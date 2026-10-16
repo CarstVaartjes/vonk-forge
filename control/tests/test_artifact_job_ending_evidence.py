@@ -13,6 +13,7 @@ from sqlalchemy import select
 from vonk_agent_protocol import (
     AgentResult,
     OperationFailureCode,
+    RecipeJobEnding,
     RecipeJobFile,
     RecipeJobRunResult,
     canonical_message,
@@ -104,9 +105,12 @@ def test_a_receipted_unknown_keeps_its_exit_reason_and_cause(tmp_path) -> None:
     # The exit proves the process ceased: the job ends, with the agent's words.
     assert ended.state == "failed"
     assert ended.status_reason is not None
-    for fact in (_REASON, "stage=job-state", _CAUSE):
+    for fact in (_REASON, _CAUSE):
         assert fact in ended.status_reason, ended.status_reason
     assert ended.result_evidence is not None
+    # The stage and cause are typed fields, not text to parse.
+    assert ended.result_evidence.stage == "job-state"
+    assert ended.result_evidence.diagnostic == _CAUSE
     assert ended.result_evidence.exit_code == 0
     # The agent reported its ending: no lease lapsed.
     assert ended.result_evidence.failure_kind is None
@@ -142,7 +146,8 @@ def test_a_receipted_unknown_keeps_its_exit_reason_and_cause(tmp_path) -> None:
     reason_code = OperationFailureCode(detail.failure.error_code)
     assert reason_code is OperationFailureCode.ARTIFACT_PROCESS_FAILED
     assert isinstance(receipt, RecipeJobRunResult)
-    assert receipt.reason is not None and _CAUSE in receipt.reason
+    assert receipt.reason == _REASON
+    assert receipt.ending == RecipeJobEnding(stage="job-state", diagnostic=_CAUSE)
 
 
 def test_a_definite_failure_after_launch_ends_the_job_with_its_stage_and_cause(
@@ -167,8 +172,11 @@ def test_a_definite_failure_after_launch_ends_the_job_with_its_stage_and_cause(
     )
     assert ended.state == "failed"
     assert ended.status_reason is not None
-    for fact in ("stayed unreadable", "stage=output-storage", cause):
+    for fact in ("stayed unreadable", cause):
         assert fact in ended.status_reason, ended.status_reason
+    assert ended.result_evidence is not None
+    assert ended.result_evidence.stage == "output-storage"
+    assert ended.result_evidence.diagnostic == cause
     # The agent reported: no lease lapsed.
     evidence = ended.result_evidence
     assert evidence is None or evidence.failure_kind != "agent-lease-expired"

@@ -50,7 +50,7 @@ from .lifecycle_vocabulary import (
     WaitReason,
 )
 from .package_upgrade import PackageActivationReceipt
-from .recipe_jobs import RecipeJobRunResult
+from .recipe_jobs import RecipeJobEnding, RecipeJobRunResult
 from .recipe_operations import (
     RecipeReconcileResult,
     RecipeStopResult,
@@ -165,27 +165,26 @@ def _receipt_with_account(
 ) -> RecipeJobRunResult:
     """The receipt of a job that did not end done, with the agent's account.
 
-    The receipt is stored as the result (it proves the process ceased), so the
-    outcome's own reason, stage and cause travel in its ``reason``: a job that
-    exited 0 and then failed to deliver says why, instead of nothing.
+    The receipt is stored as the result (it proves the process ceased), so
+    what the outcome says beside it is kept with it: its reason in the
+    receipt's ``reason`` (a job that exited 0 and then failed to deliver says
+    why), its stage and cause as the typed ``ending``.
     """
 
     receipt = outcome.receipt
     assert receipt is not None
     evidence = outcome.evidence or OutcomeEvidence()
-    parts: list[str] = []
-    for part in (
-        receipt.reason,
-        outcome.reason,
-        None if evidence.stage is None else f"stage={evidence.stage}",
-        evidence.diagnostic,
-    ):
-        if part and part not in parts:
-            parts.append(part)
-    account = "; ".join(parts)[:512] or None
-    if account == receipt.reason:
+    reasons: list[str] = []
+    for part in (receipt.reason, outcome.reason):
+        if part and part not in reasons:
+            reasons.append(part)
+    reason = "; ".join(reasons)[:512] or None
+    ending = receipt.ending
+    if ending is None and evidence.stage is not None:
+        ending = RecipeJobEnding(stage=evidence.stage, diagnostic=evidence.diagnostic)
+    if reason == receipt.reason and ending == receipt.ending:
         return receipt
-    return receipt.model_copy(update={"reason": account})
+    return receipt.model_copy(update={"reason": reason, "ending": ending})
 
 
 def outcome_body(

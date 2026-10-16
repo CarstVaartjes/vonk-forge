@@ -246,6 +246,21 @@ class RecipeJobEvidence(_RecipeJobModel):
     peak_memory_bytes: int | None = Field(default=..., ge=0, le=16 * 1024**4)
 
 
+class RecipeJobEnding(_RecipeJobModel):
+    """How a job whose process exited ended without its result.
+
+    The stage and one-line cause the agent reported beside the receipt (an
+    output delivery that was not confirmed, a record that was not written).
+    The Controller keeps them with the stored receipt; the bounds are those of
+    the outcome evidence they come from.
+    """
+
+    stage: str = Field(min_length=1, max_length=128)
+    # Rust uses skip_serializing_if for this optional nullable field. Both an
+    # omitted field and explicit JSON null are accepted on input.
+    diagnostic: str | None = Field(default=None, min_length=1, max_length=512)
+
+
 class RecipeJobRunRequest(_RecipeJobModel):
     """One job run; interface, image, placement and timeout come from the plan."""
 
@@ -311,6 +326,11 @@ class RecipeJobRunResult(_RecipeJobModel):
     # Rust uses skip_serializing_if for this optional nullable field. Both an
     # omitted field and explicit JSON null are accepted on input.
     reason: str | None = Field(default=None, min_length=1, max_length=512)
+    # Rust uses skip_serializing_if for this optional nullable field. Both an
+    # omitted field and explicit JSON null are accepted on input. The agent
+    # never sets it: it reports the ending beside the receipt, and the
+    # Controller stores it here so the receipt stays the stored result.
+    ending: RecipeJobEnding | None = None
 
     @field_validator("reason")
     @classmethod
@@ -353,6 +373,7 @@ __all__ = [
     "MAX_OUTPUT_FILES",
     "MAX_OUTPUT_FILE_BYTES",
     "MAX_OUTPUT_TOTAL_BYTES",
+    "RecipeJobEnding",
     "RecipeJobEvidence",
     "RecipeJobFile",
     "RecipeJobInputFile",

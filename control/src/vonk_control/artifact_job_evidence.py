@@ -69,6 +69,10 @@ class ArtifactJobResultEvidence(StrictJSONModel):
     residue_resolved_by: Literal["exact-stop"] | None = None
     #: Why the job's outputs were refused: the job ended failed at once.
     output_breach: OutputContractBreach | None = None
+    #: The stage and the one-line cause the agent reported for how the job
+    #: ended (a failure, or an exit whose result was not delivered).
+    stage: str | None = Field(default=None, min_length=1, max_length=128)
+    diagnostic: str | None = Field(default=None, min_length=1, max_length=512)
 
     @property
     def scope_unproven(self) -> bool:

@@ -790,6 +790,9 @@ pub(super) fn job_receipt(
         },
         reason: reason.map(str::to_owned),
         diagnostics: None,
+        // The Controller stores the ending beside a receipt; the agent reports
+        // it as the outcome's evidence.
+        ending: None,
     };
     debug_assert!(result.validate().is_ok());
     result
