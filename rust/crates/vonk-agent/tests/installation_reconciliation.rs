@@ -6,7 +6,6 @@ use std::{
     os::unix::fs::{OpenOptionsExt, PermissionsExt},
     path::{Path, PathBuf},
     process::{Command, Stdio},
-    sync::{Mutex, MutexGuard},
     time::Duration,
 };
 
@@ -25,20 +24,6 @@ use vonk_agent_protocol::{RecipeReconciliationIdentity, canonical_json};
 const CHILD_ROOT_ENV: &str = "VONK_RECONCILIATION_CHILD_ROOT";
 const CHILD_IDENTITY_ENV: &str = "VONK_RECONCILIATION_CHILD_IDENTITY";
 const LOCK_PATH_ENV: &str = "VONK_RECONCILIATION_CHILD_LOCK_PATH";
-
-// Reconciliation locks are flock(2) locks on an open file description. When
-// one test thread spawns a child process, the forked child briefly shares every
-// open descriptor of this process until exec closes it, so a lock another test
-// thread just released can still be held by that child and a same-process
-// relock reports `ReconciliationBusy`. The product treats that as retryable;
-// these tests assert exact outcomes, so they run one at a time.
-static SERIAL: Mutex<()> = Mutex::new(());
-
-fn serial() -> MutexGuard<'static, ()> {
-    SERIAL
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-}
 
 struct NoProcess;
 
@@ -116,7 +101,6 @@ fn child_command(test_name: &str) -> Command {
 
 #[test]
 fn opaque_install_is_removed_while_shared_model_cache_survives_and_receipt_replays() {
-    let _serial = serial();
     let data = tempdir().unwrap();
     let runner = NoProcess;
     let (identity, spec_bytes) = identity_and_spec(Uuid::new_v4());
@@ -175,7 +159,6 @@ fn opaque_install_is_removed_while_shared_model_cache_survives_and_receipt_repla
 
 #[test]
 fn prepared_checkpoint_survives_process_exit_and_resumes_in_a_new_process() {
-    let _serial = serial();
     if let (Some(data_root), Some(encoded_identity)) =
         (env::var_os(CHILD_ROOT_ENV), env::var_os(CHILD_IDENTITY_ENV))
     {
@@ -248,7 +231,6 @@ fn prepared_checkpoint_survives_process_exit_and_resumes_in_a_new_process() {
 
 #[test]
 fn current_request_supersedes_stored_checkpoint_identity() {
-    let _serial = serial();
     let data = tempdir().unwrap();
     let runner = NoProcess;
     let (identity, spec_bytes) = identity_and_spec(Uuid::new_v4());
@@ -277,7 +259,6 @@ fn current_request_supersedes_stored_checkpoint_identity() {
 
 #[test]
 fn replaced_directory_is_preserved_until_current_request_reobserves_it() {
-    let _serial = serial();
     let data = tempdir().unwrap();
     let runner = NoProcess;
     let (identity, spec_bytes) = identity_and_spec(Uuid::new_v4());
@@ -309,7 +290,6 @@ fn replaced_directory_is_preserved_until_current_request_reobserves_it() {
 
 #[test]
 fn missing_installation_without_a_checkpoint_does_not_poison_a_later_prepare() {
-    let _serial = serial();
     let data = tempdir().unwrap();
     let runner = NoProcess;
     let (identity, spec_bytes) = identity_and_spec(Uuid::new_v4());
@@ -323,7 +303,6 @@ fn missing_installation_without_a_checkpoint_does_not_poison_a_later_prepare() {
 
 #[test]
 fn separate_process_lock_contention_is_retryable_after_the_owner_exits() {
-    let _serial = serial();
     if let Some(lock_path) = env::var_os(LOCK_PATH_ENV) {
         let file = fs::OpenOptions::new()
             .read(true)

@@ -9,6 +9,9 @@ Documentation=https://vonkforge.ai/docs/operations/install-vonk-agent
 ConditionPathExists=/usr/bin/nvidia-smi
 Wants=nvidia-persistenced.service
 After=nvidia-persistenced.service
+# Restarting the driver's persistence daemon (as a driver reload does) restarts
+# this unit too, so the lock is set again instead of lost until the next boot.
+PartOf=nvidia-persistenced.service
 
 [Service]
 Restart=on-failure
@@ -21,9 +24,11 @@ User=root
 Group=root
 UMask=0077
 NoNewPrivileges=yes
-# Locking clocks is an administrator operation in the NVIDIA driver; the
-# bounding set is narrowed further only once proven on a Spark.
-CapabilityBoundingSet=~CAP_SYS_PTRACE
+# Locking clocks (nvmlDeviceSetGpuLockedClocks) is a PRIVILEGED RM control:
+# the driver allows it when osIsAdministrator(), which is
+# capable(CAP_SYS_ADMIN) (open-gpu-kernel-modules os_is_administrator /
+# NV_IS_SUSER). The device nodes are root-owned, so nothing else is needed.
+CapabilityBoundingSet=CAP_SYS_ADMIN
 AmbientCapabilities=
 PrivateTmp=yes
 # nvidia-smi opens the NVIDIA device nodes O_RDWR; nothing else is exposed.

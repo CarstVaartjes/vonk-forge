@@ -4,7 +4,7 @@ from datetime import timedelta
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from vonk_control.inventory_repository import (
     InventoryRepository,
     InventorySnapshotInput,
@@ -163,3 +163,26 @@ def test_only_a_sole_active_claim_owner_is_charged_with_the_use(
         other_claim=other_claim,
     )
     assert observed == (280 if attributed else None)
+
+
+def test_a_runs_real_use_outlives_its_collected_history(tmp_path) -> None:
+    """Catches the observed peak leaving with the run's terminal history.
+
+    Terminal history is collected a day after a run ends (its rank rows go
+    with it), so an over-declaration was forgotten and the next run was
+    admitted on the declaration again. The installation keeps the peak.
+    """
+    sessions, now, node, installation = setup(tmp_path, free_memory=_FREE)
+    service, observed = _serve(
+        sessions, now, node, installation, lowest_available=_FREE - 280
+    )
+    assert observed == 280
+    with sessions.begin() as session:
+        # As terminal_history_collection removes an ended run.
+        session.execute(delete(RunNode))
+        session.execute(delete(RecipeRun))
+
+    refused = service.plan_run(installation, alias="qwen", now=now)
+
+    assert not refused.allowed
+    assert refused.nodes[0].required_memory_bytes == 280

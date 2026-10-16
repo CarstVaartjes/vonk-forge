@@ -37,6 +37,21 @@ def test_control_services_keep_memory_and_survive_workload_oom(name: str) -> Non
     assert service["MemoryLow"] == "512M"
 
 
+def test_gpu_clock_cap_keeps_only_the_driver_admin_capability_and_follows_the_driver() -> (
+    None
+):
+    # The clock ceiling guards against hard power-off; it must be re-applied
+    # when the NVIDIA persistence daemon restarts, and hold no capability
+    # beyond the one the driver checks for locking clocks.
+    from configparser import ConfigParser
+
+    unit = ConfigParser(strict=False)
+    unit.read(ROOT / "packaging/systemd/vonk-forge-gpu-clock-cap.service")
+    assert unit["Unit"]["PartOf"] == "nvidia-persistenced.service"
+    assert unit["Service"]["CapabilityBoundingSet"] == "CAP_SYS_ADMIN"
+    assert unit["Service"]["AmbientCapabilities"] == ""
+
+
 def test_monitor_unit_allows_clean_start_before_agent_state_exists() -> None:
     unit = (ROOT / "packaging/systemd/vonk-forge-monitor.service").read_text()
     inaccessible = next(
