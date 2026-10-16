@@ -76,7 +76,7 @@ from .claim_reconcile import (
     _settle_lapsed,
     _superseded_cancellation_state,
 )
-from .completion import _report_event
+from .completion import _report_event, note_report
 from .contracts import (
     AgentConfigurationConflict,
     AgentFence,
@@ -685,15 +685,11 @@ class AgentJobService:
                 session, resume_candidates=operator_resume_candidates_in_session
             )
             adapter.record_report(attempt, state, message.result)
-            adapter.settle(
-                operation,
-                attempt,
-                parent,
-                self._report_event(
-                    operation, attempt, parent, outcome, message.result, now
-                ),
-                now,
+            event = self._report_event(
+                operation, attempt, parent, outcome, message.result, now
             )
+            adapter.settle(operation, attempt, parent, event, now)
+            note_report(session, operation, event, message.result, now)
             if self._result_consumer is not None:
                 self._result_consumer(session, operation, attempt, message)
             self._aggregate_parent(session, operation.parent_job_id)

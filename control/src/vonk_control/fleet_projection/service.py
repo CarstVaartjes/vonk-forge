@@ -16,6 +16,7 @@ from vonk_agent_protocol import (
 )
 
 from ..auth import CursorError
+from ..evidence_repeats import repeating_evidence
 from ..fleet_event_contract import NodeProfilePayload
 from ..fleet_events import FleetEventDraft, FleetEventRepository
 from ..models import (
@@ -176,6 +177,7 @@ class FleetProjection:
             )
             reservations = self._reservations(session, node_ids)
             stalls = self._stalled_loads(session, node_ids)
+            repeating = repeating_evidence(session, node_ids, current)
         return FleetSnapshot(
             event_cursor=event_cursor,
             generated_at=current,
@@ -196,6 +198,7 @@ class FleetProjection:
                     loaded=loaded.get(node_id, ()),
                     reservations=reservations.get(node_id, {}),
                     stalls=stalls.get(node_id, ()),
+                    repeating=repeating.get(node_id, ()),
                 )
                 for node_id in node_ids
             ],

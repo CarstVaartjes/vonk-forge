@@ -49,6 +49,9 @@ class ProjectionCode(WireEnum):
     """Warnings and attention items of the fleet and library projections."""
 
     CPU_LOW_CLOCK = "cpu.low-clock"
+    #: The same deterministic evidence repeated up to the one failure limit
+    #: with no success between: a platform fault to look at, never acted on.
+    EVIDENCE_REPEATING = "evidence.repeating"
     FLEET_FRAME_BUDGET_EXCEEDED = "fleet.frame_budget_exceeded"
     FLEET_FRAME_ENCODING_UNAVAILABLE = "fleet.frame_encoding_unavailable"
     FLEET_STORED_EVENT_PAYLOAD_UNAVAILABLE = "fleet.stored_event_payload_unavailable"

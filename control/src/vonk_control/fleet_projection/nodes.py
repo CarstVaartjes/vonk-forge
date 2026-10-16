@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Annotated
 
 from pydantic import Field, TypeAdapter
 from vonk_agent_protocol import NodeOfflineReason, ProjectionCode
+from vonk_agent_protocol.agent_words import ProfileReasonSeverity
 from vonk_agent_protocol.inventory import NetworkInterface
 
 from ..models import (
@@ -60,6 +61,7 @@ def _node(
     loaded: Sequence[LoadedPresence],
     reservations: Mapping[str, tuple[int, int]],
     stalls: Sequence[str] = (),
+    repeating: Sequence[str] = (),
     telemetry_unreadable: bool = False,
 ) -> FleetNode:
     warnings: list[ProjectionReason] = []
@@ -171,6 +173,14 @@ def _node(
                 code=ProjectionCode.PROFILE_RETRYING,
                 detail=f"A profile load keeps retrying: {detail}"[:256],
                 severity="warning",
+            )
+        )
+    for detail in repeating:
+        warnings.append(
+            ProjectionReason(
+                code=ProjectionCode.EVIDENCE_REPEATING,
+                detail=detail,
+                severity=ProfileReasonSeverity.WARNING.value,
             )
         )
     for value in loaded:

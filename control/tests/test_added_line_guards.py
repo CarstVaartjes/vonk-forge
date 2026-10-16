@@ -71,6 +71,21 @@ PATH = "control/src/vonk_control/example.py"
             ),
             4,
         ),
+        # The worker owner's isolation: the same failure retried every tick.
+        (
+            "repeats",
+            (
+                "try:\n    result = task()\nexcept Exception:\n"
+                "    self._retry_at[task] = now + timedelta(seconds=5)\n"
+                "    _LOGGER.exception('observation failed')\n"
+            ),
+            4,
+        ),
+        (
+            "repeats",
+            "try:\n    work()\nexcept OSError:\n    row.next_action_at = due\n",
+            4,
+        ),
         (
             "residues",
             "recipe = Recipe.model_validate(read_row_column(row, 'document'))\n",
@@ -478,6 +493,16 @@ def test_new_failure_that_discards_its_cause_fails_untouched_does_not(source, ke
 def test_a_retry_that_classifies_its_cause_is_allowed(source):
     lines = set(range(1, len(source.splitlines()) + 1))
     assert not check_source(PATH, source, lines, modes=("retries",))
+
+
+def test_a_scheduled_retry_that_shows_its_repetition_is_allowed():
+    source = (
+        "try:\n    result = task()\nexcept Exception as error:\n"
+        "    self._retry_at[task] = now + timedelta(seconds=5)\n"
+        "    note_repeat(session, owner, node_id, code(error), now=now)\n"
+    )
+    lines = set(range(1, len(source.splitlines()) + 1))
+    assert not check_source(PATH, source, lines, modes=("repeats",))
 
 
 @pytest.mark.parametrize(

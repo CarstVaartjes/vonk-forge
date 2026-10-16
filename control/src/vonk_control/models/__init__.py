@@ -26,6 +26,7 @@ from .catalog import (
 from .catalog import (
     _catalog_document_revision_is_immutable as _catalog_document_revision_is_immutable,
 )
+from .evidence import EvidenceRepeat as EvidenceRepeat
 from .execution import ACTIVE_RUN_STATES as ACTIVE_RUN_STATES
 from .execution import (
     STOPPABLE_NOT_RUNNING_RUN_STATES as STOPPABLE_NOT_RUNNING_RUN_STATES,

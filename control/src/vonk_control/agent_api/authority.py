@@ -44,6 +44,7 @@ from ..enrollment import (
 from ..enrollment.responses import unknown_response
 from ..enrollment_body import _bounded_enrollment_body
 from ..enrollment_contract import EnrollmentObservationReply
+from ..evidence_repeats import note_repeat, note_success
 from ..host_helper_authority import (
     HostHelperAuthorityError,
     HostRuntimeAuthorityService,
@@ -102,9 +103,28 @@ def issue_host_runtime_grant(
 def install_authority_routes(
     agent: APIRouter, services: AgentApiServices | None, limiter: EnrollmentRateLimiter
 ) -> None:
+    def note_grant(node_id: str, subject: str, *, denied: bool) -> None:
+        # A grant denied on every ask is shown as repeated evidence; the
+        # answer itself is unchanged, and a granted ask clears it.
+        required = _require_services(services)
+        with suppress(SQLAlchemyError), required.sessions.begin() as session:
+            if denied:
+                note_repeat(
+                    session,
+                    subject,
+                    node_id,
+                    SecurityRefusalReason.HOST_HELPER_AUTHORITY_DENIED,
+                    now=required.clock(),
+                )
+            else:
+                note_success(session, subject, node_id)
+
     def observe_grant(
         issue: Callable[[], SignedHostHelperGrant],
         evidence_available: Callable[[], bool] = lambda: True,
+        *,
+        node_id: str,
+        subject: str,
     ) -> SignedHostHelperGrant:
         # A new read of the exact authority precedes each attempt. No grant is
         # issued on unreadable evidence, and this request owns no durable slot.
@@ -112,7 +132,7 @@ def install_authority_routes(
             if delay:
                 time.sleep(delay)
             try:
-                return issue()
+                grant = issue()
             except HostRuntimeGrantUnsatisfiable as refused:
                 # Deterministic: this attempt's plan can never be granted. A
                 # definite answer the agent ends the work with, not a wait.
@@ -131,11 +151,14 @@ def install_authority_routes(
                 except (KeyError, TypeError, ValueError, SQLAlchemyError):
                     continue
                 # The authority's denied binding remains a security refusal.
+                note_grant(node_id, subject, denied=True)
                 raise HTTPException(
                     status_code=403, detail="grant authority denied"
                 ) from None
             except (KeyError, TypeError, ValueError, SQLAlchemyError):
                 continue
+            note_grant(node_id, subject, denied=False)
+            return grant
         raise UnknownOutcomeError(
             "grant authority observation is unavailable",
             reason=WaitReason.OBSERVATION_UNAVAILABLE,
@@ -199,6 +222,8 @@ def install_authority_routes(
                 certificate_serial=identity.certificate_serial,
             ),
             evidence_available=lambda: attempt_evidence(body.fence),
+            node_id=identity.node_id,
+            subject=f"host runtime {body.action} grant",
         )
         return _json_response(_host_grant_response(grant))
 
@@ -217,6 +242,8 @@ def install_authority_routes(
                 certificate_serial=identity.certificate_serial,
             ),
             evidence_available=lambda: activation_evidence(identity.node_id),
+            node_id=identity.node_id,
+            subject="package activation grant",
         )
         return _json_response(_host_grant_response(grant))
 
@@ -236,6 +263,8 @@ def install_authority_routes(
                 expires_in_seconds=body.expires_in_seconds,
             ),
             evidence_available=lambda: attempt_evidence(body.fence),
+            node_id=identity.node_id,
+            subject="agent upgrade grant",
         )
         return _json_response(_host_grant_response(grant))
 

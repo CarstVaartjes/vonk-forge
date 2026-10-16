@@ -39,6 +39,7 @@ MODES = (
     "noexit",
     "causes",
     "retries",
+    "repeats",
     "residues",
     "claims",
     "reasons",
@@ -430,6 +431,11 @@ def check_source(
                 for line in retries.scan_source(source)
             )
             hits.extend(retries.scan_dispositions(source, path=path))
+        if "repeats" in modes and path.startswith("control/src/"):
+            hits.extend(
+                (line, "retry scheduled without note_repeat")
+                for line in retries.scan_repeats(source)
+            )
         if "residues" in modes and path.startswith("control/src/"):
             # A stored column read answers with a Residue for a damaged document;
             # handing that answer straight to a parser or consumer makes the
