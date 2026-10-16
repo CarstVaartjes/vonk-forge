@@ -190,15 +190,20 @@ class FleetProfileService:
                     application_id, reason=InvalidRequestReason.NOT_FOUND
                 )
             intended = _persisted_profile_progress(row).intended_profile
-            taken = (
-                self._lifecycle.retry_pending(row)
-                and intended is not None
-                and _newer_profile_intent_overlaps(
-                    session,
-                    _application_order_key(session, row),
-                    set(intended.scope.node_ids),
+            try:
+                taken = (
+                    self._lifecycle.retry_pending(row)
+                    and intended is not None
+                    and _newer_profile_intent_overlaps(
+                        session,
+                        _application_order_key(session, row),
+                        set(intended.scope.node_ids),
+                    )
                 )
-            )
+            except FleetProfileConflict:
+                # An unreadable lineage proves no newer request: the stale
+                # review stays a wait, which the recovery scan ends.
+                taken = False
             if not taken:
                 return self._decline_retry(
                     row, ProfileReasonCode.RETRY_CONFLICT, str(error)
