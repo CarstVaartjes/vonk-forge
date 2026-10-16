@@ -161,6 +161,9 @@ pub struct Inventory {
     pub host_settings: Option<vonk_agent_protocol::generated::HostSettings>,
     /// The installation directories, by id; `None` when they could not be listed.
     pub installations: Option<Vec<uuid::Uuid>>,
+    /// Bytes of the model objects no installation links or names; `None`
+    /// when a plan could not be read.
+    pub unused_model_bytes: Option<u64>,
 }
 
 impl Inventory {
@@ -192,6 +195,7 @@ impl Inventory {
             nas_route_interface: self.nas_route_interface.clone(),
             host_settings: self.host_settings.clone(),
             installations: self.installations.clone(),
+            unused_model_bytes: self.unused_model_bytes,
         }
     }
 }
@@ -459,6 +463,7 @@ impl<R: ProcessRunner> InventoryCollector<'_, R> {
             nas_route_interface: None,
             host_settings: host_settings(self.runner),
             installations: crate::store_retention::installation_names(self.store_path),
+            unused_model_bytes: crate::store_retention::unused_model_bytes(self.store_path),
         })
     }
 }
@@ -760,6 +765,7 @@ mod process_tests {
             nas_route_interface: None,
             host_settings: None,
             installations: None,
+            unused_model_bytes: None,
             nvidia_driver_version: "590".into(),
             container_runtime_version: "29".into(),
         };

@@ -53,6 +53,7 @@ from ..runtime_preflight import (
     recipe_requirements,
     request_digest,
 )
+from ..spark_disk import spark_free_bytes
 from ..topology import Placement, TopologyError, validate_topology
 from .contracts import (
     AGENT_UPGRADE_REQUIRED_DETAIL,
@@ -472,7 +473,17 @@ class InstallPlanningService:
             )
             required = disk_need.required_bytes
             floor = disk_need.floor_bytes
-            free = snapshot.disk_free_bytes if snapshot else None
+            # Free disk plus the unused model files the agent removes before
+            # it writes, less those this install reuses.
+            free = (
+                spark_free_bytes(
+                    snapshot.disk_free_bytes,
+                    snapshot.unused_model_bytes,
+                    reused_model_bytes=reused_artifacts,
+                )
+                if snapshot
+                else None
+            )
             free_after = None if free is None else free - reserved - required
             if free_after is not None and free_after < floor:
                 blockers.append(

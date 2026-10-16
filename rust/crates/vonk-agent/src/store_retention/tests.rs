@@ -9,6 +9,7 @@ use super::{GRACE, LOW_FREE_PERCENT, RESERVE_FLOOR_BYTES, RESERVE_PERCENT, STORE
 
 const OBJECT: &str = "1111111111111111111111111111111111111111111111111111111111111111";
 const OTHER: &str = "2222222222222222222222222222222222222222222222222222222222222222";
+const THIRD: &str = "3333333333333333333333333333333333333333333333333333333333333333";
 const INSTALLATION: &str = "0b7d2c9e-6a51-4c43-9d07-3a3c3c3c3c3c";
 const ORPHAN: &str = "5f0c1e2d-3b4a-4c5d-8e6f-7a8b9c0d1e2f";
 const TOTAL: u64 = 4_000_000_000_000;
@@ -96,6 +97,30 @@ fn low_space_takes_the_least_recently_used_first_and_stops_above_the_line() {
 
     assert!(!older.exists());
     assert!(newer.exists());
+}
+
+#[test]
+fn a_claim_makes_room_from_unused_model_files_least_recently_used_first() {
+    let root = tempfile::tempdir().unwrap();
+    let store = root.path().join("distribution/models");
+    let oldest = file(&store.join(OBJECT), b"old");
+    std::thread::sleep(Duration::from_millis(20));
+    let own = file(&store.join(OTHER), b"own");
+    std::thread::sleep(Duration::from_millis(20));
+    let newest = file(&store.join(THIRD), b"new");
+    assert_eq!(super::unused_model_bytes(root.path()), Some(9));
+    let free = super::disk_usage(root.path()).unwrap().0;
+
+    // Already room: nothing goes.
+    let keep: BTreeSet<String> = [OTHER.to_owned()].into();
+    assert_eq!(super::make_room(root.path(), free, &keep), 0);
+    assert!(oldest.exists() && own.exists() && newest.exists());
+
+    // More than the disk can offer: every unused object goes but the claim's
+    // own, least recently used first, and the claim then checks as before.
+    assert_eq!(super::make_room(root.path(), u64::MAX, &keep), 6);
+    assert!(!oldest.exists() && !newest.exists() && own.exists());
+    assert_eq!(super::unused_model_bytes(root.path()), Some(3));
 }
 
 #[test]

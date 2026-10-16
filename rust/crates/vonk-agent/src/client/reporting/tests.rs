@@ -29,6 +29,7 @@ fn out_of_contract_inventory_is_clamped_instead_of_refused() {
         nas_route_interface: None,
         host_settings: None,
         installations: None,
+        unused_model_bytes: None,
         nvidia_driver_version: "580.1\u{e9}".to_owned(),
         container_runtime_version: "podman 5".to_owned(),
     };
@@ -294,4 +295,118 @@ async fn an_inventory_returns_the_controllers_verdict_and_an_older_controller_no
         );
         finish_capture_peer(server).await;
     }
+}
+
+/// An inventory with every optional evidence group present.
+fn inventory_with_all_evidence() -> vonk_agent_protocol::InventoryRequest {
+    let mut request = valid_inventory();
+    request.network_interfaces = Some(vec![interface("enP7s7", Some(1000))]);
+    request.nas_route_interface = Some("enP7s7".to_owned());
+    request.fabric_address = Some("192.168.100.2".to_owned());
+    request.fabric_bandwidth_mbps = Some(200_000);
+    request.host_settings = Some(vonk_agent_protocol::generated::HostSettings {
+        display_manager_active: false,
+        graphical_default_target: false,
+        gpu_clock_cap_active: Some(true),
+    });
+    request.installations = Some(vec![uuid::Uuid::nil()]);
+    request.validate().unwrap();
+    request
+}
+
+#[test]
+fn the_inventory_core_keeps_the_capacity_report_and_no_optional_evidence() {
+    let request = inventory_with_all_evidence();
+
+    let core = inventory_core(&request);
+
+    core.validate().unwrap();
+    let mut expected = valid_inventory();
+    expected.observed_at = request.observed_at;
+    assert_eq!(core, expected);
+}
+
+/// Two exchanges on one listener: answer each request with its status and
+/// return the request bodies.
+async fn two_answers(
+    statuses: [u16; 2],
+) -> (AgentHttpClient, tokio::task::JoinHandle<Vec<String>>) {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        let mut bodies = Vec::new();
+        for status in statuses {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = Vec::new();
+            let mut buffer = [0_u8; 8192];
+            loop {
+                let size = stream.read(&mut buffer).await.unwrap();
+                assert_ne!(size, 0, "request ended early");
+                request.extend_from_slice(&buffer[..size]);
+                let text = String::from_utf8_lossy(&request).to_string();
+                if let Some(end) = text.find("\r\n\r\n") {
+                    let length = text[..end]
+                        .lines()
+                        .find_map(|line| {
+                            line.to_ascii_lowercase()
+                                .strip_prefix("content-length:")
+                                .map(|value| value.trim().parse::<usize>().unwrap())
+                        })
+                        .unwrap_or(0);
+                    if request.len() >= end + 4 + length {
+                        bodies.push(text[end + 4..end + 4 + length].to_owned());
+                        break;
+                    }
+                }
+            }
+            let body = if status == 422 {
+                r#"{"detail":"extra field"}"#
+            } else {
+                ""
+            };
+            let response = format!(
+                "HTTP/1.1 {status} Test\r\ncontent-type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            stream.write_all(response.as_bytes()).await.unwrap();
+        }
+        bodies
+    });
+    let client = authenticated_test_client(&format!("http://{address}/"), TEST_NODE_ID);
+    let mut headers = reqwest::header::HeaderMap::new();
+    headers.insert(
+        "x-vonk-fixture-auth",
+        reqwest::header::HeaderValue::from_static("enrolled-agent"),
+    );
+    *client.client.write().await = reqwest::Client::builder()
+        .default_headers(headers)
+        .timeout(CONTROLLER_REQUEST_TIMEOUT)
+        .build()
+        .unwrap();
+    (client, server)
+}
+
+#[tokio::test]
+async fn an_older_controller_that_refuses_optional_evidence_still_gets_the_core() {
+    let (client, server) = two_answers([422, 204]).await;
+
+    let answer = client
+        .report_inventory_request(inventory_with_all_evidence())
+        .await
+        .unwrap();
+
+    assert_eq!(answer, None);
+    let bodies = server.await.unwrap();
+    assert!(bodies[0].contains("\"installations\"") && bodies[0].contains("\"host_settings\""));
+    for optional in [
+        "installations",
+        "host_settings",
+        "network_interfaces",
+        "nas_route_interface",
+        "fabric_address",
+    ] {
+        assert!(!bodies[1].contains(optional), "{optional} in {}", bodies[1]);
+    }
+    assert!(bodies[1].contains("\"disk_free_bytes\""));
 }

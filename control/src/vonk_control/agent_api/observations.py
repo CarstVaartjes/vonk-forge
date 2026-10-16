@@ -173,6 +173,7 @@ def install_observations_routes(
                     ),
                     nas_route_interface=body.nas_route_interface,
                     host_settings=body.host_settings,
+                    unused_model_bytes=body.unused_model_bytes,
                 )
             )
         except ValueError as error:

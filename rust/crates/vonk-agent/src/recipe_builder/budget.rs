@@ -28,6 +28,12 @@ pub(super) fn ensure_build_disk_available(
     request: &RecipeBuildRequest,
 ) -> Result<u64, RecipeBuildError> {
     let minimum_free_disk_bytes = build_disk_reserve(data_root)?;
+    // The build's own need: unused model objects go first, least recently used.
+    crate::store_retention::make_room(
+        data_root,
+        required_build_disk(request, minimum_free_disk_bytes)?,
+        &std::collections::BTreeSet::new(),
+    );
     let available = available_disk_bytes(data_root).map_err(|_| {
         RecipeBuildError::Process(ProcessError::Io(std::io::Error::other(
             "filesystem capacity is unavailable",

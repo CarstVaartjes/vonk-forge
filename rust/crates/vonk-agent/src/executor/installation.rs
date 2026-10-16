@@ -60,6 +60,8 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
             .iter()
             .map(|artifact| artifact.size_bytes)
             .sum::<u64>();
+        // The claim's own need, before it downloads or pulls anything.
+        self.runtime.make_room_for_install(spec, installation_id);
         let assets = run_with_authority(
             self.client.download_distribution_with_progress(
                 plan_digest,
