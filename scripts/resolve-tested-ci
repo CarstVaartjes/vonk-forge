@@ -322,8 +322,12 @@ def _proven_run(
     target_tree: str,
     *,
     deadline: float,
+    compared: list[str],
 ) -> int | None:
-    """A successful ci.yml run of ``event`` on ``head`` whose receipt proves ``source``."""
+    """A successful ci.yml run of ``event`` on ``head`` whose receipt proves ``source``.
+
+    Each tested tree that differs from ``target_tree`` is added to ``compared``.
+    """
     page = 1
     while True:
         if monotonic() >= deadline:
@@ -387,6 +391,9 @@ def _proven_run(
             ):
                 raise EvidenceError("receipt differs from its tested commit")
             if proof["tree_sha"] != target_tree:
+                compared.append(
+                    f"PR #{pull['number']} run {run_id} tested tree {proof['tree_sha']}"
+                )
                 continue
             # Exact tree entries include removed paths and file modes, as in
             # the producer's no-renames diff. Authenticated REST avoids Git
@@ -419,6 +426,7 @@ def resolve(source: str, repo: str) -> tuple[int, int | None]:
     target_tree = git("rev-parse", f"{source}^{{tree}}")
     deadline = monotonic() + LOOKUP_SECONDS
     pulls = api(f"repos/{repo}/commits/{source}/pulls?per_page=100", deadline=deadline)
+    compared: list[str] = []
     for pull in pulls:
         if (
             pull.get("merge_commit_sha") != source
@@ -437,6 +445,7 @@ def resolve(source: str, repo: str) -> tuple[int, int | None]:
             source,
             target_tree,
             deadline=deadline,
+            compared=compared,
         )
         if run_id is None:
             # The merge queue tested this very commit before it became main.
@@ -448,9 +457,16 @@ def resolve(source: str, repo: str) -> tuple[int, int | None]:
                 source,
                 target_tree,
                 deadline=deadline,
+                compared=compared,
             )
         if run_id is not None:
             return 0, run_id
+    # Name the miss: usually the pull request was not up to date with main.
+    print(
+        f"main tree {target_tree} matched no successful PR check; compared: "
+        + ("; ".join(compared) or "no tested tree of a merged pull request"),
+        file=sys.stderr,
+    )
     return 2, None
 
 

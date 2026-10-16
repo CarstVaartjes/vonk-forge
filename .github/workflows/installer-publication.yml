@@ -83,13 +83,20 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if run_id=$(scripts/resolve-tested-ci "$GITHUB_SHA"); then
+          diagnostic="$RUNNER_TEMP/tested-ci.stderr"
+          if run_id=$(scripts/resolve-tested-ci "$GITHUB_SHA" 2>"$diagnostic"); then
             printf 'run_id=%s\n' "$run_id" >> "$GITHUB_OUTPUT"
             echo "Source checks reuse successful PR run $run_id for the identical Git tree" >> "$GITHUB_STEP_SUMMARY"
           else
             status=$?
+            cat "$diagnostic" >&2
             [[ "$status" == 2 ]] || exit "$status"
-            echo "No matching PR evidence; running source CI" >> "$GITHUB_STEP_SUMMARY"
+            # The fallback is visible: which main tree missed, and what it was compared with.
+            {
+              echo "No matching PR evidence; running source CI"
+              echo
+              sed 's/^/    /' "$diagnostic"
+            } >> "$GITHUB_STEP_SUMMARY"
           fi
 
   supersede:
