@@ -57,6 +57,7 @@ from ..run_switch_contract import (
 )
 from .constants import _MAX_ACTION_NODES
 from .errors import RecipeReconciliationBlocked
+from .rank_authority import _uninstall_recipe
 
 if TYPE_CHECKING:
     from .service import RecipeOperationService
@@ -362,19 +363,14 @@ class ReconciliationAuthorityMixin:
         def blocked(code: str, detail: str) -> NoReturn:
             raise RecipeReconciliationBlocked(code, detail)
 
-        revision_statement = select(CatalogDocumentRevision).where(
-            CatalogDocumentRevision.id == installation.recipe_revision_id,
-            CatalogDocumentRevision.kind == "recipe",
-        )
-        if lock:
-            revision_statement = revision_statement.with_for_update(
-                of=CatalogDocumentRevision
-            )
-        revision = session.scalar(revision_statement)
-        if revision is None or revision.content_digest is None:
+        # The revision row is provenance: retention may remove it while the
+        # installation's bytes remain, so their cleanup names the digest the
+        # installation's accepted plan recorded.
+        revision = _uninstall_recipe(session, installation, lock=lock)
+        if revision is None:
             blocked(
                 ReconcileCode.RECIPE_REVISION_UNAVAILABLE,
-                "The installation's exact accepted recipe revision is unavailable.",
+                "The installation's accepted recipe digest is unavailable.",
             )
 
         # Cleanup binds the accepted relational identity. Launch JSON is a
