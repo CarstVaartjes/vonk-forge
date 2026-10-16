@@ -18,6 +18,11 @@ use vonk_agent_protocol::generated::{
 use x509_parser::{parse_x509_certificate, pem::parse_x509_pem};
 
 const MAX_RETIRED_GENERATIONS: usize = 4;
+/// How far this Spark's clock may lag the Controller's: the Controller signs a
+/// certificate valid from the instant it issues it, so a fresh certificate is
+/// not refused as "not yet valid" by a clock a little behind.  When it expires
+/// is never extended.  The same allowance the Controller gives its CA tokens.
+const CERTIFICATE_CLOCK_SKEW_SECONDS: i64 = 30;
 
 #[derive(Debug, Error)]
 pub enum IdentityError {
@@ -540,7 +545,9 @@ fn certificate_expired(path: &Path, now: DateTime<Utc>) -> Result<bool, Identity
             .single()
             .ok_or_else(|| std::io::Error::other("identity certificate validity is invalid"))?;
         found = true;
-        if now < not_before || now >= not_after {
+        if now + chrono::Duration::seconds(CERTIFICATE_CLOCK_SKEW_SECONDS) < not_before
+            || now >= not_after
+        {
             return Ok(true);
         }
         remaining = rest;
@@ -739,6 +746,25 @@ mod tests {
         assert!(renewal_due(&root, due).unwrap());
         assert!(renewal_due(&root, due + chrono::Duration::seconds(1)).unwrap());
         assert_eq!(fs::read(path).unwrap(), before);
+    }
+
+    #[test]
+    fn a_fresh_certificate_is_valid_on_a_clock_that_lags_its_issuer() {
+        // The Controller signs a certificate valid from the instant it issues
+        // it; a Spark a little behind must not retire it as not yet valid.
+        let temporary = tempdir().unwrap();
+        let root = temporary.path().join("credentials");
+        persist_identity(&root, &certificate_material(1, false)).unwrap();
+        stage_identity(&root, &certificate_material(2, false)).unwrap();
+        let (_, paths) = staged_identity_paths(&root).unwrap().unwrap();
+        let issued = Utc.with_ymd_and_hms(2026, 8, 1, 0, 0, 0).unwrap();
+
+        for lag in [1, 5, CERTIFICATE_CLOCK_SKEW_SECONDS] {
+            assert!(!identity_expired(&paths, issued - chrono::Duration::seconds(lag)).unwrap());
+        }
+        // A certificate issued well in this clock's future is still refused.
+        let early = issued - chrono::Duration::seconds(CERTIFICATE_CLOCK_SKEW_SECONDS + 1);
+        assert!(identity_expired(&paths, early).unwrap());
     }
 
     #[test]

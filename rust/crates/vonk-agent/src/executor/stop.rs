@@ -58,11 +58,7 @@ impl<R> RecipeExecutor<'_, R> {
                     crate::host_runtime::HostRuntimeError::HelperRejected { code, .. }
                         if *code == HelperErrorCode::OperationInvalidArtifact
                 ),
-                result: unconfirmed(
-                    WaitReason::StopUnconfirmed,
-                    "workload stop remains unconfirmed",
-                    host_runtime_evidence(FailureStage::Stop, &error),
-                ),
+                result: stop_failure("workload stop remains unconfirmed", &error),
             });
         }
         if let Err(error) = self.runtime.complete_stop(run_id) {
@@ -158,11 +154,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
             .execute_host_runtime_plan(claim, Vec::new(), HostRuntimePlan::Stop(request.clone()))
             .await
         {
-            unconfirmed(
-                WaitReason::StopUnconfirmed,
-                "container runtime stop remains unconfirmed",
-                host_runtime_evidence(FailureStage::Stop, &error),
-            )
+            stop_failure("container runtime stop remains unconfirmed", &error)
         } else {
             if let Err(error) = self.runtime.complete_stop(&run_id) {
                 return unconfirmed(

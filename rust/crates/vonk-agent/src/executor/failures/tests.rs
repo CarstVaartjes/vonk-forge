@@ -1064,3 +1064,43 @@ fn controller_denial_results_are_the_shared_vector_the_ingress_keeps_whole() {
         assert_eq!(case, &body, "{name}: update the shared vector");
     }
 }
+
+#[test]
+fn a_stop_the_helper_refused_before_any_effect_is_definite() {
+    // spark-2297, 2026-10-16 18:32:53Z: the helper refused the Stop's grant
+    // and the Stop was reported as an unconfirmed effect.
+    for code in [
+        HelperErrorCode::GrantInvalid,
+        HelperErrorCode::GrantNodeMismatch,
+        HelperErrorCode::GrantUnauthorized,
+        HelperErrorCode::PeerIdentityInvalid,
+    ] {
+        let refused = crate::host_runtime::HostRuntimeError::HelperRejected {
+            code,
+            diagnostic: None,
+            process_logs: None,
+        };
+        let ExecutionResult::Failed(failure) =
+            stop_failure("container runtime stop remains unconfirmed", &refused)
+        else {
+            panic!("a refusal before any effect is definite: {code}");
+        };
+        assert_eq!(failure.helper_error_code, Some(code));
+    }
+    // A failure once the helper accepted the request may have stopped it.
+    for code in [
+        HelperErrorCode::OperationFailed,
+        HelperErrorCode::RequestReplayed,
+        HelperErrorCode::ConcurrencyLimit,
+    ] {
+        let accepted = crate::host_runtime::HostRuntimeError::HelperRejected {
+            code,
+            diagnostic: None,
+            process_logs: None,
+        };
+        assert!(matches!(
+            stop_failure("container runtime stop remains unconfirmed", &accepted),
+            ExecutionResult::Unknown(_)
+        ));
+    }
+}
