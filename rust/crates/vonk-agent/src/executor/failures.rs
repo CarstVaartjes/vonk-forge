@@ -514,6 +514,28 @@ pub(super) fn temporary_preparation_failure(
     )
 }
 
+/// A job step before its process is dispatched stopped, so this attempt never
+/// ran the job. A cause that clears by itself (local storage, metadata,
+/// capacity, the attempt's lease) waits at `stage`, a stage the job reaches
+/// only before launch, and the Controller issues the job again; a refused
+/// workload input ends it with that evidence.
+pub(super) fn job_step_before_launch(
+    stage: FailureStage,
+    step: &str,
+    error: &OciError,
+) -> ExecutionResult {
+    let (_, category) = error.safe_start_context();
+    if error.is_cancelled() || retryable_runtime_preparation(error) {
+        temporary_preparation_failure(stage, step, category)
+    } else {
+        failed_stage_owned(
+            "job preparation was refused",
+            stage,
+            preparation_diagnostic(step, category),
+        )
+    }
+}
+
 fn retryable_runtime_preparation(error: &OciError) -> bool {
     match error {
         OciError::Start { source, .. } | OciError::Install { source, .. } => {
