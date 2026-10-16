@@ -24,6 +24,7 @@ fn main() {
         network_interfaces: None,
         nas_route_interface: None,
         host_settings: None,
+        installations: None,
         nvidia_driver_version: "550.1".to_owned(),
         container_runtime_version: "5.0".to_owned(),
     };

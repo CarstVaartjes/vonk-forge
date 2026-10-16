@@ -228,7 +228,12 @@ from .host_helper import (
     SignedHostHelperGrant,
     host_helper_grant_signing_bytes,
 )
-from .inventory import HostSettings, InventoryRequest, NetworkInterface
+from .inventory import (
+    HostSettings,
+    InventoryRequest,
+    InventoryVerdict,
+    NetworkInterface,
+)
 from .recipe_jobs import (
     RecipeJobEvidence,
     RecipeJobFile,
@@ -393,6 +398,7 @@ __all__ = [
     "InvalidRequestError",
     "InvalidRequestReason",
     "InventoryRequest",
+    "InventoryVerdict",
     "LibraryAssessmentCode",
     "LibraryProjectionCode",
     "LifecycleEffect",

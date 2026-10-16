@@ -9,6 +9,8 @@ use super::{GRACE, LOW_FREE_PERCENT, RESERVE_FLOOR_BYTES, RESERVE_PERCENT, STORE
 
 const OBJECT: &str = "1111111111111111111111111111111111111111111111111111111111111111";
 const OTHER: &str = "2222222222222222222222222222222222222222222222222222222222222222";
+const INSTALLATION: &str = "0b7d2c9e-6a51-4c43-9d07-3a3c3c3c3c3c";
+const ORPHAN: &str = "5f0c1e2d-3b4a-4c5d-8e6f-7a8b9c0d1e2f";
 const TOTAL: u64 = 4_000_000_000_000;
 /// Below the 10 % low-space line.
 const SHORT: Option<(u64, u64)> = Some((TOTAL / 20, TOTAL));
@@ -23,10 +25,23 @@ fn within_grace() -> SystemTime {
 }
 
 fn run(root: &Path, now: SystemTime, disk: &dyn Fn() -> Option<(u64, u64)>) -> Swept {
+    judged(root, now, None, disk)
+}
+
+/// A pass with the Controller's verdict naming `untracked` installations.
+fn judged(
+    root: &Path,
+    now: SystemTime,
+    untracked: Option<&[&str]>,
+    disk: &dyn Fn() -> Option<(u64, u64)>,
+) -> Swept {
+    let untracked: Option<BTreeSet<String>> =
+        untracked.map(|names| names.iter().map(|name| (*name).to_owned()).collect());
     sweep(
         root,
         now,
         Instant::now() + Duration::from_secs(60),
+        untracked.as_ref(),
         disk,
         &|| {},
     )
@@ -46,7 +61,11 @@ fn an_unlinked_model_object_is_a_cache_that_leaves_only_while_space_is_short() {
     let orphan = file(&store.join(OTHER), b"superseded");
     // The production trigger: an uninstall without model cleanup removed the
     // installation's link, so only the store's own name remains.
-    let installation = root.path().join("installations/a/models/sel");
+    let installation = root
+        .path()
+        .join("installations")
+        .join(INSTALLATION)
+        .join("models/sel");
     fs::create_dir_all(&installation).unwrap();
     fs::hard_link(&linked, installation.join("model.safetensors")).unwrap();
 
@@ -180,7 +199,14 @@ fn retired_stores_are_emptied() {
 #[test]
 fn controller_owned_stores_and_links_out_of_a_store_are_never_followed() {
     let root = tempfile::tempdir().unwrap();
-    let installation = file(&root.path().join("installations/a/spec.json"), b"{}");
+    let installation = file(
+        &root
+            .path()
+            .join("installations")
+            .join(INSTALLATION)
+            .join("spec.json"),
+        b"{}",
+    );
     let run_scope = file(&root.path().join("runs/r/outputs/x"), b"out");
     let outside = tempfile::tempdir().unwrap();
     let target = file(&outside.path().join("keep"), b"user data");
@@ -197,6 +223,124 @@ fn controller_owned_stores_and_links_out_of_a_store_are_never_followed() {
 }
 
 #[test]
+fn an_installation_the_controller_does_not_track_leaves_a_day_after_it_said_so() {
+    let root = tempfile::tempdir().unwrap();
+    let installations = root.path().join("installations");
+    let store = root.path().join("distribution/models");
+    let object = file(&store.join(OBJECT), b"weights");
+    // An orphan links a shared model object and holds its own runtime cache.
+    let orphan = installations.join(ORPHAN);
+    file(&orphan.join("runtime-cache/compiled"), b"kernels");
+    fs::create_dir_all(orphan.join("models/sel")).unwrap();
+    fs::hard_link(&object, orphan.join("models/sel/model.safetensors")).unwrap();
+    // A tracked installation with a readable plan.
+    let (_, tracked, plan) = crate::oci::test_support::persisted_installation(root.path());
+
+    // Without the Controller's verdict (an older Controller) nothing goes,
+    // however old the directory.
+    assert_eq!(run(root.path(), after_grace(), &|| ROOMY).entries, 0);
+    // The first verdict starts the grace; within it nothing goes.
+    assert_eq!(
+        judged(root.path(), after_grace(), Some(&[ORPHAN]), &|| ROOMY).entries,
+        0
+    );
+    assert_eq!(
+        judged(root.path(), within_grace(), Some(&[ORPHAN]), &|| ROOMY).entries,
+        0
+    );
+    // Tracked again (a restored record): the grace starts over.
+    judged(root.path(), after_grace(), Some(&[]), &|| ROOMY);
+    assert_eq!(
+        judged(root.path(), SystemTime::now(), Some(&[ORPHAN]), &|| ROOMY).entries,
+        0
+    );
+    assert!(orphan.exists());
+
+    // A started run's installation stays whatever the verdict says.
+    let record = vonk_agent_protocol::generated::RunLifecycleRecord {
+        installation_id: ORPHAN.to_owned(),
+        placement: plan.runtime.placement.clone(),
+        run_generation: None,
+    };
+    let lifecycle = file(
+        &root.path().join("run-metadata/r1/lifecycle.json"),
+        &serde_json::to_vec(&record).unwrap(),
+    );
+    assert_eq!(
+        judged(root.path(), after_grace(), Some(&[ORPHAN]), &|| ROOMY).entries,
+        0
+    );
+    // A run record that cannot be read could name any installation.
+    fs::write(&lifecycle, b"{").unwrap();
+    assert_eq!(
+        judged(root.path(), after_grace(), Some(&[ORPHAN]), &|| ROOMY).entries,
+        0
+    );
+    assert!(orphan.exists());
+
+    // The run stopped: a day after the verdict the orphan leaves, and its
+    // model object is unused in the same pass, so low space takes it too.
+    fs::remove_file(&lifecycle).unwrap();
+    judged(root.path(), SystemTime::now(), Some(&[ORPHAN]), &|| ROOMY);
+    let swept = judged(root.path(), after_grace(), Some(&[ORPHAN]), &|| SHORT);
+    assert!(!orphan.exists() && !object.exists());
+    assert!(swept.entries >= 2);
+    // What the Controller tracks stays.
+    assert!(tracked.exists());
+}
+
+#[test]
+fn an_isolated_entry_among_the_installations_leaves_after_the_grace() {
+    let root = tempfile::tempdir().unwrap();
+    let installations = root.path().join("installations");
+    let damaged = file(
+        &installations
+            .join(format!("{INSTALLATION}.{ORPHAN}.damaged"))
+            .join("spec.json"),
+        b"{}",
+    );
+
+    assert_eq!(run(root.path(), within_grace(), &|| ROOMY).entries, 0);
+    assert_eq!(run(root.path(), after_grace(), &|| ROOMY).entries, 1);
+    assert!(!damaged.exists() && installations.is_dir());
+}
+
+#[test]
+fn inventory_names_the_installation_directories() {
+    let root = tempfile::tempdir().unwrap();
+    assert_eq!(super::installation_names(root.path()), Some(vec![]));
+    file(
+        &root
+            .path()
+            .join("installations")
+            .join(ORPHAN)
+            .join("spec.json"),
+        b"{}",
+    );
+    file(
+        &root
+            .path()
+            .join("installations")
+            .join(INSTALLATION)
+            .join("spec.json"),
+        b"{}",
+    );
+    file(
+        &root.path().join("installations/x.damaged/spec.json"),
+        b"{}",
+    );
+    file(
+        &root.path().join("installations").join(format!("{ORPHAN}0")),
+        b"",
+    );
+
+    assert_eq!(
+        super::installation_names(root.path()),
+        Some(vec![INSTALLATION.parse().unwrap(), ORPHAN.parse().unwrap()])
+    );
+}
+
+#[test]
 fn a_pass_past_its_deadline_removes_nothing_and_says_more_remain() {
     let root = tempfile::tempdir().unwrap();
     let orphan = file(&root.path().join("builds/b/image.docker.tar"), b"x");
@@ -205,6 +349,7 @@ fn a_pass_past_its_deadline_removes_nothing_and_says_more_remain() {
         root.path(),
         after_grace(),
         Instant::now(),
+        None,
         &|| ROOMY,
         &|| {},
     );
@@ -290,6 +435,19 @@ fn every_store_below_the_data_root_has_an_owner_and_a_collector() {
     assert!(names.len() > 10, "the scan found the data root's stores");
     assert_eq!(declared.len(), STORES.len(), "one entry per store");
     assert!(STORES.iter().all(|store| !store.2.is_empty()));
+    // An entry only a Controller order removes stays for ever once the
+    // Controller forgets it. Each such store is a reviewed exception; prefer a
+    // collector that asks the Controller, as installations/ does.
+    let order_only: Vec<_> = STORES
+        .iter()
+        .filter(|store| store.1 == super::Collector::ControllerOrder)
+        .map(|store| store.0)
+        .collect();
+    assert_eq!(
+        order_only,
+        ["installation-reconciliation/", "runs/", "run-metadata/"],
+        "a new Controller-order-only store needs a collector for what the Controller forgets"
+    );
 }
 
 fn collect_sources(directory: &Path, sources: &mut Vec<PathBuf>) {

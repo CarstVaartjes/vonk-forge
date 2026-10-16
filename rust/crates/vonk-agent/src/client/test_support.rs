@@ -61,6 +61,7 @@ pub(super) fn valid_inventory() -> vonk_agent_protocol::InventoryRequest {
         network_interfaces: None,
         nas_route_interface: None,
         host_settings: None,
+        installations: None,
         nvidia_driver_version: "580.1".to_owned(),
         container_runtime_version: "podman 5".to_owned(),
     }

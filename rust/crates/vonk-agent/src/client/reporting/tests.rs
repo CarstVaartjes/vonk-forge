@@ -28,6 +28,7 @@ fn out_of_contract_inventory_is_clamped_instead_of_refused() {
         network_interfaces: None,
         nas_route_interface: None,
         host_settings: None,
+        installations: None,
         nvidia_driver_version: "580.1\u{e9}".to_owned(),
         container_runtime_version: "podman 5".to_owned(),
     };
@@ -248,5 +249,49 @@ async fn unavailable_telemetry_peer_drops_one_sample_and_accepts_the_next() {
         fresh.report_telemetry(&samples).await.unwrap();
         let request = finish_capture_peer(server).await;
         assert!(request.starts_with(b"POST /agent/telemetry "));
+    }
+}
+
+#[tokio::test]
+async fn an_inventory_returns_the_controllers_verdict_and_an_older_controller_none() {
+    const ORPHAN: &str = "5f0c1e2d-3b4a-4c5d-8e6f-7a8b9c0d1e2f";
+    let mut request = valid_inventory();
+    request.installations = Some(vec![ORPHAN.parse().unwrap()]);
+    let verdict = format!(r#"{{"untracked_installations":["{ORPHAN}"]}}"#);
+    let (client, server) = request_capture_client(
+        200,
+        vec!["content-type: application/json".to_owned()],
+        verdict.into_bytes(),
+        None,
+        CONTROLLER_REQUEST_TIMEOUT,
+    )
+    .await;
+
+    let answer = client
+        .report_inventory_request(request.clone())
+        .await
+        .unwrap();
+
+    assert_eq!(
+        answer.unwrap().untracked_installations,
+        vec![ORPHAN.parse::<uuid::Uuid>().unwrap()]
+    );
+    let sent = finish_capture_peer(server).await;
+    assert!(String::from_utf8_lossy(&sent).contains(&format!(r#""installations":["{ORPHAN}"]"#)));
+
+    // An older Controller answers nothing, and a verdict that cannot be read
+    // is none: the inventory is reported either way and nothing is removed.
+    for (status, body) in [(204, Vec::new()), (200, br#"{"untracked":[]}"#.to_vec())] {
+        let (client, server) =
+            request_capture_client(status, Vec::new(), body, None, CONTROLLER_REQUEST_TIMEOUT)
+                .await;
+        assert_eq!(
+            client
+                .report_inventory_request(request.clone())
+                .await
+                .unwrap(),
+            None
+        );
+        finish_capture_peer(server).await;
     }
 }

@@ -36,9 +36,10 @@ use url::Url;
 use vonk_agent_protocol::generated::{
     ActivateRequest, AgentEvidenceCode, AgentUpgradeGrantRequest, BoundedErrorResponse,
     ClaimRequest, ControllerErrorCode, ControllerRefusalBody, HostHelperGrantResponse,
-    HostRuntimeGrantRequest, HostRuntimeGrantRequestAction, IssuedCertificateResponse,
-    PackageActivationGrantRequest, ProgressPhase, RenewRequest, RequestValidationIssueLocItem,
-    RequestValidationProblem, SecurityRefusalReason, TelemetryRequest,
+    HostRuntimeGrantRequest, HostRuntimeGrantRequestAction, InventoryVerdict,
+    IssuedCertificateResponse, PackageActivationGrantRequest, ProgressPhase, RenewRequest,
+    RequestValidationIssueLocItem, RequestValidationProblem, SecurityRefusalReason,
+    TelemetryRequest,
 };
 use vonk_agent_protocol::{
     AgentClaim, AgentDirective, AgentProgress, AgentResult, DistributionAssignment,
@@ -65,6 +66,8 @@ use tokio::sync::{RwLock, RwLockReadGuard};
 
 const MAX_BODY_BYTES: usize = 64 * 1024;
 const MAX_CLAIM_BODY_BYTES: usize = MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES;
+/// An inventory verdict names at most the installations one inventory reports.
+const MAX_VERDICT_BODY_BYTES: usize = 256 * 1024;
 /// Longest Controller validation digest retained in one refusal record.
 const MAX_REJECTION_CONTEXT_CHARS: usize = 256;
 /// Validation issues kept from one refusal.  A union payload fails every

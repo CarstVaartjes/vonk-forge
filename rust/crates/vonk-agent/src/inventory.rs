@@ -159,6 +159,8 @@ pub struct Inventory {
     pub nas_route_interface: Option<String>,
     /// `None` when either setting could not be observed (unknown).
     pub host_settings: Option<vonk_agent_protocol::generated::HostSettings>,
+    /// The installation directories, by id; `None` when they could not be listed.
+    pub installations: Option<Vec<uuid::Uuid>>,
 }
 
 impl Inventory {
@@ -189,6 +191,7 @@ impl Inventory {
             network_interfaces: self.network_interfaces.clone(),
             nas_route_interface: self.nas_route_interface.clone(),
             host_settings: self.host_settings.clone(),
+            installations: self.installations.clone(),
         }
     }
 }
@@ -455,6 +458,7 @@ impl<R: ProcessRunner> InventoryCollector<'_, R> {
             network_interfaces: None,
             nas_route_interface: None,
             host_settings: host_settings(self.runner),
+            installations: crate::store_retention::installation_names(self.store_path),
         })
     }
 }
@@ -755,6 +759,7 @@ mod process_tests {
             network_interfaces: None,
             nas_route_interface: None,
             host_settings: None,
+            installations: None,
             nvidia_driver_version: "590".into(),
             container_runtime_version: "29".into(),
         };

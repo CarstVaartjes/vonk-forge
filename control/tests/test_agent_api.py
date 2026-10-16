@@ -798,6 +798,48 @@ def test_agent_posts_authenticated_runtime_and_fabric_inventory(agent_system) ->
     )
 
 
+def test_an_inventory_naming_installations_gets_the_controllers_verdict(
+    agent_system,
+) -> None:
+    """Catches a Controller that judges nothing, or answers an older agent."""
+
+    client, _, _, clock = agent_system
+    forgotten = "5f0c1e2d-3b4a-4c5d-8e6f-7a8b9c0d1e2f"
+    payload = {
+        "schema_version": 1,
+        "observed_at": clock.now.isoformat(),
+        "disk_total_bytes": 1000,
+        "disk_free_bytes": 700,
+        "host_memory_total_bytes": 2000,
+        "host_memory_free_bytes": 1500,
+        "gpu_memory_total_bytes": 1000,
+        "gpu_memory_free_bytes": 800,
+        "gpu_count": 1,
+        "memory_pool": "separate",
+        "artifact_store_read_only": False,
+        "capabilities": [],
+        "nvidia_driver_version": "580.65.06",
+        "container_runtime_version": "28.3.3",
+    }
+
+    older = client.post(
+        "/agent/inventory", headers=agent_headers(NODE_A, "serial-a"), json=payload
+    )
+    judged = client.post(
+        "/agent/inventory",
+        headers=agent_headers(NODE_A, "serial-a"),
+        json=payload
+        | {
+            "installations": [forgotten],
+            "observed_at": (clock.now + timedelta(seconds=1)).isoformat(),
+        },
+    )
+
+    assert older.status_code == 204 and older.content == b""
+    assert judged.status_code == 200
+    assert judged.json() == {"untracked_installations": [forgotten]}
+
+
 def test_agent_4xx_logs_one_line_with_request_id_and_field(agent_system, caplog):
     client, _, _, clock = agent_system
     caplog.set_level("INFO")
