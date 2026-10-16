@@ -132,6 +132,24 @@ pub(super) async fn inspect_trusted_final(
     Ok(Some(file))
 }
 
+/// A reused object no installation links yet is used again: marking it changed
+/// makes it the most recently used, so low space takes older objects first and
+/// the installation that follows still finds it. A linked object is untouched.
+pub(super) async fn mark_claimed(object: tokio::fs::File) {
+    let object = object.into_std().await;
+    if object
+        .metadata()
+        .is_ok_and(|metadata| metadata.nlink() == 1)
+    {
+        let marked =
+            tokio::task::spawn_blocking(move || object.set_modified(std::time::SystemTime::now()))
+                .await;
+        if let Ok(Err(error)) = marked {
+            eprintln!("vonk-agent: reused model object last use unmarked: {error}");
+        }
+    }
+}
+
 pub(super) async fn open_trusted_partial(path: &Path) -> Result<tokio::fs::File, ClientError> {
     if let Ok(metadata) = tokio::fs::symlink_metadata(path).await
         && !validate_trusted_metadata(&metadata, metadata.len())

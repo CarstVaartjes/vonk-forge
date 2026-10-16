@@ -380,6 +380,7 @@ async fn run_control_lane(
     let mut failures = 0_u32;
     let mut readiness_published = false;
     let mut authority = AuthorityRetry::default();
+    let mut retention_due = Instant::now();
     loop {
         if authority.reason.is_none() && !matches!(active_identity_is_valid(config), Ok(true)) {
             // The rotation lane is renewing it; never present an expired
@@ -461,6 +462,10 @@ async fn run_control_lane(
                 authority.refuse(LoopError::Client(error));
                 continue;
             }
+        }
+        // Between claims no claim is live, so stores lose only ownerless bytes.
+        if Instant::now() >= retention_due {
+            retention_due = collect_stores(config.data_dir.clone()).await;
         }
         let wait_seconds = claim_wait_seconds(
             POLL_MAX_SECONDS,
@@ -556,6 +561,37 @@ async fn run_control_lane(
 
 // Inventory owns its own retry cadence. Failed host probes and uploads never
 // gate stop/reconciliation claims; admission remains with the Controller.
+/// One bounded store retention pass; returns when the next one is due.
+async fn collect_stores(data_root: std::path::PathBuf) -> Instant {
+    const PASS: Duration = Duration::from_secs(60);
+    const INTERVAL: Duration = Duration::from_secs(60 * 60);
+    let swept = tokio::task::spawn_blocking(move || {
+        vonk_agent::store_retention::sweep(
+            &data_root,
+            SystemTime::now(),
+            Instant::now() + PASS,
+            &|| vonk_agent::store_retention::disk_usage(&data_root),
+            &systemd_notify::watchdog,
+        )
+    })
+    .await
+    .unwrap_or_default();
+    if swept.entries > 0 {
+        eprintln!(
+            "vonk-agent: store retention removed {} entries ({} file bytes){}",
+            swept.entries,
+            swept.bytes,
+            if swept.pending { "; more remain" } else { "" }
+        );
+    }
+    Instant::now()
+        + if swept.pending {
+            Duration::ZERO
+        } else {
+            INTERVAL
+        }
+}
+
 async fn run_inventory_lane(config: AgentConfig, client: AgentHttpClient) {
     inventory_lane(
         || {

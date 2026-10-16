@@ -164,6 +164,16 @@ that already holds a private copy keeps it until it is uninstalled. Removing an
 installation removes its links, and its model cleanup removes the store object
 when that was the last link, so the bytes are freed when the last name goes
 (see [unused storage](runbooks/model-cache.md#unused-storage-is-removed-only-when-disk-is-short)).
+An object no installation links or names is a cache: while the Spark is below
+the Controller's low-space line, the agent removes such objects (and base
+images no build holds) least recently used first, until free space is back
+above the line plus the eviction reserve. Scratch whose claim ended (a transfer
+checkpoint, a build export, an isolated entry, a retired store) is a leak, not
+a cache: it leaves once nothing has changed it for 24 hours, and a build's
+export as soon as the Controller has its image. Every store below the agent's
+data root declares its owner and collector in `store_retention::STORES`; the
+Controller's orders remove installations and run scopes. A later claim that
+needs a removed entry fetches or builds it again.
 
 ## Artifact recovery
 
