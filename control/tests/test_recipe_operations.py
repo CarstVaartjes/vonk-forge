@@ -3815,10 +3815,11 @@ def test_issued_stop_is_not_retired_as_unissued(tmp_path: Path) -> None:
         )
     assert not service.assess_superseded_unissued("recipe.stop", run.owner_id)
     assert not service.reconcile_superseded_unissued("recipe.stop", run.owner_id, 4)
+    # A newer Stop of the same run observes the issued one, which is cleanup:
+    # the newer intent never cancels it.
     pending = service.assess_superseded_issued("recipe.stop", run.owner_id, 4)
     assert pending is not None
     assert pending.job_id == old.id
-    # Recovery is asserted through effects and ownership below.
     assert pending.observe_due_at <= pending.observation_deadline
     fresh = service.preview_stop(run.owner_id)
     assert fresh.allowed and fresh.run_state == "stopping"
@@ -3832,7 +3833,7 @@ def test_issued_stop_is_not_retired_as_unissued(tmp_path: Path) -> None:
     with sessions() as session:
         old_job = _required(session.get(Job, old.id))
         assert old_job.state == "running"
-        assert old_job.result is not None and old_job.result["cancel_requested"] is True
+        assert not (old_job.result or {}).get("cancel_requested")
         assert (
             _required(session.get(Job, replacement.id)).payload[
                 "workload_intent_ordinal"
@@ -3971,7 +3972,8 @@ def test_start_stop_and_uninstall_preserve_capacity_safely(tmp_path: Path) -> No
         request_id="7" * 35 + "a",
     )
     assert replacement_stop.id != stop.id
-    assert service.get(stop.id).state == "cancelled"
+    # A Stop is cleanup: the newer Stop runs alongside it, never cancels it.
+    assert service.get(stop.id).state == "running"
     assert service.get(replacement_stop.id).state == "running"
     service.record_node_result(
         replacement_stop.id, nodes[0], succeeded=True, evidence={}

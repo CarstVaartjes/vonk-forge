@@ -15,10 +15,8 @@ from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import (
     AgentResult,
     AgentResultState,
-    FailureCode,
     LifecycleState,
     OutcomeDone,
-    OutcomeFailed,
     OutcomeKind,
     RecipeStopResult,
     ReservationState,
@@ -641,20 +639,11 @@ def test_profile_cancel_after_one_of_two_stop_targets_preserves_exact_partial_ef
         )
         assert second_operation is not None and second_operation.state == "running"
         assert second_operation.parent_job_id == stop_job_id
+    # The Stop is cleanup: the profile's cancellation never cancels it, and
+    # the cancellation waits for its exact receipt.
     directive = agent_jobs.heartbeat(second_claim, None, 30)
-    assert directive.cancel_requested is True
-    # The native stop executor emits this result only after the exact host
-    # STOP and runtime completion receipt have both succeeded.
-    agent_jobs.record_result(
-        _agent_result(
-            second_claim,
-            state="cancelled",
-            result={
-                "error_code": "operation_cancelled",
-                "reason": "profile cancellation stopped the outstanding target effect",
-            },
-        )
-    )
+    assert directive.cancel_requested is False
+    agent_jobs.record_result(_agent_result(second_claim, state="succeeded", result={}))
     run_switch.tick()
     service.tick()
 
@@ -688,7 +677,7 @@ def test_profile_cancel_after_one_of_two_stop_targets_preserves_exact_partial_ef
         )
     assert [item.id for item in stop_jobs] == [stop_job_id]
     assert first_operation is not None and first_operation.state == "succeeded"
-    assert second_operation is not None and second_operation.state == "cancelled"
+    assert second_operation is not None and second_operation.state == "succeeded"
     assert first_node is not None and first_node.state == "stopped"
     assert second_node is not None and second_node.state == "stopped"
 
@@ -799,18 +788,9 @@ def test_profile_cancel_pending_child_survives_os_worker_death_and_restarts(
             )
         )
         assert retained_nodes == set(nodes)
-    assert agent_jobs.heartbeat(second_claim, None, 30).cancel_requested is True
-    agent_jobs.record_result(
-        AgentResult(
-            fence=second_claim.fence,
-            state=AgentResultState.CANCELLED,
-            result=OutcomeFailed(
-                kind=OutcomeKind.FAILED,
-                code=FailureCode.OPERATION_CANCELLED,
-                reason="second exact Stop reconciled after worker death",
-            ),
-        )
-    )
+    # The Stop is cleanup: the cancellation never cancels it.
+    assert agent_jobs.heartbeat(second_claim, None, 30).cancel_requested is False
+    agent_jobs.record_result(_agent_result(second_claim, state="succeeded", result={}))
     now[0] += timedelta(seconds=61)
     restarted = context.Process(
         target=_resume_profile_cancel_process,
@@ -832,7 +812,8 @@ def test_profile_cancel_pending_child_survives_os_worker_death_and_restarts(
         stop_jobs = tuple(session.scalars(select(Job).where(Job.kind == "recipe.stop")))
         run_row = session.get(RecipeRun, run.owner_id)
     assert [item.id for item in stop_jobs] == [stop_job_id]
-    assert run_row is not None and run_row.state == RunState.STOPPING
+    # Both ranks' Stops completed (the cancellation never cancelled them).
+    assert run_row is not None and run_row.state == RunState.STOPPED
     with sessions() as session:
         assert (
             session.scalar(
@@ -932,18 +913,10 @@ def test_newer_profile_load_replaces_pending_cancellation_without_losing_child_o
 
     # A late exact stop receipt settles its issued cleanup owner only; it
     # cannot reopen the superseded profile or change the replacement intent.
+    # The Stop is cleanup: the newer load never cancels it.
     directive = agent_jobs.heartbeat(second_claim, None, 30)
-    assert directive.cancel_requested is True
-    agent_jobs.record_result(
-        _agent_result(
-            second_claim,
-            state="cancelled",
-            result={
-                "error_code": "operation_cancelled",
-                "reason": "controller cancellation confirmed after exact workload stop",
-            },
-        )
-    )
+    assert directive.cancel_requested is False
+    agent_jobs.record_result(_agent_result(second_claim, state="succeeded", result={}))
     with sessions() as session:
         settled = session.get(
             AgentOperation, fenced_operation(sessions, second_claim).id
@@ -953,7 +926,7 @@ def test_newer_profile_load_replaces_pending_cancellation_without_losing_child_o
         nodes_after_receipt = tuple(
             session.scalars(select(AgentNode).where(AgentNode.node_id.in_(nodes)))
         )
-    assert settled is not None and settled.state == "cancelled"
+    assert settled is not None and settled.state == "succeeded"
     assert old_after_receipt is not None and old_after_receipt.state == "superseded"
     assert new_after_receipt is not None and new_after_receipt.state == "queued"
     assert {node.workload_intent_ordinal for node in nodes_after_receipt} == {

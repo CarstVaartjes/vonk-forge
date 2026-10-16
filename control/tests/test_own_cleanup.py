@@ -4,6 +4,11 @@ The drift matrix sends the agent's own Stop requests (``agent_grant_requests``)
 for every kind that may Stop, after each kind of bookkeeping drift, and expects
 the grant; it expects a refusal only at a real edge: another node, certificate
 or fence, an ended lease, or a container that is not the order's own.
+
+On the queue, a cleanup order (``CLEANUP_KINDS``) survives a newer workload
+intent on its Sparks and any time since: it is enqueued, claimed, renewed and
+completed under the intent it was admitted under, while a non-cleanup order of
+the same intent is still superseded.
 """
 
 from __future__ import annotations
@@ -24,6 +29,7 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest
 from vonk_agent_protocol.recipe_operations import RecipeStartPayload, RecipeStopPayload
 from vonk_control.agent_api import HostRuntimeGrantRequest
+from vonk_control.agent_jobs import AgentJobService
 from vonk_control.host_helper_authority import (
     HostHelperAuthorityError,
     HostRuntimeAuthorityService,
@@ -36,10 +42,23 @@ from vonk_control.models import (
     Job,
     RecipeRun,
 )
-from vonk_control.own_cleanup import CLEANUP_ACTIONS, EFFECT_ACTIONS
+from vonk_control.own_cleanup import CLEANUP_ACTIONS, CLEANUP_KINDS, EFFECT_ACTIONS
 from vonk_control.recipe_lifecycle_contract import RecipeOperationCancellationResult
 
+from .agent_fences import fenced_operation
 from .agent_grant_requests import own_stop_grant_request, stop_grant_request
+from .recipe_stop_fixtures import recipe_stop_payload
+from .runtime_identity_support import claim_agent
+from .test_agent_jobs import (
+    COMMIT,
+    NODE_A,
+    NODE_B,
+    STOP_PAYLOAD,
+    STOP_RESULT,
+    canonical_start_payload,
+    parent,
+    service,  # noqa: F401 -- pytest fixture
+)
 from .test_host_helper_authority import (
     NOW,
     RUNTIME_RUN_ID,
@@ -64,13 +83,13 @@ class _Order:
 def _order(kind: str, *, collective: bool = False) -> _Order:
     if kind == "recipe.stop":
         return _Order(kind, *service_stop_runtime_service())
-    service = runtime_service(
+    authority = runtime_service(
         operation_kind=kind,
         operation_payload={"phase": "collective-readiness"} if collective else None,
     )
     return _Order(
         kind,
-        service,
+        authority,
         "20000000-0000-4000-8000-000000000002",
         "30000000-0000-4000-8000-000000000003",
         "40000000-0000-4000-8000-000000000004",
@@ -343,3 +362,136 @@ def test_the_drift_matrix_covers_every_kind_a_cleanup_serves() -> None:
         for kind in HostRuntimeAuthorityService._ACTION_KINDS[action]
     }
     assert served == {*OWN_ORDER_KINDS, "recipe.stop"}
+
+
+def test_every_cleanup_kind_is_an_order_kind_a_cleanup_action_serves() -> None:
+    served = {
+        kind
+        for action in CLEANUP_ACTIONS
+        for kind in HostRuntimeAuthorityService._ACTION_KINDS[action]
+    }
+    assert CLEANUP_KINDS <= served - set(OWN_ORDER_KINDS)
+
+
+def _state(session: Session, model: type[Job | AgentOperation], key: str) -> str:
+    row = session.get(model, key)
+    assert row is not None
+    return row.state
+
+
+def _newer_intent(jobs, sessions, clock) -> None:
+    with sessions.begin() as session:
+        for node in session.scalars(select(AgentNode)):
+            node.workload_intent_ordinal = 2
+        jobs.request_superseded_workload_cancellation_in_session(
+            session, (NODE_A, NODE_B), 2, clock.now
+        )
+
+
+def _admit_newer_work(jobs, sessions, clock) -> None:
+    """The newer load's own order is admitted and claimed."""
+    newer = parent(sessions, clock)
+    with sessions.begin() as session:
+        stored = session.get(Job, newer.id)
+        assert stored is not None
+        stored.payload = {"workload_intent_ordinal": 2}
+    payload = canonical_start_payload(start_deadline=clock.now + timedelta(minutes=30))
+    order = jobs.enqueue(newer.id, NODE_A, "recipe.start", COMMIT, payload)
+    claim = claim_agent(jobs, NODE_A, "serial-a")
+    assert claim is not None and fenced_operation(sessions, claim).id == order.id
+
+
+#: Seconds a cleanup order is held after a newer intent: none, and past the
+#: 660 s window a superseded order's cancellation is given.
+_HELD = {"newer intent": 0, "newer intent, past the cancellation window": 700}
+
+
+@pytest.mark.parametrize("held", _HELD)
+def test_an_issued_cleanup_order_outlives_a_newer_intent(service, held: str) -> None:  # noqa: F811 -- pytest fixture
+    jobs, sessions, clock = service
+    job = parent(sessions, clock)
+    order = jobs.enqueue(job.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
+    claim = claim_agent(jobs, NODE_A, "serial-a")
+    assert claim is not None
+    _newer_intent(jobs, sessions, clock)
+    with sessions() as session:
+        # The newer load never waits for it, and nothing asks it to cancel.
+        assert not AgentJobService.assess_superseded_agent_effects_in_session(
+            session, (NODE_A, NODE_B), 2, clock.now
+        )
+    for _ in range(_HELD[held] // 20 + 1):
+        directive = jobs.heartbeat(claim, None, 30)
+        assert directive.cancel_requested is False
+        assert directive.deadline > clock.now
+        clock.advance(seconds=20)
+    jobs.succeed(claim, STOP_RESULT)
+    with sessions() as session:
+        assert _state(session, AgentOperation, order.id) == "succeeded"
+        assert _state(session, Job, job.id) == "succeeded"
+    _admit_newer_work(jobs, sessions, clock)
+
+
+def test_an_unissued_cleanup_order_is_claimed_after_a_newer_intent(service) -> None:  # noqa: F811 -- pytest fixture
+    """An offline Spark's Stop waits for it and runs when it returns."""
+    jobs, sessions, clock = service
+    job = parent(sessions, clock)
+    order = jobs.enqueue(job.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
+    _newer_intent(jobs, sessions, clock)
+    # A later phase of the same Stop is still queued under its own intent.
+    later = jobs.enqueue(
+        job.id,
+        NODE_B,
+        "recipe.stop",
+        COMMIT,
+        recipe_stop_payload(NODE_B, plan_digest=COMMIT),
+    )
+    for node, serial, expected in (
+        (NODE_A, "serial-a", order.id),
+        (NODE_B, "serial-b", later.id),
+    ):
+        claim = claim_agent(jobs, node, serial)
+        assert claim is not None
+        assert fenced_operation(sessions, claim).id == expected
+        jobs.succeed(claim, STOP_RESULT)
+    with sessions() as session:
+        assert _state(session, Job, job.id) == "succeeded"
+    _admit_newer_work(jobs, sessions, clock)
+
+
+def test_a_newer_intent_still_supersedes_an_order_that_is_not_cleanup(service) -> None:  # noqa: F811 -- pytest fixture
+    """The newest request steers every order but cleanup."""
+    jobs, sessions, clock = service
+    job = parent(sessions, clock)
+    payload = canonical_start_payload(start_deadline=clock.now + timedelta(minutes=30))
+    jobs.enqueue(job.id, NODE_A, "recipe.start", COMMIT, payload)
+    claim = claim_agent(jobs, NODE_A, "serial-a")
+    assert claim is not None
+    _newer_intent(jobs, sessions, clock)
+    assert jobs.heartbeat(claim, None, 30).cancel_requested is True
+
+
+def test_a_silent_sparks_cleanup_order_waits_and_runs_when_it_returns(service) -> None:  # noqa: F811 -- pytest fixture
+    jobs, sessions, clock = service
+    job = parent(sessions, clock)
+    order = jobs.enqueue(job.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
+    first = claim_agent(jobs, NODE_A, "serial-a")
+    assert first is not None
+    # The Spark goes silent and a newer load takes its intent.
+    _newer_intent(jobs, sessions, clock)
+    clock.advance(seconds=3600)
+    jobs.reconcile_orders()
+    with sessions() as session:
+        assert _state(session, AgentOperation, order.id) != "cancelled"
+    # On its return the same Stop is issued again and completes.
+    returned = None
+    for _ in range(10):
+        returned = claim_agent(jobs, NODE_A, "serial-a")
+        if returned is not None:
+            break
+        clock.advance(seconds=60)
+    assert returned is not None and returned.fence != first.fence
+    assert fenced_operation(sessions, returned).id == order.id
+    jobs.succeed(returned, STOP_RESULT)
+    with sessions() as session:
+        assert _state(session, Job, job.id) == "succeeded"
+    _admit_newer_work(jobs, sessions, clock)

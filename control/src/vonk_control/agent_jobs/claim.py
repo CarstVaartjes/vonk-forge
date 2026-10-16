@@ -35,6 +35,7 @@ from ..lifecycle.evidence import Residue
 from ..models import AgentNode, AgentOperationAttempt, Job
 from ..models import AgentOperation as StoredOperation
 from ..operation_progress import stored_progress
+from ..own_cleanup import CLEANUP_KINDS
 from .contracts import _MUTATING_OPERATIONS, CLAIM_LEASE_SECONDS
 from .endings import end_unobserved_order
 from .evidence import (
@@ -338,7 +339,8 @@ def _claim_once(
                     superseded_by = (
                         operation.workload_intent_ordinal
                         if (
-                            old.workload_intent_ordinal is not None
+                            old.kind not in CLEANUP_KINDS
+                            and old.workload_intent_ordinal is not None
                             and operation.workload_intent_ordinal is not None
                             and old.workload_intent_ordinal
                             < operation.workload_intent_ordinal

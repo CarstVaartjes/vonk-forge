@@ -34,6 +34,7 @@ from ..models import (
 )
 from ..models import AgentOperation as StoredOperation
 from ..offline_stops import is_deferred_stop
+from ..own_cleanup import CLEANUP_KINDS
 from .contracts import (
     _WORKLOAD_INTENT_OPERATIONS,
     AgentContactIdentityMismatch,
@@ -133,6 +134,8 @@ def _active(
         or (
             operation.workload_intent_ordinal is not None
             and operation.workload_intent_ordinal != node.workload_intent_ordinal
+            # A cleanup order keeps the intent it was admitted under.
+            and operation.kind not in CLEANUP_KINDS
             and not (
                 allow_superseded_cancellation
                 and operation.kind in _WORKLOAD_INTENT_OPERATIONS

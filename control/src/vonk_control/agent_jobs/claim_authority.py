@@ -26,6 +26,7 @@ from ..lifecycle.evidence import BookkeepingReason, retire_as_unknown
 from ..models import AgentNode, AgentOperationAttempt, Job, RecipeBuild
 from ..models import AgentOperation as StoredOperation
 from ..offline_stops import is_deferred_stop
+from ..own_cleanup import CLEANUP_KINDS
 from ..recipe_builds import BUILD_ARTIFACT_FORMAT
 from ..recipe_execution_contract import (
     RecipeExecutionContractError,
@@ -281,7 +282,9 @@ def _claim_has_authority(
             != column_field(job, "payload", "workload_intent_ordinal")
         )
         or (
-            current_operation.workload_intent_ordinal is not None
+            # A cleanup order keeps the intent it was admitted under.
+            current_operation.kind not in CLEANUP_KINDS
+            and current_operation.workload_intent_ordinal is not None
             and current_operation.workload_intent_ordinal
             != node.workload_intent_ordinal
         )

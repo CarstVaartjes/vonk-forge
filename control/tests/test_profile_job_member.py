@@ -754,10 +754,10 @@ def test_a_job_member_whose_run_is_stopped_after_a_lost_job_is_reactivated(
                     )
                 )
             }
-            # The submission asked for the run's Stop; the profile's newer
-            # intent stopped the lost job's exact runtime.
-            assert "one-shot-jobs" in stops
-            assert stops["profile-jobrun-stop"] == "succeeded"
+            # The submission asked for the run's Stop. It is cleanup, so the
+            # profile's newer intent never supersedes it: it stopped the lost
+            # job's exact runtime itself.
+            assert stops == {"one-shot-jobs": "succeeded"}, stops
             assert (
                 session.scalars(
                     select(func.count()).select_from(FleetProfileApplication)

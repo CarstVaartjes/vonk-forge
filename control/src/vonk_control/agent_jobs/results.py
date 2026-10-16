@@ -29,6 +29,7 @@ from ..lifecycle.agent_operation import AgentOperationAdapter
 from ..models import AgentOperation as StoredOperation
 from ..models import AgentOperationAttempt, Job
 from ..offline_stops import is_deferred_stop
+from ..own_cleanup import CLEANUP_KINDS
 from .contracts import (
     _ABANDONABLE_OPERATIONS,
     _ENDED_PARENT_STATES,
@@ -198,7 +199,8 @@ def record_late_result(
         ):
             return False
         superseded_intent = (
-            operation.workload_intent_ordinal is not None
+            operation.kind not in CLEANUP_KINDS
+            and operation.workload_intent_ordinal is not None
             and operation.workload_intent_ordinal != node.workload_intent_ordinal
         )
         if (

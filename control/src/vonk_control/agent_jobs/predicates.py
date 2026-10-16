@@ -27,6 +27,7 @@ from ..agent_operation_facts import (
 from ..logging import redact_text
 from ..models import AgentNode, AgentOperationAttempt, Job
 from ..models import AgentOperation as StoredOperation
+from ..own_cleanup import CLEANUP_KINDS
 from ..stored_json import read_row_column
 from .contracts import (
     _CLAIM_NOTE_PREFIX,
@@ -280,6 +281,8 @@ def _claim_predicate(now: datetime) -> _ClaimPredicate:
                     StoredOperation.workload_intent_ordinal.is_(None),
                     StoredOperation.workload_intent_ordinal
                     == AgentNode.workload_intent_ordinal,
+                    # A cleanup order keeps the intent it was admitted under.
+                    StoredOperation.kind.in_(CLEANUP_KINDS),
                 ),
             ),
             _ClaimCondition(

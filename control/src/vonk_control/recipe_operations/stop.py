@@ -456,6 +456,7 @@ class StopMixin:
             targets=job.targets,
             workload_intent_ordinal=ordinal,
             now=service._clock(),
+            accepted=True,
         )
         if review.exact_payloads is None:
             if (

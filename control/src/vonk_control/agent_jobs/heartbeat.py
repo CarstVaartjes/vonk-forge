@@ -29,6 +29,7 @@ from ..operation_progress import (
     sample_progress,
     stored_progress,
 )
+from ..own_cleanup import CLEANUP_KINDS
 from .contracts import _LOGGER, _WORKLOAD_INTENT_OPERATIONS, AgentFence
 from .endings import end_unobserved_order
 from .retry import _renew_distribution_grant, superseded_cancellation_deadline
@@ -65,8 +66,10 @@ def heartbeat(
         now = self._clock()
         parent = session.get(Job, operation.parent_job_id)
         node = session.get(AgentNode, operation.node_id)
+        # A cleanup order is never superseded: it keeps renewing until done.
         superseded = bool(
             node is not None
+            and operation.kind not in CLEANUP_KINDS
             and operation.workload_intent_ordinal is not None
             and operation.workload_intent_ordinal != node.workload_intent_ordinal
         )
