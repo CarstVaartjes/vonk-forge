@@ -389,7 +389,10 @@ def _eviction_sentence(items: Iterable[_Item], shortfall: int) -> str:
 
 
 def spark_eviction_capacity(
-    session: Session, node_id: str, now: datetime
+    session: Session,
+    node_id: str,
+    now: datetime,
+    superseded_applications: Collection[str] = (),
 ) -> EvictionCapacity:
     """What unused installations on a Spark could free, read-only, and what stays.
 
@@ -397,14 +400,19 @@ def spark_eviction_capacity(
     the installations the collector can remove (no saved profile points to them
     first, then pointed ones, least recently used first) and a sentence naming
     what it must keep, so a refusal names what blocks. It registers no demand and
-    removes nothing.
+    removes nothing. The loads the reviewed one supersedes keep nothing: they
+    end when it is accepted, before it waits for the eviction.
     """
     from .evidence import _Evidence
     from .service import UnusedStorageCollector
 
     kept_bytes: Counter[str] = Counter()
     items = UnusedStorageCollector._spark_items(
-        session, node_id, _Evidence.read(session, now), Counter(), kept_bytes
+        session,
+        node_id,
+        _Evidence.read(session, now, superseded_applications),
+        Counter(),
+        kept_bytes,
     )
     return EvictionCapacity(
         sum(item.freeable for item in items), _kept_sentence(kept_bytes), tuple(items)

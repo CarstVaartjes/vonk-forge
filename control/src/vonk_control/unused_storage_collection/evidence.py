@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import Counter
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
 
@@ -67,7 +67,15 @@ class _Evidence:
     application_references_readable: bool
 
     @classmethod
-    def read(cls, session: Session, now: datetime) -> _Evidence:
+    def read(
+        cls,
+        session: Session,
+        now: datetime,
+        superseded_applications: Collection[str] = (),
+    ) -> _Evidence:
+        """``superseded_applications`` are the loads a reviewed load replaces:
+        they keep nothing for its review (the collector itself passes none)."""
+
         cutoff = now - GRACE
         revisions = session.execute(
             select(
@@ -166,13 +174,19 @@ class _Evidence:
                 )
             )
             if not _waits_for_storage(application)
+            and application.id not in superseded_applications
         )
         return cls(
             now=now,
             application_references_readable=application_references_readable,
             cutoff=cutoff,
             live=live_tokens(session, now),
-            operations=operation_tokens(session, now, recent=False),
+            operations=operation_tokens(
+                session,
+                now,
+                recent=False,
+                superseded_applications=superseded_applications,
+            ),
             pinned=pinned,
             pointed_digests=frozenset(row.content_digest for row in pointed),
             pointed_models=bound | pinned,

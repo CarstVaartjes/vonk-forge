@@ -877,3 +877,108 @@ def test_no_spark_dispatching_adapter_observes_a_constant():
     ]
     assert len(sources) > 100  # the scan sees the Controller
     assert sites == []
+
+
+#: Functions that order two ordinals read on one Spark, and why.
+_ONE_SPARK_ORDINAL_ORDERS = {
+    # The source JobRun ran on ``target.node_id`` alone, the Spark whose
+    # ordinal the Stop carries (checked in the same predicate).
+    (
+        "control/src/vonk_control/profile_stop_authority.py",
+        "validate_jobrun_stop_source",
+    ),
+}
+
+
+def _cross_spark_ordinal_orders(source: str, path: str = "") -> list[int]:
+    """Lines that order two workload ordinals, neither read off a Spark's row.
+
+    A load fences only its own Sparks, at one more than their highest ordinal,
+    so two loads' ordinals order nothing: two loads got 598 on different
+    Sparks (#1608).  A Spark's current ordinal (its node row) against a load's
+    is the supersession check; "newer" between loads is the acceptance order
+    (``_application_order_key``).  Equality is identity, not order, and is not
+    checked.  Scoped to modules that import ``FleetProfileApplication``: a load
+    spans Sparks there, while a Spark order elsewhere holds one Spark's ordinal.
+    """
+
+    tree = ast.parse(source)
+    if not any(
+        isinstance(node, ast.ImportFrom)
+        and any(alias.name == "FleetProfileApplication" for alias in node.names)
+        for node in ast.walk(tree)
+    ):
+        return []
+
+    def ordinal(node: ast.expr) -> bool:
+        name = node.id if isinstance(node, ast.Name) else getattr(node, "attr", "")
+        return name.endswith("ordinal")
+
+    def node_row(node: ast.expr) -> bool:
+        return (
+            isinstance(node, ast.Attribute)
+            and "node" in ast.unparse(node.value).lower()
+        )
+
+    lines = []
+    for function in ast.walk(tree):
+        if not isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        if (path, function.name) in _ONE_SPARK_ORDINAL_ORDERS:
+            continue
+        for compare in ast.walk(function):
+            if not isinstance(compare, ast.Compare):
+                continue
+            operands = [compare.left, *compare.comparators]
+            for op, left, right in zip(compare.ops, operands, operands[1:]):
+                if (
+                    isinstance(op, (ast.Lt, ast.LtE, ast.Gt, ast.GtE))
+                    and ordinal(left)
+                    and ordinal(right)
+                    and not (node_row(left) or node_row(right))
+                ):
+                    lines.append(compare.lineno)
+    return sorted(set(lines))
+
+
+_LOADS = "from .models import FleetProfileApplication\n"
+
+
+def test_ordering_two_loads_by_their_ordinals_fails_the_guard():
+    across = (
+        _LOADS + "def older(prior_progress, workload_intent_ordinal):\n"
+        "    prior_ordinal = prior_progress.workload_intent_ordinal\n"
+        "    return prior_ordinal >= workload_intent_ordinal\n"
+    )
+    by_acceptance = (
+        _LOADS + "def older(prior_order, intent_order):\n"
+        "    return prior_order >= intent_order\n"
+    )
+    on_its_spark = (
+        _LOADS + "def superseded(node, ordinal, progress):\n"
+        "    if progress.workload_intent_ordinal != ordinal:\n"
+        "        return False\n"
+        "    return node.workload_intent_ordinal > ordinal\n"
+    )
+    spark_orders = (
+        "def older(old, operation):\n    return old.ordinal < operation.ordinal\n"
+    )
+    assert _cross_spark_ordinal_orders(across) == [4]
+    assert _cross_spark_ordinal_orders(by_acceptance) == []
+    assert _cross_spark_ordinal_orders(on_its_spark) == []
+    assert _cross_spark_ordinal_orders(spark_orders) == []
+
+
+def test_no_load_is_ordered_by_another_loads_ordinal_anywhere():
+    """Whole tree: "newer" between loads is the acceptance order (P: the
+    newest request steers)."""
+    sources = sorted((ROOT / "control/src/vonk_control").rglob("*.py"))
+    sites = [
+        f"{path.relative_to(ROOT).as_posix()}:{line}"
+        for path in sources
+        for line in _cross_spark_ordinal_orders(
+            path.read_text(), path.relative_to(ROOT).as_posix()
+        )
+    ]
+    assert len(sources) > 100  # the scan sees the Controller
+    assert sites == []

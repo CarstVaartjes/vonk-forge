@@ -14,15 +14,20 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import select
-from vonk_agent_protocol import RecipeImageCode
+from vonk_agent_protocol import ProfileReasonCode, RecipeImageCode
 from vonk_control.fleet_profiles import FleetProfileService
-from vonk_control.models import NodeInventorySnapshot, ResourceReservation
+from vonk_control.models import (
+    FleetProfileApplication,
+    NodeInventorySnapshot,
+    ResourceReservation,
+)
 from vonk_control.operation_blockers import ProgressAlarmCode, make_blocker
 from vonk_control.platform_observation import PlatformObserver
 from vonk_control.progress_stall import PROGRESS_STALL_WINDOW
 
 from .test_attempt_residues import _load, _loop, _switch
-from .test_fleet_profiles import NOW, _database, _input, _seed, _uuid
+from .test_fleet_profile_continuity import _world
+from .test_fleet_profiles import NOW, _database, _input, _node_id, _seed, _uuid
 from .test_profile_claim_selfheal import _application, _follow_due, _settle
 
 
@@ -241,3 +246,100 @@ def test_a_load_waiting_on_a_working_preparation_is_never_stalled(
     advanced[0] = now[0]
     retry_for(timedelta(minutes=2))
     assert not stalled() and not listed()
+
+
+def test_a_backoff_declined_alike_on_every_retry_is_stalled() -> None:
+    """Production 2026-10-16: a load backed off for five hours, every retry
+    declined with profile.retry_conflict, while the platform listed no stalled
+    load. It keeps backing off (a wait is not a failure) and is shown stalled
+    a whole window after it last moved; a different wait starts over."""
+    sessions, service, _adapter, first, _original, _both = _world()
+    now = [NOW + timedelta(minutes=1)]
+    service._clock = lambda: now[0]
+    with sessions.begin() as session:
+        row = session.get(FleetProfileApplication, first.id)
+        assert row is not None
+        row.state = "backoff"  # its child failed retryably
+
+    def decline(code=ProfileReasonCode.RETRY_CONFLICT) -> None:
+        now[0] += timedelta(minutes=2)
+        service._decline_retry_application(
+            first.id, code, "Recovery would stop an unreviewed workload"
+        )
+
+    def listed():
+        return (
+            PlatformObserver(sessions, clock=lambda: now[0]).read().stalled_applications
+        )
+
+    decline()
+    stall = service.application(first.id).progress.stall
+    assert stall is not None
+    while now[0] < stall.first_seen_at + PROGRESS_STALL_WINDOW - timedelta(minutes=2):
+        decline()
+        assert not listed()
+    decline()
+    decline()
+    application = service.application(first.id)
+    assert application.state == "backoff"
+    assert any(item.code == ProgressAlarmCode.STALLED for item in application.blockers)
+    (row,) = listed()
+    assert row.application_id == first.id and row.state == "backoff"
+    assert row.detail.startswith(f"{ProfileReasonCode.RETRY_CONFLICT}: ")
+    assert row.first_seen_at == stall.first_seen_at and row.repeats > 2
+
+    decline(ProfileReasonCode.RETRY_REVIEW_UNAVAILABLE)
+    assert not listed()
+
+
+def test_a_load_waiting_for_the_load_it_continues_is_never_silent() -> None:
+    """A newer load that continues an older load's assignments waits for it
+    to finish them. That wait recorded nothing, so it could last for hours
+    unseen; it is now a typed wait, shown stalled a whole window after it
+    last moved, and the load keeps waiting."""
+    sessions, service, adapter, first, _original, both = _world()
+    now = [NOW + timedelta(minutes=1)]
+    service._clock = lambda: now[0]
+    held = service.application(first.id).current_operation_id
+    real_advance = adapter.advance
+
+    def advance(operation_id, *, session=None):
+        if operation_id == held:
+            return adapter.get(operation_id)  # the older load's child is slow
+        return real_advance(operation_id, session=session)
+
+    adapter.advance = advance
+    newer = service.apply(both.id, request_key=_uuid(18030), actor="admin")
+
+    def waiting():
+        blockers = service.application(newer.id).progress.blockers
+        return [
+            b
+            for b in blockers
+            if b.code == ProfileReasonCode.CONTINUING_ASSIGNMENTS_PENDING
+        ]
+
+    def listed():
+        return (
+            PlatformObserver(sessions, clock=lambda: now[0]).read().stalled_applications
+        )
+
+    for _ in range(20):
+        if waiting():
+            break
+        now[0] += timedelta(minutes=1)
+        service.tick()
+    (wait,) = waiting()
+    assert first.id in wait.detail and wait.node_ids == [_node_id(1)]
+    stall = service.application(newer.id).progress.stall
+    assert stall is not None and not listed()
+
+    now[0] = stall.first_seen_at + PROGRESS_STALL_WINDOW
+    service.tick()
+    (row,) = listed()
+    assert row.application_id == newer.id
+    assert row.detail.startswith(
+        f"{ProfileReasonCode.CONTINUING_ASSIGNMENTS_PENDING}: "
+    )
+
+    assert service.application(newer.id).state == "running"  # waiting, not ended
