@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import sys
+import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -79,6 +81,71 @@ def test_one_missed_probe_is_tolerated_but_two_in_a_row_are_not():
                 _probe("agent-settled"),
             ]
         )._judge()
+
+
+def _settling_lane(
+    probes: list[carry.ProbeResult], run: dict[str, object] | None, monkeypatch
+) -> carry.UpgradeCarryLifecycle:
+    lane = _lane(probes)
+    lane._lock = threading.Lock()
+    lane._phase = "baseline-install"
+    monkeypatch.setattr(lane, "_carried_run", lambda: run, raising=False)
+    return lane
+
+
+@pytest.mark.parametrize(
+    ("probes", "route", "age", "reported", "settled"),
+    [
+        ([True] * 3, "published", 1.0, True, True),
+        ([True] * 2, "published", 1.0, True, False),
+        ([True, False, True], "published", 1.0, True, False),
+        ([True] * 3, "withdrawn", 1.0, True, False),
+        ([True] * 3, "published", 30.0, True, False),
+        ([True] * 3, "published", 30.0, False, True),
+    ],
+)
+def test_a_settle_phase_ends_on_behaviour_not_on_a_timer(
+    monkeypatch, probes, route, age, reported, settled
+):
+    """Settled means: consecutive answered probes in the phase, a published
+    route and, after a restart, a report of the carried run newer than the
+    restart. Missing any of these keeps the phase waiting."""
+    lane = _settling_lane(
+        [_probe("agent-settled", ok=ok) for ok in probes],
+        {"alias": "canary", "route_state": route, "rank_age_seconds": age},
+        monkeypatch,
+    )
+    started = time.monotonic() - 10
+    reason = lane._unsettled("agent-settled", started, reported=reported)
+    assert (reason is None) == settled, reason
+
+
+def test_an_upgraded_agent_that_never_reports_the_run_fails_by_name(monkeypatch):
+    """What release d30de9199 did, caught at the bound instead of after a soak."""
+    lane = _settling_lane(
+        [_probe("agent-settled")] * 3,
+        {"alias": "canary", "route_state": "published", "rank_age_seconds": 3600.0},
+        monkeypatch,
+    )
+    monkeypatch.setattr(carry, "PROBE_INTERVAL_SECONDS", 0.0)
+    with pytest.raises(LifecycleError) as raised:
+        lane._settle("agent-settled", 0.05, reported=True)
+    assert "agent-settled" in str(raised.value)
+    assert "has not reported the carried run" in str(raised.value)
+
+
+def test_a_settled_phase_returns_without_waiting_out_a_fixed_hold(monkeypatch):
+    lane = _settling_lane(
+        [_probe("baseline-serving")] * 3,
+        {"alias": "canary", "route_state": "published", "rank_age_seconds": 0.0},
+        monkeypatch,
+    )
+    started = time.monotonic()
+    lane._settle(
+        "baseline-serving", carry.BASELINE_SERVING_BOUND_SECONDS, reported=False
+    )
+    assert time.monotonic() - started < 1
+    assert lane.evidence.phases[-1]["phase"] == "baseline-serving"
 
 
 def test_the_first_release_is_skipped_visibly(tmp_path: Path, monkeypatch, capsys):

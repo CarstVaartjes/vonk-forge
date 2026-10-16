@@ -47,6 +47,14 @@ changes get the clean NAS and Spark exercises on the pull request and the
 carry on main; the `release-acceptance` label asks for the carry on any PR.
 The pull request's acceptance summary says when the carry was left to main.
 
+The carry waits on behaviour, never on a fixed timer. After the baseline
+serves, after the Controller recreate and after the agent upgrade, each phase
+ends once the workload answered three consecutive probes in it, its route is
+published and, after a restart, the Spark reported the carried run to the
+Controller again (rank evidence newer than the restart). A phase that does not
+settle within its bound (60, 120 and 300 seconds) fails and names what is
+missing, for example an upgraded agent that never reports the run it inherited.
+
 ## Local verification before requesting review
 
 Choose checks that exercise the changed boundary. Documentation-only changes

@@ -79,11 +79,17 @@ from tests.acceptance.test_spark_lifecycle import (
 )
 
 PROBE_INTERVAL_SECONDS = 3.0
-# Longer than two route-evidence windows (120 s) plus a report cycle: a
-# Controller that withdraws routes on stale rank evidence does it inside this.
-AGENT_SETTLE_SECONDS = 300
-CONTROLLER_SETTLE_SECONDS = 60
-BASELINE_SERVING_SECONDS = 30
+# Each settle phase waits for its observed condition, not a fixed time: the
+# carried workload answered this many consecutive probes in the phase, its
+# route is published and, after a restart, its Spark reported the run to the
+# Controller again (fresh rank evidence after the phase began). An upgraded
+# agent that does not adopt the run never reports it, so its route would go
+# stale and be withdrawn; that is refused here, at the bound, by name.
+SETTLED_CONSECUTIVE_PROBES = 3
+BASELINE_SERVING_BOUND_SECONDS = 60
+CONTROLLER_SETTLE_BOUND_SECONDS = 120
+# The old fixed hold: two route-evidence windows (120 s) plus a report cycle.
+AGENT_SETTLE_BOUND_SECONDS = 300
 # Outside the Controller recreate (the gateway restarts with it) a carried
 # workload may miss at most this many probes, never two in a row.
 TOLERATED_PROBE_FAILURES = 1
@@ -661,11 +667,15 @@ class UpgradeCarryLifecycle(SparkLifecycle):
         self._inference_key = self._read_secret("litellm-master-key")
         self._start_prober()
         try:
-            self._hold("baseline-serving", BASELINE_SERVING_SECONDS)
+            self._settle(
+                "baseline-serving", BASELINE_SERVING_BOUND_SECONDS, reported=False
+            )
             self._run_phase("controller-redeploy", self._redeploy_controller)
-            self._hold("controller-settled", CONTROLLER_SETTLE_SECONDS)
+            self._settle(
+                "controller-settled", CONTROLLER_SETTLE_BOUND_SECONDS, reported=True
+            )
             self._run_phase("agent-upgrade", self._upgrade_agent)
-            self._hold("agent-settled", AGENT_SETTLE_SECONDS)
+            self._settle("agent-settled", AGENT_SETTLE_BOUND_SECONDS, reported=True)
             self._run_phase("route-still-published", self._require_published)
         finally:
             self._stop_prober()
@@ -729,8 +739,43 @@ class UpgradeCarryLifecycle(SparkLifecycle):
         else:
             self.evidence.phases.append({"phase": name, "seconds": seconds})
 
-    def _hold(self, name: str, seconds: float) -> None:
-        self._run_phase(name, lambda: time.sleep(seconds))
+    def _settle(self, name: str, bound: float, *, reported: bool) -> None:
+        """Wait until phase ``name`` is settled by behaviour; refuse at ``bound``."""
+
+        def wait() -> None:
+            started = time.monotonic()
+            while True:
+                reason = self._unsettled(name, started, reported=reported)
+                if reason is None:
+                    return
+                if time.monotonic() - started >= bound:
+                    raise LifecycleError(f"not settled after {bound:.0f} s: {reason}")
+                time.sleep(PROBE_INTERVAL_SECONDS)
+
+        self._run_phase(name, wait)
+
+    def _unsettled(self, name: str, started: float, *, reported: bool) -> str | None:
+        """Why phase ``name`` (begun at ``started``) is not settled yet, or None."""
+        recent = [probe for probe in self.evidence.probes if probe.phase == name][
+            -SETTLED_CONSECUTIVE_PROBES:
+        ]
+        if len(recent) < SETTLED_CONSECUTIVE_PROBES or not all(
+            probe.ok for probe in recent
+        ):
+            return (
+                f"the workload has not answered {SETTLED_CONSECUTIVE_PROBES} "
+                "consecutive probes"
+            )
+        run = self._carried_run()
+        if run is None or run.get("route_state") != "published":
+            state = None if run is None else run.get("route_state")
+            return f"the carried route is {state!r}, not published"
+        if reported:
+            age = run.get("rank_age_seconds")
+            elapsed = time.monotonic() - started
+            if not isinstance(age, int | float) or age >= elapsed:
+                return "the Spark has not reported the carried run since the restart"
+        return None
 
     def _redeploy_controller(self) -> None:
         """Upgrade the Controller the way an operator reruns the installer."""
@@ -1165,7 +1210,8 @@ class UpgradeCarryLifecycle(SparkLifecycle):
             detail=detail,
         )
 
-    def _route_state(self) -> str | None:
+    def _carried_run(self) -> dict[str, object] | None:
+        """The carried run as the Controller's fleet snapshot shows it."""
         with self._lock:
             control = self.control
         assert control is not None
@@ -1173,9 +1219,15 @@ class UpgradeCarryLifecycle(SparkLifecycle):
         for node in require_object(payload, "Fleet snapshot").get("nodes") or []:
             for run in (node.get("loaded") or []) if isinstance(node, dict) else []:
                 if isinstance(run, dict) and run.get("alias") == self._alias:
-                    state = run.get("route_state")
-                    return str(state) if state is not None else None
-        return "absent"
+                    return run
+        return None
+
+    def _route_state(self) -> str | None:
+        run = self._carried_run()
+        if run is None:
+            return "absent"
+        state = run.get("route_state")
+        return str(state) if state is not None else None
 
     def _judge(self) -> None:
         """Fail on any loss of service outside the Controller recreate."""
