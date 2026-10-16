@@ -26,6 +26,7 @@ GUARDS: tuple[str, ...] = (
     "tests/test_reusable_workflow_permissions.py",
     "tests/test_release_workflow.py",
     "tests/test_repository_guard_inventory.py",
+    "tests/test_clock_skew_validity_sites.py",
     "tests/scripts/test_select_ci_areas.py",
     "tests/scripts/test_verify_ci_gate.py",
     "tests/scripts/test_build_control_wheel.py::test_every_control_workflow_builds_the_wheel_before_uv",
