@@ -2,8 +2,9 @@
 
 A load that stops a run re-plans its Stop when the Stop's acceptance finds the
 reviewed plan stale. If every fresh plan is refused the same way, the wait is
-never forever and never silent: each attempt names the refusal and its next
-attempt, each Run/Switch child ends once its checkpoint window closes, and the
+never forever and never silent: every load in the lineage shows the refusal as
+a named retry blocker, each Run/Switch child ends once its checkpoint window
+closes, and the
 profile's retry lineage ends ``failed`` naming the refusal once it failed the
 same way as often as recovery allows. Nothing is stopped on a guess.
 
@@ -21,6 +22,7 @@ import pytest
 from sqlalchemy import select
 from vonk_control.fleet_profiles import PROFILE_REPEATED_FAILURE_CODE
 from vonk_control.models import FleetProfileApplication, RecipeRun
+from vonk_control.operation_blockers import PHASE_RETRY_CODE
 from vonk_control.recovery_policy import RECOVERY
 
 from .lifecycle_simulation.invariants import ENDED
@@ -86,10 +88,11 @@ def test_a_profile_stop_refused_every_time_waits_visibly_and_then_ends(
                 break
             for row in live:
                 shown = world.controller.profiles.application(row.id)
-                said = [shown.status_reason or ""] + [
-                    item.detail or "" for item in shown.progress.blockers
-                ]
-                if any(refusal in text and "next attempt at" in text for text in said):
+                # The wait is a named blocker that carries the refusal.
+                if any(
+                    item.code == PHASE_RETRY_CODE and refusal in item.detail
+                    for item in shown.progress.blockers
+                ):
                     waits.add(row.id)
 
         assert not live, "the refused Stop is still waiting"
