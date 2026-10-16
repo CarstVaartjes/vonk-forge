@@ -156,69 +156,119 @@ fn job_wait_preserves_only_bounded_container_exit_statuses() {
     }
 }
 
+/// An unread `docker wait` concludes nothing: the job is read again by its
+/// identity and waited for while it runs; its own recorded exit is reported,
+/// and a container proven gone leaves the exit unknown -- never a made-up one.
 #[test]
-fn malformed_job_wait_reobserves_then_ends_without_poisoning_the_next_job() {
-    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-    #[derive(Clone, Default)]
-    struct JobObserver {
-        unavailable: Arc<AtomicBool>,
-        waits: Arc<AtomicUsize>,
-    }
-    impl CommandRunner for JobObserver {
-        fn run(&self, _: &Path, arguments: &[String]) -> Result<CommandOutput, String> {
-            if arguments[0] == "wait" {
-                let attempt = self.waits.fetch_add(1, Ordering::SeqCst);
-                let output = if attempt == 0 || self.unavailable.load(Ordering::SeqCst) {
-                    "unreadable peer answer"
-                } else {
-                    "37"
-                };
-                return Ok(docker_output(true, output, 0));
-            }
-            if arguments[0] == "container" && arguments[1] == "inspect" {
-                return Ok(docker_output(false, "", 1));
-            }
-            Ok(docker_output(true, "", 0))
-        }
-    }
-    let temp = tempfile::tempdir().unwrap();
-    let observer = JobObserver::default();
-    let executor = OperationExecutor::new(
-        ManagedRoots::under(temp.path()),
-        &[0; 32],
-        observer.clone(),
-        None,
-    )
-    .unwrap();
-    let identity = runtime_effect_identity(1);
-    let result = executor
-        .runtime_wait_for_job(
+fn an_unread_job_wait_is_reobserved_by_identity_before_anything_is_concluded() {
+    const RUN: &str = "a0000000-0000-4000-8000-00000000000a";
+    const JOB: &str = "a1000000-0000-4000-8000-0000000000a1";
+    let identity = RuntimeEffectIdentity {
+        runtime_id: JOB.parse().unwrap(),
+        installation_id: INSTALLATION.parse().unwrap(),
+        run_generation: 1,
+    };
+    let wait = |host: &Host| {
+        let (_temp, executor) = host_executor(host);
+        executor.runtime_wait_for_job(
             identity,
-            identity.runtime_id,
-            &"a".repeat(64),
-            1,
+            RUN.parse().unwrap(),
+            PLAN_DIGEST,
+            60,
+            Instant::now(),
+        )
+    };
+
+    let running = Host::with(&[Container {
+        exit: 37,
+        ..job(RUN, JOB, "running")
+    }]);
+    *running.unreadable_waits.lock().unwrap() = 2;
+    assert_eq!(wait(&running).unwrap().exit_code, Some(37));
+
+    let exited = Host::with(&[Container {
+        exit: 0,
+        ..job(RUN, JOB, "exited")
+    }]);
+    *exited.unreadable_waits.lock().unwrap() = u32::MAX;
+    let outcome = wait(&exited).unwrap();
+    assert_eq!(outcome.exit_code, Some(0));
+    assert!(outcome.evidence.is_none());
+    assert!(!exited.present(JOB));
+
+    assert!(matches!(
+        wait(&Host::default()),
+        Err(OperationError::RuntimeJobWaitFailed { evidence: None })
+    ));
+}
+
+/// A measured exit is kept when the container cannot be removed afterwards;
+/// the reply says the stop is uncertain instead of replacing the exit.
+#[test]
+fn a_measured_job_exit_survives_a_failed_removal() {
+    const RUN: &str = "a0000000-0000-4000-8000-00000000000a";
+    const JOB: &str = "a1000000-0000-4000-8000-0000000000a1";
+    let host = Host::with(&[Container {
+        exit: 5,
+        ..job(RUN, JOB, "running")
+    }]);
+    *host.stop_fails.lock().unwrap() = true;
+    let (_temp, executor) = host_executor(&host);
+    let outcome = executor
+        .runtime_wait_for_job(
+            RuntimeEffectIdentity {
+                runtime_id: JOB.parse().unwrap(),
+                installation_id: INSTALLATION.parse().unwrap(),
+                run_generation: 1,
+            },
+            RUN.parse().unwrap(),
+            PLAN_DIGEST,
+            60,
             Instant::now(),
         )
         .unwrap();
-    assert_eq!(result.0, Some(37));
-    assert_eq!(observer.waits.load(Ordering::SeqCst), 2);
-    observer.unavailable.store(true, Ordering::SeqCst);
-    let before = observer.waits.load(Ordering::SeqCst);
-    let began = Instant::now();
-    assert!(
-        executor
-            .runtime_wait_for_job(identity, identity.runtime_id, &"a".repeat(64), 1, began)
-            .is_err()
-    );
-    assert!(began.elapsed() < Duration::from_secs(1));
-    assert_eq!(observer.waits.load(Ordering::SeqCst) - before, 3);
-    observer.unavailable.store(false, Ordering::SeqCst);
-    let fresh = RuntimeEffectIdentity {
-        run_generation: 2,
-        ..identity
+    assert_eq!(outcome.exit_code, Some(5));
+    assert!(outcome.stop_uncertain);
+    assert!(outcome.evidence.is_some());
+}
+
+/// At its deadline a job is ended by the helper: a running one reports the
+/// helper-ended exit with its output; one never read stays unknown -- its
+/// exit is not made up.
+#[test]
+fn a_job_at_its_deadline_is_ended_and_an_unread_one_keeps_its_exit_unknown() {
+    const RUN: &str = "a0000000-0000-4000-8000-00000000000a";
+    const JOB: &str = "a1000000-0000-4000-8000-0000000000a1";
+    let expired = |host: &Host| {
+        let (_temp, executor) = host_executor(host);
+        executor.runtime_wait_for_job(
+            RuntimeEffectIdentity {
+                runtime_id: JOB.parse().unwrap(),
+                installation_id: INSTALLATION.parse().unwrap(),
+                run_generation: 1,
+            },
+            RUN.parse().unwrap(),
+            PLAN_DIGEST,
+            1,
+            Instant::now() - Duration::from_secs(1),
+        )
     };
-    let result = executor
-        .runtime_wait_for_job(fresh, fresh.runtime_id, &"b".repeat(64), 1, Instant::now())
-        .unwrap();
-    assert_eq!(result.0, Some(37));
+    let running = Host::with(&[job(RUN, JOB, "running")]);
+    let outcome = expired(&running).unwrap();
+    assert_eq!(
+        outcome.exit_code,
+        Some(super::super::start::JOB_ENDED_BY_HELPER_EXIT_CODE)
+    );
+    assert!(outcome.evidence.is_some());
+    assert!(!running.present(JOB));
+
+    let unlisted = Host {
+        listing_fails: true,
+        ..Host::with(&[job(RUN, JOB, "running")])
+    };
+    assert!(matches!(
+        expired(&unlisted),
+        Err(OperationError::RuntimeJobWaitFailed { evidence: Some(_) })
+    ));
+    assert!(!unlisted.present(JOB));
 }

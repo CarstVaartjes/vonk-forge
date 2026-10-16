@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Any
+from typing import Annotated, Any, NoReturn
 
 from fastapi import FastAPI, HTTPException, Path, Query, Request, status
+from vonk_agent_protocol import InvalidRequestError
 
 from .auth import MUTATION_ROLES, Actor
 from .endpoint_contract import inference_gateway_api_base
@@ -19,11 +20,7 @@ from .fleet_profile_contract import (
     FleetProfileReadView,
     FleetProfileView,
 )
-from .fleet_profiles import (
-    FleetProfileConflict,
-    FleetProfilePermissionDenied,
-    FleetProfileStalePlanConflict,
-)
+from .fleet_profiles import FleetProfileConflict, FleetProfilePermissionDenied
 from .integer_domains import MAX_DATABASE_INTEGER
 from .operation_api import bounded_error_responses
 
@@ -44,6 +41,25 @@ FLEET_PROFILE_OPERATION_IDS = {
     ("get", _APPLICATION_PATH): "getProfileApplication",
     ("get", _REQUEST_PATH): "getProfileApplicationByRequest",
 }
+
+
+def raise_profile_conflict(error: FleetProfileConflict) -> NoReturn:
+    """Answer a Fleet profile conflict by what asking again does.
+
+    A refusal never succeeds as sent: 409 naming its typed code, so a client
+    fails fast with the detail. Anything else is a wait (a busy admission owner,
+    lock contention, evidence that cannot settle here): it propagates, and the
+    route policy answers it 503 with ``Retry-After``.
+    """
+
+    if isinstance(error, InvalidRequestError):
+        code = getattr(error, "code", None)
+        raise HTTPException(
+            status_code=409,
+            detail=str(error)[:256],
+            headers={"x-vonk-error-code": str(code)} if code else None,
+        ) from None
+    raise error
 
 
 def install_fleet_profile_routes(
@@ -170,7 +186,7 @@ def install_fleet_profile_routes(
         try:
             result = service().update_number(number, body, actor=actor.subject)
         except FleetProfileConflict as error:
-            raise HTTPException(status_code=409, detail=str(error)[:256]) from None
+            raise_profile_conflict(error)
         except KeyError:
             raise HTTPException(
                 status_code=422, detail="invalid profile number"
@@ -198,7 +214,7 @@ def install_fleet_profile_routes(
         except KeyError:
             raise HTTPException(status_code=404, detail="Profile not found") from None
         except FleetProfileConflict as error:
-            raise HTTPException(status_code=409, detail=str(error)[:256]) from None
+            raise_profile_conflict(error)
         except (OSError, RuntimeError, TypeError, ValueError):
             raise HTTPException(
                 status_code=503, detail="Profile preview unavailable"
@@ -230,14 +246,8 @@ def install_fleet_profile_routes(
             raise HTTPException(status_code=403, detail=str(error)) from None
         except KeyError:
             raise HTTPException(status_code=404, detail="Profile not found") from None
-        except FleetProfileStalePlanConflict as error:
-            raise HTTPException(
-                status_code=409,
-                detail=str(error)[:256],
-                headers={"x-vonk-error-code": error.code},
-            ) from None
         except FleetProfileConflict as error:
-            raise HTTPException(status_code=409, detail=str(error)[:256]) from None
+            raise_profile_conflict(error)
         except (OSError, RuntimeError, TypeError, ValueError):
             raise HTTPException(
                 status_code=503, detail="Profile load unavailable"

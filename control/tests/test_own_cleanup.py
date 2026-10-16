@@ -1,0 +1,345 @@
+"""A Stop of a record's own container is granted by identity, whatever drifted.
+
+The drift matrix sends the agent's own Stop requests (``agent_grant_requests``)
+for every kind that may Stop, after each kind of bookkeeping drift, and expects
+the grant; it expects a refusal only at a real edge: another node, certificate
+or fence, an ended lease, or a container that is not the order's own.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Callable
+from dataclasses import dataclass
+from datetime import timedelta
+
+import pytest
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+from vonk_agent_protocol import (
+    ContainerRuntimeAction,
+    ExecuteContainerRuntimeRequestOperation,
+    SignedHostHelperGrant,
+    canonical_message,
+)
+from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest
+from vonk_agent_protocol.recipe_operations import RecipeStartPayload, RecipeStopPayload
+from vonk_control.agent_api import HostRuntimeGrantRequest
+from vonk_control.host_helper_authority import (
+    HostHelperAuthorityError,
+    HostRuntimeAuthorityService,
+)
+from vonk_control.models import (
+    AgentCertificate,
+    AgentNode,
+    AgentOperation,
+    AgentOperationAttempt,
+    Job,
+    RecipeRun,
+)
+from vonk_control.own_cleanup import CLEANUP_ACTIONS, EFFECT_ACTIONS
+from vonk_control.recipe_lifecycle_contract import RecipeOperationCancellationResult
+
+from .agent_grant_requests import own_stop_grant_request, stop_grant_request
+from .test_host_helper_authority import (
+    NOW,
+    RUNTIME_RUN_ID,
+    runtime_service,
+    service_stop_runtime_service,
+)
+
+NODE = "spk_" + "1" * 32
+OTHER = "c0000000-0000-4000-8000-00000000000c"
+OWN_ORDER_KINDS = ("recipe.start", "recipe.job.run.v1")
+
+
+@dataclass(frozen=True)
+class _Order:
+    kind: str
+    service: HostRuntimeAuthorityService
+    job_id: str
+    operation_id: str
+    fence: str
+
+
+def _order(kind: str, *, collective: bool = False) -> _Order:
+    if kind == "recipe.stop":
+        return _Order(kind, *service_stop_runtime_service())
+    service = runtime_service(
+        operation_kind=kind,
+        operation_payload={"phase": "collective-readiness"} if collective else None,
+    )
+    return _Order(
+        kind,
+        service,
+        "20000000-0000-4000-8000-000000000002",
+        "30000000-0000-4000-8000-000000000003",
+        "40000000-0000-4000-8000-000000000004",
+    )
+
+
+def _requests(order: _Order) -> list[HostRuntimeGrantRequest]:
+    """The agent's Stop requests for this order: a Stop order's claim as sent,
+    or the Stop it derives for its own order with either ``cancel_pending_start``
+    (a Start order sends ``False`` to clean up, ``True`` to cancel)."""
+    with order.service._sessions() as session:
+        operation = session.get(AgentOperation, order.operation_id)
+        assert operation is not None
+        payload = canonical_message(operation.payload)
+    if order.kind == "recipe.stop":
+        stop = RecipeStopPayload.model_validate_json(payload)
+        return [stop_grant_request(stop, fence=order.fence)]
+    own = (
+        RecipeStartPayload.model_validate_json(payload)
+        if order.kind == "recipe.start"
+        else RecipeJobRunRequest.model_validate_json(payload)
+    )
+    return [
+        own_stop_grant_request(own, fence=order.fence, cancel_pending_start=flag)
+        for flag in (False, True)
+    ]
+
+
+def _grant(
+    order: _Order,
+    body: HostRuntimeGrantRequest,
+    *,
+    node_id: str = NODE,
+    certificate_serial: str = "certificate-1",
+) -> SignedHostHelperGrant:
+    return order.service.issue_grant(
+        node_id=node_id,
+        certificate_serial=certificate_serial,
+        fence=body.fence,
+        action=ContainerRuntimeAction(body.action),
+        request_sha256=body.request_sha256,
+        start_plan_sha256=body.start_plan_sha256,
+        stop_plan_sha256=body.stop_plan_sha256,
+        run_generation=body.run_generation,
+        runtime_run_id=body.runtime_run_id,
+        runtime_target_id=body.runtime_target_id,
+        runtime_installation_id=body.runtime_installation_id,
+        expires_in_seconds=body.expires_in_seconds,
+    )
+
+
+def _stopped(grant: SignedHostHelperGrant) -> bool:
+    operation = grant.claims.operation
+    return (
+        isinstance(operation, ExecuteContainerRuntimeRequestOperation)
+        and operation.action == ContainerRuntimeAction.STOP.value
+    )
+
+
+def _no_drift(session: Session, order: _Order) -> None:
+    pass
+
+
+def _drift(order: _Order, change: Callable[[Session, _Order], None]) -> None:
+    with order.service._sessions.begin() as session:
+        change(session, order)
+
+
+def _move_workload_intent(session: Session, order: _Order) -> None:
+    for node in session.scalars(select(AgentNode)):
+        node.workload_intent_ordinal = 2
+
+
+def _cancel(session: Session, order: _Order, *, seconds_ago: int = 0) -> None:
+    job = session.get(Job, order.job_id)
+    assert job is not None
+    job.result = RecipeOperationCancellationResult(
+        cancel_requested=True,
+        cancel_requested_at=NOW - timedelta(seconds=seconds_ago),
+        cancel_request_id="50000000-0000-4000-8000-000000000005",
+        cancel_actor="admin",
+        reason="cancellation requested",
+    ).model_dump(mode="json", exclude_none=True)
+
+
+def _cancel_long_ago(session: Session, order: _Order) -> None:
+    # Past the 660 s window that once ended a cancelled order's Stop.
+    _cancel(session, order, seconds_ago=3600)
+
+
+def _supersede_and_cancel_long_ago(session: Session, order: _Order) -> None:
+    _move_workload_intent(session, order)
+    _cancel_long_ago(session, order)
+
+
+def _recover_run(session: Session, order: _Order) -> None:
+    run = session.get(RecipeRun, RUNTIME_RUN_ID)
+    assert run is not None
+    run.run_generation = 2
+
+
+def _refresh_run_plan(session: Session, order: _Order) -> None:
+    run = session.get(RecipeRun, RUNTIME_RUN_ID)
+    assert run is not None
+    run.plan_digest = "f" * 64
+
+
+def _drift_record_digests(session: Session, order: _Order) -> None:
+    job = session.get(Job, order.job_id)
+    operation = session.get(AgentOperation, order.operation_id)
+    assert job is not None and operation is not None
+    job.payload_digest = operation.payload_digest = "0" * 64
+
+
+def _drop_manifest(session: Session, order: _Order) -> None:
+    # An order queued before its producer recorded the phase manifest (#1569).
+    job = session.get(Job, order.job_id)
+    assert job is not None
+    job.payload = {key: value for key, value in job.payload.items() if key != "phases"}
+
+
+#: Drift every kind that may Stop must survive.
+_EVERY_KIND_DRIFT: dict[str, Callable[[Session, _Order], None]] = {
+    "current": _no_drift,
+    "workload intent moved": _move_workload_intent,
+    "cancellation recorded": _cancel,
+    "cancelled long ago": _cancel_long_ago,
+    "superseded and cancelled long ago": _supersede_and_cancel_long_ago,
+}
+#: Drift of the run an order's own Stop must also survive: the Stop document
+#: is the order's, so what the run became since does not decide it.
+_OWN_ORDER_DRIFT: dict[str, Callable[[Session, _Order], None]] = {
+    "run recovered to a newer generation": _recover_run,
+    "run plan refreshed": _refresh_run_plan,
+    "record digests drifted": _drift_record_digests,
+    "phase manifest missing": _drop_manifest,
+}
+_MATRIX = [
+    *(
+        pytest.param(kind, drift, id=f"{kind}: {drift}")
+        for kind in (*OWN_ORDER_KINDS, "recipe.stop")
+        for drift in _EVERY_KIND_DRIFT
+    ),
+    *(
+        pytest.param(kind, drift, id=f"{kind}: {drift}")
+        for kind in OWN_ORDER_KINDS
+        for drift in _OWN_ORDER_DRIFT
+    ),
+]
+
+
+@pytest.mark.parametrize(("kind", "drift"), _MATRIX)
+@pytest.mark.usefixtures("damaged_json_rows")
+def test_a_stop_of_the_orders_own_container_is_granted_whatever_drifted(
+    kind: str, drift: str
+) -> None:
+    order = _order(kind)
+    _drift(order, {**_EVERY_KIND_DRIFT, **_OWN_ORDER_DRIFT}[drift])
+    for body in _requests(order):
+        operation = _grant(order, body).claims.operation
+        assert isinstance(operation, ExecuteContainerRuntimeRequestOperation)
+        # The agent's own document is what the helper executes; the grant
+        # binds it to the order's identity, which the helper checks it against.
+        assert operation.action == ContainerRuntimeAction.STOP.value
+        assert operation.stop_plan_sha256 == body.stop_plan_sha256
+        assert (
+            operation.run_generation,
+            operation.runtime_run_id,
+            operation.runtime_target_id,
+            operation.runtime_installation_id,
+        ) == (
+            body.run_generation,
+            body.runtime_run_id,
+            body.runtime_target_id,
+            body.runtime_installation_id,
+        )
+
+
+@pytest.mark.usefixtures("damaged_json_rows")
+def test_a_collective_readiness_order_stops_its_own_rank_only() -> None:
+    order = _order("recipe.start", collective=True)
+    other_rank = "spk_" + "2" * 32
+    with order.service._sessions.begin() as session:
+        session.add(
+            AgentCertificate(
+                serial="certificate-2",
+                node_id=other_rank,
+                not_before=NOW,
+                not_after=NOW + timedelta(minutes=5),
+                fingerprint="fingerprint-2",
+            )
+        )
+    for body in _requests(order):
+        assert _stopped(_grant(order, body))
+        # The other rank's Spark, with its own valid certificate, cannot use
+        # this rank's order.
+        with pytest.raises(HostHelperAuthorityError):
+            _grant(order, body, node_id=other_rank, certificate_serial="certificate-2")
+
+
+@pytest.mark.parametrize("kind", OWN_ORDER_KINDS)
+def test_a_superseded_order_still_stops_but_never_starts(kind: str) -> None:
+    order = _order(kind)
+    _drift(order, _move_workload_intent)
+    with pytest.raises(HostHelperAuthorityError):
+        order.service.issue_grant(
+            node_id=NODE,
+            fence=order.fence,
+            action=ContainerRuntimeAction.START,
+            request_sha256="e" * 64,
+            certificate_serial="certificate-1",
+        )
+    for body in _requests(order):
+        assert _stopped(_grant(order, body))
+
+
+def _expire_lease(session: Session, order: _Order) -> None:
+    for attempt in session.scalars(select(AgentOperationAttempt)):
+        attempt.lease_deadline = NOW
+
+
+def _disown_order(session: Session, order: _Order) -> None:
+    job = session.get(Job, order.job_id)
+    assert job is not None
+    job.payload = {**job.payload, "owner_id": OTHER}
+
+
+#: What the caller changes at the edge: its node or certificate, the request
+#: it sends, or the stored record it claims under.
+_CALLER_EDGES: dict[str, dict[str, str]] = {
+    "another node": {"node_id": "spk_" + "2" * 32},
+    "another certificate": {"certificate_serial": "certificate-2"},
+}
+_REQUEST_EDGES: dict[str, dict[str, object]] = {
+    "another fence": {"fence": OTHER},
+    "another run": {"runtime_run_id": OTHER},
+    "another container": {"runtime_target_id": OTHER},
+    "another installation": {"runtime_installation_id": OTHER},
+    "another generation": {"run_generation": 2},
+    "no Stop document": {"stop_plan_sha256": None},
+}
+_RECORD_EDGES: dict[str, Callable[[Session, _Order], None]] = {
+    "the lease ended": _expire_lease,
+    "an order its parent does not own": _disown_order,
+}
+
+
+@pytest.mark.parametrize("kind", OWN_ORDER_KINDS)
+@pytest.mark.parametrize("edge", [*_CALLER_EDGES, *_REQUEST_EDGES, *_RECORD_EDGES])
+@pytest.mark.usefixtures("damaged_json_rows")
+def test_a_stop_is_refused_only_at_a_real_edge(kind: str, edge: str) -> None:
+    order = _order(kind)
+    if edge in _RECORD_EDGES:
+        _drift(order, _RECORD_EDGES[edge])
+    for body in _requests(order):
+        sent = body.model_copy(update=_REQUEST_EDGES.get(edge, {}))
+        with pytest.raises(HostHelperAuthorityError):
+            _grant(order, sent, **_CALLER_EDGES.get(edge, {}))
+
+
+def test_every_runtime_action_is_a_cleanup_or_an_effect() -> None:
+    assert CLEANUP_ACTIONS.isdisjoint(EFFECT_ACTIONS)
+    assert CLEANUP_ACTIONS | EFFECT_ACTIONS == set(ContainerRuntimeAction)
+
+
+def test_the_drift_matrix_covers_every_kind_a_cleanup_serves() -> None:
+    served = {
+        kind
+        for action in CLEANUP_ACTIONS
+        for kind in HostRuntimeAuthorityService._ACTION_KINDS[action]
+    }
+    assert served == {*OWN_ORDER_KINDS, "recipe.stop"}

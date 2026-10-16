@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -10,6 +11,7 @@ from datetime import datetime
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+from vonk_agent_protocol import AgentOperation as AgentOperationKind
 from vonk_agent_protocol import (
     ContainerRuntimeAction,
     InstallationState,
@@ -41,6 +43,7 @@ from .models import (
     RunNode,
 )
 from .offline_stops import is_deferred_stop
+from .own_cleanup import own_runtime_target
 from .profile_stop_authority import (
     ProfileJobRunStopJob,
     ProfileStopAuthorityError,
@@ -54,8 +57,6 @@ from .recipe_execution_contract import (
 from .recipe_stop_payloads import (
     RecipeStopAuthorityError,
     durable_run_stop_payloads,
-    stop_payload_from_job_run,
-    stop_payload_from_start,
 )
 from .stored_json import read_row_column
 from .strict_json import read_stored_model, serialize_json_value
@@ -107,15 +108,23 @@ def derive_runtime_plan_binding(
     operation: AgentOperation,
     node_id: str,
     action: ContainerRuntimeAction,
-    cancellation_requested: bool,
+    stop_plan_sha256: str | None,
     now: datetime,
 ) -> RuntimePlanBinding:
-    """Select and hash the exact plan owned by this durable child operation."""
+    """Select and hash the exact plan owned by this durable child operation.
+
+    The Stop of an order's own container is bound to the order's identity and
+    to the Stop document the agent sent (``stop_plan_sha256``): the helper
+    executes that document only when its identity is the one bound here.
+    """
 
     if action not in {ContainerRuntimeAction.START, ContainerRuntimeAction.STOP}:
         return RuntimePlanBinding()
+    if action is ContainerRuntimeAction.STOP and operation.kind in _OWN_ORDER_KINDS:
+        return _own_stop_binding(parent, operation, stop_plan_sha256)
     _validate_child_record(parent, operation, node_id)
-    if operation.kind == "recipe.start":
+    start_order = action is ContainerRuntimeAction.START
+    if start_order and operation.kind == AgentOperationKind.RECIPE_START.value:
         start = _parse_start(operation.payload)
         _service_run_authority(
             session,
@@ -123,32 +132,15 @@ def derive_runtime_plan_binding(
             operation=operation,
             node_id=node_id,
             start=start,
-            action=action,
         )
-        if action is ContainerRuntimeAction.START:
-            plan = start
-            binding = RuntimePlanBinding(
-                start_plan_sha256=_payload_sha256(plan),
-                run_generation=start.run_generation,
-                runtime_run_id=start.run_id,
-                runtime_target_id=start.run_id,
-                runtime_installation_id=start.installation_id,
-            )
-        else:
-            stop = stop_payload_from_start(
-                start,
-                cancel_pending_start=cancellation_requested,
-            )
-            plan = stop
-            binding = RuntimePlanBinding(
-                stop_plan_sha256=_payload_sha256(plan),
-                run_generation=stop.run_generation,
-                runtime_run_id=stop.run_id,
-                runtime_target_id=stop.target_runtime_id,
-                runtime_installation_id=stop.installation_id,
-            )
-        return binding
-    if operation.kind == "recipe.job.run.v1":
+        return RuntimePlanBinding(
+            start_plan_sha256=_payload_sha256(start),
+            run_generation=start.run_generation,
+            runtime_run_id=start.run_id,
+            runtime_target_id=start.run_id,
+            runtime_installation_id=start.installation_id,
+        )
+    if start_order and operation.kind == AgentOperationKind.RECIPE_JOB_RUN.value:
         job_plan = _parse_job_run(operation.payload)
         _job_run_authority(
             session,
@@ -156,30 +148,14 @@ def derive_runtime_plan_binding(
             operation=operation,
             node_id=node_id,
             request=job_plan,
-            action=action,
         )
-        if action is ContainerRuntimeAction.START:
-            plan = job_plan
-            binding = RuntimePlanBinding(
-                start_plan_sha256=_payload_sha256(plan),
-                run_generation=job_plan.run_generation,
-                runtime_run_id=job_plan.run_id,
-                runtime_target_id=job_plan.job_id,
-                runtime_installation_id=job_plan.installation_id,
-            )
-        else:
-            # The agent sends one Stop per JobRun, fencing any pending Start
-            # of the same job, for cancellation and cleanup alike. The flag
-            # never changes which container is stopped.
-            plan = stop_payload_from_job_run(job_plan, cancel_pending_start=True)
-            binding = RuntimePlanBinding(
-                stop_plan_sha256=_payload_sha256(plan),
-                run_generation=plan.run_generation,
-                runtime_run_id=plan.run_id,
-                runtime_target_id=plan.target_runtime_id,
-                runtime_installation_id=plan.installation_id,
-            )
-        return binding
+        return RuntimePlanBinding(
+            start_plan_sha256=_payload_sha256(job_plan),
+            run_generation=job_plan.run_generation,
+            runtime_run_id=job_plan.run_id,
+            runtime_target_id=job_plan.job_id,
+            runtime_installation_id=job_plan.installation_id,
+        )
     if action is not ContainerRuntimeAction.STOP or operation.kind != "recipe.stop":
         raise RuntimePlanAuthorityRefused(
             "lifecycle plan owner does not match action",
@@ -281,6 +257,49 @@ def derive_runtime_plan_binding(
     )
 
 
+_OWN_ORDER_KINDS = frozenset(
+    {AgentOperationKind.RECIPE_START.value, AgentOperationKind.RECIPE_JOB_RUN.value}
+)
+_DIGEST = re.compile(r"[0-9a-f]{64}")
+
+
+def _own_stop_binding(
+    parent: Job, operation: AgentOperation, stop_plan_sha256: str | None
+) -> RuntimePlanBinding:
+    """Bind the agent's Stop of its own order's container to that identity.
+
+    Only the identity decides: run, container, installation and generation
+    from the stored order. The rest of the document is the agent's (its
+    timeout is bounded by the helper, ``cancel_pending_start`` fences only this
+    identity's own Start, the plan digest only narrows which container
+    matches), so it is bound by its digest, never re-derived and compared.
+    """
+    order = (
+        _parse_start(operation.payload)
+        if operation.kind == AgentOperationKind.RECIPE_START.value
+        else _parse_job_run(operation.payload)
+    )
+    target = own_runtime_target(parent, order)
+    # Neither is ever an end of the cleanup: the agent waits and asks again.
+    if target is None:
+        raise RuntimePlanAuthorityStale(
+            "the order is not its parent's own",
+            reason=InvalidRequestReason.MALFORMED,
+        )
+    if stop_plan_sha256 is None or not _DIGEST.fullmatch(stop_plan_sha256):
+        raise RuntimePlanAuthorityStale(
+            "the Stop document digest is missing",
+            reason=InvalidRequestReason.MALFORMED,
+        )
+    return RuntimePlanBinding(
+        stop_plan_sha256=stop_plan_sha256,
+        run_generation=target.run_generation,
+        runtime_run_id=target.run_id,
+        runtime_target_id=target.target_id,
+        runtime_installation_id=target.installation_id,
+    )
+
+
 def _service_run_authority(
     session: Session,
     *,
@@ -288,7 +307,6 @@ def _service_run_authority(
     operation: AgentOperation,
     node_id: str,
     start: RecipeStartPayload,
-    action: ContainerRuntimeAction,
 ) -> _RunAuthority:
     if parent.kind != "recipe.start" or parent.payload.get("owner_kind") != "run":
         raise RuntimePlanAuthorityRefused(
@@ -329,13 +347,10 @@ def _service_run_authority(
         or stored.mapping_id != run.mapping_id
         or stored.mapping_generation != run.mapping_generation
         or stored.recipe_revision_id != authority.revision.id
-        or action is ContainerRuntimeAction.START
-        and (
-            run.state not in {RunState.STARTING, RunState.RUNNING}
-            or authority.installation.state != InstallationState.INSTALLED
-            or authority.mapping.state != "ready"
-            or authority.revision.state != "active"
-        )
+        or run.state not in {RunState.STARTING, RunState.RUNNING}
+        or authority.installation.state != InstallationState.INSTALLED
+        or authority.mapping.state != "ready"
+        or authority.revision.state != "active"
     ):
         raise RuntimePlanAuthorityStale(
             "service Start is no longer authorized",
@@ -351,7 +366,6 @@ def _job_run_authority(
     operation: AgentOperation,
     node_id: str,
     request: RecipeJobRunRequest,
-    action: ContainerRuntimeAction,
 ) -> _RunAuthority:
     if (
         parent.kind != "recipe.job.run.v1"
@@ -383,7 +397,7 @@ def _job_run_authority(
             "artifact JobRun identity is stale",
             reason=InvalidRequestReason.SUPERSEDED,
         )
-    if action is ContainerRuntimeAction.START and (
+    if (
         request.run_generation != run.run_generation
         or run.state != RunState.RUNNING
         or authority.installation.state != InstallationState.INSTALLED
@@ -394,9 +408,6 @@ def _job_run_authority(
             "artifact JobRun start is no longer authorized",
             reason=InvalidRequestReason.NOT_READY,
         )
-    # JobRun cleanup keeps its immutable request generation. The distinct
-    # artifact job ID is the runtime target, so an old job cleanup cannot stop
-    # the service container created by a newer RecipeRun generation.
     return authority
 
 

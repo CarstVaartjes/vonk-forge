@@ -70,9 +70,9 @@ def _uninstall(
 
 
 def _stop_failed_runs(self: UnusedStorageCollector, installation_id: str) -> None:
-    """Queue the exact Stop of each failed run of the installation, if any.
+    """Queue the exact Stop of each failed or lost run of the installation.
 
-    A failed run is not wanted, but only its Spark can prove the process gone,
+    Such a run is not wanted, but only its Spark can prove the process gone,
     and uninstall waits for that proof (the run recorded stopped). The Stop
     joins the workload intent its Sparks already share, so it supersedes no
     order and costs no recovery; a load admitted since takes a newer intent and
@@ -84,7 +84,7 @@ def _stop_failed_runs(self: UnusedStorageCollector, installation_id: str) -> Non
             session.scalars(
                 select(RecipeRun.id).where(
                     RecipeRun.installation_id == installation_id,
-                    RecipeRun.state == RunState.FAILED,
+                    RecipeRun.state.in_((RunState.FAILED, RunState.LOST)),
                 )
             )
         )

@@ -11,6 +11,8 @@ middle of a cancel is harmless.
 
 from __future__ import annotations
 
+from datetime import datetime
+
 import pytest
 from sqlalchemy import select
 from vonk_agent_protocol import (
@@ -537,6 +539,14 @@ def test_an_exact_stop_receipt_resolves_a_recorded_residue(tmp_path) -> None:
     assert resolved.result_evidence.active_scope_may_remain is False
 
 
+def _report_rank_absent(run: RecipeRun, rank: RunNode, now: datetime) -> None:
+    """The rank's own Spark reports its process gone, now."""
+
+    rank.observed_run_generation = run.run_generation
+    rank.observation_process_running = False
+    rank.observation_observed_at = now
+
+
 def test_an_exact_stop_after_a_job_failed_keeps_its_outcome_and_resolves_residue(
     tmp_path,
 ) -> None:
@@ -560,6 +570,7 @@ def test_an_exact_stop_after_a_job_failed_keeps_its_outcome_and_resolves_residue
         ranks = session.scalars(select(RunNode).where(RunNode.run_id == run_id)).all()
         for rank in ranks:
             rank.state = RunState.FAILED
+            _report_rank_absent(run, rank, clock())
         _settle_unrecoverable(run, ranks, "the job run's rank failed", clock())
     agent_jobs.reconcile_orders()
     failed = service.get(submitted.id)
@@ -779,6 +790,7 @@ def test_a_job_whose_run_ended_ends_failed_and_is_never_run_again(tmp_path):
         ranks = session.scalars(select(RunNode).where(RunNode.run_id == run_id)).all()
         for rank in ranks:
             rank.state = RunState.FAILED
+            _report_rank_absent(run, rank, clock())
         _settle_unrecoverable(run, ranks, "the job run's rank failed", clock())
 
     agent_jobs.reconcile_orders()

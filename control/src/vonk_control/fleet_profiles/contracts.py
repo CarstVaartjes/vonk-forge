@@ -159,6 +159,8 @@ class FleetProfileInvalid(InvalidRequestError, FleetProfileConflict):
     """The request, or what it names, is out of contract or conflicts with the
     stored profile state; the caller corrects it and asks again."""
 
+    code = ProfileReasonCode.REQUEST_INVALID
+
 
 class FleetProfileUnavailable(UnknownOutcomeError, FleetProfileConflict):
     """Persisted bookkeeping or evidence that cannot settle the outcome here."""
@@ -212,6 +214,8 @@ class FleetProfileAdmissionBusy(UnknownOutcomeError, FleetProfileConflict):
 class FleetProfileAdmissionDefect(InvalidRequestError, FleetProfileConflict):
     """An unregistered database constraint refused admission: the load fails at
     once, naming the constraint, and is never retried as it stands."""
+
+    code = ProfileReasonCode.ADMISSION_DEFECT
 
     def __init__(self, *args: object) -> None:
         super().__init__(*args, reason=InvalidRequestReason.CONFLICT)
@@ -292,12 +296,6 @@ class FleetProfileSelectionLost(FleetProfileStalePlanConflict):
 
     code = ProfileReasonCode.SELECTION_LOST
     supersede_code = SupersedeCode.EFFECTS_CHANGED_DURING_ADMISSION
-
-
-class FleetProfileAssetReservationConflict(FleetProfileConflict):
-    """A profile asset could not be reserved right now; a later attempt may."""
-
-    code = ProfileReasonCode.ASSET_RESERVATION_UNAVAILABLE
 
 
 class FleetProfilePermissionDenied(SecurityRefusalError, PermissionError):

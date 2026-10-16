@@ -3,174 +3,14 @@
 use super::*;
 use crate::operations::test_support::*;
 
-const INSTALLATION: &str = "50000000-0000-4000-8000-000000000005";
 const RUN_A: &str = "a0000000-0000-4000-8000-00000000000a";
 const RUN_B: &str = "b0000000-0000-4000-8000-00000000000b";
 const JOB_A: &str = "a1000000-0000-4000-8000-0000000000a1";
 const JOB_B: &str = "b1000000-0000-4000-8000-0000000000b1";
 const SERVING: &str = "c0000000-0000-4000-8000-00000000000c";
-const STOP_REFUSAL: &str = "Error response from daemon: cannot stop container\n";
-
-#[derive(Clone)]
-struct Container {
-    run: String,
-    target: String,
-    state: &'static str,
-}
-
-impl Container {
-    /// Docker's full container id, distinct per target.
-    fn id(&self) -> String {
-        format!("{:0>64}", self.target.replace('-', ""))
-    }
-}
-
-/// A Docker host: the containers it holds, the commands it was given, and
-/// whether `docker stop` works.
-#[derive(Clone, Default)]
-struct Host {
-    containers: Arc<Mutex<Vec<Container>>>,
-    calls: Arc<Mutex<Vec<Vec<String>>>>,
-    stop_fails: Arc<Mutex<bool>>,
-    listing_fails: bool,
-}
-
-impl Host {
-    fn with(containers: &[Container]) -> Self {
-        let host = Self::default();
-        *host.containers.lock().unwrap() = containers.to_vec();
-        host
-    }
-
-    fn present(&self, target: &str) -> bool {
-        self.containers
-            .lock()
-            .unwrap()
-            .iter()
-            .any(|container| container.target == target)
-    }
-
-    fn called(&self, verb: &str, target: &str) -> Option<usize> {
-        let name = format!("vonk-{target}");
-        self.calls.lock().unwrap().iter().position(|call| {
-            call.first().map(String::as_str) == Some(verb) && call.last() == Some(&name)
-        })
-    }
-}
-
-impl CommandRunner for Host {
-    fn run(&self, executable: &Path, args: &[String]) -> Result<CommandOutput, String> {
-        assert_eq!(executable, Path::new("/usr/bin/docker"));
-        self.calls.lock().unwrap().push(args.to_vec());
-        let mut containers = self.containers.lock().unwrap();
-        let find = |name: &str| {
-            containers
-                .iter()
-                .position(|container| format!("vonk-{}", container.target) == name)
-        };
-        let name = args.last().cloned().unwrap_or_default();
-        let output = match args
-            .iter()
-            .map(String::as_str)
-            .collect::<Vec<_>>()
-            .as_slice()
-        {
-            ["container", "ls", ..] if self.listing_fails => docker_output(false, "", 1),
-            ["container", "ls", ..] => {
-                let run_filter = args
-                    .iter()
-                    .find_map(|arg| arg.strip_prefix("label=ai.vonkforge.run-id="));
-                let last = args
-                    .iter()
-                    .position(|arg| arg == "--last")
-                    .map(|index| args[index + 1].parse::<usize>().unwrap());
-                let quiet = args.iter().any(|arg| arg == "--quiet");
-                let id_filter = args.iter().find_map(|arg| arg.strip_prefix("id="));
-                // Newest first, as Docker lists them; `--last` applies after
-                // the filters.
-                let lines: String = containers
-                    .iter()
-                    .rev()
-                    .filter(|container| run_filter.is_none_or(|run| run == container.run))
-                    .filter(|container| id_filter.is_none_or(|id| id == container.id()))
-                    .take(last.unwrap_or(usize::MAX))
-                    .map(|container| {
-                        if quiet {
-                            format!("{}\n", container.id())
-                        } else {
-                            format!(
-                                "vonk-{}\t{}\t{}\t{}\t{INSTALLATION}\t1\t{}\n",
-                                container.target,
-                                container.state,
-                                container.run,
-                                container.target,
-                                "c".repeat(64)
-                            )
-                        }
-                    })
-                    .collect();
-                docker_output(true, &lines, 0)
-            }
-            ["logs", ..] => docker_output(true, "job output so far\n", 0),
-            ["container", "inspect", "--format", format, _]
-                if *format == crate::runtime_logs::EXIT_FORMAT =>
-            {
-                docker_output(true, "137\tfalse\t\n", 0)
-            }
-            ["inspect", ..] => docker_output(true, &"f".repeat(64), 0),
-            ["container", "inspect", ..] => match find(&name) {
-                Some(index) => {
-                    let container = &containers[index];
-                    docker_output(
-                        true,
-                        &format!(
-                            "true\t{}\t{}\t{INSTALLATION}\t1\t{}\n",
-                            container.run,
-                            container.target,
-                            "c".repeat(64)
-                        ),
-                        0,
-                    )
-                }
-                None => docker_output(false, "", 1),
-            },
-            ["stop", ..] if *self.stop_fails.lock().unwrap() => CommandOutput {
-                stderr: STOP_REFUSAL.as_bytes().to_vec(),
-                ..docker_output(false, "", 1)
-            },
-            ["stop", ..] => docker_output(true, "", 0),
-            ["rm", _] => {
-                if let Some(index) = find(&name) {
-                    containers.remove(index);
-                }
-                docker_output(true, "", 0)
-            }
-            _ => return Err(format!("unexpected command {args:?}")),
-        };
-        // The production runner refuses captured output over its bound; the
-        // caller never sees a partial listing.
-        if output.stdout.len() > MAX_COMMAND_OUTPUT_BYTES as usize {
-            return Err("compiled command output exceeded its bound".to_owned());
-        }
-        Ok(output)
-    }
-}
 
 fn executor(host: &Host) -> (TempDir, OperationExecutor<Host>) {
-    let temp = tempfile::tempdir().unwrap();
-    let roots = ManagedRoots::under(&temp.path().join("helper"))
-        .with_agent_data(&temp.path().join("agent"));
-    fs::create_dir_all(&roots.data).unwrap();
-    let executor = OperationExecutor::new(roots, &[0; 32], host.clone(), None).unwrap();
-    (temp, executor)
-}
-
-fn job(run: &str, target: &str, state: &'static str) -> Container {
-    Container {
-        run: run.to_owned(),
-        target: target.to_owned(),
-        state,
-    }
+    host_executor(host)
 }
 
 /// `count` exited job containers, each of its own run, as leaked Starts leave
@@ -196,9 +36,8 @@ fn identity(target: &str) -> RuntimeEffectIdentity {
 }
 
 #[test]
-fn a_returning_helper_removes_every_job_it_does_not_own_and_never_a_serving_run() {
+fn a_returning_helper_removes_exited_jobs_and_never_a_serving_run() {
     let host = Host::with(&[
-        job(RUN_A, JOB_A, "running"),
         job(RUN_B, JOB_B, "exited"),
         job(SERVING, SERVING, "running"),
     ]);
@@ -211,10 +50,6 @@ fn a_returning_helper_removes_every_job_it_does_not_own_and_never_a_serving_run(
     executor.sweep_stray_jobs();
 
     assert!(
-        !host.present(JOB_A),
-        "a running job without an owner was left running"
-    );
-    assert!(
         !host.present(JOB_B),
         "an exited job container was left behind"
     );
@@ -222,13 +57,49 @@ fn a_returning_helper_removes_every_job_it_does_not_own_and_never_a_serving_run(
     assert_eq!(host.called("stop", SERVING), None);
     assert_eq!(host.called("rm", SERVING), None);
     // Its output is read before the container that holds it is removed.
-    assert!(host.called("logs", JOB_A).unwrap() < host.called("rm", JOB_A).unwrap());
+    assert!(host.called("logs", JOB_B).unwrap() < host.called("rm", JOB_B).unwrap());
     // The agent's completion record is kept for the same job's replay; the
     // sweep removes only the container.
     assert!(
         completion.join("job-exit.json").is_file(),
         "the sweep removed the agent's completion record"
     );
+}
+
+/// A helper restart or package upgrade ends the helper's wait, never the job:
+/// the running job survives the sweep, and a later wait of the same identity
+/// reports its own exit and removes it.
+#[test]
+fn a_running_job_survives_a_helper_restart_and_is_adopted_by_its_identity() {
+    let host = Host::with(&[Container {
+        exit: 3,
+        ..job(RUN_A, JOB_A, "running")
+    }]);
+    let (_temp, executor) = executor(&host);
+
+    executor.sweep_stray_jobs();
+    assert!(
+        host.present(JOB_A),
+        "a running job was removed at helper start"
+    );
+    assert_eq!(host.called("stop", JOB_A), None);
+
+    let outcome = executor
+        .runtime_wait_for_job(
+            identity(JOB_A),
+            RUN_A.parse().unwrap(),
+            PLAN_DIGEST,
+            60,
+            Instant::now(),
+        )
+        .unwrap();
+    assert_eq!(outcome.exit_code, Some(3));
+    assert!(!outcome.stop_uncertain);
+    assert!(
+        outcome.evidence.is_some(),
+        "its failed exit kept no evidence"
+    );
+    assert!(!host.present(JOB_A), "the adopted job was not removed");
 }
 
 #[test]

@@ -278,6 +278,16 @@ def install_observations_routes(
                         node.observed_run_generation = run.run_generation
                         node.observation_process_running = evidence.process_running
                         node.observation_observed_at = observed_at
+                        if (
+                            not evidence.process_running
+                            and evidence.failure_diagnostics
+                        ):
+                            # The exit's cause outlives the settle it allows.
+                            node.last_exit_diagnostics = (
+                                evidence.failure_diagnostics.model_dump(
+                                    mode="json", exclude_none=True
+                                )
+                            )
                         continue
                     if node.state not in {RunState.RUNNING, RunState.FAILED} or (
                         node.state == "failed"

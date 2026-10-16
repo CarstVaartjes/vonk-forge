@@ -837,10 +837,7 @@ def _issue_exact_stop_grant(
             operation=operation,
             node_id=node_id,
             action=ContainerRuntimeAction.STOP,
-            cancellation_requested=(
-                isinstance(parent.result, Mapping)
-                and parent.result.get("cancel_requested") is True
-            ),
+            stop_plan_sha256=hashlib.sha256(canonical_message(stop)).hexdigest(),
             now=grant_now,
         )
     signer = HostHelperGrantIssuer(
@@ -3561,7 +3558,8 @@ def test_partial_multinode_stop_retains_every_active_capacity_reservation(
 
     assert service.get(operation.id).state == "failed"
     with sessions() as session:
-        assert _required(session.get(RecipeRun, run.owner_id)).state == "failed"
+        # The unconfirmed rank may still run: lost, never failed.
+        assert _required(session.get(RecipeRun, run.owner_id)).state == "lost"
         active = tuple(
             session.scalars(
                 select(ResourceReservation).where(
@@ -4961,7 +4959,7 @@ def test_distributed_recovery_deadline_is_enforced_during_stop_phase_advance(
         stored_stop = _required(session.get(Job, stop_job.id))
         assert worker_stop is None
         assert stored_stop.state == "failed"
-        assert run.state == "failed"
+        assert run.state == "lost"  # the second rank was never stopped
         assert run.route_state == "withdrawn"
 
 

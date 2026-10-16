@@ -128,15 +128,21 @@ impl<R: CommandRunner> OperationExecutor<R> {
                     },
                     request_sha256,
                 );
+                // A stop-uncertain reply carries a job's exit only when it was
+                // measured; none is ever made up for it.
                 let (status, exit_code, evidence) = match outcome {
                     Ok(outcome) => (
-                        HostHelperResponseStatus::ContainerRuntimeRequestExecuted,
+                        if outcome.stop_uncertain {
+                            HostHelperResponseStatus::ContainerRuntimeStopUncertain
+                        } else {
+                            HostHelperResponseStatus::ContainerRuntimeRequestExecuted
+                        },
                         outcome.exit_code,
                         outcome.evidence,
                     ),
                     Err(OperationError::StopUncertain) => (
                         HostHelperResponseStatus::ContainerRuntimeStopUncertain,
-                        Some(124),
+                        None,
                         None,
                     ),
                     Err(error) => return Err(error),

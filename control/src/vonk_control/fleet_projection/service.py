@@ -410,9 +410,7 @@ class FleetProjection:
             .join(RunNode, RunNode.run_id == RecipeRun.id)
             .where(
                 RunNode.node_id.in_(node_ids),
-                RecipeRun.state.not_in(
-                    {RunState.STOPPED, RunState.FAILED, RunState.LOST}
-                ),
+                RecipeRun.state.not_in({RunState.STOPPED, RunState.FAILED}),
             )
             .group_by(RecipeRun.id, RecipeRun.updated_at)
             .order_by(RecipeRun.updated_at.desc(), RecipeRun.id.desc())

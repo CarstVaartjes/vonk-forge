@@ -180,6 +180,28 @@ def test_security_alias_and_local_subclass_cannot_escape():
     assert check_source(PATH, source, {3}, modes=("security",))
 
 
+def test_an_edge_answers_403_only_for_a_reviewed_security_refusal():
+    edge = "control/src/vonk_control/agent_api/authority.py"
+    template = (
+        "try:\n"
+        "    issue()\n"
+        "except {caught}:\n"
+        "    raise HTTPException(status_code=403, detail='denied')\n"
+    )
+    # Stale grant authority caught as a broad error became a 403 (#1579).
+    for caught in ("HostHelperAuthorityError", "(EnrollmentDenied, ValueError)"):
+        assert check_source(
+            edge, template.format(caught=caught), {4}, modes=("security",)
+        ) == [f"{edge}:4: 403 for an error that is not a security refusal"]
+    assert not check_source(
+        edge, template.format(caught="EnrollmentDenied"), {4}, modes=("security",)
+    )
+    # Untouched lines are not judged.
+    assert not check_source(
+        edge, template.format(caught="ValueError"), {1}, modes=("security",)
+    )
+
+
 def test_patch_context_deleted_lines_and_multiple_hunks():
     patch = "diff --git a/x.py b/x.py\n--- a/x.py\n+++ b/x.py\n@@ -1,3 +1,3 @@\n old\n-removed\n+new\n context\n@@ -9 +9,2 @@\n old\n+second\n"
     additions = added_lines(patch)["x.py"]
@@ -461,6 +483,41 @@ def test_new_failure_that_discards_its_cause_fails_untouched_does_not(source, ke
         "rust/crates/vonk-agent/src/executor/start/tests.rs",
         source,
         lines,
+        modes=("causes",),
+    )
+
+
+@pytest.mark.parametrize(
+    ("source", "kept"),
+    [
+        (
+            # A stop-uncertain reply made up a timeout exit for its job.
+            "Err(OperationError::StopUncertain) => (status, Some(124), None),\n",
+            "Err(OperationError::StopUncertain) => (status, None, None),\n",
+        ),
+        (
+            "RuntimeStartLaunch::TimedOut => Ok((Some(124), None)),\n",
+            "RuntimeStartLaunch::Job { timeout } => self.wait(timeout),\n",
+        ),
+        (
+            "Outcome { exit_code: Some(1), evidence: None }\n",
+            "Outcome { exit_code: Some(code), evidence: None }\n",
+        ),
+        (
+            "Ok((Some(0), None))\n",
+            "Ok((Some(JOB_ENDED_BY_HELPER_EXIT_CODE), None))\n",
+        ),
+    ],
+)
+def test_a_new_invented_exit_code_fails_a_measured_one_does_not(source, kept):
+    path = "rust/crates/vonk-agent-helper/src/operations/dispatch.rs"
+    assert check_source(path, source, {1}, modes=("causes",))
+    assert not check_source(path, kept, {1}, modes=("causes",))
+    # Test code may build any exit it asserts on.
+    assert not check_source(
+        "rust/crates/vonk-agent-helper/src/operations/start/tests.rs",
+        source,
+        {1},
         modes=("causes",),
     )
 

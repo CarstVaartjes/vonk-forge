@@ -925,6 +925,9 @@ def test_a_started_load_waiting_for_disk_lets_a_failed_run_be_stopped_and_evicte
         ranks = session.scalars(select(RunNode).where(RunNode.run_id == run_id)).all()
         for rank in ranks:
             rank.state = RunState.FAILED  # every rank's process died
+            rank.observed_run_generation = run.run_generation  # its Spark says so
+            rank.observation_process_running = False
+            rank.observation_observed_at = now
         _settle_unrecoverable(run, ranks, "fault: unrecoverable", now)
         release_inactive_run_claims_in_session(session, now)
         for snapshot in session.scalars(select(NodeInventorySnapshot)):

@@ -43,6 +43,7 @@ def cli_words() -> str:
     )
     from vonk_agent_protocol.agent_words import ProfileEffectState
     from vonk_agent_protocol.lifecycle_vocabulary import ArtifactPreparation
+    from vonk_agent_protocol.reason_codes.profiles import PROFILE_REFUSAL_CODES
 
     words = {
         "STOP_UNCONFIRMED": StopOutcome.UNCONFIRMED,
@@ -95,6 +96,14 @@ def cli_words() -> str:
             f'    ({first}, {last}, "{verdict.value}"),'
             for first, last, verdict in HTTP_STATUS_DISPOSITIONS
         ),
+        ")",
+        "",
+        "# The codes a Fleet profile request is refused with (HTTP 409): it never",
+        "# succeeds as sent. Every other profile conflict is a wait (HTTP 503).",
+        "PROFILE_REFUSAL_CODES = frozenset(",
+        "    {",
+        *(f'        "{code.value}",' for code in sorted(PROFILE_REFUSAL_CODES)),
+        "    }",
         ")",
     ]
     return "\n".join(lines) + "\n"

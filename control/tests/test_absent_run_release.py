@@ -89,7 +89,9 @@ def test_stop_of_a_run_the_spark_reports_gone_succeeds_and_releases(tmp_path):
         )
 
 
-def test_superseded_run_is_settled_and_released_not_recovered(tmp_path):
+def _superseded_failed_run(tmp_path, *, reported_absent: bool):
+    """A run whose ranks are recorded failed while a newer intent owns its Sparks."""
+
     sessions, service, queue, mapping, build, nodes = setup_services(
         tmp_path, distributed_lifecycle=True
     )
@@ -101,18 +103,39 @@ def test_superseded_run_is_settled_and_released_not_recovered(tmp_path):
     routes.publish_run(started.owner_id)
     with sessions.begin() as session:
         for node in session.scalars(select(RunNode)):
-            node.state = "failed"  # no Spark has to say it is gone
+            node.state = "failed"
         for agent in session.scalars(select(AgentNode)):
             agent.workload_intent_ordinal += 1  # a newer intent owns the Spark
+    if reported_absent:
+        _report_absent(sessions, started.owner_id)
     recovery = DistributedRecoveryCoordinator(
         sessions, routes=routes, agent_jobs=queue, clock=lambda: NOW
     )
-
     assert recovery.tick() is True
+    return sessions, started.owner_id
 
-    assert _active_run_claims(sessions, started.owner_id) == 0
+
+def test_superseded_run_its_spark_reports_gone_is_settled_and_released(tmp_path):
+    sessions, run_id = _superseded_failed_run(tmp_path, reported_absent=True)
+
+    assert _active_run_claims(sessions, run_id) == 0
     with sessions() as session:
-        run = _run(session, started.owner_id)
+        run = _run(session, run_id)
         assert run.state == "failed"
         assert "newer workload intent" in (run.route_error or "")
         assert not list(session.scalars(select(Job).where(Job.kind == "recipe.stop")))
+
+
+def test_superseded_run_no_spark_reports_gone_is_lost_and_keeps_its_claims(tmp_path):
+    """A rank recorded failed is not proof its process is gone (Class 2).
+
+    Wrong implementation: the run was settled failed from the recorded rank
+    states alone, so the ownership rule freed ports and memory a container
+    that may still run was using, and the next load collided with it.
+    """
+    sessions, run_id = _superseded_failed_run(tmp_path, reported_absent=False)
+
+    assert _active_run_claims(sessions, run_id) > 0
+    with sessions() as session:
+        run = _run(session, run_id)
+        assert run.state == "lost"
