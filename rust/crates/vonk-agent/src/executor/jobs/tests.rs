@@ -546,6 +546,75 @@ fn job_start_preparation_reports_the_runtime_step_that_stopped_it() {
     assert_eq!(stage, FailureStage::RunStorage);
 }
 
+/// A local step before the job's process is dispatched never leaves the
+/// job's effect in doubt: this attempt did not run it. A cause that clears by
+/// itself is a typed wait at the step's pre-launch stage (the Controller
+/// issues the job again); a refused workload input ends it with evidence.
+#[test]
+fn a_step_before_launch_waits_at_its_stage_unless_the_input_was_refused() {
+    let (claim, request) = job_claim();
+    let spec = &request.compiled_execution_plan;
+    let data = tempdir().unwrap();
+    let runtime = OciRuntime {
+        runner: &NoProcess,
+        data_root: data.path(),
+    };
+    // Production trigger: the job's input directory is not there yet when its
+    // launch is prepared (the step reported an unknown effect, so the job
+    // was lost without ever running).
+    let Err(error) = runtime.prepare_job_start(
+        spec,
+        &request.installation_id.to_string(),
+        &request.job_id.to_string(),
+        &super::job_placement(spec).unwrap(),
+        spec,
+    ) else {
+        panic!("a start without its input directory is not prepared");
+    };
+    let storage = std::io::Error::from(std::io::ErrorKind::PermissionDenied);
+    for (stage, step, error) in [
+        (
+            FailureStage::RuntimeProjection,
+            "job start preparation",
+            error,
+        ),
+        (
+            FailureStage::RunStorage,
+            "job intent record",
+            crate::oci::OciError::Io(storage),
+        ),
+    ] {
+        let result = job_step_before_launch(stage, step, &error);
+        assert_eq!(result.state(), AgentResultState::Failed, "{step}");
+        let failure = result.failure().expect("a typed failure");
+        assert_eq!(
+            failure.failure_kind,
+            Some(AgentFailureKind::TemporaryDependency),
+            "{step}"
+        );
+        // The step's own stage, not the error's: a later stage would prove
+        // nothing about launch.
+        assert_eq!(failure.stage, Some(stage), "{step}");
+        assert!(
+            failure
+                .diagnostic
+                .as_deref()
+                .is_some_and(|d| d.contains(step))
+        );
+        let finished = result.finish(&claim);
+        assert_eq!(finished.state, AgentResultState::Failed);
+    }
+    let refused = job_step_before_launch(
+        FailureStage::JobInputs,
+        "job input manifest write",
+        &crate::oci::OciError::Workload(
+            vonk_agent_protocol::compiled_execution_plan::WorkloadError::Invalid("input"),
+        ),
+    );
+    assert_eq!(refused.state(), AgentResultState::Failed);
+    assert_eq!(refused.failure().expect("a failure").failure_kind, None);
+}
+
 fn grant_answer(status: u16, code: Option<&str>) -> crate::host_runtime::HostRuntimeError {
     let mut answer = crate::client::ControllerError::from_status(status);
     answer.endpoint = "/agent/host-runtime/grant".into();

@@ -308,19 +308,25 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                     return *result;
                 }
                 if let Err(error) = self.runtime.cleanup_job_scope(&job_scope) {
-                    return local(FailureStage::RunStorage, "job scope cleanup", error);
+                    return job_step_before_launch(
+                        FailureStage::RunStorage,
+                        "job scope cleanup",
+                        &error,
+                    );
                 }
                 self.report_phase(claim, ProgressPhase::Downloading).await;
                 for input in &request.inputs {
-                    let destination = match self
-                        .runtime
-                        .job_input_destination(&job_scope, &input.name)
-                    {
-                        Ok(path) => path,
-                        Err(error) => {
-                            return local(FailureStage::JobInputs, "job input destination", error);
-                        }
-                    };
+                    let destination =
+                        match self.runtime.job_input_destination(&job_scope, &input.name) {
+                            Ok(path) => path,
+                            Err(error) => {
+                                return job_step_before_launch(
+                                    FailureStage::JobInputs,
+                                    "job input destination",
+                                    &error,
+                                );
+                            }
+                        };
                     let result = distribution::run_with_authority(
                         self.client.download_recipe_job_input(
                             request.job_id,
@@ -350,21 +356,32 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                                 "job input was refused by the Controller",
                             );
                         }
-                        // Keep why the input did not arrive (a stall names its
-                        // window and the bytes that moved).
+                        // The job has not run: an input that did not arrive is a
+                        // wait, and the next attempt fetches it again. Keep why
+                        // (a stall names its window and the bytes that moved).
                         Some(Err(error)) => {
-                            return ExecutionResult::Unknown(unconfirmed_job(
-                                claim,
-                                &request,
+                            let cause = crate::failure_evidence::sanitize_text(&error.to_string())
+                                .chars()
+                                .take(400)
+                                .collect::<String>();
+                            return temporary_preparation_failure(
                                 FailureStage::JobInputs,
-                                "job input delivery remains unobserved",
-                                error.to_string(),
-                            ));
+                                "job input download",
+                                &cause,
+                            );
+                        }
+                        None if *cancellation.borrow() => {
+                            return cancelled_job(
+                                &request,
+                                started,
+                                "controller cancellation requested",
+                            );
                         }
                         None => {
-                            return unknown(
+                            return temporary_preparation_failure(
                                 FailureStage::JobInputs,
-                                "order authority ended during the input delivery".to_owned(),
+                                "job input download",
+                                super::installation::attempt_end_cause(&lease_deadline),
                             );
                         }
                     }
@@ -380,7 +397,11 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                     &input_manifest,
                     &request.input_manifest_sha256,
                 ) {
-                    return local(FailureStage::JobInputs, "job input manifest write", error);
+                    return job_step_before_launch(
+                        FailureStage::JobInputs,
+                        "job input manifest write",
+                        &error,
+                    );
                 }
                 let plan = match self.runtime.prepare_job_start(
                     spec,
@@ -391,10 +412,10 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                 ) {
                     Ok(plan) => plan,
                     Err(error) => {
-                        return local(
+                        return job_step_before_launch(
                             FailureStage::RuntimeProjection,
                             "job start preparation",
-                            error,
+                            &error,
                         );
                     }
                 };
@@ -406,7 +427,11 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                 ];
                 arguments.extend(plan.main);
                 if let Err(error) = self.runtime.persist_job_intent(&request) {
-                    return local(FailureStage::JobState, "job intent record", error);
+                    return job_step_before_launch(
+                        FailureStage::RunStorage,
+                        "job intent record",
+                        &error,
+                    );
                 }
                 JobScopeCleanup::new(&self.runtime, &job_scope).retain();
                 let dispatched = Instant::now();

@@ -247,3 +247,34 @@ def test_a_reports_stage_decides_a_job_reissue_in_one_place() -> None:
         and node.args[0].value == "stage"
     )
     assert readers == ["agent_jobs/retry.py"]
+
+
+def test_every_wait_the_agent_reports_before_a_job_launches_is_reissued() -> None:
+    """Across the boundary: each stage the agent reports a job's pre-launch
+    wait at (its job and installation preparation) is one the Controller
+    reissues from, so no such wait ends a job that never ran."""
+    import re
+    from pathlib import Path
+
+    executor = (
+        Path(__file__).resolve().parents[2] / "rust/crates/vonk-agent/src/executor"
+    )
+    waits = re.compile(
+        r"(?:job_step_before_launch|temporary_preparation_failure)\(\s*"
+        r"FailureStage::(\w+)"
+    )
+    installation = (executor / "installation.rs").read_text()
+    # A job prepares its installation (artifacts, image, model) up to the
+    # install order's own entry point.
+    preparation = installation[
+        installation.index("fn prepare_installation") : installation.index(
+            "fn execute_install"
+        )
+    ]
+    stages = {
+        re.sub(r"(?<!^)(?=[A-Z])", "-", name).lower()
+        for source in ((executor / "jobs.rs").read_text(), preparation)
+        for name in waits.findall(source)
+    }
+    assert {"job-inputs", "run-storage", "runtime-projection"} <= stages
+    assert stages <= JOB_PRE_LAUNCH_STAGES
