@@ -59,6 +59,10 @@ REVIEWED_CORE_DEFAULTS = {
     # Reached through OutcomeDone.result, the receipt of a success: its
     # diagnostics describe a completed job, not a failure the Controller acts on.
     "RecipeJobRunResult.diagnostics",
+    # The Controller fills a receipt's typed ending from the evidence beside it
+    # (outcome_body); an agent never sends one, so absent is the core default.
+    "RecipeJobRunResult.ending",
+    "RecipeJobEnding.diagnostic",
     "FailureDiagnostics.schema_version",
     "AgentFailureResult.error_code",
     "AgentFailureResult.failure_kind",
