@@ -58,7 +58,6 @@ from .intent import _active_owned_workload_jobs
 from .observation_helpers import _active_recipe_revision
 from .rank_authority import (
     _installation_accepted_ranks,
-    _run_accepted_ranks,
     _uninstall_recipe,
 )
 
@@ -183,17 +182,11 @@ class ActionPlansMixin:
                 and bool(missing_node_ids)
             )
 
+        # The run's own ranks are what a Stop stops: whether its stored plan
+        # still agrees with them is bookkeeping and never blocks it.
         actual_identity = {(node.node_id, node.rank, node.role) for node in nodes}
-        accepted_run = _run_accepted_ranks(session, run, recipe_revision_id)
-        accepted_ranks, accepted_exact = (
-            (frozenset[tuple[str, int, str]](), False)
-            if isinstance(accepted_run, Residue)
-            else accepted_run
-        )
         immutable_membership_exact = (
             len(all_nodes) <= _MAX_ACTION_NODES
-            and accepted_exact
-            and accepted_ranks == actual_identity
             and len(actual_identity) == len(nodes)
             and profile_scope_exact
         )

@@ -56,6 +56,7 @@ from .agent_fences import fenced_operation
 from .agent_grant_requests import own_stop_grant_request, stop_grant_request
 from .recipe_stop_fixtures import recipe_stop_payload
 from .runtime_identity_support import claim_agent
+from .runtime_image_fixtures import refresh_inventory
 from .test_agent_jobs import (
     COMMIT,
     NODE_A,
@@ -555,7 +556,16 @@ def _accept_service_stop(tmp_path, monkeypatch):
     with sessions() as session:
         accepted = session.scalar(select(Job).where(Job.request_id == request))
         assert accepted is not None
-    return sessions, operations, jobs, routes, run_id, nodes, accepted.id
+    return (
+        sessions,
+        operations,
+        jobs,
+        routes,
+        installation.owner_id,
+        run_id,
+        nodes,
+        accepted.id,
+    )
 
 
 def _run_moved_to_a_newer_generation(session: Session, run_id: str) -> None:
@@ -573,16 +583,11 @@ def _reservation_released(session: Session, run_id: str) -> None:
     reservation.state = ReservationState.RELEASED
 
 
-def _run_revision_digest_drifted(session: Session, run_id: str) -> None:
+def _run_plan_digest_drifted(session: Session, run_id: str) -> None:
+    # The run's stored digest differs from the one the Stop was reviewed under.
     run = session.get(RecipeRun, run_id)
     assert run is not None
-    installation = session.get(RecipeInstallation, run.installation_id)
-    assert installation is not None
-    session.execute(
-        update(CatalogDocumentRevision)
-        .where(CatalogDocumentRevision.id == installation.recipe_revision_id)
-        .values(content_digest="e" * 64)
-    )
+    run.plan_digest = "f" * 64
 
 
 #: Drift between acceptance and dispatch an accepted Stop must survive: it
@@ -590,7 +595,7 @@ def _run_revision_digest_drifted(session: Session, run_id: str) -> None:
 _ACCEPTED_DRIFT: dict[str, Callable[[Session, str], None]] = {
     "run moved to a newer generation": _run_moved_to_a_newer_generation,
     "reservation released": _reservation_released,
-    "revision digest drifted": _run_revision_digest_drifted,
+    "run plan digest drifted": _run_plan_digest_drifted,
 }
 
 
@@ -599,8 +604,9 @@ _ACCEPTED_DRIFT: dict[str, Callable[[Session, str], None]] = {
 def test_an_accepted_stop_stops_its_run_as_it_is_now(
     tmp_path, monkeypatch, drift: str
 ) -> None:
-    sessions, operations, jobs, routes, run_id, nodes, accepted_id = (
-        _accept_service_stop(tmp_path, monkeypatch)
+    accepted = _accept_service_stop(tmp_path, monkeypatch)
+    sessions, operations, jobs, routes, installation_id, run_id, nodes, accepted_id = (
+        accepted
     )
     with sessions.begin() as session:
         _ACCEPTED_DRIFT[drift](session, run_id)
@@ -632,3 +638,9 @@ def test_an_accepted_stop_stops_its_run_as_it_is_now(
     for node_id in nodes:
         restarted.record_node_result(accepted_id, node_id, succeeded=True, evidence={})
     assert restarted.get(accepted_id).state == LifecycleState.SUCCEEDED
+    refresh_inventory(sessions, clock)
+    plan = restarted.preview_run(installation_id, "after-the-stop")
+    fresh = restarted.start(
+        plan, plan_digest=plan.plan_digest, actor="admin", request_id=str(uuid4())
+    )
+    assert fresh.state in {LifecycleState.QUEUED, LifecycleState.RUNNING}

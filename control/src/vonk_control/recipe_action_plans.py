@@ -203,7 +203,7 @@ def stop_plan(
         blockers.append(
             ActionReason(
                 StopPlanCode.RANK_MEMBERSHIP_CHANGED,
-                "Persisted ranks no longer match the immutable accepted run plan.",
+                "The run's persisted ranks are not one exact rank group.",
             )
         )
     if not stop_scope_exact:

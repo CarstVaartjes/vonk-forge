@@ -323,6 +323,8 @@ def test_pending_service_stop_stops_its_run_at_a_newer_generation(
         accepted = session.get(Job, accepted_id)
         assert accepted is not None
         assert accepted.state == LifecycleState.RUNNING
+        run = session.get(RecipeRun, run_id)
+        assert run is not None
         orders = tuple(
             session.scalars(
                 select(AgentOperation).where(
@@ -332,9 +334,15 @@ def test_pending_service_stop_stops_its_run_at_a_newer_generation(
         )
         assert orders
         assert {order.payload["run_generation"] for order in orders} == {generation}
+        installation_id = run.installation_id
     for node_id in nodes:
         restarted.record_node_result(accepted_id, node_id, succeeded=True, evidence={})
     assert restarted.get(accepted_id).state == LifecycleState.SUCCEEDED
+    plan = restarted.preview_run(installation_id, "after-the-stop")
+    fresh = restarted.start(
+        plan, plan_digest=plan.plan_digest, actor="admin", request_id=str(uuid4())
+    )
+    assert fresh.state in {LifecycleState.QUEUED, LifecycleState.RUNNING}
 
 
 @pytest.mark.parametrize("replacement", ["adopt", "cancel"])
