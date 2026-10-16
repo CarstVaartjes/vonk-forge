@@ -421,11 +421,7 @@ def _claim_once(
                 profile_jobrun_stop_authorized = (
                     current_parent is not None
                     and _profile_stop_covers_jobrun_mutations(
-                        session,
-                        operation,
-                        current_parent,
-                        active_mutations,
-                        now=now,
+                        operation, current_parent, active_mutations
                     )
                     if has_jobrun_blocker
                     else False

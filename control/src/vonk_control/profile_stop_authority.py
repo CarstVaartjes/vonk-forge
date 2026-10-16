@@ -41,7 +41,6 @@ from .models import (
     RecipeRun,
     RunNode,
 )
-from .recipe_stop_payloads import stop_payload_from_job_run
 from .stored_json import read_row_column
 from .strict_json import StrictJSONModel, read_stored_model
 
@@ -69,6 +68,21 @@ class ProfileJobRunStopTarget(StrictJSONModel):
     stop_payload_sha256: str = Field(
         min_length=64, max_length=64, pattern=_SHA256.pattern
     )
+
+    @property
+    def key(self) -> tuple[str, str]:
+        """The Stop's identity: its Spark and the job container it removes."""
+        return self.node_id, self.artifact_job_id
+
+
+def jobrun_stop_key(node_id: str, stop: RecipeStopPayload) -> tuple[str, str]:
+    """A JobRun Stop order's identity, matched against :attr:`ProfileJobRunStopTarget.key`.
+
+    The order is its target's by the Spark it runs on and the container it
+    names, never by a digest of its document: a document read back under a
+    newer Controller hashes differently and still names the same container.
+    """
+    return node_id, stop.target_runtime_id
 
 
 class RunStopScope(StrictJSONModel):
@@ -199,14 +213,9 @@ class ProfileJobRunStopJob(StrictJSONModel):
             raise BookkeepingUnknown(
                 "profile JobRun Stop parent identity is inconsistent"
             )
-        target_keys = {
-            (item.node_id, item.stop_payload_sha256) for item in authorization.targets
-        }
+        target_keys = {item.key for item in authorization.targets}
         child_keys = [
-            (
-                item.node_id,
-                hashlib.sha256(canonical_message(item.payload)).hexdigest(),
-            )
+            jobrun_stop_key(item.node_id, item.payload)
             for item in parent.flattened_phase_items
         ]
         if (
@@ -659,16 +668,28 @@ def validate_jobrun_stop_source(
     *,
     workload_intent_ordinal: int,
 ) -> tuple[ArtifactJob, Job, AgentOperation]:
-    """Prove the exact immutable issued JobRun target a cleanup Stop names."""
+    """Prove a cleanup Stop names the run's own issued JobRun, by identity.
+
+    The JobRun is the run's (its artifact job, source job and single order, on
+    a Spark of the run), older than the Stop's intent (a newer intent's JobRun
+    belongs to its newer owner), and the Stop names its container at no newer
+    generation than the run's. What the run's plan, revision, mapping or the
+    rows' digests became since it launched never decides it.
+    """
 
     artifact = session.get(ArtifactJob, target.artifact_job_id)
     source_job = session.get(Job, target.source_job_id)
     source_operation = session.get(AgentOperation, target.source_operation_id)
     source_siblings = tuple(
         session.scalars(
-            select(AgentOperation)
-            .where(AgentOperation.parent_job_id == target.source_job_id)
-            .order_by(AgentOperation.id)
+            select(AgentOperation.id).where(
+                AgentOperation.parent_job_id == target.source_job_id
+            )
+        )
+    )
+    member = session.scalar(
+        select(RunNode.id).where(
+            RunNode.run_id == run.id, RunNode.node_id == target.node_id
         )
     )
     if (
@@ -677,26 +698,17 @@ def validate_jobrun_stop_source(
         or artifact.operation_id != target.source_job_id
         or source_job is None
         or source_operation is None
+        or member is None
         or source_job.kind != "recipe.job.run.v1"
         or source_job.payload.get("owner_kind") != "artifact-job"
         or source_job.payload.get("owner_id") != artifact.id
-        or source_job.authority_revision != stop.recipe_content_sha256
-        or source_job.payload_digest
-        != hashlib.sha256(
-            canonical_message(read_row_column(source_job, "payload"))
-        ).hexdigest()
+        or source_job.targets != [target.node_id]
+        or source_siblings != (source_operation.id,)
         or source_operation.parent_job_id != source_job.id
         or source_operation.node_id != target.node_id
         or source_operation.kind != "recipe.job.run.v1"
         or source_operation.workload_intent_ordinal is None
-        or source_operation.workload_intent_ordinal
-        != source_job.payload.get("workload_intent_ordinal")
         or source_operation.workload_intent_ordinal >= workload_intent_ordinal
-        or source_operation.payload_digest
-        != hashlib.sha256(canonical_message(source_operation.payload)).hexdigest()
-        or source_job.targets != [target.node_id]
-        or len(source_siblings) != 1
-        or source_siblings[0].id != source_operation.id
     ):
         raise ProfileStopAuthorityError("source JobRun identity is inconsistent")
     try:
@@ -705,143 +717,21 @@ def validate_jobrun_stop_source(
             canonical_message(source_operation.payload),
             from_json=True,
         )
-        expected = stop_payload_from_job_run(request, cancel_pending_start=True)
     except (TypeError, ValueError) as error:
         raise ProfileStopAuthorityError(
             "source JobRun request is invalid", reason=InvalidRequestReason.MALFORMED
         ) from error
-    installation = session.get(RecipeInstallation, run.installation_id)
-    member = session.scalar(
-        select(RunNode).where(
-            RunNode.run_id == run.id, RunNode.node_id == target.node_id
-        )
-    )
     if (
-        installation is None
-        or member is None
-        or request.recipe_revision_id != installation.recipe_revision_id
-        or request.run_generation > run.run_generation
-        or request.compiled_execution_plan.runtime.placement.rank != member.rank
-        or request.compiled_execution_plan.runtime.placement.role != member.role
-        or request.compiled_execution_plan.runtime.placement.world_size
-        != len(
-            tuple(session.scalars(select(RunNode.id).where(RunNode.run_id == run.id)))
-        )
-        or request.job_id != artifact.id
+        request.job_id != artifact.id
         or request.run_id != run.id
         or request.installation_id != run.installation_id
-        or request.mapping_id != run.mapping_id
-        or request.plan_digest != run.plan_digest
-        or stop.cancel_pending_start is not True
-        or canonical_message(stop) != canonical_message(expected)
-        or hashlib.sha256(canonical_message(stop)).hexdigest()
-        != target.stop_payload_sha256
+        or request.run_generation > run.run_generation
+        or (stop.run_id, stop.installation_id, stop.run_generation)
+        != (request.run_id, request.installation_id, request.run_generation)
+        or jobrun_stop_key(target.node_id, stop) != target.key
     ):
         raise ProfileStopAuthorityError("JobRun Stop differs from its source")
     return artifact, source_job, source_operation
-
-
-def validate_run_jobrun_stop_target(
-    session: Session,
-    scope: JobRunStopScope,
-    target: ProfileJobRunStopTarget,
-    stop: RecipeStopPayload,
-    *,
-    stop_parent: Job,
-    operation: AgentOperation | None = None,
-    require_current: bool = True,
-) -> tuple[ArtifactJob, Job, AgentOperation]:
-    """Bind an ordinary accepted run Stop to its frozen exact JobRun targets."""
-    from .job_documents import RecipeStopParent
-
-    accepted = RecipeStopParent.model_validate_json(
-        canonical_message(stop_parent.payload), strict=True
-    )
-    run = session.get(RecipeRun, scope.run_id)
-    installation = session.get(RecipeInstallation, scope.installation_id)
-    nodes = tuple(
-        session.scalars(
-            select(RunNode).where(RunNode.run_id == scope.run_id).order_by(RunNode.rank)
-        )
-    )
-    if (
-        run is None
-        or installation is None
-        or installation.recipe_revision_id != scope.recipe_revision_id
-        or stop_parent.kind != "recipe.stop"
-        or stop_parent.payload_digest
-        != hashlib.sha256(
-            canonical_message(read_row_column(stop_parent, "payload"))
-        ).hexdigest()
-        or accepted.owner_kind != "run"
-        or accepted.owner_id != scope.run_id
-        or accepted.execution_mode != "one-shot-jobs"
-        or accepted.plan_digest != scope.stop_plan_digest
-        or accepted.workload_intent_ordinal != scope.workload_intent_ordinal
-        or accepted.job_run_stop_authorization != scope
-        or stop_parent.targets != scope.reachable_node_ids
-        or run.installation_id != scope.installation_id
-        or run.mapping_id != scope.mapping_id
-        or run.mapping_generation != scope.mapping_generation
-        or run.run_generation != scope.run_generation
-        or run.plan_digest != scope.plan_digest
-        or [node.node_id for node in nodes] != scope.run_node_ids
-        or target not in scope.targets
-        or (require_current and run.state not in {RunState.RUNNING, RunState.STOPPING})
-    ):
-        raise ProfileStopAuthorityError("accepted run JobRun Stop owner changed")
-    if require_current:
-        agents = tuple(
-            session.scalars(
-                select(AgentNode).where(AgentNode.node_id.in_(scope.reachable_node_ids))
-            )
-        )
-        if len(agents) != len(scope.reachable_node_ids) or any(
-            node.workload_intent_ordinal != scope.workload_intent_ordinal
-            for node in agents
-        ):
-            raise ProfileStopAuthorityError("accepted run JobRun Stop was superseded")
-    matches = [
-        item
-        for phase in accepted.phases or ()
-        for item in phase
-        if item.node_id == target.node_id
-        and hashlib.sha256(canonical_message(item.payload)).hexdigest()
-        == target.stop_payload_sha256
-    ]
-    phase_keys = [
-        (item.node_id, hashlib.sha256(canonical_message(item.payload)).hexdigest())
-        for phase in accepted.phases or ()
-        for item in phase
-    ]
-    if len(phase_keys) != len(scope.targets) or set(phase_keys) != {
-        (item.node_id, item.stop_payload_sha256) for item in scope.targets
-    }:
-        raise ProfileStopAuthorityError("accepted run JobRun Stop manifest changed")
-    if len(matches) != 1 or (
-        operation is not None
-        and (
-            operation.parent_job_id != stop_parent.id
-            or operation.id != matches[0].operation_id
-            or operation.kind != "recipe.stop"
-            or operation.node_id != target.node_id
-            or operation.workload_intent_ordinal != scope.workload_intent_ordinal
-            or operation.authority_revision != stop_parent.authority_revision
-            or operation.payload_digest
-            != hashlib.sha256(canonical_message(operation.payload)).hexdigest()
-            or canonical_message(operation.payload) != canonical_message(stop)
-        )
-    ):
-        raise ProfileStopAuthorityError("issued run JobRun Stop child changed")
-    if canonical_message(matches[0].payload) != canonical_message(stop):
-        raise ProfileStopAuthorityError("run JobRun Stop phase target changed")
-    return validate_jobrun_stop_source(
-        session,
-        target,
-        stop,
-        run,
-        workload_intent_ordinal=scope.workload_intent_ordinal,
-    )
 
 
 def validate_profile_jobrun_stop_target(
@@ -850,16 +740,12 @@ def validate_profile_jobrun_stop_target(
     target: ProfileJobRunStopTarget,
     stop: RecipeStopPayload,
     *,
-    operation: AgentOperation | None = None,
     stop_parent: Job | None = None,
     now: datetime,
-    require_current: bool = True,
 ) -> None:
     """Bind a schema-2 Stop to the exact older typed JobRun request."""
 
-    run, _run_nodes = validate_profile_stop_owner(
-        session, authorization, now=now, require_current=require_current
-    )
+    run, _run_nodes = validate_profile_stop_owner(session, authorization, now=now)
     if target not in authorization.targets:
         raise ProfileStopAuthorityError("profile Stop target is not authorized")
     _artifact, source_job, _source_operation = validate_jobrun_stop_source(
@@ -896,10 +782,6 @@ def validate_profile_jobrun_stop_target(
         typed_parent = ProfileJobRunStopJob.model_validate_parent(stop_parent.payload)
         if (
             stop_parent.kind != "recipe.stop"
-            or stop_parent.payload_digest
-            != hashlib.sha256(
-                canonical_message(read_row_column(stop_parent, "payload"))
-            ).hexdigest()
             or stop_parent.payload.get("owner_kind") != "run"
             or stop_parent.payload.get("owner_id") != run.id
             or typed_parent.plan_digest != authorization.stop_plan_digest
@@ -910,20 +792,5 @@ def validate_profile_jobrun_stop_target(
             or stop_parent.payload.get("workload_intent_ordinal")
             != authorization.workload_intent_ordinal
             or stop_parent.targets != [target.node_id]
-            or (
-                operation is not None
-                and (
-                    operation.kind != "recipe.stop"
-                    or operation.parent_job_id != stop_parent.id
-                    or operation.node_id != target.node_id
-                    or operation.workload_intent_ordinal
-                    != authorization.workload_intent_ordinal
-                    or operation.payload_digest
-                    != hashlib.sha256(canonical_message(operation.payload)).hexdigest()
-                    or canonical_message(operation.payload) != canonical_message(stop)
-                )
-            )
         ):
             raise ProfileStopAuthorityError("issued profile Stop child changed")
-    elif operation is not None:
-        raise ProfileStopAuthorityError("issued profile Stop parent is unavailable")

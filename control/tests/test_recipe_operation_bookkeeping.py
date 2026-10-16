@@ -657,12 +657,7 @@ def test_a_profile_stop_child_that_cannot_be_proven_is_retired_not_raised(
                 select(AgentOperation).where(AgentOperation.parent_job_id == stop.id)
             )
         )
-        # Not a profile JobRun Stop at all: its identity cannot be proven.
-        outcome = service._validate_profile_jobrun_stop_child(
-            session, parent, child, now=NOW, require_current=False
-        )
-        assert isinstance(outcome, Residue)
-        # Recovery is asserted through effects and ownership below.
+        # Not a JobRun Stop at all: it names no JobRun to retire.
         completion = service._complete_jobrun_stop_in_session(
             session, parent, (child,), now=NOW
         )
