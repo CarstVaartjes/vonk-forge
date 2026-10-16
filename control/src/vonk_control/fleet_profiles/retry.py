@@ -53,6 +53,7 @@ from .persistence import (
 from .projection_support import (
     _aware,
 )
+from .recovery import _stale_plan_signature
 
 if TYPE_CHECKING:
     from .service import FleetProfileService
@@ -320,8 +321,14 @@ class FleetProfileService:
                         # its deterministic identity, and its owner reconciles what
                         # it already did (it is adopted, not repeated).
                         child = None
-                    # A child still working is resumed however long it took.
-                    if child is not None and child.state in _CHILD_PENDING_STATES:
+                    # A child still working is resumed however long it took,
+                    # unless the present refused its accepted plan: resuming
+                    # repeats that refusal, so the load is planned again below.
+                    if (
+                        child is not None
+                        and child.state in _CHILD_PENDING_STATES
+                        and _stale_plan_signature(progress) is None
+                    ):
                         # End this read before the resume takes its row lock.
                         parent_id = parent.id
                         session.close()
