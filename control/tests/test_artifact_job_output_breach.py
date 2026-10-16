@@ -29,7 +29,6 @@ from vonk_control.agent_jobs import AgentJobService
 from vonk_control.artifact_job_evidence import (
     OUTPUT_CONTRACT_RULES,
     OutputContractBreach,
-    OutputContractRule,
 )
 
 from .runtime_identity_support import claim_agent
@@ -68,60 +67,69 @@ def _two_slots(document: dict) -> None:
 
 @dataclass(frozen=True)
 class Case:
-    rule: OutputContractRule
     outputs: tuple[tuple[str, str, int], ...]
-    breach: dict[str, object]
+    breach: OutputContractBreach
     limits: dict[str, object] = field(default_factory=dict)
 
 
 CASES = (
     Case(
-        "job_output_slot",
         (("a.txt", "text/plain", 10),),
-        {"entry": "a.txt"},
+        OutputContractBreach(rule="job_output_slot", entry="a.txt"),
     ),
     Case(
-        "job_output_slot_max_file_bytes",
         (("a.png", PNG, 1100),),
-        {"limit": 1024, "observed": 1100, "entry": "a.png", "slot": "image"},
+        OutputContractBreach(
+            rule="job_output_slot_max_file_bytes",
+            limit=1024,
+            observed=1100,
+            entry="a.png",
+            slot="image",
+        ),
     ),
     Case(
-        "job_output_slot_files",
         tuple((f"{name}.png", PNG, 10) for name in "abcde"),
-        {"limit": 4, "observed": 5, "slot": "image"},
+        OutputContractBreach(
+            rule="job_output_slot_files", limit=4, observed=5, slot="image"
+        ),
     ),
     Case(
-        "job_output_slot_max_total_bytes",
         (("a.png", PNG, 1000), ("b.png", PNG, 1000)),
-        {"limit": 1500, "observed": 2000, "slot": "image"},
+        OutputContractBreach(
+            rule="job_output_slot_max_total_bytes",
+            limit=1500,
+            observed=2000,
+            slot="image",
+        ),
     ),
     Case(
-        "job_output_contract_max_total_bytes",
         (("a.png", PNG, 1000), ("b.json", JSON, 1024)),
-        {"limit": 2000, "observed": 2024},
+        OutputContractBreach(
+            rule="job_output_contract_max_total_bytes", limit=2000, observed=2024
+        ),
     ),
     Case(
-        "job_output_allowed_media_type",
         (("a.png", PNG, 10), ("b.json", JSON, 10)),
-        {"entry": "b.json"},
+        OutputContractBreach(rule="job_output_allowed_media_type", entry="b.json"),
         {"allowed_media_types": [PNG]},
     ),
     Case(
-        "job_output_max_files",
         (("a.png", PNG, 10), ("b.png", PNG, 10)),
-        {"limit": 1, "observed": 2},
+        OutputContractBreach(rule="job_output_max_files", limit=1, observed=2),
         {"max_files": 1},
     ),
     Case(
-        "job_output_max_file_bytes",
         (("a.png", PNG, 500),),
-        {"limit": 100, "observed": 500, "entry": "a.png"},
+        OutputContractBreach(
+            rule="job_output_max_file_bytes", limit=100, observed=500, entry="a.png"
+        ),
         {"max_file_bytes": 100},
     ),
     Case(
-        "job_output_max_total_bytes",
         (("a.png", PNG, 100), ("b.png", PNG, 100)),
-        {"limit": 150, "observed": 200},
+        OutputContractBreach(
+            rule="job_output_max_total_bytes", limit=150, observed=200
+        ),
         {"max_file_bytes": 100, "max_total_bytes": 150},
     ),
 )
@@ -240,10 +248,10 @@ def _assert_failed_with(ended, fresh_job_is_claimed, breach, exit_code: int) -> 
 
 
 def test_every_output_contract_rule_has_a_case() -> None:
-    assert sorted(case.rule for case in CASES) == sorted(OUTPUT_CONTRACT_RULES)
+    assert sorted(case.breach.rule for case in CASES) == sorted(OUTPUT_CONTRACT_RULES)
 
 
-@pytest.mark.parametrize("case", CASES, ids=lambda case: case.rule)
+@pytest.mark.parametrize("case", CASES, ids=lambda case: case.breach.rule)
 def test_a_manifest_that_breaks_a_rule_ends_the_job_failed_at_once(
     tmp_path, case: Case
 ) -> None:
@@ -253,12 +261,7 @@ def test_a_manifest_that_breaks_a_rule_ends_the_job_failed_at_once(
     ended, fresh_job_is_claimed = _report_outputs(
         tmp_path, "unknown", case.outputs, case.limits
     )
-    _assert_failed_with(
-        ended,
-        fresh_job_is_claimed,
-        OutputContractBreach(rule=case.rule, **case.breach),
-        exit_code=0,
-    )
+    _assert_failed_with(ended, fresh_job_is_claimed, case.breach, exit_code=0)
 
 
 @pytest.mark.parametrize("state", ["succeeded", "unknown", "failed"])
