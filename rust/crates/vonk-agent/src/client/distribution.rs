@@ -251,10 +251,10 @@ impl AgentHttpClient {
 
             // An object at its digest name was renamed there only after a full
             // transfer, so its name, size and private custody are the identity.
-            if inspect_trusted_final(destination, expected_bytes)
-                .await?
-                .is_some()
-            {
+            if let Some(object) = inspect_trusted_final(destination, expected_bytes).await? {
+                if plan_digest.is_some() {
+                    mark_claimed(object).await;
+                }
                 return Ok(());
             }
 

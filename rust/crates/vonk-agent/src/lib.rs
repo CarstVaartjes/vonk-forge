@@ -30,6 +30,7 @@ pub mod self_test;
 pub mod source_policy;
 pub mod stall_window;
 pub mod state;
+pub mod store_retention;
 mod stream_governor;
 pub mod systemd_notify;
 pub mod telemetry;

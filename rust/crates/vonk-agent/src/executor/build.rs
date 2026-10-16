@@ -275,8 +275,10 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                         "Controller did not confirm the built OCI image upload",
                     );
                 }
-                // Retain the content-bound export until managed cache cleanup.
-                // A lost acceptance response retries upload without rebuilding.
+                // The Controller holds the image now and the result is journaled,
+                // so the export's owner has ended: it is scratch, not a cache. A
+                // failed upload keeps it for the retry, until store retention.
+                builder.discard_export(request.build_id);
                 ExecutionResult::done(evidence)
             }
             Err(error) => {

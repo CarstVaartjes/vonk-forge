@@ -25,6 +25,8 @@ class ArtifactJobResultEvidence(StrictJSONModel):
 
     elapsed_milliseconds: int | None = Field(default=None, ge=0)
     peak_memory_bytes: int | None = Field(default=None, ge=0)
+    #: The job process's measured exit code, from the agent's receipt.
+    exit_code: int | None = Field(default=None, ge=0, le=255)
     cancel_request_id: str | None = Field(default=None, max_length=128)
     cancel_actor: str | None = Field(default=None, max_length=256)
     cancel_reason: str | None = Field(default=None, max_length=512)

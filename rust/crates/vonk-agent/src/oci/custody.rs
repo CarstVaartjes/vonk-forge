@@ -256,24 +256,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         &self,
         installation_id: &str,
     ) -> Result<CompiledExecutionPlan, OciError> {
-        let installation = managed_path(self.data_root, "installations", installation_id)?;
-        let directory_metadata = fs::symlink_metadata(&installation)?;
-        if !directory_metadata.file_type().is_dir() || directory_metadata.file_type().is_symlink() {
-            return Err(OciError::Artifact);
-        }
-        let path = installation.join("spec.json");
-        let metadata = fs::symlink_metadata(&path)?;
-        if !metadata.file_type().is_file()
-            || metadata.file_type().is_symlink()
-            || metadata.len() > MAX_COMPILED_EXECUTION_PLAN_SPEC_BYTES as u64
-        {
-            return Err(OciError::Artifact);
-        }
-        serde_json::from_slice(&read_regular_file(
-            &path,
-            MAX_COMPILED_EXECUTION_PLAN_SPEC_BYTES as u64,
-        )?)
-        .map_err(OciError::Json)
+        read_persisted_plan(self.data_root, installation_id)
     }
 
     pub fn verify_installation(&self, installation_id: &str) -> Result<(), OciError> {
@@ -494,6 +477,31 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         atomic_write(&metadata, "runtime.json", &serde_json::to_vec(spec)?)?;
         Ok(())
     }
+}
+
+/// An installation's persisted plan, read without validating it.
+pub(crate) fn read_persisted_plan(
+    data_root: &Path,
+    installation_id: &str,
+) -> Result<CompiledExecutionPlan, OciError> {
+    let installation = managed_path(data_root, "installations", installation_id)?;
+    let directory_metadata = fs::symlink_metadata(&installation)?;
+    if !directory_metadata.file_type().is_dir() || directory_metadata.file_type().is_symlink() {
+        return Err(OciError::Artifact);
+    }
+    let path = installation.join("spec.json");
+    let metadata = fs::symlink_metadata(&path)?;
+    if !metadata.file_type().is_file()
+        || metadata.file_type().is_symlink()
+        || metadata.len() > MAX_COMPILED_EXECUTION_PLAN_SPEC_BYTES as u64
+    {
+        return Err(OciError::Artifact);
+    }
+    serde_json::from_slice(&read_regular_file(
+        &path,
+        MAX_COMPILED_EXECUTION_PLAN_SPEC_BYTES as u64,
+    )?)
+    .map_err(OciError::Json)
 }
 
 #[cfg(test)]

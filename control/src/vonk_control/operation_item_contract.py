@@ -89,6 +89,8 @@ class OperationResultFacts(BaseModel):
     diagnostic: Text | None = None
     helper_error_code: Text | None = None
     helper_exit_code: int | None = None
+    #: A job process's measured exit code, as its receipt reports it.
+    exit_code: int | None = None
     stage: Text | None = None
     stdout: Text | None = None
     stderr: Text | None = None
@@ -146,6 +148,11 @@ class OperationResultFacts(BaseModel):
                 document[name] = None
         if type(document.get("helper_exit_code")) is not int:
             document["helper_exit_code"] = None
+        # Only a process exit status (0-255) is an exit code; anything else
+        # reads as absent rather than as a damaged result.
+        exit_code = document.get("exit_code")
+        if type(exit_code) is not int or not 0 <= exit_code <= 255:
+            document["exit_code"] = None
         document["bounded_failure"] = _bounded_failure(value)
         return document
 

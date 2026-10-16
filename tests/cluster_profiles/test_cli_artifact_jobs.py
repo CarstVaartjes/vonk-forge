@@ -430,6 +430,22 @@ def test_cli_human_artifact_job_detail_uses_job_identity_and_reconnect(
     assert f"Reconnect: vonkctl recipe job detail {JOB_ID} --follow" in output
 
 
+def test_cli_human_artifact_job_detail_shows_the_measured_exit_code(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    client = ArtifactJobClient()
+    client.job = _job(state="failed")
+    client.job["result_evidence"] = {"elapsed_milliseconds": 1, "exit_code": 3}
+
+    status = cli.main(
+        ("recipe", "job", "detail", JOB_ID),
+        control_client=client,
+    )
+
+    assert status == 0
+    assert "Exit code: 3" in capsys.readouterr().out
+
+
 @pytest.mark.parametrize("action", ("create", "upload", "submit", "cancel"))
 def test_cli_human_artifact_job_mutations_name_the_current_action_and_job(
     action: str,

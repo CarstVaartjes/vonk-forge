@@ -72,10 +72,8 @@ use images::{
     podman_build_arguments, podman_storage_arguments, scalar, sha256_file_cancellable,
     write_adapter_containerfile,
 };
-use import::{
-    make_owned_directories_removable, podman_import_diagnostic, podman_import_process_error,
-    recipe_base_image_error,
-};
+pub(crate) use import::make_owned_directories_removable;
+use import::{podman_import_diagnostic, podman_import_process_error, recipe_base_image_error};
 
 pub(crate) use builder::PodmanBuildStaging;
 pub(crate) use images::podman_storage_arguments_with_cgroup_manager;

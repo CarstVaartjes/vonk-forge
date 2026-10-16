@@ -746,6 +746,17 @@ async fn distribution_reuses_an_existing_object_without_hashing_or_fetching() {
     other[0] ^= 0xff;
     std::fs::write(&destination, &other).unwrap();
     std::fs::set_permissions(&destination, std::fs::Permissions::from_mode(0o600)).unwrap();
+    let long_ago = std::time::UNIX_EPOCH + Duration::from_secs(1_000_000_000);
+    let age = |path: &std::path::Path| std::fs::metadata(path).unwrap().modified().unwrap();
+    let set_age = |path: &std::path::Path| {
+        std::fs::File::options()
+            .write(true)
+            .open(path)
+            .unwrap()
+            .set_modified(long_ago)
+            .unwrap();
+    };
+    set_age(&destination);
     let client = AgentHttpClient {
         client: Arc::new(RwLock::new(reqwest::Client::new())),
         controller: Url::parse("http://127.0.0.1:1/").unwrap(),
@@ -766,6 +777,22 @@ async fn distribution_reuses_an_existing_object_without_hashing_or_fetching() {
         .unwrap();
 
     assert_eq!(std::fs::read(&destination).unwrap(), other);
+    // Reuse claims an object no installation links: its retention grace restarts.
+    assert!(age(&destination) > long_ago);
+
+    // A linked object is an installation's file and is left as it is.
+    std::fs::hard_link(&destination, root.path().join("installation-link")).unwrap();
+    set_age(&destination);
+    client
+        .download_distribution_object(
+            TEST_PLAN_DIGEST,
+            &hex_sha256(model),
+            model.len() as u64,
+            &destination,
+        )
+        .await
+        .unwrap();
+    assert_eq!(age(&destination), long_ago);
 }
 
 #[tokio::test]
