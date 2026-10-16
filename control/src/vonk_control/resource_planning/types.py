@@ -197,6 +197,9 @@ class MemoryReservationTotals:
     unmaterialized_holders_by_kind: Mapping[str, tuple[MemoryClaimHolder, ...]] = field(
         default_factory=dict
     )
+    #: Claims of runs the plan stops: left out of the fit, but their runs hold
+    #: memory until the stop releases it.
+    releasing_bytes_by_kind: Mapping[str, int] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -229,6 +232,8 @@ class CapacitySnapshot:
     kept_bytes: int = 0
     #: The claims behind ``unmaterialized_bytes``.
     unmaterialized_holders: tuple[MemoryClaimHolder, ...] = ()
+    #: Claims of runs the plan stops here (left out of ``reserved_bytes``).
+    releasing_bytes: int = 0
 
 
 @dataclass(frozen=True, slots=True)

@@ -181,11 +181,18 @@ class FleetProfileChildPlanBlocked(UnknownOutcomeError, RunSwitchOperationConfli
         *args: object,
         reason: WaitReason = WaitReason.OBSERVATION_UNAVAILABLE,
         shortfalls: tuple[tuple[str, int], ...] = (),
+        ending: tuple[OperationBlocker, ...] = (),
     ) -> None:
         super().__init__(*args, reason=reason)
         #: ``(node_id, free bytes needed)`` for each Spark the child waits for
         #: disk on; the wait asks the storage collector for it.
         self.shortfalls = shortfalls
+        #: The plan's blockers no wait can clear (``ENDING_BLOCKER_CODES``):
+        #: the child is then a definite failure, and its load ends failed with
+        #: them instead of waiting.
+        self.ending = ending
+        if ending:
+            self.disposition = Disposition.FAIL
 
 
 class FleetProfileAdmissionBusy(UnknownOutcomeError, FleetProfileConflict):

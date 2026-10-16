@@ -1,5 +1,6 @@
 import json
 
+from vonk_agent_protocol import ResourceBlockerCode
 from vonk_control.owner_liveness import OwnerKind, OwnerRef
 from vonk_control.resource_planning import (
     PLATFORM_MEMORY_FLOOR_BYTES,
@@ -393,6 +394,58 @@ def test_a_shortfall_held_by_a_live_build_names_it_and_clears_with_it() -> None:
     assert blockers
     assert all(build.owner.id in reason.detail for reason in blockers)
     assert plan(()).allowed
+
+
+_SPARK_POOL = 130_663_235_584
+
+
+def _blocker_codes(plan) -> list[str]:
+    return [reason.code for reason in plan.reasons if reason.severity == "blocker"]
+
+
+def test_a_shortfall_nothing_vonk_holds_can_clear_never_fits() -> None:
+    # Production 2026-10-16: spark-3542 held no Vonk claim, 125_650_657_280
+    # bytes free; the aday777 recipe's measured 122_005_303_296-byte peak left
+    # 3_645_353_984 bytes before the 6 GB floor, and its load backed off 40
+    # times on a capacity wait no claim, stop or run could ever clear.
+    idle = plan_capacity(
+        {"rank-0": _declared_demand(122_005_303_296)},
+        [_idle_capacity(_SPARK_POOL, 125_650_657_280)],
+        memory_floor_bytes=PLATFORM_MEMORY_FLOOR_BYTES,
+    )
+    assert not idle.allowed
+    assert _blocker_codes(idle) == [ResourceBlockerCode.DEMAND_EXCEEDS_CAPACITY]
+    (never_fits,) = (r for r in idle.reasons if r.severity == "blocker")
+    assert "3645353984" in never_fits.detail
+
+    # The same shortfall while a Vonk claim holds memory there is a wait.
+    held = plan_capacity(
+        {"rank-0": _declared_demand(122_005_303_296)},
+        [_idle_capacity(_SPARK_POOL, 115_650_657_280, claimed=1_000_000_000)],
+        memory_floor_bytes=PLATFORM_MEMORY_FLOOR_BYTES,
+    )
+    assert not held.allowed
+    assert ResourceBlockerCode.DEMAND_EXCEEDS_CAPACITY not in _blocker_codes(held)
+
+    # So is one while a planned stop may free it, even of unknown size.
+    stopping = plan_capacity(
+        {"rank-0": _declared_demand(122_005_303_296)},
+        [_idle_capacity(_SPARK_POOL, 125_650_657_280)],
+        [PlannedStopRelease("old", "rank-0", "unified-memory", None, True)],
+        memory_floor_bytes=PLATFORM_MEMORY_FLOOR_BYTES,
+    )
+    assert not stopping.allowed
+    assert ResourceBlockerCode.DEMAND_EXCEEDS_CAPACITY not in _blocker_codes(stopping)
+
+
+def test_a_demand_above_the_physical_pool_never_fits_whatever_is_held() -> None:
+    plan = plan_capacity(
+        {"rank-0": _declared_demand(_SPARK_POOL - 1_000_000_000)},
+        [_idle_capacity(_SPARK_POOL, 90_000_000_000, claimed=30_000_000_000)],
+        memory_floor_bytes=PLATFORM_MEMORY_FLOOR_BYTES,
+    )
+    assert not plan.allowed
+    assert _blocker_codes(plan) == [ResourceBlockerCode.DEMAND_EXCEEDS_CAPACITY]
 
 
 def test_declared_peak_larger_than_physical_memory_is_a_capacity_refusal() -> None:

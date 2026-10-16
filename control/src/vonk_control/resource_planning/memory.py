@@ -136,6 +136,16 @@ def memory_capacity_snapshot(
             if memory_pool is not None
             else 0
         )
+        releasing = (
+            sum(
+                reservations.releasing_bytes_by_kind.get(item, 0)
+                for item in memory_reservation_kinds(
+                    memory_reservation_kind(kind), memory_pool
+                )
+            )
+            if memory_pool is not None
+            else 0
+        )
         holders = (
             tuple(
                 holder
@@ -162,6 +172,7 @@ def memory_capacity_snapshot(
             evidence_observed_at=evidence_observed_at,
             kept_bytes=kept,
             unmaterialized_holders=holders,
+            releasing_bytes=releasing,
         )
 
     if memory_pool == "shared":

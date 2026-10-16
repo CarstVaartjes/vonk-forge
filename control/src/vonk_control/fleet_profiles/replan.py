@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 from typing import cast as _typing_cast
@@ -75,14 +76,23 @@ class FleetProfileService:
         now: datetime,
         *,
         code: str = ProfileReasonCode.RETRY_CONFLICT,
+        ending: Sequence[OperationBlocker] = (),
     ) -> None:
         """Continue the same accepted queue/child identity without replacement admission.
 
         A wait is not a failure: the load keeps waiting with its reason on the
         bounded retry clock, however long it takes. Only a cancel request or a
-        newer load ends it.
+        newer load ends it, or a blocker no wait can clear (``ending``): the
+        load ends failed with it.
         """
         self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
+        session = object_session(row)
+        if (
+            ending
+            and session is not None
+            and self._end_definite_wait(row, ending, session)
+        ):
+            return
         progress.attempt += 1
         progress.retry_due_at = FleetProfileAdapter.next_retry(
             row.id, progress.attempt, now

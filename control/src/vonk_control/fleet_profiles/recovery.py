@@ -15,7 +15,6 @@ from vonk_agent_protocol import (
     FailureCode,
     LifecycleState,
     ProfileReasonCode,
-    RecipeImageCode,
     SupersedeCode,
 )
 from vonk_agent_protocol.agent_words import (
@@ -46,6 +45,7 @@ from .dependencies import (
     _LOGGER,
     _MAX_PARKED_APPLICATION_OBSERVATIONS,
     _OPERATION_STATE_ADAPTER,
+    ENDING_BLOCKER_CODES,
     PROFILE_REPEATED_FAILURE_CODE,
 )
 from .persistence import (
@@ -88,9 +88,7 @@ class FleetProfileService:
             # a replay repeats (a deterministic error fails fast).
             return ()
         exhausted = tuple(
-            item
-            for item in progress.blockers
-            if item.code == RecipeImageCode.PREPARATION_EXHAUSTED
+            item for item in progress.blockers if item.code in ENDING_BLOCKER_CODES
         )
         if exhausted or progress.cancellation is not None:
             return exhausted
@@ -168,10 +166,7 @@ class FleetProfileService:
         adapter = self._switch_adapter
         if (
             adapter is None
-            or any(
-                item.code == RecipeImageCode.PREPARATION_EXHAUSTED
-                for item in progress.blockers
-            )
+            or any(item.code in ENDING_BLOCKER_CODES for item in progress.blockers)
             or progress.intended_profile is None
             or adapter.recovery_refused(row.id, session=session)
         ):

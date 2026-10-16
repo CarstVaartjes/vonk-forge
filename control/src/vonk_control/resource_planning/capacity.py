@@ -85,6 +85,51 @@ def _charged_claims_detail(capacity: CapacitySnapshot, shortfall_bytes: int) -> 
     return f" Charged claims: {named}."
 
 
+def _never_fits_detail(
+    capacity: CapacitySnapshot,
+    demand_bytes: int,
+    free_after_bytes: int,
+    *,
+    memory_floor_bytes: int,
+    stopping: bool,
+) -> str | None:
+    """Why nothing the platform holds can make this demand fit, if so.
+
+    A shortfall is a wait while a Vonk claim, a kept run or a planned stop can
+    still free memory. It is not when the demand and the floor exceed the
+    physical pool itself, or when no such holder is left on the Spark and the
+    observed free memory (the host's own use only) still falls short: waiting
+    then changes nothing, so the same request fails the same way.
+    """
+    pool = capacity.available_bytes
+    if pool is None:
+        return None
+    if demand_bytes + memory_floor_bytes > pool:
+        return (
+            f"The selected demand of {demand_bytes} bytes plus the "
+            f"{memory_floor_bytes}-byte platform floor exceeds this Spark's "
+            f"{pool}-byte memory pool; it can never fit here."
+        )
+    holds_nothing = (
+        not capacity.reserved_bytes
+        and not capacity.unmaterialized_bytes
+        and not capacity.unknown_run_residuals
+        and not capacity.kept_bytes
+        and not capacity.releasing_bytes
+        and not stopping
+    )
+    if holds_nothing and free_after_bytes < memory_floor_bytes:
+        return (
+            f"No Vonk claim, kept run or planned stop holds memory on this Spark: "
+            f"the host itself uses {capacity.occupied_bytes} of its {pool}-byte "
+            f"pool, and the selected demand of {demand_bytes} bytes leaves "
+            f"{free_after_bytes} bytes before the required "
+            f"{memory_floor_bytes}-byte floor. Nothing the platform holds can "
+            "free more, so it can never fit here."
+        )
+    return None
+
+
 def plan_capacity(
     requirements: Mapping[str, ResourceDemand],
     capacities: Sequence[CapacitySnapshot],
@@ -253,78 +298,90 @@ def plan_capacity(
         current_fit = current >= memory_floor_bytes and budget_after >= 0
         after_fit = after_stop >= memory_floor_bytes and budget_after_stop >= 0
         selected = after_stop if release else current
-        allowed = (after_fit if release else current_fit) and not any(
-            reason.severity == "blocker" for reason in node_reasons
+        never_fits = _never_fits_detail(
+            capacity,
+            total_bytes,
+            current_without_unknown,
+            memory_floor_bytes=memory_floor_bytes,
+            # A planned stop frees memory even when its release is unknown.
+            stopping=any(
+                stop.planned and stop.node_id == node_id for stop in planned_stops
+            ),
         )
-        if budget_after < 0 and (not release or budget_after_stop < 0):
+        allowed = (
+            (after_fit if release else current_fit)
+            and never_fits is None
+            and not any(reason.severity == "blocker" for reason in node_reasons)
+        )
+        if never_fits is not None:
             node_reasons.append(
                 _reason(
-                    ResourceBlockerCode.INSUFFICIENT_RESERVATION_BUDGET,
-                    f"Exact memory commitments plus demand and reserve exceed the physical pool by {-budget_after} bytes."
-                    + _charged_claims_detail(capacity, -budget_after),
+                    ResourceBlockerCode.DEMAND_EXCEEDS_CAPACITY,
+                    never_fits,
                     node_id=node_id,
                 )
             )
-        if (
-            current_without_unknown >= memory_floor_bytes
-            and current < memory_floor_bytes
-            and not release
-        ):
-            node_reasons.append(
-                _reason(
-                    ResourceBlockerCode.RESIDENT_USAGE_UNKNOWN,
-                    _resident_usage_uncertainty_detail(
-                        capacity, unknown_residuals, admitted=False
-                    ),
-                    node_id=node_id,
-                )
-            )
-        elif current_without_unknown < memory_floor_bytes and not release:
-            node_reasons.append(
-                _reason(
-                    ResourceBlockerCode.INSUFFICIENT_CAPACITY,
-                    f"Observed free capacity less definite claims and selected demand leaves "
-                    f"{current_without_unknown} bytes before the required "
-                    f"{memory_floor_bytes}-byte reserve, even if retained runs use zero bytes."
-                    + (
-                        " No Vonk workload holds memory here; the declared peak cannot "
-                        "fit observed free memory while preserving the platform floor."
-                        if reserved == 0
-                        and unmaterialized == 0
-                        and not unknown_residuals
-                        and not capacity.kept_bytes
-                        else ""
+        else:
+            if budget_after < 0 and (not release or budget_after_stop < 0):
+                node_reasons.append(
+                    _reason(
+                        ResourceBlockerCode.INSUFFICIENT_RESERVATION_BUDGET,
+                        f"Exact memory commitments plus demand and reserve exceed the physical pool by {-budget_after} bytes."
+                        + _charged_claims_detail(capacity, -budget_after),
+                        node_id=node_id,
                     )
-                    + _charged_claims_detail(
-                        capacity, memory_floor_bytes - current_without_unknown
-                    ),
-                    node_id=node_id,
                 )
-            )
-        elif release and after_stop < memory_floor_bytes:
-            node_reasons.append(
-                _reason(
-                    ResourceBlockerCode.INSUFFICIENT_CAPACITY_AFTER_STOP,
-                    f"Selected demand leaves {selected} bytes after planned stops; {memory_floor_bytes} bytes must remain reserved.",
-                    node_id=node_id,
+            if (
+                current_without_unknown >= memory_floor_bytes
+                and current < memory_floor_bytes
+                and not release
+            ):
+                node_reasons.append(
+                    _reason(
+                        ResourceBlockerCode.RESIDENT_USAGE_UNKNOWN,
+                        _resident_usage_uncertainty_detail(
+                            capacity, unknown_residuals, admitted=False
+                        ),
+                        node_id=node_id,
+                    )
                 )
-            )
-        elif (
-            not release
-            and current >= memory_floor_bytes
-            and budget_after >= 0
-            and unknown_residuals
-        ):
-            node_reasons.append(
-                _reason(
-                    ResourceBlockerCode.RESIDENT_USAGE_UNKNOWN,
-                    _resident_usage_uncertainty_detail(
-                        capacity, unknown_residuals, admitted=True
-                    ),
-                    severity="warning",
-                    node_id=node_id,
+            elif current_without_unknown < memory_floor_bytes and not release:
+                node_reasons.append(
+                    _reason(
+                        ResourceBlockerCode.INSUFFICIENT_CAPACITY,
+                        f"Observed free capacity less definite claims and selected demand leaves "
+                        f"{current_without_unknown} bytes before the required "
+                        f"{memory_floor_bytes}-byte reserve, even if retained runs use zero bytes."
+                        + _charged_claims_detail(
+                            capacity, memory_floor_bytes - current_without_unknown
+                        ),
+                        node_id=node_id,
+                    )
                 )
-            )
+            elif release and after_stop < memory_floor_bytes:
+                node_reasons.append(
+                    _reason(
+                        ResourceBlockerCode.INSUFFICIENT_CAPACITY_AFTER_STOP,
+                        f"Selected demand leaves {selected} bytes after planned stops; {memory_floor_bytes} bytes must remain reserved.",
+                        node_id=node_id,
+                    )
+                )
+            elif (
+                not release
+                and current >= memory_floor_bytes
+                and budget_after >= 0
+                and unknown_residuals
+            ):
+                node_reasons.append(
+                    _reason(
+                        ResourceBlockerCode.RESIDENT_USAGE_UNKNOWN,
+                        _resident_usage_uncertainty_detail(
+                            capacity, unknown_residuals, admitted=True
+                        ),
+                        severity="warning",
+                        node_id=node_id,
+                    )
+                )
         nodes.append(
             NodeCapacityPlan(
                 node_id,

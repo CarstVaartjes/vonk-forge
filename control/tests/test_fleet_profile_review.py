@@ -25,6 +25,7 @@ from vonk_control.models import (
     NodeInventorySnapshot,
     RecipeInstallation,
     RecipeRun,
+    ResourceReservation,
     RunNode,
     User,
 )
@@ -131,6 +132,21 @@ def test_profile_review_exposes_planner_headroom_without_hashing_free_memory(
         assert inventory is not None
         inventory.host_memory_free_bytes = 0
         inventory.gpu_memory_free_bytes = 0
+        # Another Vonk workload holds the memory, so the shortage is a wait
+        # (with nothing Vonk holds there it could never fit: the load ends).
+        session.add(
+            ResourceReservation(
+                node_id=inventory.node_id,
+                kind="unified-memory",
+                resource_key="other-vonk-workload",
+                amount_bytes=1,
+                owner_kind="run",
+                owner_id=str(uuid4()),
+                state="active",
+                plan_digest="d" * 64,
+                created_at=inventory.observed_at,
+            )
+        )
     blocked = service.preview(profile.id)
     assert not blocked.allowed
     assert blocked.plan_digest != reviewed.plan_digest

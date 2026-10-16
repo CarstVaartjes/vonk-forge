@@ -54,6 +54,7 @@ from ..run_switch_contract import RunSwitchAssessment
 from .assessment_support import (
     _assignments_needing_preparation,
 )
+from .colocation import colocated_memory_overcommit
 from .contracts import (
     FleetProfileInvalid,
 )
@@ -555,6 +556,11 @@ class FleetProfileService:
                         )
                     )
             steps = switch_steps
+            # Each start was fitted alone; the ones sharing a Spark must also
+            # fit beside each other, or the last one can never start.
+            reasons.extend(
+                colocated_memory_overcommit(assignment_previews, assignment_assessments)
+            )
             # The planner owns named admission blockers, including preparation
             # failures. Its canonical assessment rejects hidden preparation
             # blockers, so count each reason once and render that same owner.
