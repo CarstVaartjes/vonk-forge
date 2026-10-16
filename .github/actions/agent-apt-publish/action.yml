@@ -89,6 +89,7 @@ runs:
         PACKAGE_ENVIRONMENT: ${{ inputs.environment }}
         SOURCE_SHA: ${{ inputs.source_sha }}
         VERSION: ${{ inputs.version }}
+        GH_TOKEN: ${{ github.token }}
       run: |
         set -euo pipefail
         case "${CHANNEL}:${PACKAGE_ENVIRONMENT}" in
@@ -129,12 +130,18 @@ runs:
           evidence_dir="$RUNNER_TEMP/agent-package-evidence-$architecture"
           install -d -m 0700 "$evidence_dir"
           dpkg-deb --extract "dist/$package" "$evidence_dir"
-          jq -e \
-            --arg source_sha "$SOURCE_SHA" \
-            '.predicate.buildDefinition.resolvedDependencies | length == 1 and
-             .[0].digest.gitCommit == $source_sha' \
-            "$evidence_dir/usr/share/doc/vonk-forge-agent/provenance.json" \
-            >/dev/null
+          built_from=$(jq -er \
+            '.predicate.buildDefinition.resolvedDependencies
+             | select(length == 1) | .[0].digest.gitCommit
+             | select(test("^[0-9a-f]{40}$"))' \
+            "$evidence_dir/usr/share/doc/vonk-forge-agent/provenance.json")
+          if [[ "$built_from" != "$SOURCE_SHA" ]]; then
+            # A package main sealed from the pull request that tested this
+            # source names that run's merge commit: it must be this exact tree.
+            test "$(gh api \
+              "repos/$GITHUB_REPOSITORY/git/commits/$built_from" --jq .tree.sha)" = \
+              "$(git rev-parse --verify "$SOURCE_SHA^{tree}")"
+          fi
           package_sha256=$(sha256sum "dist/$package" | cut -d' ' -f1)
           test "$package_sha256" = "$(jq -r .sha256 <<< "$verification")"
           packages_json=$(jq -S -c \

@@ -360,6 +360,10 @@ SCOPED: tuple[tuple[str, str], ...] = (
         "Development version sequence from commit time; no product scan.",
     ),
     (
+        "tests/scripts/test_agent_package_versions.py",
+        "Agent package set version record over a fake GitHub API; no product scan.",
+    ),
+    (
         "tests/scripts/test_restore_pytest_file_durations.py",
         "restore pytest file durations: fixed entrypoint/fixture behavior.",
     ),

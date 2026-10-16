@@ -1,0 +1,82 @@
+#!/usr/bin/env python3
+"""Recover the unsealed agent packages a pull request built and accepted.
+
+usage: reuse-agent-packages PR_ROOT OUTPUT
+
+PR_ROOT holds the pull request run's ``package`` and ``baseline`` artifacts.
+Each must hold exactly one sealed ARM64 package whose version follows the
+development scheme of this source (``X.Y.Z~dev.<seconds>+g<sha12>`` and its
+lower ``~acceptance.1`` baseline, X.Y.Z from the workspace). Both are unsealed
+into OUTPUT; GitHub outputs name the versions and package filenames.
+"""
+
+from __future__ import annotations
+
+import re
+import runpy
+import subprocess
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+METADATA = runpy.run_path(str(ROOT / "scripts/agent-package-metadata"))
+BUILDER = runpy.run_path(str(ROOT / "scripts/build-agent-deb"))
+PACKAGE = re.compile(r"vonk-forge-agent_(?P<version>[0-9A-Za-z.+~:-]+)_arm64\.deb\Z")
+
+
+def sole_package(directory: Path) -> tuple[Path, str]:
+    found = [
+        (path, match["version"])
+        for path in sorted(directory.iterdir())
+        if (match := PACKAGE.fullmatch(path.name)) is not None
+    ]
+    if len(found) != 1 or found[0][0].is_symlink() or not found[0][0].is_file():
+        raise ValueError(f"{directory} must hold exactly one sealed ARM64 package")
+    return found[0]
+
+
+def main() -> int:
+    if len(sys.argv) != 3:
+        print(__doc__, file=sys.stderr)
+        return 64
+    pr_root, output = Path(sys.argv[1]), Path(sys.argv[2])
+    try:
+        workspace = METADATA["workspace_version"]()
+        lower = METADATA["acceptance_baseline_version"](workspace, "0" * 40)
+        lower = lower.split("~", 1)[0]
+        package, version = sole_package(pr_root / "package")
+        baseline, baseline_version = sole_package(pr_root / "baseline")
+        if (
+            re.fullmatch(
+                rf"{re.escape(workspace)}~dev\.[1-9][0-9]{{0,18}}\+g[0-9a-f]{{12}}",
+                version,
+            )
+            is None
+            or re.fullmatch(
+                rf"{re.escape(lower)}~acceptance\.1\+g[0-9a-f]{{12}}", baseline_version
+            )
+            is None
+        ):
+            raise ValueError("pull request package versions do not follow this source")
+        if (
+            subprocess.run(
+                ["dpkg", "--compare-versions", baseline_version, "lt", version],
+                check=False,
+            ).returncode
+            != 0
+        ):
+            raise ValueError("acceptance baseline package is not strictly older")
+        for sealed in (package, baseline):
+            BUILDER["unseal"](sealed.resolve(), output)
+    except (OSError, ValueError, BUILDER["BuildError"]) as error:
+        print(f"reuse-agent-packages: {error}", file=sys.stderr)
+        return 1
+    print(f"version={version}")
+    print(f"arm64_package={package.name}")
+    print(f"baseline_version={baseline_version}")
+    print(f"arm64_baseline_package={baseline.name}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

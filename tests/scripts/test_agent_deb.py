@@ -2429,6 +2429,163 @@ def test_sealing_the_unsealed_build_is_exactly_the_keyed_build(tmp_path: Path) -
         assert (sealed / name).read_bytes() == (keyed / name).read_bytes(), name
 
 
+def test_main_recovers_exactly_the_packages_a_pull_request_accepted(
+    tmp_path: Path,
+) -> None:
+    """Catches main sealing anything but the unsealed packages the pull
+    request built: the recovered packages equal unsealed builds byte for byte,
+    and versions outside this source's development scheme are refused."""
+    binaries = tmp_path / "binaries"
+    binaries.mkdir()
+    for name in PACKAGE_BINARIES:
+        _aarch64_fixture(binaries / name, name.encode())
+    baseline_binaries = tmp_path / "baseline-binaries"
+    baseline_binaries.mkdir()
+    for name in PACKAGE_BINARIES:
+        _aarch64_fixture(baseline_binaries / name, name.encode())
+    agent = baseline_binaries / "vonk-agent"
+    agent.chmod(0o755)
+    agent.write_bytes(
+        agent.read_bytes().replace(
+            b"VONK_AGENT_SEMANTIC_VERSION=0.1.1", b"VONK_AGENT_SEMANTIC_VERSION=0.1.0"
+        )
+    )
+    agent.chmod(0o555)
+    key = tmp_path / "pull-request.pem"
+    _release_key(key)
+    version = "0.1.1~dev.1792000000+gabcdefabcdef"
+    baseline = "0.1.0~acceptance.1+gabcdefabcdef"
+    pr = tmp_path / "pr"
+    assert _build(pr / "package", binaries, key, version=version).returncode == 0
+    assert (
+        _build(
+            pr / "baseline",
+            baseline_binaries,
+            key,
+            version=baseline,
+            acceptance_baseline=True,
+        ).returncode
+        == 0
+    )
+    result = subprocess.run(
+        [ROOT / "scripts/reuse-agent-packages", pr, tmp_path / "unsealed"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines() == [
+        f"version={version}",
+        f"arm64_package=vonk-forge-agent_{version}_arm64.deb",
+        f"baseline_version={baseline}",
+        f"arm64_baseline_package=vonk-forge-agent_{baseline}_arm64.deb",
+    ]
+    for name, built_version, is_baseline in (
+        ("package", version, False),
+        ("baseline", baseline, True),
+    ):
+        direct = tmp_path / f"direct-{name}"
+        command = [
+            BUILD,
+            "--version",
+            built_version,
+            "--architecture",
+            "linux-arm64",
+            "--build-digest",
+            BUILD_DIGEST,
+            "--unsealed",
+            "--binaries-dir",
+            baseline_binaries if is_baseline else binaries,
+            "--source-date-epoch",
+            "1786060800",
+            "--output-dir",
+            direct,
+        ]
+        if is_baseline:
+            command.append("--acceptance-baseline")
+        assert subprocess.run(command, cwd=ROOT, check=False).returncode == 0
+        unsealed = f"vonk-forge-agent_{built_version}_arm64.unsealed.deb"
+        assert (tmp_path / "unsealed" / unsealed).read_bytes() == (
+            direct / unsealed
+        ).read_bytes()
+
+    (pr / "package" / f"vonk-forge-agent_{version}_arm64.deb").rename(
+        pr / "package" / "vonk-forge-agent_0.1.1_arm64.deb"
+    )
+    refused = subprocess.run(
+        [ROOT / "scripts/reuse-agent-packages", pr, tmp_path / "refused"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert refused.returncode != 0
+
+
+def _unseal(sealed: Path, output: Path) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [ROOT / "scripts/seal-agent-deb", "--sealed", sealed, "--output-dir", output],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+def test_unsealing_recovers_exactly_what_any_key_sealed(tmp_path: Path) -> None:
+    """Catches an unseal that is not the exact inverse of the seal: main proves
+    the package it publishes is the one a pull request accepted by comparing
+    the unsealed bytes of both, whichever key sealed each."""
+    binaries = tmp_path / "binaries"
+    binaries.mkdir()
+    for name in PACKAGE_BINARIES:
+        _aarch64_fixture(binaries / name, name.encode())
+    assert _unsealed_build(tmp_path / "unsealed", binaries).returncode == 0
+    unsealed = tmp_path / "unsealed/vonk-forge-agent_0.1.1_arm64.unsealed.deb"
+    recovered = []
+    for name in ("pull-request", "production"):
+        key = tmp_path / f"{name}.pem"
+        _release_key(key)
+        assert _seal(unsealed, key, tmp_path / name).returncode == 0
+        result = _unseal(
+            tmp_path / name / "vonk-forge-agent_0.1.1_arm64.deb",
+            tmp_path / f"{name}-recovered",
+        )
+        assert result.returncode == 0, result.stderr
+        recovered.append(
+            (
+                tmp_path / f"{name}-recovered/vonk-forge-agent_0.1.1_arm64.unsealed.deb"
+            ).read_bytes()
+        )
+    assert recovered == [unsealed.read_bytes()] * 2
+
+
+def test_unsealing_refuses_unsealed_input_and_exposes_any_other_change(
+    tmp_path: Path,
+) -> None:
+    binaries = tmp_path / "binaries"
+    binaries.mkdir()
+    for name in PACKAGE_BINARIES:
+        _aarch64_fixture(binaries / name, name.encode())
+    key = tmp_path / "release.pem"
+    _release_key(key)
+    assert _unsealed_build(tmp_path / "unsealed", binaries).returncode == 0
+    unsealed = tmp_path / "unsealed/vonk-forge-agent_0.1.1_arm64.unsealed.deb"
+    assert _unseal(unsealed, tmp_path / "refused").returncode != 0
+    # A package built from other bytes never unseals to the accepted package.
+    (binaries / "vonk-monitor").unlink()
+    _aarch64_fixture(binaries / "vonk-monitor", b"another monitor")
+    assert _build(tmp_path / "other", binaries, key).returncode == 0
+    result = _unseal(
+        tmp_path / "other/vonk-forge-agent_0.1.1_arm64.deb", tmp_path / "recovered"
+    )
+    assert result.returncode == 0, result.stderr
+    assert (
+        tmp_path / "recovered/vonk-forge-agent_0.1.1_arm64.unsealed.deb"
+    ).read_bytes() != unsealed.read_bytes()
+
+
 def test_an_unsealed_package_is_never_accepted_and_never_sealed_twice(
     tmp_path: Path,
 ) -> None:
