@@ -92,6 +92,30 @@ jobs:
             echo "No matching PR evidence; running source CI" >> "$GITHUB_STEP_SUMMARY"
           fi
 
+  supersede:
+    name: Supersede older unpublished releases
+    # Newest-only: this main source makes older in-flight main releases that
+    # have not committed to publication obsolete, so they stop holding the
+    # release groups and runners in front of it. The oldest in-flight release
+    # always finishes (no starvation); see scripts/supersede-release-runs.
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - name: Check out the supersede tooling
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Cancel obsolete older releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          scripts/supersede-release-runs --repository "$GITHUB_REPOSITORY"
+          --run-number "$GITHUB_RUN_NUMBER" --sha "$GITHUB_SHA"
+
   ci:
     name: CI
     needs: [changes]
@@ -109,7 +133,8 @@ jobs:
       packages: write
       pull-requests: write
       security-events: write
-    # A running release finishes; a newer main push queues behind it.
+    # A newer main push queues behind a running release; the supersede job
+    # cancels an obsolete one that is neither the oldest nor committed.
     concurrency:
       group: vonk-forge-release-ci-${{ github.ref }}
       cancel-in-progress: false
