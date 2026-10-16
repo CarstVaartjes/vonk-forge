@@ -16,6 +16,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import timedelta
+from uuid import uuid4
 
 import pytest
 from sqlalchemy import delete, select, update
@@ -23,6 +24,8 @@ from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
     ContainerRuntimeAction,
     ExecuteContainerRuntimeRequestOperation,
+    LifecycleState,
+    ReservationState,
     SignedHostHelperGrant,
     canonical_message,
 )
@@ -43,9 +46,11 @@ from vonk_control.models import (
     Job,
     RecipeInstallation,
     RecipeRun,
+    ResourceReservation,
 )
 from vonk_control.own_cleanup import CLEANUP_ACTIONS, CLEANUP_KINDS, EFFECT_ACTIONS
 from vonk_control.recipe_lifecycle_contract import RecipeOperationCancellationResult
+from vonk_control.recipe_operations import RecipeOperationService
 
 from .agent_fences import fenced_operation
 from .agent_grant_requests import own_stop_grant_request, stop_grant_request
@@ -67,6 +72,13 @@ from .test_host_helper_authority import (
     RUNTIME_RUN_ID,
     runtime_service,
     service_stop_runtime_service,
+)
+from .test_recipe_operations import (
+    ConcurrentPublisher,
+    bind_route_publications,
+    installed_recipe,
+    setup_services,
+    started_recipe,
 )
 
 NODE = "spk_" + "1" * 32
@@ -513,3 +525,110 @@ def test_a_silent_sparks_cleanup_order_waits_and_runs_when_it_returns(service) -
     with sessions() as session:
         assert _state(session, Job, job.id) == "succeeded"
     _admit_newer_work(jobs, sessions, clock)
+
+
+def _accept_service_stop(tmp_path, monkeypatch):
+    """A service Stop accepted and withdrawn whose process was lost before it
+    dispatched: its continuation finishes it."""
+    sessions, operations, jobs, mapping, build, nodes = setup_services(tmp_path)
+    installation = installed_recipe(
+        operations, mapping, build, nodes, request_id=str(uuid4())
+    )
+    run_id = started_recipe(
+        sessions, operations, installation.owner_id, nodes, request_id=str(uuid4())
+    ).owner_id
+    operations, routes = bind_route_publications(
+        sessions, operations, ConcurrentPublisher()
+    )
+    routes.publish_run(run_id)
+    preview = operations.preview_stop(run_id)
+    request = str(uuid4())
+
+    def process_lost(*args, **kwargs):
+        raise RuntimeError("process lost after route withdrawal")
+
+    monkeypatch.setattr(operations, "_dispatch_stop_after_withdrawal", process_lost)
+    with pytest.raises(RuntimeError):
+        operations.stop(
+            run_id, plan_digest=preview.plan_digest, actor="admin", request_id=request
+        )
+    with sessions() as session:
+        accepted = session.scalar(select(Job).where(Job.request_id == request))
+        assert accepted is not None
+    return sessions, operations, jobs, routes, run_id, nodes, accepted.id
+
+
+def _run_moved_to_a_newer_generation(session: Session, run_id: str) -> None:
+    run = session.get(RecipeRun, run_id)
+    assert run is not None
+    run.run_generation += 1
+
+
+def _reservation_released(session: Session, run_id: str) -> None:
+    # A rank's claim released before the Stop reached it (a partly stopped run).
+    reservation = session.scalar(
+        select(ResourceReservation).where(ResourceReservation.owner_id == run_id)
+    )
+    assert reservation is not None
+    reservation.state = ReservationState.RELEASED
+
+
+def _run_revision_digest_drifted(session: Session, run_id: str) -> None:
+    run = session.get(RecipeRun, run_id)
+    assert run is not None
+    installation = session.get(RecipeInstallation, run.installation_id)
+    assert installation is not None
+    session.execute(
+        update(CatalogDocumentRevision)
+        .where(CatalogDocumentRevision.id == installation.recipe_revision_id)
+        .values(content_digest="e" * 64)
+    )
+
+
+#: Drift between acceptance and dispatch an accepted Stop must survive: it
+#: stops its own run as the run is now.
+_ACCEPTED_DRIFT: dict[str, Callable[[Session, str], None]] = {
+    "run moved to a newer generation": _run_moved_to_a_newer_generation,
+    "reservation released": _reservation_released,
+    "revision digest drifted": _run_revision_digest_drifted,
+}
+
+
+@pytest.mark.parametrize("drift", _ACCEPTED_DRIFT)
+@pytest.mark.usefixtures("damaged_json_rows")
+def test_an_accepted_stop_stops_its_run_as_it_is_now(
+    tmp_path, monkeypatch, drift: str
+) -> None:
+    sessions, operations, jobs, routes, run_id, nodes, accepted_id = (
+        _accept_service_stop(tmp_path, monkeypatch)
+    )
+    with sessions.begin() as session:
+        _ACCEPTED_DRIFT[drift](session, run_id)
+    clock = NOW + timedelta(seconds=6)
+    restarted = RecipeOperationService(
+        sessions,
+        install_admission=operations._install_admission,
+        run_admission=operations._run_admission,
+        agent_jobs=jobs,
+        route_publications=routes,
+        clock=lambda: clock,
+    )
+    restarted.reconcile_pending_service_stops()
+    with sessions() as session:
+        run = session.get(RecipeRun, run_id)
+        assert run is not None
+        orders = tuple(
+            session.scalars(
+                select(AgentOperation).where(
+                    AgentOperation.parent_job_id == accepted_id
+                )
+            )
+        )
+        # The Stop is issued for the run's current container.
+        assert orders
+        assert {order.payload["run_generation"] for order in orders} == {
+            run.run_generation
+        }
+    for node_id in nodes:
+        restarted.record_node_result(accepted_id, node_id, succeeded=True, evidence={})
+    assert restarted.get(accepted_id).state == LifecycleState.SUCCEEDED

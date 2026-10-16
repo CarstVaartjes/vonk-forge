@@ -167,7 +167,6 @@ def stop_plan(
     target_node_ids: Sequence[str] | None = None,
     missing_node_ids: Sequence[str] = (),
     immutable_membership_exact: bool,
-    reservation_membership_exact: bool,
     reservation_facts: Sequence[StopReservationFact | Mapping[str, str | int]],
 ) -> StopPlan:
     """Build one stop impact plan; human copy is excluded from its digest."""
@@ -214,13 +213,8 @@ def stop_plan(
                 "Stop targets and missing ranks do not partition the accepted group.",
             )
         )
-    if not reservation_membership_exact:
-        blockers.append(
-            ActionReason(
-                StopPlanCode.RESERVATION_MEMBERSHIP_CHANGED,
-                "Active run reservations include a node outside the accepted rank group.",
-            )
-        )
+    # Reservations never block the Stop that releases them: a run whose
+    # claims are partly released (a STOPPING or LOST run) is stopped again.
     identity = {
         "schema_version": 1,
         "action": "recipe.stop",
@@ -254,7 +248,6 @@ def stop_plan(
         "missing_node_ids": list(missing_ids),
         "active_memory_reservations": [asdict(fact) for fact in facts],
         "immutable_membership_exact": immutable_membership_exact,
-        "reservation_membership_exact": reservation_membership_exact,
     }
     digest = hashlib.sha256(canonical_message(identity)).hexdigest()
     return StopPlan(

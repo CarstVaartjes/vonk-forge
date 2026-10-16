@@ -197,23 +197,6 @@ class ActionPlansMixin:
             and len(actual_identity) == len(nodes)
             and profile_scope_exact
         )
-        # A failed run holds no claims (the ownership rule releases them), so
-        # for it "exact" means none is left; any other run holds one per rank.
-        reservation_membership_exact = (
-            run.state == RunState.FAILED and not reservations
-        ) or (
-            len(reservations) == len(nodes)
-            and {reservation.node_id for reservation in reservations}
-            == {node.node_id for node in nodes}
-            and all(
-                reservation.plan_digest == run.plan_digest
-                for reservation in reservations
-            )
-            and all(
-                active_by_node[node.node_id] == node.reserved_memory_bytes
-                for node in nodes
-            )
-        )
         reservation_facts = tuple(
             {
                 "id": reservation.id,
@@ -252,7 +235,6 @@ class ActionPlansMixin:
             target_node_ids=target_node_ids,
             missing_node_ids=missing_node_ids,
             immutable_membership_exact=immutable_membership_exact,
-            reservation_membership_exact=reservation_membership_exact,
             reservation_facts=reservation_facts,
         )
 
