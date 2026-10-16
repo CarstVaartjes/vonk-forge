@@ -432,6 +432,8 @@ mod model_paths;
 use model_paths::*;
 mod storage;
 use storage::*;
+mod held_lock;
+use held_lock::HeldLock;
 
 #[cfg(test)]
 mod test_support;

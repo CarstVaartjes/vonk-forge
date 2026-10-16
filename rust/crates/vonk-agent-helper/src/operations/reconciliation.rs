@@ -216,7 +216,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
     pub(super) fn lock_installation_runtime(
         &self,
         installation_id: &str,
-    ) -> Result<File, OperationError> {
+    ) -> Result<HeldLock, OperationError> {
         if !valid_artifact_id(installation_id) {
             return Err(OperationError::InvalidOperation);
         }
@@ -239,8 +239,8 @@ impl<R: CommandRunner> OperationExecutor<R> {
         {
             return Err(OperationError::UnsafePath);
         }
-        match rustix::fs::flock(&lock, rustix::fs::FlockOperation::NonBlockingLockExclusive) {
-            Ok(()) => Ok(lock),
+        match HeldLock::try_exclusive(lock) {
+            Ok(held) => Ok(held),
             Err(error)
                 if error == rustix::io::Errno::AGAIN || error == rustix::io::Errno::WOULDBLOCK =>
             {

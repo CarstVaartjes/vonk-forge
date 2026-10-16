@@ -2,7 +2,7 @@
 use super::*;
 
 impl<R: CommandRunner> OperationExecutor<R> {
-    pub(super) fn lock_image_publication(&self) -> Result<File, OperationError> {
+    pub(super) fn lock_image_publication(&self) -> Result<HeldLock, OperationError> {
         // Lock the directory inode, avoiding another disposable lock filename.
         // All publishers fence collection and staging under this same owner.
         let directory = OpenOptions::new()
@@ -11,12 +11,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
                 (rustix::fs::OFlags::DIRECTORY | rustix::fs::OFlags::NOFOLLOW).bits() as i32,
             )
             .open(&self.roots.runtime_image_receipts)?;
-        rustix::fs::flock(
-            &directory,
-            rustix::fs::FlockOperation::NonBlockingLockExclusive,
-        )
-        .map_err(|error| OperationError::Io(errno_io(error)))?;
-        Ok(directory)
+        HeldLock::try_exclusive(directory).map_err(|error| OperationError::Io(errno_io(error)))
     }
 
     pub(super) fn collect_image_staging(&self, deadline: Instant) {
