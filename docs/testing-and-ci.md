@@ -55,6 +55,12 @@ Controller again (rank evidence newer than the restart). A phase that does not
 settle within its bound (60, 120 and 300 seconds) fails and names what is
 missing, for example an upgraded agent that never reports the run it inherited.
 
+The carry proves only the upgrade. Recipe refresh runs beside it on its own
+Spark, wherever the carry runs (`Refresh recipes on the candidate`): on a Spark
+installed with the candidate, a new editorial revision replaces the serving
+canary, and then two Recipes that build one image install and serve in turn.
+Acceptance signing requires it the same way as the carry.
+
 ## Local verification before requesting review
 
 Choose checks that exercise the changed boundary. Documentation-only changes

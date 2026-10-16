@@ -335,64 +335,51 @@ def test_serving_identity_reobserves_unknown_and_ends_without_poisoning_fresh_lo
     )
 
 
-def _scenario_lane() -> carry.UpgradeCarryLifecycle:
-    import threading
-
-    lane = _lane([])
+def _scenario_lane(cls) -> carry.UpgradeCarryLifecycle:
+    lane = object.__new__(cls)
+    lane.evidence = carry.CarryEvidence()
     lane._lock = threading.Lock()
     lane._phase = "baseline-install"
+    lane._successor_identity = ("", "")
     return lane
 
 
-def _failing() -> dict[str, object]:
-    raise LifecycleError("the second install was refused")
-
-
-def test_an_observed_phase_that_fails_is_reported_and_does_not_fail_the_lane(
-    monkeypatch, capsys
-):
-    monkeypatch.setattr(carry, "OBSERVED_PHASES", frozenset({"new-phase"}))
-    lane = _scenario_lane()
-    lane._run_scenario("new-phase", _failing)
-    assert lane.evidence.observed == [
-        {
-            "phase": "new-phase",
-            "status": "failed",
-            "error": "LifecycleError: the second install was refused",
-        }
-    ]
-    assert "::warning title=Observed upgrade-carry phase new-phase failed" in (
-        capsys.readouterr().out
-    )
-
-
-def test_an_observed_phase_that_crashes_on_a_surprise_is_still_only_observed(
+def test_the_carry_proves_only_the_upgrade_and_refresh_proves_the_recipes(
     monkeypatch,
 ):
-    monkeypatch.setattr(carry, "OBSERVED_PHASES", frozenset({"new-phase"}))
-    lane = _scenario_lane()
-    lane._run_scenario("new-phase", lambda: {}["missing"])
-    assert lane.evidence.observed[0]["status"] == "failed"
+    """Catches recipe-refresh scenarios drifting back into the carry, or
+    leaving the refresh lane: coverage moved, nothing was dropped."""
+    ran: list[str] = []
 
+    class Fixture:
+        slug = "canary"
+        serving_check = None
 
-def test_a_phase_taken_out_of_the_observed_set_gates_the_lane(monkeypatch):
-    # Promoting a phase to gating is deleting its name from OBSERVED_PHASES.
-    monkeypatch.setattr(carry, "OBSERVED_PHASES", frozenset())
-    lane = _scenario_lane()
-    with pytest.raises(LifecycleError):
-        lane._run_scenario("new-phase", _failing)
-    assert lane.evidence.observed == []
-
-
-def test_an_observed_phase_that_passes_leaves_its_evidence_in_the_report(
-    monkeypatch,
-):
-    monkeypatch.setattr(carry, "OBSERVED_PHASES", frozenset({"new-phase"}))
-    lane = _scenario_lane()
-    lane._run_scenario("new-phase", lambda: {"image_digest": "sha256:" + "a" * 64})
-    (record,) = lane.evidence.observed
-    assert record["status"] == "passed"
-    assert str(record["image_digest"]).startswith("sha256:")
+    for cls in (carry.UpgradeCarryLifecycle, carry.RecipeRefreshLifecycle):
+        lane = _scenario_lane(cls)
+        monkeypatch.setattr(lane, "synthetic_canary_fixture", Fixture(), raising=False)
+        monkeypatch.setattr(lane, "_read_secret", lambda name: "key", raising=False)
+        for name in (
+            "_start_prober",
+            "_stop_prober",
+            "_judge",
+            "_redeploy_controller",
+            "_require_published",
+        ):
+            monkeypatch.setattr(lane, name, lambda: None, raising=False)
+        monkeypatch.setattr(lane, "_upgrade_agent", lambda: ran.append("upgrade"))
+        monkeypatch.setattr(lane, "_settle", lambda *a, **k: None)
+        monkeypatch.setattr(
+            lane, "_load_editorial_successor", lambda: ran.append("editorial")
+        )
+        monkeypatch.setattr(
+            lane, "_sibling_recipes", lambda node: ran.append(f"siblings:{node}") or {}
+        )
+        lane._carry()
+        lane._after_canary("spk_1")
+        ran.append("|")
+    assert ran == ["upgrade", "|", "editorial", "siblings:spk_1", "|"]
+    assert carry.SCENARIOS == ("upgrade-carry", "recipe-refresh")
 
 
 HISTORICAL_CLEANUP_SOURCE = "3d0bc507c4917f7d41f0938d29c7a64b26b8d0ea"
