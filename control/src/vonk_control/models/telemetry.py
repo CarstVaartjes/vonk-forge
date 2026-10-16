@@ -86,7 +86,7 @@ class NodeInventorySnapshot(Base):
     network_interfaces: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON)
     nas_route_interface: Mapped[str | None] = mapped_column(String(15))
     # NULL: the agent did not report host settings (unknown).
-    host_settings: Mapped[dict[str, bool] | None] = mapped_column(JSON)
+    host_settings: Mapped[dict[str, bool | None] | None] = mapped_column(JSON)
     nvidia_driver_version: Mapped[str] = mapped_column(
         String(256), nullable=False, default="unknown", server_default="unknown"
     )

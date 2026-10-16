@@ -47,7 +47,8 @@ class HostSettings(WireModel):
     """The Spark host settings the platform keeps, as the agent observes them.
 
     A Spark runs headless: a desktop costs about 1 GB of the memory recipes
-    count on. The privileged helper corrects drift; this is what is left.
+    count on. Its GPU clock is capped so sustained load cannot power it off.
+    The privileged helper corrects drift; this is what is left.
     """
 
     model_config = ConfigDict(
@@ -58,6 +59,9 @@ class HostSettings(WireModel):
     display_manager_active: bool
     # The default boot target is graphical.target, which starts the desktop.
     graphical_default_target: bool
+    # The GPU clock ceiling unit (vonk-forge-gpu-clock-cap.service) is active
+    # this boot. None: the agent predates it or could not observe it (unknown).
+    gpu_clock_cap_active: bool | None = None
 
 
 class InventoryRequest(OptionalEvidenceModel, WireModel):

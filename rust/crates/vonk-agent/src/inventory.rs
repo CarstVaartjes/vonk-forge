@@ -477,11 +477,17 @@ fn host_settings<R: ProcessRunner>(
         .filter(|(success, target)| *success && target.ends_with(".target"))?;
     // `is-active` exits zero only for an active unit and prints its state either
     // way; no state word means systemd gave no answer.
-    let (display_manager_active, _) = query(&["is-active", "display-manager.service"])
-        .filter(|(_, state)| state.bytes().all(|byte| byte.is_ascii_lowercase()))?;
+    let is_active = |unit: &str| {
+        query(&["is-active", unit])
+            .filter(|(_, state)| state.bytes().all(|byte| byte.is_ascii_lowercase()))
+            .map(|(active, _)| active)
+    };
+    let display_manager_active = is_active("display-manager.service")?;
     Some(vonk_agent_protocol::generated::HostSettings {
         display_manager_active,
         graphical_default_target: default_target == "graphical.target",
+        // Unknown on its own: an unreadable cap never hides the desktop evidence.
+        gpu_clock_cap_active: is_active("vonk-forge-gpu-clock-cap.service"),
     })
 }
 

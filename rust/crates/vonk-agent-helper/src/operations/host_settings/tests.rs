@@ -9,7 +9,9 @@ use std::sync::Arc;
 struct Systemd {
     default_target: Arc<Mutex<Option<&'static str>>>,
     display_manager: Arc<Mutex<Option<&'static str>>>,
+    clock_cap: Arc<Mutex<Option<&'static str>>>,
     stop_fails: bool,
+    start_fails: bool,
     calls: Arc<Mutex<Vec<String>>>,
 }
 
@@ -18,7 +20,10 @@ impl Systemd {
         Self {
             default_target: Arc::new(Mutex::new(default_target)),
             display_manager: Arc::new(Mutex::new(display_manager)),
+            // The clock cap unit ran at boot unless a test says otherwise.
+            clock_cap: Arc::new(Mutex::new(Some("active"))),
             stop_fails: false,
+            start_fails: false,
             calls: Arc::default(),
         }
     }
@@ -69,6 +74,18 @@ impl CommandRunner for Systemd {
             "stop display-manager.service" if self.stop_fails => answer(false, ""),
             "stop display-manager.service" => {
                 *self.display_manager.lock().unwrap() = Some("inactive");
+                answer(true, "")
+            }
+            "is-active vonk-forge-gpu-clock-cap.service" => match *self.clock_cap.lock().unwrap() {
+                Some(state) => answer(state == "active", state),
+                None => Err("bus unreachable".to_owned()),
+            },
+            "start vonk-forge-gpu-clock-cap.service" if self.start_fails => {
+                *self.clock_cap.lock().unwrap() = Some("failed");
+                answer(false, "")
+            }
+            "start vonk-forge-gpu-clock-cap.service" => {
+                *self.clock_cap.lock().unwrap() = Some("active");
                 answer(true, "")
             }
             other => panic!("not a host-settings command: {other}"),
@@ -149,4 +166,41 @@ fn a_refused_stop_is_retried_on_the_next_pass() {
             "stop display-manager.service"
         ]
     );
+}
+
+#[test]
+fn a_clock_cap_not_active_this_boot_is_started_once_and_a_refused_start_is_retried() {
+    // A boot where the one-shot did not run, or ran before the driver was up.
+    for before in ["inactive", "failed"] {
+        let systemd = Systemd::host(Some("multi-user.target"), Some("inactive"));
+        *systemd.clock_cap.lock().unwrap() = Some(before);
+        let (_temp, executor) = helper(&systemd);
+        executor.keep_host_settings();
+        executor.keep_host_settings();
+        assert_eq!(
+            systemd.corrections(),
+            ["start vonk-forge-gpu-clock-cap.service"]
+        );
+    }
+
+    let mut systemd = Systemd::host(Some("multi-user.target"), Some("inactive"));
+    *systemd.clock_cap.lock().unwrap() = Some("inactive");
+    systemd.start_fails = true;
+    let (_temp, executor) = helper(&systemd);
+    executor.keep_host_settings();
+    executor.keep_host_settings();
+    assert_eq!(
+        systemd.corrections(),
+        [
+            "start vonk-forge-gpu-clock-cap.service",
+            "start vonk-forge-gpu-clock-cap.service"
+        ]
+    );
+
+    // Unreadable: nothing is started, and the desktop settings are still kept.
+    let systemd = Systemd::host(Some("graphical.target"), Some("inactive"));
+    *systemd.clock_cap.lock().unwrap() = None;
+    let (_temp, executor) = helper(&systemd);
+    executor.keep_host_settings();
+    assert_eq!(systemd.corrections(), ["set-default multi-user.target"]);
 }

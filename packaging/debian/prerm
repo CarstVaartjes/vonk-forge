@@ -145,6 +145,8 @@ if [ "${1:-}" = remove ]; then
     deb-systemd-helper disable vonk-forge-monitor.service >/dev/null || true
     deb-systemd-helper disable vonk-forge-package-helper.socket >/dev/null || true
     deb-systemd-helper disable vonk-forge-docker-firewall.service >/dev/null || true
+    # The clock ceiling stays until reboot: no workload is disturbed.
+    deb-systemd-helper disable vonk-forge-gpu-clock-cap.service >/dev/null || true
     /usr/bin/loginctl disable-linger vonk-agent >/dev/null || true
 fi
 

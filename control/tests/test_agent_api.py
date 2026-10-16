@@ -707,6 +707,7 @@ def test_agent_posts_authenticated_runtime_and_fabric_inventory(agent_system) ->
         "host_settings": {
             "display_manager_active": True,
             "graphical_default_target": False,
+            "gpu_clock_cap_active": True,
         },
     }
 

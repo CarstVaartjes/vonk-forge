@@ -130,9 +130,10 @@ fn inventory_reports_physical_and_available_memory_disk_and_gpu() {
             .capabilities
             .contains(&"fabric.connected.mbps.200000".to_owned())
     );
-    assert_eq!(runner.calls.borrow().len(), 6);
+    assert_eq!(runner.calls.borrow().len(), 7);
     let host = inventory.host_settings.clone().unwrap();
     assert!(host.display_manager_active && host.graphical_default_target);
+    assert_eq!(host.gpu_clock_cap_active, Some(true));
     assert_eq!(
         available_memory_bytes(&runner, &meminfo, "unified").unwrap(),
         65432 * 1024
@@ -381,6 +382,8 @@ struct SystemdHost {
     /// `None`: systemd cannot be reached.
     default_target: Option<&'static str>,
     display_manager: &'static str,
+    /// The clock cap unit's `is-active` answer; empty is no answer.
+    clock_cap: &'static str,
 }
 
 impl ProcessRunner for SystemdHost {
@@ -398,6 +401,8 @@ impl ProcessRunner for SystemdHost {
         };
         let answer = if arguments == ["get-default"] {
             target
+        } else if arguments == ["is-active", "vonk-forge-gpu-clock-cap.service"] {
+            self.clock_cap
         } else {
             self.display_manager
         };
@@ -419,7 +424,7 @@ fn host_settings_are_observed_and_an_unreadable_systemd_leaves_them_unknown() {
         "MemTotal:       123456 kB\nMemAvailable:    65432 kB\n",
     )
     .unwrap();
-    let observe = |default_target, display_manager| {
+    let observe = |default_target, display_manager, clock_cap| {
         let runner = SystemdHost {
             inner: FakeRunner {
                 calls: RefCell::new(vec![]),
@@ -428,6 +433,7 @@ fn host_settings_are_observed_and_an_unreadable_systemd_leaves_them_unknown() {
             },
             default_target,
             display_manager,
+            clock_cap,
         };
         InventoryCollector {
             runner: &runner,
@@ -440,18 +446,34 @@ fn host_settings_are_observed_and_an_unreadable_systemd_leaves_them_unknown() {
         .collect()
         .expect("host settings never fail the inventory")
         .host_settings
-        .map(|host| (host.display_manager_active, host.graphical_default_target))
+        .map(|host| {
+            (
+                host.display_manager_active,
+                host.graphical_default_target,
+                host.gpu_clock_cap_active,
+            )
+        })
     };
     // Headless: the answer of a non-zero `is-active` is still the answer.
     assert_eq!(
-        observe(Some("multi-user.target"), "inactive"),
-        Some((false, false))
+        observe(Some("multi-user.target"), "inactive", "active"),
+        Some((false, false, Some(true)))
     );
     // A desktop that failed to start stays configured to start at boot.
     assert_eq!(
-        observe(Some("graphical.target"), "activating"),
-        Some((false, true))
+        observe(Some("graphical.target"), "activating", "active"),
+        Some((false, true, Some(true)))
     );
-    assert_eq!(observe(None, "active"), None);
-    assert_eq!(observe(Some("graphical.target"), ""), None);
+    // The clock cap did not run this boot, or its state cannot be read: the
+    // desktop evidence is still reported.
+    assert_eq!(
+        observe(Some("multi-user.target"), "inactive", "inactive"),
+        Some((false, false, Some(false)))
+    );
+    assert_eq!(
+        observe(Some("multi-user.target"), "inactive", ""),
+        Some((false, false, None))
+    );
+    assert_eq!(observe(None, "active", "active"), None);
+    assert_eq!(observe(Some("graphical.target"), "", "active"), None);
 }

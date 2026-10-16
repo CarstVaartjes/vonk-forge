@@ -2682,3 +2682,14 @@ def test_a_spark_off_its_headless_settings_needs_attention() -> None:
     )
     # An older agent reports nothing: unknown is never a warning.
     assert _host_codes(None) == []
+
+
+def test_a_spark_without_its_gpu_clock_ceiling_needs_attention() -> None:
+    headless = {"display_manager_active": False, "graphical_default_target": False}
+    assert _host_codes(headless | {"gpu_clock_cap_active": False}) == [
+        "host.gpu-clock-uncapped"
+    ]
+    assert _host_codes(headless | {"gpu_clock_cap_active": True}) == []
+    # Unknown (an older agent, or an unreadable unit) is never a warning.
+    assert _host_codes(headless | {"gpu_clock_cap_active": None}) == []
+    assert _host_codes(headless) == []

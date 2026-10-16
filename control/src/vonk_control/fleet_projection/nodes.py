@@ -363,6 +363,22 @@ def _host_settings_warnings(host: HostSettings | None) -> list[ProjectionReason]
                 recommendation=_HELPER_CORRECTS,
             )
         )
+    if host is not None and host.gpu_clock_cap_active is False:
+        warnings.append(
+            ProjectionReason(
+                code=ProjectionCode.HOST_GPU_CLOCK_UNCAPPED,
+                detail=(
+                    "The GPU clock ceiling (nvidia-smi -lgc 300,2200) is not "
+                    "applied this boot: sustained load can power this Spark off."
+                ),
+                severity=ProfileReasonSeverity.WARNING.value,
+                recommendation=(
+                    "The agent helper starts vonk-forge-gpu-clock-cap.service on "
+                    "its next hourly pass; if this stays, read that unit's journal "
+                    "(journalctl -u vonk-forge-gpu-clock-cap)."
+                ),
+            )
+        )
     return warnings
 
 
