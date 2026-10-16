@@ -31,34 +31,34 @@ type Log = Arc<Mutex<Vec<&'static str>>>;
 pub(super) struct Peers {
     log: Log,
     done: Arc<AtomicBool>,
-    threads: Vec<std::thread::JoinHandle<()>>,
     pub(super) socket: PathBuf,
     controller: String,
     pub(super) runtime_root: tempfile::TempDir,
 }
 
 impl Peers {
-    fn log(mut self) -> Vec<&'static str> {
-        self.stop();
+    /// Every event is logged before its answer is written, so the log is
+    /// complete once the agent has its answers.
+    fn log(&self) -> Vec<&'static str> {
         self.log.lock().unwrap().clone()
-    }
-
-    fn stop(&mut self) {
-        self.done.store(true, Ordering::SeqCst);
-        for thread in self.threads.drain(..) {
-            thread.join().unwrap();
-        }
     }
 }
 
 impl Drop for Peers {
     fn drop(&mut self) {
-        self.stop();
+        self.done.store(true, Ordering::SeqCst);
     }
 }
 
-fn accept<L>(done: &AtomicBool, accept: impl Fn() -> std::io::Result<L>) -> Option<L> {
+/// The next connection, until the test is done; a peer never outlives its
+/// deadline.
+fn accept<L>(
+    done: &AtomicBool,
+    deadline: Instant,
+    accept: impl Fn() -> std::io::Result<L>,
+) -> Option<L> {
     loop {
+        assert!(Instant::now() < deadline, "test peer outlived its deadline");
         match accept() {
             Ok(stream) => return Some(stream),
             Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
@@ -85,12 +85,16 @@ pub(super) fn peers(job_id: Uuid, script: Vec<Answer>) -> Peers {
     let controller = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     controller.set_nonblocking(true).unwrap();
     let address = controller.local_addr().unwrap();
+    let deadline = Instant::now() + Duration::from_secs(60);
     let (helper_log, helper_done) = (log.clone(), done.clone());
-    let helper = std::thread::spawn(move || {
+    std::thread::spawn(move || {
         let mut answers = script.into_iter().peekable();
         let mut last = Answer::Running;
-        while let Some((mut stream, _)) = accept(&helper_done, || helper.accept()) {
+        while let Some((mut stream, _)) = accept(&helper_done, deadline, || helper.accept()) {
             stream.set_nonblocking(false).unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
             let mut prefix = [0; 4];
             stream.read_exact(&mut prefix).unwrap();
             let mut body = vec![0; u32::from_be_bytes(prefix) as usize];
@@ -157,12 +161,17 @@ pub(super) fn peers(job_id: Uuid, script: Vec<Answer>) -> Peers {
         }
     });
     let (controller_log, controller_done) = (log.clone(), done.clone());
-    let controller = std::thread::spawn(move || {
-        while let Some((mut stream, _)) = accept(&controller_done, || controller.accept()) {
+    std::thread::spawn(move || {
+        while let Some((mut stream, _)) = accept(&controller_done, deadline, || controller.accept())
+        {
             stream.set_nonblocking(false).unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
             let mut request = Vec::new();
             let mut buffer = [0_u8; 4096];
             while !request.windows(4).any(|part| part == b"\r\n\r\n") {
+                assert!(Instant::now() < deadline, "request headers never ended");
                 let read = stream.read(&mut buffer).unwrap();
                 assert!(read > 0);
                 request.extend_from_slice(&buffer[..read]);
@@ -179,7 +188,6 @@ pub(super) fn peers(job_id: Uuid, script: Vec<Answer>) -> Peers {
     Peers {
         log,
         done,
-        threads: vec![helper, controller],
         socket,
         controller: format!("http://{address}/"),
         runtime_root,
