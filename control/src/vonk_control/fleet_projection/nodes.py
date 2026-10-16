@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Annotated
 from pydantic import Field, TypeAdapter
 from vonk_agent_protocol import NodeOfflineReason, ProjectionCode
 from vonk_agent_protocol.agent_words import ProfileReasonSeverity
-from vonk_agent_protocol.inventory import NetworkInterface
+from vonk_agent_protocol.inventory import HostSettings, NetworkInterface
 
 from ..models import (
     AgentCertificate,
@@ -128,6 +128,11 @@ def _node(
                 recommendation=route_notice.recommendation,
             )
         )
+    warnings.extend(
+        _host_settings_warnings(
+            None if inventory_state is None else inventory_state.host_settings
+        )
+    )
     if telemetry_state is None:
         warnings.append(
             ProjectionReason(
@@ -320,7 +325,45 @@ def _inventory(
             else [NetworkInterface(**item) for item in value.network_interfaces]
         ),
         nas_route_interface=value.nas_route_interface,
+        host_settings=(
+            None
+            if value.host_settings is None
+            else HostSettings.model_validate(value.host_settings)
+        ),
     )
+
+
+_HELPER_CORRECTS = (
+    "The agent helper switches this Spark to headless on its next hourly pass; "
+    "if this stays, read the helper's journal (vonk-forge-package-helper)."
+)
+
+
+def _host_settings_warnings(host: HostSettings | None) -> list[ProjectionReason]:
+    """Drift from the declared headless Spark; unknown (an older agent) is none."""
+    warnings: list[ProjectionReason] = []
+    if host is not None and host.display_manager_active:
+        warnings.append(
+            ProjectionReason(
+                code=ProjectionCode.HOST_DESKTOP_RUNNING,
+                detail=(
+                    "A desktop session is running and holds about 1 GB of the "
+                    "memory recipes count on."
+                ),
+                severity=ProfileReasonSeverity.WARNING.value,
+                recommendation=_HELPER_CORRECTS,
+            )
+        )
+    if host is not None and host.graphical_default_target:
+        warnings.append(
+            ProjectionReason(
+                code=ProjectionCode.HOST_DESKTOP_AT_BOOT,
+                detail="This Spark boots to the desktop (graphical.target).",
+                severity=ProfileReasonSeverity.WARNING.value,
+                recommendation=_HELPER_CORRECTS,
+            )
+        )
+    return warnings
 
 
 def _telemetry_state(

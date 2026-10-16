@@ -241,6 +241,15 @@ CASES: list[
             "nas_route_interface": _INVENTORY
             | {"network_interfaces": [_NIC], "nas_route_interface": "wlan9"},
             "fabric_address": _INVENTORY | {"fabric_address": "192.168.100.2"},
+            # A newer agent's setting this Controller does not know.
+            "host_settings": _INVENTORY
+            | {
+                "host_settings": {
+                    "display_manager_active": True,
+                    "graphical_default_target": True,
+                    "gpu_clock_capped": True,
+                }
+            },
         },
     ),
     (

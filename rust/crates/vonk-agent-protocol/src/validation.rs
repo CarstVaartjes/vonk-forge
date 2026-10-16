@@ -286,6 +286,7 @@ mod inventory_tests {
             fabric_bandwidth_mbps: None,
             network_interfaces: None,
             nas_route_interface: None,
+            host_settings: None,
             nvidia_driver_version: "550.1".to_owned(),
             container_runtime_version: "podman-5".to_owned(),
         }

@@ -15,7 +15,7 @@ from vonk_agent_protocol import (
     ProjectionCode,
     RunDegradedReason,
 )
-from vonk_agent_protocol.inventory import NetworkInterface
+from vonk_agent_protocol.inventory import HostSettings, NetworkInterface
 from vonk_agent_protocol.telemetry import GpuUnavailableReason
 from vonk_forge_contracts import RecipeDefinition, document_sha256, read_recipe
 
@@ -365,6 +365,7 @@ class InventoryState(StrictModel):
         default=None, max_length=16
     )
     nas_route_interface: str | None = Field(default=None, max_length=15)
+    host_settings: HostSettings | None = None
 
 
 class TelemetryPoint(StrictModel):

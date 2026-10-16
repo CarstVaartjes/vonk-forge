@@ -27,6 +27,7 @@ fn out_of_contract_inventory_is_clamped_instead_of_refused() {
         fabric_bandwidth_mbps: Some(100),
         network_interfaces: None,
         nas_route_interface: None,
+        host_settings: None,
         nvidia_driver_version: "580.1\u{e9}".to_owned(),
         container_runtime_version: "podman 5".to_owned(),
     };

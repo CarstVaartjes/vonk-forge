@@ -157,6 +157,8 @@ pub struct Inventory {
     /// Filled by the caller from [`crate::network`]; `None` means unknown.
     pub network_interfaces: Option<Vec<vonk_agent_protocol::generated::NetworkInterface>>,
     pub nas_route_interface: Option<String>,
+    /// `None` when either setting could not be observed (unknown).
+    pub host_settings: Option<vonk_agent_protocol::generated::HostSettings>,
 }
 
 impl Inventory {
@@ -186,6 +188,7 @@ impl Inventory {
             container_runtime_version: self.container_runtime_version.clone(),
             network_interfaces: self.network_interfaces.clone(),
             nas_route_interface: self.nas_route_interface.clone(),
+            host_settings: self.host_settings.clone(),
         }
     }
 }
@@ -451,8 +454,35 @@ impl<R: ProcessRunner> InventoryCollector<'_, R> {
             fabric_bandwidth_mbps: self.fabric_bandwidth_mbps,
             network_interfaces: None,
             nas_route_interface: None,
+            host_settings: host_settings(self.runner),
         })
     }
+}
+
+/// The host settings the helper keeps, as systemd reports them. Optional
+/// evidence: a query that fails or answers unexpectedly leaves it unknown and
+/// never fails the inventory.
+fn host_settings<R: ProcessRunner>(
+    runner: &R,
+) -> Option<vonk_agent_protocol::generated::HostSettings> {
+    let query = |arguments: &[&str]| {
+        let arguments: Vec<String> = arguments.iter().map(|value| (*value).to_owned()).collect();
+        let output = runner
+            .run(Program::Systemctl, &arguments, Duration::from_secs(5))
+            .ok()?;
+        let answer = String::from_utf8(output.stdout).ok()?.trim().to_owned();
+        (!answer.is_empty()).then_some((output.success, answer))
+    };
+    let (_, default_target) = query(&["get-default"])
+        .filter(|(success, target)| *success && target.ends_with(".target"))?;
+    // `is-active` exits zero only for an active unit and prints its state either
+    // way; no state word means systemd gave no answer.
+    let (display_manager_active, _) = query(&["is-active", "display-manager.service"])
+        .filter(|(_, state)| state.bytes().all(|byte| byte.is_ascii_lowercase()))?;
+    Some(vonk_agent_protocol::generated::HostSettings {
+        display_manager_active,
+        graphical_default_target: default_target == "graphical.target",
+    })
 }
 
 fn startup_probe<R: ProcessRunner>(
@@ -718,6 +748,7 @@ mod process_tests {
             fabric_bandwidth_mbps: None,
             network_interfaces: None,
             nas_route_interface: None,
+            host_settings: None,
             nvidia_driver_version: "590".into(),
             container_runtime_version: "29".into(),
         };

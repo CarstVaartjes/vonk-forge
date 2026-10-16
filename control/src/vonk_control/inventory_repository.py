@@ -13,6 +13,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import canonical_message
 from vonk_agent_protocol.inventory import (
+    HostSettings,
     InventoryRequest,
     MemoryPool,
     NetworkInterface,
@@ -45,6 +46,7 @@ class InventorySnapshotInput:
     container_runtime_version: str = "unknown"
     network_interfaces: tuple[NetworkInterface, ...] | None = None
     nas_route_interface: str | None = None
+    host_settings: HostSettings | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,6 +75,7 @@ class InventorySnapshotView:
         kw_only=True, default=None
     )
     nas_route_interface: str | None = field(kw_only=True, default=None)
+    host_settings: HostSettings | None = field(kw_only=True, default=None)
 
 
 def _validated_inventory(
@@ -89,6 +92,8 @@ def _validated_inventory(
             item.model_dump(mode="json") if isinstance(item, NetworkInterface) else item
             for item in interfaces
         ]
+    if isinstance(document["host_settings"], HostSettings):
+        document["host_settings"] = document["host_settings"].model_dump(mode="json")
     document.update(schema_version=1, observed_at=observed_at.isoformat())
     return InventoryRequest.model_validate_json(canonical_message(document))
 
@@ -137,6 +142,11 @@ class InventoryRepository:
                 ]
             ),
             nas_route_interface=validated.nas_route_interface,
+            host_settings=(
+                None
+                if validated.host_settings is None
+                else validated.host_settings.model_dump(mode="json")
+            ),
             evidence_digest=digest,
         )
         with self._sessions.begin() as session:
@@ -197,6 +207,7 @@ class InventoryRepository:
                     else tuple(validated.network_interfaces)
                 ),
                 nas_route_interface=validated.nas_route_interface,
+                host_settings=validated.host_settings,
             )
 
     def snapshot_count(self, node_id: str) -> int:

@@ -704,6 +704,10 @@ def test_agent_posts_authenticated_runtime_and_fabric_inventory(agent_system) ->
             {"name": "wlP9s9", "kind": "wifi", "carrier": True},
         ],
         "nas_route_interface": "wlP9s9",
+        "host_settings": {
+            "display_manager_active": True,
+            "graphical_default_target": False,
+        },
     }
 
     response = client.post(
@@ -720,6 +724,7 @@ def test_agent_posts_authenticated_runtime_and_fabric_inventory(agent_system) ->
         assert row.fabric_address == "192.168.100.2"
         assert row.fabric_bandwidth_mbps == 200000
         assert row.nas_route_interface == "wlP9s9"
+        assert row.host_settings == payload["host_settings"]
         assert row.network_interfaces == [
             {
                 "name": "enP7s7",

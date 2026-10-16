@@ -14,7 +14,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use rustix::net::sockopt::socket_peercred;
 use vonk_agent_helper::operations::{
-    ManagedRoots, OperationError, OperationExecutor, ProcessCommandRunner,
+    HOST_SETTINGS_INTERVAL, ManagedRoots, OperationError, OperationExecutor, ProcessCommandRunner,
     UNUSED_IMAGE_SWEEP_INTERVAL,
 };
 use vonk_agent_helper::protocol::{
@@ -276,6 +276,11 @@ fn run() -> Result<(), String> {
     // An image no installation names goes after its grace; pulls bring it back.
     let mut next_image_sweep = Instant::now();
     let mut image_sweep: Option<thread::JoinHandle<()>> = None;
+    // A Spark runs headless; drift (a reboot to the desktop) is corrected at
+    // start and then hourly.
+    let settings = Arc::clone(&executor);
+    let mut host_settings = Some(thread::spawn(move || settings.keep_host_settings()));
+    let mut next_host_settings = Instant::now() + HOST_SETTINGS_INTERVAL;
     vonk_agent_helper::host_memory_guard::spawn(Path::new(DATA_ROOT).to_path_buf());
 
     let mut sockets = sd_listen_fds::get().map_err(display)?;
@@ -302,6 +307,15 @@ fn run() -> Result<(), String> {
             let images = Arc::clone(&executor);
             image_sweep = Some(thread::spawn(move || images.sweep_unused_runtime_images()));
             next_image_sweep = Instant::now() + UNUSED_IMAGE_SWEEP_INTERVAL;
+        }
+        if Instant::now() >= next_host_settings
+            && host_settings
+                .as_ref()
+                .is_none_or(thread::JoinHandle::is_finished)
+        {
+            let settings = Arc::clone(&executor);
+            host_settings = Some(thread::spawn(move || settings.keep_host_settings()));
+            next_host_settings = Instant::now() + HOST_SETTINGS_INTERVAL;
         }
         match connection {
             Ok(mut stream) => {

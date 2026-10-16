@@ -166,6 +166,7 @@ def install_observations_routes(
                         else tuple(body.network_interfaces)
                     ),
                     nas_route_interface=body.nas_route_interface,
+                    host_settings=body.host_settings,
                 )
             )
         except ValueError as error:

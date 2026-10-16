@@ -32,6 +32,9 @@ impl ProcessRunner for FakeRunner {
             Program::Podman => b"5.4.2\n".to_vec(),
             Program::Docker => b"Docker version 29.2.1, build test\n".to_vec(),
             Program::NvidiaCtk => self.cdi_output.to_vec(),
+            // A Spark with the desktop: what the helper switches to headless.
+            Program::Systemctl if arguments == ["get-default"] => b"graphical.target\n".to_vec(),
+            Program::Systemctl => b"active\n".to_vec(),
             _ => unreachable!(),
         };
         Ok(ProcessOutput {
@@ -127,7 +130,9 @@ fn inventory_reports_physical_and_available_memory_disk_and_gpu() {
             .capabilities
             .contains(&"fabric.connected.mbps.200000".to_owned())
     );
-    assert_eq!(runner.calls.borrow().len(), 4);
+    assert_eq!(runner.calls.borrow().len(), 6);
+    let host = inventory.host_settings.clone().unwrap();
+    assert!(host.display_manager_active && host.graphical_default_target);
     assert_eq!(
         available_memory_bytes(&runner, &meminfo, "unified").unwrap(),
         65432 * 1024
@@ -368,4 +373,85 @@ fn transient_host_runtime_failures_remain_retryable_past_the_systemd_start_limit
         assert!(collector.collect().is_err());
     }
     assert_eq!(collector.collect().unwrap().gpu_count, 1);
+}
+
+/// Answers `systemctl` as a given host does; every other probe is ready.
+struct SystemdHost {
+    inner: FakeRunner,
+    /// `None`: systemd cannot be reached.
+    default_target: Option<&'static str>,
+    display_manager: &'static str,
+}
+
+impl ProcessRunner for SystemdHost {
+    fn run(
+        &self,
+        program: Program,
+        arguments: &[String],
+        timeout: Duration,
+    ) -> Result<ProcessOutput, ProcessError> {
+        if program != Program::Systemctl {
+            return self.inner.run(program, arguments, timeout);
+        }
+        let Some(target) = self.default_target else {
+            return Err(ProcessError::Timeout);
+        };
+        let answer = if arguments == ["get-default"] {
+            target
+        } else {
+            self.display_manager
+        };
+        Ok(ProcessOutput {
+            // `is-active` exits zero only for an active unit.
+            success: arguments == ["get-default"] || answer == "active",
+            stdout: format!("{answer}\n").into_bytes(),
+            stderr: vec![],
+        })
+    }
+}
+
+#[test]
+fn host_settings_are_observed_and_an_unreadable_systemd_leaves_them_unknown() {
+    let directory = tempdir().unwrap();
+    let meminfo = directory.path().join("meminfo");
+    fs::write(
+        &meminfo,
+        "MemTotal:       123456 kB\nMemAvailable:    65432 kB\n",
+    )
+    .unwrap();
+    let observe = |default_target, display_manager| {
+        let runner = SystemdHost {
+            inner: FakeRunner {
+                calls: RefCell::new(vec![]),
+                gpu_output: b"NVIDIA GB10, [N/A], [N/A], 580.173.02\n",
+                cdi_output: b"nvidia.com/gpu=all\n",
+            },
+            default_target,
+            display_manager,
+        };
+        InventoryCollector {
+            runner: &runner,
+            meminfo_path: &meminfo,
+            store_path: directory.path(),
+            egress_binary_path: Path::new("/bin/true"),
+            fabric_address: None,
+            fabric_bandwidth_mbps: None,
+        }
+        .collect()
+        .expect("host settings never fail the inventory")
+        .host_settings
+        .map(|host| (host.display_manager_active, host.graphical_default_target))
+    };
+    // Headless: the answer of a non-zero `is-active` is still the answer.
+    assert_eq!(
+        observe(Some("multi-user.target"), "inactive"),
+        Some((false, false))
+    );
+    // A desktop that failed to start stays configured to start at boot.
+    assert_eq!(
+        observe(Some("graphical.target"), "activating"),
+        Some((false, true))
+    );
+    assert_eq!(observe(None, "active"), None);
+    assert_eq!(observe(Some("graphical.target"), ""), None);
 }
