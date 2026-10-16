@@ -948,6 +948,18 @@ def accepted_profile_runtime_image(
         for item in review.preparation_decisions
         if item.assignment_id == assignment.id
     ]
+    if not decisions and root.id != application.id:
+        # The accepted review bound no image for this assignment: the recovery
+        # that admitted this load bound the verified preparation it observed
+        # (``_require_recovery_preparation``), and that binding is the promise.
+        own = _capacity_document(
+            FleetProfilePreview,
+            canonical_message(application.plan),
+            strict=True,
+            from_json=True,
+        )
+        bound = {item.assignment_id: item for item in own.preparation_decisions}
+        decisions = [bound[assignment.id]] if assignment.id in bound else []
     if len(decisions) != 1:
         raise UnknownOutcomeError(
             "profile image identity is missing or ambiguous",
