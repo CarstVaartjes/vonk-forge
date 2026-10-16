@@ -352,6 +352,10 @@ SCOPED: tuple[tuple[str, str], ...] = (
         "Pull request image reuse selection with stubbed verifier; no product scan.",
     ),
     (
+        "tests/scripts/test_supersede_release_runs.py",
+        "Newest-only release supersession over a fake GitHub API; no product scan.",
+    ),
+    (
         "tests/scripts/test_restore_pytest_file_durations.py",
         "restore pytest file durations: fixed entrypoint/fixture behavior.",
     ),

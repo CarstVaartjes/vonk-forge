@@ -23,6 +23,7 @@ from vonk_agent_protocol import (
     canonical_message,
 )
 
+from .. import job_states
 from ..categorized_errors import (
     InvalidValue,
 )
@@ -47,6 +48,7 @@ from ..models import (
     STOPPABLE_RUN_STATES,
     AgentOperation,
     CatalogDocumentRevision,
+    Job,
     RecipeBuild,
     RecipeRun,
     RunNode,
@@ -62,7 +64,44 @@ from ..recipe_execution_contract import (
 from ..reservation_owners import run_has_live_operation
 from ..stored_json import read_row_column
 from ..strict_json import read_stored_model
+from .errors import RecipeRetryLater
 from .results import _RANK_FAILED
+
+
+def wait_for_installation_upkeep(session: Session, installation_id: str) -> None:
+    """Wait while the installation's own reconcile or uninstall has not ended.
+
+    Starting a run and (re)installing both wait here. The wait names the
+    operation it waits for and lasts exactly as long as that operation is
+    queued, running or needs an operator: it has no timer of its own.
+    """
+    upkeep = session.scalar(
+        select(Job)
+        .where(
+            Job.kind.in_(
+                (
+                    WireAgentOperation.RECIPE_UNINSTALL.value,
+                    WireAgentOperation.RECIPE_RECONCILE.value,
+                )
+            ),
+            Job.state.in_(
+                job_states.words(
+                    LifecycleState.QUEUED,
+                    LifecycleState.RUNNING,
+                    LifecycleState.NEEDS_OPERATOR,
+                )
+            ),
+            Job.payload["owner_kind"].as_string() == "installation",
+            Job.payload["owner_id"].as_string() == installation_id,
+        )
+        .order_by(Job.id)
+        .limit(1)
+    )
+    if upkeep is not None:
+        raise RecipeRetryLater(
+            f"recipe installation waits for its {upkeep.kind} operation "
+            f"{upkeep.id} to end"
+        )
 
 
 def _active_recipe_revision(

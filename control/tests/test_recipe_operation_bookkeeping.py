@@ -960,43 +960,48 @@ def test_a_stop_without_start_history_uses_current_exact_run_ownership(
     assert stopped.state == "running"
 
 
-def test_a_busy_owner_is_a_retry_later_unknown_outcome(tmp_path) -> None:
+@pytest.mark.parametrize("owner_kind", ["recipe.reconcile", "recipe.uninstall"])
+def test_a_busy_owner_is_a_retry_later_unknown_outcome(tmp_path, owner_kind) -> None:
     sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
         tmp_path, nodes=1
     )
     plan = service.preview_install(mapping_id, build_id)
     installation_id = service.prepare_installation(plan, actor="admin")
-    reconcile = {
+    owner_payload = {
         "schema_version": 1,
         "owner_kind": "installation",
         "owner_id": installation_id,
         "plan_digest": "d" * 64,
     }
+    owner_id = str(uuid.uuid4())
     with sessions.begin() as session:
         session.add(
             new_recipe_job(
-                id=str(uuid.uuid4()),
+                id=owner_id,
                 request_id=str(uuid.uuid4()),
-                kind="recipe.reconcile",
+                kind=owner_kind,
                 state="running",
                 actor="admin",
                 authority_revision="a" * 64,
                 targets=list(nodes),
-                payload_digest=hashlib.sha256(canonical_message(reconcile)).hexdigest(),
-                payload=reconcile,
+                payload_digest=hashlib.sha256(
+                    canonical_message(owner_payload)
+                ).hexdigest(),
+                payload=owner_payload,
                 created_at=NOW,
                 updated_at=NOW,
             )
         )
 
-    with pytest.raises(Exception) as _ending:
+    # The install waits, visibly, for the installation's own operation to end.
+    with pytest.raises(RecipeRetryLater, match=owner_id):
         service.start_installation(installation_id, actor="admin", request_id="8" * 36)
 
     with sessions() as session:
         assert session.scalar(select(Job.id).where(Job.request_id == "8" * 36)) is None
 
     with sessions.begin() as session:
-        owner = session.scalar(select(Job).where(Job.kind == "recipe.reconcile"))
+        owner = session.get(Job, owner_id)
         assert owner is not None
         owner.state = "succeeded"
     fresh = service.start_installation(
