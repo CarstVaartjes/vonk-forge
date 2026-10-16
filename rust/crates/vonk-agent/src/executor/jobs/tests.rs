@@ -452,7 +452,7 @@ async fn completed_job_upload_recovers_without_reexecution_and_new_jobs_are_admi
         .unwrap();
 }
 
-fn job_claim() -> (AgentClaim, vonk_agent_protocol::RecipeJobRunRequest) {
+pub(super) fn job_claim() -> (AgentClaim, vonk_agent_protocol::RecipeJobRunRequest) {
     let mut claim: AgentClaim = serde_json::from_str(include_str!(
         "../../../../../../agent_protocol/src/vonk_agent_protocol/vectors/recipe-job-run-claim-v1.json"
     ))
@@ -469,21 +469,23 @@ fn job_claim() -> (AgentClaim, vonk_agent_protocol::RecipeJobRunRequest) {
 async fn unreadable_retained_job_record_reports_its_step_and_cause_on_the_wire() {
     let (claim, request) = job_claim();
     let data = tempdir().unwrap();
-    let runtime_root = tempdir().unwrap();
-    // A damaged durable intent record (torn write, disk fault) found before
-    // any dispatch: the effect is unknown and must say where and why.
+    // A damaged durable intent record (torn write, disk fault): its job is
+    // re-observed, proven absent here, and the unknown effect says where and
+    // why.
+    let peers =
+        super::reobserve_tests::peers(request.job_id, vec![super::reobserve_tests::Answer::Absent]);
     let scope = data.path().join("runs").join(request.job_id.to_string());
     fs::create_dir_all(&scope).unwrap();
     fs::write(scope.join("job-request.json"), b"{damaged").unwrap();
     let client = AgentHttpClient::for_http_test("http://127.0.0.1:9/", NODE_ID);
     let executor = RecipeExecutor {
         client: &client,
-        helper_socket: std::path::Path::new(crate::host_runtime::HELPER_SOCKET),
+        helper_socket: &peers.socket,
         runtime: OciRuntime {
             runner: &NoProcess,
             data_root: data.path(),
         },
-        runtime_root: runtime_root.path(),
+        runtime_root: peers.runtime_root.path(),
     };
     let (_lease, lease) = tokio::sync::watch::channel(claim.deadline);
     let (_cancel, cancel) = tokio::sync::watch::channel(false);

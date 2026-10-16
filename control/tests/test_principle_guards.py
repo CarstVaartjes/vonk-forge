@@ -792,3 +792,18 @@ def test_a_failed_run_with_fresh_absence_or_a_lost_one_passes_the_guard(source):
 def test_no_run_or_rank_is_failed_without_fresh_absence_anywhere():
     """Whole tree: an unknown effect is lost, never failed (Class 2)."""
     assert unproven_run_failures.tree_sites() == []
+
+
+def test_the_agent_stops_a_job_only_after_reobserving_it():
+    """Whole tree: a job whose helper answer was lost is re-observed by its
+    identity before anything stops it (Class 2). Its stop on error has one
+    caller, the re-observation, which stops only on a cancellation, the job's
+    deadline, or a helper that cannot re-observe."""
+    crate = ROOT / "rust/crates/vonk-agent/src"
+    tests = rust_test_files(crate)
+    callers = sorted(
+        path.relative_to(ROOT).as_posix()
+        for path in crate.rglob("*.rs")
+        if path not in tests and ".stop_job(" in "".join(path.read_text().split())
+    )
+    assert callers == ["rust/crates/vonk-agent/src/executor/jobs/reobserve.rs"]

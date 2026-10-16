@@ -113,8 +113,8 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         outcome: InterruptibleJob<
             Result<HostRuntimeOutcome, crate::host_runtime::HostRuntimeError>,
         >,
-        _dispatched: Instant,
-        _cancellation: &mut tokio::sync::watch::Receiver<bool>,
+        dispatched: Instant,
+        cancellation: &mut tokio::sync::watch::Receiver<bool>,
     ) -> Result<HostRuntimeOutcome, Box<ExecutionResult>> {
         match outcome {
             InterruptibleJob::Completed(Ok(outcome)) if !outcome.stop_uncertain => Ok(outcome),
@@ -129,7 +129,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                     let _ = JobScopeCleanup::new(&self.runtime, job.job_scope).finish();
                     return Err(Box::new(refused));
                 }
-                let (stage, mut cause) = match other {
+                let (stage, cause) = match other {
                     InterruptibleJob::Completed(Err(error)) => (
                         FailureStage::RuntimeAdapter,
                         format!("job run unconfirmed: {}", error.cause()),
@@ -143,10 +143,11 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                         "job cancellation stop is unconfirmed".to_owned(),
                     ),
                 };
-                if let Some(stop) = self.stop_job(job.claim, job.stop_plan, job.job_scope).await {
-                    cause = format!("{cause}; {stop}");
-                }
-                Err(job.unknown(stage, cause))
+                // The answer was lost, not the job: it is re-observed by its
+                // identity before anything stops it.
+                let deadline = reobserve::job_deadline(dispatched, job.request);
+                self.reobserve_job(job, deadline, cancellation, stage, cause)
+                    .await
             }
         }
     }
@@ -265,17 +266,33 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
             Ok(Some(receipt)) => receipt,
             Err(error) => {
                 // Dispatch may have succeeded before its durable exit account
-                // was lost. Reconcile the exact authorized effect, never run
-                // the process again from damaged bookkeeping.
-                let (stage, mut cause) = local_step(
+                // was lost. The exact authorized effect is re-observed by its
+                // identity; the process is never run again from damaged
+                // bookkeeping.
+                let (stage, cause) = local_step(
                     FailureStage::JobState,
                     "retained job completion unreadable",
                     &error,
                 );
-                if let Some(stop) = self.stop_job(claim, &stop_plan, &job_scope).await {
-                    cause = format!("{cause}; {stop}");
+                let job = DispatchedJob {
+                    claim,
+                    request: &request,
+                    stop_plan: &stop_plan,
+                    job_scope: &job_scope,
+                    started,
+                };
+                let deadline = reobserve::job_deadline(Instant::now(), &request);
+                let receipt = match self
+                    .reobserve_job(&job, deadline, &mut cancellation, stage, cause)
+                    .await
+                {
+                    Ok(outcome) => self.job_exit_receipt(&job, outcome),
+                    Err(result) => Err(result),
+                };
+                match receipt {
+                    Ok(receipt) => receipt,
+                    Err(result) => return *result,
                 }
-                return unknown(stage, cause);
             }
             Ok(None) => {
                 if let Err(result) = self
@@ -876,5 +893,9 @@ pub(super) fn output_media_type<'mapping>(
         .map(|(_, media_type)| media_type)
 }
 
+mod reobserve;
+
+#[cfg(test)]
+mod reobserve_tests;
 #[cfg(test)]
 mod tests;
