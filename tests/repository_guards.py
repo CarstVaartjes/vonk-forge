@@ -364,6 +364,10 @@ SCOPED: tuple[tuple[str, str], ...] = (
         "Agent package set version record over a fake GitHub API; no product scan.",
     ),
     (
+        "tests/scripts/test_resolve_pr_setups.py",
+        "Pull request setup reuse selection over a fake GitHub API; no product scan.",
+    ),
+    (
         "tests/scripts/test_restore_pytest_file_durations.py",
         "restore pytest file durations: fixed entrypoint/fixture behavior.",
     ),

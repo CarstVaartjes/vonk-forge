@@ -1,0 +1,96 @@
+#!/usr/bin/env python3
+"""Find the installer setup programs a pull request built for this exact tree.
+
+usage: resolve-pr-setups RUN_ID SOURCE_SHA
+
+RUN_ID is the successful pull request CI run that scripts/resolve-tested-ci
+proved tested SOURCE_SHA's exact Git tree. When that run's candidate built the
+setup programs (``installer-setup-<sha>-<platform>`` for every setup platform
+from one source), print the release producer evidence ``RUN_ID 0 <sha>`` and
+exit 0; the release then uses them as it uses an ancestor's. Exit 2 when the
+run has none (the release builds them); exit 1 on contradicting evidence.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+SETUP_PLATFORMS = ("nas", "linux-arm64")
+ARTIFACT = re.compile(r"installer-setup-([0-9a-f]{40})-(nas|linux-arm64)\Z")
+SHA = re.compile(r"[0-9a-f]{40}\Z")
+
+
+def gh(endpoint: str) -> object:
+    output = subprocess.run(
+        ["gh", "api", "--paginate", "--slurp", endpoint],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    ).stdout
+    return json.loads(output)
+
+
+def resolve(run_id: str, source: str, repository: str) -> str | None:
+    if re.fullmatch(r"[1-9][0-9]*", run_id) is None or SHA.fullmatch(source) is None:
+        raise ValueError("pull request setup evidence is invalid")
+    pages = gh(f"/repos/{repository}/actions/runs/{run_id}/artifacts?per_page=100")
+    built: dict[str, set[str]] = {}
+    for page in pages if isinstance(pages, list) else []:
+        for artifact in page.get("artifacts", []):
+            match = ARTIFACT.fullmatch(str(artifact.get("name", "")))
+            if match is not None and not artifact.get("expired"):
+                built.setdefault(match[1], set()).add(match[2])
+    complete = [
+        sha for sha, platforms in built.items() if platforms == set(SETUP_PLATFORMS)
+    ]
+    if not complete:
+        return None
+    if len(complete) != 1 or len(built) != 1:
+        raise ValueError("the pull request run built setups from several sources")
+    built_from = complete[0]
+    tree = subprocess.run(
+        ["git", "rev-parse", "--verify", f"{source}^{{tree}}"],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        cwd=ROOT,
+    ).stdout.strip()
+    built_tree = gh(f"/repos/{repository}/git/commits/{built_from}")
+    if (
+        not isinstance(built_tree, list)
+        or built_tree[0].get("tree", {}).get("sha") != tree
+    ):
+        raise ValueError("the pull request setups were built from another tree")
+    return f"{run_id}\t0\t{built_from}"
+
+
+def main() -> int:
+    if len(sys.argv) != 3:
+        print(__doc__, file=sys.stderr)
+        return 64
+    try:
+        evidence = resolve(sys.argv[1], sys.argv[2], os.environ["GITHUB_REPOSITORY"])
+    except (
+        KeyError,
+        ValueError,
+        json.JSONDecodeError,
+        subprocess.SubprocessError,
+    ) as error:
+        print(f"pull request setups: {error}", file=sys.stderr)
+        return 1
+    if evidence is None:
+        return 2
+    print(evidence)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
