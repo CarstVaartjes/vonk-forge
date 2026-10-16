@@ -43,6 +43,9 @@ jobs:
     name: Match the pull request acceptance of this payload
     if: >-
       !cancelled() && !inputs.premerge && inputs.reuse_run_id != ''
+    # Reuse only saves time: any error here leaves reuse unset, so the Spark
+    # lane and recipe refresh run, and never fails the release.
+    continue-on-error: true
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:

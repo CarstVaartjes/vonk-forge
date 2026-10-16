@@ -599,6 +599,8 @@ def test_main_reuses_pull_request_spark_evidence_only_for_its_exact_payload() ->
     assert "!inputs.premerge" in match["if"]
     assert "inputs.reuse_run_id != ''" in match["if"]
     assert "install-release-publication payload" in str(match["steps"])
+    # An error while matching runs the lanes; it never blocks promotion.
+    assert match["continue-on-error"] is True
     for name in ("spark-acceptance", "spark-recipe-refresh"):
         assert jobs[name]["needs"] == ["match-pr-acceptance"], name
         assert "needs.match-pr-acceptance.outputs.reuse != 'true'" in jobs[name]["if"]
