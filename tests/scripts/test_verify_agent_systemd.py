@@ -37,7 +37,9 @@ def test_control_services_keep_memory_and_survive_workload_oom(name: str) -> Non
     assert service["MemoryLow"] == "512M"
 
 
-def test_gpu_clock_cap_keeps_only_the_driver_admin_capability_and_follows_the_driver() -> None:
+def test_gpu_clock_cap_keeps_only_the_driver_admin_capability_and_follows_the_driver() -> (
+    None
+):
     # The clock ceiling guards against hard power-off; it must be re-applied
     # when the NVIDIA persistence daemon restarts, and hold no capability
     # beyond the one the driver checks for locking clocks.
