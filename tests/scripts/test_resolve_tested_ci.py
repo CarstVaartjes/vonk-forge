@@ -212,6 +212,22 @@ def test_intervening_main_change_runs_source_ci_again(proof):
     assert proof["resolver"].resolve(target, REPO) == (2, None)
 
 
+def test_fallback_names_the_main_tree_and_the_trees_it_was_compared_with(proof, capsys):
+    """Catches a silent fallback: the run summary must say which tree missed."""
+    target = commit(proof["root"], "docs/other.md", "another main change\n")
+    proof["pull"]["merge_commit_sha"] = target
+    assert proof["resolver"].resolve(target, REPO) == (2, None)
+    target_tree = subprocess.run(
+        ["git", "-C", str(proof["root"]), "rev-parse", f"{target}^{{tree}}"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    diagnostic = capsys.readouterr().err
+    assert f"main tree {target_tree} matched no successful PR check" in diagnostic
+    assert f"tested tree {proof['receipt']['tree_sha']}" in diagnostic
+
+
 @pytest.mark.parametrize("missing", ["pulls", "runs", "artifacts"])
 def test_absent_proof_falls_back_to_ordinary_ci(proof, missing):
     proof[missing] = []
