@@ -17,6 +17,7 @@ impl AgentHttpClient {
             identity_content: Default::default(),
             progress_phase: Arc::new(Mutex::new(None)),
             transfer_inactivity: TRANSFER_INACTIVITY,
+            distribution_range_bytes: DISTRIBUTION_RANGE_BYTES,
         }
     }
 
@@ -24,6 +25,13 @@ impl AgentHttpClient {
     #[cfg(test)]
     pub(crate) fn with_transfer_inactivity(mut self, window: Duration) -> Self {
         self.transfer_inactivity = window;
+        self
+    }
+
+    /// A client whose distribution objects move in ranges of `bytes`.
+    #[cfg(test)]
+    pub(crate) fn with_distribution_range_bytes(mut self, bytes: u64) -> Self {
+        self.distribution_range_bytes = bytes;
         self
     }
 
@@ -60,6 +68,7 @@ impl AgentHttpClient {
                     identity_content: Default::default(),
                     progress_phase: Arc::new(Mutex::new(None)),
                     transfer_inactivity: TRANSFER_INACTIVITY,
+                    distribution_range_bytes: DISTRIBUTION_RANGE_BYTES,
                 })
             }
         }
@@ -113,6 +122,7 @@ impl AgentHttpClient {
             identity_content: Arc::new(Mutex::new(Some(content))),
             progress_phase: Arc::new(Mutex::new(None)),
             transfer_inactivity: TRANSFER_INACTIVITY,
+            distribution_range_bytes: DISTRIBUTION_RANGE_BYTES,
         })
     }
 

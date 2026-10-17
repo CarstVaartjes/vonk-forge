@@ -3170,6 +3170,52 @@ def test_a_refused_start_failure_naming_host_paths_is_accepted_on_its_retry(
         assert "/opt/vonk" not in attempt.result["reason"]
 
 
+def test_a_result_refused_on_every_delivery_is_shown_until_one_is_accepted(
+    agent_system,
+) -> None:
+    """Catches a Spark whose every result is refused before the route runs, unseen."""
+
+    from vonk_control.agent_api.authority import RESULT_REFUSALS
+    from vonk_control.evidence_repeats import repeating_evidence
+    from vonk_control.recovery_policy import RECOVERY
+
+    client, services, _, clock = agent_system
+    services.operations.enqueue(
+        parent(services.sessions, clock).id,
+        NODE_A,
+        "recipe.stop",
+        "a" * 64,
+        STOP_PAYLOAD,
+    )
+    claimed = client.post("/agent/claim", headers=agent_headers(NODE_A, "serial-a"))
+    assert claimed.status_code == 200
+    fence = claimed.json()["fence"]
+    refused = {
+        "fence": fence,
+        "state": "failed",
+        "result": {"status": "failed", "error_code": "stop/failed"},
+    }
+
+    def shown() -> tuple[str, ...]:
+        with services.sessions() as session:
+            return repeating_evidence(session, [NODE_A], clock.now).get(NODE_A, ())
+
+    for _ in range(RECOVERY.max_failures):
+        response = client.post(
+            "/agent/result", headers=agent_headers(NODE_A, "serial-a"), json=refused
+        )
+        assert response.status_code == 422
+    (warning,) = shown()
+    assert RESULT_REFUSALS in warning and "controller.invalid_request" in warning
+
+    accepted = refused | {"result": {"status": "failed", "error_code": "stop_failed"}}
+    response = client.post(
+        "/agent/result", headers=agent_headers(NODE_A, "serial-a"), json=accepted
+    )
+    assert response.status_code == 204
+    assert shown() == ()
+
+
 @pytest.mark.parametrize(
     ("failure", "expected_status"),
     (

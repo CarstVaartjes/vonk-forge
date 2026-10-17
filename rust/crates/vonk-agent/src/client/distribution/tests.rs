@@ -272,26 +272,26 @@ async fn distribution_downloads_overlap_without_reordering_evidence_or_progress(
 #[test]
 fn transfers_plan_files_in_sixty_four_mebibyte_ranges_with_adaptive_streams() {
     const MIB: u64 = 1024 * 1024;
-    // Objects open at once are the most streams the governor may allow.
+    // Objects open at once, and ranges of one object open at once, are the
+    // most streams the governor may allow.
     assert_eq!(DISTRIBUTION_CONCURRENCY, 8);
-    // A large object is walked in whole 64 MiB windows...
-    assert_eq!(range_end(0, 1024 * MIB), 64 * MIB - 1);
-    assert_eq!(range_end(64 * MIB, 1024 * MIB), 128 * MIB - 1);
-    // ...a resumed offset continues from where the partial ended...
-    assert_eq!(range_end(100 * MIB, 1024 * MIB), 164 * MIB - 1);
-    // ...and the last window stops at the final byte.
-    assert_eq!(range_end(64 * MIB, 70 * MIB), 70 * MIB - 1);
-    assert_eq!(range_end(0, 5), 4);
+    assert_eq!(DISTRIBUTION_RANGE_BYTES, 64 * MIB);
+    // A large object is walked in whole 64 MiB grid ranges...
+    assert_eq!(range_end(0, 64 * MIB, 1024 * MIB), 64 * MIB - 1);
+    assert_eq!(range_end(1, 64 * MIB, 1024 * MIB), 128 * MIB - 1);
+    // ...and the last one stops at the final byte.
+    assert_eq!(range_end(1, 64 * MIB, 70 * MIB), 70 * MIB - 1);
+    assert_eq!(range_end(0, 64 * MIB, 5), 4);
 }
 
 #[tokio::test]
 async fn write_path_reserves_space_without_changing_the_length_and_writes_exact_bytes() {
-    use tokio::io::{AsyncWriteExt, BufWriter};
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("object.partial");
     let payload: Vec<u8> = (0..5 * 1024 * 1024_u32).map(|value| value as u8).collect();
+    let total = payload.len() as u64;
     let file = open_trusted_partial(&path).await.unwrap();
-    preallocate(&file, 0, payload.len() as u64);
+    preallocate(&file, 0, total);
     // Resume reads the partial's length as the bytes already received, so
     // reserving space must not make it look complete.
     assert_eq!(file.metadata().await.unwrap().len(), 0);
@@ -299,21 +299,22 @@ async fn write_path_reserves_space_without_changing_the_length_and_writes_exact_
     {
         use std::os::unix::fs::MetadataExt;
         // tmpfs and the CI filesystems reserve blocks; skip nothing on Linux.
-        assert!(file.metadata().await.unwrap().blocks() * 512 >= payload.len() as u64);
+        assert!(file.metadata().await.unwrap().blocks() * 512 >= total);
     }
 
-    // A one-MiB window forces several background flushes during the write.
-    let mut output = BufWriter::with_capacity(64 * 1024, file);
-    let mut write_behind = WriteBehind::with_window(0, 1024 * 1024);
-    let mut written = 0_u64;
-    for chunk in payload.chunks(256 * 1024) {
-        output.write_all(chunk).await.unwrap();
-        written += chunk.len() as u64;
-        write_behind.written(&mut output, written).await.unwrap();
+    // One-MiB ranges, written last first: every byte lands at its place.
+    let file = Arc::new(file.into_std().await);
+    let (record, pending) = RangeRecord::adopt(file, 0, total, 1024 * 1024)
+        .await
+        .unwrap();
+    assert_eq!(pending.len(), 5);
+    assert!(std::fs::metadata(&path).unwrap().len() > total);
+    for range in pending.into_iter().rev() {
+        let bytes = payload[range.start as usize..=range.end as usize].to_vec();
+        record.write(range.start, bytes).await.unwrap();
+        record.complete(range).await.unwrap();
     }
-    write_behind.finish().await.unwrap();
-    output.flush().await.unwrap();
-    output.get_ref().sync_all().await.unwrap();
+    record.finish().await.unwrap();
     assert_eq!(std::fs::read(&path).unwrap(), payload);
 }
 
@@ -764,6 +765,7 @@ async fn distribution_reuses_an_existing_object_without_hashing_or_fetching() {
         identity_content: Default::default(),
         progress_phase: Default::default(),
         transfer_inactivity: TRANSFER_INACTIVITY,
+        distribution_range_bytes: DISTRIBUTION_RANGE_BYTES,
     };
 
     client

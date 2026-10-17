@@ -30,7 +30,7 @@ use std::{
 use futures_util::{StreamExt, TryStreamExt, stream};
 use reqwest::{Certificate, Client, Identity, StatusCode};
 use thiserror::Error;
-use tokio::io::{AsyncWriteExt, BufWriter};
+use tokio::io::AsyncWriteExt;
 use tokio_util::io::ReaderStream;
 use url::Url;
 use vonk_agent_protocol::generated::{
@@ -93,17 +93,16 @@ const ROTATION_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 const HOST_RUNTIME_GRANT_TTL_SECONDS: u16 = 10;
 /// Range requests in flight are bounded by an adaptive governor: it starts at
 /// what a lone transfer is known to sustain and only adds streams while the
-/// aggregate throughput still grows. Objects open at once are the most it can
-/// ever allow, so a waiting object holds nothing but its resumable partial.
+/// aggregate throughput still grows. Objects open at once, and ranges of one
+/// object open at once, are the most it can ever allow, so a waiting object
+/// or range holds nothing but its resumable partial.
 const DISTRIBUTION_CONCURRENCY: usize = stream_governor::MAX_STREAMS;
-/// Bytes requested per HTTP range. Large enough that authorization and
-/// request latency vanish next to the transfer; the writer resumes from the
-/// bytes it accepted, so a failed range repeats nothing it already wrote.
+/// Bytes requested per HTTP range, each authorized by the Controller. Large
+/// enough that authorization and request latency vanish next to the
+/// transfer; a range is synced and its pages released once it is written, so
+/// a hundreds-of-gigabytes model never builds a huge dirty backlog or fills
+/// the page cache of a shared-memory machine.
 const DISTRIBUTION_RANGE_BYTES: u64 = 64 * 1024 * 1024;
-/// Written bytes after which their writeback starts and their pages are
-/// released, so a hundreds-of-gigabytes model never builds a huge dirty backlog
-/// or fills the page cache of a shared-memory machine.
-const WRITE_BEHIND_BYTES: u64 = 256 * 1024 * 1024;
 
 /// Longest a single heartbeat request may spend before it is treated as lost.
 /// The renewal loop reserves lease margin against the same budget, so one
@@ -186,6 +185,8 @@ pub struct AgentHttpClient {
     progress_phase: Arc<Mutex<Option<ProgressSnapshot>>>,
     /// How long a streamed transfer may move no byte ([`TRANSFER_INACTIVITY`]).
     transfer_inactivity: Duration,
+    /// Bytes per distribution range ([`DISTRIBUTION_RANGE_BYTES`]).
+    distribution_range_bytes: u64,
 }
 
 use reporting::*;

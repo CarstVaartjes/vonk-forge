@@ -136,7 +136,7 @@ where
                 );
                 continue;
             }
-            let projection = match client.submit_result(&result).await {
+            let projection = match submit_or_core(client, &result).await {
                 Ok(()) | Err(ClientError::ResultSuperseded) => {
                     if acknowledged {
                         state.mark_reconciled(&result)
@@ -295,7 +295,7 @@ where
         .validate_for_operation(&claim.operation)
         .map_err(StateError::from)?;
     if state.result_rejection(&result, now)?.is_none() {
-        match client.submit_result(&result).await {
+        match submit_or_core(client, &result).await {
             Ok(()) | Err(ClientError::ResultSuperseded) => {
                 if let Err(error) = state.acknowledge(&result) {
                     eprintln!("vonk-agent: receipt acknowledgement deferred: {error}");
@@ -315,6 +315,51 @@ where
         }
     }
     Ok(())
+}
+
+/// Deliver `result`; one the Controller refuses as invalid is offered once
+/// more at once in its core-only form ([`crate::outcome::core_only`]).
+///
+/// An accepted core settles the attempt with its true state and code, and the
+/// full result stays in local custody as the evidence.  A refused core answers
+/// with the first refusal, which is retained and re-offered under the usual
+/// cool-down: a corrected Controller rule then accepts the full result, so a
+/// Controller fix alone heals it, and the refusal stays visible on every pass
+/// and in the fleet view meanwhile.
+async fn submit_or_core<C: LoopClient>(
+    client: &C,
+    result: &AgentResult,
+) -> Result<(), ClientError> {
+    let refusal = match client.submit_result(result).await {
+        Err(ClientError::ResultRejected(refusal))
+            if refusal.code
+                == vonk_agent_protocol::generated::ControllerErrorCode::ControllerInvalidRequest
+                    .as_str() =>
+        {
+            refusal
+        }
+        other => return other,
+    };
+    let Some(core) = crate::outcome::core_only(result) else {
+        return Err(ClientError::ResultRejected(refusal));
+    };
+    eprintln!(
+        "vonk-agent: controller refused result for fence {} as invalid (request_id={}); \
+         offering its core only",
+        result.fence,
+        refusal.request_id.as_deref().unwrap_or_default(),
+    );
+    match client.submit_result(&core).await {
+        Ok(()) => {
+            eprintln!(
+                "vonk-agent: result_core_only_delivered fence={}: the full result stays in local custody",
+                result.fence
+            );
+            Ok(())
+        }
+        Err(ClientError::ResultRejected(_)) => Err(ClientError::ResultRejected(refusal)),
+        other => other,
+    }
 }
 
 /// Persist one Controller ingress refusal and make it retrievable.
@@ -346,6 +391,9 @@ pub(super) fn record_result_rejection(
 
 #[cfg(test)]
 mod tests_0;
+
+#[cfg(test)]
+mod core_only_tests;
 
 #[cfg(test)]
 mod tests_1;
