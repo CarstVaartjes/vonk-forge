@@ -85,6 +85,7 @@ def test_a_progressing_transfer_keeps_its_claim_through_controller_restarts(
     attempt = _attempt(sessions, claim.fence)
     assert attempt.state == "running"
     assert attempt.attempt == 1
+    assert attempt.progress is not None
     assert attempt.progress["completed_bytes"] == copied
     with sessions() as session:
         stored = session.get(AgentOperation, operation.id)
