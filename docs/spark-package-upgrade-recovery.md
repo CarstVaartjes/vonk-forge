@@ -36,8 +36,8 @@ and bounded `dpkg` state. New helpers also return allowlisted package
 verification, metadata, custody, or installation codes; only installation
 failures may carry an exit status in the range 0 through 255. The Controller
 treats every one of these detailed failures as recoverable but operator-paused.
-It does not dispatch the next Spark until a new authenticated protocol-v3
-contact proves the exact signed package, binary digest, build digest,
+It does not dispatch that Spark's retry, nor count its upgrade done, until a
+new authenticated protocol-v3 contact proves the exact signed package, binary digest, build digest,
 architecture, required upgrade capability, and successful self-test, followed
 by the exact activation acknowledgement described below. Package and semantic version strings,
 plus any capabilities unknown to this Controller, are informational/open

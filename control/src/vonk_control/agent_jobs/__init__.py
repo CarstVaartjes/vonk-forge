@@ -107,7 +107,9 @@ from .retry import (
     abandon_idempotent_job_in_session as abandon_idempotent_job_in_session,
 )
 from .retry import agent_upgrade_in_flight as agent_upgrade_in_flight
-from .retry import other_agent_upgrade_in_flight as other_agent_upgrade_in_flight
+from .retry import (
+    agent_upgrade_in_flight_on_spark as agent_upgrade_in_flight_on_spark,
+)
 from .retry import result_disposition as result_disposition
 from .retry import schedule_agent_upgrade_retry as schedule_agent_upgrade_retry
 from .retry import superseded_cancellation_deadline as superseded_cancellation_deadline
