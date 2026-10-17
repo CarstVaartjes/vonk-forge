@@ -347,6 +347,13 @@ pub fn sweep(
             ControllerOrder | Claim | Bookkeeping => {}
         }
     }
+    // Private copies from before files were shared become links of their store
+    // object first, so that object is linked, not unused, when it is judged.
+    // A started run's installation keeps its files as they are.
+    if let Some(started) = started_run_installations(&data_root.join("run-metadata")) {
+        pass.swept.pending |=
+            crate::oci::relink_private_model_copies(data_root, &started, deadline).pending;
+    }
     let unused_models = unused_model_objects(data_root, pass.owner, &BTreeSet::new());
     pass.relieve(unused_models.unwrap_or_default(), disk);
     pass.swept

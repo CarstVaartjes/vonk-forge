@@ -1273,10 +1273,44 @@ def test_installation_is_kept_while_a_profile_cannot_be_read(world: Catalog) -> 
     assert _kept(result, "profiles unreadable") == 1
 
 
+def test_a_failed_installation_nothing_uses_goes_like_an_installed_one(
+    world: Catalog,
+) -> None:
+    """Catches a failed install holding its disk for ever as "not installed"."""
+
+    old = world.revision("glm", 1)
+    world.revision("glm", 2, head="active")
+    failed, _ = world.workload(old, installation="failed", run="stopped")
+    _size(world, failed, 80 * GIB)
+    lifecycle = FakeLifecycle(world.sessions)
+
+    result = _collector(world, lifecycle).collect()
+
+    assert lifecycle.removed == [failed]
+    assert _kept(result, "not installed") == 0
+
+
+@pytest.mark.usefixtures("damaged_json_rows")
+def test_a_failed_installation_a_retry_names_is_kept(world: Catalog) -> None:
+    """Catches removing a failed install while its retry is queued."""
+
+    old = world.revision("glm", 1)
+    world.revision("glm", 2, head="active")
+    failed, _ = world.workload(old, installation="failed", run="stopped")
+    _size(world, failed, 80 * GIB)
+    world.job({"plan": {"installation_id": failed}}, state="waiting", updated=NOW)
+    lifecycle = FakeLifecycle(world.sessions)
+
+    result = _collector(world, lifecycle).collect()
+
+    assert lifecycle.removed == []
+    assert _kept(result, "live operation") == 1
+
+
 def test_installations_that_may_hold_partial_files_are_left_to_reconcile(
     world: Catalog,
 ) -> None:
-    """Partial and failed installs belong to the exact reconcile path."""
+    """Partial installs belong to the exact reconcile path."""
 
     old = world.revision("glm", 1)
     world.revision("glm", 2, head="active")

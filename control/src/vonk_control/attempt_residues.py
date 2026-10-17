@@ -408,10 +408,11 @@ class AttemptResidueReconciler:
                     continue
                 if installation_id in superseded:
                     due.append((installation_id, "superseded"))
-                elif self._quiet_since(session, nodes, now - LEFTOVER_GRACE) and (
-                    self._untouched_since(
-                        session, installation_id, now - LEFTOVER_GRACE
-                    )
+                # The grace is the installation's own: other work on its Sparks
+                # (a busy Spark always has some) does not restart it, and an
+                # operation that owns its Sparks now was skipped above.
+                elif self._untouched_since(
+                    session, installation_id, now - LEFTOVER_GRACE
                 ):
                     due.append((installation_id, "unowned-past-grace"))
         return due

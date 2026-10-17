@@ -12,7 +12,6 @@ from pydantic import TypeAdapter
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import AgentOperation as WireAgentOperation
-from vonk_agent_protocol import InstallationState
 
 from .. import model_cache_states
 from ..artifact_reference_scan import saved_profile_selectors
@@ -32,7 +31,7 @@ from ..models import (
     RecipeRun,
 )
 from ..spark_disk import spark_free_bytes
-from .common import _DEAD_RUNS, _FINISHED_JOBS, ACTOR
+from .common import _COLLECTABLE_STATES, _DEAD_RUNS, _FINISHED_JOBS, ACTOR
 
 if TYPE_CHECKING:
     from .evidence import _Evidence
@@ -44,7 +43,7 @@ def _installation_kept(
     """Why an installation stays, or ``None`` when nothing uses it."""
 
     installation = session.get(RecipeInstallation, installation_id)
-    if installation is None or installation.state != InstallationState.INSTALLED:
+    if installation is None or installation.state not in _COLLECTABLE_STATES:
         return "not installed"
     revision = session.execute(
         select(

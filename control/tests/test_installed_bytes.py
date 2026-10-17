@@ -25,9 +25,10 @@ def _sizes(world: Catalog) -> dict[str, int]:
         }
 
 
-def test_an_installed_rank_takes_its_measured_size(tmp_path: Path) -> None:
-    """Catches a size that never moves after install, or one that overwrites
-    a rank an operation is still deciding."""
+def test_an_ended_rank_takes_its_measured_size(tmp_path: Path) -> None:
+    """Catches a size that never moves after install, a failed install whose
+    bytes storage relief never sees, or one that overwrites a rank an
+    operation is still deciding."""
 
     engine = create_engine(f"sqlite:///{tmp_path / 'controller.sqlite'}")
     Base.metadata.create_all(engine)
@@ -35,23 +36,31 @@ def test_an_installed_rank_takes_its_measured_size(tmp_path: Path) -> None:
     revision = world.revision("glm", 1)
     grown, _ = world.workload(revision, run="stopped")
     failed, _ = world.workload(revision, run="stopped")
+    planned, _ = world.workload(revision, run="stopped")
     with world.sessions.begin() as session:
-        rank = session.scalar(
-            select(InstallationNode).where(InstallationNode.installation_id == failed)
-        )
-        assert rank is not None
-        rank.state = InstallationNodeState.FAILED
+        for installation_id, state in (
+            (failed, InstallationNodeState.FAILED),
+            (planned, InstallationNodeState.PLANNED),
+        ):
+            rank = session.scalar(
+                select(InstallationNode).where(
+                    InstallationNode.installation_id == installation_id
+                )
+            )
+            assert rank is not None
+            rank.state = state
     measured = [
         InstallationBytes(installation_id=grown, bytes=7_000),
         InstallationBytes(installation_id=failed, bytes=9_000),
+        InstallationBytes(installation_id=planned, bytes=3_000),
         InstallationBytes(installation_id=str(uuid.uuid4()), bytes=5),
     ]
 
     with world.sessions.begin() as session:
-        assert refresh_installed_bytes(session, NODE, measured) == 1
+        assert refresh_installed_bytes(session, NODE, measured) == 2
         # Another Spark's measurement never names this Spark's ranks.
         assert refresh_installed_bytes(session, "other-spark", measured) == 0
 
-    assert _sizes(world) == {grown: 7_000, failed: 1}
+    assert _sizes(world) == {grown: 7_000, failed: 9_000, planned: 1}
     with world.sessions.begin() as session:
         assert refresh_installed_bytes(session, NODE, measured) == 0

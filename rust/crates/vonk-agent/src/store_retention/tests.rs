@@ -162,10 +162,11 @@ fn a_model_object_an_installation_plan_names_stays_while_the_installation_does()
     assert_eq!(run(root.path(), after_grace(), &|| SHORT).entries, 1);
     assert!(object.exists() && !partial.exists());
 
-    // Uninstalled: the object has no owner left.
+    // Uninstalled: the object has no owner left, nor the one the private
+    // copy of the other file became on the first pass.
     fs::remove_dir_all(&installation).unwrap();
-    assert_eq!(run(root.path(), SystemTime::now(), &|| SHORT).entries, 1);
-    assert!(!object.exists());
+    assert_eq!(run(root.path(), SystemTime::now(), &|| SHORT).entries, 2);
+    assert!(!object.exists() && !store.join(&plan.artifacts[1].sha256).exists());
 }
 
 #[test]
