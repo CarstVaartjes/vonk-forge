@@ -16,6 +16,13 @@ def progress_line(observed: Mapping[str, object]) -> str:
     blockers = observed.get("blockers")
     first = blockers[0] if isinstance(blockers, list) and blockers else None
     if isinstance(first, Mapping):
+        behind = first.get("operation")
+        nodes = first.get("node_ids")
+        if isinstance(behind, Mapping) and isinstance(nodes, list) and nodes:
+            return (
+                f"{line} (waiting: {_text(behind.get('kind'))} "
+                f"{_text(behind.get('id'))[:8]} on {_text(nodes[0])})"
+            )
         return f"{line} (waiting: {_text(first.get('code'))})"
     return line
 

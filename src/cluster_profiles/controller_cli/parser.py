@@ -111,7 +111,7 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
                 "--yes", action="store_true", help="Confirm without asking"
             )
     upgrade = fleet_actions.add_parser(
-        "upgrade", help="Upgrade the Spark agent, one Spark at a time"
+        "upgrade", help="Upgrade the Spark agent; each Spark upgrades independently"
     )
     upgrade.set_defaults(outcome_context="mutation")
     upgrade.add_argument("selector", nargs="?", metavar="SPARK")

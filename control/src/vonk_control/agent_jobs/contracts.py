@@ -134,6 +134,15 @@ _CONTROL_OPERATIONS = frozenset(operation.value for operation in AgentOperation)
 CLAIM_LEASE_SECONDS = 30
 
 
+#: The lease a heartbeat earns when its progress advanced. The agent renews
+#: every ten seconds, far inside half of it, so a Controller restart or a
+#: network gap shorter than the rest is a wait its live owner rides out, not
+#: a lost claim. A liveness bound, never a budget: advancing work renews it on
+#: every heartbeat, a renewal without progress adds only CLAIM_LEASE_SECONDS,
+#: and only an owner that stops renewing reaches it.
+PROGRESSING_LEASE = timedelta(minutes=5)
+
+
 _GRANT_LIFETIME = timedelta(hours=1)
 
 

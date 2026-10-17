@@ -168,7 +168,10 @@ def test_a_live_legacy_dispatch_and_a_running_order_are_untouched(tmp_path) -> N
         operation = session.scalar(
             __import__("sqlalchemy")
             .select(AgentOperation)
-            .where(AgentOperation.parent_job_id == job.id)
+            .where(
+                AgentOperation.parent_job_id == job.id,
+                AgentOperation.node_id == NODE_A,
+            )
         )
         assert operation.state == "running" and operation.current_attempt == 1
         attempt = session.scalar(

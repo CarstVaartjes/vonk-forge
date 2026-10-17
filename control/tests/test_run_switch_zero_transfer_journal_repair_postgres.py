@@ -521,12 +521,20 @@ def test_startup_adds_evidence_storage_without_replacing_issued_checkpoint(
 
 @pytest.mark.parametrize("held_kind", ["parent", "node", "native"])
 def test_held_required_row_defers_without_clock_reset_and_disjoint_work_advances(
-    faulty_install, held_kind
+    faulty_install, held_kind, monkeypatch
 ):
     from concurrent.futures import ThreadPoolExecutor
+    from types import SimpleNamespace
 
+    from vonk_control import terminal_history_collection
     from vonk_control.models import AgentNode
     from vonk_control.terminal_history_collection import TerminalHistoryCollector
+
+    # This proves disjoint work advances past a held row in one pass, not how
+    # much SQL a loaded runner fits in the collector's wall-clock pass budget.
+    monkeypatch.setattr(
+        terminal_history_collection, "time", SimpleNamespace(monotonic=lambda: 0.0)
+    )
 
     from .test_terminal_history_collection import _job
 
@@ -801,6 +809,14 @@ def test_native_lease_expiry_reconciles_same_owner_when_sample_repair_is_deferre
         )
         assert attempt is not None
         deadline = attempt.lease_deadline
+    # The progressing install holds a lease longer than the repair budget, and
+    # observation goes on while it is live: its clock waits on that owner. The
+    # last look before the lapse is one retry ceiling (30 s) earlier.
+    clock[0] = deadline - timedelta(seconds=31)
+    assert (
+        try_repair_zero_transfer_journal(sessions, switch_id, clock[0])
+        == JournalRepairDisposition.DEFERRED
+    )
     clock[0] = deadline + timedelta(microseconds=1)
     # Follow only the actual fixed owner deadline; no SQL deadline surgery.
     assert planner.tick()

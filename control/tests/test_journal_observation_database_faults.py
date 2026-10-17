@@ -32,7 +32,9 @@ def test_database_observation_failure_ends_and_accepts_fresh(
 
     from .non_blocking import assert_ended_without_blocking
 
-    sessions, lifecycle, _, _planner, _, clock, nodes, _, switch, *_ = faulty_install
+    sessions, lifecycle, _, _planner, _, clock, nodes, _, switch, _, claim, *_ = (
+        faulty_install
+    )
 
     def unavailable(*args, **kwargs):
         raise OperationalError(None, None, SerializationFailure("observation conflict"))
@@ -52,7 +54,18 @@ def test_database_observation_failure_ends_and_accepts_fresh(
     from .test_profile_child_progress_projection import _measured_profile_service
 
     _, restarted = _measured_profile_service(sessions, lifecycle)
-    clock[0] = deadline
+    with sessions() as session:
+        from sqlalchemy import select
+        from vonk_control.models import AgentOperationAttempt
+
+        # The repair clock waits on the child's live owner: it runs out only
+        # once that owner stopped renewing and its progressing lease passed.
+        lease = session.scalar(
+            select(AgentOperationAttempt.lease_deadline).where(
+                AgentOperationAttempt.fence == claim.fence
+            )
+        )
+    clock[0] = max(deadline, lease)
     if expiry_fault:
         end_observer = repair._end_unproven_journal
         monkeypatch.setattr(repair, "_end_unproven_journal", unavailable)

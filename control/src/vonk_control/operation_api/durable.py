@@ -45,6 +45,7 @@ from ..models import (
     RoutePublication,
     RoutePublicationOwner,
 )
+from ..operation_blockers import OperationBlocker
 from ..operation_item_contract import OperationItem, OperationOwnerReference
 from ..operation_progress import aggregate_progress, member_progress
 from ..route_bundle_contract import RouteBundleDocument, RouteEndpointDocument
@@ -62,6 +63,7 @@ from .contracts import (
     OperationQuery,
 )
 from .diagnostics import _agent_upgrade_diagnostics, _aware
+from .lane_wait import spark_busy_blockers
 from .providers import _activity_keyset_filter, _StandaloneJobActivityProjection
 from .responses import _advertised_actions, _operation_item, _progress_projection
 from .route_snapshot import _ActiveRouteSnapshot, _stored_activation_marker
@@ -456,6 +458,7 @@ class _DurableOperationProjection:
                     for operation in operations
                 )
             }
+            waits = spark_busy_blockers(session, operations, now)
         items = [
             _operation_item(operation, attempts.get(operation.id), now=now).model_copy(
                 update={
@@ -463,6 +466,7 @@ class _DurableOperationProjection:
                     "parent_id": None,
                     "status_reason": None,
                     "node_id": operation.node_id,
+                    "blockers": waits.get(operation.id),
                     "supported_actions": self._activity_actions(
                         operation,
                         attempts.get(operation.id),
@@ -613,12 +617,14 @@ class _DurableOperationProjection:
                     session, parent_job_id, now
                 )
             }
+            waits = spark_busy_blockers(session, rows, now)
         items = [
             self._activity_item(
                 row,
                 attempts.get(row.id),
                 request_id=owners.get(row.parent_job_id),
                 resume=row.id in resume_operation_ids,
+                blockers=waits.get(row.id),
                 now=now,
             )
             for row in rows
@@ -718,6 +724,7 @@ class _DurableOperationProjection:
                     session, parent_job_id, now
                 )
             }
+            waits = spark_busy_blockers(session, rows, now)
         return OperationListPage(
             items=[
                 self._activity_item(
@@ -725,6 +732,7 @@ class _DurableOperationProjection:
                     attempts.get(row.id),
                     request_id=owners.get(row.parent_job_id),
                     resume=row.id in resume_operation_ids,
+                    blockers=waits.get(row.id),
                     now=now,
                 )
                 for row in rows
@@ -759,6 +767,9 @@ class _DurableOperationProjection:
                 attempt,
                 request_id=None if job is None else job.request_id,
                 resume=resume,
+                blockers=spark_busy_blockers(session, [operation], now).get(
+                    operation.id
+                ),
                 now=now,
             )
 
@@ -770,6 +781,7 @@ class _DurableOperationProjection:
         *,
         request_id: str | None,
         resume: bool,
+        blockers: list[OperationBlocker] | None,
         now: datetime,
     ) -> OperationItem:
         """One agent operation as a global Activity row, owned by its job."""
@@ -777,6 +789,7 @@ class _DurableOperationProjection:
         return _operation_item(operation, attempt, now=now).model_copy(
             update={
                 "created_at": _aware(operation.created_at).isoformat(),
+                "blockers": blockers,
                 "job_id": operation.parent_job_id,
                 "supported_actions": cls._activity_actions(
                     operation, attempt, resume=resume

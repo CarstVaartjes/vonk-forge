@@ -114,6 +114,7 @@ def _job_operation_response(
             available_actions=(OperationRecoveryAction.RESUME,),
             uncertain=_result_uncertain(item),
         ),
+        blockers=item.blockers or None,
     )
 
 

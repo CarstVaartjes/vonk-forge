@@ -104,9 +104,9 @@ run the Recipe's declared HTTP serving checks with `scripts/qualify-recipe
 Prepare a NAS upgrade by rerunning the development NAS command from the parent
 of the existing local `vonk-forge/` directory. Upload it and redeploy while
 keeping named volumes. For enrolled online Sparks, preview and apply the signed
-candidate from Fleet (or `vonkctl fleet upgrade`) with the one-at-a-time
-strategy; the controller verifies the canary before it queues the next Spark,
-and no SSH is required. Rerun the development Spark command only for a local
+candidate from Fleet (or `vonkctl fleet upgrade`); every Spark upgrades
+independently, each waiting only for its own running work, and no SSH is
+required. Rerun the development Spark command only for a local
 package repair, fresh installation, or controller-authorized re-enrollment.
 
 Profile retry resumes the durable operation and reuses verified NAS and
