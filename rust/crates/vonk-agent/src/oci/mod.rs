@@ -9,6 +9,7 @@ mod materialization;
 mod metadata;
 mod observation;
 mod reconciliation;
+mod relink;
 mod storage;
 
 use std::{
@@ -41,6 +42,7 @@ use vonk_agent_protocol::{
 
 pub(crate) use custody::read_persisted_plan;
 pub(crate) use observation::read_run_lifecycle;
+pub(crate) use relink::relink_private_model_copies;
 pub(crate) use storage::installation_tree_bytes;
 pub use vonk_agent_protocol::generated::RecipeRunObservationCheckpoint;
 
