@@ -81,7 +81,7 @@ def test_postgres_completed_install_is_not_reserved_twice(tmp_path, postgres_eng
     barrier = Barrier(2)
 
     def accept():
-        barrier.wait(timeout=5)
+        barrier.wait(timeout=30)
         try:
             return admission.accept_install(plan, actor="admin", now=latest)
         except InstallPlanConflict:

@@ -60,7 +60,7 @@ def test_vm_shell_bounds_contention_and_preserves_caller_arguments(
         blocked = subprocess.run(
             ["bash", "-lc", script],
             env={**os.environ, "HOME": str(tmp_path)},
-            timeout=5,
+            timeout=30,
             check=False,
         )
         assert blocked.returncode != 0
@@ -68,7 +68,7 @@ def test_vm_shell_bounds_contention_and_preserves_caller_arguments(
     fresh = subprocess.run(
         ["bash", "-lc", script],
         env={**os.environ, "HOME": str(tmp_path)},
-        timeout=5,
+        timeout=30,
         check=False,
     )
     assert fresh.returncode == 0

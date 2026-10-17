@@ -88,7 +88,7 @@ def test_asset_timeout_then_staging_recovers_the_same_shell_command(
     virtual_sleep = 'sleep() { printf "%s\\n" "$1" >> "$SLEEPS"; }; '
     argv = ["/bin/sh", "-c", virtual_sleep + command, service, "a b", "line\nbreak"]
     missing = subprocess.run(
-        argv, env=environment, check=False, capture_output=True, text=True, timeout=2
+        argv, env=environment, check=False, capture_output=True, text=True, timeout=30
     )
     assert missing.returncode == 1
     assert f"runtime-asset-timeout: {asset}; retry via restart policy" in missing.stderr
@@ -116,7 +116,7 @@ def test_asset_timeout_then_staging_recovers_the_same_shell_command(
     stage_runtime_assets(source, assets)
     sleeps.unlink()
     repaired = subprocess.run(
-        argv, env=environment, check=False, capture_output=True, text=True, timeout=2
+        argv, env=environment, check=False, capture_output=True, text=True, timeout=30
     )
     assert repaired.returncode == 0, repaired.stderr
     assert not sleeps.exists(), "present assets must execute without another wait"

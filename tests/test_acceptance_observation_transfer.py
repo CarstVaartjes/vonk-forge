@@ -253,4 +253,4 @@ def test_local_acceptance_bearer_keeps_authorization_and_retries_verified_receip
         finally:
             server.shutdown()
             server.server_close()
-            thread.join(timeout=5)
+            thread.join(timeout=30)

@@ -25,7 +25,7 @@ def _publication(monkeypatch):
     return module
 
 
-@pytest.mark.timeout(3, method="signal")
+@pytest.mark.timeout(30, method="signal")
 @pytest.mark.parametrize("reader", ["digest", "bytes"])
 def test_partial_silent_transfer_is_reaped_and_fresh_read_recovers(
     tmp_path, monkeypatch, reader
@@ -92,4 +92,4 @@ def test_partial_silent_transfer_is_reaped_and_fresh_read_recovers(
         for process in children:
             if process.poll() is None:
                 process.kill()
-                process.wait(timeout=5)
+                process.wait(timeout=30)

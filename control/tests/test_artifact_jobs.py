@@ -1904,7 +1904,7 @@ def test_blob_store_serializes_concurrent_quota_and_reconciles(tmp_path) -> None
         async def first_source():
             yield b"aaaa"
             first_streaming.set()
-            await asyncio.wait_for(release_first.wait(), timeout=5)
+            await asyncio.wait_for(release_first.wait(), timeout=30)
 
         async def second_source():
             nonlocal second_consumed
@@ -1919,7 +1919,7 @@ def test_blob_store_serializes_concurrent_quota_and_reconciles(tmp_path) -> None
                 maximum_bytes=4,
             )
         )
-        await asyncio.wait_for(first_streaming.wait(), timeout=5)
+        await asyncio.wait_for(first_streaming.wait(), timeout=30)
         usage = second_store.usage()
         assert usage.model_dump() == {
             "max_stored_bytes": 6,
@@ -2207,7 +2207,7 @@ def test_gc_cannot_delete_old_dedup_blob_during_database_attachment(
 
     def paused_attach(*args, **kwargs):
         attach_entered.set()
-        assert release_attach.wait(timeout=2)
+        assert release_attach.wait(timeout=30)
         return original_attach(*args, **kwargs)
 
     monkeypatch.setattr(service, "_attach_input", paused_attach)
@@ -2238,14 +2238,14 @@ def test_gc_cannot_delete_old_dedup_blob_during_database_attachment(
             expected_sha256=digest,
             content=content,
         )
-        assert attach_entered.wait(timeout=2)
+        assert attach_entered.wait(timeout=30)
         gc = workers.submit(gc_service.reconcile_storage)
-        assert gc_started.wait(timeout=2)
+        assert gc_started.wait(timeout=30)
         assert gc.done() is False
         assert seeded.path.is_file()
         release_attach.set()
-        assert upload.result(timeout=2).id == job.id
-        report = gc.result(timeout=2)
+        assert upload.result(timeout=30).id == job.id
+        report = gc.result(timeout=30)
 
     assert report.removed_orphan_blobs == 0
     assert seeded.path.is_file()

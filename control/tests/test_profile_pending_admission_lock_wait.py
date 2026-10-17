@@ -86,7 +86,7 @@ def test_parked_load_names_its_lock_holder_then_queues_for_the_lock(
         letting_go = threading.Timer(0.5, release.set)
         letting_go.start()
         assert profiles.tick()
-        letting_go.join(timeout=5)
+        letting_go.join(timeout=30)
     finally:
         release.set()
         holder.join(timeout=10)

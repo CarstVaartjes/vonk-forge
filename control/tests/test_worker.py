@@ -572,19 +572,19 @@ def test_stalled_clock_sample_does_not_block_watchdog_observation():
     def clock():
         if threading.get_ident() != main_thread:
             entered.set()
-            released.wait(2)
+            released.wait(30)
         return now[0]
 
     watchdog = WorkerWatchdog(timeout_seconds=30, clock=clock)
     sampling = threading.Thread(target=watchdog.beat)
     sampling.start()
     try:
-        assert entered.wait(2)
+        assert entered.wait(30)
         now[0] = 31.0
         assert watchdog.stalled()
     finally:
         released.set()
-        sampling.join(2)
+        sampling.join(30)
     assert not sampling.is_alive()
     assert not watchdog.stalled()
     now[0] += 31

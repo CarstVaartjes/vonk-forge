@@ -186,7 +186,7 @@ def _tls_request(
     # Container-local health can become ready before the published host socket.
     # Retry only connection refusal; TLS identity/authentication failures remain
     # immediate test failures once the socket accepts a connection.
-    deadline = time.monotonic() + 5
+    deadline = time.monotonic() + 30
     while True:
         try:
             connection = socket.create_connection(("127.0.0.1", port), timeout=5)

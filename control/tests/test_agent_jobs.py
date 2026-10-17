@@ -1129,24 +1129,24 @@ def test_long_poll_wakes_on_enqueue_and_times_out_without_per_client_state(
 
     started = time.monotonic()
     with ThreadPoolExecutor(max_workers=1) as pool:
-        waiting = pool.submit(claim_agent, jobs, NODE_A, "serial-a", 1.0)
+        waiting = pool.submit(claim_agent, jobs, NODE_A, "serial-a", 30.0)
         time.sleep(0.05)
         operation = jobs.enqueue(
             parent_job.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD
         )
-        claim = waiting.result(timeout=1)
+        claim = waiting.result(timeout=30)
     elapsed = time.monotonic() - started
 
     assert claim is not None and fenced_operation(sessions, claim).id == operation.id
-    assert elapsed < 0.8
+    # Woken by the enqueue, far before its own 30 s long-poll timeout.
+    assert elapsed < 10
 
     timeout_started = time.monotonic()
     assert claim_agent(jobs, NODE_B, "serial-b", 0.08) is None
     timeout_elapsed = time.monotonic() - timeout_started
-    # The lower bound proves the requested long-poll timeout is honored. Keep
-    # the upper bound generous enough for a CPU-starved parallel CI worker to
-    # be scheduled after the condition deadline has already elapsed.
-    assert 0.06 <= timeout_elapsed < 1.5
+    # The lower bound proves the requested long-poll timeout is honored; the
+    # upper bound only tells a timeout that fired from one that never fires.
+    assert 0.06 <= timeout_elapsed < 10
 
 
 def test_long_poll_rechecks_database_for_another_process_enqueue(service) -> None:

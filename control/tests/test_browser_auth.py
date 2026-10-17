@@ -400,12 +400,12 @@ def _concurrently_reserve(
     attempts_lock = threading.Lock()
 
     def reserve(subject: str) -> None:
-        start.wait(timeout=5)
+        start.wait(timeout=30)
         attempt = limiter.reserve(subject)
         with attempts_lock:
             attempts.append(attempt)
-        reserved.wait(timeout=5)
-        assert release.wait(timeout=5)
+        reserved.wait(timeout=30)
+        assert release.wait(timeout=30)
         if attempt is not None:
             limiter.fail(attempt)
 
@@ -414,11 +414,11 @@ def _concurrently_reserve(
     ]
     for thread in threads:
         thread.start()
-    start.wait(timeout=5)
-    reserved.wait(timeout=5)
+    start.wait(timeout=30)
+    reserved.wait(timeout=30)
     release.set()
     for thread in threads:
-        thread.join(timeout=5)
+        thread.join(timeout=30)
     assert all(not thread.is_alive() for thread in threads)
     return attempts
 

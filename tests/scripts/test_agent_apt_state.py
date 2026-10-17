@@ -139,7 +139,7 @@ class ConcurrentBundleR2(FakeR2):
 
     def write(self, key: str, data: bytes) -> None:
         if key.endswith(("/aptly-state.tar.gz", "/public-tree.tar.gz")):
-            self.bundle_barrier.wait(timeout=2)
+            self.bundle_barrier.wait(timeout=30)
         super().write(key, data)
 
 
@@ -153,7 +153,7 @@ class ConcurrentReadR2(FakeR2):
 
     def read(self, key: str) -> bytes:
         if key in self.concurrent_reads:
-            self.read_barrier.wait(timeout=2)
+            self.read_barrier.wait(timeout=30)
         return super().read(key)
 
 
@@ -168,9 +168,9 @@ class ConcurrentPublicR2(FakeR2):
             "dists/dev/main/binary-arm64/Packages",
             "vonk-forge-dev-archive-keyring.gpg",
         }:
-            self.ordinary_barrier.wait(timeout=2)
+            self.ordinary_barrier.wait(timeout=30)
         if key in {"dists/dev/Release", "dists/dev/Release.gpg"}:
-            self.release_barrier.wait(timeout=2)
+            self.release_barrier.wait(timeout=30)
         super().write(key, data)
 
 

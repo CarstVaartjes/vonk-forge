@@ -632,7 +632,7 @@ def test_singleton_absence_reboots_through_new_controller_processes(
         for worker in workers:
             if worker.is_alive():
                 worker.terminate()
-                worker.join(timeout=5)
+                worker.join(timeout=30)
             worker.close()
 
     with sessions() as session:

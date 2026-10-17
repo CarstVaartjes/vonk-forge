@@ -161,7 +161,7 @@ def test_one_availability_slot_serves_two_parents_sharing_one_real_build(
         for index, _ in enumerate(parents):
             assert scheduler.tick() == 1
             for future in tuple(scheduler._futures):
-                future.result(timeout=5)
+                future.result(timeout=30)
             if index == 0 and inventory != "fresh":
                 # The second parent has not selected a builder yet. Joining
                 # an already accepted exact execution needs no new capacity
@@ -221,7 +221,7 @@ def test_one_availability_slot_serves_two_parents_sharing_one_real_build(
         for _ in parents:
             assert scheduler.tick() == 1
             for future in tuple(scheduler._futures):
-                future.result(timeout=5)
+                future.result(timeout=30)
         for parent in parents:
             completed = production.service.get(parent.id)
             assert completed.state == "succeeded", completed.failure
@@ -685,7 +685,7 @@ def test_a_succeeded_build_is_adopted_after_its_preparation_retried(
         clock[0] += timedelta(seconds=6)
         assert scheduler.tick() == 1
         for future in tuple(scheduler._futures):
-            future.result(timeout=5)
+            future.result(timeout=30)
 
     def builds_started():
         with sessions() as session:

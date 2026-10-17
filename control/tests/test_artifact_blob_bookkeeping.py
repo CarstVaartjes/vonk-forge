@@ -146,7 +146,6 @@ def test_busy_quota_ends_stream_without_consuming_it_and_fresh_stream_fits(tmp_p
     """Catches blocking flock and replaying a consumed upload on admission retry."""
     import asyncio
     import fcntl
-    import time
 
     store = _store(tmp_path)
     store.usage()
@@ -159,7 +158,6 @@ def test_busy_quota_ends_stream_without_consuming_it_and_fresh_stream_fits(tmp_p
 
     with (tmp_path / "blobs" / ".quota.lock").open("a+b") as lock:
         fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-        started = time.monotonic()
         with pytest.raises(Exception):  # noqa: B017 -- any ending; effects and fresh admission are asserted below
             asyncio.run(
                 store.put_stream(
@@ -169,7 +167,7 @@ def test_busy_quota_ends_stream_without_consuming_it_and_fresh_stream_fits(tmp_p
                     maximum_bytes=1024,
                 )
             )
-        assert time.monotonic() - started < 2
+        # The lock is still held here: a blocking flock would never return.
         assert not consumed
         assert not list((tmp_path / "blobs" / ".reservations").iterdir())
         fcntl.flock(lock.fileno(), fcntl.LOCK_UN)

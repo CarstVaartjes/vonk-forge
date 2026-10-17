@@ -205,14 +205,14 @@ def test_installed_update_survives_cli_and_worker_death_with_frozen_cache_scope(
                 assert stored is not None
                 assert stored.kind == "recipe.cache.update.v2"
             process.kill()
-            process.communicate(timeout=5)
+            process.communicate(timeout=30)
         finally:
             release_response.set()
             if process.poll() is None:
                 process.kill()
-                process.communicate(timeout=5)
+                process.communicate(timeout=30)
 
-        deadline = time.monotonic() + 5
+        deadline = time.monotonic() + 30
         while (
             "POST",
             "/api/recipe/update",

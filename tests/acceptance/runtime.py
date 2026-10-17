@@ -196,7 +196,7 @@ def run_interactive(
         except ProcessLookupError:
             pass
         if status is None:
-            reap_deadline = time.monotonic() + 5
+            reap_deadline = time.monotonic() + 5  # wall-clock: grace, SIGKILL next
             child = 0
             while child != pid and time.monotonic() < reap_deadline:
                 child, _ = os.waitpid(pid, os.WNOHANG)
@@ -571,7 +571,7 @@ def https_over_command(
             except ProcessLookupError:
                 pass
         try:
-            process.wait(timeout=5)
+            process.wait(timeout=5)  # wall-clock: terminate grace; kill follows
         except subprocess.TimeoutExpired:
             try:
                 process.kill()

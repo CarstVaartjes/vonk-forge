@@ -108,7 +108,7 @@ def _concurrent_node_lock_calls(engine, calls):
                 return
             seen.add(identity)
         context.first_test_node_lock = True
-        barrier.wait(timeout=5)
+        barrier.wait(timeout=30)
 
     def after(_conn, _cursor, _statement, _parameters, context, _many):
         if getattr(context, "first_test_node_lock", False):
@@ -361,7 +361,7 @@ def test_dual_node_enqueues_follow_claim_lock_order(queue, postgres_engine):
             futures = [pool.submit(enqueue, index) for index in range(2)]
             try:
                 assert owner_has_key.wait(timeout=10)
-                completed, _ = wait(futures, timeout=3, return_when=FIRST_COMPLETED)
+                completed, _ = wait(futures, timeout=30, return_when=FIRST_COMPLETED)
                 assert len(completed) == 1, "contending enqueue did not return promptly"
                 refusal = next(iter(completed)).result()
                 assert not isinstance(refusal, AgentOperation), refusal

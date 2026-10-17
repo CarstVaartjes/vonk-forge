@@ -191,7 +191,7 @@ def test_acceptance_controller_configuration_preserves_fixed_ca_and_generation(
         "CAPTURE_ARGUMENTS": str(captured),
     }
     subprocess.run(
-        [*old_wrapper, *service["command"]], check=True, timeout=2, env=environment
+        [*old_wrapper, *service["command"]], check=True, timeout=30, env=environment
     )
     old_selected = captured.read_text().splitlines()
     assert old_selected != service["command"][1:]
@@ -214,7 +214,7 @@ def test_acceptance_controller_configuration_preserves_fixed_ca_and_generation(
     subprocess.run(
         [*historical_wrapper, *service["command"]],
         check=True,
-        timeout=2,
+        timeout=30,
         env=environment,
     )
     assert captured.read_text().splitlines() == service["command"][1:]
@@ -225,7 +225,7 @@ def test_acceptance_controller_configuration_preserves_fixed_ca_and_generation(
     subprocess.run(
         [*wrapper, *service["command"]],
         check=True,
-        timeout=2,
+        timeout=30,
         env={
             "PATH": str(executable.parent) + os.pathsep + os.defpath,
             "VONK_CONTROL_HOSTNAME": "spark.acceptance.invalid",

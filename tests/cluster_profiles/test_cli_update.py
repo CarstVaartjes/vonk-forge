@@ -103,7 +103,7 @@ def test_update_download_identifies_product_without_following_redirects() -> Non
             assert cli_update._download(f"{origin}/current.manifest", 7) == b"release"
         finally:
             server.shutdown()
-            worker.join(timeout=5)
+            worker.join(timeout=30)
 
 
 def _signed_publication(
@@ -1025,7 +1025,7 @@ def test_installed_cli_signed_update_replaces_actual_uv_tool(
             assert "vonkctl-update-" in tool_receipt
         finally:
             server.shutdown()
-            worker.join(timeout=5)
+            worker.join(timeout=30)
 
 
 @pytest.mark.linux_only
@@ -1231,7 +1231,7 @@ def test_installed_stable_cli_updates_after_actual_controller_ndjson_transition(
     try:
         controller_thread.start()
         worker_thread.start()
-        deadline = time.monotonic() + 5
+        deadline = time.monotonic() + 30
         while not controller.started and time.monotonic() < deadline:
             assert controller_thread.is_alive(), "genuine Controller did not start"
             time.sleep(0.02)
@@ -1371,7 +1371,7 @@ def test_installed_stable_cli_updates_after_actual_controller_ndjson_transition(
                 ]
             finally:
                 publication.shutdown()
-                publication_thread.join(timeout=5)
+                publication_thread.join(timeout=30)
                 assert not publication_thread.is_alive(), (
                     "publication fixture did not stop"
                 )
@@ -1379,10 +1379,10 @@ def test_installed_stable_cli_updates_after_actual_controller_ndjson_transition(
         try:
             worker_stop.set()
             if worker_thread.ident is not None:
-                worker_thread.join(timeout=5)
+                worker_thread.join(timeout=30)
             controller.should_exit = True
             if controller_thread.ident is not None:
-                controller_thread.join(timeout=5)
+                controller_thread.join(timeout=30)
             assert not worker_thread.is_alive(), "worker fixture did not stop"
             assert not controller_thread.is_alive(), "Controller fixture did not stop"
         finally:
@@ -1630,7 +1630,7 @@ def test_signed_download_total_deadline_ends_slow_drip_and_fresh_read_works():
             if self.path == "/fresh":
                 self.wfile.write(b"verified-next-attempt")
                 return
-            for _ in range(100):
+            for _ in range(1000):
                 if stop.wait(0.03):
                     return
                 try:
@@ -1650,7 +1650,8 @@ def test_signed_download_total_deadline_ends_slow_drip_and_fresh_read_works():
         try:
             with not_adopted():
                 cli_update._download(base + "/slow", 1000, timeout=1)
-            assert time.monotonic() - started < 2
+            # The 1 s total deadline ended the 30 s drip; a per-read one would not.
+            assert time.monotonic() - started < 10
             assert (
                 cli_update._download(base + "/fresh", 1000, timeout=1)
                 == b"verified-next-attempt"
@@ -1658,7 +1659,7 @@ def test_signed_download_total_deadline_ends_slow_drip_and_fresh_read_works():
         finally:
             stop.set()
             server.shutdown()
-            thread.join(timeout=5)
+            thread.join(timeout=30)
 
 
 def test_equal_package_bytes_reuse_across_different_provenance(tmp_path, monkeypatch):

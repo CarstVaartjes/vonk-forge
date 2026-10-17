@@ -160,7 +160,7 @@ def test_installed_follow_sigint_retains_exact_application_without_remote_mutati
                 )
                 < 2
             ):
-                assert process.poll() is None, process.communicate(timeout=5)
+                assert process.poll() is None, process.communicate(timeout=30)
                 assert time.monotonic() < deadline, state.calls
                 time.sleep(0.02)
             process.send_signal(signal.SIGINT)
@@ -168,7 +168,7 @@ def test_installed_follow_sigint_retains_exact_application_without_remote_mutati
         finally:
             if process.poll() is None:
                 process.kill()
-                process.communicate(timeout=5)
+                process.communicate(timeout=30)
         assert process.returncode == 130, stdout + stderr
         assert stderr == ""
         assert stdout.count("\n") == 1

@@ -81,9 +81,9 @@ def test_postgres_concurrent_replay_is_idempotent(postgres_engine: Engine) -> No
     try:
         with ThreadPoolExecutor(max_workers=2) as pool:
             first = pool.submit(record, "first")
-            assert inserted.wait(timeout=5)
+            assert inserted.wait(timeout=30)
             second = pool.submit(record, "second")
-            results = (first.result(timeout=5), second.result(timeout=5))
+            results = (first.result(timeout=30), second.result(timeout=30))
     finally:
         event.remove(postgres_engine, "after_cursor_execute", delay)
 
@@ -117,10 +117,10 @@ def test_postgres_out_of_order_commits_cannot_regress_latest(
     try:
         with ThreadPoolExecutor(max_workers=2) as pool:
             first = pool.submit(record, "first", older)
-            assert inserted.wait(timeout=5)
+            assert inserted.wait(timeout=30)
             second = pool.submit(record, "second", newer)
-            first.result(timeout=5)
-            second.result(timeout=5)
+            first.result(timeout=30)
+            second.result(timeout=30)
     finally:
         event.remove(postgres_engine, "after_cursor_execute", delay)
 

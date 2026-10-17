@@ -128,13 +128,13 @@ def _server_process(
     deadline = time.monotonic() + 60
     while not ready.exists():
         if process.poll() is not None:
-            stdout, stderr = process.communicate(timeout=5)
+            stdout, stderr = process.communicate(timeout=30)
             raise AssertionError(
                 f"Controller process exited before HTTPS startup: {stdout}{stderr}"
             )
         if time.monotonic() >= deadline:
             process.kill()
-            stdout, stderr = process.communicate(timeout=5)
+            stdout, stderr = process.communicate(timeout=30)
             raise AssertionError(
                 f"Controller process did not become ready: {stdout}{stderr}"
             )
@@ -167,7 +167,7 @@ def _wait_for_trace(
         ):
             return
         if cli_process.poll() is not None:
-            stdout, stderr = cli_process.communicate(timeout=5)
+            stdout, stderr = cli_process.communicate(timeout=30)
             raise AssertionError(
                 f"installed CLI exited before expected request: {stdout}{stderr}"
             )
@@ -292,7 +292,7 @@ def test_installed_cli_follows_same_profile_application_after_api_process_restar
                     application_path = f"/api/profile/applications/{application_id}"
                     break
             if cli_process.poll() is not None:
-                stdout, stderr = cli_process.communicate(timeout=5)
+                stdout, stderr = cli_process.communicate(timeout=30)
                 raise AssertionError(
                     f"installed CLI did not leave an accepted owner: {stdout}{stderr}"
                 )
@@ -316,7 +316,7 @@ def test_installed_cli_follows_same_profile_application_after_api_process_restar
         )
 
         first_server.kill()
-        assert first_server.wait(timeout=5) == -signal.SIGKILL
+        assert first_server.wait(timeout=30) == -signal.SIGKILL
         second_server, second_ready = _server_process(
             tmp_path=tmp_path,
             listener=listener,
@@ -435,9 +435,9 @@ def test_installed_cli_follows_same_profile_application_after_api_process_restar
     finally:
         if cli_process is not None and cli_process.poll() is None:
             cli_process.kill()
-            cli_process.communicate(timeout=5)
+            cli_process.communicate(timeout=30)
         for process in (second_server, first_server):
             if process is not None and process.poll() is None:
                 process.kill()
-                process.communicate(timeout=5)
+                process.communicate(timeout=30)
         listener.close()

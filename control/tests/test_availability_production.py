@@ -92,7 +92,7 @@ class _Service(RecipeImageAvailabilityService):
     def run_claim(self, claim: RecipeImageAvailabilityClaim) -> None:
         del claim
         self.started.set()
-        self.release.wait(5)
+        self.release.wait(30)
 
     def claim_update(self, owner: str):
         return None
@@ -107,11 +107,11 @@ class _Service(RecipeImageAvailabilityService):
 def test_scheduler_submits_durable_claim_without_waiting_for_image_io() -> None:
     service = _Service()
     scheduler = RecipeImageAvailabilityScheduler(service, max_workers=1)
-    started = time.monotonic()
     assert scheduler.tick() == 1
-    elapsed = time.monotonic() - started
-    assert elapsed < 0.5
-    assert service.started.wait(1)
+    # The claim's image I/O is still held when tick returns, so tick never
+    # waited for it; no wall-clock bound a loaded runner could exceed.
+    assert service.started.wait(30)
+    assert not any(future.done() for future in scheduler._futures)
     service.release.set()
     scheduler.close()
     assert scheduler.executor._shutdown is True
@@ -1860,7 +1860,7 @@ def test_postgres_builder_transaction_does_not_cross_session_block(
                 first_preparation = thread_id not in prepared_threads
                 prepared_threads.add(thread_id)
             if first_preparation:
-                barrier.wait(timeout=5)
+                barrier.wait(timeout=30)
             suffix = node_id[-1]
             return SimpleNamespace(
                 build_input_sha256=(suffix * 64),

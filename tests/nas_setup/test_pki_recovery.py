@@ -96,7 +96,7 @@ def test_killed_pki_publisher_replays_bound_old_template_before_new_inputs(
         stderr=subprocess.PIPE,
     )
     try:
-        deadline = time.monotonic() + 5
+        deadline = time.monotonic() + 30
         while not ready.exists():
             if child.poll() is not None:
                 pytest.fail(child.communicate()[1].decode())
@@ -104,7 +104,7 @@ def test_killed_pki_publisher_replays_bound_old_template_before_new_inputs(
                 pytest.fail("publisher did not reach PKI fault boundary")
             time.sleep(0.01)
         child.kill()
-        child.communicate(timeout=5)
+        child.communicate(timeout=30)
         if boundary == "certificate":
             with pytest.raises(ValueError, match="PKI"):
                 validate_pki_material(
@@ -133,7 +133,7 @@ def test_killed_pki_publisher_replays_bound_old_template_before_new_inputs(
     finally:
         if child.poll() is None:
             child.kill()
-            child.communicate(timeout=5)
+            child.communicate(timeout=30)
 
 
 def test_well_formed_foreign_controller_key_remains_explicit_blocker(

@@ -128,8 +128,8 @@ def test_installed_no_input_fleet_json_pipeline_is_read_only(
             except subprocess.TimeoutExpired:
                 consumer.kill()
                 cli.kill()
-                consumer.communicate(timeout=5)
-                cli.wait(timeout=5)
+                consumer.communicate(timeout=30)
+                cli.wait(timeout=30)
                 raise
 
             cli_stderr_file.seek(0)

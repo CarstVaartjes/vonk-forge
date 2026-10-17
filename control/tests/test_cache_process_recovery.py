@@ -67,7 +67,7 @@ with open(sys.argv[1], "a+b") as lock:
     assert holder.stdout is not None and holder.stdin is not None
     try:
         assert holder.stdout.readline().strip() == "locked"
-        deadline = time.monotonic() + 5
+        deadline = time.monotonic() + 30
         while time.monotonic() < deadline:
             service.tick()
             if all(
@@ -81,7 +81,7 @@ with open(sys.argv[1], "a+b") as lock:
         assert service.get_operation(eligible.id).state == "succeeded"
         for cycle in range(5):
             before = now[0]
-            deadline = time.monotonic() + 5
+            deadline = time.monotonic() + 30
             while time.monotonic() < deadline:
                 service.tick()
                 observed = service.get_operation(waiting.id)
@@ -120,8 +120,8 @@ with open(sys.argv[1], "a+b") as lock:
             assert isinstance(queued_payload, ModelCacheDownloadPayload)
             assert queued_payload.claim is None
         holder.stdin.close()
-        assert holder.wait(timeout=3) == 0
-        deadline = time.monotonic() + 3
+        assert holder.wait(timeout=30) == 0
+        deadline = time.monotonic() + 30
         while time.monotonic() < deadline:
             # Production time advances naturally. The fixture follows only a
             # genuine queued busy receipt's canonical clock, after the actual
@@ -157,7 +157,7 @@ with open(sys.argv[1], "a+b") as lock:
     finally:
         if holder.poll() is None:
             holder.stdin.close()
-            holder.wait(timeout=3)
+            holder.wait(timeout=30)
         service.close()
 
 

@@ -221,7 +221,7 @@ def test_background_recovery_is_independent_of_reads_and_requests():
         registry.start_recovery()
         try:
             # One scheduler deadline covers construction failure and repair.
-            deadline = asyncio.get_running_loop().time() + 4
+            deadline = asyncio.get_running_loop().time() + 30
             while registry.statuses()[0].reason == CapabilityReason.INITIALIZING:
                 assert asyncio.get_running_loop().time() < deadline
                 await asyncio.sleep(0.01)
@@ -303,7 +303,7 @@ def test_hung_construction_releases_owner_and_fences_late_result(boundary, monke
 
     def hang():
         entered.set()
-        assert release.wait(timeout=5)
+        assert release.wait(timeout=30)
 
     def factory():
         calls[0] += 1
@@ -334,10 +334,10 @@ def test_hung_construction_releases_owner_and_fences_late_result(boundary, monke
         construction_timeout_seconds=0.05,
     )
     try:
-        start = time.monotonic()
         owner.attempt_construction()
-        assert time.monotonic() - start < 1
-        assert entered.is_set()
+        assert entered.wait(timeout=30)
+        # The constructor is still blocked: the caller returned without it.
+        assert threads[0].is_alive()
         assert owner._lock.acquire(blocking=False)
         owner._lock.release()
         assert owner.status.next_attempt_at is not None
@@ -356,8 +356,8 @@ def test_hung_construction_releases_owner_and_fences_late_result(boundary, monke
         )
         assert independent.require_service() is fresh
         release.set()
-        assert finished.wait(timeout=1)
-        threads[0].join(timeout=1)
+        assert finished.wait(timeout=30)
+        threads[0].join(timeout=30)
         assert not threads[0].is_alive()
         now[0] += timedelta(seconds=61)
         owner.attempt_construction()
@@ -436,7 +436,7 @@ def test_cold_method_invocation_waits_for_its_bounded_constructor(monkeypatch):
             return 7
 
     def factory():
-        assert release.wait(timeout=1)
+        assert release.wait(timeout=30)
         return Service()
 
     monkeypatch.setattr(capabilities, "Event", ConstructionDone)

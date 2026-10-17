@@ -223,7 +223,7 @@ def _https_api_peer(
         finally:
             state.release_held_response.set()
             server.shutdown()
-            thread.join(timeout=2)
+            thread.join(timeout=30)
 
 
 @pytest.fixture(scope="session")
@@ -408,11 +408,11 @@ def _run_pty(
                     answer_sent = True
             elif process.poll() is not None:
                 break
-        stdout, _ = process.communicate(timeout=5)
+        stdout, _ = process.communicate(timeout=30)
     finally:
         if process.poll() is None:
             process.kill()
-            process.communicate(timeout=5)
+            process.communicate(timeout=30)
         os.close(master)
     returncode = process.returncode
     assert returncode is not None and stdout is not None

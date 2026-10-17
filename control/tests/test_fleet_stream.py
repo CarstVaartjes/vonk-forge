@@ -873,7 +873,7 @@ def test_production_stream_cancellation_during_poll_await_leaves_no_resources() 
         )
         generator = _events(stream, 0)
         consumer = asyncio.create_task(anext(generator))
-        await asyncio.wait_for(sleep_entered.wait(), timeout=1)
+        await asyncio.wait_for(sleep_entered.wait(), timeout=30)
 
         assert len(reads) == 1
         assert probe.active == 0

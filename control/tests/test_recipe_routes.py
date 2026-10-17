@@ -132,7 +132,8 @@ class OverlapPublisher(AtomicRecipeRoutePublisher):
             if publish_index == 1:
                 self._second_publish.set()
         if publish_index == 0:
-            self._second_publish.wait(timeout=0.25)
+            # A crossing window: serialized (correct) publication lets it expire.
+            self._second_publish.wait(timeout=0.25)  # wall-clock: expected expiry
         return LiteLlmGeneration(generation, digest, digest, "memory")
 
 
@@ -833,7 +834,7 @@ def test_disjoint_sqlite_withdrawals_serialize_one_global_candidate(
     with ThreadPoolExecutor(max_workers=2) as pool:
         futures = [pool.submit(withdraw, run_id) for run_id in (first_run, second_run)]
         for future in futures:
-            future.result(timeout=5)
+            future.result(timeout=30)
 
     with service.sessions() as session:
         assert [

@@ -153,7 +153,7 @@ def test_stalled_ended_parent_cannot_monopolize_unrelated_preparation(
     def prepare(_plan, _phase, *, request_key, **_kwargs):
         if request_key == old_key:
             old_entered.set()
-            assert release.wait(5)
+            assert release.wait(30)
         else:
             fresh_entered.set()
         return prepared
@@ -172,7 +172,7 @@ def test_stalled_ended_parent_cannot_monopolize_unrelated_preparation(
             request_key=old_key,
             progress=progress,
         ).waiting
-        assert old_entered.wait(1)
+        assert old_entered.wait(30)
         with executor._runtime_image_lock:
             old_future = executor._runtime_image_futures[(old_key, 2, 0)][0]
         with accepted.sessions.begin() as session:
@@ -197,10 +197,10 @@ def test_stalled_ended_parent_cannot_monopolize_unrelated_preparation(
             request_key=fresh.request_key,
             progress=progress,
         ).waiting
-        assert fresh_entered.wait(1)
+        assert fresh_entered.wait(30)
         with executor._runtime_image_lock:
             future = executor._runtime_image_futures[(fresh.request_key, 2, 0)][0]
-        assert future.result(timeout=1) == prepared
+        assert future.result(timeout=30) == prepared
         result = executor.execute(
             plan,
             phase,
