@@ -568,7 +568,7 @@ class ActionsCache:
     def __init__(self) -> None:
         self.entries: list[tuple[str, str]] = []
 
-    def restore(self, key: str, prefixes: list[str]) -> tuple[str | None, bool]:
+    def restore(self, key: str, prefixes: list[str]) -> tuple[str, bool]:
         exact = [value for name, value in self.entries if name == key]
         if exact:
             return exact[0], True
@@ -576,7 +576,7 @@ class ActionsCache:
             matched = [value for name, value in self.entries if name.startswith(prefix)]
             if matched:
                 return matched[-1], False
-        return None, False
+        return "", False
 
     def save(self, key: str, value: str) -> None:
         if all(name != key for name, _ in self.entries):
@@ -618,7 +618,7 @@ def ship_component_image(
         "steps.pr_images.outputs.reused": "true" if pr_digest else "",
         f"steps.pr_images.outputs.{role}_digest": pr_digest,
     }
-    stored = None
+    stored = ""
     post_save = []
     for step in steps:
         if "if" in step and not evaluate(step["if"], context):
