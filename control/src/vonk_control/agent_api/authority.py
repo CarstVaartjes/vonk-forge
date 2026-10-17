@@ -5,10 +5,13 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from contextlib import suppress
 
 from fastapi import APIRouter, HTTPException, Request, Response, status
+from fastapi.concurrency import run_in_threadpool
+from fastapi.exceptions import RequestValidationError
+from fastapi.routing import APIRoute
 from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
@@ -33,7 +36,7 @@ from vonk_agent_protocol.enrollment import (
 from vonk_agent_protocol.reason_codes import ControllerErrorCode as Code
 
 from ..agent_jobs import CLAIM_LEASE_SECONDS, AgentResultRefused, StaleAgentAttempt
-from ..auth import AgentIdentity
+from ..auth import AgentIdentity, agent_identity_from_scope
 from ..contract_graph import raw_json_body
 from ..enrollment import (
     EnrollmentDenied,
@@ -51,6 +54,7 @@ from ..host_helper_authority import (
     HostRuntimeEvidenceUnavailable,
     HostRuntimeGrantUnsatisfiable,
 )
+from ..logging import redact_text
 from ..models import AgentOperation, AgentOperationAttempt, Job
 from .common import (
     AgentApiServices,
@@ -70,6 +74,7 @@ from .common import (
     _require_services,
     _scope_identity,
     _validated_authenticated_source,
+    active_agent_identity,
 )
 
 
@@ -100,9 +105,58 @@ def issue_host_runtime_grant(
     )
 
 
+#: The subject a Spark's refused results are counted under: one per Spark,
+#: cleared by its next accepted result.
+RESULT_REFUSALS = "agent result"
+
+
+def _refusal_detail(error: RequestValidationError) -> str:
+    first = next(iter(error.errors()), {})
+    where = ".".join(str(part) for part in first.get("loc", ()))
+    return redact_text(f"{where}: {first.get('msg', 'invalid')}")[:256]
+
+
 def install_authority_routes(
     agent: APIRouter, services: AgentApiServices | None, limiter: EnrollmentRateLimiter
 ) -> None:
+    def note_result(request: Request, refused: str | None) -> None:
+        # A result refused on every delivery is shown as repeated evidence,
+        # never acted on; the Spark's next accepted result clears it.
+        if services is None:
+            return
+        identity = agent_identity_from_scope(dict(request.scope))
+        if identity is None or not active_agent_identity(services, identity):
+            return
+        with suppress(SQLAlchemyError), services.sessions.begin() as session:
+            if refused is None:
+                note_success(session, RESULT_REFUSALS, identity.node_id)
+            else:
+                note_repeat(
+                    session,
+                    RESULT_REFUSALS,
+                    identity.node_id,
+                    Code.INVALID_REQUEST,
+                    now=services.clock(),
+                    detail=refused,
+                )
+
+    class NotedResultRoute(APIRoute):
+        """A result body refused before the route runs is still counted."""
+
+        def get_route_handler(self) -> Callable[[Request], Awaitable[Response]]:
+            handler = super().get_route_handler()
+
+            async def noted(request: Request) -> Response:
+                try:
+                    return await handler(request)
+                except RequestValidationError as error:
+                    await run_in_threadpool(
+                        note_result, request, _refusal_detail(error)
+                    )
+                    raise
+
+            return noted
+
     def note_grant(node_id: str, subject: str, *, denied: bool) -> None:
         # A grant denied on every ask is shown as repeated evidence; the
         # answer itself is unchanged, and a granted ask clears it.
@@ -313,7 +367,6 @@ def install_authority_routes(
             raise HTTPException(status_code=409, detail=str(error)) from None
         return _json_response(AgentDirective.model_validate(response))
 
-    @agent.post("/result", status_code=status.HTTP_204_NO_CONTENT)
     def result(body: AgentResult, request: Request) -> Response:
         _scope_identity(request)
         required = _require_services(services)
@@ -364,7 +417,16 @@ def install_authority_routes(
                         source=source,
                     )
             raise HTTPException(status_code=422, detail=str(error)) from None
+        note_result(request, None)
         return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+    agent.add_api_route(
+        "/result",
+        result,
+        methods=["POST"],
+        status_code=status.HTTP_204_NO_CONTENT,
+        route_class_override=NotedResultRoute,
+    )
 
     @agent.post(
         "/renew/expired",

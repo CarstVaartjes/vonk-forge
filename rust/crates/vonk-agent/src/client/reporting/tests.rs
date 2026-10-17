@@ -224,6 +224,7 @@ async fn telemetry_rejects_empty_or_more_than_sixteen_samples_before_transport()
         identity_content: Default::default(),
         progress_phase: Default::default(),
         transfer_inactivity: TRANSFER_INACTIVITY,
+        distribution_range_bytes: DISTRIBUTION_RANGE_BYTES,
     };
     assert!(matches!(
         client.report_telemetry(&[]).await,

@@ -36,7 +36,9 @@ impl AgentHttpClient {
 
     pub async fn submit_result(&self, result: &AgentResult) -> Result<(), ClientError> {
         result.validate().map_err(|_| ClientError::Protocol)?;
-        let body = canonical_json(result).map_err(|_| ClientError::Protocol)?;
+        // The one form a result leaves the agent in: no host path in prose.
+        let sent = crate::wire_prose::wire_result(result);
+        let body = canonical_json(&sent).map_err(|_| ClientError::Protocol)?;
         let mut response = self
             .current_client()
             .await?

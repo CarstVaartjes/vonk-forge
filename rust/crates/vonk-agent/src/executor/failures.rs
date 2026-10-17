@@ -225,9 +225,22 @@ pub(super) fn runtime_observation_failure(
     } else {
         "exact workload runtime observation failed"
     };
-    let reason = match error.diagnostic() {
-        Some(detail) if !detail.is_empty() => format!("{lead}: {error}: {detail}"),
-        _ => format!("{lead}: {error}"),
+    // The reason is a typed sentence: the lead, the helper's code and the exit
+    // facts.  The workload's own words (its exception, its paths) are evidence
+    // and travel in the diagnostic and the captured streams, never here.
+    let facts = error
+        .diagnostic()
+        .map(|detail| {
+            crate::failure_evidence::exit_facts(detail)
+                .map(|(key, value)| format!("{key}={value}"))
+                .collect::<Vec<_>>()
+                .join(" ")
+        })
+        .unwrap_or_default();
+    let reason = if facts.is_empty() {
+        format!("{lead}: {error}")
+    } else {
+        format!("{lead}: {error}: {facts}")
     };
     // A process-exit failure always says what it knows: its logs, or the
     // typed reason there are none.

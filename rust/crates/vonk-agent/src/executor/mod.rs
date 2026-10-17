@@ -283,3 +283,6 @@ use heartbeat::*;
 
 #[cfg(test)]
 mod test_support;
+
+#[cfg(test)]
+mod shared_vectors_tests;
