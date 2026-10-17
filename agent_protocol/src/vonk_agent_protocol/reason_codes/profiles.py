@@ -88,6 +88,8 @@ class ProjectionCode(WireEnum):
     NETWORK_NAS_ROUTE_WIFI_WIRED_PORT_UNUSED = (
         "network.nas-route-wifi-wired-port-unused"
     )
+    #: Measured: this Spark's recent copies from the NAS are far slower than another's.
+    NETWORK_NAS_TRANSFER_SLOW = "network.nas-transfer-slow"
     NODE_OFFLINE = "node.offline"
     PROFILE_RETRYING = "profile.retrying"
     RECIPE_UPDATE_AVAILABLE = "recipe.update_available"
