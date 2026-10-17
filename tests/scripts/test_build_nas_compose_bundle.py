@@ -200,7 +200,9 @@ def test_payload_build_is_deterministic_and_refuses_to_overwrite(
     assert preserved.read_text(encoding="utf-8") == "operator data\n"
 
 
-@pytest.mark.parametrize("mutation", ("service", "image", "include", "bind", "config"))
+@pytest.mark.parametrize(
+    "mutation", ("service", "image", "include", "bind", "config", "digest")
+)
 def test_payload_build_rejects_noncanonical_compose(
     tmp_path: Path, mutation: str
 ) -> None:
@@ -218,6 +220,9 @@ def test_payload_build_rejects_noncanonical_compose(
         document["services"]["control-api"]["volumes"].append(
             "./repository:/repository:ro"
         )
+    elif mutation == "digest":
+        environment = document["services"]["control-api"]["environment"]
+        del environment["VONK_COMPOSE_BUNDLE_DIGEST"]
     else:
         document["configs"] = {"caddyfile": {"file": "./Caddyfile"}}
     compose.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")

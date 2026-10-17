@@ -25,6 +25,7 @@ from ..capability_contract import ControllerCapability
 from ..catalog_service import CatalogService
 from ..catalog_sync import ManagedRecipeCatalogSyncService, run_automatic_sync
 from ..cluster_mappings import ClusterMappingService
+from ..compose_bundle import compose_bundle
 from ..distribution_executor import CompositeDistributionPhaseExecutor
 from ..failure_evidence import FailureEvidenceService
 from ..gateway_keys import GatewayKeyService, keep_default_key
@@ -160,6 +161,7 @@ def production_app(settings: Settings | None = None) -> FastAPI:
         clock=clock,
     )
     metrics = MetricsRegistry()
+    metrics.set_compose_bundle(compose_bundle())
     operational_metrics = OperationalMetricsCollector(
         metrics,
         sessions,

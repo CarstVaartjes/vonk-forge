@@ -475,6 +475,9 @@ def test_tailscale_disabled_rollout_starts_only_the_local_service_allowlist(
     monkeypatch.setattr(acceptance, "verify_controller_tls", lambda *_args: None)
     monkeypatch.setattr(acceptance, "verify_postgres_databases", lambda *_args: None)
     monkeypatch.setattr(
+        acceptance, "verify_compose_bundle_current", lambda *_args: None
+    )
+    monkeypatch.setattr(
         acceptance,
         "verify_tailscale_services",
         lambda *_args, **_kwargs: pytest.fail("Tailscale verification was reached"),

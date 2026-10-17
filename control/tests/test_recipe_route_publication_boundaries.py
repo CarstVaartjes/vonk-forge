@@ -181,9 +181,14 @@ def test_postgres_slow_acknowledgement_outlasting_the_idle_timeout_publishes(
                 == "1s"
             )
         clock = MutableClock(NOW)
+        # Schema creation and seeding are not under test: they run without
+        # the 1 s budget, which a loaded runner can exceed between DDL
+        # statements. Only the publication runs under it.
         base, _publisher, _applied, run_id = setup(
-            tmp_path / "database", clock=clock, engine=engine
+            tmp_path / "database", clock=clock, engine=postgres_engine
         )
+        base.sessions.configure(bind=engine)
+        assert base.sessions.kw["bind"] is engine
         root = tmp_path / "live"
 
         def slow_acknowledgement(_marker: ActivationMarker) -> None:
