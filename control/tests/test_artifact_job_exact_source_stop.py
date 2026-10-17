@@ -27,11 +27,13 @@ import pytest
 from sqlalchemy import select
 from vonk_agent_protocol import AgentResult, AgentResultState, OperationProgress
 from vonk_agent_protocol.recipe_operations import RecipeStopPayload, RecipeStopResult
+from vonk_control import artifact_job_states as ajs
 from vonk_control.agent_jobs import AgentJobService, StaleAgentFence
 from vonk_control.artifact_job_evidence import (
     ArtifactJobResultEvidence,
     dump_result_evidence,
 )
+from vonk_control.lifecycle.artifact_job import ArtifactJobAdapter
 from vonk_control.models import (
     AgentOperation,
     AgentOperationAttempt,
@@ -225,6 +227,8 @@ def test_a_frozen_job_whose_order_vanished_never_holds_the_stop(tmp_path) -> Non
     with pytest.raises(StaleAgentFence):
         agent_jobs.heartbeat(job_claim, OperationProgress(phase="running"), 30)
     assert stop().state == "succeeded"
+    ArtifactJobAdapter(sessions=sessions).reconcile()
+    assert service.get(submitted.id).state in ajs.ENDED
     _activate_fresh_job_run(sessions, operations, run_id)
 
 
@@ -302,6 +306,8 @@ def test_a_job_that_names_no_issued_order_never_holds_the_stop(tmp_path) -> None
     assert stop().state == "succeeded"
     # Its order was never handed to a Spark and never is.
     assert claim_agent(agent_jobs, node_id, "serial-0") is None
+    ArtifactJobAdapter(sessions=sessions).reconcile()
+    assert service.get(submitted.id).state in ajs.ENDED
     _activate_fresh_job_run(sessions, operations, run_id)
 
 
