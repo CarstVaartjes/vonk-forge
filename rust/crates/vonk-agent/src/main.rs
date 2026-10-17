@@ -8,6 +8,11 @@ use std::{
 };
 
 use clap::{Parser, Subcommand};
+use futures_util::{
+    StreamExt,
+    future::{self, Either},
+    stream,
+};
 use url::Url;
 use vonk_agent::{
     agent_upgrade::AgentUpgradeExecutor,
@@ -21,7 +26,7 @@ use vonk_agent::{
         InventoryCollector, InventoryError, STATE_DATABASE_DISK_RESERVE_BYTES,
         disk_reserve_degraded, prepare_state_database_reserve,
     },
-    oci::OciRuntime,
+    oci::{OciRuntime, RecipeRunObservationCheckpoint},
     pair::{collect_evidence, pair},
     process::SystemProcessRunner,
     readiness::{publish_current, verify_current},
@@ -437,10 +442,8 @@ async fn run_control_lane(
                     None
                 }
             };
-            let exact_observation_result = executor
-                .recipes
-                .report_recipe_run_observation_page(checkpoint.as_ref())
-                .await;
+            let exact_observation_result =
+                report_runs(&executor.recipes, checkpoint.as_ref()).await;
             let mut empty_snapshot_safe = observation_snapshot_is_empty(&exact_observation_result);
             if let Ok(sweep) = &exact_observation_result
                 && let Err(error) = state.save_observation_checkpoint(sweep.checkpoint.as_ref())
@@ -448,14 +451,11 @@ async fn run_control_lane(
                 eprintln!("vonk-agent: run scan checkpoint not saved: {error}");
                 empty_snapshot_safe = false;
             }
-            if let Err(error) = &exact_observation_result {
-                // A failed report must not terminate the claim lane: a
-                // stop/recovery operation may already be waiting for us.
-                eprintln!("vonk-agent: exact recipe observation failed: {error}");
-            }
-            empty_snapshot_safe
+            // A failed report (already logged) replays from where it began.
+            let resume = exact_observation_result.map_or(checkpoint, |sweep| sweep.checkpoint);
+            (empty_snapshot_safe, resume)
         };
-        let Some(empty_snapshot_safe) = authority
+        let Some((empty_snapshot_safe, mut resume)) = authority
             .observe_before_claim(observation, systemd_notify::progress)
             .await
         else {
@@ -521,6 +521,13 @@ async fn run_control_lane(
             )
             .await
         };
+        // A claim may run for most of an hour (a large model download); the
+        // running workloads' evidence keeps reaching the Controller meanwhile.
+        let operation = observing_during(operation, RUN_OBSERVATION_INTERVAL, async || {
+            if let Ok(sweep) = report_runs(&executor.recipes, resume.as_ref()).await {
+                resume = sweep.checkpoint;
+            }
+        });
         match operation.await {
             Ok(()) => {
                 failures = 0;
@@ -845,6 +852,44 @@ where
     outcome
 }
 
+/// How often running workloads are re-observed while a claim executes: the
+/// active idle cadence, far inside the Controller's rank freshness window.
+const RUN_OBSERVATION_INTERVAL: Duration = Duration::from_secs(10);
+
+/// One report of every local run's evidence from `checkpoint`; a failure is
+/// logged and never ends the caller's lane.
+async fn report_runs(
+    recipes: &RecipeExecutor<'_, SystemProcessRunner>,
+    checkpoint: Option<&RecipeRunObservationCheckpoint>,
+) -> Result<RecipeObservationSweep, RecipeObservationError> {
+    let result = recipes.report_recipe_run_observation_page(checkpoint).await;
+    if let Err(error) = &result {
+        // A stop/recovery operation may already be waiting for us.
+        eprintln!("vonk-agent: exact recipe observation failed: {error}");
+    }
+    result
+}
+
+/// Run evidence never waits behind a claim: while `work` executes, `observe`
+/// repeats every `interval`, and `work` is polled throughout. The passes end
+/// with `work`; one still in flight is dropped, as reports are idempotent.
+async fn observing_during<W: Future>(
+    work: W,
+    interval: Duration,
+    observe: impl AsyncFnMut(),
+) -> W::Output {
+    let passes = stream::unfold(observe, |mut observe| async move {
+        tokio::time::sleep(interval).await;
+        observe().await;
+        Some(((), observe))
+    })
+    .for_each(|()| future::ready(()));
+    match future::select(std::pin::pin!(work), std::pin::pin!(passes)).await {
+        Either::Left((output, _)) => output,
+        Either::Right(((), work)) => work.await,
+    }
+}
+
 /// Unknown and partial zero-count pages stay on the active cadence. Only a
 /// delivered authoritative empty snapshot allows the longer idle poll.
 fn observation_snapshot_is_empty(
@@ -917,6 +962,55 @@ mod tests {
                 .all(|s| s.contains("HTTP 403") && s.contains("authority refused"))
         );
         assert!(authority.reason.is_none());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn running_workloads_are_reported_while_a_long_claim_executes() {
+        // Wrong implementation: run evidence is reported only between claims,
+        // so a 40-minute download leaves every running rank stale.
+        let started = tokio::time::Instant::now();
+        let reports = RefCell::new(Vec::new());
+        let output = super::observing_during(
+            async {
+                tokio::time::sleep(Duration::from_secs(40 * 60)).await;
+                "downloaded"
+            },
+            super::RUN_OBSERVATION_INTERVAL,
+            async || reports.borrow_mut().push(started.elapsed()),
+        )
+        .await;
+        assert_eq!(output, "downloaded");
+        let reports = reports.into_inner();
+        // The Controller calls a rank stale after five minutes of silence.
+        let mut last = Duration::ZERO;
+        for at in reports
+            .iter()
+            .copied()
+            .chain([Duration::from_secs(40 * 60)])
+        {
+            assert!(
+                at - last < Duration::from_secs(60),
+                "silent from {last:?} to {at:?}"
+            );
+            last = at;
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_slow_observation_never_holds_back_the_claim() {
+        // Wrong implementation: the claim's work is not polled while a pass
+        // is in flight, or finishes only when the pass does.
+        let started = tokio::time::Instant::now();
+        let output = super::observing_during(
+            async {
+                tokio::time::sleep(Duration::from_secs(15)).await;
+                started.elapsed()
+            },
+            super::RUN_OBSERVATION_INTERVAL,
+            async || tokio::time::sleep(Duration::from_secs(3600)).await,
+        )
+        .await;
+        assert_eq!(output, Duration::from_secs(15));
     }
 
     use super::{
