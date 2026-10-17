@@ -403,7 +403,7 @@ def test_publisher_deep_scans_local_oci_content_without_uploading_archives() -> 
         assert f"development-role-receipt-{role}-${{{{ github.sha }}}}" in publisher
     assert "Upload exact OCI archive" not in text
     # Only the pull request's image references (digests) are downloaded;
-    # archives are exported from the registry by digest, never transferred.
+    # archives come from this job's own builds, never transferred.
     steps = yaml.safe_load(text)["jobs"]["publish-development-images"]["steps"]
     downloads = [
         step["with"]
