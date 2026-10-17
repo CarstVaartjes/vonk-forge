@@ -268,6 +268,17 @@ def _payload(document: dict[str, Any], channel: str) -> dict[str, object]:
     loader.exec_module(renderer)
     renderer._resolve_runtime_images(document, channel)
     renderer._resolve_extension_images(document, channel)
+    # The Controller compares this digest with the one its image embeds, so a
+    # pulled release can tell that this Compose file is older than it.
+    environment = _mapping(
+        services["control-api"].get("environment"), "control-api environment"
+    )
+    stamped = environment.get(renderer.COMPOSE_BUNDLE_DIGEST)
+    if not isinstance(stamped, str) or re.fullmatch(r"[0-9a-f]{64}", stamped) is None:
+        raise BundleError(
+            f"Compose control-api lacks the {renderer.COMPOSE_BUNDLE_DIGEST} "
+            "that the renderer stamps"
+        )
     # Runtime configuration ships in the Controller image, so a pulled release
     # updates it. The bundle carries only Compose, .env and secrets.
     if "configs" in document:

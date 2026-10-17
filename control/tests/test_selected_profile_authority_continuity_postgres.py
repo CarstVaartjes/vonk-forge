@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import timedelta
+from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import select
@@ -19,6 +20,7 @@ from vonk_agent_protocol.runtime_preflight import (
     RuntimePreflightRequest,
     RuntimePreflightResult,
 )
+from vonk_control import terminal_history_collection
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.cluster_mappings import ClusterMappingService
 from vonk_control.fleet_profile_contract import FleetProfileInput
@@ -133,7 +135,7 @@ def _follow_due(sessions, worker, application_id, clock):
 
 @pytest.mark.parametrize("authority_change", ["disabled", "demoted"])
 def test_serving_selection_completes_stop_and_cleanup_after_author_loses_authority(
-    postgres_engine, tmp_path, authority_change
+    postgres_engine, tmp_path, authority_change, monkeypatch
 ):
     """Catches withdrawing A, losing B's receipt or gating cleanup on its author."""
     sessions, lifecycle, _queue, mapping_a, build_id, nodes = setup_services(
@@ -327,6 +329,10 @@ def test_serving_selection_completes_stop_and_cleanup_after_author_loses_authori
             author.disabled_at = NOW
         else:
             author.role = "viewer"
+    # One pass must reach the sibling; this is not a wall-clock throughput test.
+    monkeypatch.setattr(
+        terminal_history_collection, "time", SimpleNamespace(monotonic=lambda: 0.0)
+    )
     sibling = TerminalHistoryCollector(sessions, clock=lambda: clock[0])
     worker = RecipeOperationWorker(
         sessions,
