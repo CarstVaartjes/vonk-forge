@@ -160,11 +160,12 @@ class JobOperationResponse(StrictModel):
     failure: OperationFailure | None = None
     evidence_download: OperationEvidenceDownload | None = None
     recovery: OperationRecovery | None = None
+    blockers: list[OperationBlocker] | None = Field(default=None, max_length=16)
 
     @model_serializer(mode="wrap")
     def _serialize_without_unset_evidence(self, handler):
         document = handler(self)
-        for key in ("failure", "evidence_download", "recovery"):
+        for key in ("failure", "evidence_download", "recovery", "blockers"):
             if document.get(key) is None:
                 document.pop(key, None)
         return document
