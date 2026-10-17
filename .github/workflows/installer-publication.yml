@@ -3,7 +3,7 @@ name: Release
 # One release run per push: main publishes the dev channel, a signed v* tag
 # publishes the stable channel. The run verifies source CI evidence, builds only the
 # development producers whose inputs changed since an ancestor release run
-# produced them, and publishes one installer generation once everything it
+# produced them (or that the tested pull request built), and publishes one installer generation once everything it
 # needs has succeeded.
 #
 # Development agent packages are versioned X.Y.Z~dev.<seconds>+g<sha>: the
@@ -36,8 +36,8 @@ jobs:
     outputs:
       channel: ${{ steps.select.outputs.channel }}
       tested_ci: ${{ steps.tested-ci.outputs.run_id }}
-      agent: ${{ steps.select.outputs.agent }}
-      images: ${{ steps.select.outputs.images }}
+      agent: ${{ steps.pr-producers.outputs.agent }}
+      images: ${{ steps.pr-producers.outputs.images }}
       setups: ${{ steps.pr-setups.outputs.setups || steps.select.outputs.setups }}
     steps:
       - name: Check out exact release source
@@ -99,9 +99,44 @@ jobs:
             } >> "$GITHUB_STEP_SUMMARY"
           fi
 
+      - name: Take the producers the identical pull request accepted
+        id: pr-producers
+        if: steps.select.outputs.channel == 'dev'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ steps.tested-ci.outputs.run_id }}
+          AGENT: ${{ steps.select.outputs.agent }}
+          IMAGES: ${{ steps.select.outputs.images }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The pull request's Spark evidence stands only for its exact
+          # payload (release-acceptance-core.yml). An ancestor release built
+          # the same inputs at another commit, so its bytes differ: a producer
+          # the pull request built runs here and takes the pull request's.
+          names=
+          if [[ -n "$RUN_ID" ]]; then
+            names=$(gh api --paginate \
+              "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID/artifacts?per_page=100" \
+              --jq '.artifacts[] | select(.expired | not) | .name' || true)
+          fi
+          built() {
+            local name
+            for name; do grep -qx "$name" <<< "$names" || return 1; done
+          }
+          if built acceptance-agent-package acceptance-agent-baseline; then
+            AGENT=
+            echo "Agent packages are taken from pull request run $RUN_ID" >> "$GITHUB_STEP_SUMMARY"
+          fi
+          if built acceptance-image-api acceptance-image-hermes acceptance-image-litellm; then
+            IMAGES=
+            echo "Images are taken from pull request run $RUN_ID" >> "$GITHUB_STEP_SUMMARY"
+          fi
+          printf 'agent=%s\nimages=%s\n' "$AGENT" "$IMAGES" >> "$GITHUB_OUTPUT"
+
       - name: Reuse the setup programs the identical pull request built
         id: pr-setups
-        if: steps.tested-ci.outputs.run_id != '' && steps.select.outputs.setups == ''
+        if: steps.tested-ci.outputs.run_id != ''
         env:
           GH_TOKEN: ${{ github.token }}
           RUN_ID: ${{ steps.tested-ci.outputs.run_id }}

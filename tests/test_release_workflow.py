@@ -590,17 +590,76 @@ def test_main_reuses_the_setup_programs_of_the_pull_request_that_tested_its_tree
     None
 ):
     """Catches the setups producer rebuilding what the proven pull request run
-    built from the identical tree, or reusing without that proof."""
+    built from the identical tree, reusing without that proof, or preferring an
+    ancestor release's setups (other bytes than the pull request accepted)."""
     changes = load(RELEASE)["jobs"]["changes"]
     assert (
         changes["outputs"]["setups"]
         == "${{ steps.pr-setups.outputs.setups || steps.select.outputs.setups }}"
     )
     step = next(s for s in changes["steps"] if s.get("id") == "pr-setups")
-    assert step["if"] == (
-        "steps.tested-ci.outputs.run_id != '' && steps.select.outputs.setups == ''"
-    )
+    assert step["if"] == "steps.tested-ci.outputs.run_id != ''"
     assert 'scripts/resolve-pr-setups "$RUN_ID" "$GITHUB_SHA"' in step["run"]
+
+
+@pytest.mark.parametrize(
+    ("run_id", "artifacts", "agent", "images"),
+    [
+        # The pull request built both: both run here and take its bytes, so
+        # main's payload is the one its Spark lanes accepted (#1695, #1704).
+        (
+            "42",
+            [
+                "acceptance-agent-package",
+                "acceptance-agent-baseline",
+                "acceptance-image-api",
+                "acceptance-image-hermes",
+                "acceptance-image-litellm",
+            ],
+            "",
+            "",
+        ),
+        ("42", ["acceptance-agent-package", "acceptance-agent-baseline"], "", "I"),
+        # No candidate in that run (no lane selected): ancestor reuse stands.
+        ("42", ["ci-tested-source-v3"], "A", "I"),
+        ("", [], "A", "I"),
+    ],
+)
+def test_main_takes_every_producer_the_tested_pull_request_built(
+    tmp_path: Path, run_id: str, artifacts: list[str], agent: str, images: str
+) -> None:
+    """Catches main mixing an ancestor release's agent or images with the pull
+    request's other producers: same inputs, other commit stamps, so the payload
+    differs and the Spark lanes the pull request ran run again on main."""
+    changes = load(RELEASE)["jobs"]["changes"]
+    assert changes["outputs"]["agent"] == "${{ steps.pr-producers.outputs.agent }}"
+    assert changes["outputs"]["images"] == "${{ steps.pr-producers.outputs.images }}"
+    step = next(s for s in changes["steps"] if s.get("id") == "pr-producers")
+    order = [s.get("id") for s in changes["steps"]]
+    assert order.index("tested-ci") < order.index("pr-producers")
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    gh = bin_dir / "gh"
+    gh.write_text("#!/bin/sh\nprintf '%s\\n' " + " ".join(artifacts or ["''"]) + "\n")
+    gh.chmod(0o755)
+    output = tmp_path / "output"
+    result = subprocess.run(
+        ["bash", "-c", step["run"]],
+        env={
+            "PATH": f"{bin_dir}:{os.environ['PATH']}",
+            "RUN_ID": run_id,
+            "AGENT": "A",
+            "IMAGES": "I",
+            "GITHUB_REPOSITORY": "o/r",
+            "GITHUB_OUTPUT": str(output),
+            "GITHUB_STEP_SUMMARY": str(tmp_path / "summary.md"),
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert output.read_text() == f"agent={agent}\nimages={images}\n"
 
 
 def test_main_reuses_pull_request_spark_evidence_only_for_its_exact_payload() -> None:
