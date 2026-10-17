@@ -222,7 +222,7 @@ def _poll_path(
     remaining_attempts = attempts
     failures = 0
     while True:
-        if callback is not None and publish:
+        if callback is not None and publish and not fetch_initial:
             try:
                 callback(current)
             except BrokenPipeError:
