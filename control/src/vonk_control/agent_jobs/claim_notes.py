@@ -173,7 +173,9 @@ def _write_refusal_note(
     the submission's correlating fence: a late but genuinely stale heartbeat
     or result still names the current attempt and fence of an operation that
     has already concluded, and writing the note then leaves the record
-    carrying a refusal for a completed result.
+    carrying a refusal for a completed result.  The parent is annotated by
+    the same rule: a concluded order's refusal does not explain why its
+    still-open parent waits for a sibling.
     """
 
     if (
@@ -186,7 +188,9 @@ def _write_refusal_note(
         # why the operation is not progressing; a refusal must add evidence,
         # never erase it.
         operation.status_reason = reason
-    if job_id is not None:
+    if job_id is not None and (
+        operation is None or operation.state not in _CONCLUDED_OUTCOMES
+    ):
         job = session.get(Job, job_id)
         if (
             job is not None

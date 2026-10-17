@@ -594,7 +594,6 @@ def convert_due_retained_applications(
     sessions: sessionmaker[Session], now: datetime
 ) -> int:
     """Advance one bounded conversion page; the worker continues remaining pages."""
-    deadline = time.monotonic() + _SCAN_SECONDS
     converted = 0
     consumed = 0
     with sessions.begin() as session:
@@ -620,6 +619,8 @@ def convert_due_retained_applications(
             .limit(_PAGE_ROWS)
             .with_for_update(skip_locked=True)
         )
+        # The budget starts after the page query so every pass reaches a row.
+        deadline = time.monotonic() + _SCAN_SECONDS
         for row in rows:
             if time.monotonic() >= deadline or consumed >= _SCAN_BYTES:
                 break

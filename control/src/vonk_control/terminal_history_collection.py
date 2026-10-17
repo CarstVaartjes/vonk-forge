@@ -115,13 +115,15 @@ class TerminalHistoryCollector:
         now = self._clock()
         cutoff = now - GRACE
         removed: Counter[str] = Counter()
-        deadline = time.monotonic() + 2.0
         # One reference inventory per pass, never per row. Unknown references
         # defer the whole pass; the cursor is kept for the next interval.
         with self._sessions() as session:
             protected = _protected_tokens(session, now)
         if protected is None:
             return removed
+        # The budget starts after the inventory: a slow inventory must not
+        # spend every pass before its first candidate.
+        deadline = time.monotonic() + 2.0
         # Children precede parents. Never delete live descendants by cascade.
         specs = (
             (

@@ -586,6 +586,74 @@ def maintain(owner, now):
 ]
 
 
+_SETUP_SPENT_BUDGETS = [
+    # The inventory runs on the budget, so a slow one ends every pass first.
+    """
+def collect(self):
+    deadline = time.monotonic() + 2.0
+    with self._sessions() as session:
+        protected = inventory(session)
+    for row in rows:
+        if time.monotonic() >= deadline:
+            return
+""",
+    # The page query runs on the budget before its first row.
+    """
+def convert(sessions):
+    deadline = time.monotonic() + SCAN_SECONDS
+    converted = 0
+    with sessions.begin() as session:
+        rows = session.scalars(page)
+        for row in rows:
+            if time.monotonic() >= deadline:
+                break
+""",
+]
+_WORK_BUDGETS = [
+    # The budget starts after the inventory.
+    """
+def collect(self):
+    with self._sessions() as session:
+        protected = inventory(session)
+    deadline = time.monotonic() + 2.0
+    for row in rows:
+        if time.monotonic() >= deadline:
+            return
+""",
+    # A retry's first attempt is its work, not setup.
+    """
+def admit(cache):
+    deadline = time.monotonic() + BUDGET
+    while True:
+        try:
+            with cache.lock, cache.session() as session:
+                return attempt(session)
+        except Busy:
+            if time.monotonic() >= deadline:
+                raise
+""",
+    # A context that the budget itself bounds.
+    """
+def publish(storage):
+    deadline = time.monotonic() + LOCK_SECONDS
+    with storage.lock(deadline):
+        pass
+""",
+]
+
+
+@pytest.mark.parametrize("source", _SETUP_SPENT_BUDGETS)
+def test_a_pass_budget_spent_on_setup_fails_the_waits_guard(source):
+    sites = scan_source(source, path="control/src/sample.py", mode="waits")
+    assert "pass-budget-spent-on-setup" in {site.kind for site in sites}
+
+
+@pytest.mark.parametrize("source", _WORK_BUDGETS)
+def test_a_pass_budget_that_starts_at_the_work_passes_the_waits_guard(source):
+    sites = scan_source(source, path="control/src/sample.py", mode="waits")
+    assert "pass-budget-spent-on-setup" not in {site.kind for site in sites}
+
+
 @pytest.mark.parametrize("source", _FIXED_CAPS)
 def test_a_fixed_cap_that_ends_work_fails_the_waits_guard(source):
     sites = scan_source(source, path="control/src/sample.py", mode="waits")

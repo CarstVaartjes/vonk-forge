@@ -494,6 +494,35 @@ def test_inventory_budget_restart_recomputes_and_then_progresses(
         assert session.get(Job, candidate.id) is None
 
 
+def test_a_reference_inventory_slower_than_the_budget_still_advances_the_pass(
+    history_sessions: sessionmaker[Session], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Catches fixed setup spending the pass budget, so no pass ever progresses."""
+    now = datetime.now(UTC)
+    candidate = _job(now - timedelta(days=2))
+    with history_sessions.begin() as session:
+        session.add(candidate)
+    elapsed = InventoryElapsed()
+    inventory = terminal_history_collection._protected_tokens
+
+    def slow_inventory(session: Session, at: datetime) -> frozenset[str] | None:
+        elapsed.seconds += 2.1
+        return inventory(session, at)
+
+    monkeypatch.setattr(
+        terminal_history_collection,
+        "time",
+        SimpleNamespace(monotonic=elapsed.monotonic),
+    )
+    monkeypatch.setattr(
+        terminal_history_collection, "_protected_tokens", slow_inventory
+    )
+    collector = TerminalHistoryCollector(history_sessions, clock=lambda: now)
+    assert collector.collect()["jobs"] == 1
+    with history_sessions() as session:
+        assert session.get(Job, candidate.id) is None
+
+
 def test_failed_inventory_does_not_authorize_deletion_or_skip_recovery(
     history_sessions: sessionmaker[Session], slow_job_inventory: InventoryElapsed
 ) -> None:
