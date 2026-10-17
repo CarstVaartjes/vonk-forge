@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
-from datetime import timedelta
+from dataclasses import dataclass
+from datetime import datetime, timedelta
 from uuid import uuid4
 
+import pytest
 from sqlalchemy import select
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import AgentResult, LifecycleState
@@ -15,10 +17,14 @@ from vonk_control.fleet_profile_contract import (
     FleetProfileSwitchQueueItem,
 )
 from vonk_control.fleet_profiles import (
+    FleetProfileAdmissionBusy,
     FleetProfileService,
     RunSwitchFleetProfileAdapter,
+    _aware,
     _persisted_profile_progress,
 )
+from vonk_control.fleet_profiles.contracts import _FleetProfileSupersededIntentConflict
+from vonk_control.fleet_profiles.persistence import _kept_fence_ordinal
 from vonk_control.models import (
     AgentCertificate,
     AgentNode,
@@ -390,14 +396,21 @@ def test_postgres_new_profile_never_adopts_half_of_a_dual_spark_effect(postgres_
     )
 
 
-def test_postgres_waiting_load_keeps_the_lane_it_continues_and_is_admitted(
-    postgres_engine,
-):
-    """A load waiting for admission continues one lane of an older load and
-    changes the other. Fencing its changed lane must not retire the older load
-    that owns the continued lane: that made its own reviewed plan stale, and the
-    re-planned (wider) fence then read its own older ordinal as a newer intent
-    and superseded the load. It is admitted without a person, first time."""
+@dataclass
+class _WaitingContinuation:
+    """A load waiting for admission that continues lane 1 of an older load
+    (on Spark 1) and replaces its lane 2 (on Spark 2) with lane C."""
+
+    sessions: sessionmaker
+    profiles: FleetProfileService
+    clock: list[datetime]
+    lanes: list[dict]
+    original_id: str
+    original_child: str
+    waiting_id: str
+
+
+def _waiting_continuation(postgres_engine, request_key: int) -> _WaitingContinuation:
     Base.metadata.create_all(postgres_engine)
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)
     _seed(sessions)
@@ -443,7 +456,7 @@ def test_postgres_waiting_load_keeps_the_lane_it_continues_and_is_admitted(
         actor="admin",
     )
     original = profiles.apply(
-        original_profile.id, request_key=_uuid(18500), actor="admin"
+        original_profile.id, request_key=_uuid(request_key), actor="admin"
     )
     assert profiles.tick()
     original_child = profiles.application(original.id).current_operation_id
@@ -465,31 +478,184 @@ def test_postgres_waiting_load_keeps_the_lane_it_continues_and_is_admitted(
     # Admission was busy when the load was accepted: it waits for its retry.
     waiting = profiles._create_pending_application(
         review,
-        request_key=_uuid(18501),
+        request_key=_uuid(request_key + 1),
         actor="admin",
         operation_kind="fleet-profile.apply",
     )
     profiles._defer_pending_application(
         waiting.id, "initial contention", retry_delay=timedelta(0)
     )
+    return _WaitingContinuation(
+        sessions, profiles, clock, lanes, original.id, original_child, waiting.id
+    )
 
-    assert profiles._observe_pending_admissions(clock[0])
 
-    with sessions() as session:
-        row = session.get(FleetProfileApplication, waiting.id)
+def _progress(case: _WaitingContinuation, application_id: str):
+    with case.sessions() as session:
+        row = session.get(FleetProfileApplication, application_id)
         assert row is not None
-        progress = _persisted_profile_progress(row)
-        assert row.state in {"queued", "running"}, row.status_reason
-        assert not progress.admission_pending, progress.blockers
-        assert progress.workload_intent_ordinal is not None
-        older = session.get(FleetProfileApplication, original.id)
-        assert older is not None
-        # The continued lane keeps its owner and its child.
-        assert older.state != "superseded", older.status_reason
-        assert older.current_operation_id == original_child
+        return row, _persisted_profile_progress(row)
+
+
+def _retry_busy_admission(case: _WaitingContinuation, monkeypatch) -> None:
+    """One admission retry fences the load's Sparks, then finds admission busy."""
+    admit = case.profiles._queue_application
+    refused: list[bool] = []
+
+    def busy_once(*args, **kwargs):
+        if not refused:
+            refused.append(True)
+            raise FleetProfileAdmissionBusy("another admission holds the lock")
+        return admit(*args, **kwargs)
+
+    monkeypatch.setattr(case.profiles, "_queue_application", busy_once)
+    assert case.profiles._observe_pending_admissions(case.clock[0])
+    row, progress = _progress(case, case.waiting_id)
+    assert progress.admission_pending, row.status_reason
+    assert progress.admission_retry_at is not None
+    case.clock[0] = max(case.clock[0], _aware(progress.admission_retry_at))
+
+
+def test_postgres_waiting_load_keeps_the_lane_it_continues_and_is_admitted(
+    postgres_engine,
+):
+    """A load waiting for admission continues one lane of an older load and
+    changes the other. Fencing its changed lane must not retire the older load
+    that owns the continued lane: that made its own reviewed plan stale, and the
+    re-planned (wider) fence then read its own older ordinal as a newer intent
+    and superseded the load. It is admitted without a person, first time."""
+    case = _waiting_continuation(postgres_engine, 18500)
+    profiles = case.profiles
+
+    assert profiles._observe_pending_admissions(case.clock[0])
+
+    row, progress = _progress(case, case.waiting_id)
+    assert row.state in {"queued", "running"}, row.status_reason
+    assert not progress.admission_pending, progress.blockers
+    assert progress.workload_intent_ordinal is not None
+    older, _ = _progress(case, case.original_id)
+    # The continued lane keeps its owner and its child.
+    assert older.state != "superseded", older.status_reason
+    assert older.current_operation_id == case.original_child
     # Its own worker dispatches it: nobody reviews it again.
     assert profiles.tick()
-    admitted = profiles.application(waiting.id)
+    admitted = profiles.application(case.waiting_id)
     assert admitted.state == "running", admitted.status_reason
     assert admitted.current_operation_id is not None
-    assert profiles.application(original.id).current_operation_id == original_child
+    assert profiles.application(case.original_id).current_operation_id == (
+        case.original_child
+    )
+
+
+def test_postgres_waiting_load_is_admitted_when_the_lane_it_continued_ends(
+    postgres_engine, monkeypatch
+):
+    """The older owner of the continued lane ends on its own between two
+    admission retries, so the re-planned load starts that lane itself and its
+    fence widens to that Spark. The Spark it never fenced still carries the
+    older load's ordinal: that is a Spark joining the fence, not a newer intent
+    taking it. The load is admitted and starts its child, never superseded."""
+    case = _waiting_continuation(postgres_engine, 18510)
+    profiles = case.profiles
+    _retry_busy_admission(case, monkeypatch)
+    _, fenced = _progress(case, case.waiting_id)
+    assert fenced.workload_intent_ordinal is not None
+    with case.sessions.begin() as session:
+        older = session.get(FleetProfileApplication, case.original_id)
+        assert older is not None
+        profiles._lifecycle.fail(
+            older, "Lost child observation", case.clock[0], session=session
+        )
+
+    # The next retry finds the continued lane gone and plans it again (now
+    # starting that lane itself), retrying at once: a conflict re-plans.
+    assert profiles._observe_pending_admissions(case.clock[0])
+    _, replanned = _progress(case, case.waiting_id)
+    assert replanned.admission_pending
+    assert replanned.admission_retry_at is not None
+    assert _aware(replanned.admission_retry_at) <= case.clock[0]
+
+    assert profiles._observe_pending_admissions(case.clock[0])
+
+    row, progress = _progress(case, case.waiting_id)
+    assert row.state in {"queued", "running"}, row.status_reason
+    assert not progress.admission_pending, progress.blockers
+    assert not progress.blockers
+    assert progress.supersede_code is None
+    with case.sessions() as session:
+        assert {
+            node.node_id: node.workload_intent_ordinal
+            for node in session.scalars(select(AgentNode))
+        } == {
+            _node_id(1): progress.workload_intent_ordinal,
+            _node_id(2): progress.workload_intent_ordinal,
+        }
+    assert profiles.tick()
+    admitted = profiles.application(case.waiting_id)
+    assert admitted.state == "running", admitted.status_reason
+    assert admitted.current_operation_id is not None
+
+
+def test_postgres_newer_intent_on_a_fenced_spark_supersedes_the_waiting_load(
+    postgres_engine, monkeypatch
+):
+    """The inverse: a newer load accepted for a Spark the waiting load already
+    fenced is the newest request and steers; the waiting load ends superseded
+    by it and the newer load is admitted."""
+    case = _waiting_continuation(postgres_engine, 18520)
+    profiles = case.profiles
+    _retry_busy_admission(case, monkeypatch)
+    newest_profile = profiles.create(
+        FleetProfileInput.model_validate(
+            {
+                "name": "A plus D",
+                "assignments": [
+                    case.lanes[0],
+                    {**case.lanes[1], "assignment_name": "lane-d"},
+                ],
+            }
+        ),
+        actor="admin",
+    )
+    case.clock[0] += timedelta(seconds=1)
+    newest = profiles.apply(newest_profile.id, request_key=_uuid(18522), actor="admin")
+    assert newest.state in {"queued", "running"}, newest.status_reason
+
+    profiles._observe_pending_admissions(case.clock[0])
+
+    row, progress = _progress(case, case.waiting_id)
+    assert row.state == "superseded", row.status_reason
+    assert progress.supersede_code == "superseded-by-intent"
+    assert progress.superseded_by == newest.id
+    assert profiles.application(newest.id).state in {"queued", "running"}
+
+
+def _sparks(**ordinals: int) -> list[AgentNode]:
+    return [
+        AgentNode(node_id=node_id, workload_intent_ordinal=ordinal)
+        for node_id, ordinal in ordinals.items()
+    ]
+
+
+@pytest.mark.parametrize(
+    ("ordinals", "fenced", "kept"),
+    [
+        # Every Spark it fenced still carries its ordinal: it keeps it.
+        ({"a": 4, "b": 4}, ["a", "b"], 4),
+        # A Spark joined the fence, older owner numbered higher or lower:
+        # it fences anew.
+        ({"a": 4, "b": 9}, ["a"], None),
+        ({"a": 4, "b": 1}, ["a"], None),
+        # The fence narrowed: what is left is still its own.
+        ({"a": 4}, ["a", "b"], 4),
+        # Recorded before the fence was: it fences anew.
+        ({"a": 4}, [], None),
+    ],
+)
+def test_a_spark_joining_a_waiting_fence_is_no_newer_intent(ordinals, fenced, kept):
+    assert _kept_fence_ordinal(_sparks(**ordinals), 4, fenced) == kept
+
+
+def test_a_spark_the_waiting_load_fenced_and_lost_supersedes_it():
+    with pytest.raises(_FleetProfileSupersededIntentConflict):
+        _kept_fence_ordinal(_sparks(a=5, b=9), 4, ["a"])

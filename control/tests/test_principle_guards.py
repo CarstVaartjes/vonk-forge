@@ -1050,3 +1050,84 @@ def test_no_load_is_ordered_by_another_loads_ordinal_anywhere():
     ]
     assert len(sources) > 100  # the scan sees the Controller
     assert sites == []
+
+
+#: Names that mark code deciding for a load still waiting for admission.
+_WAITING_LOAD = {"pending_ordinal", "_owns_pending_admission", "admission_pending"}
+
+
+def _waiting_fence_identity_checks(source: str) -> list[int]:
+    """Lines where waiting-load code compares a Spark's ordinal with the load's.
+
+    A waiting load's fence can widen when its plan changes: a Spark joining it
+    still carries its older owner's ordinal, which is no newer intent.  Only
+    ``_kept_fence_ordinal`` tells a Spark the load fenced and lost from one
+    that joined, so such code calls it instead of comparing ordinals itself.
+    """
+
+    def ordinal(node: ast.expr) -> bool:
+        name = node.id if isinstance(node, ast.Name) else getattr(node, "attr", "")
+        return name.endswith("ordinal")
+
+    def node_row(node: ast.expr) -> bool:
+        return (
+            isinstance(node, ast.Attribute)
+            and "node" in ast.unparse(node.value).lower()
+        )
+
+    lines = []
+    for function in ast.walk(ast.parse(source)):
+        if not isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        names = {
+            getattr(node, "id", None) or getattr(node, "attr", None)
+            for node in ast.walk(function)
+        }
+        if not names & _WAITING_LOAD:
+            continue
+        for compare in ast.walk(function):
+            if not isinstance(compare, ast.Compare):
+                continue
+            operands = [compare.left, *compare.comparators]
+            for op, left, right in zip(compare.ops, operands, operands[1:]):
+                if (
+                    isinstance(op, (ast.Eq, ast.NotEq))
+                    and ordinal(left)
+                    and ordinal(right)
+                    and node_row(left) != node_row(right)
+                ):
+                    lines.append(compare.lineno)
+    return sorted(set(lines))
+
+
+def test_a_waiting_load_comparing_its_sparks_ordinals_fails_the_guard():
+    compared = (
+        "def resume(progress, nodes):\n"
+        "    assert progress.admission_pending\n"
+        "    ordinal = progress.workload_intent_ordinal\n"
+        "    return any(node.workload_intent_ordinal != ordinal for node in nodes)\n"
+    )
+    decided = (
+        "def resume(progress, nodes):\n"
+        "    assert progress.admission_pending\n"
+        "    return _kept_fence_ordinal(nodes, progress.workload_intent_ordinal, [])\n"
+    )
+    admitted = (
+        "def owns(progress, node):\n"
+        "    return node.workload_intent_ordinal == progress.workload_intent_ordinal\n"
+    )
+    assert _waiting_fence_identity_checks(compared) == [4]
+    assert _waiting_fence_identity_checks(decided) == []
+    assert _waiting_fence_identity_checks(admitted) == []
+
+
+def test_no_waiting_load_reads_a_joining_spark_as_a_newer_intent_anywhere():
+    """Whole Controller: a conflict re-plans, never loops (#1712 follow-up)."""
+    sources = sorted((ROOT / "control/src/vonk_control").rglob("*.py"))
+    sites = [
+        f"{path.relative_to(ROOT).as_posix()}:{line}"
+        for path in sources
+        for line in _waiting_fence_identity_checks(path.read_text())
+    ]
+    assert len(sources) > 100  # the scan sees the Controller
+    assert sites == []

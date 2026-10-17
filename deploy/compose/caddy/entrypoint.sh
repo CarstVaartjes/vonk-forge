@@ -94,6 +94,13 @@ if [ "${#proxy_auth}" -lt 32 ]; then
 fi
 export VONK_AGENT_PROXY_AUTH="$proxy_auth"
 if [ "$#" -eq 0 ]; then
-  set -- caddy run --config /run/vonk-runtime-assets/caddy/Caddyfile --adapter caddyfile
+  # Compose restarts Caddy as soon as control-api starts, before its pre-exec
+  # restages this release's Caddyfile, so a start alone serves the previous
+  # release's routes. --watch rereads the file every second and applies a
+  # change in-process, with admin still off. A file that fails to load or
+  # apply is logged and the running routes keep serving; one that fails to
+  # parse also ends the watch, which the next start resumes. This script, and
+  # the variables it exports, apply from the next start.
+  set -- caddy run --config /run/vonk-runtime-assets/caddy/Caddyfile --adapter caddyfile --watch
 fi
 exec "$@"
