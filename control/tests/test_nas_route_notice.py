@@ -33,7 +33,10 @@ def test_notice_names_the_route_and_the_wired_port_state() -> None:
     notice = nas_route_notice([port, wifi], "wlP9s9")
     assert notice is not None
     assert "unknown" not in notice.detail
-    assert "Wi-Fi (wlP9s9, shared airtime)" in notice.detail
+    assert "Wi-Fi (wlP9s9)." in notice.detail
+    # Nothing measured a rate: the notice states the route, not a slowness.
+    assert "airtime" not in notice.detail
+    assert "throughput" not in notice.detail
     assert nas_route_notice([port, wifi], "enP7s7") is None
     assert nas_route_notice(None, "wlP9s9") is None
 
