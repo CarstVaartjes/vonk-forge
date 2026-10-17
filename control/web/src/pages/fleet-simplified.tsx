@@ -211,7 +211,7 @@ export function FleetPage({ api }: { api: ControlApi; onBusyChange?(busy: boolea
       {upgrading && (
         <ConfirmDialog
           title="Upgrade every Spark agent?"
-          consequence="Agents upgrade one Spark at a time and restart. Running recipes keep serving unless a Spark reports a problem."
+          consequence="Each Spark's agent upgrades as soon as that Spark is free, then restarts. Running recipes keep serving unless a Spark reports a problem."
           confirmLabel="Upgrade agents"
           command="vonkctl fleet upgrade --all --yes"
           busy={upgradeBusy}
