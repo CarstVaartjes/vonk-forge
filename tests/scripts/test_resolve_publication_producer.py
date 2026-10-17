@@ -376,7 +376,7 @@ def crate_closure(crates: set[str]) -> set[str]:
 
 def crate_inputs(crate: str) -> set[str]:
     """What building and testing the crate reads outside its own directory."""
-    inputs: set[str] = set()
+    inputs: set[str | None] = set()
     directory = ROOT / crate
     for source in directory.rglob("*.rs"):
         text = source.read_text()
@@ -388,7 +388,7 @@ def crate_inputs(crate: str) -> set[str]:
             # Build scripts name their declared inputs from the repository root.
             for literal in re.findall(r'"([\w.-]+/[\w./-]+)"', text):
                 inputs.add(input_pattern(ROOT / literal))
-    return {path for path in inputs - {None} if not path.startswith("rust/crates/")}
+    return {path for path in inputs if path and not path.startswith("rust/crates/")}
 
 
 def local_output(path: str) -> bool:
@@ -450,9 +450,13 @@ def declared_contract_inputs() -> set[str]:
     for node in ast.walk(tree):
         if (
             isinstance(node, ast.AnnAssign)
+            and node.value is not None
             and getattr(node.target, "id", "") == "INPUTS"
         ):
-            return {input_pattern(ROOT / path) for path in ast.literal_eval(node.value)}
+            patterns = {
+                input_pattern(ROOT / path) for path in ast.literal_eval(node.value)
+            }
+            return {pattern for pattern in patterns if pattern}
     raise AssertionError("tools/generated_contracts.py declares no INPUTS")
 
 
