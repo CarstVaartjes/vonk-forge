@@ -8,8 +8,10 @@ import httpx2
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
+from vonk_agent_protocol import canonical_message
 from vonk_agent_protocol.contracts import AgentUpgradeResult
 from vonk_agent_protocol.package_upgrade import PackageActivationOutcome
+from vonk_agent_protocol.recipe_operations import RecipeStopResult
 from vonk_control import agent_operation_states as aos
 from vonk_control import job_states
 from vonk_control.agent_jobs import AgentJobService
@@ -39,6 +41,7 @@ from vonk_control.models import (
 )
 
 from .agent_fences import fenced_attempt, fenced_operation
+from .recipe_stop_fixtures import recipe_stop_payload
 
 NODE_A = "spk_" + "a" * 32
 NODE_B = "spk_" + "b" * 32
@@ -201,7 +204,10 @@ def test_repair_plan_binds_manifest_but_dispatches_current_source_bound_package_
     assert job.payload["repair_manifest"] == REPAIR_MANIFEST
     with sessions() as session:
         operation = session.scalar(
-            select(AgentOperation).where(AgentOperation.parent_job_id == job.id)
+            select(AgentOperation).where(
+                AgentOperation.parent_job_id == job.id,
+                AgentOperation.node_id == NODE_A,
+            )
         )
         assert operation is not None
         assert {key: operation.payload[key] for key in REPAIR_PACKAGE} == REPAIR_PACKAGE
@@ -295,58 +301,59 @@ def test_repair_manifest_requires_canonical_immutable_url_and_latest_request_lea
     assert job.payload["package"] == changed_package
 
 
-def test_rollout_queues_only_one_spark_until_new_identity_is_proven(tmp_path) -> None:
-    now = datetime(2026, 8, 27, tzinfo=UTC)
-    engine = create_engine(f"sqlite:///{tmp_path / 'upgrades.sqlite'}")
-    Base.metadata.create_all(engine)
-    sessions = sessionmaker(engine, expire_on_commit=False)
-    with sessions.begin() as session:
-        for node_id, serial in ((NODE_A, "serial-a"), (NODE_B, "serial-b")):
-            session.add(
-                AgentNode(
-                    node_id=node_id,
-                    state="active",
-                    architecture="linux-arm64",
-                    semantic_version="0.1.0",
-                    build_digest=OLD_IDENTITY["build_digest"],
-                    binary_digest=OLD_IDENTITY["binary_digest"],
-                    last_seen_at=now,
-                )
-            )
-            session.add(
-                AgentCertificate(
-                    serial=serial,
-                    node_id=node_id,
-                    not_before=now - timedelta(minutes=1),
-                    not_after=now + timedelta(hours=8),
-                    fingerprint=f"fingerprint-{serial}",
-                )
-            )
-    operations = AgentJobService(sessions, clock=lambda: now)
-    upgrades = AgentUpgradeService(
-        sessions,
-        operations,
-        clock=lambda: now,
-    )
-    operations.set_result_consumer(upgrades.consume_agent_result)
-    plan = upgrades.preview(None, PACKAGE_MODEL)
-    assert plan.node_ids == (NODE_A, NODE_B)
-    job = upgrades.apply(
-        None,
-        PACKAGE_MODEL,
-        plan_digest=plan.plan_digest,
-        actor="admin",
-        request_id=str(uuid.uuid4()),
-    )
+def test_every_spark_upgrades_independently_of_a_busy_one(tmp_path) -> None:
+    """Two targets, one busy: the free one upgrades at once, the busy one after.
 
-    assert _operation_nodes(sessions, job.id) == [NODE_A]
-    _upgrade_node(operations, NODE_A, "serial-a")
+    Catches a rollout that materializes one Spark at a time, so a Spark busy
+    with other work holds every other Spark back.
+    """
+
+    sessions, operations, _upgrades, job = _rollout(tmp_path, "one-busy")
+    intent = {"workload_intent_ordinal": 1}
+    stop_job = Job(
+        request_id=str(uuid.uuid4()),
+        kind="agent.operations",
+        state="queued",
+        actor="operator",
+        authority_revision=REVISION,
+        targets=[NODE_A],
+        payload_digest=hashlib.sha256(canonical_message(intent)).hexdigest(),
+        payload=intent,
+        current_attempt=0,
+        created_at=datetime(2026, 8, 27, tzinfo=UTC),
+        updated_at=datetime(2026, 8, 27, tzinfo=UTC),
+    )
+    with sessions.begin() as session:
+        session.add(stop_job)
+        node_a = session.get(AgentNode, NODE_A)
+        assert node_a is not None
+        node_a.workload_intent_ordinal = 1
+    # Spark A is busy: it runs a Stop that holds its claim lane.
+    stop_payload = recipe_stop_payload(NODE_A, plan_digest=REVISION)
+    stop = operations.enqueue(
+        stop_job.id, NODE_A, "recipe.stop", REVISION, stop_payload
+    )
+    with sessions.begin() as session:
+        queued_stop = session.get(AgentOperation, stop.id)
+        assert queued_stop is not None
+        # The Stop was already there when the rollout was requested.
+        queued_stop.created_at -= timedelta(minutes=1)
+    busy = _claim_upgrade(operations, NODE_A, "serial-a", OLD_IDENTITY)
+    assert fenced_operation(sessions, busy).id == stop.id
+
+    # Both Sparks have their own order at once.
     assert set(_operation_nodes(sessions, job.id)) == {NODE_A, NODE_B}
+    assert operations.claim(NODE_A, "serial-a", runtime_identity=OLD_IDENTITY) is None
+
+    # The free Spark does not wait for the busy one.
+    _upgrade_node(operations, NODE_B, "serial-b")
     with sessions() as session:
         stored = session.get(Job, job.id)
         assert stored is not None and stored.state == "queued"
 
-    _upgrade_node(operations, NODE_B, "serial-b")
+    # Once the busy Spark's own work ends, it upgrades too.
+    operations.succeed(busy, RecipeStopResult())
+    _upgrade_node(operations, NODE_A, "serial-a")
     with sessions() as session:
         stored = session.get(Job, job.id)
         assert stored is not None and stored.state == "succeeded"
@@ -419,12 +426,11 @@ def test_failed_install_retries_behind_fence_without_budget_while_rollout_contin
         assert parent is not None and parent.state == "succeeded"
 
 
-def test_fenced_retry_waits_while_another_spark_is_installing(tmp_path) -> None:
-    """Two Sparks never install at once, even when a fenced retry comes due.
+def test_fenced_retry_never_waits_for_another_spark_installing(tmp_path) -> None:
+    """A Spark's due retry is dispatched while another Spark is installing.
 
-    Catches a claim guard that only looks at a sibling's ``running`` state in
-    the same rollout: once the next Spark has handed off to the helper it is
-    awaiting its new identity, and the failed Spark's retry must still wait.
+    Catches a claim guard that still holds every Spark behind the one in
+    flight: each Spark's install waits only for its own Spark.
     """
 
     clock = Clock()
@@ -436,40 +442,11 @@ def test_fenced_retry_waits_while_another_spark_is_installing(tmp_path) -> None:
     clock.advance(seconds=950)
     second = _claim_upgrade(operations, NODE_B, "serial-b", OLD_IDENTITY)
     clock.advance(seconds=10)
-    # Spark B is running its install: Spark A's due retry waits.
-    assert (
-        operations.claim(
-            NODE_A,
-            "serial-a",
-            runtime_identity=OLD_IDENTITY,
-        )
-        is None
-    )
-    # Spark B handed off to its helper and awaits its new identity.
-    operations.succeed(second, AgentUpgradeResult.model_validate(_target_evidence()))
-    assert (
-        operations.claim(
-            NODE_A,
-            "serial-a",
-            runtime_identity=OLD_IDENTITY,
-        )
-        is None
-    )
-    # Spark B proves the exact target: Spark A's retry is dispatched.
-    assert (
-        operations.claim(
-            NODE_B,
-            "serial-b",
-            runtime_identity={
-                **NEW_IDENTITY,
-                "package_activation": {**ACTIVATION_RECEIPT, "node_id": NODE_B},
-            },
-        )
-        is None
-    )
+    # Spark B is running its install; Spark A's due retry goes ahead.
     retry = _claim_upgrade(operations, NODE_A, "serial-a", OLD_IDENTITY)
     assert fenced_operation(sessions, retry).id == fenced_operation(sessions, first).id
     assert fenced_attempt(sessions, retry).attempt == 2
+    assert fenced_operation(sessions, second).node_id == NODE_B
     with sessions() as session:
         parent = session.get(Job, job.id)
         assert parent is not None and parent.state == "queued"
@@ -491,7 +468,10 @@ def test_controller_recovery_fence_survives_restart_without_a_retry_budget(
     assert _AGENT_UPGRADE_RECOVERY_FENCE == timedelta(seconds=960)
     with sessions() as session:
         operation = session.scalar(
-            select(AgentOperation).where(AgentOperation.parent_job_id == job.id)
+            select(AgentOperation).where(
+                AgentOperation.parent_job_id == job.id,
+                AgentOperation.node_id == NODE_A,
+            )
         )
         assert operation is not None
         attempt = session.scalar(
@@ -556,7 +536,10 @@ def test_source_binary_drift_prevents_dispatch(tmp_path) -> None:
     )
     with sessions() as session:
         operation = session.scalar(
-            select(AgentOperation).where(AgentOperation.parent_job_id == job.id)
+            select(AgentOperation).where(
+                AgentOperation.parent_job_id == job.id,
+                AgentOperation.node_id == NODE_A,
+            )
         )
         assert operation is not None
         assert operation.current_attempt == 0
@@ -581,7 +564,10 @@ def test_operator_resume_requeues_agent_operation_without_resetting_plan_or_audi
     with sessions() as session:
         before = session.get(Job, job.id)
         operation = session.scalar(
-            select(AgentOperation).where(AgentOperation.parent_job_id == job.id)
+            select(AgentOperation).where(
+                AgentOperation.parent_job_id == job.id,
+                AgentOperation.node_id == NODE_A,
+            )
         )
         assert before is not None and operation is not None
         immutable = (
@@ -612,7 +598,10 @@ def test_operator_resume_requeues_agent_operation_without_resetting_plan_or_audi
     with sessions() as session:
         resumed = session.get(Job, job.id)
         operation = session.scalar(
-            select(AgentOperation).where(AgentOperation.parent_job_id == job.id)
+            select(AgentOperation).where(
+                AgentOperation.parent_job_id == job.id,
+                AgentOperation.node_id == NODE_A,
+            )
         )
         assert resumed is not None and operation is not None
         assert resumed.state == "queued"
@@ -832,7 +821,10 @@ def test_resume_quiesces_stale_old_identity_without_duplicate_mutation(
     with sessions() as session:
         parent = session.get(Job, job.id)
         operation = session.scalar(
-            select(AgentOperation).where(AgentOperation.parent_job_id == job.id)
+            select(AgentOperation).where(
+                AgentOperation.parent_job_id == job.id,
+                AgentOperation.node_id == NODE_A,
+            )
         )
         assert operation is not None
         attempts = list(
@@ -869,7 +861,10 @@ def test_resume_rejects_legacy_running_worker_dispatch_before_lease_deadline(
     with sessions() as session:
         parent = session.get(Job, job.id)
         operation = session.scalar(
-            select(AgentOperation).where(AgentOperation.parent_job_id == job.id)
+            select(AgentOperation).where(
+                AgentOperation.parent_job_id == job.id,
+                AgentOperation.node_id == NODE_A,
+            )
         )
         worker_attempt = session.scalar(
             select(JobAttempt).where(JobAttempt.job_id == job.id)
@@ -897,7 +892,10 @@ def test_resume_recovers_expired_legacy_running_worker_without_duplicate(
     with sessions() as session:
         parent = session.get(Job, job.id)
         operation = session.scalar(
-            select(AgentOperation).where(AgentOperation.parent_job_id == job.id)
+            select(AgentOperation).where(
+                AgentOperation.parent_job_id == job.id,
+                AgentOperation.node_id == NODE_A,
+            )
         )
         assert operation is not None
         worker_attempt = session.scalar(
@@ -930,7 +928,10 @@ def test_resume_recovers_expired_legacy_running_worker_without_duplicate(
     with sessions() as session:
         parent = session.get(Job, job.id)
         operation = session.scalar(
-            select(AgentOperation).where(AgentOperation.parent_job_id == job.id)
+            select(AgentOperation).where(
+                AgentOperation.parent_job_id == job.id,
+                AgentOperation.node_id == NODE_A,
+            )
         )
         assert parent is not None and parent.state == "queued"
         assert operation is not None and operation.current_attempt == 1
@@ -956,7 +957,10 @@ def test_waiting_upgrade_resume_rejects_live_delayed_worker_fence(tmp_path) -> N
             select(JobAttempt).where(JobAttempt.job_id == job.id)
         )
         operation = session.scalar(
-            select(AgentOperation).where(AgentOperation.parent_job_id == job.id)
+            select(AgentOperation).where(
+                AgentOperation.parent_job_id == job.id,
+                AgentOperation.node_id == NODE_A,
+            )
         )
         assert parent is not None and parent.state == "queued"
         assert worker_attempt is not None and worker_attempt.state == "running"
@@ -1064,10 +1068,13 @@ def test_success_result_cannot_advance_without_exact_fresh_agent_identity(
         is None
     )
 
-    assert _operation_nodes(sessions, job.id) == [NODE_A]
+    assert set(_operation_nodes(sessions, job.id)) == {NODE_A, NODE_B}
     with sessions() as session:
         operation = session.scalar(
-            select(AgentOperation).where(AgentOperation.parent_job_id == job.id)
+            select(AgentOperation).where(
+                AgentOperation.parent_job_id == job.id,
+                AgentOperation.node_id == NODE_A,
+            )
         )
         stored = session.get(Job, job.id)
         # The unproven handoff keeps this Spark in flight; it is retried
@@ -1096,7 +1103,10 @@ def test_success_result_uses_signed_digests_over_version_metadata(tmp_path) -> N
 
     with sessions() as session:
         operation = session.scalar(
-            select(AgentOperation).where(AgentOperation.parent_job_id == job.id)
+            select(AgentOperation).where(
+                AgentOperation.parent_job_id == job.id,
+                AgentOperation.node_id == NODE_A,
+            )
         )
         stored = session.get(Job, job.id)
         assert operation is not None and operation.state == "succeeded"
@@ -1221,13 +1231,13 @@ def test_queued_exact_target_contact_settles_without_inventing_an_install_attemp
     assert set(_operation_nodes(sessions, job.id)) == {NODE_A, NODE_B}
 
 
-def test_sequential_rollout_preserves_first_success_when_next_target_drifted(
+def test_a_waiting_order_whose_spark_drifts_ineligible_is_skipped(
     tmp_path,
 ) -> None:
     drift, reason = "revoked", "is not active"
     clock = Clock()
     sessions, operations, _upgrades, job = _rollout(
-        tmp_path, f"next-target-{drift}", clock=clock
+        tmp_path, f"waiting-target-{drift}", clock=clock
     )
     first = _claim_upgrade(operations, NODE_A, "serial-a", OLD_IDENTITY)
     with sessions.begin() as session:
@@ -1239,23 +1249,25 @@ def test_sequential_rollout_preserves_first_success_when_next_target_drifted(
         operations.claim(
             NODE_A,
             "serial-a",
-            runtime_identity=NEW_IDENTITY,
+            runtime_identity={
+                **NEW_IDENTITY,
+                "package_activation": {**ACTIVATION_RECEIPT, "node_id": NODE_A},
+            },
         )
         is None
     )
 
     with sessions() as session:
-        operations_for_job = list(
-            session.scalars(
+        states = {
+            operation.node_id: operation.state
+            for operation in session.scalars(
                 select(AgentOperation).where(AgentOperation.parent_job_id == job.id)
             )
-        )
+        }
         stored = session.get(Job, job.id)
         # The Spark that can no longer take the package is skipped and named;
-        # it does not park the rollout for an operator.
-        assert len(operations_for_job) == 1
-        assert operations_for_job[0].node_id == NODE_A
-        assert operations_for_job[0].state == "succeeded"
+        # its never-attempted order is withdrawn, and the rollout finishes.
+        assert states == {NODE_A: "succeeded", NODE_B: "cancelled"}
         assert stored is not None and stored.state == "succeeded"
         assert stored.result == {"skipped": {NODE_B: reason}}
         assert f"Spark {NODE_B} {reason}" in (stored.status_reason or "")
@@ -1671,7 +1683,9 @@ def _rollout(
     database_name: str,
     *,
     clock=None,
+    offline: tuple[str, ...] = (),
 ):
+    """Apply a two-Spark rollout; an ``offline`` Spark is deferred by it."""
     now = datetime(2026, 8, 27, tzinfo=UTC) if clock is None else clock()
     service_clock = (lambda: now) if clock is None else clock
     engine = create_engine(f"sqlite:///{tmp_path / f'{database_name}.sqlite'}")
@@ -1687,7 +1701,9 @@ def _rollout(
                     semantic_version="0.1.0",
                     build_digest=OLD_IDENTITY["build_digest"],
                     binary_digest=OLD_IDENTITY["binary_digest"],
-                    last_seen_at=now,
+                    last_seen_at=now - timedelta(hours=1)
+                    if node_id in offline
+                    else now,
                 )
             )
             session.add(
@@ -1788,7 +1804,7 @@ def test_exact_candidate_contact_requires_acknowledged_matching_root_receipt(
         )
         is None
     )
-    assert _operation_nodes(sessions, job.id) == [NODE_A]
+    assert set(_operation_nodes(sessions, job.id)) == {NODE_A, NODE_B}
     with sessions() as session:
         parent = session.get(Job, job.id)
         assert parent is not None and parent.state != "succeeded"
@@ -1913,8 +1929,8 @@ def test_rollback_retry_survives_repeated_receipt_and_acknowledges_new_attempt(
     monkeypatch.setattr(
         "vonk_control.agent_upgrades.dispatch.secrets.token_hex", lambda _: "8" * 64
     )
-    # The second Spark upgrades while the first waits out recovery; the
-    # first's retry holds until that in-flight install settles.
+    # The second Spark upgrades while the first waits out recovery, and the
+    # first's retry does not wait for it.
     assert (
         operations.claim(
             NODE_B,
@@ -1923,7 +1939,8 @@ def test_rollback_retry_survives_repeated_receipt_and_acknowledges_new_attempt(
         )
         is not None
     )
-    assert contact(source) is None
+    second = contact(source)
+    assert second is not None
     assert (
         operations.claim(
             NODE_B,
@@ -1941,8 +1958,6 @@ def test_rollback_retry_survives_repeated_receipt_and_acknowledges_new_attempt(
         )
         is None
     )
-    second = contact(source)
-    assert second is not None
     assert fenced_attempt(sessions, second).attempt == 2
     assert contact(source) is None
     acknowledged = {
@@ -1991,8 +2006,8 @@ def test_predecessor_agent_handoff_is_reconcilable_not_a_failed_upgrade(
         parent = session.get(Job, job.id)
         assert parent is not None
         assert parent.state == "queued"
-    # The handed-off Spark stays the one in flight until its fence elapses.
-    assert _operation_nodes(sessions, job.id) == [NODE_A]
+    # Every Spark has its own order from the start.
+    assert set(_operation_nodes(sessions, job.id)) == {NODE_A, NODE_B}
     assert (
         operations.claim(
             NODE_A,

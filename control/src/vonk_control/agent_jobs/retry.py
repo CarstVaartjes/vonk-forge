@@ -398,18 +398,29 @@ def agent_upgrade_in_flight(
     )
 
 
-def other_agent_upgrade_in_flight(
+def agent_upgrade_in_flight_on_spark(
     session: Session, operation: StoredOperation, now: datetime
-) -> bool:
-    """Whether any other Spark's agent upgrade, in any rollout, is in flight."""
+) -> StoredOperation | None:
+    """Another agent upgrade on this order's Spark that is still in flight.
 
-    return any(
-        agent_upgrade_in_flight(session, other, now)
-        for other in session.scalars(
-            select(StoredOperation).where(
-                StoredOperation.kind == AgentOperation.AGENT_UPGRADE.value,
-                StoredOperation.id != operation.id,
-                StoredOperation.state.in_(agent_operation_states.RUNNING_OR_PARKED),
+    Each Spark installs one package at a time, including a superseded rollout's
+    order still finishing; other Sparks never hold it.
+    """
+
+    return next(
+        (
+            other
+            for other in session.scalars(
+                select(StoredOperation)
+                .where(
+                    StoredOperation.kind == AgentOperation.AGENT_UPGRADE.value,
+                    StoredOperation.node_id == operation.node_id,
+                    StoredOperation.id != operation.id,
+                    StoredOperation.state.in_(agent_operation_states.RUNNING_OR_PARKED),
+                )
+                .order_by(StoredOperation.created_at, StoredOperation.id)
             )
-        )
+            if agent_upgrade_in_flight(session, other, now)
+        ),
+        None,
     )

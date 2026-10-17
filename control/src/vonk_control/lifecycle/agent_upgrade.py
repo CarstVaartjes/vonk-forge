@@ -1,12 +1,12 @@
 """The lifecycle adapter of an agent-upgrade rollout (``Job`` of kind ``agent-upgrade``).
 
-A rollout is a **composite** over its ``agent.upgrade.v1`` orders (one Spark at a
-time).  It has no effect of its own, so it is never irreversible, never executes
-anything, and never waits for an operator: the orders carry the effect, the fenced
-retry and the cancel (they are decided by
+A rollout is a **composite** over its ``agent.upgrade.v1`` orders (one per Spark,
+each upgrading independently).  It has no effect of its own, so it is never
+irreversible, never executes anything, and never waits for an operator: the
+orders carry the effect, the fenced retry and the cancel (they are decided by
 :class:`~vonk_control.lifecycle.agent_operation.AgentOperationAdapter`), and the
 rollout *follows* them.  ``agent_upgrades`` keeps the plan, the eligibility rules
-and the dispatch of the next Spark; this module is the **only** writer of the
+and the dispatch of every Spark's order; this module is the **only** writer of the
 rollout's ``Job.state`` (and of the worker-dispatch ``JobAttempt`` a legacy rollout
 may still hold).
 

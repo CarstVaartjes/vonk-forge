@@ -116,17 +116,6 @@ def _aggregate_parent_state(
     if verdict == "queued":
         set_parent_state(job, "queued", retrying[0].status_reason, self._clock())
         return
-    if (
-        job.kind == "agent-upgrade"
-        and job.state in job_states.words(LifecycleState.NEEDS_OPERATOR)
-        and set(column_value(job, "targets"))
-        - {operation.node_id for operation in operations}
-    ):
-        # Sequential agent upgrades intentionally materialize one target at
-        # a time. If the next target drifted ineligible, preserve the
-        # service's specific operator-facing reason instead of declaring the
-        # job successful merely because every materialized operation passed.
-        return
     if verdict is None:
         return
     # A parent that already ended keeps its recorded state and reason; one

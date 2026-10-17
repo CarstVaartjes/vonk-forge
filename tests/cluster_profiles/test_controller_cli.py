@@ -3951,7 +3951,7 @@ def test_fleet_upgrade_prompts_for_resolved_scope_in_a_terminal(monkeypatch) -> 
     )
 
     assert status == 0
-    assert f"Upgrade Spark {node_id} one at a time? [y/N]" in terminal_output.getvalue()
+    assert f"Upgrade Spark {node_id}? [y/N]" in terminal_output.getvalue()
     assert client.calls[-1][0:2] == ("POST", "/api/fleet/upgrade")
 
 

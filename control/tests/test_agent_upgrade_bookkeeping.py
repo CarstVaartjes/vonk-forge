@@ -12,7 +12,7 @@ from __future__ import annotations
 import hashlib
 import json
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import httpx2
 import pytest
@@ -217,7 +217,11 @@ def test_a_stored_package_or_source_that_cannot_be_used_skips_the_spark(
 def test_a_rollout_with_a_damaged_source_skips_that_spark_and_finishes(
     tmp_path,
 ) -> None:
-    sessions, operations, _upgrades, job = _rollout(tmp_path, "damaged-source")
+    # Spark B is offline when the rollout starts, so its order is materialized
+    # only once it is back, from the (by then damaged) stored source.
+    sessions, operations, _upgrades, job = _rollout(
+        tmp_path, "damaged-source", offline=(NODE_B,)
+    )
     with sessions.begin() as session:
         parent = session.get(Job, job.id)
         assert parent is not None
@@ -226,6 +230,9 @@ def test_a_rollout_with_a_damaged_source_skips_that_spark_and_finishes(
         sources[NODE_B] = "garbage"
         payload["sources"] = sources
         parent.payload = payload
+        node_b = session.get(AgentNode, NODE_B)
+        assert node_b is not None
+        node_b.last_seen_at = node_b.last_seen_at + timedelta(hours=1)
 
     _upgrade_node(operations, NODE_A, "serial-a")
 
