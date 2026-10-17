@@ -276,6 +276,7 @@ pub(super) fn authenticated_test_client(controller: &str, node_id: &str) -> Agen
         identity_content: Default::default(),
         progress_phase: Default::default(),
         transfer_inactivity: TRANSFER_INACTIVITY,
+        distribution_range_bytes: DISTRIBUTION_RANGE_BYTES,
     }
 }
 
@@ -461,6 +462,7 @@ pub(super) fn job_input_client(
             identity_content: Default::default(),
             progress_phase: Default::default(),
             transfer_inactivity: TRANSFER_INACTIVITY,
+            distribution_range_bytes: DISTRIBUTION_RANGE_BYTES,
         },
         server,
     )
@@ -566,6 +568,7 @@ pub(super) fn delayed_upload_client(
             identity_content: Default::default(),
             progress_phase: Default::default(),
             transfer_inactivity: Duration::from_millis(50),
+            distribution_range_bytes: DISTRIBUTION_RANGE_BYTES,
         },
         server,
     )

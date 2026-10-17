@@ -86,7 +86,7 @@ impl AgentHttpClient {
     /// Consume a complete assignment. Every model/configuration object is
     /// fetched through the assignment-bound endpoint; the runtime image is
     /// pulled separately by its digests. Complete files are reused by trusted metadata, while `.partial` files
-    /// resume by identity and length after an agent process restart. Model
+    /// resume by identity and their recorded ranges after an agent process restart. Model
     /// objects are stored below one content-addressed root so assignments with
     /// different plan digests can reuse the same verified bytes.
     pub async fn download_distribution(
@@ -260,135 +260,55 @@ impl AgentHttpClient {
 
             let partial = partial_path(destination);
             let output = open_trusted_partial(&partial).await?;
-            let metadata = output.metadata().await.map_err(ClientError::Local)?;
-            let mut offset = metadata.len();
-            if offset > expected_bytes {
-                // The checkpoint is disposable. Its handle has passed the
-                // private, single-link, no-follow custody checks.
-                output.set_len(0).await.map_err(ClientError::Local)?;
-                offset = 0;
-            }
-            // TLS/network chunks can be much smaller than an efficient disk
-            // write. Coalesce them so Tokio does not dispatch a blocking file
-            // operation for every received chunk. Keep this writer across range
-            // retries; a process restart resumes from the actual partial length.
-            preallocate(&output, offset, expected_bytes);
-            let mut output = BufWriter::with_capacity(1024 * 1024, output);
-            let mut write_behind = WriteBehind::new(offset);
-            progress(offset, ProgressPhase::Copying);
-            let mut last_progress = tokio::time::Instant::now();
-            // Consecutive range attempts that moved no byte; any byte resets it.
-            let mut retries = 0_u32;
-            let max_attempts = 4_u32;
-            while offset < expected_bytes {
-                let end = range_end(offset, expected_bytes);
-                let mut url = self.endpoint(endpoint)?;
-                if let Some(plan_digest) = plan_digest {
-                    url.query_pairs_mut()
-                        .append_pair("plan_digest", plan_digest);
-                }
-                let started = offset;
-                let attempt = async {
-                    // One stream slot for this range: the governor decides how
-                    // many ranges the agent keeps in flight at once. Waiting
-                    // for a slot is waiting on the ranges that hold one; the
-                    // range's inactivity window starts once it has its slot.
-                    let _stream = governor.acquire().await;
-                    let inactivity = Inactivity::new(self.transfer_inactivity);
-                    let mut response = send_streaming(
-                        self.current_client()
-                            .await?
-                            .get(url)
-                            .header("range", format!("bytes={offset}-{end}"))
-                            .header("if-range", format!("\"sha256:{sha256}\"")),
-                        &inactivity,
-                    )
+            let length = output.metadata().await.map_err(ClientError::Local)?.len();
+            preallocate(&output, length.min(expected_bytes), expected_bytes);
+            let file = Arc::new(output.try_clone().await?.into_std().await);
+            let (record, pending) =
+                RangeRecord::adopt(file, length, expected_bytes, self.distribution_range_bytes)
                     .await?;
-                    classify_response(&mut response).await?;
-                    let expected_etag = format!("\"sha256:{sha256}\"");
-                    let expected_range = format!("bytes {offset}-{end}/{expected_bytes}");
-                    let etag = response
-                        .headers()
-                        .get("etag")
-                        .and_then(|value| value.to_str().ok());
-                    // A present substituted digest is an ingress identity failure.
-                    // Missing/unreadable framing is only an unusable observation.
-                    if etag.is_some_and(|value| value != expected_etag) {
-                        return Err(ClientError::Protocol);
-                    }
-                    if response.status() != StatusCode::PARTIAL_CONTENT
-                        || response.content_length() != Some(end - offset + 1)
-                        || etag.is_none()
-                        || response
-                            .headers()
-                            .get("content-range")
-                            .and_then(|value| value.to_str().ok())
-                            != Some(expected_range.as_str())
-                    {
-                        return Err(ClientError::Unsettled(
-                            "answer range differs from the requested range",
-                        ));
-                    }
-                    while let Some(chunk) = next_chunk(response.chunk(), &inactivity).await? {
-                        if chunk.len() as u64 > end + 1 - offset {
-                            return Err(ClientError::Unsettled(
-                                "answer exceeds the requested range",
-                            ));
-                        }
-                        inactivity.bound(output.write_all(&chunk)).await??;
-                        // This writer survives network retries, so resume from
-                        // its accepted bytes even within an interrupted range.
-                        offset += chunk.len() as u64;
-                        governor.record_bytes(chunk.len() as u64);
-                        write_behind.written(&mut output, offset).await?;
-                        if last_progress.elapsed() >= Duration::from_millis(200) {
-                            progress(offset, ProgressPhase::Copying);
-                            last_progress = tokio::time::Instant::now();
-                        }
-                    }
-                    if offset != end + 1 {
-                        return Err(ClientError::Unsettled(
-                            "answer ended before the requested range",
-                        ));
-                    }
-                    Ok::<(), ClientError>(())
-                }
-                .await;
-                if offset > started {
-                    retries = 0;
-                }
-                match attempt {
-                    Ok(()) => retries = 0,
-                    Err(error) if error.retryable() && retries < max_attempts => {
-                        governor.throttled();
-                        progress(offset, ProgressPhase::Copying);
-                        tokio::time::sleep(error.retry_delay(
-                            retries,
-                            Duration::from_millis(500),
-                            Duration::from_secs(30),
-                        ))
-                        .await;
-                        retries += 1;
-                    }
-                    Err(error) => {
-                        // Publish no final object, but persist the accepted prefix
-                        // before ending this request. A fresh request resumes
-                        // from its durable length rather than replaying it.
-                        output.flush().await?;
-                        output.get_ref().sync_data().await?;
-                        return Err(error);
-                    }
-                }
+            let remaining: u64 = pending
+                .iter()
+                .map(|range| range.end + 1 - range.start)
+                .sum();
+            progress(expected_bytes - remaining, ProgressPhase::Copying);
+            let mut url = self.endpoint(endpoint)?;
+            if let Some(plan_digest) = plan_digest {
+                url.query_pairs_mut()
+                    .append_pair("plan_digest", plan_digest);
             }
-            progress(offset, ProgressPhase::Copying);
-            write_behind.finish().await?;
-            output.flush().await.map_err(ClientError::Local)?;
-            output
-                .get_ref()
-                .sync_all()
-                .await
-                .map_err(ClientError::Local)?;
-            let output = output.into_inner();
+            let transfer = RangeTransfer {
+                url,
+                sha256,
+                total: expected_bytes,
+                record: &record,
+                governor,
+                accepted: Mutex::new(Accepted {
+                    bytes: expected_bytes - remaining,
+                    reported: tokio::time::Instant::now(),
+                    progress,
+                }),
+            };
+            // The ranges of one object move at once, as many as the governor
+            // grants: one stream's rate is no longer a large file's rate.
+            // Each range lands at its own place and is recorded once synced.
+            let fetched = stream::iter(pending)
+                .map(|range| self.fetch_range(&transfer, range))
+                .buffer_unordered(DISTRIBUTION_CONCURRENCY)
+                .try_collect::<()>()
+                .await;
+            if let Err(error) = fetched {
+                // Publish no final object, but persist the recorded ranges
+                // before ending this request; a fresh request skips them.
+                record.sync().await?;
+                return Err(error);
+            }
+            let mut progress = transfer
+                .accepted
+                .into_inner()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .progress;
+            progress(expected_bytes, ProgressPhase::Copying);
+            record.finish().await?;
             let synced_metadata = output.metadata().await.map_err(ClientError::Local)?;
             let partial_metadata = tokio::fs::symlink_metadata(&partial)
                 .await
@@ -445,6 +365,187 @@ impl AgentHttpClient {
         }
         .await
     }
+
+    /// Fetch the rest of one range into its place in the partial file and
+    /// record it once its bytes are synced.
+    async fn fetch_range<F>(
+        &self,
+        transfer: &RangeTransfer<'_, F>,
+        range: PendingRange,
+    ) -> Result<(), ClientError>
+    where
+        F: FnMut(u64, ProgressPhase),
+    {
+        let RangeTransfer {
+            url,
+            sha256,
+            total,
+            record,
+            governor,
+            accepted,
+        } = transfer;
+        let end = range.end;
+        // Accepted bytes not yet written; they belong at `offset - len`.
+        let mut buffer = Vec::new();
+        let mut offset = range.start;
+        // Consecutive range attempts that moved no byte; any byte resets it.
+        let mut retries = 0_u32;
+        let max_attempts = 4_u32;
+        loop {
+            let started = offset;
+            // One stream slot for this range: the governor decides how many
+            // ranges the agent keeps in flight at once. Waiting for a slot is
+            // waiting on the ranges that hold one; the range's inactivity
+            // window starts once it has its slot, and the slot is held until
+            // the range is recorded.
+            let stream = governor.acquire().await;
+            let attempt = async {
+                let inactivity = Inactivity::new(self.transfer_inactivity);
+                let mut response = send_streaming(
+                    self.current_client()
+                        .await?
+                        .get(url.clone())
+                        .header("range", format!("bytes={offset}-{end}"))
+                        .header("if-range", format!("\"sha256:{sha256}\"")),
+                    &inactivity,
+                )
+                .await?;
+                classify_response(&mut response).await?;
+                let expected_etag = format!("\"sha256:{sha256}\"");
+                let expected_range = format!("bytes {offset}-{end}/{total}");
+                let etag = response
+                    .headers()
+                    .get("etag")
+                    .and_then(|value| value.to_str().ok());
+                // A present substituted digest is an ingress identity failure.
+                // Missing/unreadable framing is only an unusable observation.
+                if etag.is_some_and(|value| value != expected_etag) {
+                    return Err(ClientError::Protocol);
+                }
+                if response.status() != StatusCode::PARTIAL_CONTENT
+                    || response.content_length() != Some(end - offset + 1)
+                    || etag.is_none()
+                    || response
+                        .headers()
+                        .get("content-range")
+                        .and_then(|value| value.to_str().ok())
+                        != Some(expected_range.as_str())
+                {
+                    return Err(ClientError::Unsettled(
+                        "answer range differs from the requested range",
+                    ));
+                }
+                while let Some(chunk) = next_chunk(response.chunk(), &inactivity).await? {
+                    if chunk.len() as u64 > end + 1 - offset {
+                        return Err(ClientError::Unsettled("answer exceeds the requested range"));
+                    }
+                    // Accepted bytes survive network retries, so a retry
+                    // resumes from them even within an interrupted range.
+                    buffer.extend_from_slice(&chunk);
+                    offset += chunk.len() as u64;
+                    governor.record_bytes(chunk.len() as u64);
+                    accepted
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner())
+                        .add(chunk.len() as u64);
+                    // TLS/network chunks can be much smaller than an efficient
+                    // disk write. Coalesce them so Tokio does not dispatch a
+                    // blocking file operation for every received chunk.
+                    if buffer.len() >= WRITE_BUFFER_BYTES {
+                        write_accepted(record, &inactivity, &mut offset, &mut buffer).await?;
+                    }
+                }
+                if offset != end + 1 {
+                    return Err(ClientError::Unsettled(
+                        "answer ended before the requested range",
+                    ));
+                }
+                write_accepted(record, &inactivity, &mut offset, &mut buffer).await
+            }
+            .await;
+            if offset > started {
+                retries = 0;
+            }
+            match attempt {
+                Ok(()) => {
+                    record.complete(range).await?;
+                    drop(stream);
+                    return Ok(());
+                }
+                Err(error) if error.retryable() && retries < max_attempts => {
+                    drop(stream);
+                    governor.throttled();
+                    accepted
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner())
+                        .report();
+                    tokio::time::sleep(error.retry_delay(
+                        retries,
+                        Duration::from_millis(500),
+                        Duration::from_secs(30),
+                    ))
+                    .await;
+                    retries += 1;
+                }
+                Err(error) => return Err(error),
+            }
+        }
+    }
+}
+
+/// Accepted bytes are written in pieces of at least this size.
+const WRITE_BUFFER_BYTES: usize = 1024 * 1024;
+
+/// Write the accepted bytes at their place. A write that does not finish
+/// leaves them unaccepted: the range continues from where they started.
+async fn write_accepted(
+    record: &RangeRecord,
+    inactivity: &Inactivity,
+    offset: &mut u64,
+    buffer: &mut Vec<u8>,
+) -> Result<(), ClientError> {
+    let at = *offset - buffer.len() as u64;
+    let written = inactivity
+        .bound(record.write(at, std::mem::take(buffer)))
+        .await
+        .map_err(ClientError::from)
+        .and_then(|written| written);
+    if written.is_err() {
+        *offset = at;
+    }
+    written
+}
+
+/// One object's transfer, shared by the ranges that move it at once.
+struct RangeTransfer<'a, F> {
+    url: Url,
+    sha256: &'a str,
+    total: u64,
+    record: &'a RangeRecord,
+    governor: &'a StreamGovernor,
+    accepted: Mutex<Accepted<F>>,
+}
+
+/// Bytes accepted across an object's ranges; progress is reported from them,
+/// at most every 200 ms, so it only grows however the ranges interleave.
+struct Accepted<F> {
+    bytes: u64,
+    reported: tokio::time::Instant,
+    progress: F,
+}
+
+impl<F: FnMut(u64, ProgressPhase)> Accepted<F> {
+    fn add(&mut self, count: u64) {
+        self.bytes += count;
+        if self.reported.elapsed() >= Duration::from_millis(200) {
+            self.report();
+        }
+    }
+
+    fn report(&mut self) {
+        (self.progress)(self.bytes, ProgressPhase::Copying);
+        self.reported = tokio::time::Instant::now();
+    }
 }
 
 #[cfg(test)]
@@ -455,3 +556,6 @@ mod recovery_tests;
 
 #[cfg(test)]
 mod inactivity_tests;
+
+#[cfg(test)]
+mod range_tests;
