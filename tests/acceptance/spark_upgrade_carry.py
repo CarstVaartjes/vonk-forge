@@ -429,7 +429,9 @@ class UpgradeCarryLifecycle(SparkLifecycle):
         self._prober: threading.Thread | None = None
         self._lock = threading.Lock()
         self._serving_digest: str | None = None
-        self._agent_upgraded_at: int | None = None
+        # Results refused from here on fail the lane: the candidate Controller
+        # meets the old agent's bodies first, then the upgraded agent's.
+        self._refusal_window_start: int | None = None
 
     # The previous release's Fleet document is read as plain JSON: this lane
     # judges serving behaviour, not one release's response schema.
@@ -766,6 +768,7 @@ class UpgradeCarryLifecycle(SparkLifecycle):
         """Upgrade the Controller the way an operator reruns the installer."""
 
         assert self.temporary_root is not None and self.bundle is not None
+        self._refusal_window_start = int(time.time())
         os.environ[OVERLAY_VARIABLE] = os.fspath(self.candidate.overlay)
         self.controller_generation = self.candidate.generation
         self.controller_release = self.candidate.release
@@ -823,7 +826,6 @@ class UpgradeCarryLifecycle(SparkLifecycle):
         """Upgrade the Spark agent in place with the candidate installer."""
 
         assert self.temporary_root is not None
-        self._agent_upgraded_at = int(time.time())
         try:
             _run_spark_bootstrap(
                 self._spark_bootstrap_url(self.candidate),
@@ -837,9 +839,13 @@ class UpgradeCarryLifecycle(SparkLifecycle):
         )
 
     def _require_no_result_refusals(self) -> int:
-        """Fail when the Controller refused any result from the upgraded agent."""
+        """Fail when the candidate Controller refused any result as invalid.
 
-        if self._agent_upgraded_at is None or self.bundle is None:
+        The window opens at the Controller redeploy, so an old agent's body the
+        new Controller refuses fails the lane as surely as the upgraded agent's.
+        """
+
+        if self._refusal_window_start is None or self.bundle is None:
             return 0
         logs = self._run_command(
             self._compose(
@@ -847,7 +853,7 @@ class UpgradeCarryLifecycle(SparkLifecycle):
                 "--no-color",
                 "--no-log-prefix",
                 "--since",
-                str(self._agent_upgraded_at),
+                str(self._refusal_window_start),
                 "control-api",
             ),
             cwd=self.bundle,
@@ -858,8 +864,8 @@ class UpgradeCarryLifecycle(SparkLifecycle):
             first = refused[0]
             raise self._failure(
                 "agent-results",
-                f"the Controller refused {len(refused)} result(s) of the upgraded "
-                f"agent as invalid; first: {str(first.get('reason'))[:200]}",
+                f"the candidate Controller refused {len(refused)} result(s) as "
+                f"invalid; first: {str(first.get('reason'))[:200]}",
             )
         return len(refused)
 
