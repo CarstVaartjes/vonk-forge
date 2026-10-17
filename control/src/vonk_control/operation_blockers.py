@@ -43,6 +43,13 @@ class IdentityConflict(StrictJSONModel):
     authoritative: DigestText | None
 
 
+class BlockingOperation(StrictJSONModel):
+    """The operation a wait is behind, so a reader can follow it."""
+
+    id: Annotated[str, StringConstraints(min_length=1, max_length=128)]
+    kind: Annotated[str, StringConstraints(min_length=1, max_length=80)]
+
+
 class OperationBlocker(StrictJSONModel):
     """One reason an operation is waiting or blocked, with the Sparks it concerns."""
 
@@ -51,6 +58,15 @@ class OperationBlocker(StrictJSONModel):
     severity: Literal["info", "warning", "error"]
     node_ids: list[_NODE_ID] = Field(default_factory=list, max_length=32)
     identity_conflict: IdentityConflict | None = None
+    #: The operation this wait is behind, when one is known.
+    operation: BlockingOperation | None = None
+
+
+class QueueWaitCode(StrEnum):
+    """Why a queued operation has not been claimed yet; each wait clears by itself."""
+
+    #: The Spark is executing another operation; it claims one at a time.
+    SPARK_BUSY = "queue.spark_busy"
 
 
 class ProgressAlarmCode(StrEnum):
@@ -132,10 +148,12 @@ __all__ = [
     "MAX_BLOCKERS",
     "PHASE_RETRY_CODE",
     "STALL_RETRY_ATTEMPT",
+    "BlockingOperation",
     "IdentityConflict",
     "OperationBlocker",
     "ProgressAlarmCode",
     "ProgressStall",
+    "QueueWaitCode",
     "bound_blockers",
     "dump_blockers",
     "make_blocker",
