@@ -1104,3 +1104,55 @@ fn a_stop_the_helper_refused_before_any_effect_is_definite() {
         ));
     }
 }
+
+#[test]
+fn a_start_whose_exception_names_host_paths_is_the_shared_vector_on_the_wire() {
+    // The body every live Spark had refused with 422 since 2026-10-16: the
+    // reason quotes the workload's exception, absolute paths included.  The
+    // Controller must accept this exact shape (its ingress tests read the same
+    // vector); the clock- and host-dependent diagnostics are compared by shape.
+    let vector: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../../../agent_protocol/src/vonk_agent_protocol/vectors/recipe-start-failed-host-paths-v1.json"
+    ))
+    .unwrap();
+    let summary = "exit_code=1 oom_killed=false exit_cause=python_exception exception=\"FileNotFoundError: [Errno 2] No such file or directory: '/opt/vonk/prewarm/sglang/flashinfer/autotune/fused_moe.json'\"";
+    let error = crate::host_runtime::HostRuntimeError::HelperRejected {
+        code: HelperErrorCode::RuntimeProcessExited,
+        diagnostic: Some(crate::failure_evidence::sanitize_exit_summary(summary)),
+        process_logs: Some(Box::new(crate::failure_evidence::FailureProcessLogs {
+            stdout: crate::failure_evidence::log_tail(
+                b"loading weights from /outputs/cache/home/.cache/huggingface\n",
+            ),
+            stderr: crate::failure_evidence::log_tail(
+                b"FileNotFoundError: /opt/vonk/prewarm/sglang/flashinfer/autotune/fused_moe.json\n",
+            ),
+        })),
+    };
+    let mut start_claim = claim();
+    start_claim.operation = AgentOperation::RecipeStart;
+    let finished = runtime_observation_failure(&error).finish(&start_claim);
+    let mut produced = serde_json::to_value(vonk_agent_protocol::generated::AgentResult {
+        fence: start_claim.fence,
+        result: finished.result,
+        state: finished.state,
+    })
+    .unwrap();
+    let mut expected = vector.clone();
+    let take_diagnostics = |body: &mut serde_json::Value| {
+        body["result"]["evidence"]
+            .as_object_mut()
+            .unwrap()
+            .remove("diagnostics")
+            .unwrap()
+    };
+    let produced_diagnostics = take_diagnostics(&mut produced);
+    let vector_diagnostics = take_diagnostics(&mut expected);
+    produced["fence"] = expected["fence"].clone();
+    assert_eq!(produced, expected);
+    for field in ["phase", "category", "preflight", "stdout", "stderr"] {
+        assert_eq!(
+            produced_diagnostics[field], vector_diagnostics[field],
+            "{field}"
+        );
+    }
+}

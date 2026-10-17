@@ -89,6 +89,7 @@ from vonk_forge_contracts import RecipeDefinition, document_sha256
 from .agent_fences import fenced_attempt, fenced_operation
 from .ca_test_authority import FixtureCertificateAuthority
 from .stored_documents_support import valid_policy_report
+from .test_agent_jobs import canonical_start_payload
 from .test_catalog_revision_collection import Catalog
 
 NODE_A = "spk_" + "a" * 32
@@ -3124,6 +3125,49 @@ def test_failed_result_preserves_canonical_evidence_and_maps_parent_reason(
     fresh = client.post("/agent/claim", headers=agent_headers(NODE_A, "serial-a"))
     assert fresh.status_code == 200
     assert fresh.json()["fence"] != claim["fence"]
+
+
+def test_a_refused_start_failure_naming_host_paths_is_accepted_on_its_retry(
+    agent_system,
+) -> None:
+    """Replays the body live Sparks retained after ``422 filesystem path values``.
+
+    The agent keeps a refused result and offers it again; the Controller alone
+    must accept it, its core intact and the paths redacted in its prose.
+    """
+
+    client, services, _, clock = agent_system
+    services.operations.enqueue(
+        parent(services.sessions, clock).id,
+        NODE_A,
+        "recipe.start",
+        "a" * 64,
+        canonical_start_payload(start_deadline=clock.now + timedelta(minutes=30)),
+    )
+    claimed = client.post("/agent/claim", headers=agent_headers(NODE_A, "serial-a"))
+    assert claimed.status_code == 200
+    fence = claimed.json()["fence"]
+    vector = json.loads(
+        (
+            Path(__file__).parents[2]
+            / "agent_protocol/src/vonk_agent_protocol/vectors"
+            / "recipe-start-failed-host-paths-v1.json"
+        ).read_text()
+    )
+
+    response = client.post(
+        "/agent/result",
+        headers=agent_headers(NODE_A, "serial-a"),
+        json=vector | {"fence": fence},
+    )
+
+    assert response.status_code == 204, response.text
+    with services.sessions() as session:
+        attempt = session.query(AgentOperationAttempt).filter_by(fence=fence).one()
+        assert attempt.result["status"] == "failed"
+        assert attempt.result["error_code"] == "recipe_start_failed"
+        assert "FileNotFoundError" in attempt.result["reason"]
+        assert "/opt/vonk" not in attempt.result["reason"]
 
 
 @pytest.mark.parametrize(
