@@ -100,10 +100,10 @@ def silent_then_forwarding_peer(
         stopped.set()
         repaired.set()
         listener.close()
-        accepting.join(timeout=2)
+        accepting.join(timeout=30)
         assert not accepting.is_alive()
         for worker in workers:
-            worker.join(timeout=3)
+            worker.join(timeout=30)
             assert not worker.is_alive()
         assert not failures
 
@@ -150,7 +150,8 @@ def test_initialize_database_silent_handshake_timeout_releases_attempt_then_same
             assert handshake_seen.is_set() and disposed and not authenticated
             # Bound the failed physical connection, independently of normal
             # migration's own statement/transaction budgets after admission.
-            assert 2 <= time.monotonic() - started < 5
+            # The upper bound tells the 2 s budget from the 30 s default.
+            assert 2 <= time.monotonic() - started < 15
             assert all(engine.url == same_url for engine in disposed)
             assert _schema(database.engine) == before
             with database.engine.connect() as probe:

@@ -1875,7 +1875,7 @@ def test_postgres_recipe_removal_recovers_after_process_death_between_unlink_and
     process.join(timeout=20)
     if process.is_alive():
         process.terminate()
-        process.join(timeout=5)
+        process.join(timeout=30)
         pytest.fail("recipe removal process did not reach its injected crash point")
     assert process.exitcode == 73
     # Only the receipt is retired; the blobs wait for garbage collection.
@@ -3434,7 +3434,7 @@ def test_late_verified_image_result_cannot_publish_after_cancellation(
     claim = service.claim_pending(owner_id="late-image-result")[0]
     with ThreadPoolExecutor(max_workers=1) as executor:
         worker = executor.submit(service.run_claim, claim)
-        assert entered.wait(timeout=5), "worker did not reach the issued image pull"
+        assert entered.wait(timeout=30), "worker did not reach the issued image pull"
         accepted = service.cancel(
             operation.id,
             actor="operator",

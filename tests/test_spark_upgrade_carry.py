@@ -140,11 +140,13 @@ def test_a_settled_phase_returns_without_waiting_out_a_fixed_hold(monkeypatch):
         {"alias": "canary", "route_state": "published", "rank_age_seconds": 0.0},
         monkeypatch,
     )
-    started = time.monotonic()
+    sleeps: list[float] = []
+    monkeypatch.setattr(carry.time, "sleep", sleeps.append)
     lane._settle(
         "baseline-serving", carry.BASELINE_SERVING_BOUND_SECONDS, reported=False
     )
-    assert time.monotonic() - started < 1
+    # A settled phase never sleeps out a probe interval.
+    assert sleeps == []
     assert lane.evidence.phases[-1]["phase"] == "baseline-serving"
 
 

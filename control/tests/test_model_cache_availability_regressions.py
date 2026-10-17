@@ -145,7 +145,7 @@ def test_single_job_saturates_all_controller_transfer_slots(tmp_path: Path) -> N
             maximum = max(maximum, active)
             if active == 4:
                 started.set()
-        release.wait(2)
+        release.wait(30)
         with lock:
             active -= 1
         data = responses[request.url.path]
@@ -161,7 +161,7 @@ def test_single_job_saturates_all_controller_transfer_slots(tmp_path: Path) -> N
         "00000000-0000-4000-8000-000000000301",
     )
     service.tick()
-    assert started.wait(2)
+    assert started.wait(30)
     assert maximum == 4
     release.set()
     _drain(service, operation.id)
@@ -185,7 +185,7 @@ def test_two_jobs_each_start_before_surplus_slots_are_round_robin_allocated(
     def handler(request: httpx2.Request) -> httpx2.Response:
         with lock:
             started.append(request.url.path)
-        release.wait(2)
+        release.wait(30)
         data = responses[request.url.path]
         return httpx2.Response(200, request=request, content=data)
 
@@ -201,7 +201,7 @@ def test_two_jobs_each_start_before_surplus_slots_are_round_robin_allocated(
         "00000000-0000-4000-8000-000000000303",
     )
     service.tick()
-    deadline = time.monotonic() + 2
+    deadline = time.monotonic() + 30
     while time.monotonic() < deadline:
         with lock:
             paths = tuple(started)
@@ -234,7 +234,7 @@ def test_failed_future_waits_for_sibling_before_finalizing_failure(
         if request.url.path.endswith("fail"):
             return httpx2.Response(200, request=request, content=b"wrongwrongwrong!")
         sibling_started.set()
-        release_sibling.wait(2)
+        release_sibling.wait(30)
         return httpx2.Response(200, request=request, content=b"sibling")
 
     service, client = _service(tmp_path, sessions, maximum=2, handler=handler)
@@ -248,7 +248,7 @@ def test_failed_future_waits_for_sibling_before_finalizing_failure(
         "00000000-0000-4000-8000-000000000304",
     )
     service.tick()
-    assert sibling_started.wait(2)
+    assert sibling_started.wait(30)
     time.sleep(0.05)
     service.tick()
     assert service.get_operation(operation.id).state == "running"
@@ -637,7 +637,7 @@ def test_close_checkpoints_active_transfer_and_fresh_service_resumes(
 
     def blocking_handler(request: httpx2.Request) -> httpx2.Response:
         started.set()
-        release.wait(2)
+        release.wait(30)
         return httpx2.Response(200, request=request, content=b"resume-me")
 
     service, client = _service(
@@ -653,12 +653,12 @@ def test_close_checkpoints_active_transfer_and_fresh_service_resumes(
         "00000000-0000-4000-8000-000000000310",
     )
     service.tick()
-    assert started.wait(2)
+    assert started.wait(30)
     closer = threading.Thread(target=service.close)
     closer.start()
     time.sleep(0.05)
     release.set()
-    closer.join(3)
+    closer.join(30)
     assert not closer.is_alive()
     assert service.get_operation(operation.id).state == LifecycleState.BACKOFF
 
@@ -940,7 +940,7 @@ def test_two_controller_services_share_one_upstream_object_transfer(
     def handler(request):
         calls.append(str(request.url))
         entered.set()
-        assert release.wait(5)
+        assert release.wait(30)
         return httpx2.Response(200, content=data)
 
     first, _ = _service(tmp_path, sessions, handler=handler)
@@ -950,7 +950,7 @@ def test_two_controller_services_share_one_upstream_object_transfer(
     two = _start(second, [artifact], "00000000-0000-4000-8000-000000001102")
     with ThreadPoolExecutor(max_workers=2) as pool:
         left = pool.submit(first._run_download, one.id, force=False)
-        assert entered.wait(5)
+        assert entered.wait(30)
         right = pool.submit(second._run_download, two.id, force=False)
         release.set()
         left.result(timeout=10)
@@ -1088,13 +1088,15 @@ def test_upstream_page_budget_bounds_concurrency_and_latency(tmp_path, monkeypat
     service, _ = _service(tmp_path, sessions)
     release = threading.Event()
     calls = []
+    answered = []
     monkeypatch.setattr(
         "vonk_control.model_cache.updates._UPSTREAM_CHECK_SECONDS", 0.05
     )
 
     def check(repository, revision):
         calls.append(repository)
-        release.wait(2)
+        release.wait(30)
+        answered.append(repository)
         return ModelCacheUpstreamRevision(
             repository=repository,
             pinned_revision=revision,
@@ -1104,10 +1106,11 @@ def test_upstream_page_budget_bounds_concurrency_and_latency(tmp_path, monkeypat
 
     monkeypatch.setattr(service, "_check_upstream_revision", check)
     keys = [(f"acme/model-{index}", "a" * 40) for index in range(12)]
-    started = time.monotonic()
     try:
         result = service._check_upstream_revisions(keys)
-        assert time.monotonic() - started < 0.5
+        # Latency is bounded by the page budget, not the checks: the page
+        # answered while every started check was still blocked.
+        assert answered == []
         assert len(calls) == 4
         assert list(result) == keys
         assert all(row.status != "current" for row in result.values())

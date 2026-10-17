@@ -16,6 +16,7 @@ from . import coordination_boundaries as coordination
 from . import deterministic_retries as retries
 from . import lifecycle_reasons as reasons
 from . import principle_guards as principles
+from . import short_wall_clocks as wall_clocks
 from . import untyped_mapping_boundaries as mappings
 from . import vocabulary_literals as vocabulary
 
@@ -45,6 +46,7 @@ MODES = (
     "reasons",
     "boundaries",
     "locks",
+    "clocks",
 )
 # The agent's messages a Controller test may send only as the stand-in pinned
 # to the agent's shared vector; built by hand they are the Controller's idea of
@@ -620,6 +622,10 @@ def check_source(
         else:
             sites = []
         hits.extend((site.line, site.kind) for site in sites)
+    if python and is_test and "clocks" in modes:
+        hits.extend(
+            (line, wall_clocks.KIND) for line in wall_clocks.scan_source(source)
+        )
     if python and not is_test and "retention" in modes:
         hits.extend(
             (site.line, site.kind)

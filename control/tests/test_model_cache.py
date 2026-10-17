@@ -3337,7 +3337,7 @@ def test_progress_is_sampled_while_source_read_is_blocked(cache, tmp_path, monke
             yield payload[:4096]
             # The socket has supplied no new fragment. Progress still advances
             # on its own sampler, without forcing buffered data to stable disk.
-            assert sampled.wait(3)
+            assert sampled.wait(30)
             assert checkpoints == [4096]
             yield payload[4096:]
 
@@ -3527,7 +3527,7 @@ def test_cancel_running_download_preserves_partial_and_cannot_be_resurrected(
             )
             # Another service instance owns cancellation; sampler reads its DB
             # state even when the network cannot supply a fragment yet.
-            assert service._transfer_stop(operation_id[0]).wait(3)
+            assert service._transfer_stop(operation_id[0]).wait(30)
             yield payload[4096:]
 
     def handler(request):
@@ -4083,7 +4083,7 @@ def test_model_cache_parallel_ranges_publish_or_fall_back(
         requested = request.headers.get("range")
         requests.append(requested)
         if requested:
-            barrier.wait(timeout=3)
+            barrier.wait(timeout=30)
         if requested and range_supported:
             start, end = map(int, requested.removeprefix("bytes=").split("-"))
             return httpx2.Response(
@@ -4492,7 +4492,7 @@ def test_a_lost_background_failure_ack_counts_one_missing_file_observation(
         assert isinstance(futures, list)
         running = [future for future in futures if isinstance(future, Future)]
         assert len(running) == len(futures) == 1
-        assert not wait(running, timeout=1).not_done
+        assert not wait(running, timeout=30).not_done
         with observe_unknown():
             observed = service.tick(limit=1)
             assert not observed

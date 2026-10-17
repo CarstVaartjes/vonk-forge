@@ -418,9 +418,9 @@ def test_concurrent_duplicate_reconciles_acceptance_before_reporting_stale_revie
     body = {"request_key": str(uuid4())}
 
     def preview_after_lookup(service, *args, **kwargs):
-        rendezvous.wait(timeout=5)
+        rendezvous.wait(timeout=30)
         if second_request.get():
-            assert first_committed.wait(timeout=5)
+            assert first_committed.wait(timeout=30)
         return original(service, *args, **kwargs)
 
     monkeypatch.setattr(FleetProfileService, "preview", preview_after_lookup)
@@ -464,7 +464,7 @@ def test_admission_serializes_insertion_of_a_previously_unknown_spark(postgres_e
     ):
         if statement.startswith("SELECT agent_nodes.") and "FOR UPDATE" in statement:
             snapshot_locked.set()
-            assert release.wait(timeout=5)
+            assert release.wait(timeout=30)
 
     def add_node():
         with sessions.begin() as session:
@@ -491,13 +491,13 @@ def test_admission_serializes_insertion_of_a_previously_unknown_spark(postgres_e
                 },
             )
             try:
-                assert snapshot_locked.wait(timeout=5)
+                assert snapshot_locked.wait(timeout=30)
                 # A row lock on the two known Sparks cannot block an unrelated
                 # enrollment. The final roster recheck rejects the stale plan.
                 add_node()
             finally:
                 release.set()
-            response = future.result(timeout=5)
+            response = future.result(timeout=30)
         assert response.status_code == 409, response.text
         with sessions() as session:
             assert session.scalar(select(FleetProfileApplication)) is None
@@ -702,7 +702,7 @@ def test_admission_serializes_run_replacement_until_acceptance_commits(
     ):
         if statement.startswith("SELECT agent_nodes.") and "FOR UPDATE" in statement:
             snapshot_locked.set()
-            assert release.wait(timeout=5)
+            assert release.wait(timeout=30)
 
     def change_run():
         with sessions.begin() as session:
@@ -723,13 +723,13 @@ def test_admission_serializes_run_replacement_until_acceptance_commits(
                 },
             )
             try:
-                assert snapshot_locked.wait(timeout=5)
+                assert snapshot_locked.wait(timeout=30)
                 with pytest.raises(OperationalError) as failure:
                     change_run()
                 assert getattr(failure.value.orig, "sqlstate", None) == "55P03"
             finally:
                 release.set()
-            response = future.result(timeout=5)
+            response = future.result(timeout=30)
         assert response.status_code == 202, response.text
         change_run()
     finally:

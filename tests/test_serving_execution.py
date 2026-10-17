@@ -47,7 +47,7 @@ def fixture_server():
         yield f"http://127.0.0.1:{server.server_port}"
     finally:
         server.shutdown()
-        thread.join(timeout=2)
+        thread.join(timeout=30)
 
 
 def test_execute_http_check_uses_real_request_response_and_assertions(

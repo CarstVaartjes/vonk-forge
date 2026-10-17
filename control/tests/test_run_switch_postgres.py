@@ -580,7 +580,7 @@ def test_postgres_duplicate_apply_converges_under_target_lock(
     barrier = Barrier(2)
 
     def apply():
-        barrier.wait(timeout=5)
+        barrier.wait(timeout=30)
         return service._apply_plan(
             plan,
             request_key=key,

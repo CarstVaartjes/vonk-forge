@@ -400,7 +400,7 @@ def test_model_cache_manifest_publication_is_atomic_across_readers(tmp_path):
         def resolve_verified_artifact_set(self, _digest):
             yield {"path": "model.bin", "sha256": digest, "bytes": 5, "file": path}
             descriptor_ready.set()
-            assert finish.wait(5)
+            assert finish.wait(30)
             yield {"path": "malformed"}
 
         def cached_artifact_file(self, *_args):
@@ -410,13 +410,13 @@ def test_model_cache_manifest_publication_is_atomic_across_readers(tmp_path):
     with ThreadPoolExecutor(max_workers=1) as pool:
         loading = pool.submit(source.objects_for_set, "b" * 64)
         try:
-            assert descriptor_ready.wait(5)
+            assert descriptor_ready.wait(30)
             with pytest.raises(DistributionError):
                 source.open_object(digest, 5)
         finally:
             finish.set()
         with pytest.raises(DistributionError):
-            loading.result(timeout=5)
+            loading.result(timeout=30)
     with pytest.raises(DistributionError):
         source.open_object(digest, 5)
 

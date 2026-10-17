@@ -523,7 +523,7 @@ def test_capacity_writer_is_excluded_until_profile_acceptance_commits(
     def pause_after_check(session, assignments, reviewed):
         validate(session, assignments, reviewed)
         checked.set()
-        assert release.wait(5), "test did not release admission"
+        assert release.wait(30), "test did not release admission"
 
     monkeypatch.setattr(adapter, "validate_resources_in_session", pause_after_check)
     with ThreadPoolExecutor(max_workers=1) as pool:
@@ -536,7 +536,7 @@ def test_capacity_writer_is_excluded_until_profile_acceptance_commits(
             },
         )
         try:
-            assert checked.wait(5)
+            assert checked.wait(30)
             with (
                 pytest.raises(OperationalError) as refused,
                 sessions.begin() as session,
@@ -554,7 +554,7 @@ def test_capacity_writer_is_excluded_until_profile_acceptance_commits(
             assert getattr(refused.value.orig, "sqlstate", None) == "55P03"
         finally:
             release.set()
-        response = pending.result(timeout=5)
+        response = pending.result(timeout=30)
     assert response.status_code == 202, response.text
     with sessions() as session:
         snapshot = session.scalar(select(NodeInventorySnapshot))
@@ -1260,10 +1260,10 @@ def test_late_admission_outcome_preserves_concurrent_winner(
         with ThreadPoolExecutor(max_workers=1) as pool:
             future = pool.submit(report_late_outcome)
             try:
-                assert attempted.wait(timeout=5)
+                assert attempted.wait(timeout=30)
             finally:
                 owner.commit()
-            future.result(timeout=5)
+            future.result(timeout=30)
     finally:
         owner.rollback()
         owner.close()

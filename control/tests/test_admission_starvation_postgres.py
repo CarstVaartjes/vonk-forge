@@ -64,7 +64,7 @@ def test_a_patient_admission_wins_against_a_constantly_ticking_writer(
     ticker = threading.Thread(target=_tick_forever, args=(sessions, stop, started))
     ticker.start()
     try:
-        assert started.wait(timeout=5), "ticker did not acquire admission"
+        assert started.wait(timeout=30), "ticker did not acquire admission"
         with patient_admission(3), sessions.begin() as session:
             acquire_admission_keys(
                 session, (node_admission_key(NODE),), holder="run-admission"
@@ -81,7 +81,7 @@ def test_a_patient_admission_wins_against_a_constantly_ticking_writer(
             )
     finally:
         stop.set()
-        ticker.join(timeout=5)
+        ticker.join(timeout=30)
         assert not ticker.is_alive(), "ticker outlived its test"
     with sessions.begin() as session:
         acquire_admission_keys(
@@ -97,7 +97,8 @@ def test_contended_admission_returns_and_a_fresh_owner_acquires(sessions) -> Non
         started = time.monotonic()
         with pytest.raises(Exception), sessions.begin() as taker:  # noqa: B017 -- effects and subsequent admission witness rejection
             acquire_admission_keys(taker, (node_admission_key(NODE),))
-        assert time.monotonic() - started < 3
+        # Bounded by the admission lock budget, not the generic 30 s one.
+        assert time.monotonic() - started < 10
     with sessions.begin() as fresh:
         acquire_admission_keys(
             fresh, (node_admission_key(NODE),), holder="fresh-admission"
@@ -113,7 +114,8 @@ def test_contended_row_lock_ends_and_next_transaction_acquires(sessions) -> None
         started = time.monotonic()
         with pytest.raises(Exception), sessions.begin() as taker:  # noqa: B017 -- effects and subsequent admission witness rejection
             lock_admission_rows(taker, (statement,))
-        assert time.monotonic() - started < 3
+        # Bounded by the admission lock budget, not the generic 30 s one.
+        assert time.monotonic() - started < 10
     with sessions.begin() as fresh:
         lock_admission_rows(fresh, (statement,))
 
@@ -145,7 +147,8 @@ def test_telemetry_maintenance_skips_a_node_an_admission_holds(sessions) -> None
         holder.scalars(select(AgentNode).with_for_update()).all()
         started = time.monotonic()
         maintenance.run_once()  # must neither wait for the node nor fail
-        assert time.monotonic() - started < 3
+        # Bounded by the admission lock budget, not the generic 30 s one.
+        assert time.monotonic() - started < 10
     with sessions.begin() as session:
         assert session.get(NodeTelemetrySample, "sample-old") is not None
     maintenance.run_once()

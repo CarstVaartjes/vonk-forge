@@ -748,7 +748,8 @@ def test_real_schema_lock_conflict_releases_and_same_database_retry_converges(
         try:
             with pytest.raises(DBAPIError):
                 _adopt(engine)
-            assert time.monotonic() - started < 3
+            # The 100 ms lock budget, not the 30 s default, ended the wait.
+            assert time.monotonic() - started < 15
         finally:
             transaction.rollback()
     assert _schema(engine) == before

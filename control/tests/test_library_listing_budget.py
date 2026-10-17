@@ -41,10 +41,9 @@ from .test_library_canonical_projection import _insert_canonical_rows
 from .test_recipe_image_availability import _recipe_projection
 from .test_recipe_operations import NOW
 
-# Generous: the guarded behavior is "does not wait for the blocked read", which
-# takes seconds when it regresses and milliseconds when it holds.
-_PROMPT_SECONDS = 2.5
-_BLOCKED_SECONDS = 4.0
+# A blocked read holds until the test releases it; the listing must answer
+# while it is still blocked.
+_BLOCKED_SECONDS = 30.0
 
 
 def _hex(value: str) -> str:
@@ -154,10 +153,12 @@ def test_a_blocked_image_read_makes_the_recipe_unknown_not_the_listing_slow(
     _, sessions, _, _, _, _, _, _, _, storage = assessed_library
     release = threading.Event()
     blocked = threading.Event()
+    answered = threading.Event()
 
     def probe(archive: str, size: int) -> bool:
         blocked.set()
         release.wait(_BLOCKED_SECONDS * 2)
+        answered.set()
         return storage.build_archive_available(archive, size)
 
     projection = LibraryProjection(
@@ -168,17 +169,16 @@ def test_a_blocked_image_read_makes_the_recipe_unknown_not_the_listing_slow(
         image_budget_seconds=0.2,
     )
     try:
-        started = time.monotonic()
         listing = projection.recipe_library(assess=False)
-        elapsed = time.monotonic() - started
         assert blocked.is_set()
-        assert elapsed < _PROMPT_SECONDS, elapsed
+        # The listing answered while the image read was still blocked.
+        assert not answered.is_set()
         # Neither "cached" nor "not cached" is known yet.
         assert listing.recipes[0].local.controller == "unknown"
     finally:
         release.set()
     # The answer arrives in the background; the next listing has it.
-    deadline = time.monotonic() + 5
+    deadline = time.monotonic() + 30
     state = "unknown"
     while state == "unknown" and time.monotonic() < deadline:
         state = projection.recipe_library(assess=False).recipes[0].local.controller
@@ -190,10 +190,12 @@ def test_a_blocked_placement_read_degrades_the_recipe_not_the_listing(
 ):
     _, sessions, cache, service, _, _, _, _, _, storage = assessed_library
     release = threading.Event()
+    answered = threading.Event()
     inspect = service.inspect_candidate
 
     def blocked_inspect(*args, **kwargs):
         release.wait(_BLOCKED_SECONDS * 2)
+        answered.set()
         return inspect(*args, **kwargs)
 
     service.inspect_candidate = blocked_inspect  # type: ignore[method-assign]
@@ -211,12 +213,11 @@ def test_a_blocked_placement_read_degrades_the_recipe_not_the_listing(
         ),
     )
     try:
-        started = time.monotonic()
         listing = projection.recipe_library()
-        elapsed = time.monotonic() - started
+        # The listing answered while the placement read was still blocked.
+        assert not answered.is_set()
     finally:
         release.set()
-    assert elapsed < _PROMPT_SECONDS, elapsed
     assessment = listing.recipes[0].assessment
     assert assessment is not None
     assert assessment.readiness.state == "unavailable"
@@ -264,7 +265,7 @@ def test_image_presence_is_asked_once_for_concurrent_and_recent_readers():
 
     def probe(archive: str, size: int) -> bool:
         calls.append((archive, size))
-        release.wait(5)
+        release.wait(30)
         return archive != "gone"
 
     index = ImagePresenceIndex(
@@ -482,13 +483,13 @@ def test_blocked_image_attempt_is_deduplicated_and_other_image_progresses():
         calls.append(archive)
         if archive == "blocked":
             entered.set()
-            assert release.wait(timeout=5)
+            assert release.wait(timeout=30)
         return True
 
     index = ImagePresenceIndex(probe, workers=2, present_ttl_seconds=30)
     try:
         index.lookup({("blocked", 1)}, budget_seconds=0.01)
-        assert entered.wait(timeout=1)
+        assert entered.wait(timeout=30)
         for _ in range(20):
             index.lookup({("blocked", 1)}, budget_seconds=0)
         observed = index.lookup({("independent", 1)}, budget_seconds=1)
@@ -523,7 +524,7 @@ def test_blocked_assessment_reuses_one_executor_then_fresh_read_is_assessed(
             # Inject the wait before roster/cache/placement reads, whose runtime
             # on a loaded runner must not decide whether the fault was reached.
             entered.set()
-            assert release.wait(timeout=5)
+            assert release.wait(timeout=30)
             target()
 
         if not workers:
@@ -549,7 +550,7 @@ def test_blocked_assessment_reuses_one_executor_then_fresh_read_is_assessed(
         # Only the blocked read needs to expire quickly. Recovery exercises real
         # placement SQL and gets the full bounded budget on a loaded CI runner.
         first = assessment(recipes, budget_seconds=1.0)
-        assert entered.wait(timeout=1)
+        assert entered.wait(timeout=30)
         for _ in range(20):
             assert assessment(recipes)[0].assessment is not None
         assert len(workers) == 1

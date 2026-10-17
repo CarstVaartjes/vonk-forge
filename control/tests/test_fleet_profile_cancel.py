@@ -745,7 +745,7 @@ def test_profile_cancel_pending_child_survives_os_worker_death_and_restarts(
     dead_worker.join(timeout=20)
     if dead_worker.is_alive():
         dead_worker.terminate()
-        dead_worker.join(timeout=5)
+        dead_worker.join(timeout=30)
     assert dead_worker.exitcode == 23
     with sessions() as session:
         durable = session.get(FleetProfileApplication, application.id)
@@ -800,7 +800,7 @@ def test_profile_cancel_pending_child_survives_os_worker_death_and_restarts(
     restarted.join(timeout=20)
     if restarted.is_alive():
         restarted.terminate()
-        restarted.join(timeout=5)
+        restarted.join(timeout=30)
     assert restarted.exitcode == 0
     terminal = service.application(application.id)
     assert terminal.state == "cancelled"

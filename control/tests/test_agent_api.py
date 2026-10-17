@@ -1637,7 +1637,7 @@ def test_recipe_image_fsync_does_not_block_concurrent_agent_requests(
 
     def observe_responsiveness() -> bool:
         assert entered.wait(timeout=30)
-        responsive = health_completed.wait(timeout=5)
+        responsive = health_completed.wait(timeout=30)
         release.set()
         return responsive
 
@@ -1807,7 +1807,7 @@ def asgi_post(
         }
         # A hang guard, not a latency assertion: a loaded four-worker CI shard
         # can take over a second for the synchronous grant consumption.
-        await asyncio.wait_for(app(scope, receive, send), timeout=5)
+        await asyncio.wait_for(app(scope, receive, send), timeout=30)
         start = next(
             message for message in sent if message["type"] == "http.response.start"
         )
@@ -4580,15 +4580,15 @@ def test_enrollment_observation_does_not_block_unrelated_requests(
 
     def slow_issue(*args, **kwargs):
         entered.set()
-        assert release.wait(timeout=5)
+        assert release.wait(timeout=30)
         return original(*args, **kwargs)
 
     monkeypatch.setattr(services.enrollment._authority, "issue_node", slow_issue)
 
     def observe():
         try:
-            assert entered.wait(timeout=3)
-            return health_completed.wait(timeout=2)
+            assert entered.wait(timeout=30)
+            return health_completed.wait(timeout=30)
         finally:
             release.set()
 
@@ -4598,7 +4598,7 @@ def test_enrollment_observation_does_not_block_unrelated_requests(
         ) as async_client:
 
             async def health_request():
-                assert await asyncio.to_thread(entered.wait, 3)
+                assert await asyncio.to_thread(entered.wait, 30)
                 response = await async_client.get("/api/healthz")
                 health_completed.set()
                 return response
@@ -4616,7 +4616,7 @@ def test_enrollment_observation_does_not_block_unrelated_requests(
                     )
                 finally:
                     release.set()
-                return paired, responsive, observer.result(timeout=1)
+                return paired, responsive, observer.result(timeout=30)
 
     paired, responsive, progressed = asyncio.run(exercise())
     assert progressed

@@ -29,7 +29,7 @@ def test_parallel_ranges_assemble_and_reuse_contiguous_prefix(tmp_path):
 
     def open_range(start, end):
         requests.append((start, end))
-        barrier.wait(timeout=5)  # Fails if the actual transfers serialize.
+        barrier.wait(timeout=30)  # Fails if the actual transfers serialize.
         return response(start, end, len(data), data[start : end + 1])
 
     assert download_ranges(target, len(data), open_range, Event(), progress.append)

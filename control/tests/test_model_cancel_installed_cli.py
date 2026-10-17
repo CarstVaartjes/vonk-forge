@@ -75,7 +75,7 @@ def test_installed_model_cancel_recovers_lost_receipt_and_observes_settlement(
         worker.start()
         worker_started = True
         if not reached.wait(25):
-            detail = errors.get(timeout=1) if not errors.empty() else worker.exitcode
+            detail = errors.get(timeout=30) if not errors.empty() else worker.exitcode
             pytest.fail(f"worker did not reach verified staging: {detail}")
 
         headers = {"Authorization": "Bearer installed-model-cancel-test-token"}

@@ -307,7 +307,7 @@ def test_the_default_key_is_asked_for_again_until_the_gateway_answers() -> None:
                 first_delay=0.001,
                 maximum_delay=0.002,
             ),
-            timeout=5,
+            timeout=30,
         )
 
     asyncio.run(run())
@@ -529,7 +529,7 @@ def test_process_death_preserves_create_secret_and_releases_mutation_claim(tmp_p
                 content=body,
             )
         )
-        process.join(timeout=3)
+        process.join(timeout=30)
         assert not process.is_alive()
         assert process.exitcode == 0
         service = GatewayKeyService(
@@ -544,7 +544,7 @@ def test_process_death_preserves_create_secret_and_releases_mutation_claim(tmp_p
         receiver.close()
         if process.is_alive():
             process.terminate()
-            process.join(timeout=3)
+            process.join(timeout=30)
 
 
 @pytest.mark.parametrize("reply", ["malformed", "unavailable"])
@@ -796,7 +796,7 @@ def test_default_key_http_unavailable_reobserves_and_fresh_attempt_enters(
                 first_delay=0.001,
                 maximum_delay=0.002,
             ),
-            timeout=1,
+            timeout=30,
         )
 
     asyncio.run(observe())

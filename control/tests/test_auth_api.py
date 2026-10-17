@@ -169,7 +169,7 @@ def _chunked_asgi_login(
             "root_path": "",
             "state": {},
         }
-        await asyncio.wait_for(app(scope, receive, send), timeout=1)  # type: ignore[operator]
+        await asyncio.wait_for(app(scope, receive, send), timeout=30)  # type: ignore[operator]
         start = next(
             message for message in sent if message["type"] == "http.response.start"
         )

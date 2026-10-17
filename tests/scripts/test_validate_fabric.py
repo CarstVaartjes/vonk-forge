@@ -338,7 +338,7 @@ def test_aggregate_requires_concurrent_components(validate_module):
     durations = []
 
     def component(*args, **kwargs):
-        barrier.wait(timeout=1)
+        barrier.wait(timeout=30)
         durations.append(kwargs.get("duration_seconds"))
         return {
             "name": f"component-{args[6]}",

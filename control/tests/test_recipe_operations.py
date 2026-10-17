@@ -6439,7 +6439,8 @@ def test_postgres_start_waiting_on_accepted_uninstall_is_rejected(
             and "FOR UPDATE" in statement
         ):
             uninstall_locked.set()
-            assert release_uninstall.wait(timeout=10)
+            # Outlives the observer's bound: only a bounded start returns.
+            assert release_uninstall.wait(timeout=60)
 
     def uninstall():
         role.value = "uninstall"
@@ -6470,7 +6471,7 @@ def test_postgres_start_waiting_on_accepted_uninstall_is_rejected(
         assert uninstall_locked.wait(timeout=10)
         start_future = pool.submit(start)
         assert start_lock_started.wait(timeout=10)
-        completed, _ = wait((start_future,), timeout=3.0)
+        completed, _ = wait((start_future,), timeout=30)
         returned_while_uninstall_held = start_future in completed
         start_result_while_held = (
             start_future.result() if returned_while_uninstall_held else None
@@ -6683,7 +6684,7 @@ def test_postgres_start_bounds_uncommitted_job_request_unique_wait(
         request_id=request_id,
     )
     try:
-        completed, _ = wait((future,), timeout=3.0)
+        completed, _ = wait((future,), timeout=30)
         returned_while_unique_row_uncommitted = future in completed
         busy_error = (
             future.exception() if returned_while_unique_row_uncommitted else None

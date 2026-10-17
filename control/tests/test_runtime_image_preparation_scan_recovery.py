@@ -445,7 +445,7 @@ def test_postgres_concurrent_owner_newer_intent_fences_stale_claim_and_restarts(
     finally:
         if process.is_alive():
             process.terminate()
-            process.join(timeout=5)
+            process.join(timeout=30)
         parent.close()
     now[0] += timedelta(minutes=16)
     service = owner()

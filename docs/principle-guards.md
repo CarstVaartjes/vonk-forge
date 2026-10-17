@@ -12,6 +12,16 @@ coordination detectors also inspect added lines. Bounded waits remain valid.
 No count ledger, baseline regeneration, category assignment or before/after
 report is required. Untouched old findings cannot block a change.
 
+A test may not put a short wall-clock limit (5 s or less) on real work:
+`future.result(timeout=1)`, `asyncio.wait_for(work, timeout=1)`, an asserted
+`event.wait(2)`, a `communicate`/`subprocess` timeout or a
+`time.monotonic() + 2` deadline fails at random on a loaded runner and proves
+nothing pytest-timeout does not. Bound a hang guard generously (30 s) and prove
+"does not wait" by behaviour: a lock-wait probe, a fake clock or event order.
+A wait the test expects to expire (`not done.wait(0.1)`) and a polling interval
+in a loop are not limits on work. A deliberate short limit names its reason on
+the call: `# wall-clock: <reason>` (`control/tests/short_wall_clocks.py`).
+
 One rule is whole-tree rather than added-line: a failure's retry follows its
 one disposition (`vonk_agent_protocol.Disposition`, read through
 `failure_classification.disposition`). A `WAIT` never spends a retry and never

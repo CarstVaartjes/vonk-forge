@@ -350,7 +350,8 @@ def test_initialize_database_busy_owner_exhausts_one_fixed_deadline_without_muta
             with pytest.raises(Exception):  # noqa: B017 -- observable effects and recovery establish the rejection
                 db.initialize_database(database.url, config_path=CONFIG)
             assert waits and sum(waits) <= 0.3
-            assert 0.3 <= time.monotonic() - started < 2
+            # One fixed 0.3 s deadline; a renewed one never ends.
+            assert 0.3 <= time.monotonic() - started < 10
             assert attempts.disposed == set(attempts.pids)
         finally:
             blocker.exec_driver_sql(
@@ -479,7 +480,8 @@ def test_initialize_database_bad_handshake_is_bounded_unknown_with_unchanged_cre
         assert failed and waits and not connected
         assert all(engine.url == bad_url for engine in failed)
         assert sum(waits) <= 0.3
-        assert 0.3 <= time.monotonic() - started < 2
+        # One fixed 0.3 s deadline; a renewed one never ends.
+        assert 0.3 <= time.monotonic() - started < 10
     finally:
         event.remove(Engine, "engine_connect", connected_attempt)
         event.remove(Engine, "engine_disposed", disposed_attempt)

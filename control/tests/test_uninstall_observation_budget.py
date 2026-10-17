@@ -224,18 +224,18 @@ def test_observation_lock_contention_is_a_nonblocking_miss(service) -> None:
     def occupy():
         with jobs._claim_lock:
             entered.set()
-            assert release.wait(timeout=5)
+            assert release.wait(timeout=30)
 
     holder = Thread(target=occupy)
     holder.start()
-    assert entered.wait(timeout=5)
+    assert entered.wait(timeout=30)
     try:
         # A contended pass must return while the foreground owner still holds it.
         jobs.reconcile_orders()
         assert not release.is_set()
     finally:
         release.set()
-        holder.join(timeout=5)
+        holder.join(timeout=30)
     jobs.reconcile_orders()
     fresh_owner = parent(sessions, clock)
     payload = RecipeUninstallPayload(

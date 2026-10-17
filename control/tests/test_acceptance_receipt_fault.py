@@ -165,7 +165,7 @@ def test_disposable_journal_fault_invalidates_wal_and_preserves_managed_work(
             [sys.executable, "-c", writer, str(journal)],
             input=canonical_message(receipt),
             check=True,
-            timeout=2,
+            timeout=30,
         )
         assert Path(str(journal) + "-wal").is_file()
         if root_name == "old-main-only":
@@ -190,11 +190,14 @@ def test_disposable_journal_fault_invalidates_wal_and_preserves_managed_work(
                         str(journal),
                     ],
                     cwd=ROOT,
-                    timeout=2,
+                    timeout=30,
                 )
             )
             result = subprocess.run(
-                [sys.executable, *fault[2:]], capture_output=True, check=True, timeout=2
+                [sys.executable, *fault[2:]],
+                capture_output=True,
+                check=True,
+                timeout=30,
             )
             observation = json.loads(result.stdout)
             assert observation == {

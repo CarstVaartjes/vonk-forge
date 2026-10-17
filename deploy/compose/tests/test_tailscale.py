@@ -257,7 +257,7 @@ def test_default_gateway_reconciles_only_the_vonk_service(
                 capture_output=True,
                 text=True,
                 check=False,
-                timeout=5,
+                timeout=30,
             )
         except subprocess.TimeoutExpired:
             pytest.fail("default-only Tailscale service map did not converge")
@@ -311,7 +311,7 @@ def test_unavailable_hermes_with_stale_advertisements_is_withdrawn_before_exact_
             capture_output=True,
             text=True,
             check=False,
-            timeout=5,
+            timeout=30,
         )
     finally:
         daemon_socket.close()
@@ -536,7 +536,7 @@ def test_configurator_uses_distinct_overridden_service_names(
             capture_output=True,
             text=True,
             check=False,
-            timeout=5,
+            timeout=30,
         )
     finally:
         daemon_socket.close()
@@ -578,7 +578,7 @@ def test_configurator_rejects_invalid_or_duplicate_service_names(
         capture_output=True,
         text=True,
         check=False,
-        timeout=5,
+        timeout=30,
     )
 
     assert result.returncode == 64
@@ -613,7 +613,7 @@ def test_unapproved_advertisement_does_not_claim_service_host_readiness(
             capture_output=True,
             text=True,
             check=False,
-            timeout=5,
+            timeout=30,
         )
     finally:
         daemon_socket.close()
@@ -654,7 +654,7 @@ def test_service_host_mapping_without_primary_routes_is_healthy(
             capture_output=True,
             text=True,
             check=False,
-            timeout=5,
+            timeout=30,
         )
     finally:
         daemon_socket.close()
@@ -705,7 +705,7 @@ def test_pending_advertisement_is_acceptance_only(
             capture_output=True,
             text=True,
             check=False,
-            timeout=5,
+            timeout=30,
         )
     finally:
         daemon_socket.close()
@@ -754,7 +754,7 @@ def test_empty_pending_service_map_is_ephemeral_acceptance_only(
             capture_output=True,
             text=True,
             check=False,
-            timeout=5,
+            timeout=30,
         )
     finally:
         daemon_socket.close()
@@ -773,7 +773,7 @@ def test_service_host_bypass_requires_ephemeral_gateway() -> None:
         capture_output=True,
         text=True,
         check=False,
-        timeout=5,
+        timeout=30,
     )
 
     assert result.returncode == 64
@@ -821,7 +821,7 @@ def test_configurator_re_advertises_pending_service_host(
             capture_output=True,
             text=True,
             check=False,
-            timeout=5,
+            timeout=30,
         )
     finally:
         daemon_socket.close()
@@ -874,7 +874,7 @@ def test_configurator_replaces_exact_map_for_stale_primary_route(
             capture_output=True,
             text=True,
             check=False,
-            timeout=5,
+            timeout=30,
         )
     finally:
         daemon_socket.close()
@@ -1137,10 +1137,10 @@ def test_reconciler_tracks_authenticated_hermes_readiness_and_is_concurrency_saf
     finally:
         reconciler.terminate()
         try:
-            stdout, stderr = reconciler.communicate(timeout=5)
+            stdout, stderr = reconciler.communicate(timeout=30)
         except subprocess.TimeoutExpired:
             reconciler.kill()
-            stdout, stderr = reconciler.communicate(timeout=5)
+            stdout, stderr = reconciler.communicate(timeout=30)
         daemon_socket.close()
     assert reconciler.returncode == 0, (stdout, stderr)
     assert stdout == ""

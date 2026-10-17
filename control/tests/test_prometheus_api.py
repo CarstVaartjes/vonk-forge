@@ -236,7 +236,7 @@ def test_fleet_never_waits_and_shutdown_cancels_inflight_refresh(
 
         mock_prometheus(monkeypatch, blocked)
         async with reader.lifespan():
-            await asyncio.wait_for(started.wait(), timeout=1)
+            await asyncio.wait_for(started.wait(), timeout=30)
             assert fleet_document(client)["attention_unavailable"] is True
             assert fleet_document(client)["attention_unavailable"] is True
         assert cancelled.is_set()
@@ -263,12 +263,12 @@ def test_alert_cache_retries_outage_and_reports_stale_observation(reader, monkey
         monkeypatch.setattr("vonk_control.prometheus_api.asyncio.sleep", advance)
         mock_prometheus(monkeypatch, lambda request: httpx.Response(503))
         async with reader.lifespan():
-            await asyncio.wait_for(waiting.wait(), timeout=1)
+            await asyncio.wait_for(waiting.wait(), timeout=30)
             assert reader.cached_attention() == ([], True)
             mock_prometheus(monkeypatch, lambda request: reply(alerts=[]))
             waiting.clear()
             retry_due.set()
-            await asyncio.wait_for(waiting.wait(), timeout=1)
+            await asyncio.wait_for(waiting.wait(), timeout=30)
             assert reader.cached_attention() == ([], False)
             clock[0] += 16
             assert reader.cached_attention() == ([], True)
@@ -331,5 +331,5 @@ def test_application_owns_configured_monitoring_and_preserves_service_lifespan(
     )
     with TestClient(app):
         assert lifecycle == [app]
-        assert observed.wait(timeout=1)
+        assert observed.wait(timeout=30)
     assert lifecycle == [app, app]

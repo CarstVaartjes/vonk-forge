@@ -159,11 +159,11 @@ def test_locked_removal_row_is_bounded_and_same_owner_retries_after_release(
                 except Exception as error:
                     step_errors.append(error)
                     result_observed.set()
-                    assert release_holder.wait(timeout=5)
+                    assert release_holder.wait(timeout=30)
                     raise
                 step_results.append(outcome)
                 result_observed.set()
-                assert release_holder.wait(timeout=5)
+                assert release_holder.wait(timeout=30)
                 return outcome
             finally:
                 holder.rollback()
@@ -172,10 +172,10 @@ def test_locked_removal_row_is_bounded_and_same_owner_retries_after_release(
     executor = ThreadPoolExecutor(max_workers=1)
     future = executor.submit(service.advance_removals, limit=1)
     try:
-        assert key_acquired.wait(timeout=5), "worker did not reach the removal owner"
-        prompt = result_observed.wait(timeout=2)
+        assert key_acquired.wait(timeout=30), "worker did not reach the removal owner"
+        prompt = result_observed.wait(timeout=30)
         release_holder.set()
-        completed_count = future.result(timeout=5)
+        completed_count = future.result(timeout=30)
     finally:
         release_holder.set()
         executor.shutdown(wait=True)
