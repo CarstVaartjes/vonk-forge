@@ -166,7 +166,6 @@ class UnusedStorageCollector:
         """One pass: free what the short Sparks and the NAS need, and no more."""
 
         now = self._clock()
-        deadline = time.monotonic() + self._budget_seconds
         self._retry_at = {key: due for key, due in self._retry_at.items() if now < due}
         self._stopping.clear()
         self._refused.clear()
@@ -176,6 +175,8 @@ class UnusedStorageCollector:
             return Swept(0, 0, 0, {})
         with self._sessions() as session:
             evidence = _Evidence.read(session, now)
+        # The budget starts after the inventory so every pass reaches an item.
+        deadline = time.monotonic() + self._budget_seconds
         kept: Counter[str] = Counter()
         # An installation on two Sparks is one removal for both of them.
         attempted: dict[tuple[str, str], bool] = {}

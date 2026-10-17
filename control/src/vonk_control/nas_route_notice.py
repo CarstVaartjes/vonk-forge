@@ -1,11 +1,12 @@
 """One owner for "this Spark reaches the NAS over Wi-Fi" (never gates anything).
 
-Production Sparks that reach the NAS over Wi-Fi share airtime and get a
-fraction of the wired throughput. The agent reports interface kind, link speed
-and carrier for its NICs plus the interface the NAS route uses; this module
-turns that evidence into one typed warning with a recommendation, so the
-fleet view, ``vonkctl fleet`` and the web say the same thing. Missing evidence
-(an older agent) is unknown and produces no warning.
+The agent reports interface kind, link speed and carrier for its NICs plus
+the interface the NAS route uses; this module turns that evidence into one
+typed warning with a recommendation, so the fleet view, ``vonkctl fleet`` and
+the web say the same thing. It states the route and the wired ports only and
+claims no throughput: nothing measures what a link carries (a transfer's own
+progress shows its rate), and a link speed is what the interface negotiated.
+Missing evidence (an older agent) is unknown and produces no warning.
 """
 
 from __future__ import annotations
@@ -45,8 +46,12 @@ def nas_route_notice(
     route = next((item for item in interfaces if item.name == route_interface), None)
     if route is None or route.kind != "wifi":
         return None
-    rate = "" if route.link_speed_mbps is None else f", {_speed(route.link_speed_mbps)}"
-    detail = f"Reaches the NAS over Wi-Fi ({route.name}{rate}, shared airtime)."
+    rate = (
+        ""
+        if route.link_speed_mbps is None
+        else f", {_speed(route.link_speed_mbps)} link"
+    )
+    detail = f"Reaches the NAS over Wi-Fi ({route.name}{rate})."
     # Fabric (RDMA/ConnectX) ports link Sparks to each other and never reach the
     # NAS, so only general-purpose wired ports are candidates for the NAS route.
     wired = [item for item in interfaces if item.kind == "wired"]

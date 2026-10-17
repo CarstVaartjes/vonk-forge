@@ -201,6 +201,11 @@ services:
       - prometheus
     command:
       - --config.file=/run/vonk-runtime-assets/prometheus/prometheus.yml
+      # Compose restarts Prometheus as soon as control-api starts, before its
+      # pre-exec has staged the new release's rules, so a start alone loads
+      # the previous release. Reloading on change applies the restage.
+      - --config.auto-reload
+      - --config.auto-reload-interval=10s
       - --storage.tsdb.path=/prometheus
       # One year of history for inference statistics. The size cap is a
       # backstop (oldest blocks go first), sized for roughly 100 series per
@@ -228,9 +233,11 @@ services:
       retries: 12
 
   # Services that read the Controller-staged runtime assets depend on the
-  # Controller only to restart with a new release. They wait for their staged
-  # files, never for a healthy Controller: the volume keeps the last release,
-  # so the gateway keeps serving while the Controller is down.
+  # Controller only to restart with it. That restart precedes the restage, so
+  # one that does not reload keeps the previous release's files until its next
+  # restart. They wait for their staged files, never for a healthy Controller:
+  # the volume keeps the last release, so the gateway keeps serving while the
+  # Controller is down.
   caddy:
     image: caddy:2.11.7@sha256:f2a1290d0463aad60660d4ec134943f183ee2a5f6c3eb7bf32dd984f2f020772
     restart: unless-stopped

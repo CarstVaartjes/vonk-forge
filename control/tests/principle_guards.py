@@ -11,7 +11,7 @@ from pathlib import Path
 
 import yaml
 
-from . import fixed_caps
+from . import fixed_caps, pass_budgets
 from .parsed_sources import parse_file
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -855,6 +855,10 @@ def scan_source(
                 tree,
                 fixed_caps.tree_ending_deadlines() | fixed_caps.ending_deadlines(tree),
             )
+        )
+        sites.extend(
+            Site(path, function, pass_budgets.KIND, line)
+            for function, line in pass_budgets.setup_spent_budget_lines(tree)
         )
     if mode == "reads":
         functions = {

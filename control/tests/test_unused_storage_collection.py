@@ -59,6 +59,9 @@ from vonk_control.unused_storage_collection import (
     UnusedStorageCollector,
     spark_eviction_capacity,
 )
+from vonk_control.unused_storage_collection import pressure as unused_storage_pressure
+from vonk_control.unused_storage_collection import service as unused_storage_service
+from vonk_control.unused_storage_collection.evidence import _Evidence
 
 from .removal_settle import advance_until_ended, release_ended_gates
 from .runtime_image_fixtures import place_test_image
@@ -1388,6 +1391,32 @@ def test_a_sweep_that_runs_out_of_budget_continues_on_the_next_pass(
     assert lifecycle.removed == []
 
     collector._budget_seconds = 30.0
+    assert collector.tick() is True
+    assert len(lifecycle.removed) == 1
+
+
+def test_evidence_slower_than_the_budget_still_advances_the_pass(
+    world: Catalog, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Catches fixed setup spending the pass budget, so no pass ever progresses."""
+
+    old = world.revision("glm", 1)
+    world.revision("glm", 2, head="active")
+    world.workload(old, run="stopped")
+    lifecycle = FakeLifecycle(world.sessions)
+    collector = _collector(world, lifecycle, budget_seconds=1.0)
+    elapsed = [0.0]
+    read = _Evidence.read
+
+    def slow_read(session: Session, now: datetime) -> _Evidence:
+        elapsed[0] += 2.0
+        return read(session, now)
+
+    clock = SimpleNamespace(monotonic=lambda: elapsed[0])
+    monkeypatch.setattr(unused_storage_service, "time", clock)
+    monkeypatch.setattr(unused_storage_pressure, "time", clock)
+    monkeypatch.setattr(_Evidence, "read", slow_read)
+
     assert collector.tick() is True
     assert len(lifecycle.removed) == 1
 

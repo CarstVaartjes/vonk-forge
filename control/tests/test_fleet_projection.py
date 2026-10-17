@@ -2465,7 +2465,7 @@ def test_wifi_nas_route_is_a_typed_warning_with_a_recommendation() -> None:
     down = {"name": "enP7s7", "kind": "wired", "carrier": False}
     (warning,) = _route_warnings([down, _WIFI], "wlP9s9")
     assert warning.severity == "warning"
-    assert "over Wi-Fi (wlP9s9, 2.402 Gb/s, shared airtime)" in warning.detail
+    assert "over Wi-Fi (wlP9s9, 2.402 Gb/s link)." in warning.detail
     assert warning.recommendation is not None
     assert "network cable to the RJ45 port enP7s7" in warning.recommendation
 

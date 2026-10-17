@@ -15,6 +15,7 @@ import logging
 import uuid
 from datetime import UTC, datetime, timedelta
 from importlib.resources import files
+from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import create_engine, delete, event, func, insert, select, text, update
@@ -23,10 +24,12 @@ from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import LifecycleState, RecipeBuildRequest, canonical_message
 from vonk_agent_protocol.agent_words import ProfileSwitchChildKind
 from vonk_agent_protocol.contracts import AgentOperation as OperationKind
+from vonk_control import catalog_revision_collection
 from vonk_control.catalog_entities import recipe_document_projection
 from vonk_control.catalog_revision_collection import (
     GRACE,
     INTERVAL,
+    SWEEP_BUDGET_SECONDS,
     CatalogRevisionCollector,
 )
 from vonk_control.catalog_revision_contract import ModelRevisionProjection
@@ -843,6 +846,32 @@ def test_the_sweep_runs_once_per_interval(catalog: Catalog) -> None:
     catalog.now = NOW + INTERVAL
     assert collector.tick() is True
     assert not catalog.exists(second)
+
+
+def test_a_candidate_inventory_slower_than_the_budget_still_advances_the_pass(
+    catalog: Catalog, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Catches fixed setup spending the pass budget, so no pass ever progresses."""
+
+    old, head = _refresh(catalog, "glm")
+    elapsed = [0.0]
+    candidates = CatalogRevisionCollector._candidates
+
+    def slow_candidates(session: Session, cutoff: datetime) -> object:
+        elapsed[0] += SWEEP_BUDGET_SECONDS + 1
+        return candidates(session, cutoff)
+
+    monkeypatch.setattr(
+        catalog_revision_collection,
+        "time",
+        SimpleNamespace(monotonic=lambda: elapsed[0]),
+    )
+    monkeypatch.setattr(
+        CatalogRevisionCollector, "_candidates", staticmethod(slow_candidates)
+    )
+    assert catalog.collector().collect().revisions == 1
+    assert not catalog.exists(old)
+    assert catalog.exists(head)
 
 
 def test_removal_succeeds_on_postgres_with_its_real_constraints(
