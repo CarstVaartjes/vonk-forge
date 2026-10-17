@@ -73,6 +73,7 @@ from .dependencies import _INSTALLATION_POLICY_ADAPTER
 from .persistence import (
     _application_order_key,
     _intent_scope,
+    _kept_fence_ordinal,
     _newer_profile_intent_overlaps,
     _next_profile_acceptance_time,
     _persisted_profile_plan,
@@ -182,6 +183,7 @@ class FleetProfileService:
                     )
                 )
             pending_ordinal: int | None = None
+            pending_fence: list[str] = []
             created_at = (
                 _next_profile_acceptance_time(session, now) if existing is None else now
             )
@@ -193,6 +195,7 @@ class FleetProfileService:
                 )
                 if pending and existing_progress is not None:
                     pending_ordinal = existing_progress.workload_intent_ordinal
+                    pending_fence = existing_progress.fenced_node_ids
                 if pending and existing.state in {
                     LifecycleState.CANCELLED.value,
                     ProfileCancellationCause.SUPERSEDED.value,
@@ -539,6 +542,10 @@ class FleetProfileService:
                 raise FleetProfileAdmissionEffectBusy(
                     f"{dependency_wait.code}: {dependency_wait}"
                 ) from dependency_wait
+            if pending_ordinal is not None:
+                pending_ordinal = _kept_fence_ordinal(
+                    affected_nodes, pending_ordinal, pending_fence
+                )
             workload_intent_ordinal = (
                 recovery_ordinal
                 if recovery_ordinal is not None
@@ -548,13 +555,6 @@ class FleetProfileService:
                 if affected_nodes
                 else None
             )
-            if pending_ordinal is not None and any(
-                node.workload_intent_ordinal != pending_ordinal
-                for node in affected_nodes
-            ):
-                raise _FleetProfileSupersededIntentConflict(
-                    "Profile workload intent was superseded before admission resumed"
-                )
             if workload_intent_ordinal is not None:
                 for node in affected_nodes:
                     node.workload_intent_ordinal = workload_intent_ordinal
