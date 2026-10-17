@@ -521,7 +521,7 @@ def _fleet(
                 )
             args.selector = resolved[0]
             scope = f"Spark {args.selector}"
-        _confirm_action(args, f"Upgrade {scope} one at a time?")
+        _confirm_action(args, f"Upgrade {scope}?")
         result = _submit_fleet_upgrade(args, client, factory)
         if getattr(getattr(args, "observation", None), "status", None) in {
             "timed_out",

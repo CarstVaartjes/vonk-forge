@@ -46,8 +46,9 @@ curl -fsSL https://install.vonkforge.ai/spark | sh
 
 For routine upgrades of enrolled online Sparks, use Fleet's **Upgrade agents**
 action or `vonkctl fleet upgrade`. It previews the exact signed package and
-eligible nodes, rolls out one Spark at a time by default, and requires the new
-agent and privileged helper activation evidence before continuing. This path
+eligible nodes, upgrades every eligible Spark independently (each waits only
+for its own running work), and requires the new agent and privileged helper
+activation evidence from each Spark. This path
 preserves configuration and identity and does not require SSH.
 
 Connected idle agents refresh their hardware inventory after two minutes, with

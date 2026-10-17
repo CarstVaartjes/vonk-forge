@@ -21,6 +21,7 @@ from . import job_states
 from .categorized_errors import InvalidValue
 from .failure_classification import error_detail
 from .lifecycle.recipe_operation import RecipeOperationAdapter
+from .logging import log_event
 from .models import Job, RecipeRun, RunNode
 from .recipe_execution_contract import (
     RecipeExecutionContractError,
@@ -28,8 +29,12 @@ from .recipe_execution_contract import (
 )
 from .recipe_lifecycle_contract import RecipeOperationResult
 from .recipe_operations.constants import _INITIAL_OBSERVATION_GRACE_SECONDS
-from .recipe_routes import RecipeRouteNotReady, publication_disposition
-from .recovery_policy import ROUTE_RECOVERY, schedule
+from .recipe_routes import (
+    RecipeRouteNotReady,
+    RecipeRouteOwnerBusy,
+    publication_disposition,
+)
+from .recovery_policy import RECOVERY, ROUTE_RECOVERY, schedule
 from .reservation_owners import OwnerKind, OwnerRef, owner
 from .stall_window import stall_deadline
 
@@ -88,6 +93,9 @@ class RecipeOperationWorker:
         self._residue_cleanup = residue_cleanup
         self._order_reconcile = order_reconcile
         self._retry_at: dict[Callable[[], bool], datetime] = {}
+        # Consecutive passes that found the shared route owner held elsewhere.
+        self._route_owner_waits = 0
+        self._route_owner_due: datetime | None = None
 
     def tick(self) -> bool:
         progressed = False
@@ -110,7 +118,7 @@ class RecipeOperationWorker:
             if self._recoveries is not None:
                 self._advance(self._recoveries.tick)
         progressed = self._advance(self._publish_routes) or progressed
-        return self._advance(self._routes.maintain) or progressed
+        return self._advance(self._maintain_routes) or progressed
 
     def _advance(self, task: Callable[[], bool] | None) -> bool:
         if task is None:
@@ -135,6 +143,40 @@ class RecipeOperationWorker:
             )
             return False
 
+    def _with_route_owner(self, task: Callable[[], bool]) -> bool:
+        """Run one pass that needs the shared route publication owner.
+
+        Every run and the maintenance pass take the same singleton row, so a
+        held owner ends the pass and is not progress: trying the next run would
+        only meet the same holder. The next pass waits a growing, jittered step
+        that resets once the owner is won, and each wait is logged once.
+        """
+
+        now = self._clock()
+        if self._route_owner_due is not None and now < self._route_owner_due:
+            return False
+        try:
+            result = task()
+        except RecipeRouteOwnerBusy as error:
+            self._route_owner_waits += 1
+            self._route_owner_due = RECOVERY.next_attempt(
+                "recipe.route.owner", self._route_owner_waits, now, ongoing_intent=True
+            )
+            log_event(
+                _LOGGER,
+                "recipe.route.owner_busy",
+                service="control-worker",
+                retry_at=self._route_owner_due,
+                reason=str(error),
+            )
+            return False
+        self._route_owner_waits = 0
+        self._route_owner_due = None
+        return result
+
+    def _maintain_routes(self) -> bool:
+        return self._with_route_owner(self._routes.maintain)
+
     def _publish_routes(self) -> bool:
         now = self._clock()
         with self._sessions() as session:
@@ -156,18 +198,25 @@ class RecipeOperationWorker:
                     .order_by(RecipeRun.created_at, RecipeRun.id)
                 )
             )
+        if not run_ids:
+            return False
+        return self._with_route_owner(lambda: self._publish_runs(run_ids))
+
+    def _publish_runs(self, run_ids: tuple[str, ...]) -> bool:
         progressed = False
         for run_id in run_ids:
             try:
                 self._routes.publish_run(run_id)
+            except RecipeRouteOwnerBusy:
+                raise
             except SecurityRefusalError as error:
                 self._end_publication(run_id, error)
                 progressed = True
                 continue
             except RecipeRouteNotReady as error:
-                # Publication evidence that is not there yet, or a held owner:
-                # a wait on the one retry clock, so restart cannot turn it into
-                # a hot loop and it never spends the budget of a serving route.
+                # Publication evidence that is not there yet: a wait on the
+                # one retry clock, so restart cannot turn it into a hot loop
+                # and it never spends the budget of a serving route.
                 self._defer_publication(run_id, error)
                 progressed = True
                 continue

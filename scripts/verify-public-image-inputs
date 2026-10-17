@@ -30,6 +30,11 @@ INPUTS = (
     "deploy/compose/registry/config.yml",
     "deploy/compose/tailscale/configure.sh",
     "deploy/compose/hermes-agent/provision-litellm-key.py",
+    # Read only to embed the Compose template digest.
+    "deploy/compose/compose.yaml",
+    "deploy/compose/tailscale/compose.yaml",
+    "deploy/compose/hermes-agent/compose.yaml",
+    "scripts/render-dev-compose",
 )
 
 EXCLUDED_DIRECTORIES = frozenset(

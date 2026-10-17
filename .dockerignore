@@ -47,6 +47,7 @@ deploy/*
 !deploy/compose/
 deploy/compose/*
 !deploy/compose/Caddyfile
+!deploy/compose/compose.yaml
 !deploy/compose/caddy/
 deploy/compose/caddy/*
 !deploy/compose/caddy/entrypoint.sh
@@ -65,9 +66,11 @@ deploy/compose/registry/*
 !deploy/compose/tailscale/
 deploy/compose/tailscale/*
 !deploy/compose/tailscale/configure.sh
+!deploy/compose/tailscale/compose.yaml
 !deploy/compose/hermes-agent/
 deploy/compose/hermes-agent/*
 !deploy/compose/hermes-agent/provision-litellm-key.py
+!deploy/compose/hermes-agent/compose.yaml
 !inventory/
 !inventory/wheels/
 !inventory/wheels/vonk_agent_protocol-4.1.0-py3-none-any.whl
@@ -100,6 +103,7 @@ deploy/compose/step-ca/**
 !scripts/check_environment.py
 !scripts/generate-control-clients
 !scripts/export-agent-wire-schema
+!scripts/render-dev-compose
 !tools/openapi-client/
 !tools/openapi-client/**
 

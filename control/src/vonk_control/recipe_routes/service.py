@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Callable, Iterable, Mapping
-from contextlib import AbstractContextManager
+from collections.abc import Callable, Iterable, Mapping, Sequence
+from contextlib import AbstractContextManager, suppress
 from datetime import datetime, timedelta
 
 from sqlalchemy import select
@@ -22,7 +22,7 @@ from vonk_agent_protocol import RouteState as RunRouteState
 from vonk_agent_protocol.route_activation import ROUTE_EVIDENCE_MAX_AGE_SECONDS
 
 from ..agent_operation_facts import job_start_deadline
-from ..bounded_retry import bounded_attempts
+from ..bounded_retry import REQUEST_PAUSES, bounded_attempts
 from ..job_documents import DistributedRecoveryMarker
 from ..litellm import (
     LiteLlmGeneration,
@@ -53,6 +53,7 @@ from .shared import (
     RecipeRecoveryDeadlineError,
     RecipeRouteError,
     RecipeRouteNotReady,
+    RecipeRouteOwnerBusy,
     RecipeRouteSuperseded,
     _ActivatedRecipeRouteError,
     _aware,
@@ -93,7 +94,7 @@ class RecipeRouteService:
             try:
                 publication = self._claim_run(run_id)
                 break
-            except SecurityRefusalError:
+            except (SecurityRefusalError, RecipeRouteOwnerBusy):
                 raise
             except RecipeRouteNotReady as error:
                 last = error
@@ -114,7 +115,8 @@ class RecipeRouteService:
 
         committed_error: RecipeRouteError | None = None
         publication: _Publication | None = None
-        with self.publication_transaction() as session:
+        # One owner try: the worker paces a held owner across its passes.
+        with self.publication_transaction(pauses=()) as session:
             try:
                 publication = self._claim_run_publication(session, run_id)
                 owner = session.get(RoutePublicationOwner, 1)
@@ -129,8 +131,10 @@ class RecipeRouteService:
         assert publication is not None
         return publication
 
-    def publication_transaction(self) -> AbstractContextManager[Session]:
-        return route_publication_transaction(self.sessions)
+    def publication_transaction(
+        self, pauses: Sequence[float] = REQUEST_PAUSES
+    ) -> AbstractContextManager[Session]:
+        return route_publication_transaction(self.sessions, pauses)
 
     def _claim_in_session(self, session: Session, digest: str) -> _Claim:
         """Claim the next publication ordinal inside the owner-locked transaction.
@@ -264,7 +268,8 @@ class RecipeRouteService:
 
         if run_id is None:
             return
-        self.maintain()
+        with suppress(RecipeRouteOwnerBusy):
+            self.maintain()
 
     def _record_completion(
         self, publication: _Publication, generation: LiteLlmGeneration
@@ -608,7 +613,7 @@ class RecipeRouteService:
         for _attempt in bounded_attempts():
             try:
                 return self._maintain_once()
-            except SecurityRefusalError:
+            except (SecurityRefusalError, RecipeRouteOwnerBusy):
                 raise
             except RecipeRouteNotReady:
                 continue
@@ -621,7 +626,9 @@ class RecipeRouteService:
 
     def _maintain_once(self) -> bool:
         now = _aware(self._clock())
-        with self.publication_transaction() as session:
+        # A held owner is raised to the worker, which records its wait: this
+        # schedule is readable only under the owner.
+        with self.publication_transaction(pauses=()) as session:
             owner = session.get(RoutePublicationOwner, 1)
             if owner is None:
                 raise RecipeRouteNotReady("route publication owner is unavailable")
