@@ -15,11 +15,22 @@
 //! is not this start's (the helper already read it): the stop removes one of
 //! this order's and refuses any other. And a refused authority: the start is
 //! not this agent's to adopt.
+//!
+//! A refused inspection grant is not a refused start: it says nothing about
+//! the container (a Controller that predates generation-bound inspections
+//! refuses the request's shape), so a launched rank is read again and nothing
+//! is stopped on it.
 
 use super::*;
 use crate::host_runtime::HostRuntimeError;
 
 const START_FAILED: &str = "container runtime could not start the workload";
+
+/// The Controller refused an inspection's grant. That is no answer about the
+/// container, so it is read again or waited on, never stopped on.
+fn inspection_grant_refused(error: &HostRuntimeError) -> bool {
+    matches!(error, HostRuntimeError::Controller(_))
+}
 
 /// The Controller or the helper refused this start's authority before any
 /// effect.
@@ -54,6 +65,20 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                 },
             ));
         }
+        self.reobserve_start(claim, run_id, run_generation, arguments, error)
+            .await
+    }
+
+    /// Read this start's container again through the grant-free inspection
+    /// bound to its generation, and go on by what is there.
+    async fn reobserve_start(
+        &self,
+        claim: &AgentClaim,
+        run_id: &str,
+        run_generation: u64,
+        arguments: &[String],
+        error: &HostRuntimeError,
+    ) -> Result<(), Box<ExecutionResult>> {
         let request_root = self.runtime_root.join("runtime-requests");
         let inspection = HostRuntimeBoundary {
             client: self.client,
@@ -97,9 +122,56 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         Err(Box::new(ended))
     }
 
-    /// A launched rank's granted inspection: `Ok` when its container runs.
-    /// An error is read again as a Start's error is, so a lost reply stops
-    /// nothing; a cancellation stops the rank.
+    /// A retained start (an earlier agent may have launched it) or a
+    /// collective readiness phase whose granted inspection answered `error`:
+    /// the result that ends it. Another generation's container under the name
+    /// (the helper refuses it) is healed by the exact stop, which removes one
+    /// of this order's and refuses any other; an unread inspection or a
+    /// refused inspection grant waits; anything else is reported.
+    pub(super) async fn inspected_start_failed(
+        &self,
+        claim: &AgentClaim,
+        run_id: &str,
+        retained: bool,
+        error: &HostRuntimeError,
+    ) -> ExecutionResult {
+        if retained {
+            if matches!(
+                error,
+                HostRuntimeError::HelperRejected { code, .. }
+                    if *code == HelperErrorCode::OperationInvalidArtifact
+            ) {
+                return match self.heal_retained_run(claim, run_id).await {
+                    Ok(()) => retained_container_removed(run_id),
+                    Err(result) => result,
+                };
+            }
+            if temporary_observation_error(error) || inspection_grant_refused(error) {
+                return temporary_preparation_failure(
+                    FailureStage::RetainedContainer,
+                    "retained_inspect",
+                    &error.preflight_code(),
+                );
+            }
+            return runtime_observation_failure(error);
+        }
+        if inspection_grant_refused(error) {
+            return temporary_preparation_failure(
+                FailureStage::Unknown,
+                "collective_inspect",
+                &error.preflight_code(),
+            );
+        }
+        runtime_failure(
+            "collective workload is not running with exact identity",
+            error,
+        )
+    }
+
+    /// A launched rank's granted inspection, bound to its generation: `Ok`
+    /// when its container runs. An error is read again as a Start's error is,
+    /// so a lost reply stops nothing; a refused inspection grant is read again
+    /// without a stop; a cancellation stops the rank.
     pub(super) async fn inspect_launched_rank(
         &self,
         claim: &AgentClaim,
@@ -109,13 +181,18 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         cancellation: &tokio::sync::watch::Receiver<bool>,
     ) -> Result<(), Box<ExecutionResult>> {
         let Err(error) = self
-            .execute_host_runtime(claim, HostRuntimeAction::RunInspect, arguments.to_vec())
+            .inspect_start_run(claim, arguments.to_vec(), run_generation)
             .await
         else {
             return Ok(());
         };
         if *cancellation.borrow() {
             return Err(Box::new(self.cancel_start_run(claim, run_id).await));
+        }
+        if inspection_grant_refused(&error) {
+            return self
+                .reobserve_start(claim, run_id, run_generation, arguments, &error)
+                .await;
         }
         self.reobserve_failed_start(claim, run_id, run_generation, arguments, &error)
             .await

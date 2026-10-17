@@ -93,6 +93,7 @@ def derive_runtime_plan_binding(
     node_id: str,
     action: ContainerRuntimeAction,
     stop_plan_sha256: str | None,
+    run_generation: int | None = None,
 ) -> RuntimePlanBinding:
     """Select and hash the exact plan owned by this durable child operation.
 
@@ -100,8 +101,17 @@ def derive_runtime_plan_binding(
     to the order's identity and to the Stop document the agent sent
     (``stop_plan_sha256``); the helper executes that document only when its
     identity is the one bound here.
+
+    An inspection whose agent names a generation (``run_generation``) is
+    bound to its Start's own generation, read from the stored order; an
+    inspection that names none (an older agent) stays unbound.
     """
 
+    if action is ContainerRuntimeAction.RUN_INSPECT and run_generation is not None:
+        # Granted only for a recipe.start (``_ACTION_KINDS``).
+        return RuntimePlanBinding(
+            run_generation=_parse_start(operation.payload).run_generation
+        )
     if action not in {ContainerRuntimeAction.START, ContainerRuntimeAction.STOP}:
         return RuntimePlanBinding()
     if action is ContainerRuntimeAction.STOP:

@@ -150,6 +150,32 @@ def test_only_an_inspection_may_name_a_generation_without_a_plan() -> None:
             HostRuntimeRequest.model_validate(refused)
 
 
+def test_an_inspection_grant_may_bind_a_generation_alone() -> None:
+    operation = {
+        "type": "execute-container-runtime-request",
+        "action": "run-inspect",
+        "fence": "40000000-0000-4000-8000-000000000004",
+        "request_sha256": "e" * 64,
+    }
+    for generation in (1, 2**63 - 1):
+        granted = ExecuteContainerRuntimeRequestOperation.model_validate(
+            operation | {"run_generation": generation}
+        )
+        assert granted.to_mapping()["run_generation"] == generation
+    assert "run_generation" not in (
+        ExecuteContainerRuntimeRequestOperation.model_validate(operation).to_mapping()
+    )
+    run_id = "00000000-0000-4000-8000-000000000003"
+    for refused in (
+        operation | {"run_generation": 0},
+        operation | {"run_generation": 2**63},
+        operation | {"action": "image-inspect", "run_generation": 1},
+        operation | {"run_generation": 1, "runtime_run_id": run_id},
+    ):
+        with pytest.raises(ValidationError):
+            ExecuteContainerRuntimeRequestOperation.model_validate(refused)
+
+
 def test_exact_runtime_request_round_trips_a_plan_over_two_megabytes() -> None:
     start = start_plan(large_environment=True)
     document = {

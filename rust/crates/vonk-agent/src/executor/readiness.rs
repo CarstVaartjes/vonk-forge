@@ -163,6 +163,30 @@ where
     }
 }
 
+impl<R> RecipeExecutor<'_, R> {
+    /// One read of a loading Start's container for the readiness guard: its
+    /// bounded tail, answered only for a container whose label carries
+    /// `run_generation`, so another generation's container never stands in
+    /// for this Start's.
+    pub(super) async fn loading_tail(
+        &self,
+        arguments: &[String],
+        run_generation: u64,
+    ) -> Result<Option<String>, crate::host_runtime::HostRuntimeError> {
+        let request_root = self.runtime_root.join("runtime-requests");
+        let report = HostRuntimeBoundary {
+            client: self.client,
+            request_root: &request_root,
+            helper_socket: self.helper_socket,
+        }
+        .inspect_start_run_report(arguments.to_vec(), run_generation)
+        .await?;
+        Ok(report
+            .process_logs
+            .map(|logs| format!("{}\0{}", logs.stdout.text, logs.stderr.text)))
+    }
+}
+
 pub(super) fn before_phase_deadline(
     lease_deadline: &tokio::sync::watch::Receiver<DateTime<FixedOffset>>,
     start_deadline: Option<&DateTime<FixedOffset>>,

@@ -462,3 +462,101 @@ fn an_inspection_naming_a_generation_refuses_another_generations_container() {
     ));
     assert!(matches!(inspect("1", None), Ok(true)));
 }
+
+/// A granted inspection is bound to one generation when its request names it
+/// and its grant (the Controller's record of the Start) names the same: the
+/// container under the name answers only when its label carries it. A request
+/// and a grant that disagree are refused before Docker is read; neither naming
+/// one (an older agent or Controller) reads the container as before.
+#[test]
+fn a_granted_inspection_is_bound_to_the_generation_its_grant_names() {
+    use std::os::unix::fs::PermissionsExt;
+    let inspect = |label: &str, requested: Option<u64>, granted: Option<u64>| {
+        let mut plan = recipe_start_plan_for_authority(2);
+        let (_temp, roots) = start_fixture(&mut plan);
+        let projector = OperationExecutor::new(
+            roots.clone(),
+            &[0; 32],
+            InspectedRunner(String::new()),
+            None,
+        )
+        .unwrap();
+        let arguments = projector
+            .projected_runtime_arguments(
+                &plan.compiled_execution_plan,
+                plan.installation_id,
+                plan.run_id,
+            )
+            .unwrap();
+        let validated = validate_docker_run_with_archive(
+            &arguments[4..],
+            &roots,
+            projector.runtime_request_owner_uid,
+            Some(&arguments[0]),
+            Some(&arguments[1]),
+        )
+        .unwrap();
+        let container = format!(
+            "{}\ttrue\t{}\ttrue\t{}\t{label}\n",
+            "f".repeat(64),
+            hex_sha256(&canonical_json(&validated.arguments).unwrap()),
+            plan.run_id
+        );
+        let executor =
+            OperationExecutor::new(roots.clone(), &[0; 32], InspectedRunner(container), None)
+                .unwrap();
+        let fence = uuid::Uuid::new_v4();
+        let request = HostRuntimeRequest {
+            action: HostRuntimeAction::RunInspect,
+            fence,
+            arguments,
+            job_plan: None,
+            installation_id: None,
+            reconciliation_identity: None,
+            run_generation: requested,
+            start_plan: None,
+            stop_plan: None,
+        };
+        let body = canonical_json(&request).unwrap();
+        let digest = hex_sha256(&body);
+        fs::create_dir_all(&roots.runtime_requests).unwrap();
+        let path = roots.runtime_requests.join(format!("{digest}.json"));
+        fs::write(&path, &body).unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+        executor
+            .execute_runtime_request(
+                &ContainerRuntimeAction::RunInspect,
+                RuntimeRequestGrantBinding {
+                    fence: &fence,
+                    installation_intent_nonce: None,
+                    installation_intent_ordinal: None,
+                    installation_id: None,
+                    reconciliation_identity: None,
+                    start_plan_sha256: None,
+                    stop_plan_sha256: None,
+                    run_generation: granted,
+                    runtime_run_id: None,
+                    runtime_target_id: None,
+                    runtime_installation_id: None,
+                },
+                &digest,
+            )
+            .map(|_| ())
+    };
+    assert!(matches!(inspect("2", Some(2), Some(2)), Ok(())));
+    assert!(matches!(
+        inspect("1", Some(2), Some(2)),
+        Err(OperationError::InvalidArtifact)
+    ));
+    assert!(matches!(
+        inspect("", Some(2), Some(2)),
+        Err(OperationError::InvalidArtifact)
+    ));
+    for (requested, granted) in [(Some(2), None), (None, Some(2)), (Some(2), Some(3))] {
+        assert!(matches!(
+            inspect("2", requested, granted),
+            Err(OperationError::InvalidOperation)
+        ));
+    }
+    assert!(matches!(inspect("1", None, None), Ok(())));
+}

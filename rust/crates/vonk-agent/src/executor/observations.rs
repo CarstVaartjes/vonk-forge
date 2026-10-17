@@ -201,7 +201,11 @@ impl<R> RecipeExecutor<'_, R> {
                     helper_socket: self.helper_socket,
                 };
                 match boundary
-                    .inspect_recipe_run_evidence_for_observation(vec![run_id.to_owned()], false)
+                    .inspect_recipe_run_evidence_for_observation(
+                        vec![run_id.to_owned()],
+                        false,
+                        None,
+                    )
                     .await
                     .map(|report| report.running)
                 {
@@ -289,7 +293,11 @@ impl<R> RecipeExecutor<'_, R> {
                     helper_socket: self.helper_socket,
                 };
                 let inspection = boundary
-                    .inspect_recipe_run_evidence_for_observation(plan.arguments.clone(), false)
+                    .inspect_recipe_run_evidence_for_observation(
+                        plan.arguments.clone(),
+                        false,
+                        Some(plan.run_generation),
+                    )
                     .await
                     .inspect_err(|error| {
                         eprintln!(
@@ -319,7 +327,11 @@ impl<R> RecipeExecutor<'_, R> {
                 // removes the container.
                 let failure_diagnostics = match failure_diagnostics {
                     None if !process_running => boundary
-                        .inspect_recipe_run_evidence_for_observation(plan.arguments, true)
+                        .inspect_recipe_run_evidence_for_observation(
+                            plan.arguments,
+                            true,
+                            Some(plan.run_generation),
+                        )
                         .await
                         .err()
                         .and_then(|error| exited_workload_diagnostics(&error)),
@@ -401,6 +413,7 @@ impl<R> RecipeExecutor<'_, R> {
     pub(super) async fn running_workload_evidence(
         &self,
         arguments: &[String],
+        run_generation: u64,
         why: &str,
     ) -> (Option<crate::failure_evidence::FailureProcessLogs>, String) {
         let request_root = self.runtime_root.join("runtime-requests");
@@ -410,7 +423,7 @@ impl<R> RecipeExecutor<'_, R> {
             helper_socket: self.helper_socket,
         };
         match boundary
-            .inspect_recipe_run_report(arguments.to_vec(), true)
+            .inspect_start_run_report(arguments.to_vec(), run_generation)
             .await
         {
             Ok(report) => {

@@ -52,7 +52,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
                 .runtime_image_inspect(&request.arguments)
                 .map(|()| RuntimeRequestOutcome::default()),
             HostRuntimeAction::RunInspect => {
-                if !self.runtime_run_inspect(&request.arguments, true)? {
+                if !self.runtime_run_inspect(&request.arguments, true, request.run_generation)? {
                     return Err(OperationError::InvalidArtifact);
                 }
                 Ok(RuntimeRequestOutcome::default())
@@ -272,10 +272,13 @@ impl<R: CommandRunner> OperationExecutor<R> {
                 if request.start_plan.is_some()
                     || request.job_plan.is_some()
                     || request.stop_plan.is_some()
-                    || request.run_generation.is_some()
+                    // An inspection may be bound to one generation: the one
+                    // its request names and its grant names the same.
+                    || (request.run_generation.is_some() || grant.run_generation.is_some())
+                        && (request.action != HostRuntimeAction::RunInspect
+                            || request.run_generation != grant.run_generation)
                     || grant.start_plan_sha256.is_some()
                     || grant.stop_plan_sha256.is_some()
-                    || grant.run_generation.is_some()
                     || grant.runtime_run_id.is_some()
                     || grant.runtime_target_id.is_some()
                     || grant.runtime_installation_id.is_some()
