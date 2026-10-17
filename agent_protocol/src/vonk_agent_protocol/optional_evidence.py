@@ -14,12 +14,19 @@ This is confined to evidence the Controller only displays or ignores. Identity,
 time, fences, fabric *policy* decisions, versions and every other mandatory
 field stay strict, and nothing is repaired into a different valid value: a
 damaged optional part is removed, never rewritten.
+
+One rewrite is allowed, in prose only: a model names its free-text leaves
+(``HOST_PATH_TEXT``: a reason, a summary, a one-line diagnostic). A host path
+in one of them is replaced by the typed marker ``<host-path>`` and the report
+carries ``RESULT_HOST_PATH_REDACTED``. The rest of the sentence is kept, and
+the report's core is never refused for it.
 """
 
 from __future__ import annotations
 
 import copy
 import itertools
+import re
 from collections.abc import Mapping
 from typing import Any, ClassVar, NamedTuple
 
@@ -35,6 +42,40 @@ class EvidenceGroup(NamedTuple):
     code: AgentEvidenceCode
     #: Each path is the keys from the model's input down to one optional field.
     paths: tuple[tuple[str, ...], ...]
+
+
+#: What stands in for a host path inside prose. It carries no path separator.
+HOST_PATH_MARKER = "<host-path>"
+# A path is a token with a separator in it; the whole token is replaced, so no
+# separator survives in the sentence. ``key=`` before it and ``:line`` after it
+# are not part of the token and are kept.
+_PATH_TOKEN = re.compile(r"[^\s'\"`()\[\]{},;=:]*[/\\][^\s'\"`()\[\]{},;=:]*")
+
+
+def redact_host_paths(text: str) -> str:
+    """``text`` with every path-like token replaced by :data:`HOST_PATH_MARKER`."""
+
+    return _PATH_TOKEN.sub(HOST_PATH_MARKER, text)
+
+
+def redacted_prose(document: object, paths: tuple[tuple[str, ...], ...]) -> object:
+    """``document`` with host paths redacted in its prose leaves, or ``None`` if none had one."""
+
+    if not isinstance(document, Mapping):
+        return None
+    redacted = copy.deepcopy(dict(document))
+    changed = False
+    for path in paths:
+        node: object = redacted
+        for key in path[:-1]:
+            node = node.get(key) if isinstance(node, dict) else None
+        if not isinstance(node, dict):
+            continue
+        value = node.get(path[-1])
+        if isinstance(value, str) and ("/" in value or "\\" in value):
+            node[path[-1]] = redact_host_paths(value)
+            changed = True
+    return redacted if changed else None
 
 
 def _present(document: Mapping[str, Any], path: tuple[str, ...]) -> bool:
@@ -64,6 +105,9 @@ class OptionalEvidenceModel(BaseModel):
     """Mixin: drop invalid optional evidence instead of refusing the report."""
 
     EVIDENCE_GROUPS: ClassVar[tuple[EvidenceGroup, ...]] = ()
+    #: Free-text leaves (paths from the model's input) whose host paths are
+    #: redacted rather than refusing the report.
+    HOST_PATH_TEXT: ClassVar[tuple[tuple[str, ...], ...]] = ()
     _evidence_warnings: tuple[AgentEvidenceCode, ...] = PrivateAttr(default=())
 
     @property
@@ -97,6 +141,18 @@ def _drop_invalid_optional_evidence(
     except ValidationError:
         if not isinstance(data, Mapping):
             raise
+        redacted: tuple[AgentEvidenceCode, ...] = ()
+        prose = redacted_prose(data, cls.HOST_PATH_TEXT)
+        if prose is not None:
+            # A host path in prose is redacted, never a reason to refuse.
+            data, redacted = prose, (AgentEvidenceCode.RESULT_HOST_PATH_REDACTED,)
+            try:
+                model = handler(data)
+            except ValidationError:
+                pass
+            else:
+                model._evidence_warnings = redacted
+                return model
         present = tuple(
             group
             for group in cls.EVIDENCE_GROUPS
@@ -109,7 +165,9 @@ def _drop_invalid_optional_evidence(
                     model = handler(_without(data, dropped))
                 except ValidationError:
                     continue
-                model._evidence_warnings = tuple(group.code for group in dropped)
+                model._evidence_warnings = redacted + tuple(
+                    group.code for group in dropped
+                )
                 return model
         raise
 
@@ -125,4 +183,10 @@ def fail_open_on_optional_evidence() -> Any:
     return model_validator(mode="wrap")(classmethod(_drop_invalid_optional_evidence))
 
 
-__all__ = ["EvidenceGroup", "OptionalEvidenceModel", "fail_open_on_optional_evidence"]
+__all__ = [
+    "HOST_PATH_MARKER",
+    "EvidenceGroup",
+    "OptionalEvidenceModel",
+    "fail_open_on_optional_evidence",
+    "redact_host_paths",
+]

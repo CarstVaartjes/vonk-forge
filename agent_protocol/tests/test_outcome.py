@@ -9,6 +9,7 @@ from uuid import uuid4
 import pytest
 from pydantic import TypeAdapter, ValidationError
 from vonk_agent_protocol import (
+    AgentEvidenceCode,
     AgentFailureResult,
     AgentOperation,
     AgentProtocolError,
@@ -182,11 +183,13 @@ def test_a_typed_done_is_checked_against_the_operation_that_ran() -> None:
         )
 
 
-def test_result_bodies_still_refuse_filesystem_paths() -> None:
-    with pytest.raises(AgentProtocolError):
-        AgentResult.parse(
-            _report("waiting-for-operator", {**UNKNOWN, "reason": "stuck at /etc/x"})
-        )
+def test_a_host_path_in_result_prose_is_redacted_not_refused() -> None:
+    parsed = AgentResult.parse(
+        _report("waiting-for-operator", {**UNKNOWN, "reason": "stuck at /etc/x"})
+    )
+    assert isinstance(parsed.result, OutcomeUnknown)
+    assert parsed.result.reason == "stuck at <host-path>"
+    assert AgentEvidenceCode.RESULT_HOST_PATH_REDACTED in parsed.evidence_warnings
 
 
 def test_the_error_categories_are_closed_per_kind() -> None:

@@ -63,7 +63,12 @@ def test_generic_failure_round_trip_and_diagnostic_guard_are_narrow():
         AgentResult.model_validate_json(canonical_message(result)).result.diagnostics
         == result.result.diagnostics
     )
+    # A path in prose is redacted; in the code the Controller acts on, refused.
     document["result"]["reason"] = "/etc/shadow"
+    redacted = AgentResult.model_validate(document)
+    assert isinstance(redacted.result, AgentFailureResult)
+    assert redacted.result.reason == "<host-path>"
+    document["result"]["error_code"] = "recipe/build_failed"
     with pytest.raises(ValidationError):
         AgentResult.model_validate(document)
 

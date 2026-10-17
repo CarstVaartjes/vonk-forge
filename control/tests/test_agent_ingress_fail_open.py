@@ -31,7 +31,11 @@ from vonk_agent_protocol import (
     RecipeStartResult,
 )
 from vonk_agent_protocol.claims import ClaimRequest
-from vonk_agent_protocol.optional_evidence import EvidenceGroup, OptionalEvidenceModel
+from vonk_agent_protocol.optional_evidence import (
+    EvidenceGroup,
+    OptionalEvidenceModel,
+    redact_host_paths,
+)
 from vonk_agent_protocol.telemetry import TelemetryRequest, TelemetrySample
 from vonk_control.agent_api import install_agent_routes
 
@@ -405,7 +409,7 @@ def _outcome_failed(**evidence: object) -> dict[str, object]:
     [
         (
             {"diagnostic": "endpoint=/agent/result"},
-            {AgentEvidenceCode.FAILURE_DIAGNOSTIC_LINE_DROPPED},
+            {AgentEvidenceCode.RESULT_HOST_PATH_REDACTED},
         ),
         ({"stage": "s" * 200}, {AgentEvidenceCode.FAILURE_STAGE_DROPPED}),
         (
@@ -419,7 +423,7 @@ def _outcome_failed(**evidence: object) -> dict[str, object]:
         (
             {"diagnostic": "/var/log/x", "stage": "a/b"},
             {
-                AgentEvidenceCode.FAILURE_DIAGNOSTIC_LINE_DROPPED,
+                AgentEvidenceCode.RESULT_HOST_PATH_REDACTED,
                 AgentEvidenceCode.FAILURE_STAGE_DROPPED,
             },
         ),
@@ -430,14 +434,22 @@ def test_an_invalid_result_evidence_field_costs_only_itself(
     poison: dict[str, object],
     codes: set[AgentEvidenceCode],
 ) -> None:
-    """Catches one bad failure field taking the stage and helper codes with it."""
+    """Catches one bad failure field taking the stage and helper codes with it.
+
+    A host path in prose is redacted to the marker, never dropped or refused.
+    """
 
     accepted = AgentResult.model_validate(shape(**poison))
     assert len(accepted.evidence_warnings) == len(codes)
     assert set(accepted.evidence_warnings) == codes
     stored = accepted.stored_result()
     for name, value in _RESULT_EVIDENCE.items():
-        assert getattr(stored, name) == (None if name in poison else value), name
+        if name not in poison:
+            assert getattr(stored, name) == value, name
+        elif name == "diagnostic":
+            assert getattr(stored, name) == redact_host_paths(str(poison[name]))
+        else:
+            assert getattr(stored, name) is None, name
 
 
 def test_telemetry_batch_survives_one_samples_invalid_reading() -> None:
