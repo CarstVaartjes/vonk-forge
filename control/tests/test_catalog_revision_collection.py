@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import logging
 import uuid
 from datetime import UTC, datetime, timedelta
 from importlib.resources import files
@@ -872,6 +873,57 @@ def test_removal_succeeds_on_postgres_with_its_real_constraints(
     assert result.revisions == 1
     for model in (RecipeInstallation, RecipeRun, ClusterMapping, RecipeBuild):
         assert catalog.count(model) == 1
+
+
+def test_a_busy_reference_fence_ends_the_pass_and_retries_after_release(
+    postgres_engine: Engine, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Catches a sweep that re-tries the shared fence once per candidate.
+
+    Every candidate takes the same table fence, so a writer in flight on one
+    fenced table refuses them all; trying each in turn is a hot loop.
+    """
+
+    Base.metadata.create_all(postgres_engine)
+    catalog = Catalog(postgres_engine)
+    old = [_refresh(catalog, f"busy-{index}")[0] for index in range(3)]
+    collector = catalog.collector()
+    fences: list[str] = []
+
+    def count_fence(_connection, _cursor, statement, *_rest) -> None:
+        if "NOWAIT" in statement:
+            fences.append(statement)
+
+    caplog.set_level(logging.INFO, logger="vonk_control.catalog_revision_collection")
+    event.listen(postgres_engine, "before_cursor_execute", count_fence)
+    try:
+        with postgres_engine.connect() as writer:
+            writer.execute(text("LOCK TABLE jobs IN ROW EXCLUSIVE MODE"))
+
+            assert collector.tick() is False
+            assert len(fences) == 1
+            assert len(caplog.records) == 1
+            assert all(catalog.exists(revision) for revision in old)
+            assert collector._due_at is not None
+            first_wait = collector._due_at - catalog.now
+
+            # The wait is paced: a worker pass before the retry tries nothing.
+            assert collector.tick() is False
+            assert len(fences) == 1
+
+            # A writer still in flight at the retry backs the next wait off.
+            catalog.now = collector._due_at
+            assert collector.tick() is False
+            assert len(fences) == 2
+            assert collector._due_at - catalog.now > first_wait
+            writer.rollback()
+
+        # Re-checked within moments, not after the hourly interval.
+        catalog.now = NOW + timedelta(minutes=1)
+        assert collector.tick() is True
+    finally:
+        event.remove(postgres_engine, "before_cursor_execute", count_fence)
+    assert not any(catalog.exists(revision) for revision in old)
 
 
 def test_a_retained_image_authorization_row_never_blocks_collection_on_postgres(
