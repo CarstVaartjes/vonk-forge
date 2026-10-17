@@ -1,5 +1,6 @@
 """Unused storage collection: public imports."""
 
+from vonk_agent_protocol import InstallationState as InstallationState
 from vonk_agent_protocol import canonical_message as canonical_message
 
 from ..catalog_revision_collection import GRACE as GRACE
@@ -134,7 +135,6 @@ from .service import Callable as Callable
 from .service import Counter as Counter
 from .service import FilesystemRuntimeImageStorage as FilesystemRuntimeImageStorage
 from .service import InstallationNode as InstallationNode
-from .service import InstallationState as InstallationState
 from .service import Path as Path
 from .service import RecipeInstallation as RecipeInstallation
 from .service import Session as Session

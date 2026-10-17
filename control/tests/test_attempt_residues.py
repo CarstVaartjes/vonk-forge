@@ -793,6 +793,43 @@ def test_an_unowned_incomplete_installation_is_uninstalled_after_the_grace(
     assert len(_uninstalls(load, installation_id)) == 1
 
 
+def test_other_work_on_its_sparks_does_not_restart_a_leftovers_grace(
+    tmp_path: Path,
+) -> None:
+    """Catches a busy Spark keeping a failed installation for ever."""
+
+    load = _load(tmp_path)
+    installation_id = _leave_incomplete(load, state="failed")
+    tick = load.lifecycle._clock() + LEFTOVER_GRACE + timedelta(minutes=1)
+    with load.sessions.begin() as session:
+        nodes = sorted(
+            session.scalars(
+                select(InstallationNode.node_id).where(
+                    InstallationNode.installation_id == installation_id
+                )
+            )
+        )
+        # Another recipe started and stopped on the same Sparks an hour ago.
+        session.add(
+            Job(
+                request_id=str(uuid.uuid4()),
+                kind="recipe.start",
+                state="succeeded",
+                actor="operator",
+                authority_revision="r",
+                targets=nodes,
+                payload_digest="0" * 64,
+                payload={},
+                current_attempt=0,
+                created_at=tick - timedelta(hours=1),
+                updated_at=tick - timedelta(hours=1),
+            )
+        )
+
+    assert _reconciler(load, after=LEFTOVER_GRACE + timedelta(minutes=1)).tick()
+    assert len(_uninstalls(load, installation_id)) == 1
+
+
 def test_an_installation_short_of_its_payload_is_uninstalled_after_the_grace(
     tmp_path: Path,
 ) -> None:

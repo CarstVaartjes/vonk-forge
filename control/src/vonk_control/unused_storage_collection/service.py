@@ -11,7 +11,6 @@ from pathlib import Path
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import InstallationState
 
 from ..logging import log_event
 from ..models import InstallationNode, RecipeInstallation
@@ -34,6 +33,7 @@ from ..storage_demands import (
 )
 from ..worker_memory_contract import WorkerMemoryComponent
 from .common import (
+    _COLLECTABLE_STATES,
     _HOLDING_STATES,
     _KEPT_WORDS,
     _LOGGER,
@@ -343,7 +343,7 @@ class UnusedStorageCollector:
             reasons = {
                 installation_id: (
                     _installation_kept(session, installation_id, evidence)
-                    if state == InstallationState.INSTALLED
+                    if state in _COLLECTABLE_STATES
                     else "not installed"
                 )
                 for installation_id, state, _installed in members
