@@ -350,6 +350,10 @@ jobs:
       - name: Smoke the exact rootless LiteLLM runtime on both architectures
         if: steps.reuse_litellm.outputs.digest == ''
         shell: bash
+        env:
+          # The pull request ran no smoke for this digest, so it runs here. Each
+          # architecture is read from the registry by digest: no archive needed.
+          DIGEST: ${{ steps.pr_images.outputs.litellm_digest || steps.build_litellm.outputs.digest }}
         run: |
           set -euo pipefail
           tags=()
@@ -362,8 +366,9 @@ jobs:
           for architecture in amd64 arm64; do
             tag="vonk-forge-litellm-smoke:${architecture}-${GITHUB_RUN_ID}"
             tags+=("$tag")
-            skopeo copy --override-os linux --override-arch "$architecture" \
-              "oci-archive:$RUNNER_TEMP/vonk-forge-litellm.oci.tar" \
+            scripts/retry-dependency-fetch skopeo copy \
+              --override-os linux --override-arch "$architecture" \
+              "docker://ghcr.io/carstvaartjes/vonk-forge-litellm@$DIGEST" \
               "docker-daemon:$tag"
             docker run --rm --platform "linux/$architecture" \
               --network none --read-only --cap-drop ALL \
@@ -375,7 +380,32 @@ jobs:
               'import importlib.util,sys; spec=importlib.util.spec_from_file_location("vonk_litellm_supervisor","/tmp/config_supervisor.py"); module=importlib.util.module_from_spec(spec); sys.modules[spec.name]=module; spec.loader.exec_module(module); module._prepare_query_engine()'
           done
 
+      - name: Accept the pull request images by their verified digests
+        id: pr_acceptance
+        if: steps.pr_images.outputs.reused == 'true'
+        shell: bash
+        env:
+          REUSE_RUN_ID: ${{ inputs.reuse_run_id }}
+          API_DIGEST: ${{ steps.pr_images.outputs.api_digest }}
+          WORKER_DIGEST: ${{ steps.pr_images.outputs.worker_digest }}
+          HERMES_DIGEST: ${{ steps.pr_images.outputs.hermes_digest }}
+          LITELLM_DIGEST: ${{ steps.pr_images.outputs.litellm_digest }}
+        run: |
+          set -euo pipefail
+          # The pull request's candidate lane and scripts/reuse-pr-candidate-images
+          # verified each digest for this tree. A deep scan binds a local build
+          # to its remote digest; these images have no local build to bind.
+          for role in api worker hermes litellm; do
+            digest_variable="${role^^}_DIGEST"
+            scripts/dev-image-acceptance-receipt create-role \
+              "$RUNNER_TEMP/$role.role-receipt.json" \
+              "$GITHUB_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" \
+              "$role" "ghcr.io/carstvaartjes/vonk-forge-$role" "${!digest_variable}"
+          done
+          echo "Manifest verification and deep scan reused from pull request run $REUSE_RUN_ID: it verified these exact digests" >> "$GITHUB_STEP_SUMMARY"
+
       - name: Deep-scan exact API build and bind its remote digest
+        if: steps.pr_images.outputs.reused != 'true'
         shell: bash
         run: |
           scripts/accept-development-image-archive \
@@ -386,6 +416,7 @@ jobs:
             "$RUNNER_TEMP/api.role-receipt.json"
 
       - name: Deep-scan exact worker build and bind its remote digest
+        if: steps.pr_images.outputs.reused != 'true'
         shell: bash
         run: |
           scripts/accept-development-image-archive \
@@ -396,7 +427,7 @@ jobs:
             "$RUNNER_TEMP/worker.role-receipt.json"
 
       - name: Deep-scan exact Hermes build and bind its remote digest
-        if: steps.reuse_hermes.outputs.digest == ''
+        if: steps.reuse_hermes.outputs.digest == '' && steps.pr_images.outputs.reused != 'true'
         shell: bash
         run: |
           scripts/accept-development-image-archive \
@@ -407,7 +438,7 @@ jobs:
             "$RUNNER_TEMP/hermes.role-receipt.json"
 
       - name: Deep-scan exact LiteLLM build and bind its remote digest
-        if: steps.reuse_litellm.outputs.digest == ''
+        if: steps.reuse_litellm.outputs.digest == '' && steps.pr_images.outputs.reused != 'true'
         shell: bash
         run: |
           scripts/accept-development-image-archive \
@@ -497,6 +528,8 @@ jobs:
             "$RUNNER_TEMP" "$RUNNER_TEMP/accepted"
 
       - name: Verify exact digest-only API manifest and attestations
+        # scripts/reuse-pr-candidate-images ran this exact check for a reused image.
+        if: steps.pr_images.outputs.reused != 'true'
         shell: bash
         run: >-
           scripts/verify-published-image api
@@ -504,6 +537,8 @@ jobs:
           "${{ steps.pr_images.outputs.api_digest || steps.build_api.outputs.digest }}" - "$GITHUB_SHA"
 
       - name: Verify exact digest-only worker manifest and attestations
+        # scripts/reuse-pr-candidate-images ran this exact check for a reused image.
+        if: steps.pr_images.outputs.reused != 'true'
         shell: bash
         run: >-
           scripts/verify-published-image worker
@@ -511,6 +546,8 @@ jobs:
           "${{ steps.pr_images.outputs.worker_digest || steps.build_worker.outputs.digest }}" - "$GITHUB_SHA"
 
       - name: Verify exact digest-only Hermes manifest and attestations
+        # scripts/reuse-pr-candidate-images ran this exact check for a reused image.
+        if: steps.pr_images.outputs.reused != 'true'
         shell: bash
         run: >-
           scripts/verify-published-image hermes
@@ -518,6 +555,8 @@ jobs:
           "${{ steps.images.outputs.hermes_digest }}" - "$GITHUB_SHA"
 
       - name: Verify exact digest-only LiteLLM manifest and attestations
+        # scripts/reuse-pr-candidate-images ran this exact check for a reused image.
+        if: steps.pr_images.outputs.reused != 'true'
         shell: bash
         run: >-
           scripts/verify-published-image litellm
