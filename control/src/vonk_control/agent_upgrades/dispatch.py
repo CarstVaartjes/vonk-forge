@@ -19,6 +19,7 @@ from vonk_agent_protocol.package_upgrade import PackageRollbackAuthority
 
 from .. import agent_operation_states, job_states
 from ..agent_jobs import (
+    _BOUNDARY_REFUSAL_PREFIXES,
     agent_upgrade_in_flight,
 )
 from ..agent_upgrade_contract import (
@@ -75,15 +76,27 @@ class DispatchMixin:
             if dispatched:
                 service._rollouts.project(parent, now, reason=None)
                 return
-        if any(
-            operation.state == "queued"
-            or agent_upgrade_in_flight(session, operation, now)
+        live = [
+            operation
             for operation in operations
-        ):
+            if operation.state == agent_operation_states.QUEUED
+            or agent_upgrade_in_flight(session, operation, now)
+        ]
+        if live:
             if parent.state not in job_states.words(LifecycleState.QUEUED):
                 # A legacy wait or dispatch: no action exists for a rollout,
                 # and its orders are moving by themselves.
                 service._rollouts.project(parent, now)
+            elif (parent.status_reason or "").startswith(_BOUNDARY_REFUSAL_PREFIXES):
+                # A heartbeat or result refusal named an attempt this order
+                # change ended: a live order's own reason is the wait.
+                service._rollouts.project(
+                    parent,
+                    now,
+                    reason=next(
+                        (o.status_reason for o in live if o.status_reason), None
+                    ),
+                )
             return
         if result.superseded_by is not None:
             service._rollouts.cancelled(

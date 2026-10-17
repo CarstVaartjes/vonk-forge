@@ -452,6 +452,57 @@ def test_fenced_retry_never_waits_for_another_spark_installing(tmp_path) -> None
         assert parent is not None and parent.state == "queued"
 
 
+def test_a_requeued_order_replaces_the_rollouts_refusal_of_its_ended_attempt(
+    tmp_path,
+) -> None:
+    """A boundary refusal names one attempt; once it ends the note is stale.
+
+    Wrong implementation: a rollout never re-derived its reason while an
+    order was queued or in flight, so after attempt 1's lease lapsed into a
+    retry the rollout still read ``heartbeat refused: stale-attempt
+    (attempt=1)`` instead of the order's own wait.
+    """
+
+    clock = Clock()
+    sessions, operations, _upgrades, job = _rollout(
+        tmp_path, "refusal-follows-attempt", clock=clock
+    )
+    first = _claim_upgrade(operations, NODE_A, "serial-a", OLD_IDENTITY)
+    assert operations.record_boundary_refusal(
+        first.fence, boundary="heartbeat", check="stale-attempt"
+    )
+    with sessions() as session:
+        parent = session.get(Job, job.id)
+        assert parent is not None and "refused" in (parent.status_reason or "")
+
+    clock.advance(seconds=60)
+    assert operations.claim(NODE_A, "serial-a", runtime_identity=OLD_IDENTITY) is None
+    with sessions() as session:
+        parent = session.get(Job, job.id)
+        order = session.get(AgentOperation, fenced_operation(sessions, first).id)
+        assert parent is not None and order is not None
+        assert order.state in aos.PARKED and order.current_attempt == 1
+        assert parent.state == "queued"
+        assert "refused" not in (parent.status_reason or "")
+        assert parent.status_reason == order.status_reason
+
+    retry = None
+    for _ in range(40):
+        clock.advance(seconds=60)
+        retry = operations.claim(NODE_A, "serial-a", runtime_identity=OLD_IDENTITY)
+        if retry is not None:
+            break
+
+    assert retry is not None and fenced_attempt(sessions, retry).attempt == 2
+    with sessions() as session:
+        parent = session.get(Job, job.id)
+        assert parent is not None and parent.state == "queued"
+        assert "refused" not in (parent.status_reason or "")
+    # The ended attempt stays as evidence of how it ended.
+    previous = fenced_attempt(sessions, first)
+    assert previous.attempt == 1 and previous.state != "running"
+
+
 def test_controller_recovery_fence_survives_restart_without_a_retry_budget(
     tmp_path,
 ) -> None:
