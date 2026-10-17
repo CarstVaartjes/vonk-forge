@@ -43,6 +43,7 @@ from .contracts import (
     FleetProfileConflict,
     FleetProfileInvalid,
     FleetProfileReviewStale,
+    _FleetProfileSupersededIntentConflict,
 )
 from .dependencies import _CHILD_PENDING_STATES, _LOGGER
 from .persistence import (
@@ -189,7 +190,9 @@ class FleetProfileService:
             return self._decline_retry(row, code, detail, blockers)
 
     def _decline_stale_retry(
-        self, application_id: str, error: FleetProfileReviewStale
+        self,
+        application_id: str,
+        error: FleetProfileReviewStale | _FleetProfileSupersededIntentConflict,
     ) -> FleetProfileApplicationView:
         """A replay its review no longer covers waits, unless a newer request
         took a Spark of its scope.
@@ -432,7 +435,12 @@ class FleetProfileService:
                     automatic_cache_recovery=automatic_cache_recovery,
                     platform_maintenance=automatic_cache_recovery,
                 )
-        except FleetProfileReviewStale as error:
+        except (
+            FleetProfileReviewStale,
+            _FleetProfileSupersededIntentConflict,
+        ) as error:
+            # An adopted lane may continue, but replaying its original whole
+            # scope would undo the newer load. End it instead of parking it.
             return self._decline_stale_retry(application_id, error)
         except (
             FleetProfileConflict,
