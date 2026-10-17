@@ -213,9 +213,10 @@ class CatalogRevisionCollector:
     def _sweep(self) -> Collected:
         now = self._clock()
         cutoff = now - GRACE
-        deadline = time.monotonic() + self._budget_seconds
         with self._sessions() as session:
             candidates = self._candidates(session, cutoff)
+        # The budget starts after the inventory so every pass reaches a candidate.
+        deadline = time.monotonic() + self._budget_seconds
         removed = 0
         kept: Counter[str] = Counter()
         for candidate in candidates:
