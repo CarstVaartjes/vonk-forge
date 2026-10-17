@@ -25,7 +25,12 @@ import uuid
 
 import pytest
 from sqlalchemy import select
-from vonk_agent_protocol import AgentResult, AgentResultState, OperationProgress
+from vonk_agent_protocol import (
+    AgentResult,
+    AgentResultState,
+    InvalidRequestReason,
+    OperationProgress,
+)
 from vonk_agent_protocol.recipe_operations import RecipeStopPayload, RecipeStopResult
 from vonk_control import artifact_job_states as ajs
 from vonk_control.agent_jobs import AgentJobService, StaleAgentFence
@@ -43,6 +48,7 @@ from vonk_control.models import (
 )
 from vonk_control.recipe_operations import (
     RecipeArtifactJobCancellationPending,
+    RecipeRequestInvalid,
     RecipeRetryLater,
 )
 
@@ -284,16 +290,17 @@ def test_a_job_retired_on_an_earlier_pass_never_escapes_the_stop(tmp_path) -> No
     _activate_fresh_job_run(sessions, operations, run_id)
 
 
-def _unlink_order(sessions, artifact_job_id: str) -> None:
-    """The job loses its link to its order; its evidence says it may remain."""
+def _unlink_order(sessions, artifact_job_id: str, *, may_remain: bool) -> None:
+    """The job loses its link to its order; its evidence may say it remains."""
 
     with sessions.begin() as session:
         artifact = session.get(ArtifactJob, artifact_job_id)
         assert artifact is not None
         artifact.operation_id = None
-        artifact.result_evidence = dump_result_evidence(
-            ArtifactJobResultEvidence(active_scope_may_remain=True)
-        )
+        if may_remain:
+            artifact.result_evidence = dump_result_evidence(
+                ArtifactJobResultEvidence(active_scope_may_remain=True)
+            )
 
 
 def test_a_job_that_names_no_issued_order_never_holds_the_stop(tmp_path) -> None:
@@ -301,7 +308,7 @@ def test_a_job_that_names_no_issued_order_never_holds_the_stop(tmp_path) -> None
         tmp_path
     )
     submitted = submitted_artifact_job(service, run_id, request_suffix=118)
-    _unlink_order(sessions, submitted.id)
+    _unlink_order(sessions, submitted.id, may_remain=True)
 
     assert stop().state == "succeeded"
     # Its order was never handed to a Spark and never is.
@@ -311,16 +318,51 @@ def test_a_job_that_names_no_issued_order_never_holds_the_stop(tmp_path) -> None
     _activate_fresh_job_run(sessions, operations, run_id)
 
 
-def test_a_job_that_names_no_order_but_was_issued_holds_the_stop(tmp_path) -> None:
+@pytest.mark.parametrize("may_remain", [False, True], ids=["clean", "may-remain"])
+def test_an_issued_job_that_lost_its_order_link_is_stopped_exactly(
+    tmp_path, may_remain: bool
+) -> None:
+    sessions, operations, service, run_id, node_id, agent_jobs, clock, stop = _service(
+        tmp_path
+    )
+    submitted = submitted_artifact_job(service, run_id, request_suffix=118)
+    job_claim = claim_agent(agent_jobs, node_id, "serial-0")
+    assert job_claim is not None
+    _unlink_order(sessions, submitted.id, may_remain=may_remain)
+
+    stopping = stop()
+
+    # Its issued order may still run: the run is not released, and the exact
+    # Stop is built from the order's own request.
+    assert stopping.state not in {"succeeded", "failed", "cancelled"}
+    assert _run_state(sessions, run_id) == "stopping"
+    _receipt_exact_stop(agent_jobs, clock, node_id, job_claim, submitted)
+    assert stop().state == "succeeded"
+    _activate_fresh_job_run(sessions, operations, run_id)
+
+
+def test_a_job_that_names_no_order_and_has_two_issued_ones_holds_the_stop(
+    tmp_path,
+) -> None:
     sessions, _operations, service, run_id, node_id, agent_jobs, _clock, stop = (
         _service(tmp_path)
     )
     submitted = submitted_artifact_job(service, run_id, request_suffix=118)
     assert claim_agent(agent_jobs, node_id, "serial-0") is not None
-    _unlink_order(sessions, submitted.id)
+    with sessions.begin() as session:
+        _order_row, child = _order(session, submitted.id)
+        _add_unissued_sibling(session, child)
+        session.flush()
+        for sibling in session.scalars(
+            select(AgentOperation).where(
+                AgentOperation.parent_job_id == child.parent_job_id
+            )
+        ):
+            sibling.current_attempt = max(sibling.current_attempt, 1)
+    _unlink_order(sessions, submitted.id, may_remain=False)
 
-    # Its issued order may still run and no exact Stop can name it from the
-    # job: nothing is stopped on a guess, and the run keeps serving.
+    # No exact Stop can name which issued order is the job's: nothing is
+    # stopped on a guess, and the run keeps serving.
     with pytest.raises(RecipeRetryLater):
         stop()
     assert _run_state(sessions, run_id) == "running"
@@ -328,5 +370,38 @@ def test_a_job_that_names_no_order_but_was_issued_holds_the_stop(tmp_path) -> No
     fresh = create_artifact_job(
         service,
         **artifact_create_request(run_id, "00000000-0000-4000-8000-000000000170"),
+    )
+    assert fresh.id != submitted.id
+
+
+def test_a_frozen_job_relinked_to_another_order_re_plans_the_stop(tmp_path) -> None:
+    sessions, _operations, service, run_id, node_id, agent_jobs, _clock, stop = (
+        _service(tmp_path)
+    )
+    submitted = submitted_artifact_job(service, run_id, request_suffix=118)
+    assert claim_agent(agent_jobs, node_id, "serial-0") is not None
+    with pytest.raises(RecipeArtifactJobCancellationPending):
+        stop()
+    with sessions.begin() as session:
+        order, _child = _order(session, submitted.id)
+        columns = Job.__table__.columns
+        other = Job(**{column.name: getattr(order, column.name) for column in columns})
+        other.id = str(uuid.uuid4())
+        other.request_id = str(uuid.uuid4())
+        session.add(other)
+        session.flush()
+        artifact = session.get(ArtifactJob, submitted.id)
+        assert artifact is not None
+        artifact.operation_id = other.id
+
+    # The frozen order is no longer the job's: the reviewed Stop is drift its
+    # owner re-plans, never a crash of the Stop.
+    with pytest.raises(RecipeRequestInvalid) as refused:
+        stop()
+    assert refused.value.typed_reason is InvalidRequestReason.SUPERSEDED
+    # The refused Stop leaves the run serving: fresh work is still admitted.
+    fresh = create_artifact_job(
+        service,
+        **artifact_create_request(run_id, "00000000-0000-4000-8000-000000000171"),
     )
     assert fresh.id != submitted.id

@@ -150,7 +150,8 @@ class JobRunCompletionMixin:
                 or source_job is None
                 or source_operation is None
                 or artifact.run_id != authorization.run_id
-                or artifact.operation_id != source_job.id
+                # A job that lost its link is named by its order's request.
+                or artifact.operation_id not in {None, source_job.id}
                 or source_operation.parent_job_id != source_job.id
             ):
                 return unproven(
