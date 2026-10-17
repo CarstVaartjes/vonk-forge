@@ -45,6 +45,17 @@ def test_a_start_failure_naming_host_paths_is_accepted_with_its_core() -> None:
     assert "/opt/vonk/prewarm" in stored.diagnostics.stderr.text
 
 
+def test_a_host_path_in_a_receipted_ending_is_redacted_where_it_is() -> None:
+    document = copy.deepcopy(_vector("recipe-job-run-unknown-receipt-v1.json"))
+    document["result"]["evidence"]["diagnostic"] = "upload of /outputs/a.png refused"  # type: ignore[index]
+
+    accepted = AgentResult.model_validate(document)
+
+    assert AgentEvidenceCode.RESULT_HOST_PATH_REDACTED in accepted.evidence_warnings
+    ending = accepted.stored_result().ending
+    assert ending.diagnostic == "upload of <host-path> refused"
+
+
 @pytest.mark.parametrize("parse", [AgentResult.model_validate, AgentResult.parse])
 def test_a_path_in_a_field_the_controller_acts_on_still_refuses(
     parse: Callable[[object], AgentResult],

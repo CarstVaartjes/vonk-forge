@@ -1180,11 +1180,9 @@ class AgentResult(OptionalEvidenceModel, _ProtocolEnvelopeModel):
 
     # Prose a person reads: never an identity, a path the Controller acts on or
     # authority. A host path here is redacted, never a reason to refuse.
-    HOST_PATH_TEXT: ClassVar[tuple[tuple[str, ...], ...]] = tuple(
-        (*prefix, name)
-        for prefix in (("result",), ("result", "evidence"), ("result", "receipt"))
-        for name in ("reason", "summary", "detail", "diagnostic", "recovery")
-    ) + (("result", "receipt", "ending", "diagnostic"),)
+    HOST_PATH_TEXT: ClassVar[frozenset[str]] = frozenset(
+        {"reason", "summary", "detail", "diagnostic", "recovery"}
+    )
 
     fence: CanonicalUUID
     state: AgentResultState

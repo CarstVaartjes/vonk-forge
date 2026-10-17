@@ -16,10 +16,10 @@ field stay strict, and nothing is repaired into a different valid value: a
 damaged optional part is removed, never rewritten.
 
 One rewrite is allowed, in prose only: a model names its free-text leaves
-(``HOST_PATH_TEXT``: a reason, a summary, a one-line diagnostic). A host path
-in one of them is replaced by the typed marker ``<host-path>`` and the report
-carries ``RESULT_HOST_PATH_REDACTED``. The rest of the sentence is kept, and
-the report's core is never refused for it.
+(``HOST_PATH_TEXT``: a reason, a summary, a one-line diagnostic, at any
+depth). A host path in one of them is replaced by the typed marker
+``<host-path>`` and the report carries ``RESULT_HOST_PATH_REDACTED``. The rest
+of the sentence is kept, and the report's core is never refused for it.
 """
 
 from __future__ import annotations
@@ -58,23 +58,30 @@ def redact_host_paths(text: str) -> str:
     return _PATH_TOKEN.sub(HOST_PATH_MARKER, text)
 
 
-def redacted_prose(document: object, paths: tuple[tuple[str, ...], ...]) -> object:
-    """``document`` with host paths redacted in its prose leaves, or ``None`` if none had one."""
+def redacted_prose(document: object, names: frozenset[str]) -> object:
+    """``document`` with host paths redacted in its prose leaves, or ``None`` if none had one.
+
+    A prose leaf is a string under one of ``names`` at any depth, so a reason
+    nested in a receipt, an ending or a finding is covered like a top-level one.
+    """
 
     if not isinstance(document, Mapping):
         return None
     redacted = copy.deepcopy(dict(document))
     changed = False
-    for path in paths:
-        node: object = redacted
-        for key in path[:-1]:
-            node = node.get(key) if isinstance(node, dict) else None
-        if not isinstance(node, dict):
-            continue
-        value = node.get(path[-1])
-        if isinstance(value, str) and ("/" in value or "\\" in value):
-            node[path[-1]] = redact_host_paths(value)
-            changed = True
+    pending: list[object] = [redacted]
+    while pending:
+        node = pending.pop()
+        if isinstance(node, list):
+            pending.extend(node)
+        elif isinstance(node, dict):
+            for key, value in node.items():
+                if key in names and isinstance(value, str):
+                    if "/" in value or "\\" in value:
+                        node[key] = redact_host_paths(value)
+                        changed = True
+                else:
+                    pending.append(value)
     return redacted if changed else None
 
 
@@ -107,7 +114,7 @@ class OptionalEvidenceModel(BaseModel):
     EVIDENCE_GROUPS: ClassVar[tuple[EvidenceGroup, ...]] = ()
     #: Free-text leaves (paths from the model's input) whose host paths are
     #: redacted rather than refusing the report.
-    HOST_PATH_TEXT: ClassVar[tuple[tuple[str, ...], ...]] = ()
+    HOST_PATH_TEXT: ClassVar[frozenset[str]] = frozenset()
     _evidence_warnings: tuple[AgentEvidenceCode, ...] = PrivateAttr(default=())
 
     @property
