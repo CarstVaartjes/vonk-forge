@@ -904,10 +904,18 @@ def test_a_busy_reference_fence_ends_the_pass_and_retries_after_release(
             assert len(fences) == 1
             assert len(caplog.records) == 1
             assert all(catalog.exists(revision) for revision in old)
+            assert collector._due_at is not None
+            first_wait = collector._due_at - catalog.now
 
             # The wait is paced: a worker pass before the retry tries nothing.
             assert collector.tick() is False
             assert len(fences) == 1
+
+            # A writer still in flight at the retry backs the next wait off.
+            catalog.now = collector._due_at
+            assert collector.tick() is False
+            assert len(fences) == 2
+            assert collector._due_at - catalog.now > first_wait
             writer.rollback()
 
         # Re-checked within moments, not after the hourly interval.

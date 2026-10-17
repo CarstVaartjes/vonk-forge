@@ -38,7 +38,7 @@ Every revision is removed in its own transaction, and one that cannot be
 removed (a reference appeared, a constraint refused) is skipped and retried at
 the next sweep: a failure never stops the rest and never touches a workload.
 The reference fence is shared by every candidate, so a writer holding it ends
-the pass instead, and the sweep is re-checked at the wait cadence.
+the pass instead, and the sweep is re-checked with jittered backoff.
 The head is re-checked under its row lock inside that transaction. Cached
 model files and runtime-image receipts are not owned by a revision (they are
 content-addressed and shared) and are left to their own request-led removal.
@@ -65,7 +65,6 @@ from sqlalchemy import Select, and_, delete, exists, or_, select, text
 from sqlalchemy.exc import DBAPIError, SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
-    Disposition,
     InstallationState,
     RunState,
     WaitReason,
@@ -98,7 +97,7 @@ from .models import (
     SourceBundleArchive,
 )
 from .owner_liveness import builds_in_flight
-from .recovery_policy import RECOVERY, schedule
+from .recovery_policy import RECOVERY
 from .revision_images import revision_images
 from .stored_json import binding_for
 
@@ -164,6 +163,8 @@ class CatalogRevisionCollector:
         self._clock = clock
         self._budget_seconds = budget_seconds
         self._due_at: datetime | None = None
+        # Consecutive passes that met a busy fence; a won fence resets it.
+        self._busy_streak = 0
 
     def tick(self) -> bool:
         """Collect at most once per interval; True when anything was removed."""
@@ -187,24 +188,27 @@ class CatalogRevisionCollector:
 
     def collect(self) -> Collected:
         try:
-            return self._sweep()
+            result = self._sweep()
         except _FenceBusy:
-            # A wait, not a failure: the pass ends and is re-checked at the one
-            # wait cadence, never per candidate and never only next interval.
-            self._due_at = schedule(
-                RECOVERY,
+            # A wait, not a failure: the pass ends, never per candidate, and
+            # is re-checked with jittered backoff that grows while it lasts.
+            self._busy_streak += 1
+            self._due_at = RECOVERY.next_attempt(
                 "catalog_revision.fence",
-                0,
-                Disposition.WAIT,
+                self._busy_streak,
                 self._clock(),
-            ).next_at
+                ongoing_intent=True,
+            )
             log_event(
                 _LOGGER,
                 "catalog_revision.fence_busy",
                 service="control-worker",
+                busy_passes=self._busy_streak,
                 retry_at=self._due_at,
             )
             return Collected(0, 0, {})
+        self._busy_streak = 0
+        return result
 
     def _sweep(self) -> Collected:
         now = self._clock()
