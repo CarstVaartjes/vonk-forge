@@ -90,11 +90,26 @@ fn no_host_path_leaves_the_agent_in_any_result_form() {
 
 #[test]
 fn a_reason_nested_in_a_done_body_is_prose_too() {
-    let mut body = serde_json::json!({
-        "result": {"kind": "done", "result": {"reason": "exited at /opt/x", "exit_code": 0}},
-        "fence": "00000000-0000-4000-8000-000000000001",
-    });
-    redact_prose(&mut body);
-    assert_eq!(body["result"]["result"]["reason"], "exited at <host-path>");
-    assert_eq!(body["result"]["result"]["exit_code"], 0);
+    let vector: Value = serde_json::from_str(include_str!(
+        "../../../../../agent_protocol/src/vonk_agent_protocol/vectors/recipe-job-run-result-v1.json"
+    ))
+    .unwrap();
+    let mut receipt: vonk_agent_protocol::generated::RecipeJobRunResult =
+        serde_json::from_value(vector["result"].clone()).unwrap();
+    receipt.reason = Some("exited at /opt/x".to_owned());
+    let finished =
+        ExecutionResult::done(receipt.clone()).finish_for(&AgentOperation::RecipeJobRunV1);
+    let result = AgentResult {
+        fence: uuid::Uuid::nil(),
+        result: finished.result,
+        state: finished.state,
+    };
+
+    let sent = serde_json::to_value(wire_result(&result)).unwrap();
+
+    assert_eq!(sent["result"]["result"]["reason"], "exited at <host-path>");
+    assert_eq!(
+        sent["result"]["result"]["output_manifest"],
+        vector["result"]["output_manifest"]
+    );
 }
