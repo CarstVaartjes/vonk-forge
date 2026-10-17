@@ -42,7 +42,11 @@ from .contracts import (
     FleetProfileStalePlanConflict,
     _FleetProfileSupersededIntentConflict,
 )
-from .dependencies import _CANCELLED_OPERATION, _MAX_PARKED_APPLICATION_OBSERVATIONS
+from .dependencies import (
+    _CANCELLED_OPERATION,
+    _LOGGER,
+    _MAX_PARKED_APPLICATION_OBSERVATIONS,
+)
 from .persistence import (
     _owns_pending_admission,
     _persisted_profile_plan,
@@ -268,6 +272,14 @@ class FleetProfileService:
                     ),
                 )
                 return True
+            _LOGGER.info(
+                "profile application %s re-planned after a stale plan (%s): "
+                "plan %s -> %s",
+                application_id,
+                error,
+                plan.plan_digest,
+                replanned.plan_digest,
+            )
             self._defer_pending_application(
                 application_id, str(error), code=error.code, retry_delay=timedelta(0)
             )
