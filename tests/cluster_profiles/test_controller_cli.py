@@ -4140,6 +4140,58 @@ def test_fleet_log_reconnect_uses_resolved_node_id_and_keeps_log_scope() -> None
     assert observation["timeout_seconds"] == 0
 
 
+def _fleet_log_with_entries(node_id: str) -> dict[str, object]:
+    response = _fleet_log_response(node_id, follow=False)
+    response["entries"] = [
+        {
+            "observed_at": "2026-09-24T10:00:01Z",
+            "level": "info",
+            "source": "agent",
+            "message": "first retained line",
+        },
+        {
+            "observed_at": "2026-09-24T10:00:02Z",
+            "level": "warning",
+            "source": "job",
+            "message": "second retained line",
+        },
+    ]
+    return response
+
+
+@pytest.mark.parametrize("follow", [False, True])
+def test_fleet_loginfo_header_names_the_spark_not_an_unavailable_snapshot(
+    capsys: pytest.CaptureFixture[str], follow: bool
+) -> None:
+    node_id = "spk_" + "1" * 32
+    path = f"/api/fleet/{node_id}/loginfo"
+    client = FakeClient({("GET", path): _fleet_log_with_entries(node_id)})
+    argv = ("fleet", "loginfo", node_id, *(("--follow",) if follow else ()))
+
+    status = cli.main(argv, control_client=client)
+
+    captured = capsys.readouterr()
+    assert status == 0
+    assert "unavailable" not in captured.out + captured.err
+    assert f"Spark: {node_id}" in captured.out
+
+
+def test_fleet_loginfo_without_follow_prints_each_line_once_on_stdout(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    node_id = "spk_" + "1" * 32
+    path = f"/api/fleet/{node_id}/loginfo"
+    client = FakeClient({("GET", path): _fleet_log_with_entries(node_id)})
+
+    status = cli.main(("fleet", "loginfo", node_id), control_client=client)
+
+    captured = capsys.readouterr()
+    assert status == 0
+    for line in ("first retained line", "second retained line"):
+        assert captured.out.count(line) == 1
+        assert line not in captured.err
+
+
 def test_fleet_upgrade_follows_exact_job_and_stops_at_operator_blocker() -> None:
     job_id = "upgrade-job"
     request_key = "11111111-1111-4111-8111-111111111111"

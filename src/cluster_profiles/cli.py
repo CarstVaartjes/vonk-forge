@@ -762,10 +762,10 @@ def _main(
 
         def render_watch(observed: Mapping[str, object]) -> None:
             nonlocal last_progress
-            if (
-                getattr(args, "watch", False)
-                or getattr(args, "fleet_action", None) == "loginfo"
-            ):
+            loginfo = getattr(args, "fleet_action", None) == "loginfo"
+            if loginfo and not getattr(args, "follow", False):
+                return
+            if getattr(args, "watch", False) or loginfo:
                 buffer = StringIO()
                 with redirect_stderr(buffer):
                     _emit(observed, args, error=True)
