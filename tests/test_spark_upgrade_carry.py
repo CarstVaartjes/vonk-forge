@@ -675,3 +675,30 @@ def test_acceptance_scripts_define_everything_before_their_entry_point():
         if guards and guards[-1] != len(body) - 1:
             late.append(script.name)
     assert late == []
+
+
+def test_only_results_refused_as_invalid_count_as_refusals():
+    # The shape of the 2026-10-16 stall: every result refused with 422, while a
+    # stale fence (409) and other endpoints are answers, not refusals.
+    def line(endpoint: str, status: int) -> str:
+        return json.dumps(
+            {
+                "event": "agent.request_rejected",
+                "endpoint": endpoint,
+                "http_status": status,
+                "reason": "invalid field body",
+            }
+        )
+
+    logs = "\n".join(
+        [
+            "INFO:     uvicorn started",
+            line("/agent/result", 422),
+            line("/agent/result", 409),
+            line("/agent/heartbeat", 422),
+            "control-api-1  | " + line("/agent/result", 422),
+            "{not json",
+        ]
+    )
+    assert len(carry.result_refusals(logs)) == 2
+    assert carry.result_refusals("") == []

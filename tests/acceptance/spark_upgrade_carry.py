@@ -145,6 +145,37 @@ class CarryEvidence:
     probes: list[ProbeResult] = field(default_factory=list)
 
 
+#: The Controller's one line per refused agent request (``_log_agent_rejection``).
+REJECTION_EVENT = "agent.request_rejected"
+
+
+def result_refusals(log_text: str) -> list[dict[str, object]]:
+    """Each result the Controller refused as invalid (422) in ``log_text``.
+
+    A result refused as invalid is refused again on every delivery, so the work
+    it ends never ends: the 2026-10-16 fleet-wide stall. A stale fence (409) is
+    an answer, not a refusal, and is not counted.
+    """
+
+    refused: list[dict[str, object]] = []
+    for line in log_text.splitlines():
+        start = line.find("{")
+        if start < 0:
+            continue
+        try:
+            event = json.loads(line[start:])
+        except ValueError:
+            continue
+        if (
+            isinstance(event, dict)
+            and event.get("event") == REJECTION_EVENT
+            and event.get("endpoint") == "/agent/result"
+            and event.get("http_status") == 422
+        ):
+            refused.append(event)
+    return refused
+
+
 def _fetch(url: str, destination: Path) -> None:
     # The public origin refuses anonymous library user agents.
     request = urllib.request.Request(
@@ -398,6 +429,9 @@ class UpgradeCarryLifecycle(SparkLifecycle):
         self._prober: threading.Thread | None = None
         self._lock = threading.Lock()
         self._serving_digest: str | None = None
+        # Results refused from here on fail the lane: the candidate Controller
+        # meets the old agent's bodies first, then the upgraded agent's.
+        self._refusal_window_start: int | None = None
 
     # The previous release's Fleet document is read as plain JSON: this lane
     # judges serving behaviour, not one release's response schema.
@@ -635,6 +669,7 @@ class UpgradeCarryLifecycle(SparkLifecycle):
         node_id = str(identity["node_id"])
         canary = self._run_synthetic_canary(node_id, carry=self._carry)
         self._after_canary(node_id)
+        refused = self._require_no_result_refusals()
         return {
             "baseline": {
                 "generation": self.baseline.generation,
@@ -647,6 +682,7 @@ class UpgradeCarryLifecycle(SparkLifecycle):
             "canary": canary,
             "phases": self.evidence.phases,
             "probe_summary": self._probe_summary(),
+            "result_refusals": refused,
         }
 
     # -- the carry ---------------------------------------------------------
@@ -732,6 +768,7 @@ class UpgradeCarryLifecycle(SparkLifecycle):
         """Upgrade the Controller the way an operator reruns the installer."""
 
         assert self.temporary_root is not None and self.bundle is not None
+        self._refusal_window_start = int(time.time())
         os.environ[OVERLAY_VARIABLE] = os.fspath(self.candidate.overlay)
         self.controller_generation = self.candidate.generation
         self.controller_release = self.candidate.release
@@ -800,6 +837,37 @@ class UpgradeCarryLifecycle(SparkLifecycle):
         self._wait_for_agent_identity(
             package_version=self.candidate.package_version, timeout=300
         )
+
+    def _require_no_result_refusals(self) -> int:
+        """Fail when the candidate Controller refused any result as invalid.
+
+        The window opens at the Controller redeploy, so an old agent's body the
+        new Controller refuses fails the lane as surely as the upgraded agent's.
+        """
+
+        if self._refusal_window_start is None or self.bundle is None:
+            return 0
+        logs = self._run_command(
+            self._compose(
+                "logs",
+                "--no-color",
+                "--no-log-prefix",
+                "--since",
+                str(self._refusal_window_start),
+                "control-api",
+            ),
+            cwd=self.bundle,
+            timeout=60,
+        )
+        refused = result_refusals(logs.stdout + "\n" + logs.stderr)
+        if refused:
+            first = refused[0]
+            raise self._failure(
+                "agent-results",
+                f"the candidate Controller refused {len(refused)} result(s) as "
+                f"invalid; first: {str(first.get('reason'))[:200]}",
+            )
+        return len(refused)
 
     def _load_editorial_successor(self) -> None:
         """Load a new editorial revision of the running recipe, end to end.
