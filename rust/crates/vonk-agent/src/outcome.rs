@@ -18,6 +18,7 @@
 
 use crate::failure_evidence::{self, FailureProcessLogs, sanitize_text};
 use vonk_agent_protocol::AgentClaim;
+use vonk_agent_protocol::generated::AgentResult;
 use vonk_agent_protocol::generated::{
     AgentFailureKind, AgentOperation, AgentResultResult, AgentResultState, FailureCode,
     FailureStage, HelperErrorCode, OutcomeDone, OutcomeDoneKind, OutcomeDoneResult,
@@ -273,6 +274,51 @@ impl ExecutionResult {
         };
         Finished { state, result }
     }
+}
+
+/// The reason a result offered in its core-only form carries.
+pub const CORE_ONLY_REASON: &str =
+    "the controller refused this result as invalid; its core is reported without its evidence";
+
+fn core_receipt(receipt: Option<RecipeJobRunResult>) -> Option<RecipeJobRunResult> {
+    receipt.map(|receipt| RecipeJobRunResult {
+        diagnostics: None,
+        ending: None,
+        reason: None,
+        ..receipt
+    })
+}
+
+/// `result` reduced to its core: its state, outcome kind, code and wait
+/// reason, a job's receipt identity, and [`CORE_ONLY_REASON`]; no evidence,
+/// no free text.  `None` when nothing is left to remove (a done body is its
+/// own core), so a refused core is never offered twice.
+pub fn core_only(result: &AgentResult) -> Option<AgentResult> {
+    let core = match &result.result {
+        AgentResultResult::OutcomeFailed(failed) => {
+            AgentResultResult::OutcomeFailed(OutcomeFailed {
+                reason: CORE_ONLY_REASON.to_owned(),
+                evidence: None,
+                receipt: core_receipt(failed.receipt.clone()),
+                ..failed.clone()
+            })
+        }
+        AgentResultResult::OutcomeUnknown(unknown) => {
+            AgentResultResult::OutcomeUnknown(OutcomeUnknown {
+                reason: CORE_ONLY_REASON.to_owned(),
+                evidence: None,
+                receipt: core_receipt(unknown.receipt.clone()),
+                ..unknown.clone()
+            })
+        }
+        _ => return None,
+    };
+    let core = AgentResult {
+        fence: result.fence,
+        state: result.state,
+        result: core,
+    };
+    (core != *result).then_some(core)
 }
 
 /// The failure code of an operation that reports no more specific one.

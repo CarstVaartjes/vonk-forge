@@ -1,8 +1,10 @@
 """A host path in a result's prose is redacted; the result is never refused for it.
 
-The shared vector is the body the Rust agent produces for a start whose workload
-raised an exception naming absolute paths: the body every live Spark had
-refused with ``422 filesystem path values are not allowed``. Prose is only
+``recipe-start-failed-host-paths-v1`` is the body released agents send for a
+start whose workload raised an exception naming absolute paths: the body every
+live Spark had refused with ``422 filesystem path values are not allowed``.
+``recipe-start-workload-exited-v1`` is the same failure as the Rust agent now
+sends it (its test produces the vector): no redaction is left to do. Prose is only
 displayed, so its paths become a typed marker. Fields the Controller acts on
 (manifest names, identities) stay strict: a path there still refuses.
 """
@@ -55,6 +57,23 @@ def test_a_host_path_in_a_receipted_ending_is_redacted_where_it_is() -> None:
     assert AgentEvidenceCode.RESULT_HOST_PATH_REDACTED in accepted.evidence_warnings
     ending = accepted.stored_result().ending
     assert ending.diagnostic == "upload of <host-path> refused"
+
+
+def test_the_agent_sends_a_start_failure_with_nothing_to_redact() -> None:
+    accepted = AgentResult.model_validate(
+        _vector("recipe-start-workload-exited-v1.json")
+    )
+
+    assert accepted.evidence_warnings == ()
+    stored = accepted.stored_result()
+    assert isinstance(stored, AgentFailureResult)
+    assert stored.error_code == "recipe_start_failed"
+    # The reason is the typed exit facts; the exception is the diagnostic.
+    assert stored.reason is not None
+    assert stored.reason.endswith("exit_cause=python_exception")
+    assert stored.diagnostic is not None
+    assert "FileNotFoundError" in stored.diagnostic
+    assert HOST_PATH_MARKER in stored.diagnostic
 
 
 @pytest.mark.parametrize("parse", [AgentResult.model_validate, AgentResult.parse])
