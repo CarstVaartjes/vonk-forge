@@ -1,5 +1,8 @@
 {
 	admin off
+	# The adapted config carries resolved secrets (the agent proxy-auth
+	# header). Caddy must never write it to disk; it runs from this file.
+	persist_config off
 	auto_https disable_redirects
 }
 
