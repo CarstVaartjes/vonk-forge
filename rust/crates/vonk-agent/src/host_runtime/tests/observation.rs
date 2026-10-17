@@ -224,7 +224,7 @@ async fn cancelled_observation_pages_keep_native_slots_and_leave_foreground_work
                     .map(|report| report.running)
             } else {
                 boundary
-                    .inspect_recipe_run_report(arguments, true)
+                    .inspect_start_run_report(arguments, 1)
                     .await
                     .map(|report| report.running)
             }

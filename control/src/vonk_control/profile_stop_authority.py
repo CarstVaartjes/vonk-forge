@@ -689,7 +689,8 @@ def validate_jobrun_stop_source(
     if (
         artifact is None
         or artifact.run_id != run.id
-        or artifact.operation_id != target.source_job_id
+        # A job that lost its link to its order is named by the order's request.
+        or artifact.operation_id not in {None, target.source_job_id}
         or source_job is None
         or source_operation is None
         or member is None

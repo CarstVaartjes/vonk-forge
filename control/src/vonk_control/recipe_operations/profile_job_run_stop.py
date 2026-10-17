@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import hashlib
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 from typing import cast as typing_cast
@@ -89,18 +89,109 @@ def _jobrun_effect_may_remain(
 
     An issued job may be running; a damaged receipt, or one that says its job
     scope may remain, is uncertainty about the physical effect, never an empty
-    receipt. A job that ended with its receipt left nothing to stop.
+    receipt. A job that ended with its receipt left nothing to stop. A job that
+    lost its link to its order is read through the order issued for it.
     """
 
+    issued = _issued_orders_of_unlinked_job(adapter.session, artifact)
+    if len(issued) > 1:
+        return True
+    if issued:
+        session = adapter.session
+        effect = adapter.lifecycle(
+            artifact,
+            session.get(Job, issued[0].parent_job_id),
+            issued[0],
+            AgentOperationAdapter.attempt_of(session, issued[0]),
+            adapter.now(),
+        ).effect
+    else:
+        effect = adapter.adopt(artifact).effect
     evidence = read_row_column(artifact, "result_evidence")
     return (
-        adapter.adopt(artifact).effect in {Effect.ISSUED, Effect.UNKNOWN}
+        effect in {Effect.ISSUED, Effect.UNKNOWN}
         or isinstance(evidence, Residue)
         or (
             isinstance(evidence, ArtifactJobResultEvidence)
             and evidence.active_scope_may_remain is True
         )
     )
+
+
+def _issued_orders_of_unlinked_job(
+    session: Session, artifact: ArtifactJob
+) -> tuple[AgentOperation, ...]:
+    """The issued orders of a submitted job that names none: each names its owner.
+
+    A job being prepared was never handed an order, so none is looked up.
+    """
+
+    if (
+        artifact.operation_id is not None
+        or artifact_job_states.preparation_of(artifact) is not None
+    ):
+        return ()
+    orders = select(Job.id).where(Job.payload["owner_id"].as_string() == artifact.id)
+    return tuple(
+        session.scalars(
+            select(AgentOperation)
+            .where(
+                AgentOperation.parent_job_id.in_(orders),
+                AgentOperation.current_attempt > 0,
+            )
+            .order_by(AgentOperation.id)
+            .with_for_update(of=AgentOperation)
+        )
+    )
+
+
+def _exact_jobrun_source(
+    session: Session,
+    artifact: ArtifactJob,
+    frozen: ProfileJobRunStopTarget | None,
+    target_node_ids: Collection[str],
+) -> AgentOperation | None:
+    """The order an exact Stop of this job is built from, by its own identity.
+
+    A Stop accepted earlier keeps the order it froze; otherwise it is the job's
+    one order, or its one issued order beside siblings no Spark was handed. A
+    job that lost its link to its order is read through the orders issued for
+    it. ``None`` retires the job as unknown: nothing of it was issued, so
+    nothing can remain, and a re-plan reads the same rows. An issued order that
+    no exact Stop can reach holds the Stop: nothing is stopped on a guess.
+    """
+    if artifact.operation_id is None:
+        issued = list(_issued_orders_of_unlinked_job(session, artifact))
+        candidates = list(issued)
+    else:
+        children = tuple(
+            session.scalars(
+                select(AgentOperation)
+                .where(AgentOperation.parent_job_id == artifact.operation_id)
+                .with_for_update(of=AgentOperation)
+            )
+        )
+        issued = [child for child in children if child.current_attempt > 0]
+        candidates = list(children) if len(children) == 1 else issued
+    if frozen is not None:
+        held = session.get(
+            AgentOperation, frozen.source_operation_id, with_for_update=True
+        )
+        candidates = [] if held is None else [held]
+        issued += [child for child in candidates if child.current_attempt > 0]
+    if len(candidates) == 1 and candidates[0].node_id in target_node_ids:
+        return candidates[0]
+    if issued:
+        raise RecipeRetryLater("unknown JobRun exact target is not reachable")
+    # A Spark that holds a fence for a missing order loses it on its next
+    # heartbeat.
+    retire_as_unknown(
+        "recipe.artifact-job",
+        artifact.id,
+        BookkeepingReason.EVIDENCE_MISMATCH,
+        "artifact job has no issued order on the run",
+    )
+    return None
 
 
 def _switch_stops_run_now(operation: Job | None, run_id: str) -> bool:
@@ -245,9 +336,7 @@ class ProfileJobRunStopMixin:
 
         run_node_by_id = {node.node_id: node for node in nodes}
         reachable_node_ids = set(target_node_ids)
-        target_rows: list[
-            tuple[ArtifactJob, Job, AgentOperation, RecipeStopPayload]
-        ] = []
+        target_rows: list[tuple[ArtifactJob, AgentOperation, RecipeStopPayload]] = []
         unissued_artifacts: list[ArtifactJob] = []
         adapter = ArtifactJobAdapter(session)
         for artifact in session.scalars(
@@ -256,7 +345,9 @@ class ProfileJobRunStopMixin:
             .order_by(ArtifactJob.created_at, ArtifactJob.id)
             .with_for_update(of=ArtifactJob)
         ):
-            if artifact.operation_id is None:
+            if artifact.operation_id is None and not _issued_orders_of_unlinked_job(
+                session, artifact
+            ):
                 if artifact_job_states.preparation_of(artifact) is None:
                     # Submitted without an order: nothing was ever issued for
                     # it, so there is no runtime to stop and it is superseded
@@ -272,41 +363,15 @@ class ProfileJobRunStopMixin:
             if not _jobrun_effect_may_remain(adapter, artifact):
                 # An ended job left nothing on its Spark for this Stop to reach.
                 continue
-            source_job = session.get(Job, artifact.operation_id, with_for_update=True)
-            source_operations = tuple(
-                session.scalars(
-                    select(AgentOperation)
-                    .where(AgentOperation.parent_job_id == artifact.operation_id)
-                    .order_by(AgentOperation.node_id, AgentOperation.id)
-                    .with_for_update(of=AgentOperation)
-                )
+            source_operation = _exact_jobrun_source(
+                session, artifact, None, run_node_by_id
             )
-            if (
-                source_job is None
-                or source_job.kind != WireAgentOperation.RECIPE_JOB_RUN.value
-                or _parent_identity(source_job, "owner_kind") != "artifact-job"
-                or _parent_identity(source_job, "owner_id") != artifact.id
-                or len(source_operations) != 1
-                or source_operations[0].kind != WireAgentOperation.RECIPE_JOB_RUN.value
-                or source_operations[0].parent_job_id != source_job.id
-            ):
-                raise RecipeRetryLater(
-                    "artifact JobRun physical Stop identity is ambiguous"
-                )
-            source_operation = source_operations[0]
-            if source_operation.node_id not in run_node_by_id:
-                raise RecipeRequestInvalid(
-                    "artifact JobRun escaped its immutable run membership",
-                    reason=InvalidRequestReason.SUPERSEDED,
-                )
+            if source_operation is None:
+                # None of its orders was issued: it is superseded unissued.
+                unissued_artifacts.append(artifact)
+                continue
             if source_operation.node_id not in reachable_node_ids:
                 continue
-            source_node = run_node_by_id.get(source_operation.node_id)
-            if source_node is None or source_job.targets != [source_operation.node_id]:
-                raise RecipeRequestInvalid(
-                    "artifact JobRun escaped its immutable run membership",
-                    reason=InvalidRequestReason.SUPERSEDED,
-                )
             try:
                 request = read_stored_model(
                     RecipeJobRunRequest,
@@ -324,17 +389,17 @@ class ProfileJobRunStopMixin:
                 ) from error
             # Its identity (job, run, installation, generation ceiling, the
             # container named) is proven with the target below.
-            target_rows.append((artifact, source_job, source_operation, stop))
+            target_rows.append((artifact, source_operation, stop))
 
         targets = [
             ProfileJobRunStopTarget(
                 artifact_job_id=artifact.id,
-                source_job_id=source_job.id,
+                source_job_id=source_operation.parent_job_id,
                 source_operation_id=source_operation.id,
                 node_id=source_operation.node_id,
                 stop_payload_sha256=hashlib.sha256(canonical_message(stop)).hexdigest(),
             )
-            for artifact, source_job, source_operation, stop in target_rows
+            for artifact, source_operation, stop in target_rows
         ]
         try:
             authorization = ProfileJobRunStopAuthorization(
@@ -368,7 +433,7 @@ class ProfileJobRunStopMixin:
             validate_profile_stop_owner(session, authorization, now=now)
             for target, row in zip(targets, target_rows, strict=True):
                 validate_profile_jobrun_stop_target(
-                    session, authorization, target, row[3], now=now
+                    session, authorization, target, row[2], now=now
                 )
         except ProfileStopAuthorityError as error:
             # Drift in the Controller's own records: re-planned, never refused.
@@ -397,7 +462,7 @@ class ProfileJobRunStopMixin:
             return None
 
         grouped: dict[str, list[tuple[RecipeStopPayload, ProfileJobRunStopTarget]]] = {}
-        for (_artifact, _source_job, source_operation, stop), target in zip(
+        for (_artifact, source_operation, stop), target in zip(
             target_rows, targets, strict=True
         ):
             grouped.setdefault(source_operation.node_id, []).append((stop, target))

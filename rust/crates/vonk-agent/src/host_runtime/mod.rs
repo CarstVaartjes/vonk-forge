@@ -176,17 +176,6 @@ impl Drop for RequestFileCleanup {
 }
 
 impl HostRuntimeBoundary<'_> {
-    /// Ask the helper whether the exact container of one managed run is
-    /// running.  The inspection is read-only, so it needs no Controller grant.
-    pub async fn inspect_recipe_run(
-        &self,
-        arguments: Vec<String>,
-    ) -> Result<bool, HostRuntimeError> {
-        self.inspect_recipe_run_report(arguments, false)
-            .await
-            .map(|report| report.running)
-    }
-
     /// A background observation's inspection, in its bounded lane.  With
     /// `include_logs` an exited container answers with its retained output.
     /// With `run_generation` the helper answers only for a container whose
@@ -213,20 +202,10 @@ impl HostRuntimeBoundary<'_> {
         .await
     }
 
-    /// Like `inspect_recipe_run`, and when `include_logs` is set also reads the
-    /// running container's bounded output without stopping it.
-    pub async fn inspect_recipe_run_report(
-        &self,
-        arguments: Vec<String>,
-        include_logs: bool,
-    ) -> Result<RunInspectionReport, HostRuntimeError> {
-        self.inspect_recipe_run_report_with_permit(arguments, include_logs, None, None)
-            .await
-    }
-
-    /// Like `inspect_recipe_run_report` with its output, for one Start's
-    /// container: the helper answers for it only when its label carries
-    /// `run_generation`, and refuses a container of another generation.
+    /// Ask the helper about one Start's exact container, with its bounded
+    /// output, in the lifecycle lane: the helper answers for it only when its
+    /// label carries `run_generation`, and refuses a container of another
+    /// generation.
     pub async fn inspect_start_run_report(
         &self,
         arguments: Vec<String>,
