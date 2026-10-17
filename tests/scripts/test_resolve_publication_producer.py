@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import ast
+import fnmatch
 import importlib.machinery
 import importlib.util
 import re
 import subprocess
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -44,9 +47,9 @@ def history(tmp_path, monkeypatch):
     git("config", "user.name", "CI test", cwd=tmp_path)
     git("config", "user.email", "ci@example.invalid", cwd=tmp_path)
     git("config", "commit.gpgsign", "false", cwd=tmp_path)
-    shas = {"base": commit(tmp_path, "packaging/input", "one\n")}
+    shas = {"base": commit(tmp_path, "packaging/debian/input", "one\n")}
     shas["docs"] = commit(tmp_path, "docs/guide.md", "words\n")
-    shas["changed"] = commit(tmp_path, "packaging/input", "two\n")
+    shas["changed"] = commit(tmp_path, "packaging/debian/input", "two\n")
     git("checkout", "-q", "-b", "side", shas["base"], cwd=tmp_path)
     shas["side"] = commit(tmp_path, "docs/side.md", "elsewhere\n")
     git("checkout", "-q", "main", cwd=tmp_path)
@@ -138,6 +141,16 @@ def github(monkeypatch):
         ("images", "docs/something.md", False),
         ("images", ".github/workflows/installer-publication.yml", True),
         ("setups", "scripts/resolve-publication-producer", True),
+        ("agent", "tests/nodes/test_agent_package_native_lifecycle.sh", True),
+        ("agent", "rust/crates/vonk-spark-setup/src/lib.rs", True),
+        ("agent", "control/src/vonk_control/contract_graph.py", True),
+        ("agent", "control/tests/fixtures/compiled_workload_v2.json", True),
+        ("agent", "control/tests/test_x.py", False),
+        ("agent", "docs/x.md", False),
+        ("setups", "control/src/vonk_control/resources/site-ports.json", True),
+        ("setups", "schemas/install-release-manifest.schema.json", True),
+        ("setups", "control/packaging/public-contracts.lock", False),
+        ("setups", "tests/nodes/test_agent_package_native_lifecycle.sh", False),
     ],
 )
 def test_reuse_checks_each_producer_input_filter(
@@ -157,7 +170,7 @@ def test_reuse_checks_each_producer_input_filter(
 def test_renaming_an_input_out_of_its_area_is_a_change(history, tmp_path):
     resolver = module()
     before = git("rev-parse", "HEAD", cwd=tmp_path)
-    git("mv", "packaging/input", "docs/input", cwd=tmp_path)
+    git("mv", "packaging/debian/input", "docs/input", cwd=tmp_path)
     git("commit", "-qm", "move input", cwd=tmp_path)
     assert resolver.changed_matches(
         before, git("rev-parse", "HEAD", cwd=tmp_path), ("packaging/**",)
@@ -316,3 +329,199 @@ def test_image_producer_paths_are_exactly_the_image_job_inputs():
     # with its tests) rebuilds images whose bytes did not change.
     assert sorted(inputs - paths) == [], "image inputs the producer ignores"
     assert sorted(paths - inputs) == [], "producer paths no image job reads"
+
+
+# Cargo reads the workspace manifest, lock and toolchain pin from the root.
+CARGO_WORKSPACE = ("Cargo.toml", "Cargo.lock", "rust-toolchain.toml")
+PATH_TOKEN = re.compile(r"[\w.@-]+(?:/[\w.@-]+)*")
+IMPORT = re.compile(r"^\s*from\s+([\w.]+)\s+import\s+([\w, ]+)$", re.MULTILINE)
+RUST_READS = (
+    # include_str!/include_bytes! resolve against the including file ...
+    (re.compile(r'include_(?:str|bytes)!\(\s*"([^"]+)"'), False),
+    # ... and env!("CARGO_MANIFEST_DIR") joins against the crate directory.
+    (
+        re.compile(r'env!\("CARGO_MANIFEST_DIR"\)\)?\s*(?:\.join\(|,)\s*"/?([^"]+)"'),
+        True,
+    ),
+)
+
+
+def input_pattern(path: Path) -> str | None:
+    """A repository file or directory as a producer path pattern."""
+    path = path.resolve()
+    if path == ROOT or not path.is_relative_to(ROOT) or not path.exists():
+        return None
+    relative = path.relative_to(ROOT).as_posix()
+    return f"{relative}/**" if path.is_dir() else relative
+
+
+def crate_closure(crates: set[str]) -> set[str]:
+    """The crates and every crate they reach through a path dependency."""
+    found: set[str] = set()
+    pending = sorted(crates)
+    while pending:
+        crate = pending.pop()
+        if crate in found:
+            continue
+        found.add(crate)
+        manifest = tomllib.loads((ROOT / crate / "Cargo.toml").read_text())
+        for table in [manifest, *manifest.get("target", {}).values()]:
+            for kind in ("dependencies", "build-dependencies", "dev-dependencies"):
+                for dependency in table.get(kind, {}).values():
+                    if isinstance(dependency, dict) and "path" in dependency:
+                        target = (ROOT / crate / dependency["path"]).resolve()
+                        pending.append(target.relative_to(ROOT).as_posix())
+    return found
+
+
+def crate_inputs(crate: str) -> set[str]:
+    """What building and testing the crate reads outside its own directory."""
+    inputs: set[str] = set()
+    directory = ROOT / crate
+    for source in directory.rglob("*.rs"):
+        text = source.read_text()
+        for expression, from_crate in RUST_READS:
+            for literal in expression.findall(text):
+                base = directory if from_crate else source.parent
+                inputs.add(input_pattern(base / literal))
+        if source.name == "build.rs":
+            # Build scripts name their declared inputs from the repository root.
+            for literal in re.findall(r'"([\w.-]+/[\w./-]+)"', text):
+                inputs.add(input_pattern(ROOT / literal))
+    return {path for path in inputs - {None} if not path.startswith("rust/crates/")}
+
+
+def local_output(path: str) -> bool:
+    """Whether .gitignore names the path as a local output (generated, .state/)."""
+    for line in (ROOT / ".gitignore").read_text().splitlines():
+        # Name patterns such as *.pem would also match tracked inputs.
+        if "/" not in line or line.startswith(("#", "!")):
+            continue
+        pattern = line.strip("/")
+        parts = path.split("/")
+        for start in range(1 if line.startswith("/") else len(parts)):
+            candidate = "/".join(parts[start:])
+            if fnmatch.fnmatchcase(candidate, pattern) or candidate.startswith(
+                f"{pattern}/"
+            ):
+                return True
+    return False
+
+
+def named_inputs(path: str) -> set[str]:
+    """Repository files a workflow, action or script names by path or import."""
+    source = ROOT / path
+    text = "\n".join(
+        re.sub(r"(^|\s)#.*", "", line) for line in source.read_text().splitlines()
+    )
+    names: set[str] = set()
+    for token in PATH_TOKEN.findall(text):
+        parts = token.removeprefix("./").split("/")
+        # A bare word names only a root file such as uv.lock or Cargo.lock.
+        for start in range(max(len(parts) - 1, 1)):
+            name = "/".join(parts[start:])
+            if (len(parts) > 1 or "." in name) and (ROOT / name).is_file():
+                names.add(name)
+    for module, members in IMPORT.findall(text):
+        stem = module.replace(".", "/")
+        for base in (source.parent, ROOT):
+            for candidate in (
+                f"{stem}.py",
+                *(f"{stem}/{member.strip()}.py" for member in members.split(",")),
+            ):
+                if (base / candidate).is_file():
+                    names.add((base / candidate).relative_to(ROOT).as_posix())
+    names = {name for name in names if not local_output(name)}
+    for action in re.findall(r"uses:\s*\./([\w./-]+)", text):
+        if (ROOT / action).is_dir():
+            names.add(f"{action.rstrip('/')}/**")
+    # A path template such as f"packaging/systemd/{name}" reads its directory.
+    for directory in re.findall(r"([\w.-]+(?:/[\w.-]+)+)/\{", text):
+        if (ROOT / directory).is_dir():
+            names.add(f"{directory}/**")
+    for project in re.findall(r"uv build --project (\S+)", text):
+        names.add(f"{project}/**")
+    return names
+
+
+def declared_contract_inputs() -> set[str]:
+    """What the contract generators read, as tools/generated_contracts.py declares."""
+    tree = ast.parse((ROOT / "tools/generated_contracts.py").read_text())
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.AnnAssign)
+            and getattr(node.target, "id", "") == "INPUTS"
+        ):
+            return {input_pattern(ROOT / path) for path in ast.literal_eval(node.value)}
+    raise AssertionError("tools/generated_contracts.py declares no INPUTS")
+
+
+def job_inputs(sources: tuple[str, ...], crates: set[str]) -> set[str]:
+    """The path patterns a producer's jobs read, derived from their own sources."""
+    crates = crate_closure(crates)
+    inputs = {*sources, *CARGO_WORKSPACE, *(f"{crate}/**" for crate in crates)}
+    for crate in crates:
+        inputs |= crate_inputs(crate)
+    # The workflows and every local action they use ...
+    pending = [
+        f"{path[:-3]}/action.yml" if path.endswith("/**") else path for path in sources
+    ]
+    while pending:
+        named = named_inputs(pending.pop())
+        pending += [
+            f"{path[:-3]}/action.yml"
+            for path in named - inputs
+            if path.startswith(".github/actions/")
+        ]
+        inputs |= named
+    # ... and one level into the scripts and tests they and build scripts run.
+    for path in sorted(inputs):
+        if path.startswith(("scripts/", "tests/")) and not path.endswith("/**"):
+            inputs |= named_inputs(path)
+            # pytest also loads every conftest.py above the test it runs.
+            if path.startswith("tests/") and path.endswith(".py"):
+                for parent in Path(path).parents:
+                    if (ROOT / parent / "conftest.py").is_file():
+                        conftest = (parent / "conftest.py").as_posix()
+                        inputs |= {conftest, *named_inputs(conftest)}
+    if "tools/generated_contracts.py" in inputs:
+        inputs |= declared_contract_inputs()
+    # A file inside a directory input is already covered by that directory.
+    return {
+        path
+        for path in inputs
+        if not any(
+            other.endswith("/**") and other != path and path.startswith(other[:-2])
+            for other in inputs
+        )
+    }
+
+
+def producer_job_inputs(producer: str) -> set[str]:
+    if producer == "agent":
+        # agent-package-security runs cargo test and clippy over the workspace;
+        # the apt job publishes this producer's package (installer-publication).
+        workspace = tomllib.loads((ROOT / "Cargo.toml").read_text())["workspace"]
+        return job_inputs(
+            (
+                ".github/workflows/agent-release.yml",
+                ".github/actions/agent-apt-publish/**",
+            ),
+            set(workspace["members"]),
+        )
+    # installer-setups tests and builds only the native Spark setup crate.
+    return job_inputs(
+        (".github/workflows/installer-setups.yml",),
+        {"rust/crates/vonk-spark-setup"},
+    )
+
+
+@pytest.mark.parametrize("producer", ["agent", "setups"])
+def test_producer_paths_are_exactly_the_job_inputs(producer):
+    resolver = module()
+    paths = set(resolver.PRODUCERS[producer].paths)
+    inputs = producer_job_inputs(producer) | set(resolver.ORCHESTRATION)
+    # A missing input reuses a stale artifact; an extra one rebuilds an
+    # artifact whose inputs did not change.
+    assert sorted(inputs - paths) == [], f"{producer} inputs the producer ignores"
+    assert sorted(paths - inputs) == [], f"{producer} paths no job reads"
