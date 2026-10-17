@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import gzip
 import json
 import os
 import shutil
@@ -9,6 +10,7 @@ import uuid
 from pathlib import Path
 
 import pytest
+import yaml
 
 ROOT = Path(__file__).resolve().parents[3]
 SCRIPT = ROOT / "deploy/compose/postgres/init-databases.sh"
@@ -16,6 +18,22 @@ ENTRYPOINT = ROOT / "deploy/compose/postgres/entrypoint.sh"
 POSTGRES_IMAGE = json.loads(
     (ROOT / "deploy/compose/images.lock.json").read_text(encoding="utf-8")
 )["images"]["postgres"]
+
+
+def _deployed_security_options() -> list[str]:
+    """The capability and security options Compose gives the postgres service."""
+    service = yaml.safe_load(
+        (ROOT / "deploy/compose/compose.yaml").read_text(encoding="utf-8")
+    )["services"]["postgres"]
+    options = []
+    for option, field in (
+        ("--cap-drop", "cap_drop"),
+        ("--cap-add", "cap_add"),
+        ("--security-opt", "security_opt"),
+    ):
+        for value in service.get(field, []):
+            options.extend((option, value))
+    return options
 
 
 def _docker_unavailable(message: str) -> None:
@@ -137,6 +155,7 @@ def test_fresh_postgres_owns_a_distinct_litellm_database(
                 "-d",
                 "--name",
                 container,
+                *_deployed_security_options(),
                 "-e",
                 "POSTGRES_DB=control",
                 "-e",
@@ -338,6 +357,87 @@ def test_fresh_postgres_owns_a_distinct_litellm_database(
             timeout=10,
         ).strip()
         assert repaired_database == "litellm"
+    finally:
+        subprocess.run(
+            ["docker", "rm", "--force", container],
+            check=False,
+            capture_output=True,
+            timeout=30,
+        )
+
+
+@pytest.mark.slow(60)
+def test_deployed_postgres_writes_a_restore_verified_backup(
+    tmp_path: Path, postgres_image: str
+) -> None:
+    # Break caught: without the KILL capability the entrypoint cannot probe the
+    # server it started (it runs as postgres), so it waits on it forever and
+    # never starts the backup loop, without logging anything.
+    password_file = tmp_path / "litellm-password"
+    password_file.write_text("b" * 64 + "\n", encoding="ascii")
+    password_file.chmod(0o600)
+    backups = tmp_path / "backups"
+    state = tmp_path / "state"
+    backups.mkdir()
+    state.mkdir()
+    container = f"vonk-postgres-backup-test-{uuid.uuid4().hex}"
+    try:
+        subprocess.run(
+            [
+                "docker",
+                "run",
+                "-d",
+                "--name",
+                container,
+                "--network",
+                "none",
+                *_deployed_security_options(),
+                "-e",
+                "POSTGRES_DB=control",
+                "-e",
+                "POSTGRES_USER=control",
+                "-e",
+                "POSTGRES_PASSWORD=control-password",
+                "-v",
+                f"{SCRIPT}:/run/vonk-runtime-assets/postgres/init-databases.sh:ro",
+                "-v",
+                f"{ENTRYPOINT}:/run/vonk-runtime-assets/postgres/entrypoint.sh:ro",
+                "-v",
+                f"{password_file}:/run/secrets/litellm-database-password:ro",
+                "-v",
+                f"{backups}:/backups",
+                "-v",
+                f"{state}:/state",
+                "--entrypoint",
+                "/bin/sh",
+                postgres_image,
+                "/run/vonk-runtime-assets/postgres/entrypoint.sh",
+                "postgres",
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        marker = state / "last-successful-backup.epoch"
+        deadline = time.monotonic() + 50
+        while not marker.is_file():
+            if time.monotonic() > deadline:
+                logs = subprocess.run(
+                    ["docker", "logs", container],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                )
+                raise AssertionError(
+                    f"no verified backup was written:\n{logs.stdout}{logs.stderr}"
+                )
+            time.sleep(0.25)
+        assert (state / "last-backup-restore-verification.epoch").is_file()
+        dumps = sorted(backups.glob("postgres-*.sql.gz"))
+        assert len(dumps) == 1, dumps
+        assert b"CREATE DATABASE litellm" in gzip.decompress(dumps[0].read_bytes())
     finally:
         subprocess.run(
             ["docker", "rm", "--force", container],
