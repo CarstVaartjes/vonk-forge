@@ -33,12 +33,17 @@ ROOT = Path(__file__).resolve().parents[3]
 # is a known instance of the class above; a new consumer must reload or be
 # named here with its reason.
 RESTART_ONLY = {
-    "postgres": "entrypoint and init scripts run once per start",
-    "litellm": "the config supervisor and bootstrap config load once per start",
-    "caddy": "Caddyfile loads once per start; caddy --watch is development-only",
-    "registry": "the registry has no configuration reload",
-    "tailscale-configurator": "the reconciler script loads once per start",
-    "hermes-litellm-key-provisioner": "the reconciler script loads once per start",
+    "postgres": "Compose does not restart it with the Controller (no control-api "
+    "dependency: the database must not bounce with it); init scripts run only on "
+    "an empty data directory, and entrypoint and backup-loop changes apply from "
+    "its next start",
+    "litellm": "the supervisor rereads bootstrap-config.json every poll; "
+    "entrypoint.sh and config_supervisor.py are its own process code",
+    "registry": "distribution has no configuration reload",
+    "tailscale-configurator": "configure.sh is its own reconcile loop; the "
+    "healthcheck already runs the restaged copy",
+    "hermes-litellm-key-provisioner": "provision-litellm-key.py is its own "
+    "reconcile loop; the --check healthcheck already runs the restaged copy",
 }
 
 
@@ -59,8 +64,8 @@ def test_every_runtime_asset_consumer_reloads_or_is_named() -> None:
         for name, service in _services().items()
         if "runtime-assets:/run/vonk-runtime-assets:ro" in service.get("volumes", [])
     }
-    # Prometheus reloads; the test below proves it with the real image.
-    assert consumers - set(RESTART_ONLY) == {"prometheus"}
+    # These reload; the tests below prove each with its real image.
+    assert consumers - set(RESTART_ONLY) == {"prometheus", "caddy"}
     assert set(RESTART_ONLY) <= consumers, "drop entries for retired consumers"
 
 
@@ -72,10 +77,9 @@ def _docker(*argv: str, timeout: float = 60) -> str:
     return result.stdout
 
 
-@pytest.fixture(scope="module")
-def prometheus() -> dict:
+def _pulled(name: str) -> dict:
     """The production service; pulling its image is setup, not the test."""
-    service = _services()["prometheus"]
+    service = _services()[name]
     if shutil.which("docker") is not None:
         subprocess.run(
             ["docker", "pull", "-q", service["image"]],
@@ -84,6 +88,16 @@ def prometheus() -> dict:
             check=False,
         )
     return service
+
+
+@pytest.fixture(scope="module")
+def prometheus() -> dict:
+    return _pulled("prometheus")
+
+
+@pytest.fixture(scope="module")
+def caddy() -> dict:
+    return _pulled("caddy")
 
 
 @pytest.fixture
@@ -197,3 +211,144 @@ def test_prometheus_started_on_old_assets_applies_the_restaged_rules(
         )
         time.sleep(1)
     assert _rules(start_only) == {"PreviousRelease"}, "the failure mode reproduces"
+
+
+def _caddy_kit(root: Path, caddyfile: str) -> Path:
+    """One release's Caddy kit: the shipped entrypoint and that release's
+    Caddyfile."""
+    kit = root / "caddy"
+    kit.mkdir(parents=True)
+    shutil.copy(ROOT / "deploy/compose/caddy/entrypoint.sh", kit)
+    (kit / "Caddyfile").write_text(caddyfile)
+    assert write_runtime_asset_inventory(root)
+    return root
+
+
+def _caddyfile(route: str) -> str:
+    return (
+        "{\n\tadmin off\n\tauto_https off\n}\n"
+        f':8080 {{\n\trespond /release "{route}"\n}}\n'
+    )
+
+
+def _docker_logs(container: str) -> str:
+    result = subprocess.run(
+        ["docker", "logs", container],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    return result.stdout + result.stderr
+
+
+def _served(container: str) -> str | None:
+    result = subprocess.run(
+        ["docker", "exec", container, "wget", "-qO-", "http://127.0.0.1:8080/release"],
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+    return result.stdout if result.returncode == 0 else None
+
+
+@pytest.mark.needs_docker
+@pytest.mark.slow(60)
+def test_caddy_started_on_old_assets_applies_the_restaged_caddyfile(
+    caddy: dict,
+    containers: list[str],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Wrong implementation: production's Caddy, started by Compose before the
+    # pre-exec restaged, served the previous release's routes for good.
+    monkeypatch.setattr(os, "fchown", lambda *_args: None)
+    assets = tmp_path / "assets"
+    stage_runtime_assets(
+        _caddy_kit(tmp_path / "previous", _caddyfile("previous")), assets
+    )
+    for path in (assets, *assets.rglob("*")):
+        path.chmod(0o755 if path.is_dir() else 0o444)
+    secrets = tmp_path / "secrets"
+    secrets.mkdir()
+    for name in (
+        "controller-server-certificate",
+        "controller-server-key",
+        "agent-client-ca",
+    ):
+        (secrets / name).write_text("fixture\n")
+    (secrets / "agent-proxy-auth").write_text("a" * 32)
+
+    # The control: the native default command minus watching, as before the
+    # fix. The fixed container runs the native default itself.
+    native = (ROOT / "deploy/compose/caddy/entrypoint.sh").read_text()
+    default = next(
+        line.split()[2:] for line in native.splitlines() if "set -- caddy run" in line
+    )
+    for name, arguments in (
+        ("watch", []),
+        ("start-only", [a for a in default if a != "--watch"]),
+    ):
+        container = f"vonk-asset-reload-caddy-{name}-{uuid.uuid4().hex[:8]}"
+        containers.append(container)
+        _docker(
+            "run",
+            "-d",
+            "--name",
+            container,
+            "--network",
+            "none",
+            "--read-only",
+            "--tmpfs",
+            "/tmp",
+            "--tmpfs",
+            "/data",
+            "--tmpfs",
+            "/config",
+            "--cap-drop",
+            "ALL",
+            *(f"--cap-add={capability}" for capability in caddy["cap_add"]),
+            *(f"--security-opt={option}" for option in caddy["security_opt"]),
+            "-e",
+            "VONK_CONTROL_HOSTNAME=example.invalid",
+            "-v",
+            f"{assets}:/run/vonk-runtime-assets:ro",
+            "-v",
+            f"{secrets}:/run/secrets:ro",
+            "--entrypoint",
+            caddy["entrypoint"][0],
+            caddy["image"],
+            caddy["entrypoint"][1],
+            caddy["entrypoint"][2].replace("$$", "$"),
+            *caddy["entrypoint"][3:],
+            *arguments,
+        )
+    watching, start_only = containers
+
+    deadline = time.monotonic() + 20
+    while not _served(watching) == _served(start_only) == "previous":
+        assert time.monotonic() < deadline, _docker_logs(watching)
+        time.sleep(0.5)
+
+    # The pulled release's pre-exec restages its kit into the shared volume.
+    # Its route reads a variable the entrypoint exports, as production's do.
+    pulled = "pulled {$VONK_AGENT_HOSTNAME}"
+    stage_runtime_assets(_caddy_kit(tmp_path / "pulled", _caddyfile(pulled)), assets)
+
+    deadline = time.monotonic() + 20
+    while _served(watching) != "pulled agents.example.invalid":
+        assert time.monotonic() < deadline, "restaged Caddyfile never applied:\n" + (
+            _docker_logs(watching)
+        )
+        time.sleep(0.5)
+    assert _served(start_only) == "previous", "the failure mode reproduces"
+
+    # A release whose Caddyfile cannot load is logged, never silent, and the
+    # running routes keep serving.
+    stage_runtime_assets(_caddy_kit(tmp_path / "broken", ":8080 {\n"), assets)
+    deadline = time.monotonic() + 20
+    while "unable to load latest config" not in _docker_logs(watching):
+        assert time.monotonic() < deadline, _docker_logs(watching)
+        time.sleep(0.5)
+    assert _served(watching) == "pulled agents.example.invalid"
