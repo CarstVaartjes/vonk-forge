@@ -19,6 +19,7 @@ from ..models import (
     NodeInventorySnapshot,
 )
 from ..nas_route_notice import nas_route_notice
+from ..nas_transfer_rate import NasTransferNotice
 from ..recipe_update_notice import RECIPE_UPDATE_AVAILABLE
 from ..strict_json import warn_unreadable_once
 from ..telemetry import TelemetrySampleView, sustained_low_cpu_clock
@@ -62,6 +63,7 @@ def _node(
     reservations: Mapping[str, tuple[int, int]],
     stalls: Sequence[str] = (),
     repeating: Sequence[str] = (),
+    slow_nas: NasTransferNotice | None = None,
     telemetry_unreadable: bool = False,
 ) -> FleetNode:
     warnings: list[ProjectionReason] = []
@@ -126,6 +128,15 @@ def _node(
                 detail=route_notice.detail,
                 severity="warning",
                 recommendation=route_notice.recommendation,
+            )
+        )
+    if slow_nas is not None:
+        warnings.append(
+            ProjectionReason(
+                code=ProjectionCode.NETWORK_NAS_TRANSFER_SLOW,
+                detail=slow_nas.detail,
+                severity=ProfileReasonSeverity.WARNING.value,
+                recommendation=slow_nas.recommendation,
             )
         )
     warnings.extend(

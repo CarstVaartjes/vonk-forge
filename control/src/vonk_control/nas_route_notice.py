@@ -4,8 +4,8 @@ The agent reports interface kind, link speed and carrier for its NICs plus
 the interface the NAS route uses; this module turns that evidence into one
 typed warning with a recommendation, so the fleet view, ``vonkctl fleet`` and
 the web say the same thing. It states the route and the wired ports only and
-claims no throughput: nothing measures what a link carries (a transfer's own
-progress shows its rate), and a link speed is what the interface negotiated.
+claims no throughput: what copies from the NAS achieve is measured by
+``nas_transfer_rate``, and a link speed is what the interface negotiated.
 Missing evidence (an older agent) is unknown and produces no warning.
 """
 
