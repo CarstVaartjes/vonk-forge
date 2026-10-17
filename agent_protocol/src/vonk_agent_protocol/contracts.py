@@ -30,6 +30,7 @@ from .optional_evidence import (
     EvidenceGroup,
     OptionalEvidenceModel,
     fail_open_on_optional_evidence,
+    redacted_prose,
 )
 from .reason_codes import AgentEvidenceCode
 from .wire_model import ErrorCode, OperationProgress, WireModel
@@ -1177,6 +1178,12 @@ class AgentResult(OptionalEvidenceModel, _ProtocolEnvelopeModel):
         )
     )
 
+    # Prose a person reads: never an identity, a path the Controller acts on or
+    # authority. A host path here is redacted, never a reason to refuse.
+    HOST_PATH_TEXT: ClassVar[frozenset[str]] = frozenset(
+        {"reason", "summary", "detail", "diagnostic", "recovery"}
+    )
+
     fence: CanonicalUUID
     state: AgentResultState
     result: AgentResultPayload
@@ -1237,11 +1244,24 @@ class AgentResult(OptionalEvidenceModel, _ProtocolEnvelopeModel):
                 and isinstance(raw.get("result"), Mapping)
                 and raw["result"].get("kind") not in OUTCOME_KINDS
             ):
-                _validate_bounded_document(
-                    raw["result"],
-                    name="result",
-                    typed_result_strings=True,
-                )
+                try:
+                    _validate_bounded_document(
+                        raw["result"],
+                        name="result",
+                        typed_result_strings=True,
+                    )
+                except AgentProtocolError:
+                    # A host path in a legacy body's prose is redacted, as the
+                    # model does for a typed outcome; anything else refuses.
+                    prose = redacted_prose(raw, cls.HOST_PATH_TEXT)
+                    if prose is None:
+                        raise
+                    model = cls.parse(prose)
+                    model._evidence_warnings = (
+                        AgentEvidenceCode.RESULT_HOST_PATH_REDACTED,
+                        *model.evidence_warnings,
+                    )
+                    return model
             return cls.model_validate(raw)
         except AgentProtocolError:
             raise
