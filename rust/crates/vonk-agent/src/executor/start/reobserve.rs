@@ -26,10 +26,16 @@ use crate::host_runtime::HostRuntimeError;
 
 const START_FAILED: &str = "container runtime could not start the workload";
 
-/// The Controller refused an inspection's grant. That is no answer about the
-/// container, so it is read again or waited on, never stopped on.
+/// The Controller refused an inspection grant request's own bytes (a
+/// Controller that predates generation-bound inspections refuses its shape).
+/// That is no answer about the container, so it is read again or waited on,
+/// never stopped on.
 fn inspection_grant_refused(error: &HostRuntimeError) -> bool {
-    matches!(error, HostRuntimeError::Controller(_))
+    matches!(
+        error,
+        HostRuntimeError::Controller(crate::client::ClientError::Controller(refusal))
+            if refusal.request_invalid()
+    )
 }
 
 /// The Controller or the helper refused this start's authority before any
