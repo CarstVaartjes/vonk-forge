@@ -148,16 +148,23 @@ jobs:
           fi
 
       - name: Restore accepted hermes digest and signed evidence
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: cache_hermes
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/accepted-image-cache/hermes
-          key: accepted-hermes-${{ steps.image_inputs.outputs.hermes_key }}
+          # A saved entry can never be overwritten, so each accepted digest gets
+          # its own key and the newest entry for these inputs wins: the cache
+          # follows what main shipped last, including a pull request's image.
+          key: accepted-hermes-${{ steps.image_inputs.outputs.hermes_key }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: accepted-hermes-${{ steps.image_inputs.outputs.hermes_key }}-
 
       - name: Restore accepted litellm digest and signed evidence
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: cache_litellm
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/accepted-image-cache/litellm
-          key: accepted-litellm-${{ steps.image_inputs.outputs.litellm_key }}
+          key: accepted-litellm-${{ steps.image_inputs.outputs.litellm_key }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: accepted-litellm-${{ steps.image_inputs.outputs.litellm_key }}-
 
       - name: Revalidate accepted hermes image for reuse
         id: reuse_hermes
@@ -700,11 +707,18 @@ jobs:
             '{digest: $digest, build_commit: $build_commit}' \
             > "$RUNNER_TEMP/accepted-image-cache/hermes/image.json"
           cp -- "$BUNDLE" "$RUNNER_TEMP/accepted-image-cache/hermes/provenance.json"
-          # Exercise the real signed-cache consumer before saving a new entry.
+          # Exercise the real signed-cache consumer before saving this entry.
           scripts/reuse-development-image hermes "$GITHUB_SHA" \
             "$RUNNER_TEMP/accepted-image-cache/hermes" \
             "$RUNNER_TEMP/hermes.cache-check.json" \
             "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT"
+
+      - name: Save signed hermes acceptance for identical future inputs
+        if: steps.reuse_hermes.outputs.digest == ''
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/accepted-image-cache/hermes
+          key: ${{ steps.cache_hermes.outputs.cache-primary-key }}
 
       - name: Retain signed litellm acceptance for identical future inputs
         if: steps.reuse_litellm.outputs.digest == ''
@@ -720,11 +734,18 @@ jobs:
             '{digest: $digest, build_commit: $build_commit}' \
             > "$RUNNER_TEMP/accepted-image-cache/litellm/image.json"
           cp -- "$BUNDLE" "$RUNNER_TEMP/accepted-image-cache/litellm/provenance.json"
-          # Exercise the real signed-cache consumer before saving a new entry.
+          # Exercise the real signed-cache consumer before saving this entry.
           scripts/reuse-development-image litellm "$GITHUB_SHA" \
             "$RUNNER_TEMP/accepted-image-cache/litellm" \
             "$RUNNER_TEMP/litellm.cache-check.json" \
             "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT"
+
+      - name: Save signed litellm acceptance for identical future inputs
+        if: steps.reuse_litellm.outputs.digest == ''
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/accepted-image-cache/litellm
+          key: ${{ steps.cache_litellm.outputs.cache-primary-key }}
 
       - name: Upload Compose artifact
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
