@@ -123,7 +123,7 @@ test("a Wi-Fi NAS route warning shows its recommendation as the next step", () =
     warnings: [
       {
         code: "network.nas-route-wifi-wired-port-down",
-        detail: "Reaches the NAS over Wi-Fi (wlP9s9, 2.402 Gb/s link).",
+        detail: "Reaches the NAS over Wi-Fi (wlP9s9, 2.402 Gb/s link, shared airtime).",
         severity: "warning",
         recommendation:
           "Wired port enP7s7 has no link; connect it to the NAS network with a cable.",
