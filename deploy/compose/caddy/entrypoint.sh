@@ -93,6 +93,10 @@ if [ "${#proxy_auth}" -lt 32 ]; then
   exit 1
 fi
 export VONK_AGENT_PROXY_AUTH="$proxy_auth"
+# Releases before persist_config off autosaved the adapted config, with the
+# proxy-auth secret, into the caddy-config volume. Remove that copy; under
+# set -e a copy that cannot be removed stops the start (a security edge).
+rm -f /config/caddy/autosave.json
 if [ "$#" -eq 0 ]; then
   # Compose restarts Caddy as soon as control-api starts, before its pre-exec
   # restages this release's Caddyfile, so a start alone serves the previous
