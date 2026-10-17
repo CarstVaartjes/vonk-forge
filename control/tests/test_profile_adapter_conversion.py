@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from copy import deepcopy
 from datetime import timedelta
+from types import SimpleNamespace
 
 import pytest
-from sqlalchemy import Engine, Table, select, update
+from sqlalchemy import Engine, Table, event, select, update
 from vonk_agent_protocol import AgentOperation as WireAgentOperation
 from vonk_agent_protocol import (
     AgentResult,
@@ -15,6 +16,7 @@ from vonk_agent_protocol import (
     OutcomeKind,
     RecipeStopResult,
 )
+from vonk_control import fleet_profile_adapter_conversion
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.db import initialize_database
 from vonk_control.fleet_profile_adapter_conversion import (
@@ -162,6 +164,40 @@ def test_retained_exact_stop_conversion_reconnects_without_another_request(tmp_p
                 )
             )
         } == claims
+
+
+@pytest.fixture
+def retained_sessions(tmp_path):
+    """Sessions holding one retained application that still needs conversion."""
+    return _retained_stop(tmp_path)[0]
+
+
+def test_a_page_query_slower_than_the_budget_still_converts_the_page(
+    retained_sessions, monkeypatch: pytest.MonkeyPatch
+):
+    """Catches fixed setup spending the pass budget, so no pass ever progresses."""
+    sessions = retained_sessions
+    engine = sessions.kw["bind"]
+    assert isinstance(engine, Engine)
+    elapsed = [0.0]
+
+    def slow_page(_connection, _cursor, statement, _parameters, _context, _many):
+        if statement.startswith("SELECT fleet_profile_applications.") and (
+            "json_type" in statement
+        ):
+            elapsed[0] += 2.0
+
+    monkeypatch.setattr(
+        fleet_profile_adapter_conversion,
+        "time",
+        SimpleNamespace(monotonic=lambda: elapsed[0]),
+    )
+    event.listen(engine, "after_cursor_execute", slow_page)
+    try:
+        assert convert_due_retained_applications(sessions, NOW) == 1
+    finally:
+        event.remove(engine, "after_cursor_execute", slow_page)
+    assert elapsed[0] == 2.0
 
 
 def test_retained_unknown_projection_preserves_outer_metadata_and_original_journal(
