@@ -16,29 +16,67 @@
 	}
 }
 
+# Every body bound below admits at least what the Controller accepts on the
+# same route (MAX_CONTROL_DOCUMENT_BYTES, MAX_ARTIFACT_*_UPLOAD_BYTES,
+# MAX_RECIPE_IMAGE_BYTES); test_agent_ingress compares them. A smaller edge
+# bound refuses a valid body with a bare 413 the Controller never sees.
 (edge_guards) {
 	request_body {
-		max_size 1MB
+		max_size 1MiB
+	}
+	import edge_headers
+}
+
+(browser_edge_guards) {
+	# Artifact-job inputs are the only large browser body. The API streams,
+	# hashes, and enforces this same 512 MiB bound.
+	@artifact_input_upload {
+		method PUT
+		path /api/artifact-jobs/*/inputs/*
+	}
+	@ordinary_browser_request not {
+		method PUT
+		path /api/artifact-jobs/*/inputs/*
+	}
+	request_body @ordinary_browser_request {
+		max_size 1MiB
+	}
+	request_body @artifact_input_upload {
+		max_size 536870912
 	}
 	import edge_headers
 }
 
 (agent_edge_guards) {
-	# Recipe OCI layouts are the only large inbound agent body. The API streams,
-	# hashes, and enforces this same 16 TiB protocol ceiling.
+	# Recipe OCI layouts and recipe-job outputs are the only large inbound
+	# agent bodies. The API streams, hashes, and enforces these same bounds:
+	# the 16 TiB image ceiling and the 1 GiB job output.
 	@recipe_image_upload {
 		method PUT
 		path /agent/recipe-builds/*/image
 	}
-	@ordinary_agent_request not {
+	@recipe_job_output_upload {
 		method PUT
-		path /agent/recipe-builds/*/image
+		path /agent/recipe-jobs/*/outputs/*
+	}
+	@ordinary_agent_request {
+		not {
+			method PUT
+			path /agent/recipe-builds/*/image
+		}
+		not {
+			method PUT
+			path /agent/recipe-jobs/*/outputs/*
+		}
 	}
 	request_body @ordinary_agent_request {
-		max_size 1MB
+		max_size 1MiB
 	}
 	request_body @recipe_image_upload {
 		max_size 17592186044416
+	}
+	request_body @recipe_job_output_upload {
+		max_size 1073741824
 	}
 	import edge_headers
 }
@@ -245,7 +283,7 @@ http://:8087 {
 :8080 {
 	@canonical_browser_host host {$VONK_CONTROL_HOSTNAME}
 	handle @canonical_browser_host {
-		import edge_guards
+		import browser_edge_guards
 		handle /healthz {
 			respond 200
 		}
