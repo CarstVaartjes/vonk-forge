@@ -34,6 +34,7 @@ from vonk_agent_protocol.recipe_operations import RecipeStopResult
 from vonk_control import agent_operation_states as aos
 from vonk_control.agent_jobs import (
     AgentJobService,
+    StaleAgentAttempt,
     _claim_predicate,
     authorize_operator_resume_in_session,
 )
@@ -2748,6 +2749,14 @@ def _restart_interrupted_result(claim, operation_kind: str):
     )
 
 
+def _deliver_result(jobs, result) -> None:
+    """Deliver ``result`` as the agent API does: the live fence, else late."""
+    try:
+        jobs.record_result(result)
+    except StaleAgentAttempt:
+        assert jobs.record_late_result(result)
+
+
 def _claim_until_due(jobs, sessions, clock, operation_id: str, *, rounds: int = 4):
     """Poll as the agent does, advancing to each scheduled retry time."""
     for _ in range(rounds):
@@ -2836,7 +2845,8 @@ def test_repeated_agent_restarts_without_progress_slow_down_and_say_why(
                 30,
             )
         clock.advance(seconds=45)
-        assert jobs.record_late_result(_restart_interrupted_result(claim, kind))
+        # A progressing attempt still holds its lease when the agent is back.
+        _deliver_result(jobs, _restart_interrupted_result(claim, kind))
         with sessions() as session:
             stored = session.get(AgentOperation, operation.id)
             delays.append(

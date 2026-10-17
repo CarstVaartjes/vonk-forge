@@ -30,7 +30,13 @@ from ..operation_progress import (
     stored_progress,
 )
 from ..own_cleanup import CLEANUP_KINDS
-from .contracts import _LOGGER, _WORKLOAD_INTENT_OPERATIONS, AgentFence
+from ..stall_window import progress_advanced
+from .contracts import (
+    _LOGGER,
+    _WORKLOAD_INTENT_OPERATIONS,
+    PROGRESSING_LEASE,
+    AgentFence,
+)
 from .endings import end_unobserved_order
 from .retry import _renew_distribution_grant, superseded_cancellation_deadline
 from .stored import column_field, column_is_document, column_value
@@ -146,6 +152,10 @@ def heartbeat(
                 )
                 write_progress = progress_write_due(retained, validated, _aware(now))
                 if write_progress:
+                    if retained is not None and progress_advanced(retained, validated):
+                        # Progress, not renewal, earns the longer lease: a live
+                        # owner keeps its claim through a Controller restart.
+                        deadline = max(deadline, _aware(now) + PROGRESSING_LEASE)
                     attempt.progress = progress_document(
                         sample_progress(retained, validated, _aware(now))
                     )
