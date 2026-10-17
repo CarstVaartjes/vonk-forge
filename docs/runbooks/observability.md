@@ -115,3 +115,13 @@ item total, so an unbounded build and an intentional `needs-operator` wait
 never alert. Inspect the operation's progress and last accepted contact, then
 reconcile the actual effect before retrying; an expired lease alone does not
 prove the host action ended.
+
+## Stale NAS Compose file
+
+`NasComposeBundleStale` fires when the NAS Compose file is not the one the
+running Controller release was built with. Redeploying with "pull latest image"
+updates the images only; the Compose file changes only when the NAS installer
+runs. Rerun it (`curl -fsSL https://install.vonkforge.ai/dev/nas | sh`, or the
+stable channel); it keeps the site's `.env` and secrets. The alert labels carry
+both digests: `running="missing"` means the Compose file predates the stamp. The
+alert clears once the Controller restarts with the new Compose file.
