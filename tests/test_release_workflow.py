@@ -590,15 +590,16 @@ def test_main_reuses_the_setup_programs_of_the_pull_request_that_tested_its_tree
     None
 ):
     """Catches the setups producer rebuilding what the proven pull request run
-    built from the identical tree, reusing without that proof, or preferring an
-    ancestor release's setups (other bytes than the pull request accepted)."""
+    built from the identical tree, or reusing without that proof."""
     changes = load(RELEASE)["jobs"]["changes"]
     assert (
         changes["outputs"]["setups"]
         == "${{ steps.pr-setups.outputs.setups || steps.select.outputs.setups }}"
     )
     step = next(s for s in changes["steps"] if s.get("id") == "pr-setups")
-    assert step["if"] == "steps.tested-ci.outputs.run_id != ''"
+    assert step["if"] == (
+        "steps.tested-ci.outputs.run_id != '' && steps.select.outputs.setups == ''"
+    )
     assert 'scripts/resolve-pr-setups "$RUN_ID" "$GITHUB_SHA"' in step["run"]
 
 

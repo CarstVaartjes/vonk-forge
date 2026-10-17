@@ -136,7 +136,7 @@ jobs:
 
       - name: Reuse the setup programs the identical pull request built
         id: pr-setups
-        if: steps.tested-ci.outputs.run_id != ''
+        if: steps.tested-ci.outputs.run_id != '' && steps.select.outputs.setups == ''
         env:
           GH_TOKEN: ${{ github.token }}
           RUN_ID: ${{ steps.tested-ci.outputs.run_id }}
