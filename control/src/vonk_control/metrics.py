@@ -21,6 +21,7 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol.claims import AGENT_PROTOCOL_VERSION
 
 from . import job_states
+from .compose_bundle import ComposeBundle
 from .models import (
     AgentCertificate,
     AgentNode,
@@ -253,6 +254,11 @@ class MetricsRegistry:
         self._agent_leases: dict[tuple[str, str], float] = {}
         self._worker_memory: WorkerMemoryReport | None = None
         self._worker_memory_age: float | None = None
+        self._compose_bundle: ComposeBundle | None = None
+
+    def set_compose_bundle(self, bundle: ComposeBundle | None) -> None:
+        with self._lock:
+            self._compose_bundle = bundle
 
     def set_worker_memory(
         self, report: WorkerMemoryReport | None, now: datetime | None = None
@@ -483,6 +489,7 @@ class MetricsRegistry:
             agent_leases = dict(self._agent_leases)
             worker_memory = self._worker_memory
             worker_memory_age = self._worker_memory_age
+            compose_bundle = self._compose_bundle
         lines = [
             "# HELP vonk_route_state Current inference route state.",
             "# TYPE vonk_route_state gauge",
@@ -698,6 +705,18 @@ class MetricsRegistry:
             )
         if worker_memory is not None:
             lines.extend(_worker_memory_lines(worker_memory, worker_memory_age))
+        if compose_bundle is not None:
+            labels = (
+                f'expected="{compose_bundle.expected}",'
+                f'running="{compose_bundle.running}"'
+            )
+            lines.extend(
+                (
+                    "# HELP vonk_nas_compose_bundle_current Whether the NAS Compose file matches this Controller release.",
+                    "# TYPE vonk_nas_compose_bundle_current gauge",
+                    f"vonk_nas_compose_bundle_current{{{labels}}} {int(compose_bundle.current)}",
+                )
+            )
         lines.append("# EOF")
         return "\n".join(lines) + "\n"
 
