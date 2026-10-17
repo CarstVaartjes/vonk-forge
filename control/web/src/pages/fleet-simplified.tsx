@@ -221,7 +221,9 @@ export function FleetPage({ api }: { api: ControlApi; onBusyChange?(busy: boolea
       )}
       {fleet.snapshot && fleet.stale && (
         <div className="fleet-stale">
-          <StatusPill tone="warning">{fleet.refreshError ? "disconnected" : "stale"}</StatusPill>
+          <StatusPill tone={ProfileReasonSeverity.WARNING}>
+            {fleet.refreshError ? "disconnected" : "stale"}
+          </StatusPill>
           <ObservationNotice
             connection="reconnecting"
             lastSuccessAt={fleet.lastUpdatedAt}
