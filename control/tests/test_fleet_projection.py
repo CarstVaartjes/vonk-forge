@@ -31,6 +31,8 @@ from vonk_control.models import (
     AgentCertificate,
     AgentNode,
     AgentNodeProfile,
+    AgentOperation,
+    AgentOperationAttempt,
     AgentPresence,
     Base,
     CatalogDocument,
@@ -40,6 +42,7 @@ from vonk_control.models import (
     FleetEventCursor,
     FleetStreamEvent,
     InstallationNode,
+    Job,
     NodeInventorySnapshot,
     NodeTelemetryLatest,
     NodeTelemetrySample,
@@ -2474,6 +2477,90 @@ def test_wifi_nas_route_is_a_typed_warning_with_a_recommendation() -> None:
     assert "10 Gb/s" in (warning.recommendation or "")
 
     (warning,) = _route_warnings([_WIFI], "wlP9s9")
+
+
+def test_fleet_names_the_spark_that_copies_from_the_nas_far_slower() -> None:
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    # spark-3542: 48.8 GB in 553 s; spark-2297: 25.8 GB in 7089 s (2026-10-17).
+    transfers = {NODE_A: (48_755_056_484, 553.3), NODE_B: (25_800_000_000, 7089.0)}
+    with sessions.begin() as session:
+        session.add(
+            Job(
+                id="job",
+                request_id="request",
+                kind="recipe.install",
+                state="running",
+                actor="test",
+                authority_revision="a" * 64,
+                targets=list(transfers),
+                payload_digest="b" * 64,
+                payload={},
+                created_at=NOW - timedelta(hours=3),
+                updated_at=NOW,
+            )
+        )
+        for node_id, name in ((NODE_A, "spark-3542"), (NODE_B, "spark-2297")):
+            session.add(
+                AgentNode(
+                    node_id=node_id,
+                    state="active",
+                    architecture="linux-arm64",
+                    last_seen_at=NOW - timedelta(seconds=1),
+                )
+            )
+            session.flush()
+            session.add(_certificate(node_id, f"nas-rate-{node_id}"))
+            session.add(_profile(node_id, display_name=name, hostname=name))
+            size, seconds = transfers[node_id]
+            session.add(
+                AgentOperation(
+                    id=f"transfer-{node_id}",
+                    parent_job_id="job",
+                    node_id=node_id,
+                    kind="artifact.distribution.v1",
+                    payload_digest="c" * 64,
+                    payload={},
+                    authority_revision="a" * 64,
+                    state="succeeded",
+                    current_attempt=1,
+                    created_at=NOW - timedelta(hours=1),
+                    updated_at=NOW - timedelta(minutes=30),
+                )
+            )
+            session.add(
+                AgentOperationAttempt(
+                    operation_id=f"transfer-{node_id}",
+                    attempt=1,
+                    fence=f"fence-{node_id}",
+                    lease_deadline=NOW,
+                    agent_certificate_serial=f"nas-rate-{node_id}",
+                    state="succeeded",
+                    progress={
+                        "phase": "completed",
+                        "completed_bytes": size,
+                        "total_bytes_known": False,
+                        "elapsed_seconds": seconds,
+                    },
+                )
+            )
+    nodes = {
+        node.id: node
+        for node in FleetProjection(sessions, clock=lambda: NOW).read().nodes
+    }
+
+    def slow(node_id: str) -> list[str]:
+        return [
+            warning.detail
+            for warning in nodes[node_id].warnings
+            if warning.code == "network.nas-transfer-slow"
+        ]
+
+    assert slow(NODE_A) == []
+    (detail,) = slow(NODE_B)
+    assert detail.startswith("Copies from the NAS at 3.6 MB/s vs 88.1 MB/s")
+    assert "on spark-3542" in detail
 
 
 def test_wired_unknown_or_unreported_nas_route_raises_no_warning() -> None:

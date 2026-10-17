@@ -36,6 +36,7 @@ from ..models import (
     ResourceReservation,
     RunNode,
 )
+from ..nas_transfer_rate import slow_nas_transfers
 from ..observation_capture import begin_observation_capture
 from ..operation_blockers import PHASE_RETRY_CODE, read_blockers
 from ..recipe_update_notice import newest_active_revisions
@@ -178,6 +179,16 @@ class FleetProjection:
             reservations = self._reservations(session, node_ids)
             stalls = self._stalled_loads(session, node_ids)
             repeating = repeating_evidence(session, node_ids, current)
+            slow_nas = slow_nas_transfers(
+                session,
+                {
+                    node_id: node_id
+                    if node_id not in profiles
+                    else profiles[node_id].display_name
+                    for node_id in node_ids
+                },
+                current,
+            )
         return FleetSnapshot(
             event_cursor=event_cursor,
             generated_at=current,
@@ -199,6 +210,7 @@ class FleetProjection:
                     reservations=reservations.get(node_id, {}),
                     stalls=stalls.get(node_id, ()),
                     repeating=repeating.get(node_id, ()),
+                    slow_nas=slow_nas.get(node_id),
                 )
                 for node_id in node_ids
             ],
