@@ -69,6 +69,9 @@ fn bitmap_len(total: u64, range_bytes: u64) -> u64 {
 /// starts over, which is also how an earlier agent reads every longer file:
 /// after a rollback it fetches again rather than trusting a gap.
 ///
+/// A transfer with one range left to fetch writes it in order and keeps the
+/// prefix (no record), so it resumes from its exact length after a restart.
+///
 /// Order: the prefix is synced, then the record is written and the file
 /// synced before any byte lands out of order, so the length never says
 /// "prefix" while a gap exists. A range's bit is set only after its bytes are
@@ -79,6 +82,8 @@ pub(super) struct RangeRecord {
     total: u64,
     range_bytes: u64,
     bitmap: Mutex<Vec<u8>>,
+    /// Whether the file holds the record; without it, its length is a prefix.
+    recorded: bool,
 }
 
 impl RangeRecord {
@@ -96,6 +101,7 @@ impl RangeRecord {
                     total,
                     range_bytes,
                     bitmap: Mutex::new(bitmap),
+                    recorded: true,
                 };
                 let pending = record.pending(0);
                 return Ok((record, pending));
@@ -114,14 +120,18 @@ impl RangeRecord {
                     bitmap[(index / 8) as usize] |= 1 << (index % 8);
                 }
             }
-            let record = Self {
+            let mut record = Self {
                 file,
                 total,
                 range_bytes,
                 bitmap: Mutex::new(bitmap),
+                recorded: false,
             };
             let pending = record.pending(prefix);
-            if !pending.is_empty() {
+            // One range left continues the prefix in order: nothing can land
+            // out of order, so the length stays the checkpoint.
+            if pending.len() > 1 {
+                record.recorded = true;
                 record.file.sync_data()?;
                 let mut header = RANGE_RECORD_MAGIC.to_vec();
                 header.extend_from_slice(&range_bytes.to_le_bytes());
@@ -170,6 +180,9 @@ impl RangeRecord {
             Ok(())
         })
         .await?;
+        if !self.recorded {
+            return Ok(());
+        }
         let byte = (range.index / 8) as usize;
         let value = {
             let mut bitmap = self.lock();

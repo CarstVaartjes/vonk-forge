@@ -195,3 +195,19 @@ async fn a_checkpoint_of_record_length_without_a_record_starts_over() {
         [(0, 7), (8, 15), (16, 23), (24, 31), (32, 39)]
     );
 }
+
+#[tokio::test]
+async fn a_last_range_continues_the_prefix_without_a_record() {
+    let root = tempfile::tempdir().unwrap();
+    let partial = partial_path(&root.path().join("object"));
+    write_private(&partial, &BODY[..33]);
+    // Only the last range is left: it is written in order, so the length
+    // stays the checkpoint an interrupted request resumes from exactly.
+    let (url, served) = range_server(0, Some(1));
+    assert!(matches!(
+        download(&url, root.path(), &StreamGovernor::default()).await,
+        Err(ClientError::Protocol)
+    ));
+    assert_eq!(ranges(&served), [(33, 39)]);
+    assert_eq!(std::fs::read(&partial).unwrap(), &BODY[..33]);
+}
