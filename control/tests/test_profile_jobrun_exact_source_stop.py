@@ -3,7 +3,7 @@
 The profile load that replaces a run stops each issued job of it exactly, as
 the run's own Stop does: the order the job's Spark claimed names the container.
 Damaged rows around that order (a sibling no Spark was handed, the job's link
-to it) never decide the Stop.
+to it, its parent's ``targets``) never decide the Stop.
 
 Wrong implementation: the profile Stop retried "artifact JobRun physical Stop
 identity is ambiguous" on every pass until its deadline, or settled the job as
@@ -41,7 +41,7 @@ def _damage(sessions, artifact_job_id: str, damage: str) -> str:
         (child,) = session.scalars(
             select(AgentOperation).where(AgentOperation.parent_job_id == order.id)
         )
-        if damage == "unissued-sibling":
+        if damage in {"unissued-sibling", "linked-to-unissued"}:
             columns = AgentOperation.__table__.columns
             sibling = AgentOperation(
                 **{column.name: getattr(child, column.name) for column in columns}
@@ -49,13 +49,31 @@ def _damage(sessions, artifact_job_id: str, damage: str) -> str:
             sibling.id = str(uuid.uuid4())
             sibling.state = "queued"
             sibling.current_attempt = 0
+            if damage == "linked-to-unissued":
+                # The job's link moves to another order no Spark was handed.
+                columns = Job.__table__.columns
+                other = Job(
+                    **{column.name: getattr(order, column.name) for column in columns}
+                )
+                other.id = str(uuid.uuid4())
+                other.request_id = str(uuid.uuid4())
+                other.state = "queued"
+                other.result = None
+                session.add(other)
+                session.flush()
+                sibling.parent_job_id = other.id
+                artifact.operation_id = other.id
             session.add(sibling)
+        elif damage == "order-targets":
+            order.targets = ["another-spark"]
         else:
             artifact.operation_id = None
         return child.node_id
 
 
-@pytest.mark.parametrize("damage", ["unissued-sibling", "unlinked"])
+@pytest.mark.parametrize(
+    "damage", ["order-targets", "unissued-sibling", "unlinked", "linked-to-unissued"]
+)
 def test_a_profile_stops_an_issued_job_in_a_damaged_order_exactly(
     tmp_path, damage: str
 ) -> None:

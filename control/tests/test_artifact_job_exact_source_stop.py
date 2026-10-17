@@ -396,7 +396,64 @@ def test_a_job_that_names_no_order_and_has_two_issued_ones_holds_the_stop(
     assert fresh.id != submitted.id
 
 
-def test_a_frozen_job_relinked_to_another_order_re_plans_the_stop(tmp_path) -> None:
+def _relink_to_another_order(sessions, artifact_job_id: str, *, issued: bool) -> None:
+    """The job's link moves to a copy of its order, issued to a Spark or not."""
+
+    with sessions.begin() as session:
+        order, child = _order(session, artifact_job_id)
+        columns = Job.__table__.columns
+        other = Job(**{column.name: getattr(order, column.name) for column in columns})
+        other.id = str(uuid.uuid4())
+        other.request_id = str(uuid.uuid4())
+        other.state = "running" if issued else "queued"
+        other.result = None
+        session.add(other)
+        session.flush()
+        columns = AgentOperation.__table__.columns
+        copy = AgentOperation(
+            **{column.name: getattr(child, column.name) for column in columns}
+        )
+        copy.id = str(uuid.uuid4())
+        copy.parent_job_id = other.id
+        if not issued:
+            copy.state = "queued"
+            copy.current_attempt = 0
+        session.add(copy)
+        artifact = session.get(ArtifactJob, artifact_job_id)
+        assert artifact is not None
+        artifact.operation_id = other.id
+
+
+@pytest.mark.parametrize("frozen", [False, True], ids=["fresh", "frozen"])
+def test_a_job_linked_to_an_unissued_order_is_stopped_by_its_issued_one(
+    tmp_path, frozen: bool
+) -> None:
+    sessions, operations, service, run_id, node_id, agent_jobs, clock, stop = _service(
+        tmp_path
+    )
+    submitted = submitted_artifact_job(service, run_id, request_suffix=118)
+    job_claim = claim_agent(agent_jobs, node_id, "serial-0")
+    assert job_claim is not None
+    if frozen:
+        with pytest.raises(RecipeArtifactJobCancellationPending):
+            stop()
+    _relink_to_another_order(sessions, submitted.id, issued=False)
+
+    stopping = stop()
+
+    # The order its link names was never handed to a Spark; the one that was
+    # may still run: the run is not released, and the exact Stop is built from
+    # that issued order's own request.
+    assert stopping.state not in {"succeeded", "failed", "cancelled"}
+    assert _run_state(sessions, run_id) == "stopping"
+    _receipt_exact_stop(agent_jobs, clock, node_id, job_claim, submitted)
+    assert stop().state == "succeeded"
+    _activate_fresh_job_run(sessions, operations, run_id)
+
+
+def test_a_frozen_job_relinked_to_another_issued_order_re_plans_the_stop(
+    tmp_path,
+) -> None:
     sessions, _operations, service, run_id, node_id, agent_jobs, _clock, stop = (
         _service(tmp_path)
     )
@@ -404,20 +461,10 @@ def test_a_frozen_job_relinked_to_another_order_re_plans_the_stop(tmp_path) -> N
     assert claim_agent(agent_jobs, node_id, "serial-0") is not None
     with pytest.raises(RecipeArtifactJobCancellationPending):
         stop()
-    with sessions.begin() as session:
-        order, _child = _order(session, submitted.id)
-        columns = Job.__table__.columns
-        other = Job(**{column.name: getattr(order, column.name) for column in columns})
-        other.id = str(uuid.uuid4())
-        other.request_id = str(uuid.uuid4())
-        session.add(other)
-        session.flush()
-        artifact = session.get(ArtifactJob, submitted.id)
-        assert artifact is not None
-        artifact.operation_id = other.id
+    _relink_to_another_order(sessions, submitted.id, issued=True)
 
-    # The frozen order is no longer the job's: the reviewed Stop is drift its
-    # owner re-plans, never a crash of the Stop.
+    # The job now names another issued order, not the frozen one: the reviewed
+    # Stop is drift its owner re-plans, never a crash of the Stop.
     with pytest.raises(RecipeRequestInvalid) as refused:
         stop()
     assert refused.value.typed_reason is InvalidRequestReason.SUPERSEDED

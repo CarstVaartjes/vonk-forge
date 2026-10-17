@@ -60,6 +60,7 @@ from ..profile_stop_authority import (
     ProfileJobRunStopJob,
     ProfileJobRunStopTarget,
     ProfileStopAuthorityError,
+    issued_order_link,
     validate_profile_jobrun_stop_target,
     validate_profile_stop_owner,
 )
@@ -89,11 +90,11 @@ def _jobrun_effect_may_remain(
 
     An issued job may be running; a damaged receipt, or one that says its job
     scope may remain, is uncertainty about the physical effect, never an empty
-    receipt. A job that ended with its receipt left nothing to stop. A job that
-    lost its link to its order is read through the order issued for it.
+    receipt. A job that ended with its receipt left nothing to stop. A job whose
+    link names no issued order is read through the order issued for it.
     """
 
-    issued = _issued_orders_of_unlinked_job(adapter.session, artifact)
+    issued = _issued_orders_off_link(adapter.session, artifact)
     if len(issued) > 1:
         return True
     if issued:
@@ -118,16 +119,17 @@ def _jobrun_effect_may_remain(
     )
 
 
-def _issued_orders_of_unlinked_job(
+def _issued_orders_off_link(
     session: Session, artifact: ArtifactJob
 ) -> tuple[AgentOperation, ...]:
-    """The issued orders of a submitted job that names none: each names its owner.
+    """The issued orders of a submitted job whose link names none issued.
 
-    A job being prepared was never handed an order, so none is looked up.
+    Each order names its owner. A job being prepared was never handed an
+    order, so none is looked up.
     """
 
     if (
-        artifact.operation_id is not None
+        issued_order_link(session, artifact) is not None
         or artifact_job_states.preparation_of(artifact) is not None
     ):
         return ()
@@ -155,13 +157,14 @@ def _exact_jobrun_source(
 
     A Stop accepted earlier keeps the order it froze; otherwise it is the job's
     one order, or its one issued order beside siblings no Spark was handed. A
-    job that lost its link to its order is read through the orders issued for
+    job whose link names no issued order is read through the orders issued for
     it. ``None`` retires the job as unknown: nothing of it was issued, so
     nothing can remain, and a re-plan reads the same rows. An issued order that
     no exact Stop can reach holds the Stop: nothing is stopped on a guess.
     """
-    if artifact.operation_id is None:
-        issued = list(_issued_orders_of_unlinked_job(session, artifact))
+    off_link = _issued_orders_off_link(session, artifact)
+    if artifact.operation_id is None or off_link:
+        issued = list(off_link)
         candidates = list(issued)
     else:
         children = tuple(
@@ -345,7 +348,7 @@ class ProfileJobRunStopMixin:
             .order_by(ArtifactJob.created_at, ArtifactJob.id)
             .with_for_update(of=ArtifactJob)
         ):
-            if artifact.operation_id is None and not _issued_orders_of_unlinked_job(
+            if artifact.operation_id is None and not _issued_orders_off_link(
                 session, artifact
             ):
                 if artifact_job_states.preparation_of(artifact) is None:

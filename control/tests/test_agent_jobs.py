@@ -423,6 +423,50 @@ def test_new_intent_cancels_issued_order_and_receives_exact_stop_ack(service) ->
     )
 
 
+def test_new_intent_cancels_an_order_by_its_children_never_its_targets(
+    service,
+) -> None:
+    """A damaged ``targets`` list neither hides an older order on the newer
+    intent's Spark nor pulls one from another Spark into its cancellation."""
+
+    jobs, sessions, clock = service
+    inside = parent(sessions, clock)
+    running = jobs.enqueue(
+        inside.id, NODE_A, "recipe.start", COMMIT, superseded_order_payload(clock)
+    )
+    claim = claim_agent(jobs, NODE_A, "serial-a")
+    assert claim is not None
+    outside = parent(sessions, clock)
+    queued = jobs.enqueue(
+        outside.id, NODE_B, "recipe.start", COMMIT, superseded_order_payload(clock)
+    )
+    with sessions.begin() as session:
+        inside_row = session.get(Job, inside.id)
+        outside_row = session.get(Job, outside.id)
+        node = session.get(AgentNode, NODE_A)
+        assert inside_row is not None and outside_row is not None
+        assert node is not None
+        inside_row.targets = ["another-spark"]
+        outside_row.targets = [NODE_A]
+        node.workload_intent_ordinal = 2
+        jobs.request_superseded_workload_cancellation_in_session(
+            session, (NODE_A,), 2, clock.now
+        )
+
+    with sessions() as session:
+        inside_row = session.get(Job, inside.id)
+        outside_row = session.get(Job, outside.id)
+        running_row = session.get(AgentOperation, running.id)
+        queued_row = session.get(AgentOperation, queued.id)
+        assert inside_row is not None and isinstance(inside_row.result, dict)
+        assert inside_row.result["cancel_requested"] is True
+        assert running_row is not None and running_row.state == "running"
+        # The order on the other Spark is outside the newer intent: untouched.
+        assert outside_row is not None and outside_row.state == "queued"
+        assert outside_row.result is None
+        assert queued_row is not None and queued_row.state == "queued"
+
+
 def test_new_intent_finishes_superseded_parent_with_mixed_terminal_children(
     service,
 ) -> None:
