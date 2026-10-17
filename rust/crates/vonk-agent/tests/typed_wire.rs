@@ -23,8 +23,9 @@ use std::{
 const PASSTHROUGH: &[(&str, &str)] = &[
     (
         "vonk-agent-protocol/src/passthrough.rs",
-        "the typed-to-document boundary: canonical bytes and validating or \
-         round-tripping a generated value; the document never leaves the newtype",
+        "the typed-to-document boundary: canonical bytes, validating or \
+         round-tripping a generated value and rewriting named string members; \
+         the document never leaves the newtype",
     ),
     (
         "vonk-agent-protocol/src/wire_schema.rs",

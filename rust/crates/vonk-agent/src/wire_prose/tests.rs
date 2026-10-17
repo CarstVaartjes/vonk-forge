@@ -1,6 +1,9 @@
+#![cfg(test)]
+
 use super::*;
 use crate::failure_evidence::{FailureProcessLogs, log_tail};
 use crate::outcome::{ExecutionResult, Failure, UnknownEvidence};
+use serde_json::Value;
 use vonk_agent_protocol::generated::{AgentOperation, FailureStage, WaitReason};
 
 #[test]

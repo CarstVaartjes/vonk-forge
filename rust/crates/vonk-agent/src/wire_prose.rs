@@ -9,7 +9,6 @@
 //! result keeps its own words, and the captured process streams (bounded
 //! evidence the contract admits paths in) are untouched.
 
-use serde_json::Value;
 use vonk_agent_protocol::generated::AgentResult;
 
 /// What stands in for a host path inside prose.
@@ -52,35 +51,15 @@ pub fn redact_host_paths(text: &str) -> String {
     out.chars().take(bound).collect()
 }
 
-fn redact_prose(value: &mut Value) {
-    match value {
-        Value::Array(items) => items.iter_mut().for_each(redact_prose),
-        Value::Object(fields) => {
-            for (key, field) in fields.iter_mut() {
-                match field {
-                    Value::String(text)
-                        if PROSE_LEAVES.contains(&key.as_str()) && text.contains(['/', '\\']) =>
-                    {
-                        *text = redact_host_paths(text);
-                    }
-                    _ => redact_prose(field),
-                }
-            }
-        }
-        _ => {}
-    }
-}
-
 /// The result as it is sent: prose leaves without host paths, all else as is.
 ///
 /// A result whose redacted form does not read back (which no prose change can
 /// cause) is sent as it was, so the Controller still answers it.
 pub fn wire_result(result: &AgentResult) -> AgentResult {
-    let Ok(mut value) = serde_json::to_value(result) else {
-        return result.clone();
-    };
-    redact_prose(&mut value);
-    serde_json::from_value(value).unwrap_or_else(|_| result.clone())
+    vonk_agent_protocol::rewrite_named_strings(result, &PROSE_LEAVES, |text| {
+        text.contains(['/', '\\']).then(|| redact_host_paths(text))
+    })
+    .unwrap_or_else(|_| result.clone())
 }
 
 #[cfg(test)]
