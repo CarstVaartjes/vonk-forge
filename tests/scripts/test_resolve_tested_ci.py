@@ -182,8 +182,18 @@ def proof(tmp_path, monkeypatch, request):
             return zipped(state["raw"], name=state["zip_name"])
         return original_command(*args, **kwargs)
 
+    # A fake clock: a retry pause advances time instead of waiting.
+    clock = {"now": 0.0}
+    state["pauses"] = []
+
+    def pause(seconds):
+        state["pauses"].append(seconds)
+        clock["now"] += seconds
+
     monkeypatch.setattr(resolver, "api", api)
     monkeypatch.setattr(resolver, "command", command)
+    monkeypatch.setattr(resolver, "monotonic", lambda: clock["now"])
+    monkeypatch.setattr(resolver, "sleep", pause)
     return state
 
 
@@ -210,6 +220,25 @@ def test_intervening_main_change_runs_source_ci_again(proof):
     target = commit(proof["root"], "docs/other.md", "another main change\n")
     proof["pull"]["merge_commit_sha"] = target
     assert proof["resolver"].resolve(target, REPO) == (2, None)
+    # A differing tested tree is a definitive miss: nothing to wait for.
+    assert proof["pauses"] == []
+
+
+@pytest.mark.parametrize("lagging", ["pulls", "runs", "artifacts"])
+def test_evidence_github_lists_late_is_still_reused(proof, monkeypatch, lagging):
+    """Auto-merge lands seconds after the tested run; GitHub lists it later."""
+    resolver = proof["resolver"]
+    visible = proof[lagging]
+    proof[lagging] = []
+    original = resolver.sleep
+
+    def pause(seconds):
+        original(seconds)
+        proof[lagging] = visible
+
+    monkeypatch.setattr(resolver, "sleep", pause)
+    assert resolver.resolve(proof["target"], REPO) == (0, 50)
+    assert len(proof["pauses"]) == 1
 
 
 def test_fallback_names_the_main_tree_and_the_trees_it_was_compared_with(proof, capsys):
@@ -229,9 +258,14 @@ def test_fallback_names_the_main_tree_and_the_trees_it_was_compared_with(proof, 
 
 
 @pytest.mark.parametrize("missing", ["pulls", "runs", "artifacts"])
-def test_absent_proof_falls_back_to_ordinary_ci(proof, missing):
+def test_absent_proof_falls_back_to_ordinary_ci(proof, missing, capsys):
+    resolver = proof["resolver"]
     proof[missing] = []
-    assert proof["resolver"].resolve(proof["target"], REPO) == (2, None)
+    assert resolver.resolve(proof["target"], REPO) == (2, None)
+    # It looked again for late listings, within the lookup deadline, then ran CI.
+    assert proof["pauses"] == list(resolver.LATE_LISTING_PAUSES)
+    assert sum(proof["pauses"]) < resolver.LOOKUP_SECONDS
+    assert "no tested tree of a merged pull request in" in capsys.readouterr().err
 
 
 @pytest.mark.parametrize("listing", ["runs", "artifacts"])

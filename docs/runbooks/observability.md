@@ -73,6 +73,12 @@ available.
 
 ## Control job failures
 
+`RepeatedControlJobFailure` and `RepeatedAgentOperationFailures` fire when three
+or more control jobs, or agent operations, ended failed within the last hour. A
+single failed load (a recipe that does not fit, a recipe defect) is that
+recipe's outcome and ages out of the window; repeated failures across new work
+point at the platform. Stored history alone never keeps the alerts on.
+
 Filter operations and Audit by action, inspect sanitized evidence, and verify the
 recipe revision and build evidence are still current. Re-plan after correcting
 persisted state; never retry a revoked or stale plan.
@@ -99,7 +105,10 @@ control plane mounts no Git repository.
 run now has waited more than five minutes. It is grouped by job kind, so a
 running job of another kind no longer hides the starved one. A job deferred by a
 future `observation_due_at` is an intentional wait and deliberately does not age
-into the alert; if the alert fires, the wait is not the explanation.
+into the alert; if the alert fires, the wait is not the explanation. Neither does
+a queued job whose work is an agent operation (an artifact transfer, a wait on a
+busy Spark): the worker never claims it, and the operation shows its own
+progress and wait reason.
 
 Confirm the worker container is healthy and holds the online shared lock. Check
 expired attempts and database connectivity. Stale fences must never be reused;

@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 from pydantic import TypeAdapter, ValidationError
-from sqlalchemy import or_, select
+from sqlalchemy import ColumnElement, or_, select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import InvalidRequestReason, SecurityRefusalError
 
@@ -179,6 +179,20 @@ def _canonical_targets(value: object) -> list[str]:
 
 
 _ADAPTER = JobAdapter()
+
+
+def without_agent_operation() -> ColumnElement[bool]:
+    """A job the worker queue runs itself: no agent operation carries its work.
+
+    A job with an agent operation waits on that operation's Spark, so the
+    worker never claims it; the starvation metric applies the same rule.
+    """
+
+    return (
+        ~select(AgentOperation.id)
+        .where(AgentOperation.parent_job_id == Job.id)
+        .exists()
+    )
 
 
 class JobService:
@@ -363,9 +377,7 @@ class JobService:
                     # Claim only work this executor handles. Coordinators may
                     # be queued between turns without an AgentOperation yet.
                     Job.kind.in_(kinds),
-                    ~select(AgentOperation.id)
-                    .where(AgentOperation.parent_job_id == Job.id)
-                    .exists(),
+                    without_agent_operation(),
                     or_(
                         Job.state == "queued",
                         Job.id.in_(

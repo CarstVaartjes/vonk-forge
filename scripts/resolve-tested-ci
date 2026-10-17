@@ -17,7 +17,7 @@ import subprocess
 import sys
 import zipfile
 from pathlib import Path
-from time import monotonic
+from time import monotonic, sleep
 
 ROOT = Path(__file__).resolve().parents[1]
 SELECTOR = runpy.run_path(str(ROOT / "scripts/select-ci-areas"))
@@ -36,6 +36,9 @@ REPOSITORY = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+\Z")
 MAX_RECEIPT_BYTES = 16 * 1024
 MAX_ARCHIVE_BYTES = 64 * 1024
 LOOKUP_SECONDS = 120
+#: Pauses before looking again while no tested tree is visible: auto-merge
+#: lands seconds after the tested run ends, before GitHub lists it.
+LATE_LISTING_PAUSES = (5.0, 10.0, 20.0, 30.0)
 
 
 class EvidenceError(ValueError):
@@ -420,13 +423,10 @@ def _proven_run(
     return None
 
 
-def resolve(source: str, repo: str) -> tuple[int, int | None]:
-    if not SHA.fullmatch(source) or not REPOSITORY.fullmatch(repo):
-        raise EvidenceError("invalid release source")
-    target_tree = git("rev-parse", f"{source}^{{tree}}")
-    deadline = monotonic() + LOOKUP_SECONDS
+def _lookup(
+    source: str, repo: str, target_tree: str, *, deadline: float, compared: list[str]
+) -> int | None:
     pulls = api(f"repos/{repo}/commits/{source}/pulls?per_page=100", deadline=deadline)
-    compared: list[str] = []
     for pull in pulls:
         if (
             pull.get("merge_commit_sha") != source
@@ -460,11 +460,34 @@ def resolve(source: str, repo: str) -> tuple[int, int | None]:
                 compared=compared,
             )
         if run_id is not None:
+            return run_id
+    return None
+
+
+def resolve(source: str, repo: str) -> tuple[int, int | None]:
+    if not SHA.fullmatch(source) or not REPOSITORY.fullmatch(repo):
+        raise EvidenceError("invalid release source")
+    target_tree = git("rev-parse", f"{source}^{{tree}}")
+    deadline = monotonic() + LOOKUP_SECONDS
+    for pause in (*LATE_LISTING_PAUSES, None):
+        compared: list[str] = []
+        run_id = _lookup(
+            source, repo, target_tree, deadline=deadline, compared=compared
+        )
+        if run_id is not None:
             return 0, run_id
+        # A differing tested tree is a definitive miss; nothing seen may be lag.
+        if compared or pause is None:
+            break
+        sleep(pause)
     # Name the miss: usually the pull request was not up to date with main.
     print(
         f"main tree {target_tree} matched no successful PR check; compared: "
-        + ("; ".join(compared) or "no tested tree of a merged pull request"),
+        + (
+            "; ".join(compared)
+            or "no tested tree of a merged pull request"
+            f" in {len(LATE_LISTING_PAUSES) + 1} lookups"
+        ),
         file=sys.stderr,
     )
     return 2, None
