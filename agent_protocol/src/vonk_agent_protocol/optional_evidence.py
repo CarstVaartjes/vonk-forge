@@ -52,10 +52,21 @@ HOST_PATH_MARKER = "<host-path>"
 _PATH_TOKEN = re.compile(r"[^\s'\"`()\[\]{},;=:]*[/\\][^\s'\"`()\[\]{},;=:]*")
 
 
-def redact_host_paths(text: str) -> str:
-    """``text`` with every path-like token replaced by :data:`HOST_PATH_MARKER`."""
+# The shortest bound of any prose leaf (``recovery``): a redaction that makes a
+# sentence longer is cut to this or its own length, so it stays within the
+# bound the original met.
+_SHORTEST_PROSE_BOUND = 128
 
-    return _PATH_TOKEN.sub(HOST_PATH_MARKER, text)
+
+def redact_host_paths(text: str) -> str:
+    """``text`` with every path-like token replaced by :data:`HOST_PATH_MARKER`.
+
+    The agent applies the same rule before sending (shared vector
+    ``host-path-redaction-v1.json``).
+    """
+
+    redacted = _PATH_TOKEN.sub(HOST_PATH_MARKER, text)
+    return redacted[: max(len(text), _SHORTEST_PROSE_BOUND)]
 
 
 def redacted_prose(document: object, names: frozenset[str]) -> object:

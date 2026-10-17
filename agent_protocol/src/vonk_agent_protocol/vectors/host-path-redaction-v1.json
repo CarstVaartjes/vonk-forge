@@ -1,0 +1,42 @@
+{
+ "marker": "<host-path>",
+ "shortest_prose_bound": 128,
+ "cases": [
+  {
+   "text": "open /opt/a.json failed",
+   "redacted": "open <host-path> failed"
+  },
+  {
+   "text": "path='/opt/a.json':3",
+   "redacted": "path='<host-path>':3"
+  },
+  {
+   "text": "endpoint=/agent/result",
+   "redacted": "endpoint=<host-path>"
+  },
+  {
+   "text": "C:\\cache\\x",
+   "redacted": "C:<host-path>"
+  },
+  {
+   "text": "FileNotFoundError: [Errno 2] No such file or directory: '/opt/vonk/prewarm/sglang/flashinfer/autotune/fused_moe.json'",
+   "redacted": "FileNotFoundError: [Errno 2] No such file or directory: '<host-path>'"
+  },
+  {
+   "text": "weights from (/outputs/cache/home/.cache) loaded",
+   "redacted": "weights from (<host-path>) loaded"
+  },
+  {
+   "text": "1/2 done",
+   "redacted": "<host-path> done"
+  },
+  {
+   "text": "no separator here",
+   "redacted": "no separator here"
+  },
+  {
+   "text": "a/b a/b a/b a/b a/b a/b a/b a/b a/b a/b a/b a/b a/b a/b a/b a/b a/b a/b a/b a/b a/b a/b a/b a/b a/b a/b a/b a/b a/b a/b a/b a/b a/b a/b a/b a/b a/b a/b a/b a/b ",
+   "redacted": "<host-path> <host-path> <host-path> <host-path> <host-path> <host-path> <host-path> <host-path> <host-path> <host-path> <host-path> <host-path> <host-path> <hos"
+  }
+ ]
+}

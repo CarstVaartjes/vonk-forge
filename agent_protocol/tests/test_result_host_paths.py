@@ -13,6 +13,7 @@ import copy
 import json
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import pytest
 from vonk_agent_protocol import AgentFailureResult, AgentProtocolError, AgentResult
@@ -22,7 +23,7 @@ from vonk_agent_protocol.reason_codes import AgentEvidenceCode
 VECTORS = Path(__file__).parents[1] / "src/vonk_agent_protocol/vectors"
 
 
-def _vector(name: str) -> dict[str, object]:
+def _vector(name: str) -> Any:
     return json.loads((VECTORS / name).read_text())
 
 
@@ -47,7 +48,7 @@ def test_a_start_failure_naming_host_paths_is_accepted_with_its_core() -> None:
 
 def test_a_host_path_in_a_receipted_ending_is_redacted_where_it_is() -> None:
     document = copy.deepcopy(_vector("recipe-job-run-unknown-receipt-v1.json"))
-    document["result"]["evidence"]["diagnostic"] = "upload of /outputs/a.png refused"  # type: ignore[index]
+    document["result"]["evidence"]["diagnostic"] = "upload of /outputs/a.png refused"
 
     accepted = AgentResult.model_validate(document)
 
@@ -61,7 +62,7 @@ def test_a_path_in_a_field_the_controller_acts_on_still_refuses(
     parse: Callable[[object], AgentResult],
 ) -> None:
     document = copy.deepcopy(_vector("recipe-job-run-unknown-receipt-v1.json"))
-    receipt = document["result"]["receipt"]  # type: ignore[index]
+    receipt = document["result"]["receipt"]
     receipt["output_manifest"]["files"][0]["name"] = "/etc/passwd"
 
     with pytest.raises((AgentProtocolError, ValueError)) as refused:
@@ -69,15 +70,14 @@ def test_a_path_in_a_field_the_controller_acts_on_still_refuses(
     assert "output_manifest" in str(refused.value)
 
 
-@pytest.mark.parametrize(
-    ("text", "redacted"),
-    [
-        ("open /opt/a.json failed", "open <host-path> failed"),
-        ("path='/opt/a.json':3", "path='<host-path>':3"),
-        ("endpoint=/agent/result", "endpoint=<host-path>"),
-        ("C:\\cache\\x", "C:<host-path>"),
-        ("no separator here", "no separator here"),
-    ],
-)
-def test_redaction_replaces_whole_path_tokens(text: str, redacted: str) -> None:
-    assert redact_host_paths(text) == redacted
+def test_redaction_follows_the_shared_rule() -> None:
+    """The agent redacts by the same vector before it sends."""
+
+    vector = _vector("host-path-redaction-v1.json")
+    assert vector["marker"] == HOST_PATH_MARKER
+    for case in vector["cases"]:
+        assert redact_host_paths(case["text"]) == case["redacted"], case["text"]
+        assert "/" not in case["redacted"] and "\\" not in case["redacted"]
+        assert len(case["redacted"]) <= max(
+            len(case["text"]), vector["shortest_prose_bound"]
+        )
