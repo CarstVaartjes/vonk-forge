@@ -73,6 +73,12 @@ available.
 
 ## Control job failures
 
+`RepeatedControlJobFailure` and `RepeatedAgentOperationFailures` fire when three
+or more control jobs, or agent operations, ended failed within the last hour. A
+single failed load (a recipe that does not fit, a recipe defect) is that
+recipe's outcome and ages out of the window; repeated failures across new work
+point at the platform. Stored history alone never keeps the alerts on.
+
 Filter operations and Audit by action, inspect sanitized evidence, and verify the
 recipe revision and build evidence are still current. Re-plan after correcting
 persisted state; never retry a revoked or stale plan.
