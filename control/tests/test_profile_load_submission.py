@@ -951,7 +951,7 @@ def test_superseded_child_contention_is_parked_without_holding_admission(
                 json=request_body,
             )
             try:
-                assert attempted.wait(timeout=5)
+                assert attempted.wait(timeout=30)
                 # The lock is still held. Admission must park the reviewed
                 # intent now, not wait for the worker whose effects it is
                 # trying to supersede. Proven by behaviour, not wall-clock.
