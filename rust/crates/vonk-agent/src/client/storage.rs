@@ -159,8 +159,10 @@ pub(super) async fn open_trusted_partial(path: &Path) -> Result<tokio::fs::File,
     let file = tokio::fs::OpenOptions::new()
         .create(true)
         .read(true)
-        .append(true)
+        // Not append: ranges are written at their own offsets, and the
+        // checkpoint's bytes are kept.
         .write(true)
+        .truncate(false)
         .mode(0o600)
         .custom_flags((rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::CLOEXEC).bits() as i32)
         .open(path)

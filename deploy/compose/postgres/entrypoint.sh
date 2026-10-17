@@ -89,6 +89,9 @@ fi
 # Dump all databases and roles, including the configured Controller database and
 # LiteLLM. Publish only complete dumps; failed attempts never prune good backups.
 backup_loop() (
+  # This loop supervises attempts and must outlive any failed command, so it
+  # runs without errexit. Each attempt runs under errexit in backup_once.
+  set +e
   umask 077
   # One backup at startup, then daily; keep the newest week of dumps.
   interval=86400
@@ -96,8 +99,9 @@ backup_loop() (
   temporary=/backups/.postgres-backup.tmp
   state_temporary=/state/.last-successful-backup.epoch.tmp
   verification_temporary=/state/.last-backup-restore-verification.epoch.tmp
+  offhost_temporary=/offhost/.postgres-backup.tmp.gz
   cleanup() {
-    rm -f "$temporary" "$temporary.gz" "$state_temporary" "$verification_temporary"
+    rm -f "$temporary" "$temporary.gz" "$state_temporary" "$verification_temporary" "$offhost_temporary"
   }
   trap 'cleanup; exit 0' TERM INT
   restore_verify() (
@@ -121,6 +125,50 @@ backup_loop() (
     gosu postgres pg_ctl -D "$restore_directory/data" -m fast -w stop >/dev/null
     rm -rf -- "${restore_directory:?}"
   )
+  # One attempt. Any failed step ends it; the success markers are written only
+  # after the dump, the off-host copy and the restore verification succeeded.
+  # Call it as a plain command: shells ignore errexit inside a condition.
+  backup_once() (
+    set -e
+    report_failure() {
+      if [ "$1" -ne 0 ]; then
+        cleanup
+        echo "PostgreSQL backup failed at step $step (status $1); keeping previous success marker; retrying in five minutes" >&2
+      fi
+    }
+    trap 'report_failure "$?"' EXIT
+    step=dump
+    gosu postgres pg_dumpall --username "$POSTGRES_USER" --database postgres > "$temporary"
+    gzip -c "$temporary" > "$temporary.gz"
+    gzip -t "$temporary.gz"
+    step=publish
+    destination=/backups/postgres-$(date -u +%Y%m%dT%H%M%SZ).sql.gz
+    mv "$temporary.gz" "$destination"
+    # The entrypoint runs as root so the postgres process can write through a
+    # private host bind mount. Return completed dumps to the bundle owner's
+    # UID/GID so the invoking user can inspect and prune them safely.
+    chown "$backup_owner" "$destination"
+    chmod 0600 "$destination"
+    rm -f "$temporary"
+    if [ -n "${VONK_BACKUP_OFFHOST_PATH:-}" ]; then
+      step=off-host-copy
+      [ -d /offhost ]
+      cp "$destination" "$offhost_temporary"
+      gzip -t "$offhost_temporary"
+      mv "$offhost_temporary" "/offhost/$(basename "$destination")"
+    fi
+    step=restore-verification
+    restore_verify
+    step=success-marker
+    now=$(date +%s)
+    printf '%s\n' "$now" > "$verification_temporary"
+    chmod 0644 "$verification_temporary"
+    mv "$verification_temporary" /state/last-backup-restore-verification.epoch
+    printf '%s\n' "$now" > "$state_temporary"
+    chmod 0644 "$state_temporary"
+    mv "$state_temporary" /state/last-successful-backup.epoch
+    echo "PostgreSQL backup completed and restore-verified: $destination"
+  )
   while :; do
     if [ ! -d /backups ]; then
       echo "PostgreSQL backup directory /backups is unavailable; retrying shortly" >&2
@@ -135,61 +183,26 @@ backup_loop() (
         continue
         ;;
     esac
-    if gosu postgres pg_dumpall --username "$POSTGRES_USER" --database postgres > "$temporary" &&
-       gzip -c "$temporary" > "$temporary.gz" && gzip -t "$temporary.gz"; then
-      destination=/backups/postgres-$(date -u +%Y%m%dT%H%M%SZ).sql.gz
-      mv "$temporary.gz" "$destination"
-      # The entrypoint runs as root so the postgres process can write through a
-      # private host bind mount. Return completed dumps to the bundle owner's
-      # UID/GID so the invoking user can inspect and prune them safely.
-      chown "$backup_owner" "$destination"
-      chmod 0600 "$destination"
-      rm -f "$temporary"
-      if [ -n "${VONK_BACKUP_OFFHOST_PATH:-}" ]; then
-        offhost_temporary=/offhost/.postgres-backup.tmp.gz
-        if [ ! -d /offhost ] ||
-           ! cp "$destination" "$offhost_temporary" ||
-           ! gzip -t "$offhost_temporary" ||
-           ! mv "$offhost_temporary" "/offhost/$(basename "$destination")"; then
-          rm -f "$offhost_temporary"
-          rm -f "/offhost/$(basename "$destination")"
-          echo "Off-host backup copy failed; keeping previous success marker" >&2
-          sleep 300 & wait $!
-          continue
-        fi
-        offhost_count=0
-        for backup in $(ls -1 /offhost/postgres-*.sql.gz 2>/dev/null | sort -r); do
-          offhost_count=$((offhost_count + 1))
-          if [ "$offhost_count" -gt "$keep" ]; then rm -f "$backup"; fi
-        done
-      fi
-      if restore_verify; then
-        now=$(date +%s)
-        printf '%s\n' "$now" > "$verification_temporary"
-        chmod 0644 "$verification_temporary"
-        mv "$verification_temporary" /state/last-backup-restore-verification.epoch
-      else
-        echo "PostgreSQL restore verification failed; keeping previous success marker" >&2
-        sleep 300 & wait $!
-        continue
-      fi
-      now=$(date +%s)
-      printf '%s\n' "$now" > "$state_temporary"
-      chmod 0644 "$state_temporary"
-      mv "$state_temporary" /state/last-successful-backup.epoch
-      echo "PostgreSQL backup completed and restore-verified: $destination"
-      # Filenames are generated above and contain neither spaces nor newlines.
-      count=0
-      for backup in $(ls -1 /backups/postgres-*.sql.gz | sort -r); do
-        count=$((count + 1))
-        if [ "$count" -gt "$keep" ]; then rm -f "$backup"; fi
-      done
-      sleep "$interval" & wait $!
-    else
-      echo "PostgreSQL backup failed; retrying in five minutes" >&2
-      rm -f "$temporary" "$temporary.gz"
+    backup_once
+    attempt_status=$?
+    if [ "$attempt_status" -ne 0 ]; then
       sleep 300 & wait $!
+      continue
     fi
+    # Filenames are generated above and contain neither spaces nor newlines.
+    count=0
+    for backup in $(ls -1 /backups/postgres-*.sql.gz | sort -r); do
+      count=$((count + 1))
+      if [ "$count" -gt "$keep" ]; then rm -f "$backup"; fi
+    done
+    if [ -n "${VONK_BACKUP_OFFHOST_PATH:-}" ]; then
+      offhost_count=0
+      for backup in $(ls -1 /offhost/postgres-*.sql.gz 2>/dev/null | sort -r); do
+        offhost_count=$((offhost_count + 1))
+        if [ "$offhost_count" -gt "$keep" ]; then rm -f "$backup"; fi
+      done
+    fi
+    sleep "$interval" & wait $!
   done
 )
 backup_loop &
