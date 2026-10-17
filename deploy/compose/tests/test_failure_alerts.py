@@ -158,3 +158,85 @@ def test_failure_alerts_follow_recent_failures_not_history(tmp_path: Path) -> No
     )
 
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.needs_docker
+@pytest.mark.slow(30)
+def test_history_retention_alert_requires_sustained_failure_to_drain(
+    tmp_path: Path,
+) -> None:
+    """A backlog's existence or slow drain must not become a stall alarm."""
+    name = "HistoryRetentionStalled"
+    metric = "vonk_history_rows_past_grace"
+    shutil.copy(ROOT / "deploy/compose/prometheus/alerts.yaml", tmp_path)
+
+    def backlog(values: str) -> list[dict[str, str]]:
+        return [{"series": f"{metric}{{{TARGET}}}", "values": values}]
+
+    tests = [
+        _test(
+            backlog("100x800 0x400"),
+            [
+                ("6h", name, []),
+                ("11h59m", name, []),
+                ("12h", name, [_alert(name)]),
+                ("14h", name, []),
+            ],
+        ),
+        # Even a slow budget-limited drain advances within each six-hour
+        # comparison. An age-only threshold would fire throughout this drain.
+        _test(
+            backlog("100x299 90x299 80x299 70x299"),
+            [("12h", name, []), ("19h", name, [])],
+        ),
+        _test(
+            backlog("10+1x800"),
+            [("12h", name, [_alert(name)])],
+        ),
+        # A previous process's sample survives for the Prometheus lookback.
+        # A healthy replacement's zero cannot leave the alert firing.
+        _test(
+            [
+                {
+                    "series": f'{metric}{{job="vonk-control",instance="old"}}',
+                    "values": "100x719",
+                },
+                {
+                    "series": f'{metric}{{job="vonk-control",instance="new"}}',
+                    "values": "_x720 0x100",
+                },
+            ],
+            [("12h", name, [_alert(name)]), ("12h5m", name, [])],
+        ),
+    ]
+    (tmp_path / "test.yaml").write_text(
+        yaml.safe_dump(
+            {"rule_files": ["alerts.yaml"], "evaluation_interval": "1m", "tests": tests}
+        )
+    )
+    result = subprocess.run(
+        [
+            "docker",
+            "run",
+            "--rm",
+            "--network",
+            "none",
+            "--user",
+            f"{os.getuid()}:{os.getgid()}",
+            "-v",
+            f"{tmp_path}:/rules:ro",
+            "-w",
+            "/rules",
+            "--entrypoint",
+            "promtool",
+            _services()["prometheus"]["image"],
+            "test",
+            "rules",
+            "test.yaml",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
