@@ -1,0 +1,1 @@
+{"fence":"00000000-0000-4000-8000-000000000031","result":{"evidence":{"diagnostic":"the package is installed; the new agent's identity is not yet confirmed","stage":"agent-upgrade-installed"},"kind":"unknown","reason":"agent upgrade installed the package; awaiting identity confirmation","wait_reason":"agent-upgrade-awaiting-identity"},"state":"observing"}

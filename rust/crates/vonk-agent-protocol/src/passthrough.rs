@@ -12,9 +12,9 @@ use std::collections::BTreeMap;
 
 /// A generated wire value rendered as a JSON document.
 ///
-/// Reason: canonical bytes, schema validation of directly constructed values
-/// and strict round-trips are properties of the document form; the document is
-/// never inspected field by field and never leaves this type.
+/// Reason: canonical bytes, schema validation of directly constructed values,
+/// strict round-trips and rewriting string members by name (prose redaction)
+/// are properties of the document form; the document never leaves this type.
 pub struct WireDocument(Value);
 
 impl WireDocument {
@@ -43,6 +43,51 @@ impl WireDocument {
     pub fn into_typed<T: DeserializeOwned>(self) -> Result<T, serde_json::Error> {
         serde_json::from_value(self.0)
     }
+
+    /// Replace each string member named one of `names`, at any depth, where
+    /// `rewrite` returns a new string; every other member is kept as it is.
+    pub fn rewrite_named_strings(
+        &mut self,
+        names: &[&str],
+        rewrite: &impl Fn(&str) -> Option<String>,
+    ) {
+        fn walk(value: &mut Value, names: &[&str], rewrite: &impl Fn(&str) -> Option<String>) {
+            match value {
+                Value::Array(items) => {
+                    for item in items {
+                        walk(item, names, rewrite);
+                    }
+                }
+                Value::Object(members) => {
+                    for (name, member) in members.iter_mut() {
+                        match member {
+                            Value::String(text) if names.contains(&name.as_str()) => {
+                                if let Some(rewritten) = rewrite(text) {
+                                    *text = rewritten;
+                                }
+                            }
+                            _ => walk(member, names, rewrite),
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        walk(&mut self.0, names, rewrite);
+    }
+}
+
+/// `value` with each string member named one of `names`, at any depth,
+/// replaced where `rewrite` returns a new string, read back through the
+/// generated deserializer so the result still meets its contract.
+pub fn rewrite_named_strings<T: Serialize + DeserializeOwned>(
+    value: &T,
+    names: &[&str],
+    rewrite: impl Fn(&str) -> Option<String>,
+) -> Result<T, serde_json::Error> {
+    let mut document = WireDocument::of(value)?;
+    document.rewrite_named_strings(names, &rewrite);
+    document.into_typed()
 }
 
 /// Validate a value constructed in Rust against its named contract model.

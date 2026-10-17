@@ -361,10 +361,13 @@ fn an_exited_workload_failure_carries_the_captured_container_output() {
 const PYTHON_EXCEPTION_SUMMARY: &str = "exit_code=1 oom_killed=false exit_cause=python_exception exception=\"AssertionError: GptOssForCausalLM requires one of ['triton', 'trtllm_mha', 'fa3', 'fa4', 'ascend', 'intel_amx', 'intel_xpu', 'aiter'] attention backend, but got the following backends - Prefill: flashinfer - Decode: flashinfer exit_code=7\"";
 
 #[test]
-fn an_uncaught_exception_is_the_reason_an_exited_workload_reports() {
-    // Wrong implementation this catches: the reason read
+fn an_uncaught_exception_is_the_evidence_an_exited_workload_reports() {
+    // Wrong implementations this catches: the failure read
     // `exit_cause=unclassified` and the operator had to download a bundle to
-    // learn that the workload refused its attention backend.
+    // learn that the workload refused its attention backend; and the
+    // workload's exception (its paths included) was the reason, which the
+    // Controller refused as a whole result.  The reason is the typed exit
+    // facts; the exception is the diagnostic beside them.
     let error = crate::host_runtime::HostRuntimeError::HelperRejected {
         code: HelperErrorCode::RuntimeProcessExited,
         diagnostic: Some(crate::failure_evidence::sanitize_exit_summary(
@@ -376,17 +379,19 @@ fn an_uncaught_exception_is_the_reason_an_exited_workload_reports() {
     start_claim.operation = AgentOperation::RecipeStart;
     let failed = failed_outcome(&start_claim, runtime_observation_failure(&error));
     assert!(
-        failed.reason.contains(
-            "runtime_process_exited: exit_code=1 oom_killed=false exit_cause=python_exception exception=\"AssertionError: GptOssForCausalLM requires one of ['triton',"
+        failed.reason.ends_with(
+            "runtime_process_exited: exit_code=1 oom_killed=false exit_cause=python_exception"
         ),
         "{}",
         failed.reason
     );
+    let diagnostic = evidence_of(&failed).diagnostic.as_deref().unwrap();
     assert!(
-        failed.reason.contains("- Decode: flashinfer"),
-        "{}",
-        failed.reason
+        diagnostic
+            .contains("exception=\"AssertionError: GptOssForCausalLM requires one of ['triton',"),
+        "{diagnostic}"
     );
+    assert!(diagnostic.contains("- Decode: flashinfer"), "{diagnostic}");
     assert!(failed.reason.chars().count() <= 1024);
     let diagnostics = evidence_of(&failed)
         .diagnostics
@@ -1102,5 +1107,61 @@ fn a_stop_the_helper_refused_before_any_effect_is_definite() {
             stop_failure("container runtime stop remains unconfirmed", &accepted),
             ExecutionResult::Unknown(_)
         ));
+    }
+}
+
+#[test]
+fn a_start_whose_exception_names_host_paths_is_the_shared_vector_on_the_wire() {
+    // The start failure that every live Spark had refused with 422 since
+    // 2026-10-16 (`recipe-start-failed-host-paths-v1`, what released agents
+    // send) as this agent sends it: a typed reason, the exception only in the
+    // diagnostic, no host path in either.  The Controller accepts it without a
+    // redaction (its ingress tests read the same vector); the clock- and
+    // host-dependent diagnostics are compared by shape.
+    let vector: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../../../agent_protocol/src/vonk_agent_protocol/vectors/recipe-start-workload-exited-v1.json"
+    ))
+    .unwrap();
+    let summary = "exit_code=1 oom_killed=false exit_cause=python_exception exception=\"FileNotFoundError: [Errno 2] No such file or directory: '/opt/vonk/prewarm/sglang/flashinfer/autotune/fused_moe.json'\"";
+    let error = crate::host_runtime::HostRuntimeError::HelperRejected {
+        code: HelperErrorCode::RuntimeProcessExited,
+        diagnostic: Some(crate::failure_evidence::sanitize_exit_summary(summary)),
+        process_logs: Some(Box::new(crate::failure_evidence::FailureProcessLogs {
+            stdout: crate::failure_evidence::log_tail(
+                b"loading weights from /outputs/cache/home/.cache/huggingface\n",
+            ),
+            stderr: crate::failure_evidence::log_tail(
+                b"FileNotFoundError: /opt/vonk/prewarm/sglang/flashinfer/autotune/fused_moe.json\n",
+            ),
+        })),
+    };
+    let mut start_claim = claim();
+    start_claim.operation = AgentOperation::RecipeStart;
+    let finished = runtime_observation_failure(&error).finish(&start_claim);
+    let mut produced = serde_json::to_value(crate::wire_prose::wire_result(
+        &vonk_agent_protocol::generated::AgentResult {
+            fence: start_claim.fence,
+            result: finished.result,
+            state: finished.state,
+        },
+    ))
+    .unwrap();
+    let mut expected = vector.clone();
+    let take_diagnostics = |body: &mut serde_json::Value| {
+        body["result"]["evidence"]
+            .as_object_mut()
+            .unwrap()
+            .remove("diagnostics")
+            .unwrap()
+    };
+    let produced_diagnostics = take_diagnostics(&mut produced);
+    let vector_diagnostics = take_diagnostics(&mut expected);
+    produced["fence"] = expected["fence"].clone();
+    assert_eq!(produced, expected);
+    for field in ["phase", "category", "preflight", "stdout", "stderr"] {
+        assert_eq!(
+            produced_diagnostics[field], vector_diagnostics[field],
+            "{field}"
+        );
     }
 }

@@ -37,6 +37,7 @@ class AgentEvidenceCode(WireEnum):
         "agent_evidence.inventory_network_interface_dropped"
     )
     PROGRESS_DROPPED = "agent_evidence.progress_dropped"
+    RESULT_HOST_PATH_REDACTED = "agent_evidence.result_host_path_redacted"
     TELEMETRY_READING_DROPPED = "agent_evidence.telemetry_reading_dropped"
 
 

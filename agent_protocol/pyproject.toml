@@ -20,6 +20,12 @@ packages = ["src/vonk_agent_protocol"]
 "src/vonk_agent_protocol/vectors/recipe-job-run-claim-v1.json" = "vonk_agent_protocol/vectors/recipe-job-run-claim-v1.json"
 "src/vonk_agent_protocol/vectors/recipe-job-run-result-v1.json" = "vonk_agent_protocol/vectors/recipe-job-run-result-v1.json"
 "src/vonk_agent_protocol/vectors/recipe-job-run-unknown-receipt-v1.json" = "vonk_agent_protocol/vectors/recipe-job-run-unknown-receipt-v1.json"
+"src/vonk_agent_protocol/vectors/recipe-start-failed-host-paths-v1.json" = "vonk_agent_protocol/vectors/recipe-start-failed-host-paths-v1.json"
+"src/vonk_agent_protocol/vectors/host-path-redaction-v1.json" = "vonk_agent_protocol/vectors/host-path-redaction-v1.json"
+"src/vonk_agent_protocol/vectors/recipe-start-workload-exited-v1.json" = "vonk_agent_protocol/vectors/recipe-start-workload-exited-v1.json"
+"src/vonk_agent_protocol/vectors/agent-upgrade-awaiting-identity-v1.json" = "vonk_agent_protocol/vectors/agent-upgrade-awaiting-identity-v1.json"
+"src/vonk_agent_protocol/vectors/agent-upgrade-refused-v1.json" = "vonk_agent_protocol/vectors/agent-upgrade-refused-v1.json"
+"src/vonk_agent_protocol/vectors/recipe-run-observation-exited-v1.json" = "vonk_agent_protocol/vectors/recipe-run-observation-exited-v1.json"
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
