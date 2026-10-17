@@ -144,6 +144,39 @@ fn redact_word(word: &str) -> String {
     }
 }
 
+/// The typed facts of a process-exit summary (`exit_code=1 exit_cause=...`):
+/// fixed keys with token values, never the workload's exception after them,
+/// which may itself read `exit_code=...`.
+pub fn exit_facts(text: &str) -> impl Iterator<Item = (&str, &str)> {
+    text.split(EXIT_SUMMARY_EXCEPTION_FIELD)
+        .next()
+        .unwrap_or_default()
+        .split_whitespace()
+        .filter_map(|token| token.split_once('='))
+        .filter(|(key, value)| {
+            matches!(
+                *key,
+                "exit_code"
+                    | "exit_cause"
+                    | "oom_killed"
+                    | "reason"
+                    | "trigger"
+                    | "mem_available_bytes"
+                    | "memory_full_avg10"
+                    | "sustained_ms"
+                    | "observed_at"
+                    | "pressure_started_at"
+            ) && value.chars().all(|c| {
+                c.is_ascii_alphanumeric()
+                    || c == '_'
+                    || c == '-'
+                    || c == '.'
+                    || c == ':'
+                    || c == '+'
+            })
+        })
+}
+
 /// Sanitize a helper's process-exit summary.  The uncaught exception it ends
 /// with is the workload's own text and is redacted as a line of its own: a
 /// credential in that text then costs the exception, never the exit facts in
@@ -633,38 +666,8 @@ fn exit_properties(failure: &Failure) -> Vec<FailureProperty> {
         })
     };
     if let Some(text) = failure.diagnostic.as_deref() {
-        // Only the facts are tokens; the exception after them is free text
-        // that may itself read `exit_code=...`.
-        let facts = text
-            .split(EXIT_SUMMARY_EXCEPTION_FIELD)
-            .next()
-            .unwrap_or_default();
-        for token in facts.split_whitespace() {
-            if let Some((key, value)) = token.split_once('=')
-                && matches!(
-                    key,
-                    "exit_code"
-                        | "exit_cause"
-                        | "oom_killed"
-                        | "reason"
-                        | "trigger"
-                        | "mem_available_bytes"
-                        | "memory_full_avg10"
-                        | "sustained_ms"
-                        | "observed_at"
-                        | "pressure_started_at"
-                )
-                && value.chars().all(|c| {
-                    c.is_ascii_alphanumeric()
-                        || c == '_'
-                        || c == '-'
-                        || c == '.'
-                        || c == ':'
-                        || c == '+'
-                })
-            {
-                push(key, value.to_owned());
-            }
+        for (key, value) in exit_facts(text) {
+            push(key, value.to_owned());
         }
     }
     if let Some(logs) = &failure.process_logs {

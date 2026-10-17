@@ -35,4 +35,5 @@ mod stream_governor;
 pub mod systemd_notify;
 pub mod telemetry;
 pub mod vocabulary;
+pub mod wire_prose;
 pub mod workloads;
