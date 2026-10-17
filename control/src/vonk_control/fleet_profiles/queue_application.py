@@ -65,6 +65,7 @@ from .contracts import (
     FleetProfileAdmissionEffectBusy,
     FleetProfileConflict,
     FleetProfileInvalid,
+    FleetProfileReviewStale,
     FleetProfileSelectionLost,
     FleetProfileStalePlanConflict,
     _FleetProfileSupersededIntentConflict,
@@ -309,7 +310,7 @@ class FleetProfileService:
             )
             frozen_nodes = tuple(node.node_id for node in scope_nodes)
             if frozen_nodes != tuple(preview.scope.node_ids):
-                raise FleetProfileStalePlanConflict(
+                raise FleetProfileReviewStale(
                     "Profile fleet scope changed during admission; review again"
                 )
             if selected_application:
@@ -465,8 +466,9 @@ class FleetProfileService:
                     for item in preview.assignments
                 )
             ):
+                _validate_remaining_effects(preview.effects, control.effects)
                 raise FleetProfileStalePlanConflict(
-                    "Profile workload effects changed during admission; review again"
+                    "Profile workload effects changed during admission"
                 )
             affected_nodes = [
                 node for node in scope_nodes if node.node_id in fenced_nodes
@@ -816,7 +818,7 @@ class FleetProfileService:
                 )
             )
             if current_scope != frozen_nodes:
-                raise FleetProfileStalePlanConflict(
+                raise FleetProfileReviewStale(
                     "Profile fleet scope changed during admission; review again"
                 )
             if pending_roster_reconciliation:

@@ -343,6 +343,19 @@ class FleetProfileService:
                     code=_deferral_code(error),
                     storage=_storage_wait_of(error),
                 )
+            except _FleetProfileSupersededIntentConflict:
+                raise
+            except FleetProfileStalePlanConflict as error:
+                if error.code != FleetProfileStalePlanConflict.code:
+                    raise
+                # Keep the accepted receipt. Its worker re-plans against current
+                # state, ending an unchanged refusal instead of looping on it.
+                return self._defer_pending_application(
+                    pending.id,
+                    f"{error}; the Controller will re-plan automatically.",
+                    code=error.code,
+                    retry_delay=timedelta(0),
+                )
         except (
             FleetProfileConflict,
             FleetProfilePermissionDenied,

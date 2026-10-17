@@ -9,7 +9,7 @@ from typing import cast as _typing_cast
 
 from pydantic import ValidationError
 from sqlalchemy.orm import Session, object_session
-from vonk_agent_protocol import ProfileReasonCode, SupersedeCode
+from vonk_agent_protocol import LifecycleState, ProfileReasonCode, SupersedeCode
 from vonk_forge_contracts import RecipeDefinition
 
 from ..fleet_profile_contract import (
@@ -32,6 +32,7 @@ from .assessment_support import (
 )
 from .contracts import (
     FleetProfileConflict,
+    FleetProfileReviewStale,
 )
 from .dependencies import _LOGGER
 from .persistence import (
@@ -45,6 +46,7 @@ from .projection_support import (
     _aware,
     _digest,
     _profile_document,
+    _validate_remaining_effects,
 )
 
 if TYPE_CHECKING:
@@ -248,6 +250,20 @@ class FleetProfileService:
                 wait_for_space=True,
             )
             return None
+        try:
+            if fresh.scope.node_ids != blocked.scope.node_ids:
+                raise FleetProfileReviewStale(
+                    "Profile fleet scope changed before admission resumed; review again"
+                )
+            _validate_remaining_effects(blocked.effects, fresh.effects)
+        except FleetProfileReviewStale as error:
+            self._finish_pending_admission(
+                application_id,
+                state=LifecycleState.SUPERSEDED,
+                reason=str(error),
+                code=error.supersede_code,
+            )
+            return None
         if not fresh.allowed:
             self._wait_for_conditions(application_id, fresh, actor)
             return None
@@ -352,6 +368,12 @@ class FleetProfileService:
                     accepted_profile_definition=plan.profile_definition,
                     excluded_application_id=application_id,
                 )
+                # Following a recipe must preserve the same consent boundary
+                # as every other pending re-plan. Let ordinary admission name
+                # a changed scope or unreviewed destructive effect.
+                if fresh.scope.node_ids != plan.scope.node_ids:
+                    return False
+                _validate_remaining_effects(plan.effects, fresh.effects)
         except (FleetProfileConflict, ValidationError, KeyError):
             # The ordinary admission path reports whatever is unresumable.
             return False
