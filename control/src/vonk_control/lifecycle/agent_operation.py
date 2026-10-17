@@ -383,23 +383,24 @@ class AgentOperationAdapter:
         return row.kind in IRREVERSIBLE_OPERATIONS
 
     def retry_not_before(self, row: Lifecycle, now: datetime) -> datetime | None:
-        """The agent-upgrade dpkg fence, and a crash-looping transfer's slowdown."""
+        """The agent-upgrade dpkg fence, and a crash-looping order's slowdown."""
 
         if row.kind == AgentOperation.AGENT_UPGRADE.value:
             return aware(now) + AGENT_UPGRADE_RECOVERY_FENCE
-        if row.kind == AgentOperation.ARTIFACT_DISTRIBUTION.value:
-            with self._read() as session:
-                operation = session.get(StoredOperation, row.id)
-                stalled = 0 if operation is None else stalled_interruptions(operation)
-            if stalled >= STALLED_INTERRUPTION_LIMIT:
-                # Rate, not intent, is what a crash loop bounds: slow down to a
-                # cap while the request stays authorised.
-                delay = min(
-                    STALLED_RETRY_BASE_SECONDS
-                    * 2 ** (stalled - STALLED_INTERRUPTION_LIMIT),
-                    STALLED_RETRY_MAX_SECONDS,
-                )
-                return aware(now) + timedelta(seconds=delay)
+        if row.attempt < STALLED_INTERRUPTION_LIMIT:
+            return None  # fewer attempts than a crash loop has
+        with self._read() as session:
+            operation = session.get(StoredOperation, row.id)
+            stalled = 0 if operation is None else stalled_interruptions(operation)
+        if stalled >= STALLED_INTERRUPTION_LIMIT:
+            # Rate, not intent, is what a crash loop bounds: slow down to a
+            # cap while the request stays authorised.
+            delay = min(
+                STALLED_RETRY_BASE_SECONDS
+                * 2 ** (stalled - STALLED_INTERRUPTION_LIMIT),
+                STALLED_RETRY_MAX_SECONDS,
+            )
+            return aware(now) + timedelta(seconds=delay)
         return None
 
     def execute(self, row: Lifecycle, attempt: int) -> Dispatch:
@@ -600,9 +601,9 @@ class AgentOperationAdapter:
             stalled = stalled_interruptions(operation)
             if stalled >= STALLED_INTERRUPTION_LIMIT:
                 note = (
-                    f"agent restarted {stalled} times in a row during "
-                    f"{operation.kind} without copying new bytes; "
-                    f"exact observation scheduled at {due.isoformat()}"
+                    f"{operation.kind} was interrupted {stalled} times in a row "
+                    "(agent restart or lapsed lease) without copying new bytes; "
+                    f"retry slowed to {due.isoformat()}"
                 )
             else:
                 note = (

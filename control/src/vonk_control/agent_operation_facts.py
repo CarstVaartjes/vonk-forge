@@ -48,10 +48,11 @@ RESTART_REISSUE_OPERATIONS = LIFECYCLE_RESTART_OPERATIONS | frozenset(
 )
 
 
-#: Consecutive interrupted transfer attempts that copied no new bytes before
-#: the retry rate is relaxed. A transfer that progresses between restarts is
-#: healthy recovery and is never slowed; one that dies without progress is a
-#: crash loop, which a faster retry cannot help.
+#: Consecutive interrupted attempts (an agent restart or a lapsed lease) that
+#: copied no new bytes before the retry rate is relaxed. A transfer that
+#: progresses between restarts is healthy recovery and is never slowed; an
+#: order of any kind that dies without progress is a crash loop, which a
+#: faster retry cannot help.
 STALLED_INTERRUPTION_LIMIT = 3
 
 
@@ -99,14 +100,15 @@ def advanced_bytes(
 
 
 def stalled_interruptions(operation: StoredOperation) -> int:
-    """Count trailing transfer attempts that ended interrupted without progress."""
+    """Count trailing attempts that ended interrupted without progress.
+
+    Every reissued kind counts, not only a transfer: a start whose attempts
+    lapse one after another is the same crash loop (2026-10-16/17: five
+    single-Spark starts reissued 45-47 times each inside their recovery hour).
+    """
 
     session = object_session(operation)
-    if (
-        session is None
-        or operation.kind != AgentOperation.ARTIFACT_DISTRIBUTION.value
-        or operation.current_attempt < 1
-    ):
+    if session is None or operation.current_attempt < 1:
         return 0
     attempts = list(
         session.scalars(

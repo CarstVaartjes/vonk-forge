@@ -2867,6 +2867,61 @@ def test_repeated_agent_restarts_without_progress_slow_down_and_say_why(
     )
 
 
+def _single_spark_start_payload(clock) -> dict[str, object]:
+    """A start that binds no launch budget: its 30 s lease is its only clock."""
+
+    payload = canonical_start_payload(start_deadline=clock.now)
+    del payload["phase"], payload["start_deadline"]
+    return payload
+
+
+@pytest.mark.parametrize(
+    "kind",
+    [
+        ProtocolAgentOperation.RECIPE_START.value,
+        ProtocolAgentOperation.ARTIFACT_DISTRIBUTION.value,
+    ],
+)
+def test_attempts_that_lapse_without_progress_slow_down_and_say_why(
+    service, kind: str
+) -> None:
+    """Live regression (2026-10-16/17): a lapsing start was reissued 45-47 times.
+
+    Each attempt of five single-Spark starts lapsed silently, and only the
+    transfer kind slowed down: the start was reissued every 45-75 s until its
+    one-hour recovery budget ended it. Every reissued kind now counts its
+    consecutive lapses, slows down after three and names the loop.
+    """
+
+    jobs, sessions, clock = service
+    payload = (
+        _single_spark_start_payload(clock)
+        if kind == ProtocolAgentOperation.RECIPE_START.value
+        else {"plan_digest": COMMIT}
+    )
+    operation = jobs.enqueue(parent(sessions, clock).id, NODE_A, kind, COMMIT, payload)
+    delays: list[float] = []
+    for attempt_number in range(1, 6):
+        claim = _claim_until_due(jobs, sessions, clock, operation.id, rounds=12)
+        assert claim is not None
+        assert fenced_attempt(sessions, claim).attempt == attempt_number
+        # The attempt never renews and never reports; the Spark's next poll
+        # finds its lease lapsed.
+        clock.advance(seconds=45)
+        assert claim_agent(jobs, NODE_A, "serial-a") is None
+        with sessions() as session:
+            stored = session.get(AgentOperation, operation.id)
+            assert stored.state == aos.BACKOFF
+            delays.append(
+                (stored.next_action_at.replace(tzinfo=UTC) - clock.now).total_seconds()
+            )
+            reason = stored.status_reason or ""
+
+    assert max(delays[:2]) <= 5
+    assert delays[3] >= 30 and delays[4] >= 60
+    assert "interrupted 5 times in a row" in reason
+
+
 def _registered_distribution_grant(sessions, clock):
     source = MemoryObjectSource()
     model_digest = source.put(b"weights")
