@@ -26,6 +26,8 @@ from ..agent_upgrade_contract import (
     AgentUpgradePackage,
     AgentUpgradeRolloutResult,
 )
+from ..lifecycle import CancelRequested
+from ..lifecycle.agent_operation import AgentOperationAdapter
 from ..models import AgentNode, AgentOperation, Job
 from ..strict_json import read_stored_model
 
@@ -41,17 +43,22 @@ class DispatchMixin:
     def _advance(self, session: Session, parent: Job) -> None:
         """Own the rollout projection: dispatch, defer, or conclude.
 
-        One Spark is upgraded at a time.  A Spark that is offline is deferred
-        and the next one proceeds; the deferred Spark is dispatched when it
-        polls again.  A Spark that already runs the target, or that can never
-        take this package, is skipped.  Failed orders retry automatically, so
-        the rollout concludes only when every target is settled.
+        Every Spark gets its own order at once and upgrades independently: an
+        order waits only for its own Spark, never for another one.  A Spark
+        that is offline is deferred and dispatched when it polls again.  A
+        Spark that already runs the target, or that can never take this
+        package, is skipped, also when it drifts so while its order waits.
+        Failed orders retry automatically, so the rollout concludes only when
+        every target is settled.
         """
         service = cast("AgentUpgradeService", self)
 
         if parent.state not in _ACTIVE_ROLLOUT_STATES:
             return
         now = service._clock()
+        result = _stored_result(parent)
+        skipped: dict[str, str] = dict(result.skipped or {})
+        deferred: list[str] = []
         operations = list(
             session.scalars(
                 select(AgentOperation)
@@ -59,6 +66,16 @@ class DispatchMixin:
                 .order_by(AgentOperation.created_at, AgentOperation.id)
             )
         )
+        package = _stored_package(parent)
+        order = _stored_node_order(parent)
+        if result.superseded_by is None and package is not None and order is not None:
+            dispatched = service._dispatch(
+                session, parent, operations, package, order, skipped, deferred
+            )
+            service._record(parent, result, skipped)
+            if dispatched:
+                service._rollouts.project(parent, now, reason=None)
+                return
         live = [
             operation
             for operation in operations
@@ -66,65 +83,34 @@ class DispatchMixin:
             or agent_upgrade_in_flight(session, operation, now)
         ]
         if live:
-            if parent.state in job_states.words(LifecycleState.NEEDS_OPERATOR):
-                # A legacy wait: no action exists for a rollout, and its orders
-                # are moving by themselves.
+            if parent.state not in job_states.words(LifecycleState.QUEUED):
+                # A legacy wait or dispatch: no action exists for a rollout,
+                # and its orders are moving by themselves.
                 service._rollouts.project(parent, now)
             elif (parent.status_reason or "").startswith(_BOUNDARY_REFUSAL_PREFIXES):
                 # A heartbeat or result refusal named an attempt this order
-                # change ended: the live order's own reason is the wait.
-                service._rollouts.project(parent, now, reason=live[0].status_reason)
+                # change ended: a live order's own reason is the wait.
+                service._rollouts.project(
+                    parent,
+                    now,
+                    reason=next(
+                        (o.status_reason for o in live if o.status_reason), None
+                    ),
+                )
             return
-        result = _stored_result(parent)
         if result.superseded_by is not None:
             service._rollouts.cancelled(
                 parent, now, f"superseded by agent upgrade {result.superseded_by}"
             )
             return
-        skipped: dict[str, str] = dict(result.skipped or {})
-        deferred: list[str] = []
-        materialized = {operation.node_id for operation in operations}
-        package = _stored_package(parent)
-        order = _stored_node_order(parent)
         if package is None or order is None:
             service._rollouts.fail(parent, now, "stored agent upgrade plan is invalid")
             return
-        for node_id in order:
-            if node_id in materialized:
-                continue
-            if node_id in skipped:
-                continue
-            node = session.scalar(
-                select(AgentNode)
-                .where(AgentNode.node_id == node_id)
-                .with_for_update(of=AgentNode)
-            )
-            if node is None:
-                skipped[node_id] = "does not exist"
-                continue
-            if service._at_target(node, package):
-                skipped[node_id] = _ALREADY_CURRENT
-                continue
-            reason = service._permanent_ineligible_reason(node, package)
-            if reason is not None:
-                skipped[node_id] = reason
-                continue
-            if service._ineligible_reason(node, package, now) is not None:
-                deferred.append(node_id)
-                continue
-            not_queued = service._enqueue_node(session, parent, node_id)
-            if not_queued is not None:
-                skipped[node_id] = not_queued
-                continue
-            service._record(parent, result, skipped)
-            service._rollouts.project(parent, now, reason=None)
-            return
-        service._record(parent, result, skipped)
         retrying = [
             operation
             for operation in operations
             # A dispatched order whose Spark went dark past its fence no
-            # longer holds the fleet, but it is not settled either.
+            # longer holds its Spark, but it is not settled either.
             if operation.state in agent_operation_states.RUNNING_OR_PARKED
         ]
         if deferred or retrying:
@@ -150,6 +136,79 @@ class DispatchMixin:
             )
         else:
             service._rollouts.succeed(parent, now, reason=_summary(skipped))
+
+    def _dispatch(
+        self,
+        session: Session,
+        parent: Job,
+        operations: list[AgentOperation],
+        package: AgentUpgradePackage,
+        order: list[str],
+        skipped: dict[str, str],
+        deferred: list[str],
+    ) -> bool:
+        """Queue every eligible Spark's order at once; return whether one was queued.
+
+        A Spark that can never take the package is added to ``skipped`` (its
+        never-attempted order, if any, is withdrawn); an offline one to
+        ``deferred``.
+        """
+        service = cast("AgentUpgradeService", self)
+
+        now = service._clock()
+        materialized = {operation.node_id for operation in operations}
+        never_attempted = {
+            operation.node_id: operation
+            for operation in operations
+            if operation.state == agent_operation_states.QUEUED
+            and operation.current_attempt == 0
+        }
+        dispatched = False
+        for node_id in order:
+            waiting = never_attempted.get(node_id)
+            if node_id in skipped or (node_id in materialized and waiting is None):
+                continue
+            # Only a Spark about to be queued is locked; a waiting order's
+            # Spark is merely checked for drift.
+            node = (
+                session.get(AgentNode, node_id)
+                if waiting is not None
+                else session.scalar(
+                    select(AgentNode)
+                    .where(AgentNode.node_id == node_id)
+                    .with_for_update(of=AgentNode)
+                )
+            )
+            if node is None:
+                skipped[node_id] = "does not exist"
+            elif service._at_target(node, package):
+                skipped[node_id] = _ALREADY_CURRENT
+            elif (
+                reason := service._permanent_ineligible_reason(node, package)
+            ) is not None:
+                skipped[node_id] = reason
+            if node is None or node_id in skipped:
+                if waiting is not None:
+                    # Never attempted, and this Spark can no longer take it.
+                    AgentOperationAdapter(session).settle(
+                        waiting,
+                        None,
+                        parent,
+                        CancelRequested(reason=skipped[node_id]),
+                        now,
+                    )
+                continue
+            if waiting is not None:
+                continue
+            if service._ineligible_reason(node, package, now) is not None:
+                deferred.append(node_id)
+                continue
+            not_queued = service._enqueue_node(session, parent, node_id)
+            if not_queued is not None:
+                skipped[node_id] = not_queued
+                continue
+            dispatched = True
+        return dispatched
 
     @staticmethod
     def _record(
