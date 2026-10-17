@@ -41,6 +41,7 @@ from vonk_control.run_switch_journal_repair import (
 from vonk_control.run_switch_operations import advance as advance_owner
 from vonk_control.stored_json import write_guard_mode
 
+from .lock_wait_support import backend_pid, lock_waits_behind
 from .runtime_identity_support import claim_agent
 from .test_fleet_profile_api import _client, _headers
 from .test_profile_child_progress_projection import (
@@ -573,11 +574,19 @@ def test_held_required_row_defers_without_clock_reset_and_disjoint_work_advances
             AgentOperation.node_id == nodes[0],
         )
     assert holder.scalar(statement.with_for_update()) is not None
+    holder_pid = backend_pid(holder)
     executor = ThreadPoolExecutor(max_workers=1)
     try:
         # Includes the REAL worker's post-advance wait observer, not just a
         # direct helper call that could conceal a second blocking row lock.
-        assert executor.submit(planner.tick).result(timeout=1) is False
+        # Deferral is proven by behaviour, not by wall-clock: the tick returns
+        # while the row is still held and no session ever queues behind it.
+        tick = executor.submit(planner.tick)
+        waits = lock_waits_behind(sessions, holder_pid, tick)
+        if waits:
+            holder.rollback()  # release the waiter so the failure is prompt
+        assert not waits, f"planner tick waited on the held row: {waits}"
+        assert tick.result() is False
         assert clock[0] == original_clock
         assert TerminalHistoryCollector(sessions, clock=lambda: clock[0]).tick()
         with sessions() as session:
