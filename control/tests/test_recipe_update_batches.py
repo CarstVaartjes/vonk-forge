@@ -1058,7 +1058,7 @@ def test_postgres_concurrent_parent_acceptance_reconciles_original_key(
     from concurrent.futures import ThreadPoolExecutor
 
     sessions, revision, recipe, _, fresh = postgres_update_env
-    barrier = threading.Barrier(2, timeout=5)
+    barrier = threading.Barrier(2, timeout=30)
     services = [fresh(), fresh()]
     key = str(uuid.uuid4())
 
@@ -1130,7 +1130,7 @@ def test_postgres_takeover_fences_old_parent_admission_and_result(
     with ThreadPoolExecutor(max_workers=1) as pool:
         old_future = pool.submit(service.run_update_claim, old_claim)
         try:
-            assert entered.wait(5)
+            assert entered.wait(30)
             now[0] += timedelta(seconds=11)
             replacement = fresh()
             new_claim = replacement.claim_update(owner="new-worker")
@@ -1139,7 +1139,7 @@ def test_postgres_takeover_fences_old_parent_admission_and_result(
             accepted = replacement.get_operator_operation(parent.id)
         finally:
             release.set()
-        old_future.result(timeout=5)
+        old_future.result(timeout=30)
     assert fresh().get_operator_operation(parent.id) == accepted
     with sessions() as session:
         assert len(list(session.scalars(select(Job)))) == 2
@@ -1170,7 +1170,7 @@ def test_postgres_author_revocation_does_not_revoke_accepted_child_scope(
     with ThreadPoolExecutor(max_workers=1) as pool:
         worker = pool.submit(service.run_update_claim, claim)
         try:
-            assert entered.wait(5)
+            assert entered.wait(30)
             with sessions.begin() as session:
                 serialize_user_authority(session)
                 session.scalar(
@@ -1178,7 +1178,7 @@ def test_postgres_author_revocation_does_not_revoke_accepted_child_scope(
                 ).disabled_at = now[0]
         finally:
             release.set()
-        worker.result(timeout=5)
+        worker.result(timeout=30)
     observed = fresh().get_operator_operation(parent.id)
     assert observed.state in {"queued", "running"}
     assert observed.children[0].operation_id is not None
@@ -1206,7 +1206,8 @@ def test_scheduler_keeps_image_slot_available_while_parent_admits_another_child(
 
     def slow_metadata(*args, **kwargs):
         metadata_entered.set()
-        assert release_metadata.wait(10)
+        # Outlives the observer's bound: the parent keeps its slot meanwhile.
+        assert release_metadata.wait(60)
         return actual_authority(*args, **kwargs)
 
     def image_run(claim):
@@ -1218,8 +1219,8 @@ def test_scheduler_keeps_image_slot_available_while_parent_admits_another_child(
     scheduler = RecipeImageAvailabilityScheduler(service, max_workers=1)
     try:
         assert scheduler.tick() == 2
-        assert metadata_entered.wait(3)
-        assert image_finished.wait(3), "parent consumed the only image execution slot"
+        assert metadata_entered.wait(30)
+        assert image_finished.wait(30), "parent consumed the only image execution slot"
         assert service.get(existing.id).state == "succeeded"
         waiting = service.get_operator_operation(parent.id)
         assert waiting.next_attempt_at is not None and waiting.wait_owner

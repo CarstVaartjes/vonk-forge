@@ -193,7 +193,7 @@ class CompletedRenewalAuthority(RecordingAuthority):
             request=request,
         )
         self.completed.set()
-        assert self.release.wait(timeout=5)
+        assert self.release.wait(timeout=30)
         return issued
 
     def revoke_node(self, serial: str, now: datetime) -> None:
@@ -789,11 +789,11 @@ def test_staged_rotation_releases_an_idle_claim_before_certificate_expiry(
             },
         )
         try:
-            assert contacted.wait(timeout=5)
+            assert contacted.wait(timeout=30)
             enrollment.renew(NODE_ID, issued.serial, csr())
             # The HTTP response must drain so the agent can activate the staged
             # identity. Waiting out 60 seconds can expire a 90-second certificate.
-            assert waiting.result(timeout=5) is None
+            assert waiting.result(timeout=30) is None
         finally:
             # Advance only the long-poll clock to bound failure cleanup too.
             stop_waiting.set()
@@ -1180,14 +1180,14 @@ def test_sqlite_simultaneous_exact_renewal_issues_one_staged_generation(
 
     first = threading.Thread(target=renew)
     first.start()
-    assert authority.entered.wait(timeout=5)
+    assert authority.entered.wait(timeout=30)
     follower.renew(NODE_ID, issued.serial, renewed_csr)
     with sessions() as session:
         assert session.get(AgentCertificateRotation, NODE_ID) is not None
         source = session.get(AgentCertificate, issued.serial)
         assert source is not None and source.revoked_at is None
     authority.release.set()
-    first.join(timeout=5)
+    first.join(timeout=30)
 
     assert len(results) == 1
     assert isinstance(results[0], IssuedCertificate)
@@ -1288,7 +1288,7 @@ def test_postgres_retirement_wins_completed_rotation_and_reconciles_issued_seria
             and "FOR UPDATE OF agent_nodes" in statement
         ):
             revocation_locked.set()
-            assert release_revocation.wait(timeout=5)
+            assert release_revocation.wait(timeout=30)
 
     def renew() -> None:
         try:
@@ -1309,17 +1309,17 @@ def test_postgres_retirement_wins_completed_rotation_and_reconciles_issued_seria
         renewer = threading.Thread(target=renew, name="renewer")
         revoker = threading.Thread(target=revoke, name="revoker")
         renewer.start()
-        assert authority.completed.wait(timeout=5)
+        assert authority.completed.wait(timeout=30)
         revoker.start()
-        assert revocation_locked.wait(timeout=5)
+        assert revocation_locked.wait(timeout=30)
         authority.release.set()
         time.sleep(0.25)
         assert renewer.is_alive(), (
             "rotation persistence must wait for revocation's node lock"
         )
         release_revocation.set()
-        revoker.join(timeout=5)
-        renewer.join(timeout=5)
+        revoker.join(timeout=30)
+        renewer.join(timeout=30)
     finally:
         authority.release.set()
         release_revocation.set()
@@ -1418,14 +1418,14 @@ def test_postgres_missing_node_after_completed_rotation_retains_recovery_evidenc
 
     renewer = threading.Thread(target=renew, name="renewer")
     renewer.start()
-    assert authority.completed.wait(timeout=5)
+    assert authority.completed.wait(timeout=30)
     with sessions.begin() as session:
         session.execute(
             delete(AgentCertificate).where(AgentCertificate.node_id == NODE_ID)
         )
         session.execute(delete(AgentNode).where(AgentNode.node_id == NODE_ID))
     authority.release.set()
-    renewer.join(timeout=5)
+    renewer.join(timeout=30)
 
     assert not renewer.is_alive()
     assert len(results) == 1
@@ -1540,7 +1540,7 @@ class PausingAuthority(RecordingAuthority):
             pause = not self.pause_once or len(self.calls) == 1
         if pause:
             self.entered.set()
-            assert self.release.wait(timeout=5)
+            assert self.release.wait(timeout=30)
         return self._finish(
             request, _fixture_certificate(node_id, public_key_pem, request)
         )
@@ -1576,9 +1576,9 @@ def test_postgres_newer_grant_fences_paused_issuer_and_reconciles_late_effect(
     )
     first_thread.start()
     try:
-        assert authority.entered.wait(timeout=5)
+        assert authority.entered.wait(timeout=30)
         second_thread.start()
-        second_thread.join(timeout=3)
+        second_thread.join(timeout=30)
         assert not second_thread.is_alive()
         assert len(results) == 1
         issued = results[0]
@@ -1598,9 +1598,9 @@ def test_postgres_newer_grant_fences_paused_issuer_and_reconciles_late_effect(
             assert session.get(AgentCertificate, issued.serial) is not None
     finally:
         authority.release.set()
-        first_thread.join(timeout=5)
+        first_thread.join(timeout=30)
         if second_thread.ident is not None:
-            second_thread.join(timeout=5)
+            second_thread.join(timeout=30)
     assert not first_thread.is_alive()
     assert not second_thread.is_alive()
     assert len(results) == 2
@@ -1653,7 +1653,7 @@ def test_postgres_separate_services_never_duplicate_in_progress_renewal(
 
     thread = threading.Thread(target=renew_owner)
     thread.start()
-    assert authority.entered.wait(timeout=5)
+    assert authority.entered.wait(timeout=30)
 
     follower.renew(NODE_ID, issued.serial, request)
     with sessions() as session:
@@ -1663,7 +1663,7 @@ def test_postgres_separate_services_never_duplicate_in_progress_renewal(
     assert len(authority.calls) == 1
 
     authority.release.set()
-    thread.join(timeout=5)
+    thread.join(timeout=30)
     assert not thread.is_alive()
     assert len(results) == 1
     assert follower.renew(NODE_ID, issued.serial, request) == results[0]

@@ -48,18 +48,18 @@ def test_reference_admission_cannot_cross_uncommitted_deletion_reservation(
                 now=datetime.now(UTC),
             )
             reserved.set()
-            assert release.wait(timeout=3)
+            assert release.wait(timeout=30)
 
     with ThreadPoolExecutor(max_workers=2) as pool:
         deletion = pool.submit(reserve)
-        assert reserved.wait(timeout=2)
+        assert reserved.wait(timeout=30)
         with (
             artifact_sessions.begin() as session,
             pytest.raises(Exception),  # noqa: B017 -- no unsafe reference; fresh admission after reconciliation below
         ):
             require_reference_open(session, (identity,), now=datetime.now(UTC))
         release.set()
-        deletion.result(timeout=3)
+        deletion.result(timeout=30)
 
     with (
         artifact_sessions.begin() as session,
@@ -157,11 +157,11 @@ def test_removal_fence_nowait_reports_row_contention_then_recovers(
             )
             assert row is not None
             locked.set()
-            assert release.wait(timeout=3)
+            assert release.wait(timeout=30)
 
     with ThreadPoolExecutor(max_workers=2) as pool:
         holder = pool.submit(hold_gate_row)
-        assert locked.wait(timeout=2)
+        assert locked.wait(timeout=30)
         with (
             artifact_sessions.begin() as session,
             pytest.raises(Exception),  # noqa: B017 -- no unsafe reference; fresh admission after reconciliation below
@@ -179,7 +179,7 @@ def test_removal_fence_nowait_reports_row_contention_then_recovers(
         ):
             reference_gate_is_open_nowait(session, identity)
         release.set()
-        holder.result(timeout=3)
+        holder.result(timeout=30)
 
     with artifact_sessions.begin() as session:
         assert (

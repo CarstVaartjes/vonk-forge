@@ -722,7 +722,7 @@ def test_busy_job_projection_does_not_hold_up_other_jobs_or_fresh_admission(
         observer = Thread(target=observe)
         observer.start()
         try:
-            assert completed.wait(timeout=2)
+            assert completed.wait(timeout=30)
             assert service.get(second.id).state == LifecycleState.CANCELLED
             fresh = submitted_artifact_job(service, run_id, request_suffix=921)
             assert fresh.id not in {first.id, second.id}
@@ -730,7 +730,7 @@ def test_busy_job_projection_does_not_hold_up_other_jobs_or_fresh_admission(
         finally:
             # Release the actual PostgreSQL lock before joining a failed worker.
             occupied.rollback()
-            observer.join(timeout=5)
+            observer.join(timeout=30)
     assert not observer.is_alive()
     ArtifactJobAdapter(sessions=sessions, clock=lambda: NOW).reconcile()
     assert service.get(first.id).state == LifecycleState.CANCELLED

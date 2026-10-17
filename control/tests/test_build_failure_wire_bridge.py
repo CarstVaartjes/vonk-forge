@@ -457,4 +457,4 @@ def test_native_source_fetch_failure_reaches_availability_owner(
         production.close()
         source_server.shutdown()
         source_server.server_close()
-        source_thread.join(timeout=5)
+        source_thread.join(timeout=30)

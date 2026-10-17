@@ -446,7 +446,8 @@ There are no debt counts, category ledgers, baseline updates, or PR count report
 The guards reject new handwritten contract literals, untyped mapping annotations,
 provenance comparisons, security refusals outside ingress owners, unbounded waits,
 read refusals, imperative remedy text, missing retention policy, anti-principle
-test assertions, and the existing coordination syntax violations. Small fixtures
+test assertions, short wall-clock limits on test work, and the existing
+coordination syntax violations. Small fixtures
 prove that added violations fail, untouched old occurrences do not, and bounded
 waits and security ingress remain valid. Detection is a syntax check; behavior,
 process and PostgreSQL tests establish recovery and fresh admission.

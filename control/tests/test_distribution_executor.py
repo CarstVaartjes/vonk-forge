@@ -1913,7 +1913,7 @@ def test_runtime_image_phase_hands_preparation_to_background_executor() -> None:
         assert request_key
         assert progress == RunSwitchOperationResult()
         entered.set()
-        assert release.wait(5)
+        assert release.wait(30)
 
     executor._prepare_runtime_image = prepare
     phase = _phase(index=2, kind="prepare", subphase="runtime-image")
@@ -1930,7 +1930,7 @@ def test_runtime_image_phase_hands_preparation_to_background_executor() -> None:
         assert result.waiting
         assert result.operation_id is None
         assert "background" in (result.status_reason or "")
-        assert entered.wait(1)
+        assert entered.wait(30)
         observed = executor.execute(
             _plan(),
             phase,

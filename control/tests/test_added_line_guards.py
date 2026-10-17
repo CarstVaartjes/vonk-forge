@@ -698,3 +698,70 @@ def test_an_exclusive_flock_is_taken_only_through_a_held_lock():
     assert not check_source(test, raw, {1}, modes=("locks",))
     unit = "#[cfg(test)]\nmod tests {\n    fn t() {\n        " + raw + "    }\n}\n"
     assert not check_source(agent, unit, {4}, modes=("locks",))
+
+
+# The CI failure on #1735: keep_default_key outlived 1 s on a loaded runner.
+GATEWAY_WAIT = (
+    "async def observe():\n"
+    "    await asyncio.wait_for(\n"
+    "        keep_default_key(\n"
+    "            service,  # type: ignore[arg-type]\n"
+    "            asyncio.Event(),\n"
+    "            first_delay=0.001,\n"
+    "            maximum_delay=0.002,\n"
+    "        ),\n"
+    "        timeout=1,\n"
+    "    )\n"
+)
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        GATEWAY_WAIT,
+        "assert executor.submit(planner.tick).result(timeout=1) is False\n",
+        "assert entered.wait(2)\n",
+        "process.communicate(timeout=5)\n",
+        "subprocess.run(command, check=True, timeout=2)\n",
+        "worker.join(timeout=3)\nassert not worker.is_alive()\n",
+        "deadline = time.monotonic() + 2\n",
+        "LIMIT = 1\nfuture.result(LIMIT)\n",
+        "@pytest.mark.timeout(3)\ndef test_x():\n    pass\n",
+        "assert time.monotonic() - started < 0.5\n",
+        "assert 0.3 <= elapsed < 2\n",
+        # Popen.wait raises on expiry, even in a cleanup loop.
+        "for child in children:\n    child.wait(timeout=5)\n",
+        # The opt-out must name its reason.
+        "future.result(timeout=1)  # wall-clock:\n",
+    ],
+)
+def test_a_new_short_wall_clock_limit_on_work_fails(source):
+    lines = set(range(1, len(source.splitlines()) + 1))
+    path = "control/tests/test_example.py"
+    assert check_source(path, source, lines, modes=("clocks",))
+    # Only an added line can fail the change.
+    unchanged = source + "x = 1\n"
+    assert not check_source(path, unchanged, {len(lines) + 1}, modes=("clocks",))
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        GATEWAY_WAIT.replace("timeout=1", "timeout=30"),
+        "assert not done.wait(0.1)\n",
+        "assert done.wait(timeout=0.1) is False\n",
+        "while not stop.wait(1):\n    poll()\n",
+        "for _ in range(3):\n    if stop.wait(0.05):\n        return\n",
+        "future.result()\n",
+        "assert 0.3 <= elapsed\n",
+        "assert time.monotonic() - started < 30\n",
+        "future.result(timeout=1)  # wall-clock: proves the stub's own deadline\n",
+    ],
+)
+def test_a_generous_bound_expected_expiry_or_named_reason_is_allowed(source):
+    lines = set(range(1, len(source.splitlines()) + 1))
+    assert not check_source(
+        "control/tests/test_example.py", source, lines, modes=("clocks",)
+    )
+    # Product code is held to its own wait rules, not this test rule.
+    assert not check_source(PATH, "future.result(timeout=1)\n", {1}, modes=("clocks",))

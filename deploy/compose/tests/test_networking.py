@@ -364,7 +364,7 @@ def test_caddy_disables_admin_and_sets_edge_guards() -> None:
     root = Path(__file__).resolve().parents[3]
     text = (root / "deploy/compose/Caddyfile").read_text()
     assert "admin off" in text
-    assert "max_size 1MB" in text
+    assert "max_size 1MiB" in text
     assert "source-bundles" not in text
     assert "Strict-Transport-Security" in text
     assert "X-Frame-Options" in text

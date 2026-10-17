@@ -118,12 +118,12 @@ def _confirm_after_review_is_visible(
     except BaseException:
         if process.poll() is None:
             process.kill()
-            process.communicate(timeout=5)
+            process.communicate(timeout=30)
         raise
     finally:
         os.close(master)
 
-    stdout, _ = process.communicate(timeout=5)
+    stdout, _ = process.communicate(timeout=30)
     assert answer_sent
     assert process.returncode is not None
     return (

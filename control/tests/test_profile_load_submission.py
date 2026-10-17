@@ -52,6 +52,7 @@ from cluster_profiles import cli
 from cluster_profiles.control_client import ControlClient
 
 from .consumer_outcomes import not_adopted
+from .lock_wait_support import backend_pid, lock_waits_behind
 from .test_fleet_profile_api import _client, _headers
 from .test_fleet_profile_review import _replace_run
 from .test_fleet_profiles import _exact_cleanup_profile, _SwitchAdapter
@@ -418,9 +419,9 @@ def test_concurrent_duplicate_reconciles_acceptance_before_reporting_stale_revie
     body = {"request_key": str(uuid4())}
 
     def preview_after_lookup(service, *args, **kwargs):
-        rendezvous.wait(timeout=5)
+        rendezvous.wait(timeout=30)
         if second_request.get():
-            assert first_committed.wait(timeout=5)
+            assert first_committed.wait(timeout=30)
         return original(service, *args, **kwargs)
 
     monkeypatch.setattr(FleetProfileService, "preview", preview_after_lookup)
@@ -464,7 +465,7 @@ def test_admission_serializes_insertion_of_a_previously_unknown_spark(postgres_e
     ):
         if statement.startswith("SELECT agent_nodes.") and "FOR UPDATE" in statement:
             snapshot_locked.set()
-            assert release.wait(timeout=5)
+            assert release.wait(timeout=30)
 
     def add_node():
         with sessions.begin() as session:
@@ -491,13 +492,13 @@ def test_admission_serializes_insertion_of_a_previously_unknown_spark(postgres_e
                 },
             )
             try:
-                assert snapshot_locked.wait(timeout=5)
+                assert snapshot_locked.wait(timeout=30)
                 # A row lock on the two known Sparks cannot block an unrelated
                 # enrollment. The final roster recheck rejects the stale plan.
                 add_node()
             finally:
                 release.set()
-            response = future.result(timeout=5)
+            response = future.result(timeout=30)
         assert response.status_code == 409, response.text
         with sessions() as session:
             assert session.scalar(select(FleetProfileApplication)) is None
@@ -702,7 +703,7 @@ def test_admission_serializes_run_replacement_until_acceptance_commits(
     ):
         if statement.startswith("SELECT agent_nodes.") and "FOR UPDATE" in statement:
             snapshot_locked.set()
-            assert release.wait(timeout=5)
+            assert release.wait(timeout=30)
 
     def change_run():
         with sessions.begin() as session:
@@ -723,13 +724,13 @@ def test_admission_serializes_run_replacement_until_acceptance_commits(
                 },
             )
             try:
-                assert snapshot_locked.wait(timeout=5)
+                assert snapshot_locked.wait(timeout=30)
                 with pytest.raises(OperationalError) as failure:
                     change_run()
                 assert getattr(failure.value.orig, "sqlstate", None) == "55P03"
             finally:
                 release.set()
-            response = future.result(timeout=5)
+            response = future.result(timeout=30)
         assert response.status_code == 202, response.text
         change_run()
     finally:
@@ -935,6 +936,7 @@ def test_superseded_child_contention_is_parked_without_holding_admission(
     assert locked_id is not None
     locked_owner = locker.get(locked_model, locked_id, with_for_update=True)
     assert locked_owner is not None
+    locker_pid = backend_pid(locker)
     if isinstance(locked_owner, AgentOperation):
         assert locked_owner.parent_job_id == pending.id
     # The canonical child lock declares the complete exact parent scope, not
@@ -949,34 +951,33 @@ def test_superseded_child_contention_is_parked_without_holding_admission(
                 json=request_body,
             )
             try:
-                assert attempted.wait(timeout=5)
+                assert attempted.wait(timeout=30)
                 # The lock is still held. Admission must park the reviewed
                 # intent now, not wait for the worker whose effects it is
-                # trying to supersede.
-                try:
-                    response = future.result(timeout=1)
-                except TimeoutError:
-                    with postgres_engine.connect() as diagnostic:
-                        wait = diagnostic.execute(
-                            text(
-                                "SELECT wait_event_type, wait_event, pg_blocking_pids(pid) "
-                                "FROM pg_stat_activity WHERE pid = :pid"
-                            ),
-                            {"pid": request_backend[0]},
-                        ).one_or_none()
-                    pytest.fail(
-                        f"admission waited while {locked_model.__name__} stayed locked; "
-                        f"SQL={lock_statements!r}; backend_wait={wait!r}"
-                    )
+                # trying to supersede. Proven by behaviour, not wall-clock.
+                waits = lock_waits_behind(sessions, locker_pid, future)
+                if waits:
+                    locker.rollback()  # release the waiter so failure is prompt
+                assert not waits, (
+                    f"admission waited while {locked_model.__name__} stayed locked; "
+                    f"SQL={lock_statements!r}; request={request_backend!r}; "
+                    f"waits={waits!r}"
+                )
+                response = future.result()
                 assert response.status_code == 202, response.text
                 # Lost-response replay reconnects to the same parked intent
                 # while its exact superseded owner is still locked.
-                replay = pool.submit(
+                replaying = pool.submit(
                     api.post,
                     f"/api/profile/{profile.number}/load",
                     headers=headers,
                     json=request_body,
-                ).result(timeout=1)
+                )
+                waits = lock_waits_behind(sessions, locker_pid, replaying)
+                if waits:
+                    locker.rollback()  # release the waiter so failure is prompt
+                assert not waits, f"replay waited on the held owner: {waits!r}"
+                replay = replaying.result()
                 assert replay.status_code == 202, replay.text
                 assert replay.json()["id"] == response.json()["id"]
                 assert replay.json()["request_key"] == request_body["request_key"]

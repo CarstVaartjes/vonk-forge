@@ -9,6 +9,19 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
+from vonk_agent_protocol.telemetry import MAX_TELEMETRY_REPORT_BYTES
+from vonk_control.agent_api import MAX_RECIPE_IMAGE_BYTES
+from vonk_control.api.common import (
+    _ARTIFACT_INPUT_UPLOAD,
+    _ARTIFACT_OUTPUT_UPLOAD,
+    _RECIPE_IMAGE_UPLOAD,
+)
+from vonk_control.artifact_job_api import (
+    MAX_ARTIFACT_INPUT_UPLOAD_BYTES,
+    MAX_ARTIFACT_OUTPUT_UPLOAD_BYTES,
+)
+
+from cluster_profiles.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 
 ROOT = Path(__file__).resolve().parents[3]
 DEV_CADDYFILE = ROOT / "deploy/compose/Caddyfile"
@@ -553,7 +566,6 @@ def test_development_browser_edge_accepts_only_the_canonical_tailscale_service_h
     trusted_routes = trusted["handle"][0]["routes"]
     trusted_serialized = json.dumps(trusted_routes, sort_keys=True)
 
-    assert '"max_size": 1000000' in trusted_serialized
     for header in (
         "Strict-Transport-Security",
         "X-Content-Type-Options",
@@ -661,62 +673,113 @@ def test_production_browser_edge_accepts_only_control_hostname_and_fails_closed(
     assert '"status_code": 421' in json.dumps(rejected)
 
 
-def test_mtls_image_upload_has_a_dedicated_bound_without_widening_other_edges() -> None:
+def _caddy_matches(match: list[dict] | None, method: str, path: str) -> bool:
+    """Whether a Caddy matcher list (any set; every key of a set) admits a request."""
+
+    def admits(matcher: dict) -> bool:
+        return all(
+            (key == "method" and method in value)
+            or (key == "path" and any(fnmatchcase(path, item) for item in value))
+            or (key == "not" and not any(admits(inner) for inner in value))
+            for key, value in matcher.items()
+        )
+
+    return match is None or any(admits(matcher) for matcher in match)
+
+
+def _edge_body_bound(site: object, method: str, path: str) -> int | None:
+    """The tightest Caddy body bound a request meets on ``site`` (None: unbounded)."""
+
+    bounds = [
+        route["max_size"]
+        for route in _request_body_routes(site)
+        if _caddy_matches(route["match"], method, path)
+    ]
+    return min(bounds, default=None)
+
+
+_UUID = str(uuid4())
+#: Each request the Controller bounds, on the edge site that carries it, with the
+#: Controller's own maximum. The large-body paths are proven against the
+#: Controller's route patterns, so the sample is the route the boundary bounds.
+_CONTROLLER_BODY_BOUNDS = {
+    "agent": (
+        ("PUT", f"/agent/recipe-builds/{_UUID}/image", MAX_RECIPE_IMAGE_BYTES),
+        (
+            "PUT",
+            f"/agent/recipe-jobs/{_UUID}/outputs/{'a' * 64}",
+            MAX_ARTIFACT_OUTPUT_UPLOAD_BYTES,
+        ),
+        ("POST", "/agent/telemetry", MAX_TELEMETRY_REPORT_BYTES),
+        ("POST", "/agent/heartbeat", MAX_CONTROL_DOCUMENT_BYTES),
+        ("PUT", f"/agent/recipe-jobs/{_UUID}/state", MAX_CONTROL_DOCUMENT_BYTES),
+    ),
+    "enrollment": (("POST", "/agent/enroll", MAX_CONTROL_DOCUMENT_BYTES),),
+    "browser": (
+        (
+            "PUT",
+            f"/api/artifact-jobs/{_UUID}/inputs/image.png",
+            MAX_ARTIFACT_INPUT_UPLOAD_BYTES,
+        ),
+        ("POST", "/api/fleet-profiles", MAX_CONTROL_DOCUMENT_BYTES),
+    ),
+}
+
+
+def test_controller_upload_patterns_name_the_sampled_routes() -> None:
+    assert _RECIPE_IMAGE_UPLOAD.fullmatch(_CONTROLLER_BODY_BOUNDS["agent"][0][1])
+    assert _ARTIFACT_OUTPUT_UPLOAD.fullmatch(_CONTROLLER_BODY_BOUNDS["agent"][1][1])
+    assert _ARTIFACT_INPUT_UPLOAD.fullmatch(_CONTROLLER_BODY_BOUNDS["browser"][0][1])
+
+
+def test_every_edge_admits_each_body_the_controller_accepts_and_no_more() -> None:
+    """Live regression (2026-10-16): a recipe job's .glb output got a bare 413.
+
+    The agent site bounded every body but the recipe image to 1 MB, while the
+    Controller and the agent accept a 1 GiB job output; the edge refused the
+    upload before the Controller saw it. Each bound is now at least the
+    Controller's own for that route, and an ordinary request is held to the
+    Controller's document bound, never widened by a large route.
+    """
+
     environments = (
         (
             _adapted_development_caddy(),
-            "agents.test.example",
-            "enroll.test.example",
+            {
+                "agent": "agents.test.example",
+                "enrollment": "enroll.test.example",
+                "browser": "vonk-forge.tailnet.test.ts.net",
+            },
         ),
         (
             _adapted_caddy(_environment()),
-            "agents.control.test.example",
-            "enroll.control.test.example",
+            {
+                "agent": "agents.control.test.example",
+                "enrollment": "enroll.control.test.example",
+                "browser": _environment()["VONK_CONTROL_HOSTNAME"],
+            },
         ),
     )
-    upload_match = [
-        {
-            "method": ["PUT"],
-            "path": ["/agent/recipe-builds/*/image"],
+    for adapted, hosts in environments:
+        sites = {
+            name: next(
+                route
+                for route in _routes_with_handlers(
+                    _server_on_port(adapted, 8080 if name == "browser" else 8443)[
+                        "routes"
+                    ]
+                )
+                if route.get("match") == [{"host": [host]}]
+            )
+            for name, host in hosts.items()
         }
-    ]
-    ordinary_match = [{"not": upload_match}]
-
-    for adapted, agent_hostname, enrollment_hostname in environments:
-        backend = _server_on_port(adapted, 8443)
-        agent_site = next(
-            route
-            for route in backend["routes"]
-            if route.get("match") == [{"host": [agent_hostname]}]
-        )
-        enrollment_site = next(
-            route
-            for route in backend["routes"]
-            if route.get("match") == [{"host": [enrollment_hostname]}]
-        )
-
-        assert _request_body_routes(agent_site) == [
-            {"match": ordinary_match, "max_size": 1_000_000},
-            {"match": upload_match, "max_size": 16 * 1024**4},
-        ]
-        assert _request_body_routes(enrollment_site) == [
-            {"match": None, "max_size": 1_000_000}
-        ]
-
-
-def test_browser_requests_share_the_ordinary_body_bound() -> None:
-    adapted = _adapted_caddy(_environment())
-    browser = _server_on_port(adapted, 8080)
-    trusted = next(
-        route
-        for route in _routes_with_handlers(browser["routes"])
-        if route.get("match") == [{"host": [_environment()["VONK_CONTROL_HOSTNAME"]]}]
-    )
-    trusted_routes = trusted["handle"][0]["routes"]
-
-    assert _request_body_routes(trusted_routes) == [
-        {"match": None, "max_size": 1_000_000}
-    ]
+        for name, requests in _CONTROLLER_BODY_BOUNDS.items():
+            for method, path, controller_bound in requests:
+                edge_bound = _edge_body_bound(sites[name], method, path)
+                assert edge_bound is not None, (name, method, path)
+                assert edge_bound >= controller_bound, (name, method, path)
+                if controller_bound == MAX_CONTROL_DOCUMENT_BYTES:
+                    assert edge_bound == MAX_CONTROL_DOCUMENT_BYTES, (name, path)
 
 
 def test_caddy_adapts_three_sni_boundaries_for_admin_enrollment_and_mtls_agents() -> (

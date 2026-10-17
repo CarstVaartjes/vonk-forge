@@ -223,7 +223,7 @@ def https_journal(tmp_path: Path):
                 counts[binding.request_id] = counts.get(binding.request_id, 0) + 1
             if binding.node_id == control["pause_node"]:
                 entered.set()
-                assert release.wait(5)
+                assert release.wait(30)
             leaf = _leaf(
                 body["csr"].encode(), material, now=NOW, serial=int(binding.serial)
             )
@@ -276,7 +276,7 @@ def https_journal(tmp_path: Path):
         provider._client.close()
         server.shutdown()
         server.server_close()
-        thread.join(5)
+        thread.join(30)
 
 
 def prepare(postgres_engine, provider):
@@ -327,7 +327,7 @@ def test_slow_https_node_does_not_hold_an_unrelated_postgres_claim(
         control["pause_node"] = NODE_ID
         with ThreadPoolExecutor(max_workers=2) as pool:
             blocked = pool.submit(issue, NODE_ID)
-            assert entered.wait(5)
+            assert entered.wait(30)
             with postgres_engine.connect() as connection:
                 assert (
                     connection.scalar(
@@ -338,7 +338,7 @@ def test_slow_https_node_does_not_hold_an_unrelated_postgres_claim(
                     == 0
                 )
             try:
-                independent = pool.submit(issue, OTHER_NODE_ID).result(timeout=3)
+                independent = pool.submit(issue, OTHER_NODE_ID).result(timeout=30)
                 assert isinstance(independent, IssuedCertificate)
                 assert independent.node_id == OTHER_NODE_ID
                 assert not blocked.done()
@@ -346,7 +346,7 @@ def test_slow_https_node_does_not_hold_an_unrelated_postgres_claim(
                     assert session.get(AgentCertificate, independent.serial) is not None
             finally:
                 release.set()
-            issued = blocked.result(5)
+            issued = blocked.result(30)
             assert isinstance(issued, IssuedCertificate)
             assert issued.node_id == NODE_ID
         assert all(count == 1 for count in counts.values())
@@ -376,7 +376,7 @@ def test_postgres_concurrent_exact_binding_and_lost_https_response_adopt_same_le
         control["lose_node"] = NODE_ID
         with ThreadPoolExecutor(max_workers=2) as pool:
             blocked = pool.submit(issue, service)
-            assert entered.wait(5)
+            assert entered.wait(30)
             with postgres_engine.connect() as connection:
                 assert (
                     connection.scalar(
@@ -388,7 +388,7 @@ def test_postgres_concurrent_exact_binding_and_lost_https_response_adopt_same_le
                 )
             try:
                 replay = pool.submit(issue, service)
-                replay.result(3)
+                replay.result(30)
                 # The follower must leave the still-running exact owner intact.
                 with sessions() as session:
                     assert session.scalar(
@@ -396,7 +396,7 @@ def test_postgres_concurrent_exact_binding_and_lost_https_response_adopt_same_le
                     ) == (1 if source is not None else 0)
             finally:
                 release.set()
-            completed = blocked.result(5)
+            completed = blocked.result(30)
             assert isinstance(completed, IssuedCertificate)
         restarted = EnrollmentService(sessions, provider, clock=lambda: NOW)
         adopted = issue(restarted)
@@ -500,7 +500,7 @@ def test_postgres_controller_process_death_adopts_the_committed_https_leaf(
             assert process.stdin is not None
             process.stdin.write(json.dumps(payload).encode())
             process.stdin.close()
-            assert entered.wait(5)
+            assert entered.wait(30)
             with sessions() as session:
                 enrollment = session.scalar(select(AgentEnrollment))
                 assert enrollment is not None
@@ -509,10 +509,10 @@ def test_postgres_controller_process_death_adopts_the_committed_https_leaf(
                     enrollment.provider_request
                 )
             process.kill()
-            process.wait(5)
+            process.wait(30)
             assert process.returncode != 0
             release.set()
-            assert committed.wait(5)
+            assert committed.wait(30)
             restarted = EnrollmentService(sessions, provider, clock=lambda: NOW)
             adopted = restarted.submit(grant.token, request, evidence(request))
             assert isinstance(adopted, IssuedCertificate)
@@ -523,7 +523,7 @@ def test_postgres_controller_process_death_adopts_the_committed_https_leaf(
             release.set()
             if process.poll() is None:
                 process.kill()
-                process.wait(5)
+                process.wait(30)
 
 
 def test_postgres_grant_lock_conflict_ends_observation_and_same_request_recovers(

@@ -417,7 +417,7 @@ def test_postgres_revocation_serializes_agent_work_and_contact(
             and "FOR UPDATE OF agent_nodes" in statement
         ):
             revocation_locked.set()
-            assert release_revocation.wait(timeout=5)
+            assert release_revocation.wait(timeout=30)
 
     def revoke() -> None:
         try:
@@ -458,15 +458,15 @@ def test_postgres_revocation_serializes_agent_work_and_contact(
         revoker = threading.Thread(target=revoke, name="revoker")
         worker = threading.Thread(target=act, name="agent-worker")
         revoker.start()
-        assert revocation_locked.wait(timeout=5)
+        assert revocation_locked.wait(timeout=30)
         worker.start()
         time.sleep(0.25)
         assert worker.is_alive(), (
             "agent work must wait for the revocation identity lock"
         )
         release_revocation.set()
-        revoker.join(timeout=5)
-        worker.join(timeout=5)
+        revoker.join(timeout=30)
+        worker.join(timeout=30)
     finally:
         release_revocation.set()
         event.remove(postgres_engine, "after_cursor_execute", pause_after_node_lock)
@@ -674,7 +674,7 @@ def test_postgres_enqueue_cannot_race_parent_finalization(
             and "ORDER BY" in statement
         ):
             aggregation_read.set()
-            assert release.wait(timeout=5)
+            assert release.wait(timeout=30)
 
     finish_errors: list[Exception] = []
     enqueue_errors: list[Exception] = []
@@ -714,17 +714,17 @@ def test_postgres_enqueue_cannot_race_parent_finalization(
         finisher = threading.Thread(target=finish, name="finisher")
         enqueuer = threading.Thread(target=enqueue, name="enqueuer")
         finisher.start()
-        assert aggregation_read.wait(timeout=5)
+        assert aggregation_read.wait(timeout=30)
         enqueuer.start()
-        enqueuer.join(timeout=2)
+        enqueuer.join(timeout=30)
         assert not enqueuer.is_alive(), (
             "busy admission must release the caller promptly"
         )
         assert len(enqueue_errors) == 1
         assert isinstance(enqueue_errors[0], AdmissionLockBusy)
         release.set()
-        finisher.join(timeout=5)
-        enqueuer.join(timeout=5)
+        finisher.join(timeout=30)
+        enqueuer.join(timeout=30)
     finally:
         release.set()
         event.remove(
@@ -781,7 +781,7 @@ def test_postgres_enqueue_locks_node_before_completion_and_parent_aggregation(
             and "FOR UPDATE OF agent_nodes" in statement
         ):
             node_locked.set()
-            assert release_enqueue.wait(timeout=5)
+            assert release_enqueue.wait(timeout=30)
 
     def enqueue() -> None:
         try:
@@ -816,13 +816,13 @@ def test_postgres_enqueue_locks_node_before_completion_and_parent_aggregation(
         enqueuer = threading.Thread(target=enqueue, name="enqueuer")
         finisher = threading.Thread(target=finish, name="finisher")
         enqueuer.start()
-        assert node_locked.wait(timeout=5)
+        assert node_locked.wait(timeout=30)
         finisher.start()
         time.sleep(0.25)
         assert finisher.is_alive(), "completion must order behind enqueue's node lock"
         release_enqueue.set()
-        enqueuer.join(timeout=5)
-        finisher.join(timeout=5)
+        enqueuer.join(timeout=30)
+        finisher.join(timeout=30)
     finally:
         release_enqueue.set()
         event.remove(
@@ -874,7 +874,7 @@ def test_postgres_complete_serializes_expiry_gate_with_identity_lock(
             and "FOR UPDATE OF agent_operations" in statement
         ):
             locked.set()
-            assert release.wait(timeout=5)
+            assert release.wait(timeout=30)
 
     event.listen(postgres_engine, "after_cursor_execute", pause_after_operation_lock)
     try:
@@ -906,15 +906,15 @@ def test_postgres_complete_serializes_expiry_gate_with_identity_lock(
         finisher = threading.Thread(target=finish, name="finisher")
         reclaimer = threading.Thread(target=reclaim, name="reclaimer")
         finisher.start()
-        assert locked.wait(timeout=5)
+        assert locked.wait(timeout=30)
         reclaimer.start()
         time.sleep(0.25)
         assert reclaimer.is_alive(), (
             "reclaim must wait for the active identity transaction"
         )
         release.set()
-        finisher.join(timeout=5)
-        reclaimer.join(timeout=5)
+        finisher.join(timeout=30)
+        reclaimer.join(timeout=30)
     finally:
         release.set()
         event.remove(
@@ -964,7 +964,7 @@ def test_postgres_concurrent_final_completions_aggregate_parent_once(
             and threading.current_thread().name in {"first-finisher", "second-finisher"}
         ):
             aggregation_started.set()
-            assert release.wait(timeout=5)
+            assert release.wait(timeout=30)
 
     event.listen(
         postgres_engine, "after_cursor_execute", pause_before_aggregation_reads_siblings
@@ -992,11 +992,11 @@ def test_postgres_concurrent_final_completions_aggregate_parent_once(
         )
         thread_a.start()
         thread_b.start()
-        assert aggregation_started.wait(timeout=5)
+        assert aggregation_started.wait(timeout=30)
         time.sleep(0.25)
         release.set()
-        thread_a.join(timeout=5)
-        thread_b.join(timeout=5)
+        thread_a.join(timeout=30)
+        thread_b.join(timeout=30)
     finally:
         event.remove(
             postgres_engine,
@@ -1163,7 +1163,7 @@ def test_postgres_terminal_request_stays_ended_and_fresh_request_has_one_claim_w
     barrier = threading.Barrier(2)
 
     def claim_from(service):
-        barrier.wait(timeout=5)
+        barrier.wait(timeout=30)
         return claim_agent(
             service,
             NODE_A,

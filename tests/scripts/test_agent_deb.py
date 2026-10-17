@@ -1304,7 +1304,7 @@ def test_recovery_lifecycle_crash_point_is_race_safe_and_diagnostic() -> None:
             env={**os.environ, "helper_active_state": active, "helper_sub_state": sub},
             capture_output=True,
             check=False,
-            timeout=5,
+            timeout=30,
         )
         assert (result.returncode == 0) == accepted
     assert 'test "$helper_freezer_state" = running' in post_kill

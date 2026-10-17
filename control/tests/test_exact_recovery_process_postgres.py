@@ -56,7 +56,7 @@ def _lose_committed_response(
     finally:
         if worker.is_alive():
             worker.terminate()
-            worker.join(timeout=5)
+            worker.join(timeout=30)
         worker.close()
 
 

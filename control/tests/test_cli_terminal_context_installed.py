@@ -74,11 +74,11 @@ def _run_tty(
                 transcript.extend(chunk)
             elif process.poll() is not None:
                 break
-        status = process.wait(timeout=5)
+        status = process.wait(timeout=30)
     finally:
         if process.poll() is None:
             process.kill()
-            process.wait(timeout=5)
+            process.wait(timeout=30)
         os.close(master)
     return status, transcript.decode("utf-8").replace("\r\n", "\n")
 

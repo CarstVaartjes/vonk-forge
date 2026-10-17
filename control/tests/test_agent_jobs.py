@@ -1129,24 +1129,24 @@ def test_long_poll_wakes_on_enqueue_and_times_out_without_per_client_state(
 
     started = time.monotonic()
     with ThreadPoolExecutor(max_workers=1) as pool:
-        waiting = pool.submit(claim_agent, jobs, NODE_A, "serial-a", 1.0)
+        waiting = pool.submit(claim_agent, jobs, NODE_A, "serial-a", 30.0)
         time.sleep(0.05)
         operation = jobs.enqueue(
             parent_job.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD
         )
-        claim = waiting.result(timeout=1)
+        claim = waiting.result(timeout=30)
     elapsed = time.monotonic() - started
 
     assert claim is not None and fenced_operation(sessions, claim).id == operation.id
-    assert elapsed < 0.8
+    # Woken by the enqueue, far before its own 30 s long-poll timeout.
+    assert elapsed < 10
 
     timeout_started = time.monotonic()
     assert claim_agent(jobs, NODE_B, "serial-b", 0.08) is None
     timeout_elapsed = time.monotonic() - timeout_started
-    # The lower bound proves the requested long-poll timeout is honored. Keep
-    # the upper bound generous enough for a CPU-starved parallel CI worker to
-    # be scheduled after the condition deadline has already elapsed.
-    assert 0.06 <= timeout_elapsed < 1.5
+    # The lower bound proves the requested long-poll timeout is honored; the
+    # upper bound only tells a timeout that fired from one that never fires.
+    assert 0.06 <= timeout_elapsed < 10
 
 
 def test_long_poll_rechecks_database_for_another_process_enqueue(service) -> None:
@@ -2865,6 +2865,61 @@ def test_repeated_agent_restarts_without_progress_slow_down_and_say_why(
     _assert_parent_ending_admit_fresh_request(
         jobs, sessions, clock, job_state(sessions, operation.parent_job_id)
     )
+
+
+def _single_spark_start_payload(clock) -> dict[str, object]:
+    """A start that binds no launch budget: its 30 s lease is its only clock."""
+
+    payload = canonical_start_payload(start_deadline=clock.now)
+    del payload["phase"], payload["start_deadline"]
+    return payload
+
+
+@pytest.mark.parametrize(
+    "kind",
+    [
+        ProtocolAgentOperation.RECIPE_START.value,
+        ProtocolAgentOperation.ARTIFACT_DISTRIBUTION.value,
+    ],
+)
+def test_attempts_that_lapse_without_progress_slow_down_and_say_why(
+    service, kind: str
+) -> None:
+    """Live regression (2026-10-16/17): a lapsing start was reissued 45-47 times.
+
+    Each attempt of five single-Spark starts lapsed silently, and only the
+    transfer kind slowed down: the start was reissued every 45-75 s until its
+    one-hour recovery budget ended it. Every reissued kind now counts its
+    consecutive lapses, slows down after three and names the loop.
+    """
+
+    jobs, sessions, clock = service
+    payload = (
+        _single_spark_start_payload(clock)
+        if kind == ProtocolAgentOperation.RECIPE_START.value
+        else {"plan_digest": COMMIT}
+    )
+    operation = jobs.enqueue(parent(sessions, clock).id, NODE_A, kind, COMMIT, payload)
+    delays: list[float] = []
+    for attempt_number in range(1, 6):
+        claim = _claim_until_due(jobs, sessions, clock, operation.id, rounds=12)
+        assert claim is not None
+        assert fenced_attempt(sessions, claim).attempt == attempt_number
+        # The attempt never renews and never reports; the Spark's next poll
+        # finds its lease lapsed.
+        clock.advance(seconds=45)
+        assert claim_agent(jobs, NODE_A, "serial-a") is None
+        with sessions() as session:
+            stored = session.get(AgentOperation, operation.id)
+            assert stored.state == aos.BACKOFF
+            delays.append(
+                (stored.next_action_at.replace(tzinfo=UTC) - clock.now).total_seconds()
+            )
+            reason = stored.status_reason or ""
+
+    assert max(delays[:2]) <= 5
+    assert delays[3] >= 30 and delays[4] >= 60
+    assert "interrupted 5 times in a row" in reason
 
 
 def _registered_distribution_grant(sessions, clock):

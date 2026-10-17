@@ -371,4 +371,4 @@ def test_real_agent_client_reads_bounded_422_and_preserves_503_status(
     finally:
         server.shutdown()
         server.server_close()
-        thread.join(timeout=2)
+        thread.join(timeout=30)

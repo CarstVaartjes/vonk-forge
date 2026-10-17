@@ -36,6 +36,12 @@ _DIGEST = r"^[0-9a-f]{64}$"
 _NAME = r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
 _MEDIA_TYPE = r"^[a-z0-9][a-z0-9!#$&^_.+-]{0,63}/[a-z0-9][a-z0-9!#$&^_.+-]{0,63}$"
 
+#: The largest body each artifact-job upload accepts. The request boundary
+#: enforces these, and the edge (``deploy/compose/Caddyfile``) must admit at
+#: least as much on the same route (``test_agent_ingress`` compares them).
+MAX_ARTIFACT_INPUT_UPLOAD_BYTES = 512 * 1024**2
+MAX_ARTIFACT_OUTPUT_UPLOAD_BYTES = 1024**3
+
 
 class ArtifactJobModel(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
@@ -397,7 +403,8 @@ def install_artifact_job_routes(
         artifact_name: Annotated[str, Header(alias="X-Vonk-Artifact-Name")],
         content_type: Annotated[str, Header(alias="Content-Type")],
         content_length: Annotated[
-            int, Header(alias="Content-Length", ge=0, le=1024**3)
+            int,
+            Header(alias="Content-Length", ge=0, le=MAX_ARTIFACT_OUTPUT_UPLOAD_BYTES),
         ],
     ) -> Response:
         identity = agent_identity_from_scope(dict(request.scope))

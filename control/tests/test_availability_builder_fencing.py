@@ -223,7 +223,7 @@ def test_parent_claim_is_held_until_child_admission_commits(
 
     def paused_start(*args, **kwargs):
         admitted.set()
-        assert resume.wait(timeout=5)
+        assert resume.wait(timeout=30)
         return start(*args, **kwargs)
 
     with monkeypatch.context() as patch:
@@ -231,7 +231,7 @@ def test_parent_claim_is_held_until_child_admission_commits(
         with ThreadPoolExecutor(max_workers=1) as pool:
             future = pool.submit(service.run_claim, claim)
             try:
-                assert admitted.wait(timeout=5)
+                assert admitted.wait(timeout=30)
                 # A guard evaluated in a separate transaction would allow this
                 # independent writer to replace the claim before dispatch.
                 with (
@@ -242,7 +242,7 @@ def test_parent_claim_is_held_until_child_admission_commits(
                 assert service.get(parent.id).id == parent.id
             finally:
                 resume.set()
-            future.result(timeout=5)
+            future.result(timeout=30)
     assert service.get(parent.id).state == "queued"
     with sessions() as session:
         child = session.scalars(select(Job).where(Job.kind == "recipe.build.v1")).one()

@@ -335,7 +335,7 @@ def test_contended_progress_releases_the_artifact_worker(claimed_image, monkeypa
         with ThreadPoolExecutor(max_workers=1) as pool:
             future = pool.submit(service.run_claim, claim)
             try:
-                future.result(timeout=5)
+                future.result(timeout=30)
                 assert len(blockers) == 1
             finally:
                 for blocker in blockers:

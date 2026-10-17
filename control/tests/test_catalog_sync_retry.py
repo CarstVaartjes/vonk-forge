@@ -87,7 +87,7 @@ def test_the_automatic_sync_is_asked_again_after_every_unsettled_attempt(
                 interval_seconds=0,
                 settle_seconds=0.0,
             ),
-            timeout=5,
+            timeout=30,
         )
 
     asyncio.run(run())
@@ -146,7 +146,7 @@ def test_partial_receipts_back_off_then_success_resets_the_retry_episode(
                 interval_seconds=0,
                 settle_seconds=0,
             ),
-            timeout=5,
+            timeout=30,
         )
 
     asyncio.run(run())
@@ -266,7 +266,7 @@ def test_periodic_recovery_paths_do_not_suppress_each_other(
                 settle_seconds=0,
                 reconcile=reconcile,
             ),
-            timeout=5,
+            timeout=30,
         )
 
     asyncio.run(run())

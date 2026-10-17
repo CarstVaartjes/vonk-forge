@@ -290,7 +290,7 @@ def distribution_https(tmp_path: Path, controller):
         server.release_partial.set()
         server.shutdown()
         server.server_close()
-        thread.join(timeout=5)
+        thread.join(timeout=30)
 
 
 @pytest.fixture(scope="session")
@@ -407,7 +407,7 @@ def test_dead_agent_resumes_partial_transfer_from_fresh_controller_claim(
             )
     finally:
         first_process.kill()
-        first_process.wait(timeout=5)
+        first_process.wait(timeout=30)
         server.release_partial.set()
     # Read the checkpoint only after the writer is gone.  The agent buffers
     # range bytes, so the partial keeps growing between the readiness check

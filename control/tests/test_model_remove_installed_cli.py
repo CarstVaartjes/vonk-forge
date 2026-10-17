@@ -194,7 +194,7 @@ def test_installed_model_remove_recovers_exact_digest_after_head_change(
             except BaseException:
                 if process.poll() is None:
                     process.kill()
-                process.communicate(timeout=5)
+                process.communicate(timeout=30)
                 raise
             finally:
                 peer.release_held_response.set()

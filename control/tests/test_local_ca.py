@@ -267,7 +267,7 @@ ca.issue_node(body['node'], body['csr'].encode(), datetime.fromisoformat(body['n
         ),
         text=True,
         capture_output=True,
-        timeout=5,
+        timeout=30,
         check=False,
     )
     assert child.returncode == 73, child.stderr
@@ -279,7 +279,7 @@ ca.issue_node(body['node'], body['csr'].encode(), datetime.fromisoformat(body['n
 
     def paused_sign(*args):
         entered.set()
-        assert release.wait(5)
+        assert release.wait(30)
         return sign(*args)
 
     with (
@@ -288,11 +288,11 @@ ca.issue_node(body['node'], body['csr'].encode(), datetime.fromisoformat(body['n
     ):
         first = executor.submit(ca.issue_node, NODE_ID, csr, NOW, request=binding)
         try:
-            assert entered.wait(5)
+            assert entered.wait(30)
             issued = restarted.issue_node(NODE_ID, csr, NOW, request=binding)
         finally:
             release.set()
-        assert first.result(timeout=5) == issued
+        assert first.result(timeout=30) == issued
 
 
 def test_revocation_fences_a_pending_signature(local_ca):

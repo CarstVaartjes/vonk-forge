@@ -15,6 +15,10 @@ from sqlalchemy.orm import Session, sessionmaker
 from vonk_control import terminal_history_collection
 from vonk_control.catalog_revision_collection import INTERVAL
 from vonk_control.models import (
+    AgentCertificate,
+    AgentNode,
+    AgentOperation,
+    AgentOperationAttempt,
     Base,
     Job,
     JobAttempt,
@@ -23,7 +27,10 @@ from vonk_control.models import (
     RunNode,
 )
 from vonk_control.recipe_execution_contract import StoredRunNodePlan, StoredRunPlan
-from vonk_control.terminal_history_collection import TerminalHistoryCollector
+from vonk_control.terminal_history_collection import (
+    BACKLOG_PAUSE,
+    TerminalHistoryCollector,
+)
 
 
 @pytest.fixture(params=["sqlite", pytest.param("postgres", marks=pytest.mark.postgres)])
@@ -261,9 +268,16 @@ def test_one_pass_judges_every_row_against_one_reference_inventory(
         assert session.scalar(select(Job.id)) is None
 
 
-def test_an_exhausted_pass_continues_at_the_next_interval_not_the_next_tick(
+def test_an_exhausted_pass_continues_after_a_short_pause_not_the_next_tick(
     history_sessions: sessionmaker[Session], monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """Live regression (2026-10-17): a backlog drained one batch an hour.
+
+    An hourly two-second pass removed about 36 rows an hour, so a backlog of
+    thousands of ended rows outlived the 24 h grace by days. A pass that runs
+    out of budget with rows left continues after a short pause; each pass is
+    still bounded, and a finished cycle waits the whole interval.
+    """
     elapsed = InventoryElapsed()
     monkeypatch.setattr(
         terminal_history_collection,
@@ -302,11 +316,60 @@ def test_an_exhausted_pass_continues_at_the_next_interval_not_the_next_tick(
         clock[0] += timedelta(seconds=1)
         assert not collector.tick()
         assert len(remaining()) == 1
-        clock[0] += INTERVAL
+        clock[0] += BACKLOG_PAUSE
         assert collector.tick()
         assert remaining() == set()
+        # The cycle has finished: the next pass waits the whole interval.
+        assert collector.tick() is False
+        clock[0] += BACKLOG_PAUSE
+        assert collector.tick() is False
+        clock[0] += INTERVAL
+        assert collector.tick() is False
     finally:
         event.remove(engine, "after_cursor_execute", charge_deletion)
+
+
+def test_a_backlog_drains_within_minutes_not_hours(
+    history_sessions: sessionmaker[Session], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    elapsed = InventoryElapsed()
+    monkeypatch.setattr(
+        terminal_history_collection,
+        "time",
+        SimpleNamespace(monotonic=elapsed.monotonic),
+    )
+    clock = [datetime.now(UTC)]
+    with history_sessions.begin() as session:
+        session.add_all(_job(clock[0] - timedelta(days=2)) for _ in range(12))
+    engine = history_sessions.kw["bind"]
+    assert isinstance(engine, Engine)
+
+    def charge_deletion(
+        _connection: Connection,
+        _cursor: object,
+        statement: str,
+        _parameters: object,
+        _context: ExecutionContext,
+        _executemany: bool,
+    ) -> None:
+        # Each deletion spends half a pass: two rows per pass.
+        if statement.startswith("DELETE FROM jobs"):
+            elapsed.seconds += 1.0
+
+    collector = TerminalHistoryCollector(
+        history_sessions, clock=lambda: clock[0], batch=4
+    )
+    event.listen(engine, "after_cursor_execute", charge_deletion)
+    try:
+        start = clock[0]
+        for _ in range(12):
+            collector.tick()
+            clock[0] += BACKLOG_PAUSE
+    finally:
+        event.remove(engine, "after_cursor_execute", charge_deletion)
+    with history_sessions() as session:
+        assert session.scalar(select(Job.id)) is None
+    assert clock[0] - start < INTERVAL
 
 
 def test_terminal_history_prunes_old_rows_but_preserves_live_and_recent_references(
@@ -387,6 +450,106 @@ def test_terminal_parent_with_unreconciled_attempt_is_kept_until_attempt_ends(
     with history_sessions() as session:
         assert session.get(Job, job.id) is None
         assert session.get(JobAttempt, attempt_id) is None
+
+
+@pytest.mark.parametrize(
+    ("attempt_state", "collected"),
+    [
+        # The retained receipt of an ended order: what every lapse leaves.
+        ("observing", True),
+        ("failed", True),
+        ("succeeded", True),
+        # A claim that still owns its effect keeps the history.
+        ("running", False),
+    ],
+)
+def test_an_ended_order_whose_last_attempt_lapsed_is_collected(
+    history_sessions: sessionmaker[Session],
+    monkeypatch: pytest.MonkeyPatch,
+    attempt_state: str,
+    collected: bool,
+) -> None:
+    """Live regression (2026-10-17): ended orders outlived their grace forever.
+
+    An order's end keeps its lapsed attempt ``observing`` as the retained
+    receipt. The collector read every non-terminal attempt word as a live
+    claim, so such an order, and its parent job with it, was never collected:
+    five 47-attempt starts and the 2026-09-28 rows among them.
+    """
+    monkeypatch.setattr(
+        terminal_history_collection,
+        "time",
+        SimpleNamespace(monotonic=InventoryElapsed().monotonic),
+    )
+    now = datetime.now(UTC)
+    old = now - timedelta(days=2)
+    job = _job(old, state="cancelled")
+    operation_id = str(uuid.uuid4())
+    node_id = "spk_" + uuid.uuid4().hex
+    serial = str(uuid.uuid4())
+    with history_sessions.begin() as session:
+        session.add_all((job, AgentNode(node_id=node_id, state="active")))
+        session.flush()
+        session.add(
+            AgentCertificate(
+                serial=serial,
+                node_id=node_id,
+                not_before=old,
+                not_after=now,
+                fingerprint=serial,
+                state="active",
+                generation=1,
+            )
+        )
+        session.add(
+            AgentOperation(
+                id=operation_id,
+                parent_job_id=job.id,
+                node_id=node_id,
+                kind="recipe.start",
+                payload_digest="c" * 64,
+                payload={},
+                authority_revision="revision",
+                state="cancelled",
+                current_attempt=1,
+                created_at=old,
+                updated_at=old,
+            )
+        )
+        session.flush()
+        session.add(
+            AgentOperationAttempt(
+                operation_id=operation_id,
+                attempt=1,
+                fence=str(uuid.uuid4()),
+                lease_deadline=old,
+                agent_certificate_serial=serial,
+                state=attempt_state,
+                observation_cause="lease_lapsed"
+                if attempt_state == "observing"
+                else None,
+            )
+        )
+        session.add(
+            JobAttempt(
+                id=str(uuid.uuid4()),
+                job_id=job.id,
+                attempt=1,
+                fence=str(uuid.uuid4()),
+                worker_id="worker",
+                lease_deadline=old,
+                state=attempt_state,
+            )
+        )
+    collector = TerminalHistoryCollector(history_sessions, clock=lambda: now)
+    removed = collector.collect() + collector.collect() + collector.collect()
+    with history_sessions() as session:
+        kept = (
+            session.get(AgentOperation, operation_id) is not None,
+            session.get(Job, job.id) is not None,
+        )
+    assert kept == (not collected, not collected)
+    assert removed["agent_operations"] == removed["jobs"] == int(collected)
 
 
 def test_unreadable_live_authority_defers_pruning_until_repaired(
