@@ -341,6 +341,28 @@ def test_an_issued_job_that_lost_its_order_link_is_stopped_exactly(
     _activate_fresh_job_run(sessions, operations, run_id)
 
 
+def test_a_frozen_job_that_lost_its_order_link_is_stopped_by_its_frozen_order(
+    tmp_path,
+) -> None:
+    sessions, operations, service, run_id, node_id, agent_jobs, clock, stop = _service(
+        tmp_path
+    )
+    submitted = submitted_artifact_job(service, run_id, request_suffix=118)
+    job_claim = claim_agent(agent_jobs, node_id, "serial-0")
+    assert job_claim is not None
+    with pytest.raises(RecipeArtifactJobCancellationPending):
+        stop()
+    _unlink_order(sessions, submitted.id, may_remain=False)
+
+    stopping = stop()
+
+    assert stopping.state not in {"succeeded", "failed", "cancelled"}
+    assert _run_state(sessions, run_id) == "stopping"
+    _receipt_exact_stop(agent_jobs, clock, node_id, job_claim, submitted)
+    assert stop().state == "succeeded"
+    _activate_fresh_job_run(sessions, operations, run_id)
+
+
 def test_a_job_that_names_no_order_and_has_two_issued_ones_holds_the_stop(
     tmp_path,
 ) -> None:
