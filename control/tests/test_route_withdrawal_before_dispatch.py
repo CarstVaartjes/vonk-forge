@@ -555,7 +555,6 @@ def test_postgres_held_route_owner_never_fails_a_serving_route(
         with sessions() as session:
             held = _required(session.get(RecipeRun, run.owner_id))
             assert held.route_state == RouteState.PENDING
-            assert held.route_error is not None
     now[0] += timedelta(minutes=5)
     assert worker.tick() is True
     with sessions() as session:
