@@ -3558,6 +3558,65 @@ def test_a_concluded_operation_never_acquires_a_boundary_refusal_note(
         assert concluded.status_reason is None
 
 
+def test_a_concluded_orders_refused_result_never_annotates_its_waiting_parent(
+    agent_system, caplog
+) -> None:
+    """A parent's reason describes its current state, not a settled sibling.
+
+    Wrong implementation (production 2026-10-17): a sequential agent upgrade
+    settled its first order, queued the next, then refused a late result for
+    the first order's attempt 1.  The order was left unannotated, but its
+    still-queued parent showed ``result refused: stale-attempt (attempt=1)``,
+    so a healthy wait for the next Spark read as a failure.
+    """
+
+    client, services, _, clock = agent_system
+    caplog.set_level("INFO")
+    job = parent(services.sessions, clock)
+    for _ in range(2):
+        services.operations.enqueue(
+            job.id, NODE_A, "recipe.stop", "a" * 64, STOP_PAYLOAD
+        )
+    claim = client.post(
+        "/agent/claim", headers=agent_headers(NODE_A, "serial-a")
+    ).json()
+    envelope = {key: claim[key] for key in ("fence",)}
+    completed = client.post(
+        "/agent/result",
+        headers=agent_headers(NODE_A, "serial-a"),
+        json=envelope | {"state": "succeeded", "result": {}},
+    )
+    assert completed.status_code == 204, completed.text
+
+    late = client.post(
+        "/agent/result",
+        headers=agent_headers(NODE_A, "serial-a"),
+        json=envelope
+        | {
+            "state": "failed",
+            "result": {"status": "failed", "error_code": "stop_failed"},
+        },
+    )
+
+    assert late.status_code == 409, late.text
+    with services.sessions() as session:
+        waiting = session.get(Job, job.id)
+        settled = session.get(
+            AgentOperation, fenced_operation(services.sessions, claim["fence"]).id
+        )
+        assert waiting is not None and waiting.state not in {"succeeded", "failed"}
+        assert "refused" not in (waiting.status_reason or "")
+        assert settled is not None and settled.state == "succeeded"
+    # The evidence stays: the order's own accepted outcome, and the refusal
+    # in the Controller's one line per refused agent request.
+    assert fenced_attempt(services.sessions, claim["fence"]).state == "succeeded"
+    assert any(
+        "agent.request_rejected" in record.getMessage()
+        and '"http_status":409' in record.getMessage()
+        for record in caplog.records
+    )
+
+
 def test_invalid_failed_result_is_not_reported_as_an_acknowledged_stale_attempt(
     agent_system,
 ) -> None:
