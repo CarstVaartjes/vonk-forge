@@ -176,6 +176,9 @@ def request_superseded_workload_cancellation_in_session(
                 now,
             )
             continue
+        # The order is named by its children's own rows (kind, intent, the
+        # Spark each was sent to), never by the parent's ``targets`` list: a
+        # damaged list must not leave an older order uncancelled.
         if (
             type(bound) is not int
             or bound >= ordinal
@@ -183,7 +186,6 @@ def request_superseded_workload_cancellation_in_session(
             or any(
                 child.kind not in _WORKLOAD_INTENT_OPERATIONS
                 or child.workload_intent_ordinal != bound
-                or child.node_id not in column_value(parent, "targets")
                 for child in children
             )
         ):

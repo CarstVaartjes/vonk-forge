@@ -660,6 +660,25 @@ def validate_profile_stop_owner(
     return run, run_nodes
 
 
+def issued_order_link(session: Session, artifact: ArtifactJob) -> str | None:
+    """The order an artifact job's link names, when a Spark was handed it.
+
+    A link to an order no Spark was handed (or to none) names no source: the
+    job's issued order is then found by the owner its own request names.
+    """
+
+    if artifact.operation_id is None or not session.scalar(
+        select(AgentOperation.id)
+        .where(
+            AgentOperation.parent_job_id == artifact.operation_id,
+            AgentOperation.current_attempt > 0,
+        )
+        .limit(1)
+    ):
+        return None
+    return artifact.operation_id
+
+
 def validate_jobrun_stop_source(
     session: Session,
     target: ProfileJobRunStopTarget,
@@ -689,8 +708,8 @@ def validate_jobrun_stop_source(
     if (
         artifact is None
         or artifact.run_id != run.id
-        # A job that lost its link to its order is named by the order's request.
-        or artifact.operation_id not in {None, target.source_job_id}
+        # A job whose link names no issued order is named by the order's request.
+        or issued_order_link(session, artifact) not in {None, target.source_job_id}
         or source_job is None
         or source_operation is None
         or member is None

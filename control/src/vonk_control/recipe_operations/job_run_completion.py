@@ -38,6 +38,7 @@ from ..offline_stops import deferred_stop_nodes
 from ..profile_stop_authority import (
     JobRunStopScope,
     ProfileJobRunStopTarget,
+    issued_order_link,
     jobrun_stop_key,
 )
 from ..recipe_progress import _parent_execution_mode
@@ -150,8 +151,9 @@ class JobRunCompletionMixin:
                 or source_job is None
                 or source_operation is None
                 or artifact.run_id != authorization.run_id
-                # A job that lost its link is named by its order's request.
-                or artifact.operation_id not in {None, source_job.id}
+                # A job whose link names no issued order is named by its
+                # order's request.
+                or issued_order_link(session, artifact) not in {None, source_job.id}
                 or source_operation.parent_job_id != source_job.id
             ):
                 return unproven(

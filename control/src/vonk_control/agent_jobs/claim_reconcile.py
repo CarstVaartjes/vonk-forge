@@ -122,6 +122,11 @@ def _superseded_cancellation_state(
         old_parent is not None
         and column_is_document(old_parent, "result")
         and column_field(old_parent, "result", "cancel_requested") is True
+        # Its Spark reports only under a parent that names it (its lease and
+        # result are refused otherwise): a receipt that cannot arrive is never
+        # waited for, and the caller ends the order like any lapsed one.
+        and old.node_id
+        in (self._target_scope(column_value(old_parent, "targets")) or ())
     ):
         return "not-applicable"
     cancellation_deadline = superseded_cancellation_deadline(
