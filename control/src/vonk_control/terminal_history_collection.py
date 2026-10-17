@@ -4,7 +4,8 @@ Live and recently used exact identities are retained. Failed scans prove nothing
 unused. One reference inventory per pass judges every row; each row's own
 consumers are rechecked in a short transaction, and database foreign keys remain
 a final safety boundary rather than being bypassed for collection. A pass is
-bounded; the next one continues from its cursor an interval later.
+bounded; the next one continues from its cursor an interval later, or after
+a short pause while a backlog remains.
 """
 
 from __future__ import annotations
@@ -13,7 +14,7 @@ import logging
 import time
 from collections import Counter
 from collections.abc import Callable
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from sqlalchemy import and_, delete, exists, or_, select
 from sqlalchemy.exc import SQLAlchemyError
@@ -65,6 +66,11 @@ _TERMINAL = (
     LifecycleState.CANCELLED.value,
     LifecycleState.SUPERSEDED.value,
 )
+#: The pause before a pass that ran out of budget with rows left continues.
+#: Each pass stays bounded (two seconds), but a backlog drains at about a batch
+#: a minute instead of one per hour: an hourly pass removed ~36 rows an hour,
+#: below what a busy fleet ends, so history outlived its grace by days.
+BACKLOG_PAUSE = timedelta(minutes=1)
 
 
 class TerminalHistoryCollector:
@@ -86,6 +92,8 @@ class TerminalHistoryCollector:
         self._pending: tuple[tuple[str, datetime], ...] = ()
         # A full inventory batch means the cycle may have left rows behind.
         self._more = False
+        # The last pass ran out of budget before it reached the end.
+        self._backlog = False
 
     def tick(self) -> bool:
         now = self._clock()
@@ -94,6 +102,8 @@ class TerminalHistoryCollector:
         self._due_at = now + INTERVAL
         try:
             counts = self.collect()
+            if self._backlog:
+                self._due_at = now + BACKLOG_PAUSE
         except SQLAlchemyError as error:
             log_event(
                 _LOGGER,
@@ -120,10 +130,13 @@ class TerminalHistoryCollector:
         with self._sessions() as session:
             protected = _protected_tokens(session, now)
         if protected is None:
+            # An unknown inventory is retried at the interval, never sooner.
+            self._backlog = False
             return removed
         # The budget starts after the inventory: a slow inventory must not
         # spend every pass before its first candidate.
         deadline = time.monotonic() + 2.0
+        self._backlog = True
         # Children precede parents. Never delete live descendants by cascade.
         specs = (
             (
@@ -313,6 +326,7 @@ class TerminalHistoryCollector:
         if time.monotonic() >= deadline:
             return +removed
         self._table_index = 0
+        self._backlog = False
         removed["route_publications"] += self._publications(cutoff, protected)
         return +removed
 

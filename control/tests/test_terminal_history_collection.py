@@ -23,7 +23,10 @@ from vonk_control.models import (
     RunNode,
 )
 from vonk_control.recipe_execution_contract import StoredRunNodePlan, StoredRunPlan
-from vonk_control.terminal_history_collection import TerminalHistoryCollector
+from vonk_control.terminal_history_collection import (
+    BACKLOG_PAUSE,
+    TerminalHistoryCollector,
+)
 
 
 @pytest.fixture(params=["sqlite", pytest.param("postgres", marks=pytest.mark.postgres)])
@@ -261,9 +264,16 @@ def test_one_pass_judges_every_row_against_one_reference_inventory(
         assert session.scalar(select(Job.id)) is None
 
 
-def test_an_exhausted_pass_continues_at_the_next_interval_not_the_next_tick(
+def test_an_exhausted_pass_continues_after_a_short_pause_not_the_next_tick(
     history_sessions: sessionmaker[Session], monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """Live regression (2026-10-17): a backlog drained one batch an hour.
+
+    An hourly two-second pass removed about 36 rows an hour, so a backlog of
+    thousands of ended rows outlived the 24 h grace by days. A pass that runs
+    out of budget with rows left continues after a short pause; each pass is
+    still bounded, and a finished cycle waits the whole interval.
+    """
     elapsed = InventoryElapsed()
     monkeypatch.setattr(
         terminal_history_collection,
@@ -302,11 +312,60 @@ def test_an_exhausted_pass_continues_at_the_next_interval_not_the_next_tick(
         clock[0] += timedelta(seconds=1)
         assert not collector.tick()
         assert len(remaining()) == 1
-        clock[0] += INTERVAL
+        clock[0] += BACKLOG_PAUSE
         assert collector.tick()
         assert remaining() == set()
+        # The cycle has finished: the next pass waits the whole interval.
+        assert collector.tick() is False
+        clock[0] += BACKLOG_PAUSE
+        assert collector.tick() is False
+        clock[0] += INTERVAL
+        assert collector.tick() is False
     finally:
         event.remove(engine, "after_cursor_execute", charge_deletion)
+
+
+def test_a_backlog_drains_within_minutes_not_hours(
+    history_sessions: sessionmaker[Session], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    elapsed = InventoryElapsed()
+    monkeypatch.setattr(
+        terminal_history_collection,
+        "time",
+        SimpleNamespace(monotonic=elapsed.monotonic),
+    )
+    clock = [datetime.now(UTC)]
+    with history_sessions.begin() as session:
+        session.add_all(_job(clock[0] - timedelta(days=2)) for _ in range(12))
+    engine = history_sessions.kw["bind"]
+    assert isinstance(engine, Engine)
+
+    def charge_deletion(
+        _connection: Connection,
+        _cursor: object,
+        statement: str,
+        _parameters: object,
+        _context: ExecutionContext,
+        _executemany: bool,
+    ) -> None:
+        # Each deletion spends half a pass: two rows per pass.
+        if statement.startswith("DELETE FROM jobs"):
+            elapsed.seconds += 1.0
+
+    collector = TerminalHistoryCollector(
+        history_sessions, clock=lambda: clock[0], batch=4
+    )
+    event.listen(engine, "after_cursor_execute", charge_deletion)
+    try:
+        start = clock[0]
+        for _ in range(12):
+            collector.tick()
+            clock[0] += BACKLOG_PAUSE
+    finally:
+        event.remove(engine, "after_cursor_execute", charge_deletion)
+    with history_sessions() as session:
+        assert session.scalar(select(Job.id)) is None
+    assert clock[0] - start < INTERVAL
 
 
 def test_terminal_history_prunes_old_rows_but_preserves_live_and_recent_references(
