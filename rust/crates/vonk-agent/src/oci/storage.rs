@@ -44,6 +44,14 @@ pub(super) fn lower_hex(value: &str, length: usize) -> bool {
 }
 
 /// Sum of the lengths of the regular files below `directory`.
+/// An installation directory's logical size, as its install receipt measured it.
+pub(crate) fn installation_tree_bytes(
+    data_root: &Path,
+    installation_id: &str,
+) -> Result<u64, OciError> {
+    tree_bytes(&managed_path(data_root, "installations", installation_id)?)
+}
+
 pub(super) fn tree_bytes(directory: &Path) -> Result<u64, OciError> {
     let mut total = 0_u64;
     for entry in fs::read_dir(directory)? {

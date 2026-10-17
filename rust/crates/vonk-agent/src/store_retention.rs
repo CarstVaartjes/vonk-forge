@@ -16,7 +16,9 @@
 //!   [`GRACE`], whatever the free space: a transfer checkpoint or build export
 //!   whose claim ended, an isolated entry, a base image no build has opened, a
 //!   retired store nothing reads, an installation directory the Controller
-//!   has said for that long it does not track and no started run names.
+//!   has said for that long it does not track and no started run names, a
+//!   run scope it has said for that long no run or job owns, the cleanup
+//!   history and lock file of an installation that is gone.
 //!
 //! A later claim that needs a collected entry fetches or builds it again: a
 //! local miss repairs, it never refuses.
@@ -50,8 +52,8 @@ pub const RESERVE_FLOOR_BYTES: u64 = 5 * 1024 * 1024 * 1024;
 /// answering, and nothing is removed on it.
 pub const VERDICT_MAX_AGE: Duration = Duration::from_secs(10 * 60);
 
-/// The file a verdict that the Controller does not track an installation
-/// leaves in its directory; its age is the installation's grace.
+/// The file a verdict that the Controller does not track an installation or a
+/// run scope leaves in its directory; its age is the grace.
 const UNTRACKED_MARK: &str = "untracked-since";
 
 /// How one store's entries leave.
@@ -72,6 +74,16 @@ pub enum Collector {
     /// An installation the Controller has not tracked for [`GRACE`] and no
     /// started run names, and isolated entries; one it tracks only on its order.
     Untracked,
+    /// A run scope no run or job of the Controller's has owned for [`GRACE`],
+    /// and isolated entries; one it tracks only on its order.
+    UntrackedRuns,
+    /// Cleanup history nothing reads again and the checkpoint of an
+    /// installation that is gone, once unchanged for [`GRACE`]; a quarantined
+    /// installation (`<id>.partial`) only on the Controller's order.
+    Reconciliation,
+    /// The lock file of an installation that is gone, once unchanged for
+    /// [`GRACE`] and not held.
+    Ownership,
 }
 
 /// One top-level name below the agent data root (a directory's ends with
@@ -86,10 +98,10 @@ pub const STORES: &[Store] = &[
     // First: a removed installation's model objects are unused in the same pass.
     Store("installations/", Untracked, "the Controller's installation record; its verdict"),
     Store("distribution/", ModelObjects, "installations linking or naming it; its transfer"),
-    Store("installation-reconciliation/", ControllerOrder, "the Controller's uninstall"),
-    Store("installation-ownership/", Bookkeeping, "one lock file per installation"),
-    Store("runs/", ControllerOrder, "the Controller's run record"),
-    Store("run-metadata/", ControllerOrder, "the Controller's run record"),
+    Store("installation-reconciliation/", Reconciliation, "the Controller's uninstall"),
+    Store("installation-ownership/", Ownership, "one lock file per installation"),
+    Store("runs/", UntrackedRuns, "the Controller's run or job record; its verdict"),
+    Store("run-metadata/", UntrackedRuns, "the Controller's run or job record; its verdict"),
     Store("builds/", Ended, "the build claim, until the Controller has the image"),
     Store("build-staging/", Claim, "the build claim"),
     Store("base-images/", BaseImages, "the builds that open each image"),
@@ -132,23 +144,33 @@ pub fn disk_usage(path: &Path) -> Option<(u64, u64)> {
     ))
 }
 
-/// The Controller's latest inventory verdict: the installation directories it
-/// does not track, and when it said so. The inventory lane records each
-/// answer; a retention pass acts on it only while it is fresh.
+/// The Controller's latest inventory verdict: the installation directories and
+/// run scopes it does not track, and when it said so. The inventory lane
+/// records each answer; a retention pass acts on it only while it is fresh.
 #[derive(Clone, Debug, Default)]
-pub struct LatestVerdict(Arc<Mutex<Option<Verdict>>>);
+pub struct LatestVerdict(Arc<Mutex<Option<(Instant, Untracked)>>>);
 
-/// When the Controller answered, and the installations it does not track.
-type Verdict = (Instant, BTreeSet<String>);
+/// What the Controller said it does not track, by name.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Untracked {
+    pub installations: BTreeSet<String>,
+    /// `None`: the verdict judged no run scope (an older Controller, or none
+    /// named), and none leaves.
+    pub runs: Option<BTreeSet<String>>,
+}
 
 impl LatestVerdict {
     /// Record the Controller's answer to the latest inventory; `None` (an older
-    /// Controller, or no installations named) leaves no verdict.
-    pub fn record(&self, untracked: Option<Vec<uuid::Uuid>>) {
-        let answer = untracked.map(|ids| {
+    /// Controller, or nothing named) leaves no verdict.
+    pub fn record(&self, verdict: Option<vonk_agent_protocol::generated::InventoryVerdict>) {
+        let names = |ids: &[uuid::Uuid]| ids.iter().map(ToString::to_string).collect();
+        let answer = verdict.map(|verdict| {
             (
                 Instant::now(),
-                ids.iter().map(ToString::to_string).collect(),
+                Untracked {
+                    installations: names(&verdict.untracked_installations),
+                    runs: verdict.untracked_runs.as_deref().map(names),
+                },
             )
         });
         *self
@@ -157,9 +179,9 @@ impl LatestVerdict {
             .unwrap_or_else(std::sync::PoisonError::into_inner) = answer;
     }
 
-    /// The untracked installations, when the Controller said so within
+    /// What is untracked, when the Controller said so within
     /// [`VERDICT_MAX_AGE`].
-    pub fn fresh(&self) -> Option<BTreeSet<String>> {
+    pub fn fresh(&self) -> Option<Untracked> {
         let latest = self
             .0
             .lock()
@@ -175,22 +197,8 @@ impl LatestVerdict {
 /// reports them (at most the wire limit, in order); `None` when they cannot
 /// be listed.
 pub fn installation_names(data_root: &Path) -> Option<Vec<uuid::Uuid>> {
-    let entries = match fs::read_dir(data_root.join("installations")) {
-        Ok(entries) => entries,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Some(Vec::new()),
-        Err(error) => {
-            eprintln!("vonk-agent: inventory cannot list the installations: {error}");
-            return None;
-        }
-    };
     let mut names = BTreeSet::new();
-    for entry in entries {
-        let entry = entry.ok()?;
-        let name = entry.file_name().into_string().unwrap_or_default();
-        if installation_name(&name) && entry.file_type().ok()?.is_dir() {
-            names.insert(uuid::Uuid::parse_str(&name).ok()?);
-        }
-    }
+    scope_names(&data_root.join("installations"), &mut names)?;
     Some(
         names
             .into_iter()
@@ -199,16 +207,83 @@ pub fn installation_names(data_root: &Path) -> Option<Vec<uuid::Uuid>> {
     )
 }
 
+/// The run scopes below `data_root` (`runs/` and `run-metadata/`), by id, as
+/// inventory reports them (at most the wire limit, in order); `None` when
+/// they cannot be listed.
+pub fn run_scope_names(data_root: &Path) -> Option<Vec<uuid::Uuid>> {
+    let mut names = BTreeSet::new();
+    for store in ["runs", "run-metadata"] {
+        scope_names(&data_root.join(store), &mut names)?;
+    }
+    Some(
+        names
+            .into_iter()
+            .take(vonk_agent_protocol::MAX_REPORTED_RUNS)
+            .collect(),
+    )
+}
+
+/// Add the id-named directories of `root` to `names`; `None` when it cannot
+/// be listed (an absent root has none).
+fn scope_names(root: &Path, names: &mut BTreeSet<uuid::Uuid>) -> Option<()> {
+    let entries = match fs::read_dir(root) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Some(()),
+        Err(error) => {
+            eprintln!(
+                "vonk-agent: inventory cannot list {}: {error}",
+                root.display()
+            );
+            return None;
+        }
+    };
+    for entry in entries {
+        let entry = entry.ok()?;
+        let name = entry.file_name().into_string().unwrap_or_default();
+        if installation_name(&name) && entry.file_type().ok()?.is_dir() {
+            names.insert(uuid::Uuid::parse_str(&name).ok()?);
+        }
+    }
+    Some(())
+}
+
+/// Each installation directory's logical size now, measured as its install
+/// receipt was (metadata only), as inventory reports them; `None` when the
+/// installations cannot be listed. One that cannot be measured is left out.
+pub fn installation_sizes(
+    data_root: &Path,
+) -> Option<Vec<vonk_agent_protocol::generated::InstallationBytes>> {
+    Some(
+        installation_names(data_root)?
+            .into_iter()
+            .filter_map(|id| {
+                match crate::oci::installation_tree_bytes(data_root, &id.to_string()) {
+                    Ok(bytes) => Some(vonk_agent_protocol::generated::InstallationBytes {
+                        installation_id: id,
+                        bytes,
+                    }),
+                    Err(error) => {
+                        eprintln!(
+                            "vonk-agent: inventory cannot measure installation {id}: {error}"
+                        );
+                        None
+                    }
+                }
+            })
+            .collect(),
+    )
+}
+
 /// Collect unused entries older than [`GRACE`] at `now`, then relieve low
 /// space from unused model objects. `untracked` is the Controller's fresh
-/// verdict (`None`: there is none, and no installation leaves). `disk`
+/// verdict (`None`: there is none, and no installation or run scope leaves). `disk`
 /// observes `(free, total)`; `tick` runs after each removal (the service
 /// watchdog).
 pub fn sweep(
     data_root: &Path,
     now: SystemTime,
     deadline: Instant,
-    untracked: Option<&BTreeSet<String>>,
+    untracked: Option<&Untracked>,
     disk: &dyn Fn() -> Option<(u64, u64)>,
     tick: &dyn Fn(),
 ) -> Swept {
@@ -245,11 +320,30 @@ pub fn sweep(
                     && let Some(started) =
                         started_run_installations(&data_root.join("run-metadata"))
                 {
-                    pass.untracked(&root, &|name| {
-                        untracked.contains(name) && !started.contains(name)
+                    pass.untracked(&root, "installation", &|name| {
+                        untracked.installations.contains(name) && !started.contains(name)
                     });
                 }
             }
+            UntrackedRuns => {
+                // A name that is no scope's was isolated (`.damaged`).
+                pass.ended(&root, &|name, _| !installation_name(name));
+                // A stopped or forgotten run's lifecycle record leaves too, so
+                // it no longer keeps its installation (that leaves a day later).
+                if let Some(runs) = untracked.and_then(|untracked| untracked.runs.as_ref()) {
+                    pass.untracked(&root, "run scope", &|name| runs.contains(name));
+                }
+            }
+            Reconciliation => pass.ended(&root, &|name, _| {
+                match (name.strip_suffix(".json"), name.strip_suffix(".partial")) {
+                    // A checkpoint is disposable once its installation is gone.
+                    (Some(id), _) if installation_name(id) => installation_gone(data_root, id),
+                    (_, Some(id)) if installation_name(id) => false,
+                    // `.retained` bytes, `.retired` records, unfinished writes.
+                    _ => true,
+                }
+            }),
+            Ownership => pass.ownership_locks(&root, data_root),
             ControllerOrder | Claim | Bookkeeping => {}
         }
     }
@@ -336,6 +430,21 @@ pub fn make_room(data_root: &Path, required: u64, keep: &BTreeSet<String>) -> u6
     removed
 }
 
+/// Neither the installation nor its quarantine is on disk: its cleanup is
+/// complete (an unreadable look keeps its records).
+fn installation_gone(data_root: &Path, id: &str) -> bool {
+    [
+        data_root.join("installations").join(id),
+        data_root
+            .join("installation-reconciliation")
+            .join(format!("{id}.partial")),
+    ]
+    .iter()
+    .all(|path| {
+        fs::symlink_metadata(path).is_err_and(|error| error.kind() == std::io::ErrorKind::NotFound)
+    })
+}
+
 /// An installation directory is named by its canonical id.
 fn installation_name(name: &str) -> bool {
     uuid::Uuid::parse_str(name).is_ok_and(|id| id.to_string() == name)
@@ -374,11 +483,12 @@ impl Pass<'_> {
         }
     }
 
-    /// An installation the Controller does not track leaves a grace after the
-    /// first verdict that said so. That verdict marks the directory, the mark's
-    /// age is the grace (it survives an agent restart), and a verdict that
-    /// tracks it again, or a run that names it, removes the mark.
-    fn untracked(&mut self, root: &Path, untracked: &dyn Fn(&str) -> bool) {
+    /// An installation or run scope the Controller does not track leaves a
+    /// grace after the first verdict that said so. That verdict marks the
+    /// directory, the mark's age is the grace (it survives an agent restart),
+    /// and a verdict that tracks it again (or, for an installation, a run that
+    /// names it) removes the mark.
+    fn untracked(&mut self, root: &Path, kind: &str, untracked: &dyn Fn(&str) -> bool) {
         for (name, metadata) in self.list(root).into_iter().flatten() {
             if !metadata.is_dir() || !installation_name(&name) {
                 continue;
@@ -396,11 +506,11 @@ impl Pass<'_> {
                     .open(&mark)
                 {
                     Ok(_) => eprintln!(
-                        "vonk-agent: store retention: the Controller does not track installation {name}; it leaves after a day unless tracked again"
+                        "vonk-agent: store retention: the Controller does not track {kind} {name}; it leaves after a day unless tracked again"
                     ),
-                    Err(error) => eprintln!(
-                        "vonk-agent: store retention cannot mark installation {name}: {error}"
-                    ),
+                    Err(error) => {
+                        eprintln!("vonk-agent: store retention cannot mark {kind} {name}: {error}")
+                    }
                 },
                 (true, Some(since)) => {
                     let aged = self
@@ -409,20 +519,47 @@ impl Pass<'_> {
                         .is_ok_and(|age| age > GRACE);
                     if aged && self.remove(&directory, &metadata) {
                         eprintln!(
-                            "vonk-agent: store retention removed installation {name}: the Controller has not tracked it for a day and no started run names it"
+                            "vonk-agent: store retention removed {kind} {name}: the Controller has not tracked it for a day"
                         );
                     }
                 }
                 (false, Some(_)) => match fs::remove_file(&mark) {
                     Ok(()) => eprintln!(
-                        "vonk-agent: store retention keeps installation {name}: it is tracked or a run names it again"
+                        "vonk-agent: store retention keeps {kind} {name}: it is tracked again"
                     ),
                     Err(error) => eprintln!(
-                        "vonk-agent: store retention cannot unmark installation {name}: {error}"
+                        "vonk-agent: store retention cannot unmark {kind} {name}: {error}"
                     ),
                 },
                 (false, None) => {}
             }
+        }
+    }
+
+    /// The lock file of an installation that is gone leaves once unchanged for
+    /// the grace. It is removed while held, so no claim locks it meanwhile.
+    fn ownership_locks(&mut self, root: &Path, data_root: &Path) {
+        for (name, metadata) in self.list(root).into_iter().flatten() {
+            let Some(id) = name
+                .strip_suffix(".lock")
+                .filter(|id| installation_name(id))
+            else {
+                continue;
+            };
+            let aged = self
+                .now
+                .duration_since(changed(&metadata))
+                .is_ok_and(|age| age > GRACE);
+            if !metadata.is_file() || !aged || !installation_gone(data_root, id) {
+                continue;
+            }
+            let path = root.join(&name);
+            // A claim holding it reconciles the installation now.
+            let Ok(Ok(held)) = fs::File::open(&path).map(HeldLock::try_exclusive) else {
+                continue;
+            };
+            self.remove(&path, &metadata);
+            drop(held);
         }
     }
 

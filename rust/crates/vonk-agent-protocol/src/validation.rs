@@ -53,6 +53,8 @@ impl AgentClaim {
 /// path; only the plan identity crosses the wire.
 /// The most installation directories one inventory names (the wire limit).
 pub const MAX_REPORTED_INSTALLATIONS: usize = 4096;
+/// The most run scopes one inventory names (the wire limit).
+pub const MAX_REPORTED_RUNS: usize = 4096;
 
 /// Canonical schema-1 inventory evidence reported by a Spark agent.
 impl InventoryRequest {
@@ -89,6 +91,14 @@ impl InventoryRequest {
                 .installations
                 .as_ref()
                 .is_some_and(|names| names.len() > MAX_REPORTED_INSTALLATIONS)
+            || self.installation_bytes.as_ref().is_some_and(|sizes| {
+                sizes.len() > MAX_REPORTED_INSTALLATIONS
+                    || sizes.iter().any(|size| size.bytes > 16 * 1024_u64.pow(4))
+            })
+            || self
+                .runs
+                .as_ref()
+                .is_some_and(|names| names.len() > MAX_REPORTED_RUNS)
             || self
                 .unused_model_bytes
                 .is_some_and(|bytes| bytes > 16 * 1024_u64.pow(4))
@@ -299,6 +309,8 @@ mod inventory_tests {
             host_settings: None,
             installations: None,
             unused_model_bytes: None,
+            runs: None,
+            installation_bytes: None,
             nvidia_driver_version: "550.1".to_owned(),
             container_runtime_version: "podman-5".to_owned(),
         }

@@ -72,6 +72,7 @@ from vonk_control.models import (
     Base,
     CatalogDocument,
     CatalogDocumentRevision,
+    InstallationNode,
     Job,
     NodeInventorySnapshot,
     NodeTelemetrySample,
@@ -88,6 +89,7 @@ from vonk_forge_contracts import RecipeDefinition, document_sha256
 from .agent_fences import fenced_attempt, fenced_operation
 from .ca_test_authority import FixtureCertificateAuthority
 from .stored_documents_support import valid_policy_report
+from .test_catalog_revision_collection import Catalog
 
 NODE_A = "spk_" + "a" * 32
 NODE_B = "spk_" + "b" * 32
@@ -840,6 +842,69 @@ def test_an_inventory_naming_installations_gets_the_controllers_verdict(
     assert older.status_code == 204 and older.content == b""
     assert judged.status_code == 200
     assert judged.json() == {"untracked_installations": [forgotten]}
+    # An agent that named no runs gets no run verdict field (an older
+    # agent reads the verdict strictly); one that names them gets it.
+    runs = client.post(
+        "/agent/inventory",
+        headers=agent_headers(NODE_A, "serial-a"),
+        json=payload
+        | {
+            "runs": [forgotten],
+            "observed_at": (clock.now + timedelta(seconds=2)).isoformat(),
+        },
+    )
+    assert runs.status_code == 200
+    assert runs.json() == {"untracked_installations": [], "untracked_runs": [forgotten]}
+
+
+def test_an_inventory_measuring_installations_refreshes_their_recorded_size(
+    agent_system,
+) -> None:
+    """Catches a size the inventory measured but the record never takes."""
+
+    client, services, _, clock = agent_system
+    world = Catalog(services.sessions.kw["bind"])
+    installation, _ = world.workload(world.revision("glm", 1), run="stopped")
+    with services.sessions.begin() as session:
+        rank = session.scalar(
+            select(InstallationNode).where(
+                InstallationNode.installation_id == installation
+            )
+        )
+        assert rank is not None
+        rank.node_id = NODE_A
+    payload = {
+        "schema_version": 1,
+        "observed_at": clock.now.isoformat(),
+        "disk_total_bytes": 1000,
+        "disk_free_bytes": 700,
+        "host_memory_total_bytes": 2000,
+        "host_memory_free_bytes": 1500,
+        "gpu_memory_total_bytes": 1000,
+        "gpu_memory_free_bytes": 800,
+        "gpu_count": 1,
+        "memory_pool": "separate",
+        "artifact_store_read_only": False,
+        "capabilities": [],
+        "nvidia_driver_version": "580.65.06",
+        "container_runtime_version": "28.3.3",
+        "installation_bytes": [{"installation_id": installation, "bytes": 4242}],
+    }
+
+    response = client.post(
+        "/agent/inventory", headers=agent_headers(NODE_A, "serial-a"), json=payload
+    )
+
+    assert response.status_code == 204
+    with services.sessions() as session:
+        assert (
+            session.scalar(
+                select(InstallationNode.installed_bytes).where(
+                    InstallationNode.installation_id == installation
+                )
+            )
+            == 4242
+        )
 
 
 def test_agent_4xx_logs_one_line_with_request_id_and_field(agent_system, caplog):

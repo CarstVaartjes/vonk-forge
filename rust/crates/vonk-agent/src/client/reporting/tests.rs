@@ -30,6 +30,8 @@ fn out_of_contract_inventory_is_clamped_instead_of_refused() {
         host_settings: None,
         installations: None,
         unused_model_bytes: None,
+        runs: None,
+        installation_bytes: None,
         nvidia_driver_version: "580.1\u{e9}".to_owned(),
         container_runtime_version: "podman 5".to_owned(),
     };
@@ -273,12 +275,23 @@ async fn an_inventory_returns_the_controllers_verdict_and_an_older_controller_no
         .await
         .unwrap();
 
+    let answer = answer.unwrap();
     assert_eq!(
-        answer.unwrap().untracked_installations,
+        answer.untracked_installations,
         vec![ORPHAN.parse::<uuid::Uuid>().unwrap()]
     );
+    assert_eq!(answer.untracked_runs, None);
     let sent = finish_capture_peer(server).await;
     assert!(String::from_utf8_lossy(&sent).contains(&format!(r#""installations":["{ORPHAN}"]"#)));
+    // A verdict without run scopes judged none; one that names them carries them.
+    assert_eq!(
+        client_answer(format!(
+            r#"{{"untracked_installations":[],"untracked_runs":["{ORPHAN}"]}}"#
+        ))
+        .await
+        .and_then(|verdict| verdict.untracked_runs),
+        Some(vec![ORPHAN.parse::<uuid::Uuid>().unwrap()])
+    );
 
     // An older Controller answers nothing, and a verdict that cannot be read
     // is none: the inventory is reported either way and nothing is removed.
@@ -297,6 +310,23 @@ async fn an_inventory_returns_the_controllers_verdict_and_an_older_controller_no
     }
 }
 
+/// The verdict a Controller answering `body` gives an inventory naming runs.
+async fn client_answer(body: String) -> Option<vonk_agent_protocol::generated::InventoryVerdict> {
+    let mut request = valid_inventory();
+    request.runs = Some(vec![uuid::Uuid::nil()]);
+    let (client, server) = request_capture_client(
+        200,
+        vec!["content-type: application/json".to_owned()],
+        body.into_bytes(),
+        None,
+        CONTROLLER_REQUEST_TIMEOUT,
+    )
+    .await;
+    let answer = client.report_inventory_request(request).await.unwrap();
+    finish_capture_peer(server).await;
+    answer
+}
+
 /// An inventory with every optional evidence group present.
 fn inventory_with_all_evidence() -> vonk_agent_protocol::InventoryRequest {
     let mut request = valid_inventory();
@@ -310,6 +340,7 @@ fn inventory_with_all_evidence() -> vonk_agent_protocol::InventoryRequest {
         gpu_clock_cap_active: Some(true),
     });
     request.installations = Some(vec![uuid::Uuid::nil()]);
+    request.runs = Some(vec![uuid::Uuid::nil()]);
     request.validate().unwrap();
     request
 }

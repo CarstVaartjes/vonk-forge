@@ -230,6 +230,7 @@ from .host_helper import (
 )
 from .inventory import (
     HostSettings,
+    InstallationBytes,
     InventoryRequest,
     InventoryVerdict,
     NetworkInterface,
@@ -393,6 +394,7 @@ __all__ = [
     "InstallAdmissionCode",
     "InstallDegradedReason",
     "InstallVonkDebOperation",
+    "InstallationBytes",
     "InstallationNodeState",
     "InstallationState",
     "InvalidRequest",
