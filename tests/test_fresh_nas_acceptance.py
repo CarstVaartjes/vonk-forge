@@ -1263,6 +1263,55 @@ def test_candidate_overlay_checks_exact_roles_and_pinned_upstream(mutation):
 
 
 @pytest.mark.parametrize(
+    ("scraped", "current"),
+    [
+        ([("d" * 64, "d" * 64, "1")], True),
+        # 2026-10-17 17:13Z: what the previous Controller process reported.
+        ([("7" * 64, "missing", "0")], False),
+        ([], False),
+    ],
+)
+def test_compose_bundle_is_read_from_what_the_running_controller_reported(
+    tmp_path: Path, monkeypatch, scraped, current
+) -> None:
+    acceptance = _acceptance_module()
+    monkeypatch.setattr(acceptance, "reference_compose", lambda: ["compose"])
+    elapsed = [0.0]
+    monkeypatch.setattr(acceptance.time, "monotonic", lambda: elapsed[0])
+    monkeypatch.setattr(
+        acceptance.time,
+        "sleep",
+        lambda duration: elapsed.__setitem__(0, elapsed[0] + duration),
+    )
+    commands = []
+
+    def run(command, **_kwargs):
+        commands.append(command)
+        # Before Prometheus's first scrape of the new process there is no series.
+        result = [] if len(commands) == 1 else scraped
+        document = {
+            "data": {
+                "result": [
+                    {"metric": {"expected": e, "running": r}, "value": [0, v]}
+                    for e, r, v in result
+                ]
+            }
+        }
+        return subprocess.CompletedProcess(command, 0, json.dumps(document), "")
+
+    monkeypatch.setattr(acceptance, "run", run)
+    if current:
+        acceptance.verify_compose_bundle_current(tmp_path)
+    else:
+        with pytest.raises(AcceptanceError, match="does not report"):
+            acceptance.verify_compose_bundle_current(tmp_path)
+    assert all(
+        command[:4] == ["compose", "exec", "-T", "prometheus"] for command in commands
+    )
+    assert "control-api" not in {part for command in commands for part in command}
+
+
+@pytest.mark.parametrize(
     ("outcome", "expected_error", "expected_reads"),
     [
         ("recovers", None, 2),

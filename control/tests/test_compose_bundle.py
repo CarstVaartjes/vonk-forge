@@ -6,8 +6,11 @@ import importlib.machinery
 import importlib.util
 import json
 import re
+import shlex
+import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -47,8 +50,13 @@ def _stale_rule() -> dict:
 
 
 def _fires(rendered: str) -> dict[str, str] | None:
-    """Evaluate the rule's ``metric == 0`` against one metrics render."""
-    match = re.fullmatch(r"(\w+) == 0", _stale_rule()["expr"])
+    """Evaluate the rule's ``metric == 0`` against one metrics render.
+
+    One render is one process. The rule across a Prometheus restart, with the
+    previous process's series still visible, is proven by the real rule engine
+    in ``deploy/compose/tests/test_compose_bundle_alert.py``.
+    """
+    match = re.match(r"(\w+) == 0 ", _stale_rule()["expr"])
     assert match is not None
     for line in rendered.splitlines():
         sample = re.fullmatch(rf"{match.group(1)}\{{(.*)\}} (\S+)", line)
@@ -110,22 +118,36 @@ def _load(path: Path, name: str):
 
 
 def _embedded_digest(template: Path) -> str:
-    """What the Controller image build embeds (control/Dockerfile)."""
-    result = subprocess.run(
-        [
-            sys.executable,
-            "-c",
-            (
-                "import pathlib, runpy, sys; print(runpy.run_path(sys.argv[1])"
-                '["bundle_digest"](pathlib.Path(sys.argv[2])))'
-            ),
-            str(DEV_RENDERER),
-            str(template),
-        ],
-        text=True,
-        capture_output=True,
-        check=True,
-    )
+    """What the Controller image build embeds: ``control/Dockerfile``'s own
+    ``compose-bundle-digest`` stage, its COPY layout and its command, with the
+    Compose sources taken from ``template``'s directory."""
+    dockerfile = (ROOT / "control/Dockerfile").read_text(encoding="utf-8")
+    stage = dockerfile.split("FROM runtime-root AS compose-bundle-digest\n", 1)[1]
+    stage = stage.split("\nFROM ", 1)[0]
+    image = Path(tempfile.mkdtemp(prefix="compose-bundle-stage-"))
+    for line in stage.splitlines():
+        if line.startswith("COPY "):
+            source, destination = line.split()[1:]
+            origin = (
+                template.parent / Path(source).relative_to("deploy/compose")
+                if source.startswith("deploy/compose/")
+                else ROOT / source
+            )
+            target = image / destination.lstrip("/")
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(origin, target)
+    command = shlex.split(stage.split("RUN ", 1)[1].split(" > ", 1)[0])
+    assert command[:2] == ["python", "-c"] and len(command) == 3
+    script = command[2].replace('"/compose/', f'"{image}/compose/')
+    try:
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            text=True,
+            capture_output=True,
+            check=True,
+        )
+    finally:
+        shutil.rmtree(image)
     return result.stdout.strip()
 
 

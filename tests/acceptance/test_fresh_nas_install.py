@@ -879,23 +879,33 @@ print(json.dumps(asdict(packaged_runtime_identity())))
 
 
 def verify_compose_bundle_current(bundle: Path) -> None:
-    """The installer-written Compose file carries the digest the image embeds."""
+    """The running Controller reports the installer-written Compose file current.
 
-    script = (
-        "import json; from vonk_control.compose_bundle import compose_bundle; "
-        "state = compose_bundle(); "
-        "print(json.dumps(None if state is None else [state.expected, state.running]))"
-    )
-    result = run(
-        [*reference_compose(), "exec", "-T", "control-api", "python", "-c", script],
-        cwd=bundle,
-        timeout=20,
-    )
-    state = json.loads(result.stdout)
-    if state is None or state[0] != state[1]:
+    Read what Prometheus scraped from the server process, which is what
+    ``NasComposeBundleStale`` evaluates, not the container's environment.
+    """
+    query = "http://127.0.0.1:9090/api/v1/query?query=vonk_nas_compose_bundle_current"
+    deadline = time.monotonic() + 120
+    while True:
+        result = run(
+            [*reference_compose(), "exec", "-T", "prometheus", "wget", "-qO-", query],
+            cwd=bundle,
+            timeout=20,
+        )
+        samples = json.loads(result.stdout)["data"]["result"]
+        if samples or time.monotonic() >= deadline:
+            break
+        time.sleep(2)
+    reported = [
+        (s["metric"].get("expected"), s["metric"].get("running"), s["value"][1])
+        for s in samples
+    ]
+    if not reported or any(
+        value != "1" or expected != running for expected, running, value in reported
+    ):
         raise AcceptanceError(
-            "installed Compose bundle digest differs from the Controller image: "
-            f"{state}"
+            "the running Controller does not report the installed Compose bundle "
+            f"current: {reported}"
         )
 
 

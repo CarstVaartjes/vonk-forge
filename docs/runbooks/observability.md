@@ -124,4 +124,7 @@ updates the images only; the Compose file changes only when the NAS installer
 runs. Rerun it (`curl -fsSL https://install.vonkforge.ai/dev/nas | sh`, or the
 stable channel); it keeps the site's `.env` and secrets. The alert labels carry
 both digests: `running="missing"` means the Compose file predates the stamp. The
-alert clears once the Controller restarts with the new Compose file.
+alert clears once the Controller restarts with the new Compose file. Prometheus
+restarts with the Controller and still sees the previous process for up to five
+minutes; the alert ignores that process once the new one is current, so after a
+pull without an installer rerun it can take up to six minutes to appear.
