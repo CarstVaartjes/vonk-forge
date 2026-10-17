@@ -55,6 +55,7 @@ from vonk_control.recipe_operation_worker import RecipeOperationWorker
 from vonk_control.recipe_routes import (
     AtomicRecipeRoutePublisher,
     RecipeRouteNotReady,
+    RecipeRouteOwnerBusy,
     RecipeRouteService,
     RecipeRouteSuperseded,
 )
@@ -1777,9 +1778,10 @@ def test_postgres_concurrent_current_publishers_keep_one_owner_receipt(
     def publish(service: RecipeRouteService) -> LiteLlmGeneration | None:
         try:
             return service.publish_run(run_id)
-        except RecipeRouteSuperseded:
-            # The loser of the race is replaced by the newer claim; the
-            # worker simply retries it, so it is not a failure.
+        except (RecipeRouteSuperseded, RecipeRouteOwnerBusy):
+            # The loser of the race is replaced by the newer claim, or finds
+            # the owner held; the worker simply retries it, so it is not a
+            # failure.
             return None
 
     with ThreadPoolExecutor(max_workers=2) as pool:
