@@ -7,7 +7,7 @@ import logging
 import re
 import threading
 import uuid
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -27,7 +27,7 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol.enrollment import NodeId
 
 from ..admission_locking import ConstraintReplay, admitting
-from ..bounded_retry import bounded_attempts
+from ..bounded_retry import REQUEST_PAUSES, bounded_attempts
 from ..failure_classification import disposition
 from ..litellm import (
     LiteLlmGeneration,
@@ -286,10 +286,14 @@ def lock_route_publication_owner_in_session(
 @contextmanager
 def route_publication_transaction(
     sessions: sessionmaker[Session],
+    pauses: Sequence[float] = REQUEST_PAUSES,
 ) -> Iterator[Session]:
-    """Reobserve acquisition in fresh transactions; never retry the caller's body."""
+    """Reobserve acquisition in fresh transactions; never retry the caller's body.
+
+    ``pauses=()`` tries once, for a caller that paces a held owner itself.
+    """
     last: RecipeRouteNotReady | None = None
-    for _attempt in bounded_attempts():
+    for _attempt in bounded_attempts(pauses):
         stack = ExitStack()
         try:
             session = stack.enter_context(sessions())
