@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
 import os
 import posixpath
 import re
@@ -33,6 +35,12 @@ DEV_MUTABLE_IMAGES = {
 
 
 VONK_REPOSITORY_PREFIX = "ghcr.io/carstvaartjes/vonk-forge-"
+# Pulling a release refreshes images only; the Compose file the NAS installer
+# wrote stays until the installer reruns. Every rendered Compose file carries
+# the digest of the template it came from, and the Controller image embeds the
+# digest of the template it was built with, so the running Controller can tell
+# that the NAS Compose file is older than its release.
+COMPOSE_BUNDLE_DIGEST = "VONK_COMPOSE_BUNDLE_DIGEST"
 
 
 def channel_image(image: str, channel: str) -> str:
@@ -126,6 +134,29 @@ def _compose_document(path: Path, seen: set[Path] | None = None) -> dict[str, ob
     for key, value in document.items():
         merged = _merge_values(merged, {key: value})  # type: ignore[assignment]
     return merged
+
+
+def bundle_digest(template: Path) -> str:
+    """Digest the flattened template before any image or channel is resolved.
+
+    Comments and formatting do not count, and neither do the images a release
+    pulls, so the digest changes exactly when an installer rerun matters.
+    """
+    document = json.dumps(
+        _compose_document(template), sort_keys=True, separators=(",", ":")
+    )
+    return hashlib.sha256(document.encode("utf-8")).hexdigest()
+
+
+def _stamp_bundle_digest(services: dict[str, dict], digest: str) -> None:
+    if not isinstance(services, dict):
+        raise TypeError("Compose services are invalid")
+    # The worker reads the same site configuration as the API.
+    for name in ("control-api", "control-worker"):
+        environment = services[name].get("environment")
+        if not isinstance(environment, dict):
+            raise TypeError(f"Compose service environment is invalid: {name}")
+        environment[COMPOSE_BUNDLE_DIGEST] = digest
 
 
 def _replace_image_tokens(value: object, replacements: dict[str, str]) -> object:
@@ -242,6 +273,7 @@ def render(
     _resolve_runtime_images(document, channel)
     if channel != "pinned":
         _resolve_extension_images(document, channel)
+    _stamp_bundle_digest(document["services"], bundle_digest(template))
     rendered = yaml.safe_dump(document, sort_keys=False, default_flow_style=False)
     if "VONK_CONTROL_HOSTNAME" not in rendered:
         raise ValueError("development channel must render the production graph")
