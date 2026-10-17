@@ -561,6 +561,130 @@ def test_main_reuses_the_images_of_the_pull_request_that_tested_its_tree() -> No
         )
 
 
+class ActionsCache:
+    """The GitHub Actions cache: an entry is never overwritten; a restore takes
+    the exact key, else the newest entry matching a prefix."""
+
+    def __init__(self) -> None:
+        self.entries: list[tuple[str, str]] = []
+
+    def restore(self, key: str, prefixes: list[str]) -> tuple[str | None, bool]:
+        exact = [value for name, value in self.entries if name == key]
+        if exact:
+            return exact[0], True
+        for prefix in (key, *prefixes):
+            matched = [value for name, value in self.entries if name.startswith(prefix)]
+            if matched:
+                return matched[-1], False
+        return None, False
+
+    def save(self, key: str, value: str) -> None:
+        if all(name != key for name, _ in self.entries):
+            self.entries.append((key, value))
+
+
+def evaluate(expression: str, context: dict[str, str]) -> object:
+    """Evaluate a workflow expression over step outputs (absent ones are '')."""
+    expression = expression.strip().removeprefix("${{").removesuffix("}}")
+    expression = re.sub(
+        r"\b(?:steps|github|runner|inputs)\.[\w.-]+",
+        lambda found: repr(context.get(found.group(), "")),
+        expression,
+    )
+    expression = re.sub(r"!(?!=)", "not ", expression)
+    expression = expression.replace("&&", "and").replace("||", "or")
+    return eval(" ".join(expression.split()), {"__builtins__": {}})
+
+
+def render(template: str, context: dict[str, str]) -> str:
+    return re.sub(
+        r"\$\{\{(.*?)\}\}", lambda found: str(evaluate(found[1], context)), template
+    )
+
+
+def ship_component_image(
+    role: str, cache: ActionsCache, run_id: str, pr_digest: str
+) -> str:
+    """Run the dev-images steps that pick, retain and cache the role's digest."""
+    steps = load(WORKFLOWS / "dev-images.yml")["jobs"]["publish-development-images"][
+        "steps"
+    ]
+    directory = f"${{{{ runner.temp }}}}/accepted-image-cache/{role}"
+    context = {
+        f"steps.image_inputs.outputs.{role}_key": "8d86d7a7" * 8,
+        "github.run_id": run_id,
+        "github.run_attempt": "1",
+        "inputs.reuse_run_id": "42" if pr_digest else "",
+        "steps.pr_images.outputs.reused": "true" if pr_digest else "",
+        f"steps.pr_images.outputs.{role}_digest": pr_digest,
+    }
+    stored = None
+    post_save = []
+    for step in steps:
+        if "if" in step and not evaluate(step["if"], context):
+            continue
+        uses = step.get("uses", "")
+        options = step.get("with", {})
+        if uses.startswith("actions/cache") and options.get("path") == directory:
+            key = render(options["key"], context)
+            if uses.startswith("actions/cache/save@"):
+                cache.save(key, stored)
+                continue
+            prefixes = render(options.get("restore-keys", ""), context).split()
+            stored, hit = cache.restore(key, prefixes)
+            context[f"steps.{step.get('id')}.outputs.cache-primary-key"] = key
+            if uses.startswith("actions/cache@") and not hit:
+                post_save.append(key)
+        elif step.get("id") == f"reuse_{role}" and stored:
+            # scripts/reuse-development-image revalidates the cached entry.
+            context[f"steps.reuse_{role}.outputs.digest"] = stored
+        elif step.get("id") == f"build_{role}":
+            # Images carry their commit, so a rebuild is always another digest.
+            context[f"steps.build_{role}.outputs.digest"] = f"build-{run_id}"
+        elif re.search(
+            rf"accept-development-image-archive \\\s+{role} ", step.get("run", "")
+        ):
+            digest = re.search(r'"(\$\{\{ steps\.pr_images[^"]*)"', step["run"])
+            assert digest, step["name"]
+            context["accepted"] = render(digest[1], context)
+        elif step.get("id") == "publish":
+            context[f"steps.publish.outputs.{role}_digest"] = context.get(
+                "accepted", context.get(f"steps.reuse_{role}.outputs.digest", "")
+            )
+        elif f"accepted-image-cache/{role}/image.json" in step.get("run", ""):
+            # The retain step writes the digest this release shipped.
+            stored = context[f"steps.publish.outputs.{role}_digest"]
+    for key in post_save:
+        cache.save(key, stored)
+    return context[f"steps.publish.outputs.{role}_digest"]
+
+
+@pytest.mark.parametrize("role", ["hermes", "litellm"])
+@pytest.mark.parametrize(
+    ("releases", "shipped"),
+    [
+        # Two consecutive cache releases: the second reuses the first build.
+        (["", ""], ["build-1", "build-1"]),
+        # Main takes the pull request's image under a cached key (run
+        # 39039174931); the next cache releases ship that one, not the older
+        # build (run 39040273820 shipped 34400eab after 6a078f5c).
+        (["", "pr-2", "", ""], ["build-1", "pr-2", "pr-2", "pr-2"]),
+        (["pr-1", ""], ["pr-1", "pr-1"]),
+    ],
+)
+def test_one_content_key_ships_the_digest_main_shipped_last(
+    role: str, releases: list[str], shipped: list[str]
+) -> None:
+    """Catches the accepted-image cache keeping an older build after main
+    shipped another digest for the same inputs: consecutive releases with
+    identical inputs would ship different images and rerun the Spark lanes."""
+    cache = ActionsCache()
+    assert [
+        ship_component_image(role, cache, str(run), pr_digest)
+        for run, pr_digest in enumerate(releases, start=1)
+    ] == shipped
+
+
 def test_a_newer_main_release_supersedes_only_through_the_bounded_script() -> None:
     """Catches the supersede job running for tags, gaining write access beyond
     cancelling runs, or its commit markers drifting from the job names that
