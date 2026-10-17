@@ -154,6 +154,10 @@ class FleetProfileApplicationProgress(StrictModel):
     workload_intent_ordinal: int | None = Field(
         le=MAX_DATABASE_INTEGER, default=None, ge=1
     )
+    #: The Sparks a load waiting for admission stamped with its ordinal. A
+    #: Spark of its fence that is not here joined it later (its plan changed):
+    #: no newer intent took it.
+    fenced_node_ids: list[NodeId] = Field(default_factory=list)
     operation_kind: FleetProfileOperationKind | None = None
     completed_steps: int = Field(default=0, ge=0, le=1024)
     total_steps: int = Field(default=0, ge=0, le=1024)
