@@ -18,9 +18,9 @@ def test_agent_alerts_use_bounded_operational_metrics() -> None:
         "NodeCertificateInvalid": "vonk_node_certificate_state",
         "NodeAgentStale": "vonk_node_connection_state",
         "NodeAgentCertificateExpiring": "vonk_agent_certificate_expiry_seconds",
-        "RepeatedAgentOperationFailures": "vonk_agent_operations",
+        "RepeatedAgentOperationFailures": "vonk_recent_agent_operation_failures",
         "AgentOperationStalled": "vonk_stalled_operations",
-        "RepeatedControlJobFailure": "vonk_jobs",
+        "RepeatedControlJobFailure": "vonk_recent_job_failures",
     }
     for alert_name, metric in expected_metrics.items():
         assert metric in alerts[alert_name]["expr"]

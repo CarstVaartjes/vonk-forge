@@ -220,3 +220,79 @@ def test_operational_metrics_refresh_replaces_stale_node_series(tmp_path) -> Non
     assert f'vonk_agent_state{{node_id="{NODE}",state="active"}}' not in rendered
     assert f'vonk_agent_state{{node_id="{NODE}",state="retired"}} 1' in rendered
     assert f'vonk_agent_last_seen_age_seconds{{node_id="{NODE}"}} 5' in rendered
+
+
+@pytest.mark.usefixtures("damaged_json_rows")
+def test_only_failures_within_the_window_count_as_repeated(tmp_path) -> None:
+    # 2026-10-17: the failure alerts were on for 17 days because every stored
+    # failed row counted forever, sweep recipe outcomes included.
+    sessions = _sessions(tmp_path)
+
+    def job(identity: str, kind: str, ended: datetime) -> Job:
+        return Job(
+            id=identity,
+            request_id=f"request-{identity}",
+            kind=kind,
+            state="failed",
+            actor="sweep",
+            authority_revision="a" * 64,
+            targets=[NODE],
+            payload_digest="b" * 64,
+            payload={},
+            created_at=ended - timedelta(minutes=10),
+            updated_at=ended,
+        )
+
+    def operation(identity: str, kind: str, ended: datetime) -> AgentOperation:
+        return AgentOperation(
+            id=identity,
+            parent_job_id="job-id-secret-value",
+            node_id=NODE,
+            kind=kind,
+            payload_digest="c" * 64,
+            payload={},
+            authority_revision="a" * 64,
+            state="failed",
+            current_attempt=1,
+            created_at=ended - timedelta(minutes=10),
+            updated_at=ended,
+        )
+
+    recent, old = NOW - timedelta(minutes=50), NOW - timedelta(minutes=70)
+    with sessions.begin() as session:
+        session.add_all(
+            [
+                job("recent-switch", "recipe.run-switch.v2", recent),
+                job("recent-unknown", "unique-kind-secret", recent),
+                job("old-switch", "recipe.run-switch.v2", old),
+                operation("recent-start", "recipe.start", recent),
+                operation("old-start", "recipe.start", old),
+            ]
+        )
+    metrics = MetricsRegistry()
+
+    OperationalMetricsCollector(metrics, sessions, clock=lambda: NOW).refresh()
+    rendered = metrics.render()
+
+    assert 'vonk_recent_job_failures{kind="recipe.run-switch.v2"} 1' in rendered
+    assert 'vonk_recent_job_failures{kind="other"} 1' in rendered
+    # The fixture's recipe.install failure ended 20 seconds ago.
+    assert (
+        'vonk_recent_agent_operation_failures{operation="recipe.install"} 1' in rendered
+    )
+    assert (
+        'vonk_recent_agent_operation_failures{operation="recipe.start"} 1' in rendered
+    )
+    # Every bounded kind is emitted, so no series vanishes between scrapes.
+    assert 'vonk_recent_job_failures{kind="fleet.revoke"} 0' in rendered
+    assert 'vonk_recent_agent_operation_failures{operation="recipe.stop"} 0' in rendered
+    assert "unique-kind-secret" not in rendered
+
+    later = NOW + timedelta(minutes=30)
+    OperationalMetricsCollector(metrics, sessions, clock=lambda: later).refresh()
+    rendered = metrics.render()
+
+    assert 'vonk_recent_job_failures{kind="recipe.run-switch.v2"} 0' in rendered
+    assert (
+        'vonk_recent_agent_operation_failures{operation="recipe.start"} 0' in rendered
+    )
