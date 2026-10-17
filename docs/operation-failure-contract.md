@@ -18,7 +18,9 @@ durable attempt result, job result or progress; nothing is copied or stored for
 it. The file carries the summary, error code, phase, category, redacted
 stdout/stderr tails and the agent's `FailureDiagnostics`. Operation responses
 name it through `evidence_download.href` only while that attempt is a failure
-attempt.
+attempt. Because it is rendered from those rows, failed history is never
+collected: the terminal-history collector removes succeeded, cancelled and
+superseded rows after their 24 h grace and keeps every failed one.
 
 The cache writes `AvailabilityOperationFailure` directly into durable failure
 state. Exception codes and recovery choices are translated once, at creation.

@@ -1,6 +1,8 @@
 """Bounded retention of completed coordination history, never artifact bytes.
 
-Live and recently used exact identities are retained. Failed scans prove nothing
+Failed history is never collected: a failed row is the failure's evidence (its
+evidence download is built from it), and evidence of failures is kept. Live
+and recently used exact identities are retained. Failed scans prove nothing
 unused. One reference inventory per pass judges every row; each row's own
 consumers are rechecked in a short transaction, and database foreign keys remain
 a final safety boundary rather than being bypassed for collection. A pass is
@@ -65,6 +67,9 @@ _TERMINAL = (
     LifecycleState.CANCELLED.value,
     LifecycleState.SUPERSEDED.value,
 )
+#: The ended states whose history is collected after the grace: every ended
+#: state but ``failed``, whose row is the failure's evidence and is kept.
+_COLLECTED = tuple(state for state in _TERMINAL if state != LifecycleState.FAILED.value)
 
 
 class TerminalHistoryCollector:
@@ -129,23 +134,23 @@ class TerminalHistoryCollector:
             (
                 AgentOperation,
                 AgentOperation.updated_at,
-                AgentOperation.state.in_(_TERMINAL),
+                AgentOperation.state.in_(_COLLECTED),
             ),
-            (Job, Job.updated_at, Job.state.in_(_TERMINAL)),
+            (Job, Job.updated_at, Job.state.in_(_COLLECTED)),
             (
                 ModelCacheOperation,
                 ModelCacheOperation.updated_at,
-                ModelCacheOperation.state.in_(_TERMINAL),
+                ModelCacheOperation.state.in_(_COLLECTED),
             ),
             (
                 FleetProfileApplication,
                 FleetProfileApplication.updated_at,
-                FleetProfileApplication.state.in_(_TERMINAL),
+                FleetProfileApplication.state.in_(_COLLECTED),
             ),
             (
                 RecipeLibrarySyncRun,
                 RecipeLibrarySyncRun.completed_at,
-                RecipeLibrarySyncRun.state.in_(_TERMINAL),
+                RecipeLibrarySyncRun.state.in_(_COLLECTED),
             ),
             (
                 ArtifactDistributionAssignment,
@@ -173,7 +178,7 @@ class TerminalHistoryCollector:
             (
                 RecipeRun,
                 RecipeRun.updated_at,
-                RecipeRun.state.in_((RunState.STOPPED.value, RunState.FAILED.value)),
+                RecipeRun.state == RunState.STOPPED.value,
             ),
         )
         while self._table_index < len(specs):

@@ -167,9 +167,12 @@ def test_ended_run_history_is_reclaimed_whatever_the_spark_last_said(
     node_id = "spk_" + "0" * 32
     run = _stopped_run(old, node_id)
     kept = _stopped_run(old, node_id)
+    # A failed run is its failure's evidence (its run nodes' diagnostics).
+    failed = _stopped_run(old, node_id)
+    failed.state = "failed"
     try:
         with sessions.begin() as session:
-            session.add_all((run, kept))
+            session.add_all((run, kept, failed))
             session.flush()
             if last_word != "never-launched":
                 session.add(
@@ -211,6 +214,7 @@ def test_ended_run_history_is_reclaimed_whatever_the_spark_last_said(
             assert session.get(RecipeRun, run.id) is None
             assert session.scalar(select(RunNode.id)) is None
             assert session.get(RecipeRun, kept.id) is not None
+            assert session.get(RecipeRun, failed.id) is not None
     finally:
         engine.dispose()
 
@@ -361,7 +365,7 @@ def test_terminal_parent_with_unreconciled_attempt_is_kept_until_attempt_ends(
     )
     now = datetime.now(UTC)
     old = now - timedelta(days=2)
-    job = _job(old, state="failed")
+    job = _job(old, state="cancelled")
     attempt_id = str(uuid.uuid4())
     with history_sessions.begin() as session:
         session.add(job)
@@ -387,6 +391,34 @@ def test_terminal_parent_with_unreconciled_attempt_is_kept_until_attempt_ends(
     with history_sessions() as session:
         assert session.get(Job, job.id) is None
         assert session.get(JobAttempt, attempt_id) is None
+
+
+def test_failed_history_is_kept_as_evidence_and_ended_history_beside_it_goes(
+    history_sessions: sessionmaker[Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failed row is its failure's evidence: it outlives the grace.
+
+    Wrong implementation: ``failed`` was collected like every ended state, so
+    the evidence download of a failure older than a day (built from that row)
+    disappeared with it, against "evidence of failures is kept".
+    """
+    monkeypatch.setattr(
+        terminal_history_collection,
+        "time",
+        SimpleNamespace(monotonic=InventoryElapsed().monotonic),
+    )
+    now = datetime.now(UTC)
+    old = now - timedelta(days=30)
+    failed = _job(old, state="failed")
+    ended = [_job(old, state=state) for state in ("succeeded", "cancelled")]
+    with history_sessions.begin() as session:
+        session.add_all((failed, *ended))
+    collector = TerminalHistoryCollector(history_sessions, clock=lambda: now)
+    removed = collector.collect() + collector.collect()
+    with history_sessions() as session:
+        assert set(session.scalars(select(Job.id))) == {failed.id}
+    assert removed["jobs"] == 2
 
 
 def test_unreadable_live_authority_defers_pruning_until_repaired(
