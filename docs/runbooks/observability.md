@@ -99,7 +99,10 @@ control plane mounts no Git repository.
 run now has waited more than five minutes. It is grouped by job kind, so a
 running job of another kind no longer hides the starved one. A job deferred by a
 future `observation_due_at` is an intentional wait and deliberately does not age
-into the alert; if the alert fires, the wait is not the explanation.
+into the alert; if the alert fires, the wait is not the explanation. Neither does
+a queued job whose work is an agent operation (an artifact transfer, a wait on a
+busy Spark): the worker never claims it, and the operation shows its own
+progress and wait reason.
 
 Confirm the worker container is healthy and holds the online shared lock. Check
 expired attempts and database connectivity. Stale fences must never be reused;
