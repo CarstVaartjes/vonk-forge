@@ -14,11 +14,12 @@ from .models import InstallationNode
 def refresh_installed_bytes(
     session: Session, node_id: str, measured: Sequence[InstallationBytes]
 ) -> int:
-    """Record each installed rank's measured size on ``node_id``; how many changed.
+    """Record each ended rank's measured size on ``node_id``; how many changed.
 
-    The install receipt measured the tree once; runtime caches grow it after.
-    Only an installed rank follows the measurement: a rank being installed or
-    removed keeps what its own operation records.
+    The install receipt measured the tree once; runtime caches grow it after,
+    and a failed install's tree was never measured. An installed or failed
+    rank follows the measurement, so storage relief counts what removing it
+    frees; a rank being installed or removed keeps what its operation records.
     """
 
     sizes = {item.installation_id: item.bytes for item in measured}
@@ -29,7 +30,9 @@ def refresh_installed_bytes(
         select(InstallationNode).where(
             InstallationNode.node_id == node_id,
             InstallationNode.installation_id.in_(tuple(sizes)),
-            InstallationNode.state == InstallationNodeState.INSTALLED,
+            InstallationNode.state.in_(
+                (InstallationNodeState.INSTALLED, InstallationNodeState.FAILED)
+            ),
         )
     ):
         if node.installed_bytes != sizes[node.installation_id]:
