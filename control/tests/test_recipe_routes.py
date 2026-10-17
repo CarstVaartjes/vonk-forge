@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
@@ -9,7 +10,7 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, event, select, text
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
@@ -54,6 +55,7 @@ from vonk_control.recipe_operation_worker import RecipeOperationWorker
 from vonk_control.recipe_routes import (
     AtomicRecipeRoutePublisher,
     RecipeRouteNotReady,
+    RecipeRouteOwnerBusy,
     RecipeRouteService,
     RecipeRouteSuperseded,
 )
@@ -1776,9 +1778,10 @@ def test_postgres_concurrent_current_publishers_keep_one_owner_receipt(
     def publish(service: RecipeRouteService) -> LiteLlmGeneration | None:
         try:
             return service.publish_run(run_id)
-        except RecipeRouteSuperseded:
-            # The loser of the race is replaced by the newer claim; the
-            # worker simply retries it, so it is not a failure.
+        except (RecipeRouteSuperseded, RecipeRouteOwnerBusy):
+            # The loser of the race is replaced by the newer claim, or finds
+            # the owner held; the worker simply retries it, so it is not a
+            # failure.
             return None
 
     with ThreadPoolExecutor(max_workers=2) as pool:
@@ -1793,6 +1796,84 @@ def test_postgres_concurrent_current_publishers_keep_one_owner_receipt(
         assert owner.owner_generation == marker.generation == publication.generation
         assert publication.activation_marker_digest == marker.digest
         assert marker.generation == max(result.generation for result in results)
+
+
+def test_a_busy_route_owner_ends_the_publication_pass_and_retries_after_release(
+    tmp_path: Path, postgres_engine, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Catches a worker that re-tries the shared route owner once per run.
+
+    Every pending run and the maintenance pass lock the same singleton row, so
+    a holder elsewhere refuses them all; trying each in turn is a hot loop.
+    """
+
+    clock = MutableClock(NOW)
+    service, _publisher, _applied, first = setup(
+        tmp_path / "database", clock=clock, engine=postgres_engine
+    )
+    runs = [
+        first,
+        *(
+            add_running_run(
+                service, first, alias=alias, route_state="pending", identity=identity
+            )
+            for alias, identity in (("second", 3), ("third", 4))
+        ),
+    ]
+    with service.sessions.begin() as session:
+        _recipe_run(session, first).route_state = RouteState.PENDING
+    with service.publication_transaction():
+        pass  # the owner row exists, as it does once anything was published
+    worker = RecipeOperationWorker(service.sessions, service, clock=clock)
+    tries: list[str] = []
+
+    def count_owner_tries(_connection, _cursor, statement, *_rest) -> None:
+        if "route_publication_owner" in statement and "NOWAIT" in statement:
+            tries.append(statement)
+
+    def waits() -> int:
+        return sum(
+            "recipe.route.owner_busy" in record.getMessage()
+            for record in caplog.records
+        )
+
+    caplog.set_level(logging.INFO, logger="vonk-control-worker")
+    event.listen(postgres_engine, "before_cursor_execute", count_owner_tries)
+    try:
+        with postgres_engine.connect() as holder:
+            holder.execute(
+                text(
+                    "SELECT singleton_id FROM route_publication_owner"
+                    " WHERE singleton_id = 1 FOR UPDATE"
+                )
+            )
+
+            # One owner try ends the pass; it is not progress, so the worker sleeps.
+            assert worker.tick() is False
+            assert len(tries) == 1
+            assert waits() == 1
+            with service.sessions() as session:
+                for run_id in runs:
+                    run = _recipe_run(session, run_id)
+                    assert run.route_state == RouteState.PENDING
+                    assert run.route_next_attempt_at is None
+
+            # The wait is paced: a pass before the retry tries nothing, the
+            # maintenance pass included.
+            assert worker.tick() is False
+            assert len(tries) == 1
+            assert waits() == 1
+            holder.rollback()
+
+        clock.now += timedelta(seconds=10)
+        for _ in runs:
+            assert worker.tick() is True
+    finally:
+        event.remove(postgres_engine, "before_cursor_execute", count_owner_tries)
+    with service.sessions() as session:
+        assert {_recipe_run(session, run_id).route_state for run_id in runs} == {
+            RouteState.PUBLISHED
+        }
 
 
 @pytest.mark.parametrize(
