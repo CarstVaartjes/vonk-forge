@@ -52,7 +52,8 @@ removes the least recently used unused items until the shortfall plus a small
 reserve is covered, then stops. Items used in the last 24 hours go only after
 everything older. Which items exist:
 
-1. **Spark installations** (state ``installed``). An installation a saved
+1. **Spark installations** (state ``installed``, or ``failed``: a failed
+   install keeps what it wrote until it is removed). An installation a saved
    profile points to (but that is not the loaded profile's) may go when space is
    needed, after every installation no profile points to, least recently used
    first within each group: its models stay on the NAS, so loading that profile
@@ -127,6 +128,12 @@ _HOLDING_STATES = (
     InstallationState.PARTIAL,
     InstallationState.FAILED,
 )
+
+
+#: Holding states an unused installation is removed from. An installing one
+#: is in flight, and a partial one is the incomplete-installation sweep's
+#: (``attempt_residues``); a failed one is ended and only holds disk.
+_COLLECTABLE_STATES = (InstallationState.INSTALLED, InstallationState.FAILED)
 
 
 _FINISHED_JOBS = job_states.words(
