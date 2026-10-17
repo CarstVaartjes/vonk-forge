@@ -65,6 +65,11 @@ _TERMINAL = (
     LifecycleState.CANCELLED.value,
     LifecycleState.SUPERSEDED.value,
 )
+#: The one attempt state that still owns its row's effect. An attempt kept
+#: ``observing`` (a lapsed lease or an unconfirmed report) on an ended owner is
+#: its retained receipt, never a live claim: the owner's end lapses it so
+#: (``lifecycle/agent_operation.py``), and nothing advances it afterwards.
+_LIVE_ATTEMPT = LifecycleState.RUNNING.value
 
 
 class TerminalHistoryCollector:
@@ -347,7 +352,7 @@ class TerminalHistoryCollector:
                 select(
                     exists().where(
                         JobAttempt.job_id == identity,
-                        JobAttempt.state.not_in(_TERMINAL),
+                        JobAttempt.state == _LIVE_ATTEMPT,
                     )
                 )
             ):
@@ -393,7 +398,7 @@ class TerminalHistoryCollector:
                 select(
                     exists().where(
                         AgentOperationAttempt.operation_id == identity,
-                        AgentOperationAttempt.state.not_in(_TERMINAL),
+                        AgentOperationAttempt.state == _LIVE_ATTEMPT,
                     )
                 )
             ):

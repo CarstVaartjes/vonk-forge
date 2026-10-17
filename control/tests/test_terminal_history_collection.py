@@ -15,6 +15,10 @@ from sqlalchemy.orm import Session, sessionmaker
 from vonk_control import terminal_history_collection
 from vonk_control.catalog_revision_collection import INTERVAL
 from vonk_control.models import (
+    AgentCertificate,
+    AgentNode,
+    AgentOperation,
+    AgentOperationAttempt,
     Base,
     Job,
     JobAttempt,
@@ -387,6 +391,106 @@ def test_terminal_parent_with_unreconciled_attempt_is_kept_until_attempt_ends(
     with history_sessions() as session:
         assert session.get(Job, job.id) is None
         assert session.get(JobAttempt, attempt_id) is None
+
+
+@pytest.mark.parametrize(
+    ("attempt_state", "collected"),
+    [
+        # The retained receipt of an ended order: what every lapse leaves.
+        ("observing", True),
+        ("failed", True),
+        ("succeeded", True),
+        # A claim that still owns its effect keeps the history.
+        ("running", False),
+    ],
+)
+def test_an_ended_order_whose_last_attempt_lapsed_is_collected(
+    history_sessions: sessionmaker[Session],
+    monkeypatch: pytest.MonkeyPatch,
+    attempt_state: str,
+    collected: bool,
+) -> None:
+    """Live regression (2026-10-17): ended orders outlived their grace forever.
+
+    An order's end keeps its lapsed attempt ``observing`` as the retained
+    receipt. The collector read every non-terminal attempt word as a live
+    claim, so such an order, and its parent job with it, was never collected:
+    five 47-attempt starts and the 2026-09-28 rows among them.
+    """
+    monkeypatch.setattr(
+        terminal_history_collection,
+        "time",
+        SimpleNamespace(monotonic=InventoryElapsed().monotonic),
+    )
+    now = datetime.now(UTC)
+    old = now - timedelta(days=2)
+    job = _job(old, state="cancelled")
+    operation_id = str(uuid.uuid4())
+    node_id = "spk_" + uuid.uuid4().hex
+    serial = str(uuid.uuid4())
+    with history_sessions.begin() as session:
+        session.add_all((job, AgentNode(node_id=node_id, state="active")))
+        session.flush()
+        session.add(
+            AgentCertificate(
+                serial=serial,
+                node_id=node_id,
+                not_before=old,
+                not_after=now,
+                fingerprint=serial,
+                state="active",
+                generation=1,
+            )
+        )
+        session.add(
+            AgentOperation(
+                id=operation_id,
+                parent_job_id=job.id,
+                node_id=node_id,
+                kind="recipe.start",
+                payload_digest="c" * 64,
+                payload={},
+                authority_revision="revision",
+                state="cancelled",
+                current_attempt=1,
+                created_at=old,
+                updated_at=old,
+            )
+        )
+        session.flush()
+        session.add(
+            AgentOperationAttempt(
+                operation_id=operation_id,
+                attempt=1,
+                fence=str(uuid.uuid4()),
+                lease_deadline=old,
+                agent_certificate_serial=serial,
+                state=attempt_state,
+                observation_cause="lease_lapsed"
+                if attempt_state == "observing"
+                else None,
+            )
+        )
+        session.add(
+            JobAttempt(
+                id=str(uuid.uuid4()),
+                job_id=job.id,
+                attempt=1,
+                fence=str(uuid.uuid4()),
+                worker_id="worker",
+                lease_deadline=old,
+                state=attempt_state,
+            )
+        )
+    collector = TerminalHistoryCollector(history_sessions, clock=lambda: now)
+    removed = collector.collect() + collector.collect() + collector.collect()
+    with history_sessions() as session:
+        kept = (
+            session.get(AgentOperation, operation_id) is not None,
+            session.get(Job, job.id) is not None,
+        )
+    assert kept == (not collected, not collected)
+    assert removed["agent_operations"] == removed["jobs"] == int(collected)
 
 
 def test_unreadable_live_authority_defers_pruning_until_repaired(
