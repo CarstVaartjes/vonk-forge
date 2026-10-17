@@ -174,18 +174,6 @@ class CatalogRevisionCollector:
         self._due_at = now + INTERVAL
         try:
             result = self.collect()
-        except _FenceBusy:
-            # A wait, not a failure: re-checked at the one wait cadence.
-            self._due_at = schedule(
-                RECOVERY, "catalog_revision.fence", 0, Disposition.WAIT, now
-            ).next_at
-            log_event(
-                _LOGGER,
-                "catalog_revision.fence_busy",
-                service="control-worker",
-                retry_at=self._due_at,
-            )
-            return False
         except SQLAlchemyError as error:
             # A database fault proves nothing unused; try again next interval.
             log_event(
@@ -198,6 +186,27 @@ class CatalogRevisionCollector:
         return result.revisions > 0 or result.bundles > 0
 
     def collect(self) -> Collected:
+        try:
+            return self._sweep()
+        except _FenceBusy:
+            # A wait, not a failure: the pass ends and is re-checked at the one
+            # wait cadence, never per candidate and never only next interval.
+            self._due_at = schedule(
+                RECOVERY,
+                "catalog_revision.fence",
+                0,
+                Disposition.WAIT,
+                self._clock(),
+            ).next_at
+            log_event(
+                _LOGGER,
+                "catalog_revision.fence_busy",
+                service="control-worker",
+                retry_at=self._due_at,
+            )
+            return Collected(0, 0, {})
+
+    def _sweep(self) -> Collected:
         now = self._clock()
         cutoff = now - GRACE
         deadline = time.monotonic() + self._budget_seconds
