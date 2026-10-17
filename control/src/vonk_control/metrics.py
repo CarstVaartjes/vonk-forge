@@ -22,6 +22,7 @@ from vonk_agent_protocol.claims import AGENT_PROTOCOL_VERSION
 
 from . import agent_operation_states, job_states
 from .compose_bundle import ComposeBundle
+from .jobs import without_agent_operation
 from .models import (
     AgentCertificate,
     AgentNode,
@@ -136,6 +137,25 @@ def runnable_job_ages(
             created = created.replace(tzinfo=UTC)
         ages[kind] = max(ages.get(kind, 0.0), max(0.0, (now - created).total_seconds()))
     return ages
+
+
+def read_runnable_job_ages(session: Session, now: datetime) -> dict[str, float]:
+    """The oldest queued age per kind among jobs the worker queue would claim.
+
+    A queued job whose work is an agent operation waits on that operation's
+    Spark (``queue.spark_busy``, a transfer in progress); the worker never
+    claims it, so it is not starved work.
+    """
+
+    rows = session.execute(
+        select(Job.kind, Job.created_at, Job.result).where(
+            Job.state.in_(job_states.words(LifecycleState.QUEUED)),
+            without_agent_operation(),
+        )
+    )
+    return runnable_job_ages(
+        ((row.kind, row.created_at, row.result) for row in rows), now
+    )
 
 
 def _label_value(value: str) -> str:

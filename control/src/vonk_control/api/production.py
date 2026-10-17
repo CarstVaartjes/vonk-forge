@@ -31,7 +31,7 @@ from ..failure_evidence import FailureEvidenceService
 from ..gateway_keys import GatewayKeyService, keep_default_key
 from ..library_assessment import LibraryAssessment
 from ..logging import configure_controller_logging
-from ..metrics import MetricsRegistry, runnable_job_ages
+from ..metrics import MetricsRegistry, read_runnable_job_ages
 from ..model_cache import ModelCacheService
 from ..model_cache_api import register_model_cache_operation_provider
 from ..operator_projection_api import build_fleet_operator_services
@@ -356,21 +356,11 @@ def production_app(settings: Settings | None = None) -> FastAPI:
                 )
             ]
             metrics.replace_job_counts(job_counts)
-            # Oldest queued work an operator could actually run now.  A job
-            # deferred by a future ``observation_due_at`` is an intentional wait,
-            # not starvation, and must not age into the alert.
+            # Oldest queued work the worker queue could actually run now.  A job
+            # deferred by a future ``observation_due_at``, or one whose work is an
+            # agent operation on a Spark, is a wait, not starvation.
             metrics.replace_runnable_job_ages(
-                runnable_job_ages(
-                    (
-                        (row.kind, row.created_at, row.result)
-                        for row in session.execute(
-                            select(Job.kind, Job.created_at, Job.result).where(
-                                Job.state == "queued"
-                            )
-                        )
-                    ),
-                    now,
-                ).items()
+                read_runnable_job_ages(session, now).items()
             )
         backup_marker = settings.state_path / "last-successful-backup.epoch"
         backup_completed_at: int | None = None
