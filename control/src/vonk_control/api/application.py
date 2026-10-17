@@ -44,7 +44,11 @@ from ..agent_api import (
     install_agent_routes,
 )
 from ..agent_jobs import OperatorRetirementRefused
-from ..artifact_job_api import install_artifact_job_routes
+from ..artifact_job_api import (
+    MAX_ARTIFACT_INPUT_UPLOAD_BYTES,
+    MAX_ARTIFACT_OUTPUT_UPLOAD_BYTES,
+    install_artifact_job_routes,
+)
 from ..artifact_jobs import ArtifactJobService
 from ..auth import (
     MUTATION_ROLES,
@@ -393,9 +397,9 @@ def create_app(
         maximum = (
             MAX_RECIPE_IMAGE_BYTES
             if recipe_image_upload
-            else 512 * 1024**2
+            else MAX_ARTIFACT_INPUT_UPLOAD_BYTES
             if artifact_input_upload
-            else 1024**3
+            else MAX_ARTIFACT_OUTPUT_UPLOAD_BYTES
             if artifact_output_upload
             else MAX_CONTROL_DOCUMENT_BYTES
         )
