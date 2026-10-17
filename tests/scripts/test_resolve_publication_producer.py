@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.machinery
 import importlib.util
+import re
 import subprocess
 from pathlib import Path
 
@@ -11,10 +12,8 @@ ROOT = Path(__file__).resolve().parents[2]
 REPO = "owner/repo"
 
 
-def module():
-    loader = importlib.machinery.SourceFileLoader(
-        "producer_evidence", str(ROOT / "scripts/resolve-publication-producer")
-    )
+def module(name="producer_evidence", path="scripts/resolve-publication-producer"):
+    loader = importlib.machinery.SourceFileLoader(name, str(ROOT / path))
     spec = importlib.util.spec_from_loader(loader.name, loader)
     assert spec
     result = importlib.util.module_from_spec(spec)
@@ -130,6 +129,12 @@ def github(monkeypatch):
         ("agent", "packaging/debian/postinst", True),
         ("agent", ".github/actions/agent-apt-publish/action.yml", True),
         ("images", "control/src/vonk_control/harnesses/canonical_metadata.py", True),
+        ("images", "control/src/x.py", True),
+        ("images", "control/tests/x.py", False),
+        ("images", "control/migrations/versions/x.py", True),
+        ("images", "deploy/compose/tests/test_x.py", False),
+        ("images", "deploy/compose/tests/test.env", True),
+        ("images", "tools/openapi-client/package.json", True),
         ("images", "docs/something.md", False),
         ("images", ".github/workflows/installer-publication.yml", True),
         ("setups", "scripts/resolve-publication-producer", True),
@@ -248,3 +253,66 @@ def test_release_workflow_records_every_producer_the_resolver_reads():
     assert f"for producer in {' '.join(resolver.PRODUCERS)}; do" in workflow
     for producer in resolver.PRODUCERS:
         assert f"name: {resolver.marker_name(producer)}\n" in workflow
+
+
+def image_job_inputs() -> set[str]:
+    """The path patterns the images job reads, derived from its own sources."""
+    images = module("dev_image_inputs", "scripts/dev-image-inputs")
+
+    def pattern(path: str) -> str:
+        path = path.rstrip("/")
+        return f"{path}/**" if (ROOT / path).is_dir() else path
+
+    wheel = re.search(
+        r"^wheel_name=(\S+)$",
+        (ROOT / "scripts/build-control-wheel").read_text(),
+        re.MULTILINE,
+    )
+    assert wheel
+    inputs: set[str] = set()
+    # The Controller images read their COPY sources from the repository root.
+    dockerfile = (ROOT / "control/Dockerfile").read_text()
+    for line in re.findall(r"^COPY\s+(.+)$", dockerfile, re.MULTILINE):
+        words = line.split()
+        assert words[-1] != "\\", "continued COPY lines need a parser"
+        if any(word.startswith("--from=") for word in words):
+            continue
+        for source in [word for word in words if not word.startswith("--")][:-1]:
+            # The job builds the protocol wheel from agent_protocol sources.
+            if source != f"inventory/wheels/{wheel[1]}":
+                assert (ROOT / source).exists(), source
+                inputs.add(pattern(source))
+    # Hermes and LiteLLM build from isolated contexts under their policy.
+    for path in (*sum(images.CONTEXTS.values(), ()), *images.POLICY):
+        inputs.add(pattern(path))
+    # Files and local actions the workflow itself names, comments aside.
+    workflow = "\n".join(
+        re.sub(r"(^|\s)#.*", "", line)
+        for line in (ROOT / ".github/workflows/dev-images.yml").read_text().splitlines()
+    )
+    for token in re.findall(r"[\w.-]+(?:/[\w.-]+)+", workflow):
+        parts = token.split("/")
+        for start in range(len(parts) - 1):
+            if (ROOT / "/".join(parts[start:])).is_file():
+                inputs.add("/".join(parts[start:]))
+    for action in re.findall(r"uses:\s*\./(\S+)", workflow):
+        inputs.add(pattern(action))
+    # A file inside a directory input is already covered by that directory.
+    return {
+        path
+        for path in inputs
+        if not any(
+            other.endswith("/**") and other != path and path.startswith(other[:-2])
+            for other in inputs
+        )
+    }
+
+
+def test_image_producer_paths_are_exactly_the_image_job_inputs():
+    resolver = module()
+    paths = set(resolver.PRODUCERS["images"].paths)
+    inputs = image_job_inputs() | set(resolver.ORCHESTRATION)
+    # A missing input reuses a stale image; an extra one (such as control/**
+    # with its tests) rebuilds images whose bytes did not change.
+    assert sorted(inputs - paths) == [], "image inputs the producer ignores"
+    assert sorted(paths - inputs) == [], "producer paths no image job reads"
