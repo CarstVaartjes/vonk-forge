@@ -231,7 +231,8 @@ class ArtifactJobAdapter:
         operation = session.scalar(
             select(StoredOperation)
             .where(StoredOperation.parent_job_id == job.operation_id)
-            .order_by(StoredOperation.id)
+            # Beside siblings no Spark was handed, the issued order is its own.
+            .order_by(StoredOperation.current_attempt.desc(), StoredOperation.id)
             .limit(1)
         )
         attempt = (

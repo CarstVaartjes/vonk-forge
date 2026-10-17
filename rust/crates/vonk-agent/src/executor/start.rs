@@ -239,7 +239,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                     )
                     .await
                 } else {
-                    self.execute_host_runtime(claim, runtime_action, runtime_arguments)
+                    self.inspect_start_run(claim, runtime_arguments, request.run_generation)
                         .await
                 }
             },
@@ -314,36 +314,10 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                     }
                     return stopped;
                 }
-                if retained_existing {
-                    if temporary_observation_error(&error) {
-                        return temporary_preparation_failure(
-                            FailureStage::RetainedContainer,
-                            "retained_inspect",
-                            &error.preflight_code(),
-                        );
-                    }
-                    // The helper found the exact-name container is not
-                    // this start's. Remove it only when the exact stop
-                    // proves it this order's, then re-issue; refuse
-                    // (untouched) when it is not. Any other failure is
-                    // reported with the helper's evidence.
-                    if matches!(
-                        &error,
-                        crate::host_runtime::HostRuntimeError::HelperRejected { code, .. }
-                            if *code == HelperErrorCode::OperationInvalidArtifact
-                    ) {
-                        return match self.heal_retained_run(claim, &run_id).await {
-                            Ok(()) => retained_container_removed(&run_id),
-                            Err(result) => result,
-                        };
-                    }
-                    return runtime_observation_failure(&error);
-                }
-                if collective_readiness {
-                    return runtime_failure(
-                        "collective workload is not running with exact identity",
-                        &error,
-                    );
+                if retained_existing || collective_readiness {
+                    return self
+                        .inspected_start_failed(claim, &run_id, retained_existing, &error)
+                        .await;
                 }
                 // The error is not what the container did: it is read again
                 // before anything stops it.
@@ -414,6 +388,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                 let evidence = self
                     .running_workload_evidence(
                         &runtime_guard_arguments,
+                        request.run_generation,
                         "rank_stability_deadline=true",
                     )
                     .await;
@@ -436,12 +411,6 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         // A load is ended by a stall, not a total: the container's growing
         // log is its progress, reported to the Controller, which extends the
         // start deadline the same way.
-        let request_root = self.runtime_root.join("runtime-requests");
-        let inspection = HostRuntimeBoundary {
-            client: self.client,
-            request_root: &request_root,
-            helper_socket: self.helper_socket,
-        };
         let window = Duration::from_secs(u64::from(claim.observation_budget_seconds));
         let accepted =
             phase_deadline.map(|deadline| tokio::time::Instant::now() + remaining_lease(deadline));
@@ -454,14 +423,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
             window,
             accepted,
             &stall_at,
-            || async {
-                let report = inspection
-                    .inspect_recipe_run_report(runtime_guard_arguments.clone(), true)
-                    .await?;
-                Ok(report
-                    .process_logs
-                    .map(|logs| format!("{}\0{}", logs.stdout.text, logs.stderr.text)))
-            },
+            || self.loading_tail(&runtime_guard_arguments, request.run_generation),
             // The order's heartbeat carries this activity to the Controller on
             // its next renewal; that one post classifies and reports its own
             // failures, so no second, unobserved post exists.
@@ -507,7 +469,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
             // Read before any stop removes the container: a workload
             // that never became ready leaves its own account of why.
             let evidence = self
-                .running_workload_evidence(&runtime_guard_arguments, why)
+                .running_workload_evidence(&runtime_guard_arguments, request.run_generation, why)
                 .await;
             if !collective_readiness
                 && let Err(uncertain) = self.stop_start_run(claim, &run_id, false).await

@@ -289,7 +289,10 @@ class ExecuteContainerRuntimeRequestOperation(_HostOperation):
             for value in (
                 self.start_plan_sha256,
                 self.stop_plan_sha256,
-                self.run_generation,
+                # An inspection may be bound to the generation of its run.
+                None
+                if self.action == ContainerRuntimeAction.RUN_INSPECT
+                else self.run_generation,
                 self.runtime_run_id,
                 self.runtime_target_id,
                 self.runtime_installation_id,

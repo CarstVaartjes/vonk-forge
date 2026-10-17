@@ -1179,6 +1179,46 @@ def test_collective_readiness_grant_inspects_and_never_starts() -> None:
         service.issue_grant(**common, action=ContainerRuntimeAction.START)
 
 
+@pytest.mark.parametrize("phase", [None, "collective-readiness"])
+def test_an_inspection_grant_binds_its_starts_own_generation(
+    phase: str | None,
+) -> None:
+    """The agent's inspection names its Start's generation; the grant carries
+    the generation of the stored Start (1), so the helper answers only for
+    that generation's container. An older agent names none and its grant
+    stays unbound; another generation is refused."""
+    service = runtime_service(
+        operation_payload=None if phase is None else {"phase": phase}
+    )
+
+    def grant(**binding: object) -> ExecuteContainerRuntimeRequestOperation:
+        body = HostRuntimeGrantRequest.model_validate(
+            {
+                "fence": "40000000-0000-4000-8000-000000000004",
+                "action": "run-inspect",
+                "request_sha256": "e" * 64,
+                "expires_in_seconds": 30,
+            }
+            | binding
+        )
+        operation = issue_host_runtime_grant(
+            service,
+            body,
+            node_id="spk_" + "1" * 32,
+            certificate_serial="certificate-1",
+        ).claims.operation
+        assert isinstance(operation, ExecuteContainerRuntimeRequestOperation)
+        return operation
+
+    assert grant(run_generation=1).run_generation == 1
+    assert grant().run_generation is None
+    with pytest.raises(HostHelperAuthorityError):
+        grant(run_generation=2)
+    # Only the generation: an inspection is never bound to a plan.
+    with pytest.raises(ValidationError):
+        grant(run_generation=1, runtime_run_id=RUNTIME_RUN_ID)
+
+
 @pytest.mark.parametrize("operation_kind", ["recipe.start", "recipe.job.run.v1"])
 @pytest.mark.parametrize("node_intent", [1, 2])
 @pytest.mark.usefixtures("damaged_json_rows")

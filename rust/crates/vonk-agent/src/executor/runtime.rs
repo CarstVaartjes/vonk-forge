@@ -129,21 +129,31 @@ impl<R> RecipeExecutor<'_, R> {
 }
 
 impl<R> RecipeExecutor<'_, R> {
-    pub(super) async fn execute_host_runtime(
+    /// The granted inspection of one Start's container, bound to the Start's
+    /// generation: another generation's container is refused, never read as
+    /// this Start's.
+    pub(super) async fn inspect_start_run(
         &self,
         claim: &AgentClaim,
-        action: HostRuntimeAction,
         arguments: Vec<String>,
+        run_generation: u64,
     ) -> Result<(), crate::host_runtime::HostRuntimeError> {
-        self.execute_host_runtime_outcome(claim, action, arguments)
-            .await
-            .and_then(|outcome| {
-                if outcome.stop_uncertain {
-                    Err(crate::host_runtime::HostRuntimeError::StopUncertain)
-                } else {
-                    Ok(())
-                }
-            })
+        self.report_phase(claim, ProgressPhase::Verifying).await;
+        let request_root = self.runtime_root.join("runtime-requests");
+        HostRuntimeBoundary {
+            client: self.client,
+            request_root: &request_root,
+            helper_socket: self.helper_socket,
+        }
+        .inspect_run(claim, arguments, run_generation)
+        .await
+        .and_then(|outcome| {
+            if outcome.stop_uncertain {
+                Err(crate::host_runtime::HostRuntimeError::StopUncertain)
+            } else {
+                Ok(())
+            }
+        })
     }
 }
 

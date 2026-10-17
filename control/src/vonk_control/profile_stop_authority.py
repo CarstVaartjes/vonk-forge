@@ -670,23 +670,17 @@ def validate_jobrun_stop_source(
 ) -> tuple[ArtifactJob, Job, AgentOperation]:
     """Prove a cleanup Stop names the run's own issued JobRun, by identity.
 
-    The JobRun is the run's (its artifact job, source job and single order, on
-    a Spark of the run), older than the Stop's intent (a newer intent's JobRun
-    belongs to its newer owner), and the Stop names its container at no newer
-    generation than the run's. What the run's plan, revision, mapping or the
-    rows' digests became since it launched never decides it.
+    The JobRun is the run's (its artifact job's order, on a Spark of the run),
+    older than the Stop's intent (a newer intent's JobRun belongs to its newer
+    owner), and the Stop names its container at no newer generation than the
+    run's. The order's own request names that container; what the run's plan,
+    revision, mapping, the order's parent row or the rows' digests became since
+    it launched never decides it.
     """
 
     artifact = session.get(ArtifactJob, target.artifact_job_id)
     source_job = session.get(Job, target.source_job_id)
     source_operation = session.get(AgentOperation, target.source_operation_id)
-    source_siblings = tuple(
-        session.scalars(
-            select(AgentOperation.id).where(
-                AgentOperation.parent_job_id == target.source_job_id
-            )
-        )
-    )
     member = session.scalar(
         select(RunNode.id).where(
             RunNode.run_id == run.id, RunNode.node_id == target.node_id
@@ -699,11 +693,6 @@ def validate_jobrun_stop_source(
         or source_job is None
         or source_operation is None
         or member is None
-        or source_job.kind != "recipe.job.run.v1"
-        or source_job.payload.get("owner_kind") != "artifact-job"
-        or source_job.payload.get("owner_id") != artifact.id
-        or source_job.targets != [target.node_id]
-        or source_siblings != (source_operation.id,)
         or source_operation.parent_job_id != source_job.id
         or source_operation.node_id != target.node_id
         or source_operation.kind != "recipe.job.run.v1"

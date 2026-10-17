@@ -35,6 +35,7 @@ from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.contracts import PAYLOAD_MODELS
 from vonk_agent_protocol.contracts import AgentOperation as OperationKind
 from vonk_agent_protocol.host_helper import (
+    ContainerRuntimeAction,
     ContainerRuntimeActionName,
     RecipeReconciliationIdentity,
 )
@@ -301,7 +302,10 @@ class HostRuntimeGrantRequest(AgentGrantRequest):
             for value in (
                 self.start_plan_sha256,
                 self.stop_plan_sha256,
-                self.run_generation,
+                # An inspection may ask to be bound to its run's generation.
+                None
+                if self.action == ContainerRuntimeAction.RUN_INSPECT
+                else self.run_generation,
                 self.runtime_run_id,
                 self.runtime_target_id,
                 self.runtime_installation_id,

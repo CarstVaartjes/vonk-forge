@@ -160,6 +160,8 @@ struct Binding {
     installation_id: Option<uuid::Uuid>,
     reconciliation_identity: Option<RecipeReconciliationIdentity>,
     lifecycle_plan: Option<HostRuntimePlan>,
+    /// The generation a granted inspection's container must carry.
+    run_generation: Option<u64>,
     /// Progress the helper's work makes outside the helper exchange; the
     /// wait for its answer restarts on every step of it.
     progress: Option<Inactivity>,
@@ -187,10 +189,13 @@ impl HostRuntimeBoundary<'_> {
 
     /// A background observation's inspection, in its bounded lane.  With
     /// `include_logs` an exited container answers with its retained output.
+    /// With `run_generation` the helper answers only for a container whose
+    /// label carries it, so another generation's is never this run's.
     pub async fn inspect_recipe_run_evidence_for_observation(
         &self,
         arguments: Vec<String>,
         include_logs: bool,
+        run_generation: Option<u64>,
     ) -> Result<RunInspectionReport, HostRuntimeError> {
         let permit = background_inspection_slots(self.helper_socket)
             .try_acquire_owned()
@@ -199,8 +204,13 @@ impl HostRuntimeBoundary<'_> {
                 diagnostic: None,
                 process_logs: None,
             })?;
-        self.inspect_recipe_run_report_with_permit(arguments, include_logs, Some(permit), None)
-            .await
+        self.inspect_recipe_run_report_with_permit(
+            arguments,
+            include_logs,
+            Some(permit),
+            run_generation,
+        )
+        .await
     }
 
     /// Like `inspect_recipe_run`, and when `include_logs` is set also reads the
@@ -411,6 +421,23 @@ impl HostRuntimeBoundary<'_> {
             .await
     }
 
+    /// A granted inspection of one Start's container: the helper answers for
+    /// it only when its label carries `run_generation`, the generation the
+    /// Controller's grant names for this Start.
+    pub async fn inspect_run(
+        &self,
+        claim: &AgentClaim,
+        arguments: Vec<String>,
+        run_generation: u64,
+    ) -> Result<HostRuntimeOutcome, HostRuntimeError> {
+        let binding = Binding {
+            run_generation: Some(run_generation),
+            ..Binding::default()
+        };
+        self.execute_bound(claim, HostRuntimeAction::RunInspect, arguments, binding)
+            .await
+    }
+
     pub async fn execute_plan(
         &self,
         claim: &AgentClaim,
@@ -473,6 +500,7 @@ impl HostRuntimeBoundary<'_> {
             installation_id,
             reconciliation_identity,
             lifecycle_plan,
+            run_generation,
             progress,
         } = binding;
         // How long the helper may stay silent before its answer is presumed
@@ -507,7 +535,7 @@ impl HostRuntimeBoundary<'_> {
                 }),
             _ => Duration::from_secs(610),
         };
-        let request = runtime_request(
+        let mut request = runtime_request(
             claim,
             action,
             arguments,
@@ -515,6 +543,9 @@ impl HostRuntimeBoundary<'_> {
             reconciliation_identity,
             lifecycle_plan.as_ref(),
         );
+        if run_generation.is_some() {
+            request.run_generation = run_generation;
+        }
         request
             .validate()
             .map_err(HostRuntimeError::request_refusal)?;

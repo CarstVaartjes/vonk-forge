@@ -627,12 +627,12 @@ async fn exited_serving_workload_carries_its_retained_output() {
     };
     let arguments = vec![Uuid::new_v4().to_string()];
     let observed = boundary
-        .inspect_recipe_run_evidence_for_observation(arguments.clone(), false)
+        .inspect_recipe_run_evidence_for_observation(arguments.clone(), false, None)
         .await
         .unwrap();
     assert!(!observed.running);
     let Err(exited) = boundary
-        .inspect_recipe_run_evidence_for_observation(arguments, true)
+        .inspect_recipe_run_evidence_for_observation(arguments, true, None)
         .await
     else {
         panic!("an exited container answers with its process-exit account");
@@ -680,4 +680,97 @@ async fn exited_serving_workload_carries_its_retained_output() {
         };
         assert!(exited_workload_diagnostics(&missing).is_none());
     }
+}
+
+/// A background observation names the generation of the run's own record, so
+/// the helper answers for the container only when its label carries that
+/// generation: another generation's container is never reported as this run.
+#[tokio::test]
+async fn an_observation_names_the_generation_of_its_run() {
+    use std::io::{Read, Write};
+    use vonk_agent_protocol::generated::{HostHelperResponse, HostHelperResponseStatus};
+    let server = ObservationServer::new(Some(204));
+    let root = tempdir().unwrap();
+    let runtime_root = tempdir().unwrap();
+    let installation = Uuid::new_v4().to_string();
+    let mut plan: crate::workloads::CompiledExecutionPlan = serde_json::from_str(include_str!(
+        "../../../../../../control/tests/fixtures/compiled_workload_v2.json"
+    ))
+    .unwrap();
+    let installed = root.path().join("installations").join(&installation);
+    fs::create_dir_all(&installed).unwrap();
+    fs::write(
+        installed.join("spec.json"),
+        serde_json::to_vec(&plan).unwrap(),
+    )
+    .unwrap();
+    fs::write(
+        installed.join("recipe-content.sha256"),
+        &plan.identity.recipe_revision_sha256,
+    )
+    .unwrap();
+    plan.runtime.placement.endpoint_address = Some("127.0.0.1".parse().unwrap());
+    plan.security.network_mode = "bridge".parse().unwrap();
+    let runtime = OciRuntime {
+        runner: &NoProcess,
+        data_root: root.path(),
+    };
+    runtime
+        .prepare_start_with_inspection_identity(
+            &plan,
+            &installation,
+            &Uuid::new_v4().to_string(),
+            &plan.runtime.placement,
+            &crate::oci::RecipeRunStartIdentity { run_generation: 2 },
+        )
+        .unwrap();
+    let socket = runtime_root.path().join("helper.sock");
+    let requests = runtime_root.path().join("runtime-requests");
+    let listener = std::os::unix::net::UnixListener::bind(&socket).unwrap();
+    let helper = std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        let mut prefix = [0; 4];
+        stream.read_exact(&mut prefix).unwrap();
+        let mut body = vec![0; u32::from_be_bytes(prefix) as usize];
+        stream.read_exact(&mut body).unwrap();
+        let request: vonk_agent_protocol::RecipeRunInspectionRequest =
+            vonk_agent_protocol::parse_strict(&body).unwrap();
+        let inspected: vonk_agent_protocol::HostRuntimeRequest = serde_json::from_slice(
+            &fs::read(requests.join(format!("{}.json", request.request_sha256))).unwrap(),
+        )
+        .unwrap();
+        let response = HostHelperResponse {
+            installation_intent_nonce: None,
+            schema_version: 1,
+            request_id: Some(request.request_id),
+            status: HostHelperResponseStatus::ContainerRuntimeRequestExecuted,
+            process_running: Some(true),
+            exit_code: None,
+            error_code: None,
+            diagnostic: None,
+            process_logs: None,
+        };
+        let body = vonk_agent_protocol::canonical_generated_json(&response).unwrap();
+        stream
+            .write_all(&(body.len() as u32).to_be_bytes())
+            .unwrap();
+        stream.write_all(&body).unwrap();
+        inspected.run_generation
+    });
+    let executor = RecipeExecutor {
+        client: &server.client,
+        helper_socket: &socket,
+        runtime,
+        runtime_root: runtime_root.path(),
+    };
+    assert_eq!(
+        executor
+            .report_exact_recipe_run_observations()
+            .await
+            .unwrap(),
+        1
+    );
+    assert_eq!(helper.join().unwrap(), Some(2));
+    let reports = server.finish();
+    assert_eq!(reports[0]["runs"][0]["run_generation"], 2);
 }

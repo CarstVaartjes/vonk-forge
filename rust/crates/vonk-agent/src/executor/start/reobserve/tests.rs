@@ -35,9 +35,26 @@ enum Failed {
     /// The Start itself.
     Start(HostRuntimeError),
     /// A launched rank's granted inspection; the test Controller refuses its
-    /// grant as unavailable, a temporary answer.
-    RankInspection,
+    /// grant with this status line (`503 Unavailable` is a temporary answer).
+    RankInspection(&'static str),
+    /// A retained start's granted inspection answered this error.
+    Retained(HostRuntimeError),
+    /// A collective readiness phase's granted inspection answered this error.
+    Collective(HostRuntimeError),
+    /// The readiness guard's read of the loading container (it ends nothing).
+    Loading,
+    /// The evidence read before a not-ready start's stop (it ends nothing).
+    Evidence,
 }
+
+/// What one settlement did: its result, what the agent asked, in order, the
+/// generation each grant-free inspection named, and each grant request body.
+type Settled = (
+    Result<(), Box<ExecutionResult>>,
+    Vec<&'static str>,
+    Vec<Option<u64>>,
+    Vec<Value>,
+);
 
 /// The next connection, until the test is done.
 fn accept<L>(done: &AtomicBool, accept: impl Fn() -> std::io::Result<L>) -> Option<L> {
@@ -83,21 +100,17 @@ async fn settle(
     seen: Seen,
     error: HostRuntimeError,
 ) -> (Result<(), Box<ExecutionResult>>, Vec<&'static str>) {
-    let (settled, asked, _) = settle_failed(seen, Failed::Start(error)).await;
+    let (settled, asked, _, _) = settle_failed(seen, Failed::Start(error)).await;
     (settled, asked)
 }
 
-/// Settle what `failed` with the helper's inspection answering `seen`; the
-/// result, what the agent asked, in order, and the generation each inspection
-/// named.
-async fn settle_failed(
-    seen: Seen,
-    failed: Failed,
-) -> (
-    Result<(), Box<ExecutionResult>>,
-    Vec<&'static str>,
-    Vec<Option<u64>>,
-) {
+/// Settle what `failed` with the helper's inspection answering `seen`.
+async fn settle_failed(seen: Seen, failed: Failed) -> Settled {
+    let grant_status = match failed {
+        Failed::RankInspection(status) => status,
+        _ => "503 Unavailable",
+    };
+    let grants: Arc<Mutex<Vec<Value>>> = Arc::default();
     let log: Log = Arc::default();
     let named: Arc<Mutex<Vec<Option<u64>>>> = Arc::default();
     let done = Arc::new(AtomicBool::new(false));
@@ -160,6 +173,7 @@ async fn settle_failed(
         }
     });
     let (controller_log, controller_done) = (log.clone(), done.clone());
+    let controller_grants = grants.clone();
     std::thread::spawn(move || {
         while let Some((mut stream, _)) = accept(&controller_done, || controller.accept()) {
             stream.set_nonblocking(false).unwrap();
@@ -172,9 +186,28 @@ async fn settle_failed(
             }
             assert!(request.starts_with(b"POST /agent/host-runtime/grant "));
             controller_log.lock().unwrap().push("grant");
+            let header_end = request
+                .windows(4)
+                .position(|part| part == b"\r\n\r\n")
+                .unwrap()
+                + 4;
+            let length: usize = String::from_utf8_lossy(&request[..header_end])
+                .to_ascii_lowercase()
+                .lines()
+                .find_map(|line| line.strip_prefix("content-length:"))
+                .map_or(0, |value| value.trim().parse().unwrap());
+            while request.len() < header_end + length {
+                let read = stream.read(&mut buffer).unwrap();
+                assert!(read > 0);
+                request.extend_from_slice(&buffer[..read]);
+            }
+            controller_grants
+                .lock()
+                .unwrap()
+                .push(serde_json::from_slice(&request[header_end..header_end + length]).unwrap());
             write!(
                 stream,
-                "HTTP/1.1 503 Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                "HTTP/1.1 {grant_status}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
             )
             .unwrap();
         }
@@ -197,7 +230,7 @@ async fn settle_failed(
                 .reobserve_failed_start(&start_claim(), RUN_ID, GENERATION, &arguments, &error)
                 .await
         }
-        Failed::RankInspection => {
+        Failed::RankInspection(_) => {
             executor
                 .inspect_launched_rank(
                     &start_claim(),
@@ -208,11 +241,32 @@ async fn settle_failed(
                 )
                 .await
         }
+        Failed::Retained(error) => Err(Box::new(
+            executor
+                .inspected_start_failed(&start_claim(), RUN_ID, true, &error)
+                .await,
+        )),
+        Failed::Collective(error) => Err(Box::new(
+            executor
+                .inspected_start_failed(&start_claim(), RUN_ID, false, &error)
+                .await,
+        )),
+        Failed::Loading => {
+            let _ = executor.loading_tail(&arguments, GENERATION).await;
+            Ok(())
+        }
+        Failed::Evidence => {
+            executor
+                .running_workload_evidence(&arguments, GENERATION, "readiness_deadline=true")
+                .await;
+            Ok(())
+        }
     };
     done.store(true, Ordering::SeqCst);
     let asked = log.lock().unwrap().clone();
     let named = named.lock().unwrap().clone();
-    (settled, asked, named)
+    let grants = grants.lock().unwrap().clone();
+    (settled, asked, named, grants)
 }
 
 /// The Start's reply was lost: the helper may have launched the container.
@@ -278,7 +332,7 @@ async fn a_foreign_container_under_the_name_keeps_its_exact_stop() {
 /// older generation under the name is never adopted as this start's.
 #[tokio::test]
 async fn the_reobservation_names_the_starts_generation() {
-    let (settled, _, named) = settle_failed(Seen::Running, Failed::Start(lost_reply())).await;
+    let (settled, _, named, _) = settle_failed(Seen::Running, Failed::Start(lost_reply())).await;
     assert!(settled.is_ok());
     assert_eq!(named, [Some(GENERATION)]);
 }
@@ -288,16 +342,106 @@ async fn the_reobservation_names_the_starts_generation() {
 /// stopped; exited, it is read before its exact stop.
 #[tokio::test]
 async fn a_rank_whose_inspection_failed_is_read_again_before_any_stop() {
-    let (settled, asked, named) = settle_failed(Seen::Running, Failed::RankInspection).await;
+    const UNAVAILABLE: Failed = Failed::RankInspection("503 Unavailable");
+    let (settled, asked, named, _) = settle_failed(Seen::Running, UNAVAILABLE).await;
     assert!(settled.is_ok());
     assert_eq!(asked, ["grant", "inspect"]);
     assert_eq!(named, [Some(GENERATION)]);
     for seen in [Seen::Absent, Seen::Unread] {
-        let (settled, asked, _) = settle_failed(seen, Failed::RankInspection).await;
+        let (settled, asked, _, _) = settle_failed(seen, UNAVAILABLE).await;
         assert!(settled.is_err());
         assert_eq!(asked, ["grant", "inspect"]);
     }
-    let (settled, asked, _) = settle_failed(Seen::Exited, Failed::RankInspection).await;
+    let (settled, asked, _, _) = settle_failed(Seen::Exited, UNAVAILABLE).await;
     assert!(settled.is_err());
     assert_eq!(asked, ["grant", "inspect", "grant"]);
+}
+
+/// A launched rank's granted inspection asks for a grant bound to the rank's
+/// generation, so the helper answers only for that generation's container.
+#[tokio::test]
+async fn a_rank_inspection_asks_a_grant_bound_to_its_generation() {
+    let (_, _, _, grants) =
+        settle_failed(Seen::Running, Failed::RankInspection("503 Unavailable")).await;
+    assert_eq!(grants[0]["action"], "run-inspect");
+    assert_eq!(grants[0]["run_generation"], GENERATION);
+}
+
+/// A Controller that refuses the inspection grant's shape (one that predates
+/// generation-bound inspections answers 422) said nothing about the rank's
+/// container: it is read again, and nothing is stopped on the refusal.
+#[tokio::test]
+async fn a_refused_inspection_grant_stops_nothing() {
+    const REFUSED: Failed = Failed::RankInspection("422 Unprocessable Entity");
+    let (settled, asked, named, _) = settle_failed(Seen::Running, REFUSED).await;
+    assert!(settled.is_ok());
+    assert_eq!(asked, ["grant", "inspect"]);
+    assert_eq!(named, [Some(GENERATION)]);
+    let (settled, asked, _, _) = settle_failed(Seen::Unread, REFUSED).await;
+    let ExecutionResult::Failed(failure) = ended(settled) else {
+        panic!("a wait is a retryable failure");
+    };
+    assert_eq!(
+        failure.failure_kind,
+        Some(AgentFailureKind::TemporaryDependency)
+    );
+    assert_eq!(asked, ["grant", "inspect"]);
+}
+
+/// A Controller that predates generation-bound inspection grants refuses the
+/// grant's shape (422).
+fn refused_inspection_grant() -> HostRuntimeError {
+    HostRuntimeError::Controller(crate::client::ClientError::Controller(Box::new(
+        crate::client::ControllerError::from_status(422),
+    )))
+}
+
+fn waits(settled: Result<(), Box<ExecutionResult>>) -> bool {
+    matches!(
+        ended(settled),
+        ExecutionResult::Failed(failure)
+            if failure.failure_kind == Some(AgentFailureKind::TemporaryDependency)
+    )
+}
+
+/// A retained start or a collective readiness phase whose inspection grant
+/// was refused waits; nothing is stopped on the refusal.
+#[tokio::test]
+async fn a_refused_inspection_grant_of_a_retained_or_collective_start_waits() {
+    for failed in [
+        Failed::Retained(refused_inspection_grant()),
+        Failed::Collective(refused_inspection_grant()),
+    ] {
+        let (settled, asked, _, _) = settle_failed(Seen::Running, failed).await;
+        assert!(waits(settled));
+        assert!(asked.is_empty());
+    }
+}
+
+/// Another generation's container under a retained start's name (the helper
+/// refuses it) is healed by the exact stop, never waited on forever.
+#[tokio::test]
+async fn another_generations_container_under_a_retained_start_is_healed() {
+    let (settled, asked, _, _) = settle_failed(
+        Seen::Running,
+        Failed::Retained(HostRuntimeError::HelperRejected {
+            code: HelperErrorCode::OperationInvalidArtifact,
+            diagnostic: None,
+            process_logs: None,
+        }),
+    )
+    .await;
+    assert!(settled.is_err());
+    assert_eq!(asked, ["grant"]);
+}
+
+/// The readiness guard and the evidence read before a stop name the start's
+/// generation: another generation's container never stands in for it.
+#[tokio::test]
+async fn the_readiness_reads_name_the_starts_generation() {
+    for failed in [Failed::Loading, Failed::Evidence] {
+        let (_, asked, named, _) = settle_failed(Seen::Running, failed).await;
+        assert_eq!(asked, ["inspect"]);
+        assert_eq!(named, [Some(GENERATION)]);
+    }
 }

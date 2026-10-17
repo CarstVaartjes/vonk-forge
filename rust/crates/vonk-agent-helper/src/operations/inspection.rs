@@ -215,8 +215,9 @@ impl<R: CommandRunner> OperationExecutor<R> {
         &self,
         arguments: &[String],
         capture_failure: bool,
+        expected_generation: Option<u64>,
     ) -> Result<bool, OperationError> {
-        self.runtime_run_inspect_detail(arguments, capture_failure, false, None)
+        self.runtime_run_inspect_detail(arguments, capture_failure, false, expected_generation)
             .map(|inspection| inspection.running)
     }
 }
