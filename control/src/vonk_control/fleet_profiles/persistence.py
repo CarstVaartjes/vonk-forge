@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Sequence
 from datetime import datetime, timedelta
 
 from pydantic import ValidationError
@@ -30,12 +30,13 @@ from ..lifecycle.evidence import (
     read_or_rebuild,
     retire_as_unknown,
 )
-from ..models import CatalogDocumentRevision, FleetProfileApplication, Job
+from ..models import AgentNode, CatalogDocumentRevision, FleetProfileApplication, Job
 from ..stored_json import read_row_column
 from ..strict_json import read_stored_document, stored_document_detail
 from .activity import _profile_activity_state
 from .contracts import (
     FleetProfileConflict,
+    _FleetProfileSupersededIntentConflict,
 )
 from .projection_support import (
     _aware,
@@ -352,6 +353,34 @@ def _workload_fence_nodes(plan: FleetProfilePreview) -> set[str]:
         node_id for effect in plan.effects.adopted for node_id in effect.node_ids
     }
     return set(plan.scope.node_ids) - adopted
+
+
+def _kept_fence_ordinal(
+    nodes: Sequence[AgentNode], ordinal: int, fenced_node_ids: Sequence[str]
+) -> int | None:
+    """The ordinal a waiting load keeps for its fence, or ``None`` to fence anew.
+
+    A Spark the load fenced that carries another ordinal now was taken by a
+    newer intent: the newest request steers, so the load is superseded. A Spark
+    it never fenced joined the fence when its plan changed (a lane it continued
+    ended, say) and still carries its older owner's ordinal, which proves
+    nothing: each load numbers only its own Sparks, so that ordinal can be
+    higher or lower. The load then fences anew, above every Spark of the fence,
+    as a first fence does; it has issued nothing, so renumbering is safe. A
+    load recorded before ``fenced_node_ids`` existed fences anew the same way.
+    """
+
+    fenced = set(fenced_node_ids)
+    if any(
+        node.node_id in fenced and node.workload_intent_ordinal != ordinal
+        for node in nodes
+    ):
+        raise _FleetProfileSupersededIntentConflict(
+            "Pending profile workload intent was superseded before recovery"
+        )
+    if all(node.node_id in fenced for node in nodes):
+        return ordinal
+    return None
 
 
 def _intent_scope(

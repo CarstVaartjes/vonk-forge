@@ -56,6 +56,7 @@ from .contracts import (
 from .persistence import (
     _application_order_key,
     _intent_scope,
+    _kept_fence_ordinal,
     _newer_profile_intent_overlaps,
     _owns_pending_admission,
     _persisted_profile_plan,
@@ -159,14 +160,14 @@ class FleetProfileService:
                         "Pending profile intent was superseded by a later accepted request"
                     )
                 ordinal = progress.workload_intent_ordinal
+                if ordinal is not None:
+                    ordinal = _kept_fence_ordinal(
+                        nodes, ordinal, progress.fenced_node_ids
+                    )
                 if ordinal is None:
                     ordinal = max(node.workload_intent_ordinal for node in nodes) + 1
                     for node in nodes:
                         node.workload_intent_ordinal = ordinal
-                elif any(node.workload_intent_ordinal != ordinal for node in nodes):
-                    raise _FleetProfileSupersededIntentConflict(
-                        "Pending profile workload intent was superseded before recovery"
-                    )
                 self._switch_adapter.request_superseded_workload_cancellation_in_session(
                     session, fence_nodes, ordinal, now
                 )
@@ -243,8 +244,8 @@ class FleetProfileService:
                         session=session,
                     )
                 progress_data = progress.model_dump(mode="json")
-                if progress.workload_intent_ordinal is None:
-                    progress_data["workload_intent_ordinal"] = ordinal
+                progress_data["workload_intent_ordinal"] = ordinal
+                progress_data["fenced_node_ids"] = list(fence_nodes)
                 row.progress = read_stored_model(
                     FleetProfileApplicationProgress,
                     canonical_message(progress_data),

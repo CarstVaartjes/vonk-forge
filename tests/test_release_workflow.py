@@ -561,6 +561,91 @@ def test_main_reuses_the_images_of_the_pull_request_that_tested_its_tree() -> No
         )
 
 
+def _image_steps() -> list[dict]:
+    return load(WORKFLOWS / "dev-images.yml")["jobs"]["publish-development-images"][
+        "steps"
+    ]
+
+
+@pytest.mark.parametrize("pr_proof", [True, False])
+def test_main_reruns_no_image_proof_the_pull_request_holds(pr_proof, tmp_path) -> None:
+    """Catches main re-verifying or deep-scanning the digests the pull request
+    verified (scripts/reuse-pr-candidate-images prints reused=true only when it
+    holds them; a missing or other digest builds instead), dropping a proof the
+    pull request does not hold (Trivy, the LiteLLM smoke), or skipping
+    publication or signing under main's identity."""
+    context = {
+        "inputs.reuse_run_id": "42",
+        "steps.pr_images.outputs.reused": "true" if pr_proof else "",
+    }
+    ran = [
+        step["name"]
+        for step in _image_steps()
+        if "if" not in step or evaluate(step["if"], context)
+    ]
+
+    def count(prefix: str) -> int:
+        return sum(name.startswith(prefix) for name in ran)
+
+    reproofs = ("Verify exact digest-only", "Deep-scan exact")
+    for prefix in reproofs:
+        assert count(prefix) == (0 if pr_proof else 4), prefix
+    assert count("Accept the pull request images") == (1 if pr_proof else 0)
+    for prefix in (
+        "Scan the",
+        "Smoke the exact",
+        "Publish immutable",
+        "Verify immutable",
+        "Sign accepted",
+    ):
+        assert count(prefix) == (1 if prefix == "Smoke the exact" else 4), prefix
+    if not pr_proof:
+        return
+    (step,) = (step for step in _image_steps() if step.get("id") == "pr_acceptance")
+    roles = ("api", "worker", "hermes", "litellm")
+    digests = {role: "sha256:" + digit * 64 for role, digit in zip(roles, "abde")}
+    outputs = {
+        f"steps.pr_images.outputs.{role}_digest": digest
+        for role, digest in digests.items()
+    }
+    summary = tmp_path / "summary"
+    commit = "c" * 40
+    subprocess.run(
+        ["bash", "-c", step["run"]],
+        cwd=ROOT,
+        check=True,
+        timeout=30,
+        env={
+            **os.environ,
+            **{
+                name: render(value, {**context, **outputs})
+                for name, value in step["env"].items()
+            },
+            "GITHUB_SHA": commit,
+            "GITHUB_RUN_ID": "7",
+            "GITHUB_RUN_ATTEMPT": "1",
+            "GITHUB_STEP_SUMMARY": str(summary),
+            "RUNNER_TEMP": str(tmp_path),
+        },
+    )
+    collected = subprocess.run(
+        [
+            ROOT / "scripts/dev-image-acceptance-receipt",
+            "collect",
+            tmp_path,
+            commit,
+            "7",
+            "1",
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=30,
+    ).stdout.split()
+    assert collected == [f"{role}_digest={digests[role]}" for role in roles]
+    assert "reused from pull request run 42" in summary.read_text()
+
+
 class ActionsCache:
     """The GitHub Actions cache: an entry is never overwritten; a restore takes
     the exact key, else the newest entry matching a prefix."""
@@ -641,6 +726,9 @@ def ship_component_image(
         elif step.get("id") == f"build_{role}":
             # Images carry their commit, so a rebuild is always another digest.
             context[f"steps.build_{role}.outputs.digest"] = f"build-{run_id}"
+        elif step.get("id") == "pr_acceptance":
+            # The pull request's verified digest becomes this run's receipt.
+            context["accepted"] = render(step["env"][f"{role.upper()}_DIGEST"], context)
         elif re.search(
             rf"accept-development-image-archive \\\s+{role} ", step.get("run", "")
         ):

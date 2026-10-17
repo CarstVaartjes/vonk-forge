@@ -133,7 +133,8 @@ installer only needs to run again when `.env`, secrets or the Compose graph
 itself change.
 The Caddy startup wrapper forwards an explicit Compose `command` after the
 runtime-asset wait and native secret checks. With no command, its native
-entrypoint selects `/run/vonk-runtime-assets/caddy/Caddyfile`.
+entrypoint selects `/run/vonk-runtime-assets/caddy/Caddyfile` and watches it,
+so a restaged Caddyfile applies without a Caddy restart.
 
 Development and production use this exact topology and configuration contract.
 They use development `:dev` or production `:latest` application images and channel-specific Spark package versions
