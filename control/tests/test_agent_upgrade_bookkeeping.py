@@ -12,7 +12,7 @@ from __future__ import annotations
 import hashlib
 import json
 import uuid
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 
 import httpx2
 import pytest
@@ -232,7 +232,7 @@ def test_a_rollout_with_a_damaged_source_skips_that_spark_and_finishes(
         parent.payload = payload
         node_b = session.get(AgentNode, NODE_B)
         assert node_b is not None
-        node_b.last_seen_at = node_b.last_seen_at + timedelta(hours=1)
+        node_b.last_seen_at = datetime(2026, 8, 27, tzinfo=UTC)
 
     _upgrade_node(operations, NODE_A, "serial-a")
 
