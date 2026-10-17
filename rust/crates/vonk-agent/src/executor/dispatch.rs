@@ -103,11 +103,9 @@ pub(crate) fn upgrade_outcome(
             UnknownEvidence::at(FailureStage::Unknown),
         ),
         Err(error) => {
-            let reason = match error.diagnostic() {
-                Some(detail) if !detail.is_empty() => format!("{error}: {detail}"),
-                _ => error.to_string(),
-            };
-            let mut failure = Failure::new(reason)
+            // The reason is the typed refusal; the helper's own words are the
+            // captured detail beside it, never the reason.
+            let mut failure = Failure::new(error.to_string())
                 .process_logs(error.diagnostic().map(crate::failure_evidence::detail_logs));
             if let Some((code, exit_code)) = error.helper_diagnostics() {
                 failure = failure.helper(code, exit_code.and_then(|code| u32::try_from(code).ok()));
