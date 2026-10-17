@@ -18,9 +18,9 @@ def test_agent_alerts_use_bounded_operational_metrics() -> None:
         "NodeCertificateInvalid": "vonk_node_certificate_state",
         "NodeAgentStale": "vonk_node_connection_state",
         "NodeAgentCertificateExpiring": "vonk_agent_certificate_expiry_seconds",
-        "RepeatedAgentOperationFailures": "vonk_agent_operations",
+        "RepeatedAgentOperationFailures": "vonk_recent_agent_operation_failures",
         "AgentOperationStalled": "vonk_stalled_operations",
-        "RepeatedControlJobFailure": "vonk_jobs",
+        "RepeatedControlJobFailure": "vonk_recent_job_failures",
     }
     for alert_name, metric in expected_metrics.items():
         assert metric in alerts[alert_name]["expr"]
@@ -61,3 +61,29 @@ def test_every_service_has_bounded_logging() -> None:
         assert service["logging"]["driver"] == "local"
         assert service["logging"]["options"]["max-size"]
         assert service["logging"]["options"]["max-file"]
+
+
+def test_no_alert_can_fire_on_the_previous_process_series() -> None:
+    # Prometheus writes no staleness marker when it stops, so for one lookback
+    # (five minutes) after a restart it still sees the previous Controller's
+    # last samples. A rule that pends at least that long cannot fire on them
+    # alone; a shorter one must compare the target's own current series, as
+    # NasComposeBundleStale does (#1726), or read ``up``, which Prometheus
+    # itself writes for every scrape.
+    from deploy.compose.tests.test_runtime_asset_reload import _services
+
+    command = _services()["prometheus"]["command"]
+    assert not any(flag.startswith("--query.lookback-delta") for flag in command)
+    lookback = 5 * 60
+    seconds = {"s": 1, "m": 60, "h": 3600}
+    document = json.loads((ROOT / "deploy/compose/prometheus/alerts.yaml").read_text())
+    short = {
+        rule["alert"]
+        for group in document["groups"]
+        for rule in group["rules"]
+        if int(rule.get("for", "0s")[:-1]) * seconds[rule.get("for", "0s")[-1]]
+        < lookback
+        and "unless on(job, instance)" not in rule["expr"]
+        and not rule["expr"].startswith("up{")
+    }
+    assert short == set()

@@ -303,3 +303,48 @@ def test_job_refusals_are_invalid_requests_with_reasons(service) -> None:
         jobs.enqueue_guarded(
             "probe", "admin", "abc", ["spk_1"], {}, authority_check=lambda: False
         )
+
+
+def test_job_waiting_on_its_agent_operation_is_neither_claimed_nor_starved(
+    tmp_path,
+) -> None:
+    # 2026-10-17: an artifact-distribution job stayed queued for its whole
+    # two-hour transfer while its agent operation ran on the Spark, and
+    # RunnableControlJobStarved fired. The worker never claims such a job,
+    # so the starvation signal must not count it either.
+    from vonk_control.metrics import read_runnable_job_ages
+    from vonk_control.models import AgentOperation
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'starved.sqlite'}")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    clock = Clock()
+    jobs = JobService(sessions, clock=clock)
+    transfer = jobs.enqueue("artifact-distribution", "worker", "abc", ["spk_1"], {})
+    with sessions.begin() as session:
+        session.add(
+            AgentOperation(
+                id="transfer-operation",
+                parent_job_id=transfer.id,
+                node_id="spk_1",
+                kind="artifact.distribution.v1",
+                payload_digest="c" * 64,
+                payload={},
+                authority_revision="abc",
+                state="running",
+                current_attempt=1,
+                created_at=clock.now,
+                updated_at=clock.now,
+            )
+        )
+    probe = jobs.enqueue("probe", "admin", "abc", ["spk_1"], {})
+    clock.now += timedelta(minutes=30)
+
+    with sessions() as session:
+        assert read_runnable_job_ages(session, clock.now) == {"probe": 30 * 60}
+    kinds = ("artifact-distribution", "probe")
+    claimed = jobs.claim("worker", 10, kinds=kinds)
+    assert claimed is not None and claimed.job_id == probe.id
+    assert jobs.claim("worker", 10, kinds=kinds) is None
+    with sessions() as session:
+        assert read_runnable_job_ages(session, clock.now) == {}

@@ -7,7 +7,7 @@ import re
 import threading
 from collections import defaultdict
 from collections.abc import Callable, Iterable, Mapping
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 from sqlalchemy import func, select
@@ -20,13 +20,15 @@ from vonk_agent_protocol import (
 )
 from vonk_agent_protocol.claims import AGENT_PROTOCOL_VERSION
 
-from . import job_states
+from . import agent_operation_states, job_states
 from .compose_bundle import ComposeBundle
+from .jobs import without_agent_operation
 from .models import (
     AgentCertificate,
     AgentNode,
     AgentOperation,
     AgentOperationAttempt,
+    Job,
 )
 from .operation_progress import project_progress
 from .strict_json import read_stored_model
@@ -75,6 +77,9 @@ _CONNECTION_STATES = ("online", "offline", "unregistered")
 _CERTIFICATE_STATES = tuple(state.value for state in CertificateState)
 _INVENTORY_FRESHNESS = ("fresh", "stale", "missing")
 _TELEMETRY_FRESHNESS = ("live", "delayed", "stale", "missing")
+# Failures that ended within this window count as repeated. A recipe outcome
+# (one failed load) ages out; a platform fault keeps failing new work.
+RECENT_FAILURE_WINDOW = timedelta(hours=1)
 _BUCKETS = (0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0)
 
 
@@ -132,6 +137,25 @@ def runnable_job_ages(
             created = created.replace(tzinfo=UTC)
         ages[kind] = max(ages.get(kind, 0.0), max(0.0, (now - created).total_seconds()))
     return ages
+
+
+def read_runnable_job_ages(session: Session, now: datetime) -> dict[str, float]:
+    """The oldest queued age per kind among jobs the worker queue would claim.
+
+    A queued job whose work is an agent operation waits on that operation's
+    Spark (``queue.spark_busy``, a transfer in progress); the worker never
+    claims it, so it is not starved work.
+    """
+
+    rows = session.execute(
+        select(Job.kind, Job.created_at, Job.result).where(
+            Job.state.in_(job_states.words(LifecycleState.QUEUED)),
+            without_agent_operation(),
+        )
+    )
+    return runnable_job_ages(
+        ((row.kind, row.created_at, row.result) for row in rows), now
+    )
 
 
 def _label_value(value: str) -> str:
@@ -255,6 +279,8 @@ class MetricsRegistry:
         self._worker_memory: WorkerMemoryReport | None = None
         self._worker_memory_age: float | None = None
         self._compose_bundle: ComposeBundle | None = None
+        self._recent_job_failures: dict[str, int] = {}
+        self._recent_operation_failures: dict[str, int] = {}
 
     def set_compose_bundle(self, bundle: ComposeBundle | None) -> None:
         with self._lock:
@@ -409,6 +435,29 @@ class MetricsRegistry:
             self._api_counts[key] += 1
             self._api_durations[key].append(duration)
 
+    def replace_recent_failures(
+        self,
+        *,
+        jobs: Iterable[tuple[str, int]],
+        operations: Iterable[tuple[str, int]],
+    ) -> None:
+        """Replace the counts of work that ended failed within the window."""
+
+        def bounded(
+            rows: Iterable[tuple[str, int]], allowed: frozenset[str]
+        ) -> dict[str, int]:
+            counts = dict.fromkeys((*allowed, "other"), 0)
+            for kind, count in rows:
+                key = kind if kind in allowed else "other"
+                counts[key] += int(self._number(count, "failure count"))
+            return counts
+
+        safe_jobs = bounded(jobs, _JOB_KINDS)
+        safe_operations = bounded(operations, _AGENT_OPERATIONS)
+        with self._lock:
+            self._recent_job_failures = safe_jobs
+            self._recent_operation_failures = safe_operations
+
     def _replace_agent_snapshot(
         self,
         *,
@@ -487,6 +536,8 @@ class MetricsRegistry:
             agent_operations = dict(self._agent_operations)
             stalled_operations = dict(self._stalled_operations)
             agent_leases = dict(self._agent_leases)
+            recent_job_failures = dict(self._recent_job_failures)
+            recent_operation_failures = dict(self._recent_operation_failures)
             worker_memory = self._worker_memory
             worker_memory_age = self._worker_memory_age
             compose_bundle = self._compose_bundle
@@ -660,6 +711,26 @@ class MetricsRegistry:
             lines.append(
                 f'vonk_agent_operations{{operation="{operation}",state="{state}"}} {count}'
             )
+        # Every bounded kind is emitted, zero included, so a series never
+        # vanishes and Prometheus never judges a previous process's sample.
+        lines.extend(
+            (
+                "# HELP vonk_recent_job_failures Control jobs that ended failed within the last hour.",
+                "# TYPE vonk_recent_job_failures gauge",
+            )
+        )
+        for kind, count in sorted(recent_job_failures.items()):
+            lines.append(f'vonk_recent_job_failures{{kind="{kind}"}} {count}')
+        lines.extend(
+            (
+                "# HELP vonk_recent_agent_operation_failures Agent operations that ended failed within the last hour.",
+                "# TYPE vonk_recent_agent_operation_failures gauge",
+            )
+        )
+        for operation, count in sorted(recent_operation_failures.items()):
+            lines.append(
+                f'vonk_recent_agent_operation_failures{{operation="{operation}"}} {count}'
+            )
         lines.extend(
             (
                 "# HELP vonk_stalled_operations Running agent operations whose declared progress has stopped.",
@@ -768,6 +839,28 @@ class OperationalMetricsCollector:
                     .order_by(AgentOperation.kind, AgentOperation.state)
                 )
             )
+            # A failed row's last update is when it ended failed.
+            since = now - RECENT_FAILURE_WINDOW
+            recent_job_failures = list(
+                session.execute(
+                    select(Job.kind, func.count())
+                    .where(
+                        Job.state.in_(job_states.words(LifecycleState.FAILED)),
+                        Job.updated_at >= since,
+                    )
+                    .group_by(Job.kind)
+                )
+            )
+            recent_operation_failures = list(
+                session.execute(
+                    select(AgentOperation.kind, func.count())
+                    .where(
+                        AgentOperation.state == agent_operation_states.FAILED,
+                        AgentOperation.updated_at >= since,
+                    )
+                    .group_by(AgentOperation.kind)
+                )
+            )
             lease_rows = list(
                 session.execute(
                     select(
@@ -853,6 +946,12 @@ class OperationalMetricsCollector:
                 continue
             if projected.activity == "possibly_stalled":
                 stalled[kind] += 1
+        self._registry.replace_recent_failures(
+            jobs=((kind, int(count)) for kind, count in recent_job_failures),
+            operations=(
+                (kind, int(count)) for kind, count in recent_operation_failures
+            ),
+        )
         self._registry._replace_agent_snapshot(
             nodes=nodes,
             operations=operations,
