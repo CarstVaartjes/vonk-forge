@@ -7,6 +7,8 @@ job's link to it) never decide the Stop:
 
 - an issued order is stopped exactly, from its own request, and a Stop that
   froze it earlier stops that very order;
+- the Stop waits on the superseding cancel of that issued order, as for an
+  undamaged job, and never ends the job as never issued meanwhile;
 - a job none of whose orders was issued holds nothing on a Spark and is retired
   as unknown, also when an earlier pass of the same Stop froze it, and a later
   pass never reads it as a new effect;
@@ -15,8 +17,9 @@ job's link to it) never decide the Stop:
 Wrong implementation: the Stop refused or retried forever on the damaged rows
 ("source JobRun identity is inconsistent", "unknown JobRun has no exact source
 authority", "accepted JobRun Stop source disappeared", "new JobRun effect
-escaped the accepted Stop scope"), or released the run while its issued job
-could still run.
+escaped the accepted Stop scope"), released the run while its issued job
+could still run, or ended the job as never issued (``cancelled``, no effect)
+from the order its link names while the issued one ran.
 """
 
 from __future__ import annotations
@@ -101,6 +104,53 @@ def _order(session, artifact_job_id: str) -> tuple[Job, AgentOperation]:
         select(AgentOperation).where(AgentOperation.parent_job_id == order.id)
     )
     return order, child
+
+
+def _order_id(sessions, artifact_job_id: str) -> str:
+    with sessions() as session:
+        order, _child = _order(session, artifact_job_id)
+        return order.id
+
+
+def _waits_on_its_issued_order(
+    sessions, service, run_id: str, artifact_job, issued_order_id: str, stop
+) -> None:
+    """The Stop waits on the cancel of the order the job's Spark was handed, as
+    for an undamaged job: the run keeps serving and the job is not ended."""
+
+    with pytest.raises(RecipeArtifactJobCancellationPending) as pending:
+        stop()
+    assert pending.value.job_id == issued_order_id
+    assert _run_state(sessions, run_id) == "running"
+    assert service.get(artifact_job.id).state not in ajs.ENDED
+
+
+def _receipt_cancel(agent_jobs, job_claim, artifact_job) -> None:
+    """The Spark is told to cancel the job and receipts it."""
+
+    directive = agent_jobs.heartbeat(job_claim, OperationProgress(phase="running"), 30)
+    assert directive.cancel_requested is True
+    agent_jobs.record_result(
+        cancellation_result(
+            job_claim,
+            artifact_job,
+            state="cancelled",
+            reason="controller cancellation requested",
+        )
+    )
+
+
+def _stops_exactly(
+    sessions, agent_jobs, clock, node_id, job_claim, artifact_job, stop
+) -> None:
+    """The job's own row never saw its order end: the exact Stop of its
+    container, built from the issued order's own request, proves it absent."""
+
+    stopping = stop()
+    assert stopping.state not in {"succeeded", "failed", "cancelled"}
+    assert _run_state(sessions, artifact_job.run_id) == "stopping"
+    _receipt_exact_stop(agent_jobs, clock, node_id, job_claim, artifact_job)
+    assert stop().state == "succeeded"
 
 
 def _add_unissued_sibling(session, child: AgentOperation) -> None:
@@ -328,16 +378,15 @@ def test_an_issued_job_that_lost_its_order_link_is_stopped_exactly(
     submitted = submitted_artifact_job(service, run_id, request_suffix=118)
     job_claim = claim_agent(agent_jobs, node_id, "serial-0")
     assert job_claim is not None
+    issued_order_id = _order_id(sessions, submitted.id)
     _unlink_order(sessions, submitted.id, may_remain=may_remain)
 
-    stopping = stop()
-
-    # Its issued order may still run: the run is not released, and the exact
-    # Stop is built from the order's own request.
-    assert stopping.state not in {"succeeded", "failed", "cancelled"}
-    assert _run_state(sessions, run_id) == "stopping"
-    _receipt_exact_stop(agent_jobs, clock, node_id, job_claim, submitted)
-    assert stop().state == "succeeded"
+    # Its issued order may still run: the Stop waits on that order's cancel.
+    _waits_on_its_issued_order(
+        sessions, service, run_id, submitted, issued_order_id, stop
+    )
+    _receipt_cancel(agent_jobs, job_claim, submitted)
+    _stops_exactly(sessions, agent_jobs, clock, node_id, job_claim, submitted, stop)
     _activate_fresh_job_run(sessions, operations, run_id)
 
 
@@ -350,16 +399,16 @@ def test_a_frozen_job_that_lost_its_order_link_is_stopped_by_its_frozen_order(
     submitted = submitted_artifact_job(service, run_id, request_suffix=118)
     job_claim = claim_agent(agent_jobs, node_id, "serial-0")
     assert job_claim is not None
+    issued_order_id = _order_id(sessions, submitted.id)
     with pytest.raises(RecipeArtifactJobCancellationPending):
         stop()
     _unlink_order(sessions, submitted.id, may_remain=False)
 
-    stopping = stop()
-
-    assert stopping.state not in {"succeeded", "failed", "cancelled"}
-    assert _run_state(sessions, run_id) == "stopping"
-    _receipt_exact_stop(agent_jobs, clock, node_id, job_claim, submitted)
-    assert stop().state == "succeeded"
+    _waits_on_its_issued_order(
+        sessions, service, run_id, submitted, issued_order_id, stop
+    )
+    _receipt_cancel(agent_jobs, job_claim, submitted)
+    _stops_exactly(sessions, agent_jobs, clock, node_id, job_claim, submitted, stop)
     _activate_fresh_job_run(sessions, operations, run_id)
 
 
@@ -392,6 +441,38 @@ def test_a_job_that_names_no_order_and_has_two_issued_ones_holds_the_stop(
     fresh = create_artifact_job(
         service,
         **artifact_create_request(run_id, "00000000-0000-4000-8000-000000000170"),
+    )
+    assert fresh.id != submitted.id
+
+
+def test_the_stop_prerequisite_never_settles_a_job_with_two_issued_orders(
+    tmp_path,
+) -> None:
+    sessions, operations, service, run_id, node_id, agent_jobs, clock, _stop = _service(
+        tmp_path
+    )
+    submitted = submitted_artifact_job(service, run_id, request_suffix=118)
+    assert claim_agent(agent_jobs, node_id, "serial-0") is not None
+    with sessions.begin() as session:
+        _order_row, child = _order(session, submitted.id)
+        _add_unissued_sibling(session, child)
+        session.flush()
+        for sibling in session.scalars(
+            select(AgentOperation).where(
+                AgentOperation.parent_job_id == child.parent_job_id
+            )
+        ):
+            sibling.current_attempt = max(sibling.current_attempt, 1)
+    _unlink_order(sessions, submitted.id, may_remain=False)
+
+    # Which issued order is the job's is unknown: the Stop's wait for it is
+    # held, never ended as if nothing were issued.
+    with sessions.begin() as session, pytest.raises(RecipeRetryLater):
+        operations._one_shot_stop_prerequisite(session, run_id, clock.now)
+    # The held Stop leaves the run serving: fresh work is still admitted.
+    fresh = create_artifact_job(
+        service,
+        **artifact_create_request(run_id, "00000000-0000-4000-8000-000000000172"),
     )
     assert fresh.id != submitted.id
 
@@ -434,20 +515,20 @@ def test_a_job_linked_to_an_unissued_order_is_stopped_by_its_issued_one(
     submitted = submitted_artifact_job(service, run_id, request_suffix=118)
     job_claim = claim_agent(agent_jobs, node_id, "serial-0")
     assert job_claim is not None
+    issued_order_id = _order_id(sessions, submitted.id)
     if frozen:
         with pytest.raises(RecipeArtifactJobCancellationPending):
             stop()
     _relink_to_another_order(sessions, submitted.id, issued=False)
 
-    stopping = stop()
-
-    # The order its link names was never handed to a Spark; the one that was
-    # may still run: the run is not released, and the exact Stop is built from
-    # that issued order's own request.
-    assert stopping.state not in {"succeeded", "failed", "cancelled"}
-    assert _run_state(sessions, run_id) == "stopping"
-    _receipt_exact_stop(agent_jobs, clock, node_id, job_claim, submitted)
-    assert stop().state == "succeeded"
+    # The order its link names was never handed to a Spark, and the newer
+    # intent cancels it unissued; the one that was may still run: the Stop
+    # waits on that issued order's cancel.
+    _waits_on_its_issued_order(
+        sessions, service, run_id, submitted, issued_order_id, stop
+    )
+    _receipt_cancel(agent_jobs, job_claim, submitted)
+    _stops_exactly(sessions, agent_jobs, clock, node_id, job_claim, submitted, stop)
     _activate_fresh_job_run(sessions, operations, run_id)
 
 

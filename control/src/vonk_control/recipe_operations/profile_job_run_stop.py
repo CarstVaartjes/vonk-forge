@@ -548,14 +548,21 @@ class ProfileJobRunStopMixin:
         )
         pending: RecipeArtifactJobCancellationPending | None = None
         for artifact in active:
+            # A job whose link names no issued order is read through the order
+            # issued for it, as its exact Stop is.
+            off_link = _issued_orders_off_link(session, artifact)
             if (
                 target_scope is not None
                 and not ProfileJobRunStopMixin._artifact_job_targets(
-                    session, artifact, target_scope
+                    session, artifact, off_link, target_scope
                 )
             ):
                 continue
-            if artifact.operation_id is None:
+            if len(off_link) > 1:
+                # No identity names which issued order is the job's: nothing is
+                # settled on a guess, and the Stop is held.
+                raise RecipeRetryLater("artifact job has several issued orders")
+            if not off_link and artifact.operation_id is None:
                 if artifact_job_states.preparation_of(artifact) is None:
                     # Submitted without an order: nothing was ever issued for it,
                     # so it is superseded like an unissued job.
@@ -572,11 +579,12 @@ class ProfileJobRunStopMixin:
                     reason=SupersedeCode.SUPERSEDED_BY_INTENT,
                 )
                 continue
-            parent = session.get(Job, artifact.operation_id, with_for_update=True)
-            children = tuple(
+            order_id = off_link[0].parent_job_id if off_link else artifact.operation_id
+            parent = session.get(Job, order_id, with_for_update=True)
+            children = off_link or tuple(
                 session.scalars(
                     select(AgentOperation)
-                    .where(AgentOperation.parent_job_id == artifact.operation_id)
+                    .where(AgentOperation.parent_job_id == order_id)
                     .with_for_update(of=AgentOperation)
                 )
             )
@@ -588,7 +596,8 @@ class ProfileJobRunStopMixin:
                 or children[0].node_id not in parent.targets
             ):
                 # Damaged order bookkeeping: a re-plan reads the same rows, so
-                # it never holds the Stop. The Stop's newer intent fences the
+                # it never holds the Stop (a Spark reports its cancel only under
+                # a parent that names it). The Stop's newer intent fences the
                 # order, and the job settles once its run has ended.
                 retire_as_unknown(
                     "recipe.artifact-job",
@@ -636,12 +645,14 @@ class ProfileJobRunStopMixin:
                 )
                 continue
             # The order carries the superseding cancel: the job mirrors it
-            # (``cancelling``, or ended already) and reports the wait.
-            ArtifactJobAdapter(session).project(
-                artifact,
-                now,
-                reason=WaitReason.JOB_STOP_UNCONFIRMED,
-            )
+            # (``cancelling``, or ended already) and reports the wait. A job
+            # whose link names another order is never projected from that one.
+            if not off_link:
+                ArtifactJobAdapter(session).project(
+                    artifact,
+                    now,
+                    reason=WaitReason.JOB_STOP_UNCONFIRMED,
+                )
             if pending is None:
                 pending = RecipeArtifactJobCancellationPending(
                     job_id=parent.id,
@@ -652,9 +663,26 @@ class ProfileJobRunStopMixin:
 
     @staticmethod
     def _artifact_job_targets(
-        session: Session, artifact: ArtifactJob, target_node_ids: set[str]
+        session: Session,
+        artifact: ArtifactJob,
+        off_link: Sequence[AgentOperation],
+        target_node_ids: set[str],
     ) -> bool:
+        """Whether the job's order was sent to a Spark in the Stop's scope.
+
+        The order's own rows name its Spark: the issued orders of a job whose
+        link names none issued, else the orders its link names.
+        """
+
+        if off_link:
+            return any(order.node_id in target_node_ids for order in off_link)
         if artifact.operation_id is None:
             return False
-        parent = session.get(Job, artifact.operation_id)
-        return bool(parent is not None and set(parent.targets) & target_node_ids)
+        return any(
+            node_id in target_node_ids
+            for node_id in session.scalars(
+                select(AgentOperation.node_id).where(
+                    AgentOperation.parent_job_id == artifact.operation_id
+                )
+            )
+        )
