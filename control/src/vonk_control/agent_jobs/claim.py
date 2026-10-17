@@ -48,7 +48,7 @@ from .retry import (
     _parked_retry_evidence,
     _renew_distribution_grant,
     _retry_not_authorized_for_current_attempt,
-    other_agent_upgrade_in_flight,
+    agent_upgrade_in_flight_on_spark,
 )
 from .stored import column_field, column_is_document, column_value
 
@@ -511,13 +511,24 @@ def _claim_once(
             )
             self._aggregate_parent(session, operation.parent_job_id)
             return None
-        if (
-            operation.kind == AgentOperation.AGENT_UPGRADE.value
-            and other_agent_upgrade_in_flight(session, operation, now)
-        ):
-            # One Spark installs at a time across every rollout, including
-            # a superseded one still finishing and a fenced retry: this
-            # order waits for the Spark currently in flight to settle.
+        installing = (
+            agent_upgrade_in_flight_on_spark(session, operation, now)
+            if operation.kind == AgentOperation.AGENT_UPGRADE.value
+            else None
+        )
+        if installing is not None:
+            # A Spark installs one package at a time, including a superseded
+            # rollout's order still finishing: this order waits for it.
+            self._record_claim_refusal(
+                session,
+                operation=operation,
+                job_id=operation.parent_job_id,
+                check="agent-upgrade-in-flight",
+                kind=operation.kind,
+                blocking_kind=installing.kind,
+                blocking_state=installing.state,
+                blocking_operation=installing.id,
+            )
             return None
         if operation.kind == AgentOperation.AGENT_UPGRADE.value:
             import secrets

@@ -230,6 +230,17 @@ WORKDIR /srv/vonk-control
 
 FROM runtime-root AS worker-root
 
+# A pulled image does not refresh the Compose file the NAS installer wrote.
+# Embed the digest of the Compose template this image is built from; the API
+# compares it with the digest the renderer stamped into the running Compose.
+FROM runtime-root AS compose-bundle-digest
+COPY deploy/compose/compose.yaml /compose/compose.yaml
+COPY deploy/compose/tailscale/compose.yaml /compose/tailscale/compose.yaml
+COPY deploy/compose/hermes-agent/compose.yaml /compose/hermes-agent/compose.yaml
+COPY scripts/render-dev-compose /compose/render-dev-compose
+RUN python -c 'import pathlib, runpy; print(runpy.run_path("/compose/render-dev-compose")["bundle_digest"](pathlib.Path("/compose/compose.yaml")))' > /compose-bundle-digest \
+    && grep -Eqx '[0-9a-f]{64}' /compose-bundle-digest
+
 FROM runtime-root AS api-root
 RUN install -d -o 0 -g 0 -m 0700 /run/secrets
 # Non-secret runtime configuration for the whole Compose application ships
@@ -242,6 +253,7 @@ COPY deploy/compose/prometheus/ /usr/local/share/vonk-forge/runtime-assets/prome
 COPY deploy/compose/registry/config.yml /usr/local/share/vonk-forge/runtime-assets/registry/
 COPY deploy/compose/tailscale/configure.sh /usr/local/share/vonk-forge/runtime-assets/tailscale/
 COPY deploy/compose/hermes-agent/provision-litellm-key.py /usr/local/share/vonk-forge/runtime-assets/hermes-agent/
+COPY --from=compose-bundle-digest /compose-bundle-digest /usr/local/share/vonk-forge/compose-bundle-digest
 
 RUN python -c "import sys; from pathlib import Path; from vonk_control.runtime_init import write_runtime_asset_inventory; sys.exit(0 if write_runtime_asset_inventory(Path('/usr/local/share/vonk-forge/runtime-assets')) else 1)"
 # The API serves the admin UI from the installed package; fail the build when

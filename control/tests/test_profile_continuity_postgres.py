@@ -388,3 +388,108 @@ def test_postgres_new_profile_never_adopts_half_of_a_dual_spark_effect(postgres_
         for effect in preview.effects.adopted
         for node_id in (_node_id(1), _node_id(2))
     )
+
+
+def test_postgres_waiting_load_keeps_the_lane_it_continues_and_is_admitted(
+    postgres_engine,
+):
+    """A load waiting for admission continues one lane of an older load and
+    changes the other. Fencing its changed lane must not retire the older load
+    that owns the continued lane: that made its own reviewed plan stale, and the
+    re-planned (wider) fence then read its own older ordinal as a newer intent
+    and superseded the load. It is admitted without a person, first time."""
+    Base.metadata.create_all(postgres_engine)
+    sessions = sessionmaker(postgres_engine, expire_on_commit=False)
+    _seed(sessions)
+    clock = [NOW]
+    with sessions.begin() as session:
+        session.add(
+            AgentNode(
+                node_id=_node_id(2),
+                state="active",
+                protocol_version=2,
+                architecture="linux-arm64",
+                last_seen_at=NOW,
+            )
+        )
+        session.flush()  # Materialize the node before its certificate FK.
+        for index in (1, 2):
+            session.add(
+                AgentCertificate(
+                    serial=f"waiting-continuity-{index}",
+                    node_id=_node_id(index),
+                    not_before=NOW - timedelta(seconds=1),
+                    not_after=NOW + timedelta(hours=1),
+                    fingerprint=f"waiting-continuity-{index}",
+                )
+            )
+    profiles = FleetProfileService(
+        sessions,
+        clock=lambda: clock[0],
+        switch_adapter=_SQLCancellationAdapter(),
+        assessment_provider=_assessment_with_promises,
+    )
+    lanes = [
+        {
+            "recipe_selector": "vonk-forge/synthetic-tiny-build",
+            "spark_ids": [_node_id(index)],
+            "desired_state": "running",
+            "assignment_name": f"lane-{index}",
+        }
+        for index in (1, 2)
+    ]
+    original_profile = profiles.create(
+        FleetProfileInput.model_validate({"name": "A plus B", "assignments": lanes}),
+        actor="admin",
+    )
+    original = profiles.apply(
+        original_profile.id, request_key=_uuid(18500), actor="admin"
+    )
+    assert profiles.tick()
+    original_child = profiles.application(original.id).current_operation_id
+    assert original_child is not None
+    newer_profile = profiles.create(
+        FleetProfileInput.model_validate(
+            {
+                "name": "A plus C",
+                "assignments": [lanes[0], {**lanes[1], "assignment_name": "lane-c"}],
+            }
+        ),
+        actor="admin",
+    )
+    review = profiles.preview(newer_profile.id)
+    assert [
+        (effect.application_id, effect.node_ids) for effect in review.effects.adopted
+    ] == [(original.id, [_node_id(1)])]
+    clock[0] += timedelta(seconds=1)
+    # Admission was busy when the load was accepted: it waits for its retry.
+    waiting = profiles._create_pending_application(
+        review,
+        request_key=_uuid(18501),
+        actor="admin",
+        operation_kind="fleet-profile.apply",
+    )
+    profiles._defer_pending_application(
+        waiting.id, "initial contention", retry_delay=timedelta(0)
+    )
+
+    assert profiles._observe_pending_admissions(clock[0])
+
+    with sessions() as session:
+        row = session.get(FleetProfileApplication, waiting.id)
+        assert row is not None
+        progress = _persisted_profile_progress(row)
+        assert row.state in {"queued", "running"}, row.status_reason
+        assert not progress.admission_pending, progress.blockers
+        assert progress.workload_intent_ordinal is not None
+        older = session.get(FleetProfileApplication, original.id)
+        assert older is not None
+        # The continued lane keeps its owner and its child.
+        assert older.state != "superseded", older.status_reason
+        assert older.current_operation_id == original_child
+    # Its own worker dispatches it: nobody reviews it again.
+    assert profiles.tick()
+    admitted = profiles.application(waiting.id)
+    assert admitted.state == "running", admitted.status_reason
+    assert admitted.current_operation_id is not None
+    assert profiles.application(original.id).current_operation_id == original_child

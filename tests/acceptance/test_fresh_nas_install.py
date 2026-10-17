@@ -878,6 +878,27 @@ print(json.dumps(asdict(packaged_runtime_identity())))
     )
 
 
+def verify_compose_bundle_current(bundle: Path) -> None:
+    """The installer-written Compose file carries the digest the image embeds."""
+
+    script = (
+        "import json; from vonk_control.compose_bundle import compose_bundle; "
+        "state = compose_bundle(); "
+        "print(json.dumps(None if state is None else [state.expected, state.running]))"
+    )
+    result = run(
+        [*reference_compose(), "exec", "-T", "control-api", "python", "-c", script],
+        cwd=bundle,
+        timeout=20,
+    )
+    state = json.loads(result.stdout)
+    if state is None or state[0] != state[1]:
+        raise AcceptanceError(
+            "installed Compose bundle digest differs from the Controller image: "
+            f"{state}"
+        )
+
+
 def verify_controller_tls(bundle: Path, nas_ip: str, enrollment_hostname: str) -> None:
     root = bundle / "secrets/step-ca/root-certificate"
     response = run(
@@ -1782,6 +1803,7 @@ def exercise_compose(
         assert_compose_services_healthy(status.stdout, expected)
         verify_controller_tls(bundle, nas_ip, enrollment_hostname)
         verify_deployed_controller_identity(bundle)
+        verify_compose_bundle_current(bundle)
         verify_postgres_databases(bundle)
 
     try:

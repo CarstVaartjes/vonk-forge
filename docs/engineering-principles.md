@@ -104,7 +104,9 @@ remain separately recorded.
 - Preserve completed work and partial transfers. Managed cache receipts make
   reuse cheap; ordinary retries must not repeat downloads, full-file hashing,
   image imports, or package installation without a reason.
-- Consequential fleet-wide platform changes proceed one Spark at a time.
+- Agent upgrades roll out to every Spark in parallel, each as soon as it is
+  free; per-Spark rollback and the identity proof are the safety net. Other
+  consequential fleet-wide platform changes proceed one Spark at a time.
   Recipe profile changes stay topology-atomic.
 - Target standing policy uses one durable selected-profile record in
   PostgreSQL, pointing to the immutable accepted application snapshot for the

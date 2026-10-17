@@ -174,6 +174,12 @@ class FleetProfileService:
                 # intent owns the node fence. Waiting applications have no
                 # issued effects; leaving them eligible lets their retry loop
                 # contend with the newer intent and starve admission.
+                # The owner of a lane this load continues is not retired: the
+                # plan adopts its effects, and retiring it would make this
+                # load's own plan stale (admission hands those lanes over).
+                adopted_owners = {
+                    effect.application_id for effect in plan.effects.adopted
+                }
                 for prior in lock_admission_rows(
                     session,
                     (
@@ -193,6 +199,8 @@ class FleetProfileService:
                         ),
                     ),
                 )["prior-applications"]:
+                    if prior.id in adopted_owners:
+                        continue
                     prior_progress = _persisted_profile_progress(prior)
                     prior_plan = _persisted_profile_plan(prior)
                     if isinstance(prior_plan, Residue):
