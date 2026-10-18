@@ -78,47 +78,6 @@ fn compiled_models_materialize_selection_scoped_colliding_paths() {
 }
 
 #[test]
-fn model_materialization_reports_bytes_while_a_large_file_is_copied() {
-    // A first install copies hundreds of gigabytes. Its progress must move
-    // inside a file, not only between files, or the operation shows no
-    // bytes for minutes at a time.
-    const LARGE: u64 = 70 * 1024 * 1024;
-    let mut value = compiled_plan();
-    value["artifacts"][0]["size_bytes"] = json!(LARGE);
-    let plan: crate::workloads::CompiledExecutionPlan = serde_json::from_value(value).unwrap();
-    let data = tempdir().unwrap();
-    let root = data.path().join("distribution").join("models");
-    fs::create_dir_all(&root).unwrap();
-    let large = root.join(&plan.artifacts[0].sha256);
-    fs::File::create(&large).unwrap().set_len(LARGE).unwrap();
-    fs::set_permissions(&large, fs::Permissions::from_mode(0o600)).unwrap();
-    let small = root.join(&plan.artifacts[1].sha256);
-    fs::write(&small, b"secondary").unwrap();
-    fs::set_permissions(&small, fs::Permissions::from_mode(0o600)).unwrap();
-    let total = LARGE + plan.artifacts[1].size_bytes;
-
-    let mut reports = Vec::new();
-    materialize_compiled_models_with(
-        data.path(),
-        &plan,
-        "cb555393-764b-4eb6-8f15-b416d289428f",
-        false,
-        &mut |done, of| reports.push((done, of)),
-        &|| false,
-    )
-    .unwrap();
-
-    assert!(reports.iter().all(|(_, of)| *of == total));
-    assert!(reports.windows(2).all(|pair| pair[0].0 <= pair[1].0));
-    assert_eq!(reports.first(), Some(&(0, total)));
-    assert_eq!(reports.last(), Some(&(total, total)));
-    assert!(
-        reports.iter().any(|(done, _)| *done > 0 && *done < LARGE),
-        "no progress inside the large file: {reports:?}"
-    );
-}
-
-#[test]
 fn compiled_models_materialize_valid_empty_support_files() {
     let mut value = compiled_plan();
     let artifact = &mut value["artifacts"][0];
@@ -305,7 +264,7 @@ fn an_object_a_workload_already_runs_from_still_links_into_a_new_installation() 
 }
 
 #[test]
-fn an_installation_keeps_a_private_copy_it_already_holds() {
+fn an_installation_replaces_a_private_copy_with_the_shared_object() {
     let data = tempdir().unwrap();
     let (installation_id, installation, plan) = persisted_installation(data.path());
     stock_store(data.path(), &plan);
@@ -314,8 +273,15 @@ fn an_installation_keeps_a_private_copy_it_already_holds() {
     materialize_compiled_models(data.path(), &plan, &installation_id).unwrap();
 
     let after = fs::metadata(installation.join("models/primary/config.json")).unwrap();
-    assert_eq!((after.dev(), after.ino()), (before.dev(), before.ino()));
-    assert_eq!(after.nlink(), 1);
+    assert_ne!((after.dev(), after.ino()), (before.dev(), before.ino()));
+    let shared = fs::metadata(
+        data.path()
+            .join("distribution/models")
+            .join(&plan.artifacts[0].sha256),
+    )
+    .unwrap();
+    assert_eq!((after.dev(), after.ino()), (shared.dev(), shared.ino()));
+    write_installation_metadata(data.path(), &installation, &plan).unwrap();
     let runner = NoProcess;
     runtime(data.path(), &runner)
         .verify_installation(&installation_id)
@@ -356,25 +322,48 @@ fn a_store_object_that_is_not_private_owner_only_is_never_linked() {
 }
 
 #[test]
-fn model_materialization_copies_when_a_link_cannot_be_made() {
+fn hardlink_failure_reports_layout_without_copy_and_recovers() {
+    // Wrong implementation: a link error silently allocates a private copy.
     let data = tempdir().unwrap();
-    let plan: crate::workloads::CompiledExecutionPlan =
-        serde_json::from_value(compiled_plan()).unwrap();
+    let plan: CompiledExecutionPlan = serde_json::from_value(compiled_plan()).unwrap();
     let store = stock_store(data.path(), &plan);
-
-    materialize_compiled_models_with(data.path(), &plan, FIRST, false, &mut |_, _| {}, &|| false)
-        .unwrap();
-
-    let copy = fs::metadata(
-        data.path()
+    let error =
+        materialize_compiled_models_with(data.path(), &plan, FIRST, false, &mut |_, _| {}, &|| {
+            false
+        })
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        OciError::ModelStoreLayout {
+            errno: Some(18),
+            ..
+        }
+    ));
+    let diagnostic = error.to_string();
+    assert!(diagnostic.contains("errno=Some(18)"));
+    assert!(diagnostic.contains("models/primary/config.json"));
+    assert!(
+        !data
+            .path()
             .join("installations")
             .join(FIRST)
-            .join("models/primary/config.json"),
-    )
-    .unwrap();
+            .join("models/primary/config.json")
+            .exists()
+    );
+    assert!(store.iter().all(|path| path.exists()));
+    linked_installation(data.path(), &plan, FIRST);
+    linked_installation(data.path(), &plan, SECOND);
     let object = fs::metadata(&store[0]).unwrap();
-    assert_ne!(copy.ino(), object.ino());
-    assert_eq!((copy.nlink(), object.nlink()), (1, 1));
+    for id in [FIRST, SECOND] {
+        let linked = fs::metadata(
+            data.path()
+                .join("installations")
+                .join(id)
+                .join("models/primary/config.json"),
+        )
+        .unwrap();
+        assert_eq!((linked.dev(), linked.ino()), (object.dev(), object.ino()));
+    }
 }
 
 // This uses a hosted, owned bind mount: distribution/models is real tmpfs,
@@ -382,140 +371,33 @@ fn model_materialization_copies_when_a_link_cannot_be_made() {
 #[cfg(target_os = "linux")]
 #[test]
 #[ignore = "requires the hosted owned cross-device model-store fixture"]
-fn real_cross_device_link_failure_logs_cause_copies_and_recovers() {
-    const ROOT: &str = "VONK_OCI_CROSS_DEVICE_ROOT";
-    const PHASE: &str = "VONK_OCI_CROSS_DEVICE_PHASE";
-    const TEST: &str = "oci::tests::real_cross_device_link_failure_logs_cause_copies_and_recovers";
-    let data = PathBuf::from(std::env::var_os(ROOT).expect("hosted fixture root"));
-    let plan: crate::workloads::CompiledExecutionPlan =
-        serde_json::from_value(compiled_plan()).unwrap();
+fn real_cross_device_link_failure_reports_layout_without_copy() {
+    let data =
+        PathBuf::from(std::env::var_os("VONK_OCI_CROSS_DEVICE_ROOT").expect("hosted fixture root"));
+    let plan: CompiledExecutionPlan = serde_json::from_value(compiled_plan()).unwrap();
     let model_root = data.join("distribution/models");
     assert_ne!(
         fs::metadata(&model_root).unwrap().dev(),
-        fs::metadata(&data).unwrap().dev(),
-        "the test must reach the real cross-device hard-link error"
+        fs::metadata(&data).unwrap().dev()
     );
-    if let Ok(phase) = std::env::var(PHASE) {
-        if phase == "first" {
-            stock_store(&data, &plan);
+    stock_store(&data, &plan);
+    let error = materialize_compiled_models(&data, &plan, FIRST).unwrap_err();
+    assert!(matches!(
+        error,
+        OciError::ModelStoreLayout {
+            errno: Some(18),
+            ..
         }
-        let runner = NoProcess;
-        // A new process and runtime reopen the actual persisted installation.
-        let instance = runtime(&data, &runner);
-        let mut reports = Vec::new();
-        instance
-            .install_unlocked(
-                &plan,
-                FIRST,
-                &plan.identity.recipe_revision_sha256,
-                &mut |done, total| reports.push((done, total)),
-                &|| false,
-            )
-            .unwrap();
-        instance.verify_installation(FIRST).unwrap();
-        let total: u64 = plan
-            .artifacts
-            .iter()
-            .map(|artifact| artifact.size_bytes)
-            .sum();
-        assert_eq!(reports.last(), Some(&(total, total)));
-        for (artifact, bytes) in plan
-            .artifacts
-            .iter()
-            .zip([b"primary".as_slice(), b"secondary".as_slice()])
-        {
-            let destination = data
-                .join("installations")
-                .join(FIRST)
-                .join("models")
-                .join(&artifact.selection_id)
-                .join(&artifact.path);
-            let actual = fs::read(&destination).unwrap();
-            assert_eq!(actual, bytes);
-            assert_eq!(vonk_agent_protocol::hex_sha256(&actual), artifact.sha256);
-            let stored = fs::metadata(model_root.join(&artifact.sha256)).unwrap();
-            let copied = fs::metadata(&destination).unwrap();
-            assert_ne!((copied.dev(), copied.ino()), (stored.dev(), stored.ino()));
-            assert_eq!((copied.nlink(), stored.nlink()), (1, 1));
-        }
-        return;
-    }
-    let execute = |phase: &str| {
-        let output = std::process::Command::new(std::env::current_exe().unwrap())
-            .args([TEST, "--exact", "--ignored", "--nocapture"])
-            .env(PHASE, phase)
-            .output()
-            .unwrap();
-        assert!(
-            output.status.success(),
-            "{}\n{}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
-        String::from_utf8(output.stderr).unwrap()
-    };
-    let cause = std::io::Error::from_raw_os_error(18).to_string(); // Linux EXDEV.
-    let assert_fallbacks = |stderr: &str, artifacts: &[crate::workloads::CompiledModelArtifact]| {
-        let logs = stderr
-            .lines()
-            .filter(|line| line.contains(vonk_agent_protocol::generated::AgentDiagnosticOperation::ModelMaterializationCopyFallback.as_str()))
-            .collect::<Vec<_>>();
-        assert_eq!(logs.len(), artifacts.len(), "{stderr}");
-        for artifact in artifacts {
-            let expected = format!(
-                "vonk-agent: {} sha256={} bytes={} cause={cause}",
-                vonk_agent_protocol::generated::AgentDiagnosticOperation::ModelMaterializationCopyFallback.as_str(),
-                artifact.sha256, artifact.size_bytes
-            );
-            assert!(
-                logs.contains(&expected.as_str()),
-                "missing safe cause: {stderr}"
-            );
-        }
-        assert!(
-            !stderr.contains(data.to_str().unwrap()),
-            "owned paths must not leak in the cause log"
-        );
-    };
-    let first = execute("first");
-    assert_fallbacks(&first, &plan.artifacts);
-    // Preserve the captured production cause in the hosted proof log.
-    eprint!("{first}");
-    let model = data
-        .join("installations")
-        .join(FIRST)
-        .join("models/primary/config.json");
-    let before = fs::metadata(&model).unwrap();
-    let reused = execute("reuse");
-    assert_fallbacks(&reused, &[]);
-    let after = fs::metadata(&model).unwrap();
-    assert_eq!(
-        (before.dev(), before.ino(), before.ctime_nsec()),
-        (after.dev(), after.ino(), after.ctime_nsec())
-    );
-    // A stale private copy is recovered through the same normal materializer.
-    // Same-size damage prevents a length-only check from accidentally passing.
-    fs::write(&model, b"damaged").unwrap();
-    let recovered = execute("recover");
-    assert_fallbacks(&recovered, &plan.artifacts[..1]);
-    eprint!("{recovered}");
-    assert_eq!(fs::read(&model).unwrap(), b"primary");
-    assert_ne!(fs::metadata(&model).unwrap().ino(), after.ino());
-    let installation = data.join("installations").join(FIRST);
+    ));
+    eprintln!("{error}");
     assert!(
-        installation
-            .join(super::INSTALLATION_METADATA_FILE)
-            .is_file()
+        !data
+            .join("installations")
+            .join(FIRST)
+            .join("models/primary/config.json")
+            .exists()
     );
-    assert!(
-        !fs::read_dir(model.parent().unwrap())
-            .unwrap()
-            .any(|entry| entry
-                .unwrap()
-                .file_name()
-                .to_string_lossy()
-                .ends_with(".partial"))
-    );
+    assert!(model_root.join(&plan.artifacts[0].sha256).exists());
 }
 
 #[test]
@@ -547,7 +429,7 @@ fn cancelled_copy_yields_without_publishing_and_fresh_preparation_converges() {
             data.path(),
             &plan,
             FIRST,
-            false,
+            true,
             &mut |_, _| {},
             &cancelled,
         )
@@ -566,7 +448,7 @@ fn cancelled_copy_yields_without_publishing_and_fresh_preparation_converges() {
         data.path(),
         &plan,
         FIRST,
-        false,
+        true,
         &mut |_, _| {},
         &|| false,
     )
@@ -581,50 +463,4 @@ fn cancelled_copy_yields_without_publishing_and_fresh_preparation_converges() {
         .unwrap(),
         b"primary"
     );
-}
-
-#[test]
-fn in_flight_model_copy_cancels_at_checkpoint_and_fresh_copy_reuses_verified_sources() {
-    use std::cell::Cell;
-    const LARGE: u64 = MATERIALIZE_PROGRESS_STEP * 2;
-    let mut value = compiled_plan();
-    value["artifacts"][0]["size_bytes"] = json!(LARGE);
-    let plan: crate::workloads::CompiledExecutionPlan = serde_json::from_value(value).unwrap();
-    let data = tempdir().unwrap();
-    let root = data.path().join("distribution/models");
-    fs::create_dir_all(&root).unwrap();
-    let source = root.join(&plan.artifacts[0].sha256);
-    fs::File::create(&source).unwrap().set_len(LARGE).unwrap();
-    fs::set_permissions(&source, fs::Permissions::from_mode(0o600)).unwrap();
-    let small = root.join(&plan.artifacts[1].sha256);
-    fs::write(&small, b"secondary").unwrap();
-    fs::set_permissions(&small, fs::Permissions::from_mode(0o600)).unwrap();
-    let inode = fs::metadata(&source).unwrap().ino();
-    let cancellation = Cell::new(false);
-    let copied = Cell::new(0);
-    let result = materialize_compiled_models_with(
-        data.path(),
-        &plan,
-        FIRST,
-        false,
-        &mut |done, _| {
-            copied.set(done);
-            if done >= MATERIALIZE_PROGRESS_STEP {
-                cancellation.set(true);
-            }
-        },
-        &|| cancellation.get(),
-    );
-    assert!(result.unwrap_err().is_cancelled());
-    assert!(copied.get() < LARGE);
-    assert_eq!(fs::metadata(&source).unwrap().ino(), inode);
-    cancellation.set(false);
-    let placed =
-        materialize_compiled_models_with(data.path(), &plan, FIRST, false, &mut |_, _| {}, &|| {
-            cancellation.get()
-        })
-        .unwrap();
-    assert_eq!(placed.len(), plan.artifacts.len());
-    assert_eq!(fs::metadata(&placed[0]).unwrap().len(), LARGE);
-    assert_eq!(fs::read(&placed[1]).unwrap(), b"secondary");
 }

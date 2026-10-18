@@ -19,6 +19,7 @@ from ..auth import CursorError
 from ..evidence_repeats import repeating_evidence
 from ..fleet_event_contract import NodeProfilePayload
 from ..fleet_events import FleetEventDraft, FleetEventRepository
+from ..model_layout_notice import model_layout_notices
 from ..models import (
     AgentCertificate,
     AgentNode,
@@ -179,6 +180,7 @@ class FleetProjection:
             reservations = self._reservations(session, node_ids)
             stalls = self._stalled_loads(session, node_ids)
             repeating = repeating_evidence(session, node_ids, current)
+            layout_notices = model_layout_notices(session, node_ids)
             slow_nas = slow_nas_transfers(
                 session,
                 {
@@ -210,6 +212,7 @@ class FleetProjection:
                     reservations=reservations.get(node_id, {}),
                     stalls=stalls.get(node_id, ()),
                     repeating=repeating.get(node_id, ()),
+                    layout_notices=layout_notices.get(node_id, ()),
                     slow_nas=slow_nas.get(node_id),
                 )
                 for node_id in node_ids

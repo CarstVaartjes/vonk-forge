@@ -1,12 +1,12 @@
-name: Actual OCI cross-device copy recovery
+name: Actual OCI cross-device layout fault
 
 on:
   pull_request:
     branches: [main]
     paths:
       - .github/workflows/oci-link-fallback.yml
-      - rust/crates/vonk-agent/src/oci.rs
-      - rust/crates/vonk-agent/src/workloads.rs
+      - rust/crates/vonk-agent/src/oci/**
+      - rust/crates/vonk-agent/src/workloads/**
       - rust/crates/vonk-agent-protocol/**
       - agent_protocol/**
       - Cargo.toml
@@ -22,7 +22,7 @@ concurrency:
 
 jobs:
   cross-device:
-    name: Actual EXDEV, safe cause, receipt reuse and recovery
+    name: Actual EXDEV, visible layout fault and no private copies
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     env:
@@ -48,7 +48,7 @@ jobs:
           scripts/retry-dependency-fetch cargo fetch --locked
           uv run --project control --frozen python scripts/generate-agent-wire
           cargo test --locked --package vonk-agent --lib --no-run
-      - name: Mount only the owned model-store fixture and exercise production fallback
+      - name: Mount only the owned model-store fixture and exercise the production hardlink fault
         shell: bash
         run: |
           set -euo pipefail
@@ -83,5 +83,5 @@ jobs:
           test "$(stat -c %d "$target")" != "$(stat -c %d "$data_root")"
           export VONK_OCI_CROSS_DEVICE_ROOT="$data_root"
           cargo test --locked --package vonk-agent --lib \
-            oci::tests::real_cross_device_link_failure_logs_cause_copies_and_recovers \
+            oci::materialization::tests::real_cross_device_link_failure_reports_layout_without_copy \
             -- --exact --ignored --nocapture --test-threads=1

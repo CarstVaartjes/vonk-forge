@@ -524,6 +524,22 @@ pub(super) fn preparation_failure_at(
     } else {
         stage
     };
+    if let Some(OciError::ModelStoreLayout {
+        destination, errno, ..
+    }) = error.model_store_layout()
+    {
+        let mut failure =
+            Failure::new("model store layout needs attention before installation can continue")
+                .code(FailureCode::ModelStoreLayout)
+                .kind(AgentFailureKind::TemporaryDependency)
+                .retry_after(Some(5))
+                .stage(stage);
+        failure.model_store_layout = Some(vonk_agent_protocol::generated::ModelStoreLayoutFault {
+            path: destination.to_string_lossy().into_owned(),
+            errno: errno.and_then(|value| u32::try_from(value).ok()),
+        });
+        return ExecutionResult::Failed(failure);
+    }
     if error.is_cancelled() {
         // The attempt's budget or lease ended; copied and downloaded bytes
         // stay in place and the next attempt resumes from them.

@@ -80,6 +80,7 @@ class ProjectionCode(WireEnum):
     HOST_DESKTOP_AT_BOOT = "host.desktop-at-boot"
     #: The GPU clock ceiling is not applied: sustained load can power it off.
     HOST_GPU_CLOCK_UNCAPPED = "host.gpu-clock-uncapped"
+    MODEL_STORE_LAYOUT = "model.store_layout"
     INSTALL_PARTIAL = "install.partial"
     INVENTORY_MISSING = "inventory.missing"
     INVENTORY_STALE = "inventory.stale"
