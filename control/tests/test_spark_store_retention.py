@@ -165,3 +165,29 @@ def test_profile_build_layout_protects_its_docker_manifest_identity(world) -> No
             build.image_digest.removeprefix("sha256:")
             in request.protected_image_addresses
         )
+
+
+def test_pinned_definition_protects_file_identity_without_a_matching_cache_owner(
+    world,
+) -> None:
+    """Cache provenance can belong to another model revision. A profile pins
+    the accepted model's files, independently of that disposable cache index.
+    """
+    from vonk_control.catalog_revision_contract import read_catalog_document
+    from vonk_control.models import CatalogDocumentRevision
+    from vonk_forge_contracts import ModelDefinition
+
+    model_id = world.revision("weights", 1, kind="model")
+    with world.sessions() as session:
+        revision = session.get(CatalogDocumentRevision, model_id)
+        assert revision is not None and revision.content_digest is not None
+        digest = revision.content_digest
+        definition = read_catalog_document(revision)
+        assert isinstance(definition, ModelDefinition)
+        expected = {file.sha256 for file in definition.files}
+    _head_recipe_naming(world, digest)
+    _profile(world, "vonk-forge/glm")
+    with world.sessions() as session:
+        request = store_retention_request(session, NODE, world.now)
+    assert request is not None
+    assert expected <= set(request.protected_model_objects)

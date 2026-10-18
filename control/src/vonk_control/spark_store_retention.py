@@ -3,18 +3,26 @@
 from __future__ import annotations
 
 import logging
+import time
 from datetime import datetime, timedelta
 
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import LifecycleState, StorageDemandCode, WaitReason
 from vonk_agent_protocol.inventory import StoreRetentionRequest
+from vonk_forge_contracts import read_model
 
 from .fleet_profile_contract import FleetProfileApplicationProgress
 from .logging import log_event
 from .model_cache_contract import CacheManifest
-from .models import FleetProfileApplication, ModelCacheSet, RecipeBuild
+from .models import (
+    CatalogDocumentRevision,
+    FleetProfileApplication,
+    ModelCacheSet,
+    RecipeBuild,
+)
 from .strict_json import read_stored_model
+from .unused_storage_collection.common import SWEEP_BUDGET_SECONDS
 from .unused_storage_collection.evidence import _Evidence
 
 # An inventory arrives every two minutes. A stopped writer cannot keep demanding
@@ -41,6 +49,30 @@ def _store_retention_request(
     ):
         manifest = read_stored_model(CacheManifest, document, from_json=True)
         objects.update(artifact.sha256 for artifact in manifest.artifacts)
+    # A reusable cache set keeps its first requester's provenance. A pinned
+    # editorial successor can name the same files under a different model ID;
+    # the accepted model definitions own those file identities, not that index.
+    pending = set(references)
+    visited: set[str] = set()
+    deadline = time.monotonic() + SWEEP_BUDGET_SECONDS
+    while pending:
+        if time.monotonic() >= deadline:
+            raise ValueError("model reference scan deadline elapsed")
+        batch, pending = pending - visited, set()
+        visited.update(batch)
+        for revision in session.scalars(
+            select(CatalogDocumentRevision).where(
+                CatalogDocumentRevision.kind == "model",
+                CatalogDocumentRevision.content_digest.in_(batch),
+            )
+        ):
+            definition = read_model(revision.document)
+            objects.update(file.sha256 for file in definition.files)
+            pending.update(
+                dependency.content_sha256
+                for dependency in definition.dependencies
+                if dependency.content_sha256 not in visited
+            )
     images = set(evidence.operations | evidence.pointed_archives)
     # Docker receipts name manifest digests; NAS retention names layout digests.
     # Resolve that content identity, including builds reused by recipe successors.
