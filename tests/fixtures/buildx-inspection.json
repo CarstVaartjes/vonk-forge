@@ -1,0 +1,112 @@
+{
+  "inspection": {
+    "name": "ghcr.io/carstvaartjes/vonk-forge-api@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "manifest": {
+      "schemaVersion": 2,
+      "mediaType": "application/vnd.oci.image.index.v1+json",
+      "digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "manifests": [
+        {
+          "mediaType": "application/vnd.oci.image.manifest.v1+json",
+          "digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "platform": {
+            "os": "linux",
+            "architecture": "amd64"
+          }
+        },
+        {
+          "mediaType": "application/vnd.oci.image.manifest.v1+json",
+          "digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "platform": {
+            "os": "unknown",
+            "architecture": "unknown"
+          },
+          "annotations": {
+            "vnd.docker.reference.type": "attestation-manifest",
+            "vnd.docker.reference.digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+          }
+        },
+        {
+          "mediaType": "application/vnd.oci.image.manifest.v1+json",
+          "digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "platform": {
+            "os": "linux",
+            "architecture": "arm64"
+          }
+        },
+        {
+          "mediaType": "application/vnd.oci.image.manifest.v1+json",
+          "digest": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          "platform": {
+            "os": "unknown",
+            "architecture": "unknown"
+          },
+          "annotations": {
+            "vnd.docker.reference.type": "attestation-manifest",
+            "vnd.docker.reference.digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+          }
+        }
+      ]
+    },
+    "image": {
+      "linux/amd64": {
+        "config": {
+          "Labels": {
+            "org.opencontainers.image.source": "https://github.com/CarstVaartjes/vonk-forge",
+            "org.opencontainers.image.revision": "REVISION",
+            "ai.vonkforge.source.tree": "TREE"
+          }
+        }
+      },
+      "linux/arm64": {
+        "config": {
+          "Labels": {
+            "org.opencontainers.image.source": "https://github.com/CarstVaartjes/vonk-forge",
+            "org.opencontainers.image.revision": "REVISION",
+            "ai.vonkforge.source.tree": "TREE"
+          }
+        }
+      }
+    }
+  },
+  "provenance": {
+    "linux/amd64": {
+      "SLSA": {
+        "buildType": "https://mobyproject.org/buildkit@v1",
+        "materials": [
+          {
+            "digest": {
+              "sha1": "REVISION"
+            }
+          }
+        ]
+      }
+    },
+    "linux/arm64": {
+      "SLSA": {
+        "buildType": "https://mobyproject.org/buildkit@v1",
+        "materials": [
+          {
+            "digest": {
+              "sha1": "REVISION"
+            }
+          }
+        ]
+      }
+    }
+  },
+  "sbom": {
+    "linux/amd64": {
+      "SPDX": {
+        "SPDXID": "SPDXRef-DOCUMENT",
+        "spdxVersion": "SPDX-2.3"
+      }
+    },
+    "linux/arm64": {
+      "SPDX": {
+        "SPDXID": "SPDXRef-DOCUMENT",
+        "spdxVersion": "SPDX-2.3"
+      }
+    }
+  }
+}

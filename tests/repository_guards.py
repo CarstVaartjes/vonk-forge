@@ -37,6 +37,10 @@ GUARDS: tuple[str, ...] = (
 
 SCOPED: tuple[tuple[str, str], ...] = (
     (
+        "tests/scripts/test_verify_published_image.py",
+        "Published image identity and attestation parsing against registry fixtures.",
+    ),
+    (
         "tests/nas_setup/test_cli.py",
         "Portable NAS setup behavior and recovery; no whole-tree product scan.",
     ),

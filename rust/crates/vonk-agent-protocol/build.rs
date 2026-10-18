@@ -8,6 +8,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "scripts/export-agent-wire-schema",
         "scripts/check_environment.py",
         "control/uv.lock",
+        "src/cluster_profiles/__init__.py",
+        "src/cluster_profiles/control_limits.py",
+        "src/cluster_profiles/runtime_identity.py",
     ] {
         println!("cargo:rerun-if-changed={}", root.join(input).display());
     }

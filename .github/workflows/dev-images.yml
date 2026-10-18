@@ -292,46 +292,29 @@ jobs:
           cache-from: type=gha,scope=vonk-forge-litellm
           cache-to: type=gha,mode=max,scope=vonk-forge-litellm
 
-      - name: Scan the api image for fixable vulnerabilities
-        uses: ./.github/actions/image-scan
-        env:
-          TRIVY_PLATFORM: linux/amd64
+      - name: Download digest-keyed PR scan and smoke evidence
+        if: steps.pr_images.outputs.reused == 'true'
+        continue-on-error: true
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          image: ${{ steps.metadata.outputs.api_image }}@${{ steps.pr_images.outputs.api_digest || steps.build_api.outputs.digest }}
-          category: development-api
-          # skopeo and its runtime libraries are copied unchanged from the
-          # upstream quay.io/skopeo release image.
-          skip-dirs: /usr/local/lib/skopeo
-      - name: Scan the worker image for fixable vulnerabilities
-        uses: ./.github/actions/image-scan
+          pattern: candidate-image-security-*
+          merge-multiple: true
+          path: ${{ runner.temp }}/pr-security
+          run-id: ${{ inputs.reuse_run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Reuse fresh scan and smoke evidence for these exact digests
+        id: pr_security
+        if: steps.pr_images.outputs.reused == 'true'
+        shell: bash
         env:
-          TRIVY_PLATFORM: linux/amd64
-        with:
-          image: ${{ steps.metadata.outputs.worker_image }}@${{ steps.pr_images.outputs.worker_digest || steps.build_worker.outputs.digest }}
-          category: development-worker
-          # skopeo and its runtime libraries are copied unchanged from the
-          # upstream quay.io/skopeo release image.
-          skip-dirs: /usr/local/lib/skopeo
-      - name: Scan the hermes image for fixable vulnerabilities
-        if: steps.reuse_hermes.outputs.digest == ''
-        uses: ./.github/actions/image-scan
-        env:
-          TRIVY_PLATFORM: linux/amd64
-        with:
-          image: ghcr.io/carstvaartjes/vonk-forge-hermes@${{ steps.pr_images.outputs.hermes_digest || steps.build_hermes.outputs.digest }}
-          category: development-hermes
-          # An upstream application release with a thin layer of ours.
-          gate: "false"
-      - name: Scan the litellm image for fixable vulnerabilities
-        if: steps.reuse_litellm.outputs.digest == ''
-        uses: ./.github/actions/image-scan
-        env:
-          TRIVY_PLATFORM: linux/amd64
-        with:
-          image: ghcr.io/carstvaartjes/vonk-forge-litellm@${{ steps.pr_images.outputs.litellm_digest || steps.build_litellm.outputs.digest }}
-          category: development-litellm
-          # An upstream application release with a thin layer of ours.
-          gate: "false"
+          GH_TOKEN: ${{ github.token }}
+          REUSE_RUN_ID: ${{ inputs.reuse_run_id }}
+          API_DIGEST: ${{ steps.pr_images.outputs.api_digest }}
+          WORKER_DIGEST: ${{ steps.pr_images.outputs.worker_digest }}
+          HERMES_DIGEST: ${{ steps.pr_images.outputs.hermes_digest }}
+          LITELLM_DIGEST: ${{ steps.pr_images.outputs.litellm_digest }}
+        run: scripts/reuse-pr-image-security "$RUNNER_TEMP/pr-security" "$REUSE_RUN_ID" >> "$GITHUB_OUTPUT"
 
       - name: Remove registry write credentials before acceptance
         shell: bash
@@ -347,38 +330,54 @@ jobs:
               "$docker_config" >/dev/null
           fi
 
-      - name: Smoke the exact rootless LiteLLM runtime on both architectures
-        if: steps.reuse_litellm.outputs.digest == ''
-        shell: bash
-        env:
-          # The pull request ran no smoke for this digest, so it runs here. Each
-          # architecture is read from the registry by digest: no archive needed.
-          DIGEST: ${{ steps.pr_images.outputs.litellm_digest || steps.build_litellm.outputs.digest }}
-        run: |
-          set -euo pipefail
-          tags=()
-          cleanup() {
-            if ((${#tags[@]} > 0)); then
-              docker image rm --force "${tags[@]}" >/dev/null 2>&1 || true
-            fi
-          }
-          trap cleanup EXIT
-          for architecture in amd64 arm64; do
-            tag="vonk-forge-litellm-smoke:${architecture}-${GITHUB_RUN_ID}"
-            tags+=("$tag")
-            scripts/retry-dependency-fetch skopeo copy \
-              --override-os linux --override-arch "$architecture" \
-              "docker://ghcr.io/carstvaartjes/vonk-forge-litellm@$DIGEST" \
-              "docker-daemon:$tag"
-            docker run --rm --platform "linux/$architecture" \
-              --network none --read-only --cap-drop ALL \
-              --security-opt no-new-privileges \
-              --entrypoint python \
-              --env PRISMA_QUERY_ENGINE_BINARY=/opt/vonk-litellm/prisma/query-engine \
-              --volume "$GITHUB_WORKSPACE/deploy/compose/litellm/config_supervisor.py:/tmp/config_supervisor.py:ro" \
-              "$tag" -c \
-              'import importlib.util,sys; spec=importlib.util.spec_from_file_location("vonk_litellm_supervisor","/tmp/config_supervisor.py"); module=importlib.util.module_from_spec(spec); sys.modules[spec.name]=module; spec.loader.exec_module(module); module._prepare_query_engine()'
-          done
+      - name: Scan the api image and smoke its runtime
+        if: steps.pr_security.outputs.reused != 'true'
+        uses: ./.github/actions/image-security
+        with:
+          image: ghcr.io/carstvaartjes/vonk-forge-api@${{ steps.pr_images.outputs.api_digest || steps.build_api.outputs.digest }}
+          role: api
+      - name: Upload reused api findings under main's category
+        if: steps.pr_security.outputs.reused == 'true'
+        uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+        with:
+          sarif_file: trivy-results/development-api.sarif
+          category: trivy-development-api
+      - name: Scan the worker image and smoke its runtime
+        if: steps.pr_security.outputs.reused != 'true'
+        uses: ./.github/actions/image-security
+        with:
+          image: ghcr.io/carstvaartjes/vonk-forge-worker@${{ steps.pr_images.outputs.worker_digest || steps.build_worker.outputs.digest }}
+          role: worker
+      - name: Upload reused worker findings under main's category
+        if: steps.pr_security.outputs.reused == 'true'
+        uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+        with:
+          sarif_file: trivy-results/development-worker.sarif
+          category: trivy-development-worker
+      - name: Scan the hermes image and smoke its runtime
+        if: steps.pr_security.outputs.reused != 'true' && steps.reuse_hermes.outputs.digest == ''
+        uses: ./.github/actions/image-security
+        with:
+          image: ghcr.io/carstvaartjes/vonk-forge-hermes@${{ steps.pr_images.outputs.hermes_digest || steps.build_hermes.outputs.digest }}
+          role: hermes
+      - name: Upload reused hermes findings under main's category
+        if: steps.pr_security.outputs.reused == 'true'
+        uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+        with:
+          sarif_file: trivy-results/development-hermes.sarif
+          category: trivy-development-hermes
+      - name: Scan the litellm image and smoke its runtime
+        if: steps.pr_security.outputs.reused != 'true' && steps.reuse_litellm.outputs.digest == ''
+        uses: ./.github/actions/image-security
+        with:
+          image: ghcr.io/carstvaartjes/vonk-forge-litellm@${{ steps.pr_images.outputs.litellm_digest || steps.build_litellm.outputs.digest }}
+          role: litellm
+      - name: Upload reused litellm findings under main's category
+        if: steps.pr_security.outputs.reused == 'true'
+        uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+        with:
+          sarif_file: trivy-results/development-litellm.sarif
+          category: trivy-development-litellm
 
       - name: Accept the pull request images by their verified digests
         id: pr_acceptance

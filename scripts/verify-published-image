@@ -44,25 +44,21 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-observed=$(scripts/retry-dependency-fetch skopeo inspect --format '{{.Digest}}' \
-  "docker://$reference")
-[[ "$observed" == "$digest" ]]
-
+# Buildx's JSON of `.` contains manifest and image configs, but not the
+# Provenance/SBOM methods. Project them explicitly in the same registry read.
+inspection="$scratch/inspection.json"
+scripts/retry-dependency-fetch docker buildx imagetools inspect "$reference" \
+  --format '{"inspection":{{json .}},"provenance":{{json .Provenance}},"sbom":{{json .SBOM}}}' \
+  > "$inspection"
+[[ "$(jq -er '.inspection.manifest.digest' "$inspection")" == "$digest" ]]
 manifest_file="$scratch/manifest.json"
 platform_records="$scratch/platforms.tsv"
 provenance_file="$scratch/provenance.json"
 sbom_file="$scratch/sbom.json"
-scripts/retry-dependency-fetch docker buildx imagetools inspect "$image@$digest" \
-  --format '{{ json .Manifest }}' \
-  > "$manifest_file"
-scripts/verify-multiarch-image-manifest "$manifest_file" \
-  > "$platform_records"
-scripts/retry-dependency-fetch docker buildx imagetools inspect "$image@$digest" \
-  --format '{{ json .Provenance }}' \
-  > "$provenance_file"
-scripts/retry-dependency-fetch docker buildx imagetools inspect "$image@$digest" \
-  --format '{{ json .SBOM }}' \
-  > "$sbom_file"
+jq -e '.inspection.manifest' "$inspection" > "$manifest_file"
+scripts/verify-multiarch-image-manifest "$manifest_file" > "$platform_records"
+jq -e '.provenance' "$inspection" > "$provenance_file"
+jq -e '.sbom' "$inspection" > "$sbom_file"
 jq -e 'keys | sort == ["linux/amd64", "linux/arm64"]' \
   "$provenance_file" >/dev/null
 jq -e 'keys | sort == ["linux/amd64", "linux/arm64"]' \
@@ -72,8 +68,9 @@ build_revision=""
 build_tree=""
 while IFS=$'\t' read -r architecture runnable_digest attestation_digest; do
   [[ "$attestation_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
-  labels=$(scripts/retry-dependency-fetch skopeo inspect --config "docker://$image@$runnable_digest" \
-    | jq -ec '.config.Labels | select(."org.opencontainers.image.source" == "https://github.com/CarstVaartjes/vonk-forge")')
+  labels=$(jq -ec --arg platform "linux/$architecture" \
+    '.inspection.image[$platform].config.Labels | select(."org.opencontainers.image.source" == "https://github.com/CarstVaartjes/vonk-forge")' \
+    "$inspection")
   observed_revision=$(jq -er '."org.opencontainers.image.revision" | select(test("^[0-9a-f]{40}$"))' <<< "$labels")
   observed_tree=$(jq -r '."ai.vonkforge.source.tree" // empty' <<< "$labels")
   if [[ -z "$observed_tree" ]]; then

@@ -332,6 +332,68 @@ jobs:
           path: ${{ runner.temp }}/image
           if-no-files-found: error
 
+  image-security:
+    name: Candidate image scan and smoke (${{ matrix.role }})
+    # Runs beside candidate assembly/acceptance, never before their consumers.
+    needs: [source, images]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        role: [api, worker, hermes, litellm]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.source.outputs.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: acceptance-image-*
+          merge-multiple: true
+          path: ${{ runner.temp }}/images
+      - name: Read the verified candidate index
+        id: image
+        shell: bash
+        env:
+          ROLE: ${{ matrix.role }}
+        run: |
+          set -euo pipefail
+          image=$(cat "$RUNNER_TEMP/images/$ROLE")
+          digest=${image##*@sha256:}
+          [[ "$digest" =~ ^[0-9a-f]{64}$ ]]
+          printf 'image=ghcr.io/carstvaartjes/vonk-forge-%s@sha256:%s\ndigest=%s\n' \
+            "$ROLE" "$digest" "$digest" >> "$GITHUB_OUTPUT"
+      - uses: ./.github/actions/apt-install
+        if: matrix.role == 'litellm'
+        with:
+          packages: skopeo
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+        if: matrix.role == 'litellm'
+        with:
+          image: docker.io/tonistiigi/binfmt@sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0
+          platforms: arm64
+      - uses: ./.github/actions/image-security
+        with:
+          role: ${{ matrix.role }}
+          image: ${{ steps.image.outputs.image }}
+      - name: Bind successful scan and smoke to the digest and run attempt
+        shell: bash
+        env:
+          ROLE: ${{ matrix.role }}
+          DIGEST: ${{ steps.image.outputs.digest }}
+        run: |
+          set -euo pipefail
+          directory="$RUNNER_TEMP/security/$ROLE/$DIGEST"
+          mkdir -p "$directory"
+          cp "trivy-results/development-$ROLE.sarif" "$directory/"
+          printf '%s:%s\n' "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" > "$directory/verified"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: candidate-image-security-${{ matrix.role }}-${{ steps.image.outputs.digest }}
+          path: ${{ runner.temp }}/security
+          if-no-files-found: error
+
   package:
     name: Candidate ARM64 agent packages
     needs: source
@@ -347,6 +409,9 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - uses: ./.github/actions/python-env
+        with:
+          contracts: none
+          cli-dependencies: "false"
       - name: Install pinned native Rust toolchain
         run: scripts/retry-dependency-fetch rustup toolchain install 1.98.1 --profile minimal
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
