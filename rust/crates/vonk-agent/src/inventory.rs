@@ -137,7 +137,7 @@ mod disk_reserve_tests {
 
 /// What one collection pass observed. The wire document is `InventoryRequest`,
 /// built by the client; this value is never serialized itself.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Inventory {
     pub memory_total_bytes: u64,
     pub memory_available_bytes: u64,

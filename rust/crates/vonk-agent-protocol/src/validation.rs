@@ -342,6 +342,10 @@ mod inventory_tests {
             kind: NetworkInterfaceKind::Wifi,
             link_speed_mbps: None,
             carrier: true,
+            signal_dbm: None,
+            frequency_mhz: None,
+            tx_bitrate_mbps: None,
+            rx_bitrate_mbps: None,
         };
         let mut value = inventory();
         value.network_interfaces = Some(vec![wifi.clone()]);

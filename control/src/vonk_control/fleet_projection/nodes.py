@@ -19,7 +19,7 @@ from ..models import (
     NodeInventorySnapshot,
 )
 from ..nas_route_notice import nas_route_notice
-from ..nas_transfer_rate import NasTransferNotice
+from ..nas_transfer_rate import NasTransferNotice, nas_transfer_detail
 from ..recipe_update_notice import RECIPE_UPDATE_AVAILABLE
 from ..strict_json import warn_unreadable_once
 from ..telemetry import TelemetrySampleView, sustained_low_cpu_clock
@@ -134,7 +134,15 @@ def _node(
         warnings.append(
             ProjectionReason(
                 code=ProjectionCode.NETWORK_NAS_TRANSFER_SLOW,
-                detail=slow_nas.detail,
+                detail=nas_transfer_detail(
+                    slow_nas,
+                    None
+                    if inventory_state is None
+                    else inventory_state.network_interfaces,
+                    None
+                    if inventory_state is None
+                    else inventory_state.nas_route_interface,
+                ),
                 severity=ProfileReasonSeverity.WARNING.value,
                 recommendation=slow_nas.recommendation,
             )

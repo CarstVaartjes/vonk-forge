@@ -55,7 +55,7 @@ class InstallationBytes(WireModel):
 
 
 class NetworkInterface(WireModel):
-    """One NIC as the agent reads it from sysfs."""
+    """One NIC from sysfs, with best-effort nl80211 NAS-route link evidence."""
 
     model_config = ConfigDict(
         extra="forbid", strict=True, frozen=True, allow_inf_nan=False
@@ -66,6 +66,12 @@ class NetworkInterface(WireModel):
     # Negotiated speed; None while there is no link or the driver reports none.
     link_speed_mbps: int | None = Field(default=None, ge=1, le=1_000_000)
     carrier: bool
+    # Only observed for the wireless NAS route. Missing/unsupported readings
+    # remain unknown. Bitrates are PHY rates, never measured NAS throughput.
+    signal_dbm: int | None = Field(default=None, ge=-128, le=0)
+    frequency_mhz: int | None = Field(default=None, ge=1, le=2**32 - 1)
+    tx_bitrate_mbps: float | None = Field(default=None, gt=0)
+    rx_bitrate_mbps: float | None = Field(default=None, gt=0)
 
 
 class HostSettings(WireModel):
