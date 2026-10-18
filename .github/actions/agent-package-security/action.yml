@@ -6,6 +6,9 @@ runs:
   steps:
     - name: Prepare Pydantic contracts for Cargo builds
       uses: ./.github/actions/python-env
+      with:
+        contracts: none
+        cli-dependencies: "false"
     - name: Run Rust and packaging security gates
       shell: bash
       run: |
@@ -14,7 +17,8 @@ runs:
         cargo clippy --workspace --all-targets --locked -- -D warnings
         cargo test --workspace --locked
         cargo build --locked -p vonk-agent --bin vonk-agent
+        # These packaging tests consume the binary, not generated clients.
         VONK_AGENT_BINARY="${CARGO_TARGET_DIR:-target}/debug/vonk-agent" \
           VONK_CI_PREREQUISITES=needs_agent_binary \
-          uv run --frozen --only-group dev pytest -q \
+          uv run --frozen --only-group dev pytest -q --confcutdir=tests/scripts \
           tests/scripts/test_agent_deb.py
