@@ -8,7 +8,7 @@ control/tests/test_api_failure_classification.py. This scan prevents new direct
 import ast
 from pathlib import Path
 
-from vonk_agent_protocol import ModelCacheCode
+from vonk_agent_protocol import ArtifactLifecycleCode, ModelCacheCode
 
 from control.tests.parsed_sources import parse_file
 
@@ -112,9 +112,20 @@ def _cache_deterministic_observations(tree: ast.Module) -> list[int]:
         if not node.args or not isinstance(node.args[0], ast.Attribute):
             continue
         code = node.args[0]
-        if not isinstance(code.value, ast.Name) or code.value.id != "ModelCacheCode":
+        if not isinstance(code.value, ast.Name):
             continue
-        if ModelCacheCode[code.attr] not in _CACHE_OBSERVATIONS:
+        if code.value.id == "ModelCacheCode":
+            deterministic = ModelCacheCode[code.attr] not in _CACHE_OBSERVATIONS
+        else:
+            deterministic = (
+                code.value.id == "ArtifactLifecycleCode"
+                and ArtifactLifecycleCode[code.attr]
+                in {
+                    ArtifactLifecycleCode.REFERENCE_IDENTITY_MISMATCH,
+                    ArtifactLifecycleCode.DELETION_FENCE_LOST,
+                }
+            )
+        if deterministic:
             violations.append(node.lineno)
     return violations
 
@@ -134,5 +145,8 @@ def test_cache_observation_guard_rejects_conflicts_but_permits_unavailable_sourc
 raise ModelCacheStorageUnknown(ModelCacheCode.SELECTOR_AMBIGUOUS, "choose digest")
 raise ModelCacheStorageUnknown(ModelCacheCode.SOURCE_UNAVAILABLE, "observe")
 raise ModelCacheStorageUnknown(ModelCacheCode.MODEL_DEPENDENCY_CYCLE, "invalid")
+raise ModelCacheConflictUnknown(ArtifactLifecycleCode.REFERENCE_IDENTITY_MISMATCH, "replan")
+raise ModelCacheConflictUnknown(ArtifactLifecycleCode.DELETION_FENCE_LOST, "replan")
+raise ModelCacheConflictUnknown(ArtifactLifecycleCode.REFERENCE_UNAVAILABLE, "observe")
 """)
-    assert _cache_deterministic_observations(tree) == [2, 4]
+    assert _cache_deterministic_observations(tree) == [2, 4, 5, 6]
