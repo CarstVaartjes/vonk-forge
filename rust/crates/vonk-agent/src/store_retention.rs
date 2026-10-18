@@ -9,9 +9,9 @@
 //! Two kinds of entry leave here:
 //!
 //! - Model files are the one cache kept until the space is needed: a model
-//!   object no installation links or names leaves only while the disk is below
-//!   the platform's low-space line, least recently used first, until free space
-//!   is back above the line plus the eviction reserve.
+//!   object no installation or Controller reference names leaves when a load
+//!   needs disk space or the platform low-space line is crossed, least recently
+//!   used first, until the demand or low-space reserve is met.
 //! - Everything else unused leaves once nothing has used or changed it for
 //!   [`GRACE`], whatever the free space: a transfer checkpoint or build export
 //!   whose claim ended, an isolated entry, a base image no build has opened, a
@@ -40,7 +40,7 @@ use Collector::*;
 pub const GRACE: Duration = Duration::from_secs(24 * 60 * 60);
 
 /// The Controller's low-space line (`STORAGE_LOW_FREE_FRACTION`) without its
-/// largest-install term, so the agent never evicts above the Controller's line.
+/// largest-install term; a current load can request more free space.
 pub const LOW_FREE_PERCENT: u64 = 10;
 /// The Controller's eviction reserve (`STORAGE_EVICTION_RESERVE_FRACTION` and
 /// `STORAGE_EVICTION_RESERVE_FLOOR_BYTES`).
