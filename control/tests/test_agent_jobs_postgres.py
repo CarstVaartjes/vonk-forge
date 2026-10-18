@@ -1193,3 +1193,75 @@ def test_postgres_terminal_request_stays_ended_and_fresh_request_has_one_claim_w
         first.succeed(original, STOP_RESULT)
     services[0].succeed(resumed[0], STOP_RESULT)
     assert state(sessions, fresh.parent_job_id) == LifecycleState.SUCCEEDED.value
+
+
+@pytest.mark.parametrize("security", (False, True))
+def test_helper_time_window_replans_but_bad_authority_ends(service, security):
+    """A stale signed grant must re-plan; a bad signature must never retry."""
+    from pathlib import Path
+
+    from vonk_agent_protocol import (
+        AgentFailureKind,
+        AgentResultState,
+        FailureCode,
+        HelperErrorCode,
+        LifecycleState,
+        OutcomeEvidence,
+        OutcomeFailed,
+        OutcomeKind,
+    )
+    from vonk_agent_protocol.helper_response import HostHelperResponse
+
+    sessions, clock = service
+    jobs = AgentJobService(sessions, clock=clock)
+    operation = jobs.enqueue(
+        parent(sessions, clock).id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD
+    )
+    first = claim_agent(jobs, NODE_A, "serial-a")
+    assert first is not None
+    vector = HostHelperResponse.model_validate_json(
+        (
+            Path(__file__).parents[2]
+            / "agent_protocol/fixtures/host-helper-time-window-rejection.json"
+        ).read_bytes()
+    )
+    reason_code = HelperErrorCode.GRANT_UNAUTHORIZED if security else vector.error_code
+    assert reason_code is not None
+    jobs.record_result(
+        AgentResult(
+            fence=first.fence,
+            state=AgentResultState.FAILED,
+            result=OutcomeFailed(
+                kind=OutcomeKind.FAILED,
+                code=FailureCode.RECIPE_STOP_FAILED,
+                reason="helper refused the grant",
+                failure_kind=AgentFailureKind.UNCERTAIN_EFFECT,
+                retry_after_seconds=2,
+                evidence=OutcomeEvidence(helper_error_code=reason_code.value),
+            ),
+        )
+    )
+    with sessions() as session:
+        stored = session.get(AgentOperation, operation.id)
+        assert stored is not None
+        assert stored.status_reason is not None
+        if security:
+            assert vector.error_code is HelperErrorCode.GRANT_TIME_WINDOW
+            assert reason_code is HelperErrorCode.GRANT_UNAUTHORIZED
+            assert stored.state == LifecycleState.FAILED
+            assert stored.next_action_at is None
+            return
+        assert stored.state == LifecycleState.BACKOFF
+        assert stored.next_action_at is not None
+        due = stored.next_action_at
+    # The same durable owner survives restart; re-issue uses a fresh fence and
+    # the same exact payload, never the stale grant or a broader operation.
+    clock.advance(seconds=int((due - clock.now).total_seconds()) + 1)
+    restarted = AgentJobService(sessions, clock=clock)
+    second = claim_agent(restarted, NODE_A, "serial-a")
+    assert second is not None and second.fence != first.fence
+    assert second.payload == first.payload
+    restarted.succeed(second, STOP_RESULT)
+    with sessions() as session:
+        stored = session.get(AgentOperation, operation.id)
+        assert stored is not None and stored.state == LifecycleState.SUCCEEDED

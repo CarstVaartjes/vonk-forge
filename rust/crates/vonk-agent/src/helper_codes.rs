@@ -19,6 +19,7 @@ fn is_runtime_rejection(code: Code) -> bool {
         Code::GrantInvalid
             | Code::GrantNodeMismatch
             | Code::GrantUnauthorized
+            | Code::GrantTimeWindow
             | Code::PeerIdentityInvalid
             | Code::OperationInvalidArtifact
             | Code::RuntimeImageIdentityInvalid
@@ -72,6 +73,7 @@ pub fn is_unbound_rejection(code: Code) -> bool {
         Code::GrantInvalid
             | Code::GrantNodeMismatch
             | Code::GrantUnauthorized
+            | Code::GrantTimeWindow
             | Code::PeerIdentityInvalid
             | Code::RequestInvalid
     )
@@ -85,6 +87,7 @@ pub fn upgrade_rejection(code: Code) -> Option<Code> {
             Code::GrantInvalid
                 | Code::GrantNodeMismatch
                 | Code::GrantUnauthorized
+                | Code::GrantTimeWindow
                 | Code::PeerIdentityInvalid
                 | Code::RequestReplayed
                 | Code::OperationFailed
@@ -109,6 +112,7 @@ pub fn is_distribution_evidence(code: Code) -> bool {
         Code::GrantInvalid
             | Code::GrantNodeMismatch
             | Code::GrantUnauthorized
+            | Code::GrantTimeWindow
             | Code::PeerIdentityInvalid
             | Code::RequestReplayed
             | Code::OperationFailed

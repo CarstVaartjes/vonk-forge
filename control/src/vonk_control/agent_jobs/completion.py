@@ -9,6 +9,7 @@ from vonk_agent_protocol import (
     AgentOperation,
     AgentResultState,
     Disposition,
+    HelperErrorCode,
     OutcomeDone,
     OutcomeFailed,
     OutcomeUnknown,
@@ -90,7 +91,9 @@ def _report_event(
             fence=fence,
             effect=(
                 Effect.NONE
-                if operation.kind == AgentOperation.RECIPE_JOB_RUN.value
+                if result.get("helper_error_code")
+                == HelperErrorCode.GRANT_TIME_WINDOW.value
+                or operation.kind == AgentOperation.RECIPE_JOB_RUN.value
                 and job_attempt_did_not_launch(result)
                 and verdict is Disposition.WAIT
                 else None

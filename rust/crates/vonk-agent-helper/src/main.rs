@@ -476,9 +476,9 @@ fn handle(
             HelperRejection::new(HelperErrorCode::GrantInvalid, "system clock is unavailable")
         })?
         .as_secs() as i64;
-    verifier.authorize(&request, &peer, now).map_err(|error| {
-        HelperRejection::new(HelperErrorCode::GrantUnauthorized, error.safe_detail())
-    })?;
+    verifier
+        .authorize(&request, &peer, now)
+        .map_err(|error| HelperRejection::new(error.authorization_code(), error.safe_detail()))?;
     claim_once(&request_id).map_err(|failure| {
         HelperRejection::for_request(&request_id, failure.error_code(), failure.detail())
     })?;

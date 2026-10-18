@@ -729,6 +729,9 @@ pub(super) fn cancelled_job(
 pub(super) fn refused_job_start(
     error: &crate::host_runtime::HostRuntimeError,
 ) -> Option<ExecutionResult> {
+    if refused_before_effect(error) {
+        return Some(runtime_failure("job start refused before execution", error));
+    }
     match error {
         crate::host_runtime::HostRuntimeError::Controller(error)
             if matches!(
