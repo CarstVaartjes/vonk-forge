@@ -2,16 +2,6 @@
 
 use super::*;
 
-pub(super) fn metadata_stable(before: &fs::Metadata, after: &fs::Metadata) -> bool {
-    before.dev() == after.dev()
-        && before.ino() == after.ino()
-        && before.len() == after.len()
-        && timestamp_ns(before.mtime(), before.mtime_nsec())
-            == timestamp_ns(after.mtime(), after.mtime_nsec())
-        && timestamp_ns(before.ctime(), before.ctime_nsec())
-            == timestamp_ns(after.ctime(), after.ctime_nsec())
-}
-
 pub(super) fn write_installation_metadata(
     data_root: &Path,
     installation: &Path,

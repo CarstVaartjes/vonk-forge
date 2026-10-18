@@ -7,26 +7,6 @@ pub(super) fn sync_parent(parent: &Path) -> Result<(), OciError> {
     Ok(())
 }
 
-/// Release the kernel's page cache for a file this agent has finished with.
-///
-/// A materialized model is hundreds of gigabytes.  Where the device's memory is
-/// the system's unified memory, the page cache holding those bytes is memory the
-/// GPU cannot allocate from: after one 199 GB installation the workload's own
-/// loader read about 950 MB of free device memory and refused the 1.27 GB
-/// staging buffer its checkpoint needs, on a node that reported 126 GB
-/// available.  The agent wrote those bytes, so releasing them is the agent's
-/// job, and it is a hint: the file's content is unaffected and the next read
-/// simply caches again.
-pub(super) fn release_page_cache(path: &Path) -> Result<(), OciError> {
-    if !path.is_file() {
-        return Err(OciError::Artifact);
-    }
-    let file = File::open(path)?;
-    rustix::fs::fadvise(&file, 0, None, rustix::fs::Advice::DontNeed)
-        .map_err(std::io::Error::from)?;
-    Ok(())
-}
-
 pub(super) fn spec_references_model(
     spec: &CompiledExecutionPlan,
     model_content_sha256: &str,

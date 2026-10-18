@@ -350,7 +350,6 @@ class AgentDiagnosticOperation(WireEnum):
 
     CONTROLLER_REQUEST = "controller.request"
     WORKLOAD_PRELOAD_MEMORY = "workload.preload_memory"
-    MODEL_MATERIALIZATION_COPY_FALLBACK = "model.materialization_copy_fallback"
 
 
 class RecipeRunDispositionValue(WireEnum):

@@ -24,8 +24,8 @@ from pydantic import (
     model_validator,
 )
 
-from .failure_evidence import FailureDiagnostics
-from .lifecycle_vocabulary import AgentResultState, WaitReason
+from .failure_evidence import FailureDiagnostics, ModelStoreLayoutFault
+from .lifecycle_vocabulary import AgentResultState, FailureCode, WaitReason
 from .optional_evidence import (
     EvidenceGroup,
     OptionalEvidenceModel,
@@ -390,6 +390,11 @@ def _validate_safe_keys(
                 or typed_distribution_object_name
                 or typed_compiled_plan_key
                 or (
+                    typed_result_strings
+                    and path == ("diagnostics", FailureCode.MODEL_STORE_LAYOUT.value)
+                    and key == "path"
+                )
+                or (
                     operation is AgentOperation.RECIPE_JOB_RUN
                     and path == ("output_limits",)
                     and key == "max_file_bytes"
@@ -557,6 +562,12 @@ def _typed_recipe_job_string(path: tuple[str | int, ...], value: str) -> bool:
 
 
 def _typed_result_string(path: tuple[str | int, ...], value: str) -> bool:
+    if path == ("diagnostics", FailureCode.MODEL_STORE_LAYOUT.value, "path"):
+        try:
+            ModelStoreLayoutFault(path=value)
+        except ValidationError:
+            return False
+        return True
     # These declared leaves are inert captured observations, never authority.
     # Their enclosing Pydantic model enforces the complete diagnostic byte bound.
     if path in {("diagnostics", "stdout", "text"), ("diagnostics", "stderr", "text")}:

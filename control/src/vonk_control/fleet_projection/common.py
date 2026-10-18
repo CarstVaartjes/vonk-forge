@@ -15,6 +15,7 @@ from vonk_agent_protocol import (
     ProjectionCode,
     RunDegradedReason,
 )
+from vonk_agent_protocol.failure_evidence import ModelStoreLayoutFault
 from vonk_agent_protocol.inventory import HostSettings, NetworkInterface
 from vonk_agent_protocol.telemetry import GpuUnavailableReason
 from vonk_forge_contracts import RecipeDefinition, document_sha256, read_recipe
@@ -330,6 +331,7 @@ class ProjectionReason(StrictModel):
     #: and which reason. Absent for every other code.
     install_partial: InstallPartialEvidence | None = None
     recommendation: Text256 | None = None
+    model_store_layout: ModelStoreLayoutFault | None = None
 
 
 class NodeConnection(StrictModel):

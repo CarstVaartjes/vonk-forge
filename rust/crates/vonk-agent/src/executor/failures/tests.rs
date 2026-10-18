@@ -1186,3 +1186,38 @@ fn time_window_refusal_reaches_the_controller_without_becoming_a_security_failur
         Some(HelperErrorCode::GrantTimeWindow)
     );
 }
+
+#[test]
+fn model_layout_fault_retains_actionable_evidence_for_bounded_recovery() {
+    let error = OciError::ModelStoreLayout {
+        source_path: "distribution/models/digest".into(),
+        destination: "installations/id/models/weights".into(),
+        errno: Some(18),
+    };
+    let result = preparation_failure_at(&error, FailureStage::ModelMaterialization, "materialize");
+    let ExecutionResult::Failed(failure) = result else {
+        panic!("layout fault disappeared")
+    };
+    assert_eq!(failure.code, Some(FailureCode::ModelStoreLayout));
+    assert_eq!(
+        failure.failure_kind,
+        Some(AgentFailureKind::TemporaryDependency)
+    );
+    assert_eq!(failure.retry_after_seconds, Some(5));
+    let finished = ExecutionResult::Failed(failure)
+        .finish_for(&vonk_agent_protocol::generated::AgentOperation::RecipeInstall);
+    let vonk_agent_protocol::generated::AgentResultResult::OutcomeFailed(outcome) = finished.result
+    else {
+        panic!("layout fault lost at wire projection")
+    };
+    assert_eq!(outcome.code, FailureCode::ModelStoreLayout);
+    let layout = outcome
+        .evidence
+        .unwrap()
+        .diagnostics
+        .unwrap()
+        .model_store_layout
+        .unwrap();
+    assert_eq!(layout.errno, Some(18));
+    assert_eq!(layout.path, "installations/id/models/weights");
+}

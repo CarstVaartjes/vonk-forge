@@ -14,6 +14,14 @@ pub enum OciError {
     ImageDigest,
     #[error("managed artifact content is corrupt")]
     Artifact,
+    #[error(
+        "errno={errno:?} path={destination:?}; model store hardlink from {source_path:?} failed; place installations and distribution/models on one link-capable filesystem"
+    )]
+    ModelStoreLayout {
+        source_path: PathBuf,
+        destination: PathBuf,
+        errno: Option<i32>,
+    },
     #[error("managed workload storage failed")]
     Io(#[from] std::io::Error),
     #[error("managed workload metadata is invalid")]
@@ -37,6 +45,16 @@ pub enum OciError {
 }
 
 impl OciError {
+    pub(crate) fn model_store_layout(&self) -> Option<&Self> {
+        match self {
+            Self::ModelStoreLayout { .. } => Some(self),
+            Self::Install { source, .. } | Self::Start { source, .. } => {
+                source.model_store_layout()
+            }
+            _ => None,
+        }
+    }
+
     pub fn is_cancelled(&self) -> bool {
         match self {
             Self::Process(ProcessError::Cancelled) => true,
@@ -81,6 +99,9 @@ impl OciError {
                 vonk_agent_protocol::generated::OciFailureCategory::ImageDigest.as_str()
             }
             Self::Artifact => vonk_agent_protocol::generated::OciFailureCategory::Artifact.as_str(),
+            Self::ModelStoreLayout { .. } => {
+                vonk_agent_protocol::generated::FailureCode::ModelStoreLayout.as_str()
+            }
             Self::Io(_) => vonk_agent_protocol::generated::OciFailureCategory::Storage.as_str(),
             Self::Json(_) => vonk_agent_protocol::generated::OciFailureCategory::Metadata.as_str(),
             Self::Capacity => vonk_agent_protocol::generated::OciFailureCategory::Capacity.as_str(),

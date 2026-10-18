@@ -32,7 +32,17 @@ class FailureProperty(WireModel):
     value: str = Field(max_length=256)
 
 
+class ModelStoreLayoutFault(WireModel):
+    """Exact managed path and OS cause; not host-path-bearing prose."""
+
+    path: str = Field(
+        min_length=1, max_length=4096, pattern=r"^installations/[^/]+/models/.+"
+    )
+    errno: int | None = Field(default=None, ge=1, le=4095)
+
+
 class FailureDiagnostics(WireModel):
+    model_store_layout: ModelStoreLayoutFault | None = None
     schema_version: Literal[1] = 1
     collected_at: str = Field(min_length=1, max_length=64)
     phase: str = Field(min_length=1, max_length=80)

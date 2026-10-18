@@ -1,7 +1,6 @@
 //! Materialization for the oci boundary.
 
 use super::*;
-use std::io::{Seek, SeekFrom};
 
 pub(super) struct TemporaryArtifact {
     path: PathBuf,
@@ -39,18 +38,15 @@ pub(super) fn materialize_compiled_models(
     })
 }
 
-/// Bytes between two progress reports while one model file is copied.
-pub(super) const MATERIALIZE_PROGRESS_STEP: u64 = 64 * 1024 * 1024;
-
 /// Put every planned model file in the installation, reporting `(done, total)`
 /// bytes. A file already in place counts as done at once.
 ///
 /// The shared distribution object is the one trusted copy of a model file, so
 /// a new installation hard-links it: no bytes move and no extra disk is used,
 /// however large the model or however many installations already hold it. An
-/// installation that already holds a private copy, from before files were
-/// shared, keeps it until the installation goes. Where a link cannot be made
-/// (another filesystem, the link limit) the file is copied instead.
+/// installation that already holds a receipted private file is repaired by the
+/// normal relinker. New private copies are never created: a hardlink failure
+/// reports the managed layout fault and preserves the source for recovery.
 pub(super) fn materialize_compiled_models_observed(
     data_root: &Path,
     plan: &CompiledExecutionPlan,
@@ -61,8 +57,7 @@ pub(super) fn materialize_compiled_models_observed(
     materialize_compiled_models_with(data_root, plan, installation_id, true, progress, cancelled)
 }
 
-/// `link` is false only where a test needs the copy fallback on a filesystem
-/// that would allow the link.
+/// `link` is false only to inject EXDEV at the hardlink boundary in tests.
 pub(super) fn materialize_compiled_models_with(
     data_root: &Path,
     plan: &CompiledExecutionPlan,
@@ -103,17 +98,6 @@ pub(super) fn materialize_compiled_models_controlled(
     if model_metadata.file_type().is_symlink() || !model_metadata.is_dir() {
         return Err(OciError::Artifact);
     }
-    let receipt_index = read_installation_metadata(&installation)
-        .ok()
-        .flatten()
-        .filter(|receipt| receipt_matches_plan(receipt, plan))
-        .map(|receipt| {
-            receipt
-                .entries
-                .into_iter()
-                .map(|entry| ((entry.selection_id.clone(), entry.path.clone()), entry))
-                .collect::<BTreeMap<_, _>>()
-        });
     let mut materialized = Vec::with_capacity(plan.artifacts.len());
     let mut physical_by_path: BTreeMap<(String, String), PhysicalMaterialization> = BTreeMap::new();
     let total_bytes: u64 = unique_plan_artifacts(plan)
@@ -177,20 +161,11 @@ pub(super) fn materialize_compiled_models_controlled(
                     destination.with_extension(format!("{}.damaged", uuid::Uuid::new_v4())),
                 )?;
             }
-            let reusable = receipt_index.as_ref().and_then(|index| {
-                index
-                    .get(&(artifact.selection_id.clone(), artifact.path.clone()))
-                    .filter(|entry| metadata_matches_receipt(&metadata, entry))
-            });
             // A file that already is the shared object needs no receipt: it is
             // the one trusted inode, and nothing is left to place.
             let already_shared = shared == Some((metadata.dev(), metadata.ino()));
-            if (reusable.is_some() || already_shared)
-                && let Ok((_, opened_metadata)) =
-                    open_trusted_model_file(&destination, artifact.size_bytes, shared)
-                && (already_shared
-                    || reusable
-                        .is_some_and(|entry| metadata_matches_receipt(&opened_metadata, entry)))
+            if already_shared
+                && open_trusted_model_file(&destination, artifact.size_bytes, shared).is_ok()
             {
                 check_materialization_cancelled(cancelled)?;
                 physical_by_path.insert(physical_key, (destination.clone(), physical));
@@ -200,7 +175,7 @@ pub(super) fn materialize_compiled_models_controlled(
                 continue;
             }
         }
-        let (mut source_file, source_metadata) =
+        let (_source_file, source_metadata) =
             open_trusted_model_file(&source, artifact.size_bytes, shared)?;
         let temporary = destination.with_extension(format!(
             "{}.{}.{}.partial",
@@ -209,21 +184,24 @@ pub(super) fn materialize_compiled_models_controlled(
             artifact.file_id
         ));
         let linked = if link {
-            match fs::hard_link(&source, &temporary) {
-                Ok(()) => true,
-                Err(error) => {
-                    eprintln!(
-                        "vonk-agent: {} sha256={} bytes={} cause={error}",
-                        vonk_agent_protocol::generated::AgentDiagnosticOperation::ModelMaterializationCopyFallback.as_str(),
-                        artifact.sha256, artifact.size_bytes
-                    );
-                    false
-                }
-            }
+            fs::hard_link(&source, &temporary)
         } else {
-            false
+            Err(std::io::Error::from_raw_os_error(
+                rustix::io::Errno::XDEV.raw_os_error(),
+            ))
         };
-        if linked {
+        linked.map_err(|error| OciError::ModelStoreLayout {
+            source_path: source
+                .strip_prefix(data_root)
+                .unwrap_or(&source)
+                .to_path_buf(),
+            destination: destination
+                .strip_prefix(data_root)
+                .unwrap_or(&destination)
+                .to_path_buf(),
+            errno: error.raw_os_error(),
+        })?;
+        {
             let mut temporary_guard = TemporaryArtifact::new(temporary.clone());
             // The name just linked must be the object opened above, still a
             // trusted model file, before it replaces anything.
@@ -239,112 +217,7 @@ pub(super) fn materialize_compiled_models_controlled(
             materialized.push(destination);
             done_bytes += artifact.size_bytes;
             progress(done_bytes, total_bytes);
-            continue;
         }
-        // A deterministic content-bound checkpoint survives cancellation and
-        // process death. The installation ownership lock fences writers.
-        let temporary = parent.join(format!(".{}.{}.partial", artifact.file_id, artifact.sha256));
-        let checkpoint_name = format!(".{}.{}.source.json", artifact.file_id, artifact.sha256);
-        let checkpoint_path = parent.join(&checkpoint_name);
-        let source_receipt = installation_metadata_entry(artifact, &source_metadata);
-        let compatible = read_regular_file(&checkpoint_path, 64 * 1024)
-            .ok()
-            .and_then(|bytes| serde_json::from_slice::<InstallationMetadataEntry>(&bytes).ok())
-            .is_some_and(|receipt| {
-                receipt.sha256 == artifact.sha256
-                    && receipt.selection_id == artifact.selection_id
-                    && receipt.path == artifact.path
-                    && metadata_matches_receipt(&source_metadata, &receipt)
-            });
-        if let Ok(metadata) = fs::symlink_metadata(&temporary)
-            && (!compatible
-                || !metadata.file_type().is_file()
-                || metadata.nlink() != 1
-                || metadata.uid() != rustix::process::geteuid().as_raw()
-                || metadata.mode() & 0o777 != 0o600
-                || metadata.len() > artifact.size_bytes)
-        {
-            fs::rename(
-                &temporary,
-                parent.join(format!("{}.damaged", uuid::Uuid::new_v4())),
-            )?;
-        }
-        atomic_write(
-            parent,
-            &checkpoint_name,
-            &canonical_protocol_json(&source_receipt).map_err(|_| OciError::Artifact)?,
-        )?;
-        let mut output = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .truncate(false)
-            .mode(0o600)
-            .custom_flags(
-                (rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::CLOEXEC).bits() as i32,
-            )
-            .open(&temporary)?;
-        let mut copied = output.metadata()?.len();
-        source_file.seek(SeekFrom::Start(copied))?;
-        output.seek(SeekFrom::Start(copied))?;
-        progress(done_bytes + copied, total_bytes);
-        // The source is an immutable managed distribution object received
-        // from the Controller over mTLS. Its bytes are not re-hashed; the
-        // retained source handle, exact size and stable metadata bind this
-        // copy to the object opened above.
-        let mut reported = copied;
-        let mut buffer = [0_u8; 64 * 1024];
-        let mut remaining_bytes = artifact.size_bytes.saturating_sub(copied);
-        while remaining_bytes > 0 {
-            if cancelled() {
-                output.sync_all()?;
-                return Err(ProcessError::Cancelled.into());
-            }
-            let wave_bytes = remaining_bytes.min(buffer.len() as u64) as usize;
-            let read = source_file.read(&mut buffer[..wave_bytes])?;
-            if read == 0 {
-                break;
-            }
-            remaining_bytes -= read as u64;
-            output.write_all(&buffer[..read])?;
-            copied = copied.checked_add(read as u64).ok_or(OciError::Artifact)?;
-            if copied > artifact.size_bytes {
-                return Err(OciError::Artifact);
-            }
-            if copied - reported >= MATERIALIZE_PROGRESS_STEP {
-                output.sync_data()?;
-                reported = copied;
-                progress(done_bytes + copied, total_bytes);
-            }
-        }
-        check_materialization_cancelled(cancelled)?;
-        output.sync_all()?;
-        let source_after = source_file.metadata()?;
-        let output_metadata = output.metadata()?;
-        if copied != artifact.size_bytes
-            || !trusted_model_file(&source_file, &source_after, artifact.size_bytes, shared)
-            || !metadata_stable(&source_metadata, &source_after)
-            || !trusted_model_file(&output, &output_metadata, artifact.size_bytes, None)
-        {
-            drop(output);
-            let _ = fs::remove_file(&temporary);
-            return Err(OciError::Artifact);
-        }
-        drop(output);
-        check_materialization_cancelled(cancelled)?;
-        fs::rename(&temporary, &destination)?;
-        let _ = fs::remove_file(&checkpoint_path);
-        sync_parent(parent)?;
-        // The copy just filled the page cache with the destination, and the
-        // read filled the same cache with the source object.
-        // Neither is needed once this artifact is complete, and the workload
-        // this installation exists for needs the memory more.
-        release_page_cache(&destination)?;
-        release_page_cache(&source)?;
-        physical_by_path.insert(physical_key, (destination.clone(), physical));
-        materialized.push(destination);
-        done_bytes += artifact.size_bytes;
-        progress(done_bytes, total_bytes);
     }
     File::open(&destination_root)?.sync_all()?;
     Ok(materialized)

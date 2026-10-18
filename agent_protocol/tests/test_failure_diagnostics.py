@@ -17,7 +17,8 @@ VECTORS = Path(__file__).parents[1] / "src/vonk_agent_protocol/vectors"
 def test_failure_diagnostics_current_wire_vector():
     document = json.loads((VECTORS / "failure-diagnostics-v1.json").read_text())
     assert (
-        FailureDiagnostics.model_validate(document).model_dump(mode="json") == document
+        json.loads(canonical_message(FailureDiagnostics.model_validate(document)))
+        == document
     )
     for invalid in (
         dict(document, schema_version=True),
@@ -39,12 +40,12 @@ def test_artifact_job_failure_round_trip_retains_typed_diagnostics():
     )
     result = AgentResult.model_validate(document)
     assert isinstance(result.result, RecipeJobRunResult)
+    assert result.result.diagnostics is not None
     assert result.result.diagnostics.category == "platform-policy"
     wire = canonical_message(result)
-    assert (
-        AgentResult.model_validate_json(wire).result.diagnostics
-        == result.result.diagnostics
-    )
+    round_trip = AgentResult.model_validate_json(wire).result
+    assert isinstance(round_trip, RecipeJobRunResult)
+    assert round_trip.diagnostics == result.result.diagnostics
 
 
 def test_generic_failure_round_trip_and_diagnostic_guard_are_narrow():
@@ -59,10 +60,9 @@ def test_generic_failure_round_trip_and_diagnostic_guard_are_narrow():
     }
     result = AgentResult.model_validate(document)
     assert isinstance(result.result, AgentFailureResult)
-    assert (
-        AgentResult.model_validate_json(canonical_message(result)).result.diagnostics
-        == result.result.diagnostics
-    )
+    round_trip = AgentResult.model_validate_json(canonical_message(result)).result
+    assert isinstance(round_trip, AgentFailureResult)
+    assert round_trip.diagnostics == result.result.diagnostics
     # A path in prose is redacted; in the code the Controller acts on, refused.
     document["result"]["reason"] = "/etc/shadow"
     redacted = AgentResult.model_validate(document)
