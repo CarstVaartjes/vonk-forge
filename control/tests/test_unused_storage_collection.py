@@ -9,6 +9,7 @@ pass looked is never raced.
 
 from __future__ import annotations
 
+import json
 import os
 import threading
 import uuid
@@ -21,10 +22,14 @@ from types import SimpleNamespace
 import pytest
 from sqlalchemy import Engine, create_engine, event, func, select
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import LifecycleState, RunState
+from vonk_agent_protocol import InstallationState, LifecycleState, RunState
 from vonk_control.artifact_lifecycle import ArtifactLifecycleGate
 from vonk_control.catalog_revision_collection import operation_tokens
-from vonk_control.fleet_profile_contract import FleetProfilePreview
+from vonk_control.fleet_profile_contract import (
+    FleetProfileApplicationProgress,
+    FleetProfileEffectProgress,
+    FleetProfilePreview,
+)
 from vonk_control.model_cache import ModelCacheService
 from vonk_control.models import (
     AgentNode,
@@ -247,20 +252,27 @@ def _profile(world: Catalog, selector: str, sparks: list[str] | None = None) -> 
         )
 
 
-def _queued_load(world: Catalog) -> None:
-    """A load that has been accepted and targets the Spark."""
+def _queued_load(world: Catalog, installation_id: str) -> None:
+    """A load that has been accepted and names this exact installation."""
+    from vonk_agent_protocol import AgentOperation as OperationKind
+    from vonk_control.job_documents import RecipeInstallParent
 
     with world.sessions.begin() as session:
         session.add(
             Job(
                 request_id=str(uuid.uuid4()),
-                kind="recipe.run-switch.v2",
-                state="queued",
+                kind=OperationKind.RECIPE_INSTALL.value,
+                state=LifecycleState.QUEUED,
                 actor="test",
                 authority_revision="r",
                 targets=[NODE],
                 payload_digest="0" * 64,
-                payload={},
+                payload=RecipeInstallParent(
+                    schema_version=1,
+                    owner_kind="installation",
+                    owner_id=installation_id,
+                    plan_digest="f" * 64,
+                ).model_dump(mode="json"),
                 current_attempt=0,
                 created_at=NOW,
                 updated_at=NOW,
@@ -948,64 +960,9 @@ def test_a_load_waiting_to_be_admitted_does_not_keep_what_it_waits_for_space_fro
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
-def test_a_load_that_issued_something_still_keeps_the_installations_it_uses(
+def test_a_review_can_evict_without_superseding_an_unrelated_load(
     world: Catalog,
 ) -> None:
-    old = world.revision("glm", 1)
-    world.revision("glm", 2, head="active")
-    world.workload(old, run="stopped")
-    _application(
-        world,
-        {"steps": [{"node_ids": [NODE]}]},
-        state="running",
-        progress={"admission_pending": False, "blockers": []},
-    )
-    lifecycle = FakeLifecycle(world.sessions)
-
-    result = _collector(world, lifecycle).collect()
-
-    assert lifecycle.removed == []
-    assert _kept(result, "live operation") == 1
-
-
-@pytest.mark.usefixtures("damaged_json_rows")
-@pytest.mark.parametrize("in_flight", [False, True])
-def test_a_started_load_keeps_its_sparks_only_while_a_child_is_in_flight(
-    world: Catalog, in_flight: bool
-) -> None:
-    """A started load whose switch has no child in flight (its child waits for
-    disk) holds nothing; one with a child in flight keeps what it uses."""
-
-    old = world.revision("glm", 1)
-    world.revision("glm", 2, head="active")
-    installation, _ = world.workload(old, run="stopped")
-    _size(world, installation, 80 * GIB)
-    pending = [{"queue_index": 0, "operation_id": str(uuid.uuid4()), "kind": "run"}]
-    _application(
-        world,
-        {"steps": [{"node_ids": [NODE]}]},
-        state="running",
-        canonical=True,
-        operation=str(uuid.uuid4()),
-        progress={
-            "admission_pending": False,
-            "blockers": [],
-            "switch_adapter": {
-                "children": [],
-                "pending_children": pending if in_flight else [],
-            },
-        },
-    )
-    lifecycle = FakeLifecycle(world.sessions)
-
-    result = _collector(world, lifecycle).collect()
-
-    assert lifecycle.removed == ([] if in_flight else [installation])
-    assert _kept(result, "live operation") == int(in_flight)
-
-
-@pytest.mark.usefixtures("damaged_json_rows")
-def test_a_review_plans_eviction_past_the_load_it_supersedes(world: Catalog) -> None:
     """Catches a review that refused a load for disk the load it replaces held:
     a sweep's previous load, still copying to the other Spark, kept every
     installation on this one as a live operation, so 88 GB that the new load
@@ -1037,8 +994,7 @@ def test_a_review_plans_eviction_past_the_load_it_supersedes(world: Catalog) -> 
         held = spark_eviction_capacity(session, NODE, NOW)
         replaced = spark_eviction_capacity(session, NODE, NOW, (previous,))
 
-    assert held.freeable == 0
-    assert "a live operation names it" in held.kept
+    assert held.freeable == 80 * GIB
     assert replaced.freeable == 80 * GIB
 
 
@@ -1173,24 +1129,6 @@ def _application(
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
-def test_installation_a_profile_load_in_flight_on_its_sparks_is_kept(
-    world: Catalog,
-) -> None:
-    """A load accepted as a profile application may not have queued a job yet."""
-
-    old = world.revision("glm", 1)
-    world.revision("glm", 2, head="active")
-    world.workload(old, run="stopped")
-    _application(world, {"steps": [{"node_ids": [NODE]}]}, state="running")
-    lifecycle = FakeLifecycle(world.sessions)
-
-    result = _collector(world, lifecycle).collect()
-
-    assert lifecycle.removed == []
-    assert _kept(result, "live operation") == 1
-
-
-@pytest.mark.usefixtures("damaged_json_rows")
 def test_installation_the_selected_profile_application_names_is_kept(
     world: Catalog,
 ) -> None:
@@ -1221,7 +1159,10 @@ def test_a_load_accepted_before_the_removal_is_queued_stops_the_removal(
     old = world.revision("glm", 1)
     world.revision("glm", 2, head="active")
     world.workload(old, run="stopped")
-    lifecycle = FakeLifecycle(world.sessions, between=lambda _id: _queued_load(world))
+    lifecycle = FakeLifecycle(
+        world.sessions,
+        between=lambda installation_id: _queued_load(world, installation_id),
+    )
 
     result = _collector(world, lifecycle).collect()
 
@@ -2963,3 +2904,162 @@ def test_orphaned_receipt_removal_fence_is_reconciled_by_a_fresh_sweep(
     fresh = _receipt(tmp_path, AN_IMAGE)
     assert _collector(world, image_cache_root=tmp_path).collect().images == 1
     assert not fresh.exists()
+
+
+@pytest.mark.parametrize("hold_source", ["application", "job"])
+def test_live_two_spark_owner_does_not_pin_unrelated_installations(
+    postgres_engine: Engine, tmp_path: Path, hold_source: str
+) -> None:
+    """Fault: a copy remains live on B while A needs eviction for another load.
+
+    Catches node ownership or a profile scope retaining every installation.
+    Exact installation/run references and a running workload must still survive.
+    """
+    from vonk_agent_protocol import AgentOperation as OperationKind
+    from vonk_agent_protocol.agent_words import (
+        ProfileEffectState,
+        ProfileSwitchChildKind,
+    )
+    from vonk_agent_protocol.state_machines import NodeIdentityState
+    from vonk_control.job_documents import RecipeInstallParent
+
+    Base.metadata.create_all(postgres_engine)
+    world = Catalog(postgres_engine)
+    other = "spk_" + "2" * 32
+    with world.sessions.begin() as session:
+        session.add(
+            AgentNode(
+                node_id=other, state=NodeIdentityState.ACTIVE, workload_intent_ordinal=1
+            )
+        )
+    revision = world.revision("old", 1, head="active")
+    unused, _ = world.workload(revision, run=RunState.STOPPED)
+    named, named_run = world.workload(revision, run=RunState.STOPPED)
+    running, _ = world.workload(revision, run=RunState.RUNNING)
+    for installation in (unused, named, running):
+        _size(world, installation, 80 * GIB)
+    application_id = _application(
+        world, {}, state=LifecycleState.RUNNING, canonical=True
+    )
+    with world.sessions.begin() as session:
+        application = _required(session.get(FleetProfileApplication, application_id))
+        plan = FleetProfilePreview.model_validate_json(json.dumps(application.plan))
+        plan.scope.node_ids = [NODE, other]
+        application.plan = plan.model_dump(mode="json")
+        # Exact reference in the durable progress, before another child starts.
+        application.progress = FleetProfileApplicationProgress(
+            effects=[
+                FleetProfileEffectProgress(
+                    effect_id="copy",
+                    application_id=application_id,
+                    plan_digest=plan.plan_digest,
+                    workload_intent_ordinal=1,
+                    queue_index=0,
+                    kind=ProfileSwitchChildKind.RUN.value,
+                    target_id=named_run,
+                    node_ids=[NODE, other],
+                    request_key=str(uuid.uuid4()),
+                    state=ProfileEffectState.PENDING.value,
+                )
+            ]
+        ).model_dump(mode="json")
+        if hold_source == "job":
+            application.state = LifecycleState.SUCCEEDED
+            session.add(
+                Job(
+                    request_id=str(uuid.uuid4()),
+                    kind=OperationKind.RECIPE_INSTALL.value,
+                    state=LifecycleState.RUNNING,
+                    actor="test",
+                    authority_revision="r",
+                    targets=[NODE, other],
+                    payload_digest="0" * 64,
+                    payload=RecipeInstallParent(
+                        schema_version=1,
+                        owner_kind="installation",
+                        owner_id=named,
+                        plan_digest="1" * 64,
+                    ).model_dump(mode="json"),
+                    current_attempt=1,
+                    created_at=OLD,
+                    updated_at=NOW,
+                )
+            )
+    lifecycle = FakeLifecycle(world.sessions, apply=True)
+    collector = _collector(world, lifecycle)
+    with world.sessions() as session:
+        capacity = spark_eviction_capacity(session, NODE, NOW)
+    assert capacity.freeable == 80 * GIB
+    assert (
+        _required(
+            collector.relief_for_spark(
+                NODE,
+                50 * GIB,
+                source="profile-load",
+                subject="second-load",
+                reason="disk",
+            )
+        ).code
+        == STORAGE_EVICTING
+    )
+    assert collector.collect().installations == 1
+    assert lifecycle.removed == [unused]
+    _report_disk(world.sessions, 81 * GIB, at=NOW + timedelta(seconds=1))
+    assert (
+        collector.relief_for_spark(
+            NODE, 50 * GIB, source="profile-load", subject="second-load", reason="disk"
+        )
+        is None
+    )
+    with world.sessions() as session:
+        assert (
+            _required(session.get(RecipeInstallation, named)).state
+            == InstallationState.INSTALLED
+        )
+        assert (
+            _required(session.get(RecipeInstallation, running)).state
+            == InstallationState.INSTALLED
+        )
+        assert _required(
+            session.get(FleetProfileApplication, application_id)
+        ).state == (
+            LifecycleState.RUNNING
+            if hold_source == "application"
+            else LifecycleState.SUCCEEDED
+        )
+
+
+def test_installation_content_references_hold_but_provenance_does_not(
+    postgres_engine: Engine, tmp_path: Path
+) -> None:
+    """Catches keeping only UUIDs, or treating recipe/build provenance as use."""
+    from dataclasses import replace
+
+    from vonk_control.recipe_execution_contract import parse_stored_installation_plan
+    from vonk_control.unused_storage_collection import _installation_kept
+
+    sessions, _, installation_id, _ = _real_lifecycle(tmp_path, engine=postgres_engine)
+    with sessions() as session:
+        installation = _required(session.get(RecipeInstallation, installation_id))
+        plan = parse_stored_installation_plan(installation.plan)
+        compiled = next(iter(plan.compiled_execution_plans.values()))
+        evidence = replace(_Evidence.read(session, _REAL_CLOCK), operations=frozenset())
+        assert _installation_kept(session, installation_id, evidence) is None
+        identities = (
+            installation.plan_digest,
+            compiled.identity.model_artifact_set_sha256,
+            compiled.runtime_image.image_digest.removeprefix("sha256:"),
+            compiled.runtime_image.oci_layout_sha256,
+            compiled.artifacts[0].sha256,
+            compiled.artifacts[0].model.content_sha256,
+        )
+        for identity in identities:
+            referenced = replace(evidence, operations=frozenset((identity,)))
+            assert _installation_kept(session, installation_id, referenced) is not None
+        for provenance in (
+            installation.recipe_revision_id,
+            installation.recipe_build_id,
+        ):
+            assert provenance is not None
+            unreferenced = replace(evidence, operations=frozenset((provenance,)))
+            assert _installation_kept(session, installation_id, unreferenced) is None

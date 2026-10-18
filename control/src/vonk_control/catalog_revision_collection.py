@@ -656,20 +656,34 @@ def operation_tokens(
 
     selected = session.scalar(select(FleetProfileSelection.application_id))
     sources = (
-        select(Job.payload).where(live(Job.state, Job.updated_at)),
+        # Runtime preparation records its exact installation in durable results
+        # before the next child exists. Those effects are references too.
+        *(
+            select(column).where(live(Job.state, Job.updated_at), column.is_not(None))
+            for column in (Job.payload, Job.result)
+        ),
         select(AgentOperation.payload).where(
             live(AgentOperation.state, AgentOperation.updated_at)
         ),
-        select(FleetProfileApplication.plan).where(
-            or_(
-                and_(
-                    live(
-                        FleetProfileApplication.state,
-                        FleetProfileApplication.updated_at,
+        *(
+            select(column).where(
+                or_(
+                    and_(
+                        live(
+                            FleetProfileApplication.state,
+                            FleetProfileApplication.updated_at,
+                        ),
+                        FleetProfileApplication.id.not_in(
+                            tuple(superseded_applications)
+                        ),
                     ),
-                    FleetProfileApplication.id.not_in(tuple(superseded_applications)),
+                    FleetProfileApplication.id == selected,
                 ),
-                FleetProfileApplication.id == selected,
+                column.is_not(None),
+            )
+            for column in (
+                FleetProfileApplication.plan,
+                FleetProfileApplication.progress,
             )
         ),
         select(ModelCacheOperation.payload).where(

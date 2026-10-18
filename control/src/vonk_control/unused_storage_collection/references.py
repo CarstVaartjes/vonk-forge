@@ -12,6 +12,7 @@ from pydantic import TypeAdapter
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import AgentOperation as WireAgentOperation
+from vonk_agent_protocol import WaitReason
 
 from .. import model_cache_states
 from ..artifact_reference_scan import saved_profile_selectors
@@ -29,6 +30,10 @@ from ..models import (
     NodeInventorySnapshot,
     RecipeInstallation,
     RecipeRun,
+)
+from ..recipe_execution_contract import (
+    RecipeExecutionContractError,
+    parse_stored_installation_plan,
 )
 from ..spark_disk import spark_free_bytes
 from .common import _COLLECTABLE_STATES, _DEAD_RUNS, _FINISHED_JOBS, ACTOR
@@ -82,14 +87,26 @@ def _installation_kept(
     ).all()
     if any(state not in _DEAD_RUNS for _id, state in runs):
         return "running"
-    if (
-        installation_id in evidence.operations
-        or any(run_id in evidence.operations for run_id, _state in runs)
-        or not evidence.owned_nodes.isdisjoint(nodes)
-        or any(
-            node_id in scope for scope in evidence.active_scopes for node_id in nodes
-        )
-    ):
+    # A node is a placement/coordination scope, never an asset identity. Match
+    # exact effects and content, including an install prepared before its
+    # agent child or run exists. Do not match recipe/build provenance.
+    names = {installation_id, installation.plan_digest}
+    names.update(run_id for run_id, _state in runs)
+    names.add(installation.image_digest.removeprefix("sha256:"))
+    if installation.model_content_sha256 is not None:
+        names.add(installation.model_content_sha256)
+    try:
+        plan = parse_stored_installation_plan(installation.plan, for_uninstall=True)
+    except RecipeExecutionContractError:
+        return WaitReason.OBSERVATION_UNAVAILABLE.value
+    for compiled in plan.compiled_execution_plans.values():
+        names.add(compiled.identity.model_artifact_set_sha256)
+        names.add(compiled.runtime_image.oci_layout_sha256)
+        names.add(compiled.runtime_image.image_digest.removeprefix("sha256:"))
+        for artifact in compiled.artifacts:
+            names.add(artifact.sha256)
+            names.add(artifact.model.content_sha256)
+    if not evidence.operations.isdisjoint(names):
         return "live operation"
     if not evidence.application_references_readable:
         return "profile application unreadable"
