@@ -7,7 +7,13 @@ from datetime import timedelta
 
 import pytest
 from sqlalchemy import select
-from vonk_agent_protocol import InventoryVerdict, LifecycleState, StorageDemandCode
+from vonk_agent_protocol import (
+    AgentOperation,
+    InventoryVerdict,
+    LifecycleState,
+    StorageDemandCode,
+)
+from vonk_agent_protocol.agent_words import ProfileDocumentState
 from vonk_control.fleet_profile_contract import FleetProfileApplicationProgress
 from vonk_control.models import (
     Base,
@@ -100,7 +106,7 @@ def test_waiting_load_demand_survives_postgres_and_inventory_round_trip(
             120 * GIB,
             source="profile-load",
             subject=application_id,
-            reason="install",
+            reason=AgentOperation.RECIPE_INSTALL,
         )
         is None
     )
@@ -147,7 +153,7 @@ def test_profile_build_layout_protects_its_docker_manifest_identity(world) -> No
     """A layout's digest differs from Docker's manifest. Passing only the layout
     to native retention would remove a profile's source-built image.
     """
-    revision = world.revision("glm", 1, head="active")
+    revision = world.revision("glm", 1, head=ProfileDocumentState.ACTIVE)
     build_id = world.build(revision, archive="d" * 64)
     _profile(world, "vonk-forge/glm")
     with world.sessions() as session:
