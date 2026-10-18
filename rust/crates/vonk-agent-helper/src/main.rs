@@ -279,12 +279,10 @@ fn run() -> Result<(), String> {
     // Disk-waiting loads issue no helper requests. Image relief must keep
     // ticking independently of the blocking accept loop below.
     let images = Arc::clone(&executor);
-    thread::spawn(move || {
-        loop {
-            images.sweep_unused_runtime_images();
-            thread::sleep(UNUSED_IMAGE_SWEEP_INTERVAL);
-        }
-    });
+    let _image_sweep_lifetime = spawn_image_collection(
+        move || images.sweep_unused_runtime_images(),
+        UNUSED_IMAGE_SWEEP_INTERVAL,
+    );
     // A Spark runs headless; drift (a reboot to the desktop) is corrected at
     // start and then hourly.
     let settings = Arc::clone(&executor);
@@ -357,6 +355,27 @@ fn run() -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+/// Collection continues without socket traffic. The main helper owns the
+/// sender; its end disconnects the timed wait and stops this background lane.
+fn spawn_image_collection(
+    collect: impl Fn() + Send + 'static,
+    interval: Duration,
+) -> std::sync::mpsc::Sender<()> {
+    let (lifetime, wait) = std::sync::mpsc::channel();
+    thread::spawn(move || {
+        loop {
+            collect();
+            if !matches!(
+                wait.recv_timeout(interval),
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout)
+            ) {
+                break;
+            }
+        }
+    });
+    lifetime
 }
 
 fn reject(stream: &mut UnixStream, error: &HelperRejection) {
@@ -752,6 +771,34 @@ mod tests {
         operations::{CommandFailure, OperationError},
         protocol::{ContainerRuntimeAction, HostOperation},
     };
+
+    #[test]
+    fn image_collection_ticks_without_requests_and_stops_with_its_owner() {
+        use std::sync::mpsc::{RecvTimeoutError, channel};
+        use std::time::{Duration, Instant};
+        let (observed, ticks) = channel();
+        let lifetime = super::spawn_image_collection(
+            move || {
+                let _ = observed.send(());
+            },
+            Duration::from_millis(20),
+        );
+        ticks
+            .recv_timeout(Duration::from_secs(2))
+            .expect("initial collection");
+        ticks
+            .recv_timeout(Duration::from_secs(2))
+            .expect("idle collection without a helper request");
+        drop(lifetime);
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            match ticks.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
+                Err(RecvTimeoutError::Disconnected) => break,
+                Err(RecvTimeoutError::Timeout) => panic!("collection outlived its helper owner"),
+                Ok(()) => {}
+            }
+        }
+    }
 
     #[test]
     fn helper_request_concurrency_is_bounded_and_reusable() {
