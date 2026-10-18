@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
     Disposition,
     InvalidRequestReason,
+    LifecycleState,
     ProjectionCode,
     RecipeJobFile,
     RecipeJobInputFile,
@@ -157,7 +158,10 @@ class ArtifactJobService:
                 "artifact order observation is unavailable",
                 reason=WaitReason.OBSERVATION_UNAVAILABLE,
             )
-        if ajs.state_of(job) not in ajs.QUEUED_OR_RUNNING or order not in {
+        accepting = ajs.state_of(job) in ajs.QUEUED_OR_RUNNING or (
+            ajs.state_of(job) == LifecycleState.BACKOFF and order == aos.RUNNING
+        )
+        if not accepting or order not in {
             aos.QUEUED,
             aos.RUNNING,
         }:

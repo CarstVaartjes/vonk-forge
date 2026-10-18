@@ -1165,3 +1165,24 @@ fn a_start_whose_exception_names_host_paths_is_the_shared_vector_on_the_wire() {
         );
     }
 }
+
+#[test]
+fn time_window_refusal_reaches_the_controller_without_becoming_a_security_failure() {
+    let error = crate::host_runtime::HostRuntimeError::HelperRejected {
+        code: HelperErrorCode::GrantTimeWindow,
+        diagnostic: None,
+        process_logs: None,
+    };
+    assert!(refused_before_effect(&error));
+    let ExecutionResult::Failed(failure) = runtime_failure("grant refused", &error) else {
+        panic!("expected a re-plan report");
+    };
+    assert_eq!(
+        failure.failure_kind,
+        Some(AgentFailureKind::UncertainEffect)
+    );
+    assert_eq!(
+        failure.helper_error_code,
+        Some(HelperErrorCode::GrantTimeWindow)
+    );
+}

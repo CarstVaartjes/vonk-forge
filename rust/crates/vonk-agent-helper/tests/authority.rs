@@ -1149,3 +1149,42 @@ fn root_custody_is_cleaned_when_dpkg_fails_without_deleting_the_source() {
             .is_none()
     );
 }
+
+#[test]
+fn authenticated_time_window_refusals_match_the_shared_response() {
+    // Conflating expiry with invalid authority, or trusting expiry before the
+    // signature, would fail this test (including tampered expired grants).
+    let raw = fs::read(fixtures().join("host-helper-grant-python-issued.json")).unwrap();
+    let request = parse_request(raw.strip_suffix(b"\n").unwrap_or(&raw)).unwrap();
+    let expected: vonk_agent_protocol::generated::HostHelperResponse = serde_json::from_slice(
+        &fs::read(fixtures().join("host-helper-time-window-rejection.json")).unwrap(),
+    )
+    .unwrap();
+    let public_key =
+        hex::decode("66cd608b928b88e50e0efeaa33faf1c43cefe07294b0b87e9fe0aba6a3cf7633").unwrap();
+    let verifier = GrantVerifier::new(&public_key, 971).unwrap();
+    let peer = PeerIdentity {
+        uid: 1001,
+        primary_gid: 971,
+        supplementary_gids: vec![],
+    };
+    for now in [
+        request.claims.issued_at - 1,
+        request.claims.expires_at,
+        request.claims.expires_at + 60,
+    ] {
+        let error = verifier.authorize(&request, &peer, now).unwrap_err();
+        assert_eq!(Some(error.authorization_code()), expected.error_code);
+        let mut tampered = request.clone();
+        tampered.signature.value = "0".repeat(128);
+        assert!(matches!(
+            verifier.authorize(&tampered, &peer, now),
+            Err(vonk_agent_helper::protocol::HelperError::InvalidAuthorization)
+        ));
+        tampered.signature.key_id = "0".repeat(64);
+        assert!(matches!(
+            verifier.authorize(&tampered, &peer, now),
+            Err(vonk_agent_helper::protocol::HelperError::InvalidAuthorization)
+        ));
+    }
+}

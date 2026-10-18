@@ -55,6 +55,7 @@ class HelperErrorCode(WireEnum):
     GRANT_INVALID = "grant_invalid"
     GRANT_NODE_MISMATCH = "grant_node_mismatch"
     GRANT_UNAUTHORIZED = "grant_unauthorized"
+    GRANT_TIME_WINDOW = "grant_time_window"
     INSPECTION_OUTCOME_INVALID = "inspection_outcome_invalid"
     INSTALLATION_RECONCILIATION_BUSY = "installation_reconciliation_busy"
     INSTALLATION_RECONCILIATION_STORAGE_UNAVAILABLE = (

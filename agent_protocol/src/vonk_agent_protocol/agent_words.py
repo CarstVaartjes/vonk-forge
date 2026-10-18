@@ -131,6 +131,7 @@ class FailureStage(WireEnum):
     JOB_CANCEL_STOP = "job-cancel-stop"
     JOB_INPUTS = "job-inputs"
     JOB_STATE = "job-state"
+    JOB_OUTPUT_DELIVERY = "job-output-delivery"
     JOB_STOP = "job-stop"
     LIFECYCLE_METADATA = "lifecycle-metadata"
     MODEL_CUSTODY = "model-custody"

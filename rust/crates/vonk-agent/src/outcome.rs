@@ -426,6 +426,12 @@ fn finish_failure(operation: &AgentOperation, failure: Failure) -> OutcomeFailed
 
 /// The helper codes that cross the wire, per operation.
 fn helper_error_code_allowed(operation: &AgentOperation, code: HelperErrorCode) -> bool {
+    if matches!(
+        code,
+        HelperErrorCode::GrantTimeWindow | HelperErrorCode::GrantUnauthorized
+    ) {
+        return true;
+    }
     match operation {
         AgentOperation::AgentUpgradeV1 => crate::helper_codes::is_upgrade_evidence(code),
         AgentOperation::ArtifactDistributionV1 => {

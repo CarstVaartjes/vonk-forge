@@ -15,6 +15,7 @@ from pydantic import (
     model_validator,
 )
 
+from .agent_words import FailureStage
 from .compiled_execution_plan import CompiledExecutionPlan
 from .contracts import AgentProtocolError, canonical_message
 from .failure_evidence import FailureDiagnostics
@@ -133,10 +134,14 @@ def _manifest_document(
         if not files or isinstance(files[0], RecipeJobInputFile)
         else RecipeJobOutputManifestContent
     )
-    return model(
-        schema_version=1,
-        total_bytes=sum(item.size_bytes for item in files),
-        files=list(files),
+    return model.model_validate_json(
+        canonical_message(
+            {
+                "schema_version": 1,
+                "total_bytes": sum(item.size_bytes for item in files),
+                "files": [item.model_dump(mode="json") for item in files],
+            }
+        )
     )
 
 
@@ -264,6 +269,9 @@ class RecipeJobEnding(_RecipeJobModel):
 class RecipeJobRunRequest(_RecipeJobModel):
     """One job run; interface, image, placement and timeout come from the plan."""
 
+    # Controller-only reissue after a measured exit. Losing the Spark's
+    # retained receipt or scope must never authorize running the process again.
+    output_delivery_only: Literal[True] | None = None
     job_id: CanonicalUUID
     run_id: CanonicalUUID
     installation_id: CanonicalUUID
@@ -338,6 +346,14 @@ class RecipeJobRunResult(_RecipeJobModel):
         if value is not None and "\x00" in value:
             raise ValueError("recipe job failure reason is invalid")
         return value
+
+    @property
+    def output_delivery_pending(self) -> bool:
+        """The process exited; only its retained output delivery may be replayed."""
+        return (
+            self.ending is not None
+            and self.ending.stage == FailureStage.JOB_OUTPUT_DELIVERY
+        )
 
     @property
     def outputs(self) -> tuple[RecipeJobFile, ...]:

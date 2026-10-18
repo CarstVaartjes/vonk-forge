@@ -40,6 +40,7 @@ class ControllerErrorCode(WireEnum):
     NOT_FOUND = "controller.not_found"
     RATE_LIMITED = "controller.rate_limited"
     REQUEST_TOO_LARGE = "controller.request_too_large"
+    EDGE_BODY_LIMIT = "edge.body_limit"
     SUPERSEDED_OPERATION_CANCELLED = "superseded_operation_cancelled"
     TIMEOUT = "controller.timeout"
     UNAVAILABLE = "controller.unavailable"

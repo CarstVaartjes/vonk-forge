@@ -1504,3 +1504,90 @@ def test_docker_pulls_a_pinned_runtime_image_from_the_digest_only_store(
         subprocess.run(
             ["docker", "rm", "-f", container], capture_output=True, check=False
         )
+
+
+@pytest.mark.needs_docker
+@pytest.mark.slow(30)
+def test_edge_body_limit_errors_are_distinct_from_proxied_controller_limits(tmp_path):
+    """Inject Caddy's handler error; never relabel an upstream 413 as edge."""
+    import http.client
+    import time
+
+    from vonk_agent_protocol import ControllerErrorCode
+
+    text = DEV_CADDYFILE.read_text()
+    snippets = []
+    for name in ("edge_headers", "body_limit_errors"):
+        match = re.search(
+            rf"^\({name}\) \{{\n.*?^\}}\n", text, re.DOTALL | re.MULTILINE
+        )
+        assert match is not None
+        snippets.append(match.group(0))
+    caddyfile = tmp_path / "Caddyfile"
+    caddyfile.write_text(
+        "{\n admin off\n auto_https off\n}\n"
+        + "\n".join(snippets)
+        + ":8080 {\n import body_limit_errors\n"
+        + " handle /edge {\n error 413\n }\n"
+        + " reverse_proxy 127.0.0.1:8081\n}\n"
+        + ":8081 {\n header X-Vonk-Error-Code "
+        + ControllerErrorCode.REQUEST_TOO_LARGE
+        + "\n respond 413\n}\n"
+    )
+    container = f"vonk-body-limit-{uuid4().hex[:12]}"
+    subprocess.run(
+        [
+            "docker",
+            "run",
+            "-d",
+            "--rm",
+            "--name",
+            container,
+            "-p",
+            "127.0.0.1::8080",
+            "-v",
+            f"{caddyfile}:/etc/caddy/Caddyfile:ro",
+            DEV_CADDY_IMAGE,
+        ],
+        check=True,
+        capture_output=True,
+        timeout=30,
+    )
+    try:
+        port = int(
+            subprocess.run(
+                ["docker", "port", container, "8080/tcp"],
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            .stdout.strip()
+            .rsplit(":", 1)[1]
+        )
+        deadline = time.monotonic() + 10
+        for path, expected in (
+            ("/edge", ControllerErrorCode.EDGE_BODY_LIMIT),
+            ("/controller", ControllerErrorCode.REQUEST_TOO_LARGE),
+        ):
+            while True:
+                connection = http.client.HTTPConnection("127.0.0.1", port, timeout=3)
+                try:
+                    connection.request("PUT", path, body=b"output")
+                    response = connection.getresponse()
+                    body = response.read()
+                    assert response.status == 413
+                    assert response.getheader("X-Vonk-Error-Code") == expected
+                    if path == "/edge":
+                        assert body == b"edge body limit"
+                    break
+                except (ConnectionError, http.client.RemoteDisconnected):
+                    if time.monotonic() >= deadline:
+                        raise
+                    time.sleep(0.1)
+                finally:
+                    connection.close()
+    finally:
+        subprocess.run(
+            ["docker", "stop", container], check=True, capture_output=True, timeout=10
+        )

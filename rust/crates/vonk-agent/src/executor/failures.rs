@@ -423,6 +423,7 @@ pub(super) fn refused_before_effect(error: &crate::host_runtime::HostRuntimeErro
             code: HelperErrorCode::GrantInvalid
                 | HelperErrorCode::GrantNodeMismatch
                 | HelperErrorCode::GrantUnauthorized
+                | HelperErrorCode::GrantTimeWindow
                 | HelperErrorCode::PeerIdentityInvalid,
             ..
         }
@@ -452,6 +453,14 @@ pub(super) fn runtime_failure(
     reason: &str,
     error: &crate::host_runtime::HostRuntimeError,
 ) -> ExecutionResult {
+    if runtime_helper_code(error) == HelperErrorCode::GrantTimeWindow {
+        return ExecutionResult::Failed(
+            Failure::new("helper grant time window elapsed; Controller will issue a fresh grant")
+                .kind(AgentFailureKind::UncertainEffect)
+                .retry_after(Some(2))
+                .helper(HelperErrorCode::GrantTimeWindow, None),
+        );
+    }
     if temporary_observation_error(error) {
         return ExecutionResult::unknown(
             WaitReason::RuntimeEffectUnconfirmed,

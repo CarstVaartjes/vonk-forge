@@ -127,6 +127,9 @@ def result_disposition(kind: str, state: str, result: WireModel) -> Disposition:
         isinstance(code, str) and is_security_failure(code) for code in codes
     ):
         return Disposition.SECURITY
+    if result.get("helper_error_code") == HelperErrorCode.GRANT_TIME_WINDOW.value:
+        # Verified grant, no effects: re-plan under the durable recovery budget.
+        return Disposition.OBSERVE
     if kind == AgentOperation.AGENT_UPGRADE.value:
         # No package activation occurred; retry the exact package behind its fence.
         return (

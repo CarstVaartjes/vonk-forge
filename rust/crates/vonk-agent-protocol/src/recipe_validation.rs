@@ -340,6 +340,7 @@ mod recipe_job_tests {
             "files": inputs,
         });
         RecipeJobRunRequest {
+            output_delivery_only: None,
             job_id: Uuid::new_v4(),
             run_id: Uuid::new_v4(),
             installation_id: Uuid::new_v4(),

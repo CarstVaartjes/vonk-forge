@@ -27,6 +27,8 @@ pub enum HelperError {
     InvalidOperation,
     #[error("helper authorization is invalid")]
     InvalidAuthorization,
+    #[error("helper grant is outside its time window")]
+    GrantTimeWindow,
     #[error("helper peer is not authorized")]
     InvalidPeer,
     #[error("helper framing is invalid")]
@@ -36,11 +38,20 @@ pub enum HelperError {
 }
 
 impl HelperError {
+    pub fn authorization_code(&self) -> vonk_agent_protocol::generated::HelperErrorCode {
+        use vonk_agent_protocol::generated::HelperErrorCode;
+        match self {
+            Self::GrantTimeWindow => HelperErrorCode::GrantTimeWindow,
+            _ => HelperErrorCode::GrantUnauthorized,
+        }
+    }
+
     pub fn safe_detail(&self) -> &'static str {
         match self {
             Self::InvalidMessage => "helper message is invalid",
             Self::InvalidOperation => "helper operation is invalid",
             Self::InvalidAuthorization => "helper authorization is invalid",
+            Self::GrantTimeWindow => "helper grant is not yet valid or has expired",
             Self::InvalidPeer => "helper peer is not authorized",
             Self::InvalidFrame => "helper framing is invalid",
             Self::Io(_) => "helper I/O failed",
@@ -95,8 +106,6 @@ impl GrantVerifier {
             .validate()
             .map_err(|_| HelperError::InvalidAuthorization)?;
         if grant.schema_version != 1
-            || now < grant.claims.issued_at
-            || now >= grant.claims.expires_at
             || grant.signature.algorithm != "ed25519"
             || grant.signature.key_id != self.key_id
             || !valid_signature(&grant.signature.value)
@@ -107,7 +116,12 @@ impl GrantVerifier {
             hex::decode(&grant.signature.value).map_err(|_| HelperError::InvalidAuthorization)?;
         signature::UnparsedPublicKey::new(&signature::ED25519, self.public_key)
             .verify(&canonical_signing_bytes(&grant.claims)?, &signature_bytes)
-            .map_err(|_| HelperError::InvalidAuthorization)
+            .map_err(|_| HelperError::InvalidAuthorization)?;
+        // Only an authenticated grant can request a fresh time window.
+        if now < grant.claims.issued_at || now >= grant.claims.expires_at {
+            return Err(HelperError::GrantTimeWindow);
+        }
+        Ok(())
     }
 }
 

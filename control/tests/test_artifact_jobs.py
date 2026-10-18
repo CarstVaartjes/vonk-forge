@@ -2370,3 +2370,131 @@ def test_artifact_cancel_preserves_declared_evidence_and_meaningful_values(
     for key, value in evidence.items():
         assert getattr(cancelled.result_evidence, key) == value
     assert service.get(created.id).result_evidence == cancelled.result_evidence
+
+
+@pytest.mark.postgres
+@pytest.mark.parametrize("expires", (False, True))
+def test_undelivered_job_outputs_resume_without_repeating_the_process(
+    tmp_path, postgres_engine, expires
+):
+    """Ending on 413, losing the receipt, or resetting retention fails this flow."""
+    from vonk_agent_protocol import (
+        FailureStage,
+        OutcomeEvidence,
+        OutcomeKind,
+        OutcomeUnknown,
+        RecipeJobEvidence,
+        RecipeJobOutputManifest,
+        WaitReason,
+    )
+
+    sessions, recipe_operations, _, service, run_id, node_id = running_artifact_service(
+        tmp_path, engine=postgres_engine
+    )
+    clock = MutableClock(NOW)
+    jobs = AgentJobService(sessions, clock=clock)
+
+    def consume(session, operation, attempt, message):
+        service.consume_agent_result(session, operation, attempt, message)
+        recipe_operations.consume_agent_result(session, operation, attempt, message)
+
+    jobs.set_result_consumer(consume)
+    recipe_operations._agent_jobs = jobs
+    job = submitted_artifact_job(service, run_id, request_suffix=842)
+    first = claim_agent(jobs, node_id, "serial-0")
+    assert first is not None
+    content = b"image"
+    output = RecipeJobFile(
+        name="output.png",
+        media_type="image/png",
+        size_bytes=len(content),
+        sha256=hashlib.sha256(content).hexdigest(),
+    )
+    files = (output,)
+    receipt = RecipeJobRunResult(
+        job_id=job.id,
+        run_id=run_id,
+        exit_code=0,
+        output_manifest=RecipeJobOutputManifest(
+            schema_version=1,
+            total_bytes=len(content),
+            files=files,
+            manifest_sha256=recipe_job_manifest_sha256(files),
+        ),
+        evidence=RecipeJobEvidence(elapsed_milliseconds=100, peak_memory_bytes=None),
+    )
+
+    def undelivered(claim):
+        return AgentResult(
+            fence=claim.fence,
+            state=AgentResultState.OBSERVING,
+            result=OutcomeUnknown(
+                kind=OutcomeKind.UNKNOWN,
+                wait_reason=WaitReason.JOB_STATE_UNCERTAIN,
+                reason="output undelivered; files retained for re-delivery",
+                evidence=OutcomeEvidence(
+                    stage=FailureStage.JOB_OUTPUT_DELIVERY,
+                    diagnostic="HTTP 413",
+                ),
+                receipt=receipt,
+            ),
+        )
+
+    clock.advance(seconds=5)
+    jobs.record_result(undelivered(first))
+    waiting = service.get(job.id)
+    assert waiting.state == LifecycleState.BACKOFF
+    assert waiting.result_evidence is not None
+    assert waiting.result_evidence.exit_code == 0
+    with sessions() as session:
+        order = session.scalar(
+            select(AgentOperation).where(
+                AgentOperation.parent_job_id == job.operation_id
+            )
+        )
+        assert order is not None and order.next_action_at is not None
+        deadline = order.recovery_deadline
+        due = order.next_action_at
+        order_id = order.id
+    assert deadline == clock.now + timedelta(hours=24)
+    clock.advance(seconds=int((due - clock.now).total_seconds()) + 1)
+    # Restart queue ownership on the same PostgreSQL store. The retry keeps
+    # the job identity and asks the agent to resume its durable exit receipt.
+    restarted = AgentJobService(sessions, clock=clock)
+    restarted.set_result_consumer(consume)
+    second = claim_agent(restarted, node_id, "serial-0")
+    assert second is not None and second.fence != first.fence
+    from vonk_agent_protocol import RecipeJobRunRequest
+
+    assert isinstance(second.payload, RecipeJobRunRequest)
+    assert second.payload.output_delivery_only is True
+    assert (
+        second.payload.model_copy(update={"output_delivery_only": None})
+        == first.payload
+    )
+    if expires:
+        restarted.record_result(undelivered(second))
+        with sessions() as session:
+            retained = session.get(AgentOperation, order_id)
+            assert retained is not None and retained.recovery_deadline == deadline
+        clock.advance(seconds=24 * 60 * 60 + 1)
+        for _ in range(3):
+            restarted.reconcile_orders()
+        assert claim_agent(restarted, node_id, "serial-0") is None
+        return
+    service.put_output(
+        job.id,
+        node_id=node_id,
+        name=output.name,
+        media_type=output.media_type,
+        expected_sha256=output.sha256,
+        content=content,
+    )
+    restarted.succeed(second, receipt)
+    delivered = service.get(job.id)
+    assert delivered.state == LifecycleState.SUCCEEDED
+    assert delivered.output_files[0].sha256 == output.sha256
+    assert (
+        service.result_blob(job.id, output.name, output.sha256)[0].read_bytes()
+        == content
+    )

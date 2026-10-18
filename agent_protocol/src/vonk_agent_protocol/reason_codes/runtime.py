@@ -88,6 +88,7 @@ class RuntimePreflightFindingCode(WireEnum):
     HELPER_GRANT_INVALID = "preflight_finding.helper_grant_invalid"
     HELPER_GRANT_NODE_MISMATCH = "preflight_finding.helper_grant_node_mismatch"
     HELPER_GRANT_UNAUTHORIZED = "preflight_finding.helper_grant_unauthorized"
+    HELPER_GRANT_TIME_WINDOW = "preflight_finding.helper_grant_time_window"
     HELPER_GRANT_UNAVAILABLE = "preflight_finding.helper_grant_unavailable"
     HELPER_IMAGE_IMPORT_FAILED = "preflight_finding.helper_image_import_failed"
     HELPER_INSPECTION_OUTCOME_INVALID = (

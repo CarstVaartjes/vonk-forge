@@ -14,7 +14,7 @@ from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.orm import object_session
-from vonk_agent_protocol import AgentClaim, AgentOperation
+from vonk_agent_protocol import AgentClaim, AgentOperation, RecipeJobRunRequest
 
 from . import agent_operation_states
 from .models import AgentOperation as StoredOperation
@@ -26,6 +26,7 @@ from .stall_window import (
     progress_deadline,
     stall_deadline,
 )
+from .stored_json import read_row_column
 
 LIFECYCLE_RESTART_OPERATIONS = frozenset(
     {
@@ -346,6 +347,15 @@ def attempt_holds_order(
     )
 
 
+def job_output_retention_expiry(receipt_observed_at: datetime) -> datetime:
+    """The retained output bytes expire after 24 hours, across retries/offline.
+
+    This bounds evidence custody, rather than timing out a running process.
+    Anchor this once to the first undelivered exit receipt.
+    """
+    return aware(receipt_observed_at) + timedelta(hours=24)
+
+
 def order_recovery_deadline(
     operation: StoredOperation, now: datetime
 ) -> datetime | None:
@@ -362,6 +372,11 @@ def order_recovery_deadline(
     if operation.recovery_deadline is None:
         return None
     stored = aware(operation.recovery_deadline)
+    if operation.kind == AgentOperation.RECIPE_JOB_RUN.value:
+        payload = read_row_column(operation, "payload")
+        if isinstance(payload, RecipeJobRunRequest) and payload.output_delivery_only:
+            # Exited output bytes expire even while their Spark is offline.
+            return stored
     session = object_session(operation)
     if session is None:
         return stored

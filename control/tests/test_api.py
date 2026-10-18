@@ -270,7 +270,11 @@ def test_request_boundary_admits_large_recipe_images_only_on_exact_put_route() -
 
     # Method and path are both part of the authority boundary. Near-matches
     # retain the ordinary one-MiB API ceiling.
-    assert client.post(route, content=body).status_code == 413
+    from vonk_agent_protocol import ControllerErrorCode
+
+    refused = client.post(route, content=body)
+    assert refused.status_code == 413
+    assert refused.headers["x-vonk-error-code"] == ControllerErrorCode.REQUEST_TOO_LARGE
     assert client.put(f"{route}/extra", content=body).status_code == 413
 
 

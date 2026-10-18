@@ -109,6 +109,7 @@ pub(super) fn helper_finding_code(code: HelperErrorCode) -> RuntimePreflightFind
         HelperErrorCode::GrantInvalid => Finding::PreflightFindingHelperGrantInvalid,
         HelperErrorCode::GrantNodeMismatch => Finding::PreflightFindingHelperGrantNodeMismatch,
         HelperErrorCode::GrantUnauthorized => Finding::PreflightFindingHelperGrantUnauthorized,
+        HelperErrorCode::GrantTimeWindow => Finding::PreflightFindingHelperGrantTimeWindow,
         HelperErrorCode::PeerIdentityInvalid => Finding::PreflightFindingHelperPeerIdentityInvalid,
         HelperErrorCode::OperationInvalidArtifact => {
             Finding::PreflightFindingHelperOperationInvalidArtifact

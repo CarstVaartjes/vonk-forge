@@ -357,3 +357,46 @@ async fn host_grant_403_keeps_safe_denial_and_retry_decision_on_the_wire_path() 
     );
     assert!(error.to_string().contains("[retry]"));
 }
+
+#[tokio::test]
+async fn body_limit_refusals_report_the_layer_without_guessing_from_empty_bodies() {
+    // A bare 413 is not proof of either owner. Only a typed response header
+    // attributes it; the body stays unread and status remains definite.
+    for (code, label) in [
+        (
+            Some(ControllerErrorCode::EdgeBodyLimit),
+            Some("edge body limit"),
+        ),
+        (
+            Some(ControllerErrorCode::ControllerRequestTooLarge),
+            Some("Controller limit"),
+        ),
+        (None, None),
+    ] {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let header = code
+            .map(|code| format!("X-Vonk-Error-Code: {code}\r\n"))
+            .unwrap_or_default();
+        let peer = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            let mut buffer = [0; 4096];
+            let received = stream.read(&mut buffer).unwrap();
+            assert!(received > 0);
+            stream.write_all(format!("HTTP/1.1 413 Payload Too Large\r\n{header}Content-Length: 0\r\nConnection: close\r\n\r\n").as_bytes()).unwrap();
+        });
+        let mut response = reqwest::get(format!("http://{address}/")).await.unwrap();
+        let error = classify_response(&mut response).await.unwrap_err();
+        assert_eq!(error.disposition(), Disposition::Fail);
+        let report = error.to_string();
+        if let Some(label) = label {
+            assert!(report.contains(label), "{report}");
+        } else {
+            assert!(!report.contains("body limit") && !report.contains("Controller limit"));
+        }
+        peer.join().unwrap();
+    }
+}
