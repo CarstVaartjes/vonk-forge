@@ -64,6 +64,9 @@ from .contracts import (
     RecipeImageAvailabilityInvalid,
 )
 
+REMOVAL_PASS_BUDGET_SECONDS = 0.25
+
+
 if TYPE_CHECKING:
     from .service import RecipeImageAvailabilityService
 
@@ -444,7 +447,7 @@ def reconcile_requested_removals(
         if not observed_request:
             self._removal_request_after = None
     changed = 0
-    deadline = time.monotonic() + 0.25
+    deadline = time.monotonic() + REMOVAL_PASS_BUDGET_SECONDS
     for request_id, identity in accepted_requests[:limit]:
         if time.monotonic() >= deadline:
             break

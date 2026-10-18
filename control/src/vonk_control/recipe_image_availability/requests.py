@@ -81,6 +81,9 @@ from .contracts import (
     _retry_after,
 )
 
+REQUEST_OBSERVATION_BUDGET_SECONDS = 0.25
+
+
 if TYPE_CHECKING:
     from ..recipe_update_batches import RecipeUpdateClaim
     from .service import RecipeImageAvailabilityService
@@ -387,7 +390,7 @@ def _start_request(
     Exhaustion ends this observation with evidence, holding no claim or gate;
     a later request may try again without retiring poisoned bookkeeping.
     """
-    deadline = time.monotonic() + 0.25
+    deadline = time.monotonic() + REQUEST_OBSERVATION_BUDGET_SECONDS
     delay = 0.01
     attempts = 0
     while True:

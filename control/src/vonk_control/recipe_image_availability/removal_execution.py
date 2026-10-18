@@ -71,6 +71,9 @@ from .contracts import (
     availability_disposition,
 )
 
+REMOVAL_PASS_BUDGET_SECONDS = 0.25
+
+
 if TYPE_CHECKING:
     from .service import RecipeImageAvailabilityService
 
@@ -88,7 +91,7 @@ def reconcile_removal_gates(
     if not identities:
         self._removal_gate_after = None
     released = 0
-    deadline = time.monotonic() + 0.25
+    deadline = time.monotonic() + REMOVAL_PASS_BUDGET_SECONDS
     for identity in identities:
         if time.monotonic() >= deadline:
             break
@@ -144,7 +147,7 @@ def advance_removals(self: RecipeImageAvailabilityService, *, limit: int = 1) ->
     self.reconcile_removal_gates()
     advanced = 0
     boundary: tuple[datetime, str] | None = None
-    deadline = time.monotonic() + 0.25
+    deadline = time.monotonic() + REMOVAL_PASS_BUDGET_SECONDS
     while advanced < limit and time.monotonic() < deadline:
         with self._sessions() as session:
             statement = (

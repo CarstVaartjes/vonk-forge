@@ -37,18 +37,6 @@ from vonk_control.terminal_history_collection import (
 )
 
 
-@pytest.fixture(autouse=True)
-def frozen_pass_budget(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A pass never runs out of its two-second budget on a slow runner.
-
-    Tests that exercise the budget install their own clock after this one.
-    """
-
-    monkeypatch.setattr(
-        terminal_history_collection, "time", SimpleNamespace(monotonic=lambda: 0.0)
-    )
-
-
 @pytest.fixture(params=["sqlite", pytest.param("postgres", marks=pytest.mark.postgres)])
 def history_sessions(request: pytest.FixtureRequest) -> Iterator[sessionmaker[Session]]:
     engine = (
