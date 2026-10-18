@@ -13,7 +13,7 @@ from vonk_agent_protocol.inventory import StoreRetentionRequest
 from .fleet_profile_contract import FleetProfileApplicationProgress
 from .logging import log_event
 from .model_cache_contract import CacheManifest
-from .models import FleetProfileApplication, ModelCacheSet
+from .models import FleetProfileApplication, ModelCacheSet, RecipeBuild
 from .strict_json import read_stored_model
 from .unused_storage_collection.evidence import _Evidence
 
@@ -41,6 +41,17 @@ def _store_retention_request(
     ):
         manifest = read_stored_model(CacheManifest, document, from_json=True)
         objects.update(artifact.sha256 for artifact in manifest.artifacts)
+    images = set(evidence.operations | evidence.pointed_archives)
+    # Docker receipts name manifest digests; NAS retention names layout digests.
+    # Resolve that content identity, including builds reused by recipe successors.
+    for digest in session.scalars(
+        select(RecipeBuild.image_digest).where(
+            RecipeBuild.oci_layout_sha256.in_(images),
+            RecipeBuild.image_digest.is_not(None),
+        )
+    ):
+        if digest is not None:
+            images.add(digest.removeprefix("sha256:"))
     required = 0
     for application in session.scalars(
         select(FleetProfileApplication).where(
@@ -67,11 +78,7 @@ def _store_retention_request(
         expires_at=int((now + RETENTION_MAX_AGE).timestamp()),
         required_free_bytes=required,
         protected_model_objects=sorted(value for value in objects if _digest(value)),
-        protected_image_addresses=sorted(
-            value
-            for value in evidence.operations | evidence.pointed_archives
-            if _digest(value)
-        ),
+        protected_image_addresses=sorted(value for value in images if _digest(value)),
     )
 
 

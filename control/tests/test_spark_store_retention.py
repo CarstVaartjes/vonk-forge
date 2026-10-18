@@ -14,6 +14,7 @@ from vonk_control.models import (
     FleetProfileApplication,
     ModelCacheOperation,
     ModelCacheSet,
+    RecipeBuild,
 )
 from vonk_control.operation_blockers import OperationBlocker, StorageReliefEvidence
 from vonk_control.spark_store_retention import store_retention_request
@@ -140,3 +141,21 @@ def test_referenced_model_expands_to_protected_content_objects(
         request = store_retention_request(session, NODE, NOW)
     assert request is not None
     assert expected <= set(request.protected_model_objects)
+
+
+def test_profile_build_layout_protects_its_docker_manifest_identity(world) -> None:
+    """A layout's digest differs from Docker's manifest. Passing only the layout
+    to native retention would remove a profile's source-built image.
+    """
+    revision = world.revision("glm", 1, head="active")
+    build_id = world.build(revision, archive="d" * 64)
+    _profile(world, "vonk-forge/glm")
+    with world.sessions() as session:
+        build = session.get(RecipeBuild, build_id)
+        assert build is not None and build.image_digest is not None
+        request = store_retention_request(session, NODE, world.now)
+        assert request is not None
+        assert (
+            build.image_digest.removeprefix("sha256:")
+            in request.protected_image_addresses
+        )
