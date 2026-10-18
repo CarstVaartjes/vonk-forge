@@ -7,10 +7,11 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
-from vonk_agent_protocol import LifecycleState
+from vonk_agent_protocol import InvalidRequestReason, LifecycleState
 from vonk_agent_protocol.agent_words import ProfileOperationKind
 from vonk_agent_protocol.state_machines import NodeIdentityState
 from vonk_control.fleet_profile_contract import FleetProfileInput
+from vonk_control.fleet_profiles import FleetProfileInvalid
 from vonk_control.jobs import JobService
 from vonk_control.models import AgentNode, FleetProfileApplication, RecipeBuild
 from vonk_control.recipe_operation_worker import RecipeOperationWorker
@@ -22,8 +23,9 @@ from .test_selected_profile_postgres import _NoopRoutes
 
 
 @pytest.mark.parametrize("blocked", [False, True])
+@pytest.mark.parametrize("maintenance_conflict", [False, True])
 def test_due_queued_load_is_attempted_after_worker_restart(
-    tmp_path, postgres_engine, blocked
+    tmp_path, postgres_engine, blocked, maintenance_conflict, monkeypatch
 ):
     """Catches a due admission being excluded from the normal worker scan."""
     sessions, profiles, planner, profile, *_ = _capacity_profile(
@@ -45,9 +47,19 @@ def test_due_queued_load_is_attempted_after_worker_restart(
     due = pending.progress.admission_retry_at
     assert due is not None
 
-    def restart(now):
+    def restart(now, *, conflict=False):
         recovered, _ = _profile_service(sessions, planner._lifecycle)
         recovered._clock = lambda: now
+        if conflict:
+            # Production: a roster replay's request key names another plan.
+            # That owner's refusal cannot prevent another due load's turn.
+            def refuse_roster(_now):
+                raise FleetProfileInvalid(
+                    "Fleet profile request key was reused for another plan",
+                    reason=InvalidRequestReason.CONFLICT,
+                )
+
+            monkeypatch.setattr(recovered, "_reconcile_selected_roster", refuse_roster)
         return Worker(
             JobService(sessions, clock=lambda: now),
             "queued-profile-test",
@@ -67,7 +79,7 @@ def test_due_queued_load_is_attempted_after_worker_restart(
             build = session.scalar(select(RecipeBuild))
             assert build is not None
             build.state = LifecycleState.SUCCEEDED
-    restarted = restart(due + timedelta(seconds=1))
+    restarted = restart(due + timedelta(seconds=1), conflict=maintenance_conflict)
     try:
         restarted.run_once()
     finally:
