@@ -13,20 +13,35 @@ import uuid
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import canonical_message
+from vonk_agent_protocol import AgentOperation as OperationKind
+from vonk_agent_protocol import (
+    AgentResultState,
+    LifecycleState,
+    OperationProgress,
+    ProgressPhase,
+    WaitReason,
+    canonical_message,
+)
 from vonk_agent_protocol.recipe_operations import RecipeStopResult
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.agent_jobs.contracts import CLAIM_LEASE_SECONDS
 from vonk_control.auth import TokenCodec
-from vonk_control.models import AgentCertificate, AgentNode, Base, Job
+from vonk_control.models import (
+    AgentCertificate,
+    AgentNode,
+    AgentOperation,
+    AgentOperationAttempt,
+    Base,
+    Job,
+)
 from vonk_control.operation_api import (
     durable_operation_services,
     operation_detail_response,
 )
 from vonk_control.operation_api.responses import _job_operation_response
-from vonk_control.operation_blockers import QueueWaitCode
+from vonk_control.operation_blockers import ProgressAlarmCode
+from vonk_control.settings import PROFILE_STALL_WINDOW_SECONDS
 
 from cluster_profiles.cli_render import progress_line
 
@@ -55,11 +70,8 @@ class Clock:
 
 
 @pytest.fixture
-def fleet(tmp_path):
-    engine = create_engine(
-        f"sqlite:///{tmp_path / 'spark-busy.sqlite'}",
-        connect_args={"check_same_thread": False},
-    )
+def fleet(tmp_path, postgres_engine):
+    engine = postgres_engine
     Base.metadata.create_all(engine)
     clock = Clock()
     sessions = sessionmaker(engine, expire_on_commit=False)
@@ -76,6 +88,7 @@ def fleet(tmp_path):
                     binary_digest="f" * 64,
                 )
             )
+            session.flush()
             session.add(
                 AgentCertificate(
                     serial=f"serial-{node_id}",
@@ -178,17 +191,31 @@ def test_queued_upgrade_reports_the_order_holding_its_spark_then_proceeds(
     stop, stop_claim = _busy(fleet)
     job_id = _parent(sessions, clock)
     upgrade = jobs.enqueue(
-        job_id, NODE_A, "agent.upgrade.v1", COMMIT, _upgrade_payload()
+        job_id, NODE_A, OperationKind.AGENT_UPGRADE.value, COMMIT, _upgrade_payload()
     )
 
     for document in _waits(services, upgrade.id, job_id):
         assert document["state"] == "queued"
+        assert document["wait_reason"] == WaitReason.SPARK_BUSY
+        assert datetime.fromisoformat(document["next_attempt_at"]) > clock.now
         [blocker] = document["blockers"]
-        assert blocker["code"] == QueueWaitCode.SPARK_BUSY
+        assert blocker["code"] == WaitReason.SPARK_BUSY
         assert blocker["operation"] == {"id": stop.id, "kind": "recipe.stop"}
         assert blocker["node_ids"] == [NODE_A]
+        assert blocker["run_id"] == stop.payload["run_id"]
         # vonkctl names the order and the Spark from the same response.
         assert f"recipe.stop {stop.id[:8]} on {NODE_A}" in progress_line(document)
+
+    # A queue summary must not hide a claim refusal that carries stronger evidence.
+    refusal = "claim refused: node identity inactive"
+    with sessions.begin() as session:
+        queued = session.get(AgentOperation, upgrade.id)
+        assert queued is not None
+        queued.status_reason = refusal
+    assert (
+        operation_detail_response(services.get_operation(upgrade.id)).status_reason
+        == refusal
+    )
 
     # The running Stop itself waits for nothing.
     assert not operation_detail_response(services.get_operation(stop.id)).blockers
@@ -196,7 +223,8 @@ def test_queued_upgrade_reports_the_order_holding_its_spark_then_proceeds(
     jobs.succeed(stop_claim, RecipeStopResult())
 
     for document in _waits(services, upgrade.id, job_id):
-        assert not document.get("blockers")
+        assert document["wait_reason"] == WaitReason.OBSERVATION_UNAVAILABLE
+        assert not document["blockers"][0].get("operation")
     claim = claim_agent(jobs, NODE_A, f"serial-{NODE_A}", runtime_identity=OLD_IDENTITY)
     assert claim is not None and fenced_operation(sessions, claim).id == upgrade.id
 
@@ -215,9 +243,91 @@ def test_any_queued_order_on_a_busy_spark_waits_visibly_and_only_there(
     for document in _waits(services, behind.id, job_id):
         assert document["blockers"][0]["operation"]["id"] == stop.id
     for document in _waits(services, elsewhere.id, job_id):
-        assert not document.get("blockers")
+        assert document["wait_reason"] == WaitReason.OBSERVATION_UNAVAILABLE
+        assert not document["blockers"][0].get("operation")
 
-    # A lapsed lease holds nothing: the wait is not claimed for a dead attempt.
+    # Lease loss must not hide the unconfirmed effect or imply capacity is free.
     clock.now += timedelta(seconds=CLAIM_LEASE_SECONDS + 1)
     for document in _waits(services, behind.id, job_id):
-        assert not document.get("blockers")
+        assert document["wait_reason"] == WaitReason.JOB_STATE_UNCERTAIN
+        assert document["blockers"][0]["operation"]["id"] == stop.id
+
+    # A known failed attempt awaiting retry/operator action is not an unknown
+    # effect and must not masquerade as the holder of another order's lane.
+    with sessions.begin() as session:
+        holder = session.get(AgentOperation, stop.id)
+        assert holder is not None
+        holder.state = LifecycleState.BACKOFF.value
+        attempt = (
+            session.query(AgentOperationAttempt).filter_by(operation_id=stop.id).one()
+        )
+        attempt.state = AgentResultState.FAILED.value
+    for document in _waits(services, behind.id, job_id):
+        assert document["wait_reason"] == WaitReason.OBSERVATION_UNAVAILABLE
+        assert not document["blockers"][0].get("operation")
+
+
+def test_unconfirmed_blocker_stalls_visibly_then_clears_without_changing_intent(fleet):
+    """Catches lease loss hiding a queue wait, and heartbeat/read resetting its alarm."""
+    jobs, sessions, clock, services = fleet
+    stop, _ = _busy(fleet)
+    job_id = _parent(sessions, clock)
+    upgrade = jobs.enqueue(
+        job_id, NODE_A, OperationKind.AGENT_UPGRADE.value, COMMIT, _upgrade_payload()
+    )
+    recheck_at = clock.now + timedelta(seconds=2 * CLAIM_LEASE_SECONDS)
+    with sessions.begin() as session:
+        holder = session.get(AgentOperation, stop.id)
+        assert holder is not None
+        holder.state = LifecycleState.OBSERVING.value
+        holder.next_action_at = recheck_at
+    clock.now += timedelta(seconds=PROFILE_STALL_WINDOW_SECONDS + 1)
+    for document in _waits(services, upgrade.id, job_id):
+        assert document["wait_reason"] == WaitReason.JOB_STATE_UNCERTAIN
+        assert document["blockers"][0]["operation"]["id"] == stop.id
+        assert document["blockers"][0]["run_id"] == stop.payload["run_id"]
+        assert document["blockers"][1]["code"] == ProgressAlarmCode.STALLED
+        assert datetime.fromisoformat(document["next_attempt_at"]) == recheck_at
+    # A read never changes the queue identity, attempt, or stored schedule.
+    with sessions() as session:
+        queued = session.get(AgentOperation, upgrade.id)
+        assert queued is not None
+        assert queued.current_attempt == 0 and queued.next_action_at is None
+        assert queued.state == LifecycleState.QUEUED.value
+    # Reconciliation of the exact old effect permits the original upgrade.
+    with sessions.begin() as session:
+        holder = session.get(AgentOperation, stop.id)
+        assert holder is not None
+        holder.state = LifecycleState.SUCCEEDED.value
+    claim = claim_agent(jobs, NODE_A, f"serial-{NODE_A}", runtime_identity=OLD_IDENTITY)
+    assert claim is not None and fenced_operation(sessions, claim).id == upgrade.id
+    assert not operation_detail_response(services.get_operation(upgrade.id)).blockers
+
+
+def test_live_blocker_progress_clears_alarm_but_renewal_does_not(fleet):
+    """Catches treating a fresh lease or repeated read as useful queue progress."""
+    jobs, sessions, clock, services = fleet
+    stop, _ = _busy(fleet)
+    job_id = _parent(sessions, clock)
+    queued = jobs.enqueue(
+        job_id, NODE_A, OperationKind.AGENT_UPGRADE.value, COMMIT, _upgrade_payload()
+    )
+    clock.now += timedelta(seconds=PROFILE_STALL_WINDOW_SECONDS + 1)
+    with sessions.begin() as session:
+        attempt = (
+            session.query(AgentOperationAttempt).filter_by(operation_id=stop.id).one()
+        )
+        attempt.lease_deadline = clock.now + timedelta(seconds=CLAIM_LEASE_SECONDS)
+    for document in _waits(services, queued.id, job_id):
+        assert document["wait_reason"] == WaitReason.SPARK_BUSY
+        assert document["blockers"][1]["code"] == ProgressAlarmCode.STALLED
+    with sessions.begin() as session:
+        attempt = (
+            session.query(AgentOperationAttempt).filter_by(operation_id=stop.id).one()
+        )
+        attempt.progress = OperationProgress(
+            phase=ProgressPhase.STARTING, last_progress_at=clock.now.isoformat()
+        ).model_dump(mode="json")
+    for document in _waits(services, queued.id, job_id):
+        assert len(document["blockers"]) == 1
+        assert document["blockers"][0]["operation"]["id"] == stop.id

@@ -69,13 +69,10 @@ class OperationBlocker(StrictJSONModel):
     #: The operation this wait is behind, when one is known.
     operation: BlockingOperation | None = None
     storage: StorageReliefEvidence | None = None
-
-
-class QueueWaitCode(StrEnum):
-    """Why a queued operation has not been claimed yet; each wait clears by itself."""
-
-    #: The Spark is executing another operation; it claims one at a time.
-    SPARK_BUSY = "queue.spark_busy"
+    #: Exact workload whose effect the blocking operation owns, when present.
+    run_id: Annotated[str, StringConstraints(min_length=1, max_length=128)] | None = (
+        None
+    )
 
 
 class ProgressAlarmCode(StrEnum):
@@ -162,7 +159,6 @@ __all__ = [
     "OperationBlocker",
     "ProgressAlarmCode",
     "ProgressStall",
-    "QueueWaitCode",
     "StorageReliefEvidence",
     "bound_blockers",
     "dump_blockers",

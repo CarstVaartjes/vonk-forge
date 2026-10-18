@@ -584,12 +584,15 @@ def error_category_of(category: BlockerCategory | str) -> ErrorCategory:
 
 
 class WaitReason(WireEnum):
-    """Typed reason codes for an effect that cannot be confirmed (the *unknown* kind).
+    """Typed reasons for work awaiting execution or confirmation.
 
-    Each code names the one fact the executor could not establish.  The free
-    text of a report is for people; the Controller decides on this code.
+    A queued order names its dependency; an executor reports the fact it could
+    not establish with an unknown outcome. Free text is for people; the
+    Controller decides on this code.
     """
 
+    #: A queued order awaits its Spark's current operation.
+    SPARK_BUSY = "queue.spark_busy"
     OPERATION_NOT_ENABLED = "operation-not-enabled"
     UPGRADE_AWAITING_IDENTITY = "agent-upgrade-awaiting-identity"
     AGENT_RESTART_INTERRUPTED = "agent-restart-interrupted"
