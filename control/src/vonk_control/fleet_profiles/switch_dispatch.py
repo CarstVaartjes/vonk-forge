@@ -230,11 +230,25 @@ class RunSwitchFleetProfileAdapter:
         # job owns the Sparks and keeps what it waits to have removed.
         shortfalls = _disk_shortfalls(plan)
         if not plan.allowed or shortfalls:
-            codes = [reason.code for reason in plan.blockers] or [
-                reason.code for reason in plan.warnings if reason.code in _DISK_REFUSALS
+            reasons = [
+                *plan.blockers,
+                *(reason for reason in plan.warnings if reason.code in _DISK_REFUSALS),
             ]
+            blockers = tuple(
+                make_blocker(
+                    reason.code,
+                    reason.detail,
+                    severity=ProfileReasonSeverity.ERROR.value
+                    if reason.severity == ProfileReasonSeverity.BLOCKER.value
+                    else reason.severity,
+                    node_ids=reason.node_ids,
+                )
+                for reason in reasons
+            )
             raise FleetProfileChildPlanBlocked(
-                "profile child plan blocked: " + "; ".join(codes[:8]),
+                "profile child plan blocked: "
+                + "; ".join(reason.detail for reason in reasons),
+                blockers=blockers,
                 shortfalls=shortfalls,
                 ending=_ending_blockers(plan, accepted),
             )

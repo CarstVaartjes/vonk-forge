@@ -9,8 +9,18 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import create_engine, select
-from vonk_agent_protocol import LifecycleState, RunState
-from vonk_control.fleet_profile_contract import FleetProfileInput
+from vonk_agent_protocol import (
+    LifecycleState,
+    ResourceBlockerCode,
+    RunState,
+    RunSwitchCode,
+)
+from vonk_agent_protocol.agent_words import ProfileChildJobKind
+from vonk_agent_protocol.contracts import AgentOperation as OperationKind
+from vonk_control.fleet_profile_contract import (
+    FleetProfileApplicationView,
+    FleetProfileInput,
+)
 from vonk_control.fleet_profiles import (
     FleetProfileService,
     RunSwitchFleetProfileAdapter,
@@ -234,6 +244,158 @@ def test_installed_profile_waits_for_every_install_receipt_and_never_starts(
         assert evidence.active_runs == 0
         assert evidence.unwithdrawn_routes == 0
         assert {rank.node_id for rank in evidence.ranks} == set(nodes)
+
+
+def test_child_retry_preserves_plan_and_per_node_relief_through_progress_api(
+    tmp_path: Path, postgres_engine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Catches reducing node deficits/observation owners to codes at child dispatch.
+
+    Inject a typed unknown-usage observation at the real fit producer, alongside
+    measured disk loss after admission. Preview, worker/store and API must retain
+    both, then the original load completes when the observations recover.
+    """
+    from .test_fleet_profile_api import _client, _headers
+
+    sessions, lifecycle, _, _, _, nodes = setup_services(
+        tmp_path, nodes=2, engine=postgres_engine
+    )
+    service, planner = _profile_service(sessions, lifecycle)
+    profile = _installed_profile(service, sessions, nodes)
+    application = _apply(service, profile)
+    collector = UnusedStorageCollector(
+        sessions,
+        clock=lifecycle._clock,
+        lifecycle=lifecycle,
+        demands=StorageDemands(lifecycle._clock),
+    )
+    service.bind_storage_relief(collector.relief_for_spark)
+    original_fit = planner._fit
+    owner = str(uuid4())
+    unknown_code = f"run-switch.{ResourceBlockerCode.RESIDENT_USAGE_UNKNOWN}"
+
+    def unknown_usage(*args, **kwargs):
+        result = original_fit(*args, **kwargs)
+        _freshness, fit, blockers, _warnings, _components = result
+        for node in fit.nodes:
+            disk = next(
+                (
+                    item
+                    for item in node.blockers
+                    if item.code == RunSwitchCode.INSUFFICIENT_DISK
+                ),
+                None,
+            )
+            if disk is not None:
+                unknown = disk.model_copy(
+                    update={
+                        "code": unknown_code,
+                        "detail": f"Resident usage for run {owner} on {node.node_id} is unknown; "
+                        "reconcile that run against fresh inventory before retrying.",
+                    }
+                )
+                node.blockers.append(unknown)
+                blockers.append(unknown)
+                fit.blockers.append(unknown)
+        return result
+
+    monkeypatch.setattr(planner, "_fit", unknown_usage)
+    original_preview = planner.preview
+
+    def lose_disk_at_dispatch(*args, **kwargs):
+        with sessions.begin() as session:
+            for index, snapshot in enumerate(
+                session.scalars(select(NodeInventorySnapshot))
+            ):
+                snapshot.disk_free_bytes = 11 + index
+        return original_preview(*args, **kwargs)
+
+    monkeypatch.setattr(planner, "preview", lose_disk_at_dispatch)
+    assert service.tick()
+    monkeypatch.setattr(planner, "preview", original_preview)
+    preview = service.preview(profile.id)
+    assert not preview.allowed
+    expected = {
+        (reason.code, tuple(reason.node_ids)): reason.detail
+        for item in preview.assessments
+        for reason in item.assessment.blockers
+    }
+    assert (unknown_code, (nodes[0],)) in expected
+    assert (RunSwitchCode.INSUFFICIENT_DISK, (nodes[1],)) in expected
+    relief = {}
+    for node in preview.assessments[0].assessment.fit_current.nodes:
+        assert node.disk_required_bytes is not None and node.disk_free_bytes is not None
+        found = collector.relief_for_spark(
+            node.node_id,
+            node.disk_required_bytes,
+            source="profile-load",
+            subject=profile.id,
+            reason=RunSwitchCode.INSUFFICIENT_DISK,
+        )
+        assert found is not None
+        assert found.needed_bytes == node.disk_required_bytes - node.disk_free_bytes
+        assert found.freeable_bytes == 0
+        relief[node.node_id] = found, node.disk_required_bytes, node.disk_free_bytes
+    for _ in range(2):
+        _tick_profile_when_due(service, planner, lifecycle, application.id)
+    api, codec = _client(sessions, profiles=service)
+    response = api.get(
+        f"/api/profile/applications/{application.id}", headers=_headers(codec)
+    )
+    assert response.status_code == 200, response.text
+    waiting = FleetProfileApplicationView.model_validate_json(response.content)
+    actual = {
+        (item.code, tuple(item.node_ids)): item.detail for item in waiting.blockers
+    }
+    for identity, detail in expected.items():
+        assert actual[identity] == detail
+    for node_id, (found, required, available) in relief.items():
+        assert actual[(found.code, (node_id,))] == found.detail
+        blocker = next(
+            item
+            for item in waiting.blockers
+            if item.code == found.code and item.node_ids == [node_id]
+        )
+        assert blocker.storage is not None
+        assert blocker.storage.required_free_bytes == required
+        assert blocker.storage.available_bytes == available
+        assert blocker.storage.reclaimable_bytes == found.freeable_bytes
+    assert owner in actual[(unknown_code, (nodes[0],))]
+    assert waiting.progress.retry_due_at is not None
+    with sessions() as session:
+        assert not tuple(
+            session.scalars(
+                select(Job).where(Job.kind == ProfileChildJobKind.RUN_SWITCH)
+            )
+        )
+    with sessions.begin() as session:
+        for snapshot in session.scalars(select(NodeInventorySnapshot)):
+            snapshot.disk_free_bytes = snapshot.disk_total_bytes
+    # Restart the consumer: progress and request identity are durable, and fresh
+    # planning no longer sees either fault.
+    restarted, restarted_planner = _profile_service(sessions, lifecycle)
+    assert waiting.progress.retry_due_at is not None
+    due_at = waiting.progress.retry_due_at
+    for clocked in (restarted, restarted_planner, lifecycle):
+        clocked._clock = lambda: due_at
+    install_id = _drive_to_job(
+        restarted, restarted_planner, sessions, OperationKind.RECIPE_INSTALL
+    )
+    for node_id in nodes:
+        lifecycle.record_node_result(
+            install_id, node_id, succeeded=True, evidence={"installed_bytes": 120}
+        )
+    for _ in range(12):
+        _tick_profile_when_due(restarted, restarted_planner, lifecycle, application.id)
+    completed = restarted.application(application.id)
+    assert completed.state == LifecycleState.SUCCEEDED, completed.status_reason
+    assert (
+        completed.id == application.id
+        and completed.request_key == application.request_key
+    )
+    assert completed.blockers == []
+    with sessions() as session:
+        assert len(tuple(session.scalars(select(FleetProfileApplication)))) == 1
 
 
 def test_install_review_does_not_require_serving_memory_or_an_available_port(

@@ -30,7 +30,12 @@ from ..fleet_profile_contract import (
 )
 from ..lifecycle.evidence import BookkeepingReason, retire_as_unknown
 from ..lifecycle.types import State as _LifecycleState
-from ..operation_blockers import OperationBlocker, bound_blockers, make_blocker
+from ..operation_blockers import (
+    OperationBlocker,
+    StorageReliefEvidence,
+    bound_blockers,
+    make_blocker,
+)
 from ..preparation_contract import RolloutPreparation
 from ..storage_demands import STORAGE_INSUFFICIENT, StorageRelief
 from ..strict_json import read_stored_model
@@ -252,8 +257,10 @@ def _storage_wait_of(error: BaseException) -> FleetProfileAdmissionEffectBusy | 
     return None
 
 
-def _relief_blocker(node_id: str, found: StorageRelief) -> OperationBlocker:
-    return make_blocker(
+def _relief_blocker(
+    node_id: str, found: StorageRelief, required_free_bytes: int
+) -> OperationBlocker:
+    blocker = make_blocker(
         found.code,
         found.detail,
         severity=ProfileReasonSeverity.ERROR.value
@@ -261,6 +268,12 @@ def _relief_blocker(node_id: str, found: StorageRelief) -> OperationBlocker:
         else ProfileReasonSeverity.WARNING.value,
         node_ids=(node_id,),
     )
+    blocker.storage = StorageReliefEvidence(
+        required_free_bytes=required_free_bytes,
+        available_bytes=required_free_bytes - found.needed_bytes,
+        reclaimable_bytes=found.freeable_bytes,
+    )
+    return blocker
 
 
 def _deferral_code(error: BaseException) -> str:

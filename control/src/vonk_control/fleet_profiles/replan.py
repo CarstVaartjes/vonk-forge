@@ -79,6 +79,7 @@ class FleetProfileService:
         *,
         code: str = ProfileReasonCode.RETRY_CONFLICT,
         ending: Sequence[OperationBlocker] = (),
+        blockers: Sequence[OperationBlocker] = (),
     ) -> None:
         """Continue the same accepted queue/child identity without replacement admission.
 
@@ -99,7 +100,7 @@ class FleetProfileService:
         progress.retry_due_at = FleetProfileAdapter.next_retry(
             row.id, progress.attempt, now
         )
-        progress.blockers = bound_blockers([make_blocker(code, reason)])
+        progress.blockers = bound_blockers(blockers or [make_blocker(code, reason)])
         row.progress = progress.model_dump(mode="json")
         row.status_reason = f"Waiting for exact accepted effect ({reason}); next attempt at {progress.retry_due_at.isoformat()}"[
             :512
