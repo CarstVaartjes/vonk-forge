@@ -47,7 +47,18 @@
 	import edge_headers
 }
 
+# Only Caddy handler errors enter this route. An upstream Controller 413
+# passes through with its own typed code and must never be relabeled.
+(body_limit_errors) {
+	handle_errors 413 {
+		import edge_headers
+		header X-Vonk-Error-Code edge.body_limit
+		respond "edge body limit" 413
+	}
+}
+
 (agent_edge_guards) {
+	import body_limit_errors
 	# Recipe OCI layouts and recipe-job outputs are the only large inbound
 	# agent bodies. The API streams, hashes, and enforces these same bounds:
 	# the 16 TiB image ceiling and the 1 GiB job output.

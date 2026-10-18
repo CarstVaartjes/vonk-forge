@@ -72,6 +72,13 @@ impl fmt::Display for ControllerError {
         if let Some(request_id) = &self.request_id {
             write!(formatter, " request_id={request_id}")?;
         }
+        if self.status == 413 {
+            if vocabulary::is(&self.code, ControllerErrorCode::EdgeBodyLimit) {
+                write!(formatter, " edge body limit")?;
+            } else if vocabulary::is(&self.code, ControllerErrorCode::ControllerRequestTooLarge) {
+                write!(formatter, " Controller limit")?;
+            }
+        }
         Ok(())
     }
 }
