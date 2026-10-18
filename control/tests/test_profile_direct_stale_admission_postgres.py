@@ -13,7 +13,6 @@ from vonk_control.fleet_profiles import (
     FleetProfileStalePlanConflict,
 )
 from vonk_control.models import (
-    AgentNode,
     ClusterMapping,
     FleetProfileApplication,
     RecipeBuild,
@@ -127,11 +126,10 @@ def test_direct_stale_refusal_that_replanning_cannot_change_ends_with_evidence(
     assert "injected unchanged admission assumption" in refusal.detail
 
 
-@pytest.mark.parametrize("change", ["run", "roster"])
-def test_pending_replan_cannot_expand_reviewed_consent(
-    tmp_path, postgres_engine, monkeypatch: pytest.MonkeyPatch, change: str
+def test_pending_replan_cannot_acquire_an_unreviewed_stop_target(
+    tmp_path, postgres_engine, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Catches replacing a review with new destructive targets or fleet membership."""
+    """Catches replacing the stored review with new destructive effects on retry."""
     sessions, lifecycle, _, profiles, profile, installed, nodes = (
         _exact_cleanup_profile(tmp_path, engine=postgres_engine)
     )
@@ -150,16 +148,7 @@ def test_pending_replan_cannot_expand_reviewed_consent(
 
         race.setattr(FleetProfileService, "_queue_application", refuse)
         accepted = profiles.apply(profile.id, request_key=str(uuid4()), actor="admin")
-    if change == "run":
-        remaining_run_id = _replace_run(sessions, original_run.owner_id)
-        cause = "unreviewed workload"
-    else:
-        remaining_run_id = original_run.owner_id
-        cause = "fleet scope changed"
-        with sessions.begin() as session:
-            node = session.get(AgentNode, nodes[0])
-            assert node is not None
-            node.revoked_at = profiles._clock()
+    replacement_id = _replace_run(sessions, original_run.owner_id)
     for _ in range(4):
         waiting = profiles.application(accepted.id)
         if not waiting.progress.admission_pending:
@@ -170,7 +159,7 @@ def test_pending_replan_cannot_expand_reviewed_consent(
         assert profiles.tick()
     ended = profiles.application(accepted.id)
     assert ended.state == LifecycleState.SUPERSEDED
-    assert cause in (ended.status_reason or "")
+    assert "unreviewed workload" in (ended.status_reason or "")
     with sessions() as session:
-        replacement = session.get(RecipeRun, remaining_run_id)
+        replacement = session.get(RecipeRun, replacement_id)
         assert replacement is not None and replacement.state == LifecycleState.RUNNING

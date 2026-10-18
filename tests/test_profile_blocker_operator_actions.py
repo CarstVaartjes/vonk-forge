@@ -13,7 +13,7 @@ from vonk_control.fleet_profiles import contracts
 ROOT = Path(__file__).resolve().parents[1]
 CONSENT_EDGES = {
     ProfileReasonCode.REVIEW_STALE: (
-        "The caller's reviewed digest or fleet membership changed, or execution would "
+        "The caller's reviewed digest changed, or execution would "
         "stop or remove an unreviewed target. A new review authorizes those effects."
     ),
 }

@@ -251,10 +251,6 @@ class FleetProfileService:
             )
             return None
         try:
-            if fresh.scope.node_ids != blocked.scope.node_ids:
-                raise FleetProfileReviewStale(
-                    "Profile fleet scope changed before admission resumed; review again"
-                )
             _validate_remaining_effects(blocked.effects, fresh.effects)
         except FleetProfileReviewStale as error:
             self._finish_pending_admission(
@@ -296,6 +292,9 @@ class FleetProfileService:
                             update={
                                 "reviewed_plan_digest": fresh.plan_digest,
                                 "assignments": list(fresh.resolved_assignments),
+                                "scope": progress.intended_profile.scope.model_copy(
+                                    update={"node_ids": fresh.scope.node_ids}
+                                ),
                             }
                         ),
                         "total_steps": len(fresh.steps),
@@ -368,11 +367,7 @@ class FleetProfileService:
                     accepted_profile_definition=plan.profile_definition,
                     excluded_application_id=application_id,
                 )
-                # Following a recipe must preserve the same consent boundary
-                # as every other pending re-plan. Let ordinary admission name
-                # a changed scope or unreviewed destructive effect.
-                if fresh.scope.node_ids != plan.scope.node_ids:
-                    return False
+                # Recipe following cannot acquire unreviewed destructive targets.
                 _validate_remaining_effects(plan.effects, fresh.effects)
         except (FleetProfileConflict, ValidationError, KeyError):
             # The ordinary admission path reports whatever is unresumable.
@@ -418,7 +413,12 @@ class FleetProfileService:
                 progress.model_copy(
                     update={
                         "intended_profile": followed.model_copy(
-                            update={"reviewed_plan_digest": fresh.plan_digest}
+                            update={
+                                "reviewed_plan_digest": fresh.plan_digest,
+                                "scope": followed.scope.model_copy(
+                                    update={"node_ids": fresh.scope.node_ids}
+                                ),
+                            }
                         ),
                         "total_steps": len(fresh.steps),
                     }

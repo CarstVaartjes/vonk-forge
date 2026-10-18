@@ -65,7 +65,6 @@ from .contracts import (
     FleetProfileAdmissionEffectBusy,
     FleetProfileConflict,
     FleetProfileInvalid,
-    FleetProfileReviewStale,
     FleetProfileSelectionLost,
     FleetProfileStalePlanConflict,
     _FleetProfileSupersededIntentConflict,
@@ -310,8 +309,8 @@ class FleetProfileService:
             )
             frozen_nodes = tuple(node.node_id for node in scope_nodes)
             if frozen_nodes != tuple(preview.scope.node_ids):
-                raise FleetProfileReviewStale(
-                    "Profile fleet scope changed during admission; review again"
+                raise FleetProfileStalePlanConflict(
+                    "Profile fleet scope changed during admission"
                 )
             if selected_application:
                 intended = (
@@ -818,8 +817,8 @@ class FleetProfileService:
                 )
             )
             if current_scope != frozen_nodes:
-                raise FleetProfileReviewStale(
-                    "Profile fleet scope changed during admission; review again"
+                raise FleetProfileStalePlanConflict(
+                    "Profile fleet scope changed during admission"
                 )
             if pending_roster_reconciliation:
                 if (
