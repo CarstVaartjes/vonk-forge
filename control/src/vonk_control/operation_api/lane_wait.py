@@ -13,6 +13,7 @@ from datetime import datetime, timedelta
 from sqlalchemy import and_, select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import WaitReason
+from vonk_agent_protocol.agent_words import ProfileReasonSeverity
 
 from .. import agent_operation_states
 from ..agent_jobs.contracts import CLAIM_LEASE_SECONDS
@@ -118,7 +119,10 @@ def spark_busy_blockers(
                 progressed_at = max(progressed_at, aware(movement))
         deadline = progressed_at + timedelta(seconds=PROFILE_STALL_WINDOW_SECONDS)
         blocker = make_blocker(
-            reason, detail, severity="info", node_ids=[operation.node_id]
+            reason,
+            detail,
+            severity=ProfileReasonSeverity.INFO.value,
+            node_ids=[operation.node_id],
         ).model_copy(update={"operation": blocking_operation, "run_id": run_id})
         blockers = [blocker]
         if aware(now) >= deadline:
@@ -128,7 +132,7 @@ def spark_busy_blockers(
                     f"No queue progress since {progressed_at.isoformat()}; "
                     "inspect the Spark's contact and the blocking operation. "
                     "The order will proceed automatically when it can claim.",
-                    severity="error",
+                    severity=ProfileReasonSeverity.WARNING.value,
                     node_ids=[operation.node_id],
                 )
             )
