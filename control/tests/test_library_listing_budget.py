@@ -576,7 +576,7 @@ def test_blocked_assessment_reuses_one_executor_then_fresh_read_is_assessed(
                 frozen_pass_budgets.advance(timeout or 0)
                 super().join(timeout=0)
             else:
-                super().join(timeout=timeout)
+                super().join()
 
     real_thread = RecoveryThread
 

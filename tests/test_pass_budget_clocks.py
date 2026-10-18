@@ -183,3 +183,49 @@ def test_deadline_scan_sees_new_literal_constant_and_injected_budgets() -> None:
     ):
         assert has_wall_deadline(ast.parse(source))
     assert not has_wall_deadline(ast.parse("cutoff = time.time() - GRACE_SECONDS"))
+
+
+def uninjected_stall_calls(tree: ast.Module) -> list[int]:
+    names = {
+        alias.asname or alias.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom)
+        and node.module == "vonk_control.stalled_process"
+        for alias in node.names
+        if alias.name == "run_until_stalled"
+    }
+    return [
+        node.lineno
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and (
+            isinstance(node.func, ast.Name)
+            and node.func.id in names
+            or ast.unparse(node.func).endswith(".run_until_stalled")
+        )
+        and not any(keyword.arg == "clock" for keyword in node.keywords)
+    ]
+
+
+def test_stall_monitor_tests_inject_the_existing_clock() -> None:
+    """A subsecond real stall window can kill a healthy writer on a loaded host."""
+    failures = {
+        str(path.relative_to(ROOT)): lines
+        for directory in (ROOT / "control/tests", ROOT / "tests")
+        for path in sorted(directory.rglob("*.py"))
+        if (lines := uninjected_stall_calls(parse_file(path).tree))
+    }
+    assert not failures, f"Inject the stall monitor's clock: {failures}"
+
+
+def test_guard_rejects_a_stall_monitor_using_the_real_clock() -> None:
+    prefix = "from vonk_control.stalled_process import run_until_stalled as run\n"
+    assert uninjected_stall_calls(
+        ast.parse(prefix + "run(command, window=window)")
+    ) == [2]
+    assert not uninjected_stall_calls(
+        ast.parse(prefix + "run(command, window=window, clock=fake)")
+    )
+    assert uninjected_stall_calls(ast.parse("monitor.run_until_stalled(command)")) == [
+        1
+    ]
