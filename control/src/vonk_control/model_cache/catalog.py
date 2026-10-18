@@ -93,7 +93,7 @@ class CatalogMixin:
             if not isinstance(recipe, RecipeDefinition):
                 raise InvalidType("catalog revision is not a recipe")
         except (TypeError, ValueError) as error:
-            raise ModelCacheStorageUnknown(
+            raise ModelCacheResolutionInvalid(
                 ModelCacheCode.RECIPE_INVALID, "canonical recipe definition is invalid"
             ) from error
         return recipe, revision.id, revision.content_digest
@@ -108,19 +108,19 @@ class CatalogMixin:
     ) -> None:
         cache = cast("ModelCacheService", self)
         if not isinstance(digest, str) or not _is_hex(digest) or len(digest) != 64:
-            raise ModelCacheStorageUnknown(
+            raise ModelCacheResolutionInvalid(
                 ModelCacheCode.MODEL_PIN_INVALID, "model dependency pin is invalid"
             )
         if digest in rows:
             if visiting is not None and digest in visiting:
-                raise ModelCacheStorageUnknown(
+                raise ModelCacheResolutionInvalid(
                     ModelCacheCode.MODEL_DEPENDENCY_CYCLE,
                     "canonical model dependency graph contains a cycle",
                 )
             return
         active = visiting if visiting is not None else set()
         if digest in active:
-            raise ModelCacheStorageUnknown(
+            raise ModelCacheResolutionInvalid(
                 ModelCacheCode.MODEL_DEPENDENCY_CYCLE,
                 "canonical model dependency graph contains a cycle",
             )
@@ -152,7 +152,7 @@ class CatalogMixin:
                     visiting=active,
                 )
         except (TypeError, ValueError) as error:
-            raise ModelCacheStorageUnknown(
+            raise ModelCacheResolutionInvalid(
                 ModelCacheCode.MODEL_DEFINITION_INVALID,
                 "canonical model definition is invalid",
             ) from error
@@ -177,7 +177,7 @@ class CatalogMixin:
             or not isinstance(raw_path, str)
             or not isinstance(raw_kind, str)
         ):
-            raise ModelCacheStorageUnknown(
+            raise ModelCacheResolutionInvalid(
                 ModelCacheCode.ARTIFACT_INVALID,
                 "catalog artifact identity is incomplete",
             )
@@ -186,7 +186,7 @@ class CatalogMixin:
             or not isinstance(raw_bytes, int)
             or not isinstance(roles, list)
         ):
-            raise ModelCacheStorageUnknown(
+            raise ModelCacheResolutionInvalid(
                 ModelCacheCode.ARTIFACT_INVALID,
                 "catalog artifact integrity metadata is incomplete",
             )

@@ -153,7 +153,7 @@ class RemovalAcceptanceMixin:
             # acquisition, then re-read it after the fences are held.
             scope = cache._model_removal_scope_for_sets(session, selected)
             if expected_scope is not None and scope != expected_scope:
-                raise ModelCacheConflictUnknown(
+                raise ModelCacheConflictInvalid(
                     ArtifactLifecycleCode.REFERENCE_IDENTITY_MISMATCH,
                     "model removal scope changed before parent acceptance",
                 )
@@ -184,7 +184,7 @@ class RemovalAcceptanceMixin:
             try:
                 if gates_reserved:
                     if not removal_fences_match(session, assignments, now=now):
-                        raise ModelCacheConflictUnknown(
+                        raise ModelCacheConflictInvalid(
                             ArtifactLifecycleCode.DELETION_FENCE_LOST,
                             "parent did not reserve every model identity for this child",
                         )
@@ -199,7 +199,7 @@ class RemovalAcceptanceMixin:
                     )
                 locked_scope = cache._model_removal_scope_for_sets(session, selected)
                 if locked_scope != scope:
-                    raise ModelCacheConflictUnknown(
+                    raise ModelCacheConflictInvalid(
                         ArtifactLifecycleCode.REFERENCE_IDENTITY_MISMATCH,
                         "model-set membership changed while removal ownership was reserved",
                     )
@@ -207,7 +207,11 @@ class RemovalAcceptanceMixin:
                 # stops new consumers and each destructive step waits until the
                 # current owners have released the set.
             except ArtifactLifecycleError as error:
-                raise ModelCacheConflictUnknown(
+                raise (
+                    ModelCacheConflictUnknown
+                    if error.retryable
+                    else ModelCacheConflictInvalid
+                )(
                     error.code,
                     error.detail,
                     recovery=AvailabilityRecoveryAction.RETRY
@@ -236,7 +240,7 @@ class RemovalAcceptanceMixin:
                 if digest not in external_memberships
             )
             if delete_objects != scope.delete_objects:
-                raise ModelCacheConflictUnknown(
+                raise ModelCacheConflictInvalid(
                     ArtifactLifecycleCode.REFERENCE_IDENTITY_MISMATCH,
                     "model object sharing changed while removal ownership was reserved",
                 )

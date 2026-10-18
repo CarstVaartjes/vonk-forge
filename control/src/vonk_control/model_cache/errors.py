@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from typing import ClassVar
 from urllib.parse import urlsplit
@@ -139,6 +139,12 @@ class _CacheInvalid(InvalidRequestError, ModelCacheError):
         self.typed_reason = reason if reason is not None else self.default_reason
         self.typed_field = None
 
+    @property
+    def disposition(self) -> Disposition:
+        return (
+            Disposition.SECURITY if is_security_failure(self.code) else Disposition.FAIL
+        )
+
 
 class _CacheUnknown(UnknownOutcomeError, ModelCacheError):
     """A busy owner, an unavailable source or unconfirmed bookkeeping: the worker
@@ -169,6 +175,17 @@ class _CacheUnknown(UnknownOutcomeError, ModelCacheError):
 
 class ModelCacheConflictInvalid(_CacheInvalid, ModelCacheConflict):
     default_reason = InvalidRequestReason.CONFLICT
+
+
+class ModelCacheSelectorAmbiguous(ModelCacheConflictInvalid):
+    """A name identifies different content; the caller must choose a digest."""
+
+    def __init__(self, candidates: Sequence[str]) -> None:
+        self.candidates = tuple(sorted(set(candidates)))
+        super().__init__(
+            ModelCacheCode.SELECTOR_AMBIGUOUS,
+            "model selector matches multiple models; choose an exact candidate digest",
+        )
 
 
 class ModelCacheConflictUnknown(_CacheUnknown, ModelCacheConflict):

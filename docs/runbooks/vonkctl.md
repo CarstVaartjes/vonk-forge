@@ -511,6 +511,13 @@ explicit choice fails closed rather than prompting or guessing. Cached updates
 are automatically used by the next Profile load; there is no Profile update
 command.
 
+Model names (`publisher/slug`, a slug, or the document UUID) select the catalog's
+current accepted document. Retained cached revisions remain addressable by their
+64-character content digest with `vonkctl model detail <digest>` and
+`vonkctl model remove <digest> --review` (then the normal removal consent flow).
+A name shared by different models returns HTTP 409 with candidate digests; choose
+one of those digests instead of retrying the ambiguous name.
+
 ### Artifact jobs
 
 Artifact jobs collect files for an existing recipe run and make its verified

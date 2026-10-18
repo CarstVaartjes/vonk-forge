@@ -31,6 +31,7 @@ from .artifacts import ArtifactSpec
 from .catalog_helpers import _github_release_asset_binding
 from .constants import _CHUNK_BYTES, _GITHUB_API_HOST, _PARALLEL_RANGE_WORKERS
 from .errors import (
+    ModelCacheConflictInvalid,
     ModelCacheConflictUnknown,
     ModelCacheError,
     ModelCacheResolutionError,
@@ -291,6 +292,8 @@ class DownloadMixin:
     def _reference_unknown(
         error: ArtifactLifecycleError | ModelCacheConflictUnknown | DBAPIError,
     ) -> NoReturn:
+        if isinstance(error, ArtifactLifecycleError) and not error.retryable:
+            raise ModelCacheConflictInvalid(error.code, error.detail) from error
         raise ModelCacheConflictUnknown(
             ArtifactLifecycleCode.REFERENCE_UNAVAILABLE
             if isinstance(error, DBAPIError)

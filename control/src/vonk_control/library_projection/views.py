@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 import time
 from collections.abc import Sequence
 from datetime import datetime
@@ -26,12 +25,11 @@ from ..library_contract import (
     RecipeLibraryResponse,
     _utc,
 )
-from ..model_cache_contract import DIGEST_PATTERN, UUID_PATTERN
-from ..models import CatalogDocumentRevision, ModelCacheSet
+from ..model_cache.resolution import ResolutionMixin
+from ..models import CatalogDocumentRevision
 from ..request_fault import RequestFault
 from .common import (
     _LIBRARY_ORDER,
-    LibrarySelectorAmbiguous,
     _bounded_library_page,
     _canonical_model,
     _canonical_recipe,
@@ -208,9 +206,10 @@ def models(
 
 
 def model_detail(self: LibraryProjection, selector: str) -> ModelDetailResponse:
-    selected = selector.strip().casefold()
-    if not selected:
-        raise RequestFault("model selector is required")
+    with self._sessions() as session:
+        digest = ResolutionMixin._resolve_model_selector_in_session(
+            session, selector.strip().casefold()
+        )
     snapshot = self._local_state_snapshot()
     model_rows, recipe_rows = self._documents_for_snapshot(snapshot)
     alignment_by_model = self._alignment_by_model(
@@ -229,65 +228,10 @@ def model_detail(self: LibraryProjection, selector: str) -> ModelDetailResponse:
         )
         for row, model in model_rows
     ]
-    pairs = list(zip((row for row, _ in model_rows), entries, strict=True))
-    candidates: list[LibraryModelProjection]
-    if re.fullmatch(DIGEST_PATTERN, selected):
-        candidates = [
-            entry
-            for revision, entry in pairs
-            if revision.state == "active" and revision.content_digest == selected
-        ]
-        if not candidates:
-            with self._sessions() as session:
-                cached = session.scalar(
-                    select(ModelCacheSet.model_content_sha256)
-                    .where(ModelCacheSet.model_content_sha256 == selected)
-                    .limit(1)
-                )
-            if cached is not None:
-                candidates = [
-                    entry
-                    for revision, entry in pairs
-                    if revision.content_digest == selected
-                ]
-    elif re.fullmatch(UUID_PATTERN, selected):
-        candidates = [
-            entry
-            for revision, entry in pairs
-            if revision.state == "active"
-            and selected in {revision.id.casefold(), revision.document_id.casefold()}
-        ]
-    else:
-        if "/" in selected:
-            publisher, slug = selected.split("/", 1)
-            candidates = [
-                entry
-                for revision, entry in pairs
-                if revision.state == "active"
-                and revision.publisher.casefold() == publisher
-                and revision.slug.casefold() == slug
-            ]
-        else:
-            candidates = [
-                entry
-                for revision, entry in pairs
-                if revision.state == "active" and revision.slug.casefold() == selected
-            ]
-
+    candidates = [entry for entry in entries if entry.identity.content_sha256 == digest]
     if not candidates:
         raise KeyError(selector)
-    if len(candidates) > 1:
-        if re.fullmatch(DIGEST_PATTERN, selected):
-            # A content digest names identical canonical bytes even when
-            # the catalog has more than one active reference to them.
-            entry = max(candidates, key=lambda item: item.updated_at)
-        else:
-            raise LibrarySelectorAmbiguous(
-                selector,
-                sorted({item.identity.content_sha256 for item in candidates}),
-            )
-    else:
-        entry = candidates[0]
+    entry = max(candidates, key=lambda item: item.updated_at)
     return ModelDetailResponse.model_validate(entry.model_dump(mode="python"))
 
 

@@ -23,6 +23,7 @@ from sqlalchemy.pool import StaticPool
 from vonk_agent_protocol import LifecycleState, ProgressPhase
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.bounded_json import require_mapping, require_sequence, text
+from vonk_control.catalog_entities import CatalogEntityService
 from vonk_control.distribution import (
     CompositeObjectSource,
     MemoryObjectSource,
@@ -54,6 +55,7 @@ from vonk_control.models import (
     ArtifactLifecycleGate,
     Base,
     CatalogDocument,
+    CatalogDocumentHead,
     CatalogDocumentRevision,
     ModelCacheOperation,
     ModelCacheSet,
@@ -667,6 +669,15 @@ def test_operator_download_replays_original_before_catalog_or_storage_readmissio
         session.add(revision)
         session.flush()
         document_id = document.id
+        session.add(
+            CatalogDocumentHead(
+                kind=revision.kind,
+                publisher=revision.publisher,
+                slug=revision.slug,
+                active_revision_id=revision.id,
+                generation=1,
+            )
+        )
     with httpx2.Client(
         transport=httpx2.MockTransport(
             lambda request: httpx2.Response(200, content=data)
@@ -3626,6 +3637,16 @@ def test_remove_model_supersedes_an_older_download_of_the_same_set(
                     created_at=NOW,
                 )
             )
+            session.flush()
+            session.add(
+                CatalogDocumentHead(
+                    kind=root.kind,
+                    publisher=root.publisher,
+                    slug=root.slug,
+                    active_revision_id=f"00000000-0000-4000-8000-00000000011{index}",
+                    generation=1,
+                )
+            )
         session.add(AgentNode(node_id="spark-live", state="active"))
 
     payload = b"shared model payload"
@@ -3979,38 +4000,9 @@ def test_model_removal_resolves_the_selector_at_acceptance_and_replays_by_key(
         file_digest="b" * 64,
     )
     digest_a = document_sha256(model_a.model_dump(mode="json"))
-    digest_b = document_sha256(model_b.model_dump(mode="json"))
-    document_id = "00000000-0000-4000-8000-000000001050"
-    with sessions.begin() as session:
-        document = CatalogDocument(
-            id=document_id,
-            kind="model",
-            publisher="vonk-forge",
-            slug="exact-removal",
-            title="Exact removal",
-            created_by="operator",
-            created_at=NOW,
-            updated_at=NOW,
-        )
-        session.add(document)
-        session.flush()
-        session.add(
-            CatalogDocumentRevision(
-                id="00000000-0000-4000-8000-000000001051",
-                document_id=document.id,
-                kind="model",
-                publisher="vonk-forge",
-                slug="exact-removal",
-                revision_number=1,
-                schema_version=2,
-                state="active",
-                document=model_a.model_dump(mode="json"),
-                content_digest=digest_a,
-                projected={},
-                created_by="operator",
-                created_at=NOW,
-            )
-        )
+    catalog = CatalogEntityService(sessions, clock=lambda: NOW)
+    draft = catalog.create_draft(model_a.model_dump(mode="json"), actor="operator")
+    original = catalog.resolve(draft.id, actor="operator")
 
     request_key = "00000000-0000-4000-8000-000000001052"
     # A stale client-side identity is advisory: the selector resolves now.
@@ -4022,24 +4014,10 @@ def test_model_removal_resolves_the_selector_at_acceptance_and_replays_by_key(
     assert accepted.model_content_sha256 == digest_a
     assert service.get_operation(accepted.id).model_content_sha256 == digest_a
 
-    with sessions.begin() as session:
-        session.add(
-            CatalogDocumentRevision(
-                id="00000000-0000-4000-8000-000000001053",
-                document_id=document_id,
-                kind="model",
-                publisher="vonk-forge",
-                slug="exact-removal",
-                revision_number=2,
-                schema_version=2,
-                state="active",
-                document=model_b.model_dump(mode="json"),
-                content_digest=digest_b,
-                projected={},
-                created_by="operator",
-                created_at=NOW,
-            )
-        )
+    successor = catalog.revise(
+        original.document_id, model_b.model_dump(mode="json"), actor="operator"
+    )
+    catalog.resolve(successor.id, actor="operator")
 
     replay = service.remove_model_selector(
         "vonk-forge/exact-removal",

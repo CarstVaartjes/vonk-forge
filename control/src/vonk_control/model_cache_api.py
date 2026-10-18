@@ -25,6 +25,7 @@ from .model_cache import (
     ModelCacheResolutionError,
     ModelCacheService,
 )
+from .model_cache.errors import ModelCacheSelectorAmbiguous
 from .model_cache_contract import (
     UUID_PATTERN,
     ModelCacheCancellationRequest,
@@ -104,6 +105,42 @@ def _model_operator_response(
     )
 
 
+def model_cache_http_error(error: BaseException) -> HTTPException:
+    if isinstance(error, ModelCacheSelectorAmbiguous):
+        from .library_api import SelectorAmbiguityHTTPError
+        from .library_projection import LibrarySelectorAmbiguous
+
+        return SelectorAmbiguityHTTPError(
+            LibrarySelectorAmbiguous("model", error.candidates),
+            status_code=409,
+            code=error.code,
+        )
+    if isinstance(error, ModelCacheNotFound):
+        return HTTPException(status_code=404, detail=error.detail)
+    if isinstance(error, ModelCacheConflict):
+        return HTTPException(status_code=409, detail=error.detail)
+    if isinstance(error, ModelCacheResolutionError):
+        return HTTPException(status_code=422, detail=error.detail)
+    if isinstance(error, ModelCacheError) and isinstance(error, SecurityRefusalError):
+        return HTTPException(
+            status_code=403,
+            detail=error.detail,
+            headers={"x-vonk-error-code": error.code},
+        )
+    if isinstance(error, UnknownOutcomeError):
+        raise error
+    if isinstance(error, ModelCacheError):
+        if error.disposition != Disposition.OBSERVE:
+            return HTTPException(
+                status_code=409,
+                detail=error.detail,
+                headers={"x-vonk-error-code": error.code},
+            )
+    elif not isinstance(error, AVAILABILITY_ERRORS):
+        raise error
+    return HTTPException(status_code=503, detail="model cache unavailable")
+
+
 def install_model_operator_routes(
     app: FastAPI,
     *,
@@ -129,34 +166,6 @@ def install_model_operator_routes(
         if actor.role not in MUTATION_ROLES[("POST", route)]:
             raise HTTPException(status_code=403, detail="insufficient role")
 
-    def failure(error: BaseException) -> HTTPException:
-        if isinstance(error, ModelCacheNotFound):
-            return HTTPException(status_code=404, detail=error.detail)
-        if isinstance(error, ModelCacheConflict):
-            return HTTPException(status_code=409, detail=error.detail)
-        if isinstance(error, ModelCacheResolutionError):
-            return HTTPException(status_code=422, detail=error.detail)
-        if isinstance(error, ModelCacheError) and isinstance(
-            error, SecurityRefusalError
-        ):
-            return HTTPException(
-                status_code=403,
-                detail=error.detail,
-                headers={"x-vonk-error-code": error.code},
-            )
-        if isinstance(error, UnknownOutcomeError):
-            raise error
-        if isinstance(error, ModelCacheError):
-            if error.disposition != Disposition.OBSERVE:
-                return HTTPException(
-                    status_code=409,
-                    detail=error.detail,
-                    headers={"x-vonk-error-code": error.code},
-                )
-        elif not isinstance(error, AVAILABILITY_ERRORS):
-            raise error
-        return HTTPException(status_code=503, detail="model cache unavailable")
-
     @app.get(
         "/api/model/requests/{request_key}",
         response_model=ModelCacheOperatorResponse,
@@ -175,7 +184,7 @@ def install_model_operator_routes(
         except HTTPException:
             raise
         except (ModelCacheError, *AVAILABILITY_ERRORS) as error:
-            raise failure(error) from None
+            raise model_cache_http_error(error) from None
 
     @app.get(
         "/api/model/operations/{operation_id}",
@@ -196,7 +205,7 @@ def install_model_operator_routes(
         except HTTPException:
             raise
         except (ModelCacheError, *AVAILABILITY_ERRORS) as error:
-            raise failure(error) from None
+            raise model_cache_http_error(error) from None
 
     @app.get(
         "/api/model/{selector:path}/remove-review",
@@ -214,7 +223,7 @@ def install_model_operator_routes(
         except HTTPException:
             raise
         except (ModelCacheError, *AVAILABILITY_ERRORS) as error:
-            raise failure(error) from None
+            raise model_cache_http_error(error) from None
 
     @app.post(
         "/api/model/{selector:path}/download",
@@ -242,7 +251,7 @@ def install_model_operator_routes(
         except HTTPException:
             raise
         except (ModelCacheError, *AVAILABILITY_ERRORS) as error:
-            raise failure(error) from None
+            raise model_cache_http_error(error) from None
 
     @app.post(
         "/api/model/{selector:path}/remove",
@@ -269,7 +278,7 @@ def install_model_operator_routes(
         except HTTPException:
             raise
         except (ModelCacheError, *AVAILABILITY_ERRORS) as error:
-            raise failure(error) from None
+            raise model_cache_http_error(error) from None
 
     @app.post(
         "/api/model/operations/{operation_id}/cancel",
@@ -297,7 +306,7 @@ def install_model_operator_routes(
         except HTTPException:
             raise
         except (ModelCacheError, *AVAILABILITY_ERRORS) as error:
-            raise failure(error) from None
+            raise model_cache_http_error(error) from None
 
 
 class ModelCacheOperationProvider:

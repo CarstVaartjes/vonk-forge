@@ -97,7 +97,7 @@ def _bounded_error_content(
         RequestValidationProblem(
             detail=detail, issues=[], context=context, candidates=candidates
         )
-        if validation
+        if validation or candidates is not None
         else BoundedErrorResponse(detail=detail, context=context)
     )
     return canonical_message(response.model_dump(mode="json", exclude_none=True))

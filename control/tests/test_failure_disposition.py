@@ -22,6 +22,7 @@ from vonk_agent_protocol import (
     Disposition,
     InvalidRequestError,
     InvalidRequestReason,
+    ModelCacheCode,
     SecurityRefusalError,
     SecurityRefusalReason,
     UnknownOutcomeError,
@@ -40,6 +41,12 @@ from vonk_control.lifecycle import (
     State,
     Tick,
     transition,
+)
+from vonk_control.model_cache.errors import (
+    ModelCacheConflictInvalid,
+    ModelCacheNotFoundInvalid,
+    ModelCacheResolutionInvalid,
+    ModelCacheStorageInvalid,
 )
 from vonk_control.recovery_policy import RECOVERY, RecoveryPolicy, schedule
 
@@ -444,3 +451,20 @@ def test_no_agent_lane_reads_an_http_status_by_hand() -> None:
         )
     ]
     assert found == []
+
+
+@pytest.mark.parametrize(
+    "error_type,code",
+    [
+        (ModelCacheConflictInvalid, ModelCacheCode.STALE_PLAN),
+        (ModelCacheResolutionInvalid, ModelCacheCode.MODEL_PIN_INVALID),
+        (ModelCacheStorageInvalid, ModelCacheCode.PAYLOAD_INVALID),
+        (ModelCacheNotFoundInvalid, ModelCacheCode.SELECTOR_MISSING),
+    ],
+)
+def test_invalid_cache_errors_end_instead_of_spending_observation_attempts(
+    error_type, code
+):
+    """The cache's own disposition must not override typed invalid input as OBSERVE."""
+    error = error_type(code, "deterministic input")
+    assert disposition(error) is Disposition.FAIL
