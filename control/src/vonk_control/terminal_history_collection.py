@@ -60,6 +60,8 @@ from .models import (
 from .owner_liveness import builds_in_flight
 from .stored_json import read_row_column
 
+PASS_BUDGET_SECONDS = 2.0
+
 _LOGGER = logging.getLogger(__name__)
 _TERMINAL = (
     LifecycleState.SUCCEEDED.value,
@@ -241,7 +243,7 @@ class TerminalHistoryCollector:
             return removed
         # The budget starts after the inventory: a slow inventory must not
         # spend every pass before its first candidate.
-        deadline = time.monotonic() + 2.0
+        deadline = time.monotonic() + PASS_BUDGET_SECONDS
         self._backlog = True
         specs = _history_specs()
         while self._table_index < len(specs):

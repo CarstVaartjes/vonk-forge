@@ -33,6 +33,7 @@ from vonk_control.models import (
 )
 from vonk_forge_contracts import RecipeDefinition, document_sha256
 
+from .pass_budget_clocks import PassClock
 from .runtime_image_fixtures import place_test_image, remove_test_image
 from .test_library_assessment import (  # noqa: F401 - the shared fixture
     assessed_library,
@@ -44,6 +45,29 @@ from .test_recipe_operations import NOW
 # A blocked read holds until the test releases it; the listing must answer
 # while it is still blocked.
 _BLOCKED_SECONDS = 30.0
+
+
+def _expire_image_wait(monkeypatch, clock: PassClock, entered: threading.Event):
+    """Expire only once a real probe has reached the injected fault."""
+    from concurrent.futures import wait
+
+    def expired(futures, *, timeout, return_when):
+        assert entered.wait(timeout=30)
+        clock.advance(timeout)
+        return wait(futures, timeout=0, return_when=return_when)
+
+    monkeypatch.setattr("vonk_control.library_image_presence.wait", expired)
+    return wait
+
+
+def _expiring_thread(clock: PassClock, entered: threading.Event):
+    class ExpiringThread(threading.Thread):
+        def join(self, timeout=None):
+            assert entered.wait(timeout=30)
+            clock.advance(timeout or 0)
+            super().join(timeout=0)
+
+    return ExpiringThread
 
 
 def _hex(value: str) -> str:
@@ -148,6 +172,8 @@ def test_listing_asks_about_each_current_image_once_whatever_the_history(
 
 
 def test_a_blocked_image_read_makes_the_recipe_unknown_not_the_listing_slow(
+    monkeypatch,
+    frozen_pass_budgets,
     assessed_library,  # noqa: F811
 ):
     _, sessions, _, _, _, _, _, _, _, storage = assessed_library
@@ -168,6 +194,7 @@ def test_a_blocked_image_read_makes_the_recipe_unknown_not_the_listing_slow(
         runtime_archive_available=probe,
         image_budget_seconds=0.2,
     )
+    wait = _expire_image_wait(monkeypatch, frozen_pass_budgets, blocked)
     try:
         listing = projection.recipe_library(assess=False)
         assert blocked.is_set()
@@ -177,6 +204,7 @@ def test_a_blocked_image_read_makes_the_recipe_unknown_not_the_listing_slow(
         assert listing.recipes[0].local.controller == "unknown"
     finally:
         release.set()
+    monkeypatch.setattr("vonk_control.library_image_presence.wait", wait)
     # The answer arrives in the background; the next listing has it.
     deadline = time.monotonic() + 30
     state = "unknown"
@@ -186,18 +214,32 @@ def test_a_blocked_image_read_makes_the_recipe_unknown_not_the_listing_slow(
 
 
 def test_a_blocked_placement_read_degrades_the_recipe_not_the_listing(
+    monkeypatch,
+    frozen_pass_budgets,
     assessed_library,  # noqa: F811
 ):
     _, sessions, cache, service, _, _, _, _, _, storage = assessed_library
     release = threading.Event()
     answered = threading.Event()
+    entered = threading.Event()
     inspect = service.inspect_candidate
 
     def blocked_inspect(*args, **kwargs):
+        entered.set()
         release.wait(_BLOCKED_SECONDS * 2)
         answered.set()
         return inspect(*args, **kwargs)
 
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(
+        "vonk_control.library_assessment.threading",
+        SimpleNamespace(
+            Thread=_expiring_thread(frozen_pass_budgets, entered),
+            Lock=threading.Lock,
+            Event=threading.Event,
+        ),
+    )
     service.inspect_candidate = blocked_inspect  # type: ignore[method-assign]
     projection = LibraryProjection(
         sessions,
@@ -258,13 +300,17 @@ def test_assessment_reads_do_not_walk_the_stored_model_objects(
     assert populated - empty < 60, (empty, populated)
 
 
-def test_image_presence_is_asked_once_for_concurrent_and_recent_readers():
+def test_image_presence_is_asked_once_for_concurrent_and_recent_readers(
+    monkeypatch, frozen_pass_budgets
+):
     clock = [0.0]
+    entered = threading.Event()
     release = threading.Event()
     calls: list[tuple[str, int]] = []
 
     def probe(archive: str, size: int) -> bool:
         calls.append((archive, size))
+        entered.set()
         release.wait(30)
         return archive != "gone"
 
@@ -275,6 +321,7 @@ def test_image_presence_is_asked_once_for_concurrent_and_recent_readers():
         clock=lambda: clock[0],
     )
     wanted = {("kept", 1), ("gone", 2)}
+    wait = _expire_image_wait(monkeypatch, frozen_pass_budgets, entered)
     first = index.lookup(wanted, budget_seconds=0.05)
     assert {answer.state for answer in first.values()} == {"unknown"}
     # A second reader joins the probe already running instead of repeating it.
@@ -282,6 +329,7 @@ def test_image_presence_is_asked_once_for_concurrent_and_recent_readers():
         answer.state for answer in index.lookup(wanted, budget_seconds=0.05).values()
     } == {"unknown"}
     release.set()
+    monkeypatch.setattr("vonk_control.library_image_presence.wait", wait)
     settled = index.lookup(wanted, budget_seconds=2)
     assert settled[("kept", 1)].state == "present"
     assert settled[("gone", 2)].state == "absent"
@@ -474,7 +522,9 @@ def test_a_head_reusing_its_predecessors_image_is_cached_while_it_is_stored(
     assert controller() == "not_cached"
 
 
-def test_blocked_image_attempt_is_deduplicated_and_other_image_progresses():
+def test_blocked_image_attempt_is_deduplicated_and_other_image_progresses(
+    monkeypatch, frozen_pass_budgets
+):
     entered = threading.Event()
     release = threading.Event()
     calls: list[str] = []
@@ -487,11 +537,13 @@ def test_blocked_image_attempt_is_deduplicated_and_other_image_progresses():
         return True
 
     index = ImagePresenceIndex(probe, workers=2, present_ttl_seconds=30)
+    wait = _expire_image_wait(monkeypatch, frozen_pass_budgets, entered)
     try:
         index.lookup({("blocked", 1)}, budget_seconds=0.01)
         assert entered.wait(timeout=30)
         for _ in range(20):
             index.lookup({("blocked", 1)}, budget_seconds=0)
+        monkeypatch.setattr("vonk_control.library_image_presence.wait", wait)
         observed = index.lookup({("independent", 1)}, budget_seconds=1)
         assert observed[("independent", 1)].state == "present"
         assert calls.count("blocked") == 1
@@ -509,13 +561,24 @@ def test_blocked_image_attempt_is_deduplicated_and_other_image_progresses():
 def test_blocked_assessment_reuses_one_executor_then_fresh_read_is_assessed(
     assessed_library,  # noqa: F811 -- shared pytest fixture
     monkeypatch,
+    frozen_pass_budgets,
 ):
     projection, sessions, cache, service, *_ = assessed_library
     recipes = projection.recipe_library(assess=False).recipes
     entered = threading.Event()
     release = threading.Event()
     workers = []
-    real_thread = threading.Thread
+
+    class RecoveryThread(threading.Thread):
+        def join(self, timeout=None):
+            if not release.is_set():
+                assert entered.wait(timeout=30)
+                frozen_pass_budgets.advance(timeout or 0)
+                super().join(timeout=0)
+            else:
+                super().join(timeout=timeout)
+
+    real_thread = RecoveryThread
 
     def worker(*args, **kwargs):
         target = kwargs["target"]

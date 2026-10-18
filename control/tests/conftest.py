@@ -37,6 +37,9 @@ from .api_response_witness import (  # noqa: F401 - pytest discovers imported ho
 from .api_response_witness import (
     pytest_sessionfinish as _api_response_sessionfinish,
 )
+from .pass_budget_clocks import (
+    frozen_pass_budgets,  # noqa: F401 - inherited autouse fixture
+)
 
 # A test that writes a JSON column its contract refuses fails where it writes;
 # one that damages a row on purpose says so with ``write_guard_mode(strict=False)``.

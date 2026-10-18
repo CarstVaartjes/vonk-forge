@@ -44,6 +44,9 @@ def unassessed(clock: Callable[[], datetime], detail: str) -> RecipeReadiness:
     )
 
 
+ASSESSMENT_BUDGET_SECONDS = 5.0
+
+
 class LibraryAssessment:
     """Search complete groups under a time budget, never a candidate-count cap.
 
@@ -58,7 +61,7 @@ class LibraryAssessment:
         run_switch: RunSwitchOperationService,
         model_cache: ModelCacheService,
         clock: Callable[[], datetime],
-        budget_seconds: float = 5.0,
+        budget_seconds: float = ASSESSMENT_BUDGET_SECONDS,
     ) -> None:
         if type(budget_seconds) not in (int, float) or not 0 < budget_seconds <= 10:
             raise ValueError("library assessment budget must be in (0, 10] seconds")

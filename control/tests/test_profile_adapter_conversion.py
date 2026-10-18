@@ -172,6 +172,25 @@ def retained_sessions(tmp_path):
     return _retained_stop(tmp_path)[0]
 
 
+def test_runner_load_cannot_spend_an_ordinary_conversion_pass(
+    retained_sessions, monkeypatch: pytest.MonkeyPatch
+):
+    """Catches a test using the host clock and skipping all retained work under load."""
+    import time
+
+    from vonk_control.fleet_profile_adapter_conversion import _SCAN_SECONDS
+
+    elapsed = 0.0
+
+    def loaded_host() -> float:
+        nonlocal elapsed
+        elapsed += _SCAN_SECONDS + 1.0
+        return elapsed
+
+    monkeypatch.setattr(time, "monotonic", loaded_host)
+    assert convert_due_retained_applications(retained_sessions, NOW) == 1
+
+
 def test_a_page_query_slower_than_the_budget_still_converts_the_page(
     retained_sessions, monkeypatch: pytest.MonkeyPatch
 ):

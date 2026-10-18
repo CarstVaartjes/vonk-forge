@@ -49,6 +49,9 @@ from .views import (
     recipe_library,
 )
 
+REQUEST_BUDGET_SECONDS = 8.0
+IMAGE_BUDGET_SECONDS = 2.0
+
 
 class LibraryProjection:
     """Read active canonical Model and Recipe revisions only."""
@@ -65,8 +68,8 @@ class LibraryProjection:
         local_state: Callable[[], Mapping[str, Mapping[str, object]]] | None = None,
         runtime_archive_available: Callable[[str, int], bool] | None = None,
         assessment: Callable[..., list[LibraryRecipeProjection]] | None = None,
-        request_budget_seconds: float = 8.0,
-        image_budget_seconds: float = 2.0,
+        request_budget_seconds: float = REQUEST_BUDGET_SECONDS,
+        image_budget_seconds: float = IMAGE_BUDGET_SECONDS,
         image_present_ttl_seconds: float = 0.0,
         image_absent_ttl_seconds: float = 0.0,
     ) -> None:

@@ -1083,18 +1083,28 @@ def test_inventory_cursor_survives_unchanged_storage_reconciliation(
     service.close()
 
 
-def test_upstream_page_budget_bounds_concurrency_and_latency(tmp_path, monkeypatch):
+def test_upstream_page_budget_bounds_concurrency_and_latency(
+    tmp_path, monkeypatch, frozen_pass_budgets
+):
     sessions = _database(tmp_path)
     service, _ = _service(tmp_path, sessions)
     release = threading.Event()
     calls = []
     answered = []
-    monkeypatch.setattr(
-        "vonk_control.model_cache.updates._UPSTREAM_CHECK_SECONDS", 0.05
-    )
+    from vonk_control.model_cache.constants import _UPSTREAM_CHECK_WORKERS
+
+    started = threading.Barrier(_UPSTREAM_CHECK_WORKERS + 1)
+
+    def expired(futures, *, timeout, return_when):
+        started.wait(timeout=30)
+        frozen_pass_budgets.advance(timeout)
+        return set(), set(futures)
+
+    monkeypatch.setattr("vonk_control.model_cache.updates.wait", expired)
 
     def check(repository, revision):
         calls.append(repository)
+        started.wait(timeout=30)
         release.wait(30)
         answered.append(repository)
         return ModelCacheUpstreamRevision(
