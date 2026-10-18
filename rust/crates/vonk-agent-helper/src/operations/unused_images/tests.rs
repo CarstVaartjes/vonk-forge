@@ -15,6 +15,8 @@ fn executor() -> (tempfile::TempDir, PullRunner, OperationExecutor<PullRunner>) 
         .with_agent_data(&temp.path().join("agent"));
     fs::create_dir_all(&roots.data).unwrap();
     let executor = OperationExecutor::new(roots, &[0; 32], runner.clone(), None).unwrap();
+    fs::create_dir_all(&executor.roots.agent_data).unwrap();
+    retention(&executor, 0, Vec::new());
     (temp, runner, executor)
 }
 
@@ -150,4 +152,68 @@ fn an_uninstall_starts_its_images_grace() {
     pulled_ago(&executor, &manifest, 25);
     executor.sweep_unused_runtime_images();
     assert!(!present(&runner, &manifest));
+}
+
+fn retention(executor: &OperationExecutor<PullRunner>, required: u64, protected: Vec<String>) {
+    let request = vonk_agent_protocol::generated::StoreRetentionRequest {
+        issued_at: std::time::SystemTime::now()
+            .duration_since(std::time::SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_secs(),
+        expires_at: std::time::SystemTime::now()
+            .duration_since(std::time::SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+            + 300,
+        required_free_bytes: required,
+        protected_model_objects: Vec::new(),
+        protected_image_addresses: protected,
+    };
+    fs::write(
+        executor.roots.agent_data.join("store-retention.json"),
+        serde_json::to_vec(&request).unwrap(),
+    )
+    .unwrap();
+}
+
+#[test]
+fn disk_demand_removes_young_unused_images_but_keeps_controller_and_container_references() {
+    let (_temp, runner, executor) = executor();
+    let (unused, pinned, running) = ("a".repeat(64), "b".repeat(64), "d".repeat(64));
+    for manifest in [&unused, &pinned, &running] {
+        pull(&executor, manifest);
+    }
+    runner.in_use.lock().unwrap().insert(local(&running));
+    for manifest in [&unused, &pinned, &running] {
+        pulled_ago(&executor, manifest, 1);
+    }
+    retention(&executor, 100, vec![pinned.clone()]);
+    executor.sweep_runtime_images_unused_for(UNUSED_IMAGE_GRACE, &|| Some(0));
+    assert!(!present(&runner, &unused));
+    assert!(present(&runner, &pinned));
+    assert!(present(&runner, &running));
+}
+
+#[test]
+fn a_satisfied_demand_does_not_evict_young_images_and_unknown_references_keep_old_ones() {
+    let (_temp, runner, executor) = executor();
+    let unused = "a".repeat(64);
+    pull(&executor, &unused);
+    retention(&executor, 100, Vec::new());
+    executor.sweep_runtime_images_unused_for(UNUSED_IMAGE_GRACE, &|| Some(100));
+    assert!(present(&runner, &unused));
+    pulled_ago(&executor, &unused, 25);
+    fs::remove_file(executor.roots.agent_data.join("store-retention.json")).unwrap();
+    executor.sweep_runtime_images_unused_for(UNUSED_IMAGE_GRACE, &|| Some(0));
+    assert!(present(&runner, &unused));
+}
+
+#[test]
+fn pressure_never_removes_an_image_pulled_after_the_controllers_reference_scan() {
+    let (_temp, runner, executor) = executor();
+    retention(&executor, 100, Vec::new());
+    let image = "a".repeat(64);
+    pull(&executor, &image);
+    executor.sweep_runtime_images_unused_for(UNUSED_IMAGE_GRACE, &|| Some(0));
+    assert!(present(&runner, &image));
 }

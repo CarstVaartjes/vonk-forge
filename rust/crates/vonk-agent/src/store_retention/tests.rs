@@ -38,7 +38,7 @@ fn judged(
     untracked: Option<&[&str]>,
     disk: &dyn Fn() -> Option<(u64, u64)>,
 ) -> Swept {
-    let untracked = untracked.map(|installations| verdict(installations, None));
+    let untracked = Some(verdict(untracked.unwrap_or_default(), None));
     sweep(
         root,
         now,
@@ -55,6 +55,7 @@ fn verdict(installations: &[&str], runs: Option<&[&str]>) -> Untracked {
     Untracked {
         installations: names(installations),
         runs: runs.map(names),
+        retention: Some(retention()),
     }
 }
 
@@ -78,6 +79,7 @@ fn file(path: &Path, bytes: &[u8]) -> PathBuf {
 #[test]
 fn an_unlinked_model_object_is_a_cache_that_leaves_only_while_space_is_short() {
     let root = tempfile::tempdir().unwrap();
+    authorize_retention(root.path());
     let store = root.path().join("distribution/models");
     let linked = file(&store.join(OBJECT), b"weights");
     let orphan = file(&store.join(OTHER), b"superseded");
@@ -105,6 +107,7 @@ fn an_unlinked_model_object_is_a_cache_that_leaves_only_while_space_is_short() {
 #[test]
 fn low_space_takes_the_least_recently_used_first_and_stops_above_the_line() {
     let root = tempfile::tempdir().unwrap();
+    authorize_retention(root.path());
     let store = root.path().join("distribution/models");
     let older = file(&store.join(OBJECT), b"old");
     std::thread::sleep(Duration::from_millis(20));
@@ -123,6 +126,7 @@ fn low_space_takes_the_least_recently_used_first_and_stops_above_the_line() {
 #[test]
 fn a_claim_makes_room_from_unused_model_files_least_recently_used_first() {
     let root = tempfile::tempdir().unwrap();
+    authorize_retention(root.path());
     let store = root.path().join("distribution/models");
     let oldest = file(&store.join(OBJECT), b"old");
     std::thread::sleep(Duration::from_millis(20));
@@ -147,6 +151,7 @@ fn a_claim_makes_room_from_unused_model_files_least_recently_used_first() {
 #[test]
 fn a_model_object_an_installation_plan_names_stays_while_the_installation_does() {
     let root = tempfile::tempdir().unwrap();
+    authorize_retention(root.path());
     // A private copy (from before files were shared, or where a link cannot be
     // made) leaves the object unlinked; every start still prepares from it.
     let (_, installation, plan) = crate::oci::test_support::persisted_installation(root.path());
@@ -172,6 +177,7 @@ fn a_model_object_an_installation_plan_names_stays_while_the_installation_does()
 #[test]
 fn an_ended_transfer_checkpoint_and_isolated_entries_leave_after_the_grace() {
     let root = tempfile::tempdir().unwrap();
+    authorize_retention(root.path());
     let store = root.path().join("distribution/models");
     let partial = file(&store.join(format!("{OBJECT}.partial")), b"prefix");
     let damaged = file(&store.join(format!("{OTHER}.x.damaged")), b"bad");
@@ -191,6 +197,7 @@ fn an_ended_transfer_checkpoint_and_isolated_entries_leave_after_the_grace() {
 #[test]
 fn a_build_export_whose_upload_never_finished_leaves_after_the_grace() {
     let root = tempfile::tempdir().unwrap();
+    authorize_retention(root.path());
     let build = root
         .path()
         .join("builds/0b7d2c9e-6a51-4c43-9d07-3a3c3c3c3c3c");
@@ -207,6 +214,7 @@ fn a_build_export_whose_upload_never_finished_leaves_after_the_grace() {
 #[test]
 fn a_base_image_no_build_opened_for_the_grace_leaves_unless_a_build_holds_it() {
     let root = tempfile::tempdir().unwrap();
+    authorize_retention(root.path());
     let images = root.path().join("base-images/sha256");
     let image = images.join(OBJECT);
     file(&image.join("image.oci.tar"), b"base");
@@ -226,6 +234,7 @@ fn a_base_image_no_build_opened_for_the_grace_leaves_unless_a_build_holds_it() {
 #[test]
 fn retired_stores_are_emptied() {
     let root = tempfile::tempdir().unwrap();
+    authorize_retention(root.path());
     let legacy = file(
         &root.path().join("models/sha256").join(OBJECT).join("blob"),
         b"old",
@@ -246,6 +255,7 @@ fn retired_stores_are_emptied() {
 #[test]
 fn controller_owned_stores_and_links_out_of_a_store_are_never_followed() {
     let root = tempfile::tempdir().unwrap();
+    authorize_retention(root.path());
     let installation = file(
         &root
             .path()
@@ -277,6 +287,7 @@ fn controller_owned_stores_and_links_out_of_a_store_are_never_followed() {
 #[test]
 fn an_installation_the_controller_does_not_track_leaves_a_day_after_it_said_so() {
     let root = tempfile::tempdir().unwrap();
+    authorize_retention(root.path());
     let installations = root.path().join("installations");
     let store = root.path().join("distribution/models");
     let object = file(&store.join(OBJECT), b"weights");
@@ -349,6 +360,7 @@ fn a_run_scope_no_record_owns_leaves_a_day_after_the_verdict_and_frees_its_insta
     const JOB: &str = "7b2c3d4e-5f6a-4b7c-9d8e-0f1a2b3c4d5e";
     const LIVE: &str = "8c3d4e5f-6a7b-4c8d-9e0f-1a2b3c4d5e6f";
     let root = tempfile::tempdir().unwrap();
+    authorize_retention(root.path());
     let (tracked_id, tracked, plan) = crate::oci::test_support::persisted_installation(root.path());
     let lifecycle = |installation: &str| {
         serde_json::to_vec(&vonk_agent_protocol::generated::RunLifecycleRecord {
@@ -439,6 +451,7 @@ fn a_run_scope_no_record_owns_leaves_a_day_after_the_verdict_and_frees_its_insta
 #[test]
 fn inventory_names_the_run_scopes_of_both_stores() {
     let root = tempfile::tempdir().unwrap();
+    authorize_retention(root.path());
     assert_eq!(super::run_scope_names(root.path()), Some(vec![]));
     file(
         &root.path().join("runs").join(ORPHAN).join("outputs/x"),
@@ -470,6 +483,7 @@ fn inventory_names_the_run_scopes_of_both_stores() {
 #[test]
 fn an_isolated_entry_among_the_installations_leaves_after_the_grace() {
     let root = tempfile::tempdir().unwrap();
+    authorize_retention(root.path());
     let installations = root.path().join("installations");
     let damaged = file(
         &installations
@@ -486,6 +500,7 @@ fn an_isolated_entry_among_the_installations_leaves_after_the_grace() {
 #[test]
 fn a_removed_installations_cleanup_history_and_lock_leave_after_the_grace() {
     let root = tempfile::tempdir().unwrap();
+    authorize_retention(root.path());
     let history = root.path().join("installation-reconciliation");
     let locks = root.path().join("installation-ownership");
     const QUARANTINED: &str = "7a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d";
@@ -545,6 +560,7 @@ fn a_removed_installations_cleanup_history_and_lock_leave_after_the_grace() {
 #[test]
 fn inventory_names_the_installation_directories() {
     let root = tempfile::tempdir().unwrap();
+    authorize_retention(root.path());
     assert_eq!(super::installation_names(root.path()), Some(vec![]));
     file(
         &root
@@ -580,6 +596,7 @@ fn inventory_names_the_installation_directories() {
 #[test]
 fn inventory_measures_each_installation_as_it_is_now() {
     let root = tempfile::tempdir().unwrap();
+    authorize_retention(root.path());
     assert_eq!(super::installation_sizes(root.path()), Some(vec![]));
     let installation = root.path().join("installations").join(INSTALLATION);
     let object = file(
@@ -607,6 +624,7 @@ fn inventory_measures_each_installation_as_it_is_now() {
 #[test]
 fn a_pass_past_its_deadline_removes_nothing_and_says_more_remain() {
     let root = tempfile::tempdir().unwrap();
+    authorize_retention(root.path());
     let orphan = file(&root.path().join("builds/b/image.docker.tar"), b"x");
 
     let swept = sweep(
@@ -730,4 +748,95 @@ fn collect_sources(directory: &Path, sources: &mut Vec<PathBuf>) {
             sources.push(path);
         }
     }
+}
+
+pub(crate) fn retention() -> vonk_agent_protocol::generated::StoreRetentionRequest {
+    vonk_agent_protocol::generated::StoreRetentionRequest {
+        issued_at: std::time::SystemTime::now()
+            .duration_since(std::time::SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_secs(),
+        expires_at: SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+            + 300,
+        required_free_bytes: 0,
+        protected_model_objects: Vec::new(),
+        protected_image_addresses: Vec::new(),
+    }
+}
+
+pub(crate) fn authorize_retention(root: &Path) {
+    fs::write(
+        root.join("store-retention.json"),
+        serde_json::to_vec(&retention()).unwrap(),
+    )
+    .unwrap();
+}
+
+#[test]
+fn a_load_demand_above_the_low_space_line_evicts_lru_objects_and_preserves_references() {
+    use super::fake_disk::{FakeDisk, stored_bytes};
+    let root = tempfile::tempdir().unwrap();
+    let protected = file(
+        &root.path().join("distribution/models").join(OBJECT),
+        &[0; 4096],
+    );
+    std::thread::sleep(Duration::from_millis(20));
+    let oldest = file(
+        &root.path().join("distribution/models").join(OTHER),
+        &[0; 4096],
+    );
+    std::thread::sleep(Duration::from_millis(20));
+    let newest = file(
+        &root.path().join("distribution/models").join(THIRD),
+        &[0; 4096],
+    );
+    let mut request = retention();
+    request.protected_model_objects = vec![OBJECT.to_owned()];
+    request.required_free_bytes = 100_000;
+    fs::write(
+        root.path().join("store-retention.json"),
+        serde_json::to_vec(&request).unwrap(),
+    )
+    .unwrap();
+    let _disk = FakeDisk::mount(root.path(), stored_bytes(root.path()) + 98_000);
+    assert!(super::disk_usage(root.path()).unwrap().0 < request.required_free_bytes);
+    let verdict = Untracked {
+        retention: Some(request.clone()),
+        ..Default::default()
+    };
+    sweep(
+        root.path(),
+        SystemTime::now(),
+        Instant::now() + Duration::from_secs(10),
+        Some(&verdict),
+        &|| super::disk_usage(root.path()),
+        &|| {},
+    );
+    assert!(!oldest.exists());
+    assert!(newest.exists());
+    assert!(protected.exists());
+    assert!(super::disk_usage(root.path()).unwrap().0 >= request.required_free_bytes);
+}
+
+#[test]
+fn an_install_cannot_collect_without_current_controller_references() {
+    let root = tempfile::tempdir().unwrap();
+    let object = file(
+        &root.path().join("distribution/models").join(OBJECT),
+        b"weights",
+    );
+    assert_eq!(super::make_room(root.path(), u64::MAX, &BTreeSet::new()), 0);
+    assert!(object.exists());
+    let mut request = retention();
+    request.expires_at = 0;
+    fs::write(
+        root.path().join("store-retention.json"),
+        serde_json::to_vec(&request).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(super::make_room(root.path(), u64::MAX, &BTreeSet::new()), 0);
+    assert!(object.exists());
 }

@@ -19,17 +19,28 @@ use super::*;
 /// How long an image no installation names stays after its last pull.
 pub const UNUSED_IMAGE_GRACE: Duration = Duration::from_secs(24 * 60 * 60);
 /// How often the helper looks for unused images.
-pub const UNUSED_IMAGE_SWEEP_INTERVAL: Duration = Duration::from_secs(60 * 60);
+pub const UNUSED_IMAGE_SWEEP_INTERVAL: Duration = Duration::from_secs(60);
 /// One `docker image rm` of a large image.
 const IMAGE_REMOVE_TIMEOUT: Duration = Duration::from_secs(120);
 
 impl<R: CommandRunner> OperationExecutor<R> {
     /// One bounded pass; what it cannot remove now waits for the next one.
     pub fn sweep_unused_runtime_images(&self) {
-        self.sweep_runtime_images_unused_for(UNUSED_IMAGE_GRACE);
+        let disk = || {
+            let stat = rustix::fs::statvfs(&self.roots.agent_data).ok()?;
+            stat.f_bavail.checked_mul(stat.f_frsize)
+        };
+        self.sweep_runtime_images_unused_for(UNUSED_IMAGE_GRACE, &disk);
     }
 
-    pub(super) fn sweep_runtime_images_unused_for(&self, grace: Duration) {
+    pub(super) fn sweep_runtime_images_unused_for(
+        &self,
+        grace: Duration,
+        disk: &dyn Fn() -> Option<u64>,
+    ) {
+        let Some(retention) = self.store_retention_request() else {
+            return;
+        };
         let named = match self.installation_image_addresses() {
             Ok(named) => named,
             Err(error) => {
@@ -49,7 +60,18 @@ impl<R: CommandRunner> OperationExecutor<R> {
                 return;
             }
         };
-        for entry in entries.flatten() {
+        let mut entries: Vec<_> = entries.flatten().collect();
+        entries.sort_by_key(|entry| {
+            entry
+                .metadata()
+                .and_then(|metadata| metadata.modified())
+                .ok()
+        });
+        let deadline = Instant::now() + Duration::from_secs(60);
+        for entry in entries {
+            if Instant::now() >= deadline {
+                break;
+            }
             let Some(address) = entry
                 .file_name()
                 .to_str()
@@ -70,15 +92,69 @@ impl<R: CommandRunner> OperationExecutor<R> {
                 digest.trim_start_matches("sha256:"),
                 image.rsplit('-').next().unwrap_or_default(),
             ];
-            if names.iter().any(|name| named.contains(*name)) {
+            if names.iter().any(|name| {
+                named.contains(*name)
+                    || retention
+                        .protected_image_addresses
+                        .iter()
+                        .any(|kept| kept.as_str() == *name)
+            }) {
                 continue;
             }
-            self.remove_unused_image(&address, &image, grace);
+            let pressured = disk().is_some_and(|free| free < retention.required_free_bytes);
+            // A pull newer than this reference scan may belong to a newly
+            // accepted operation whose plan is not on disk yet. A later scan
+            // must judge it before pressure may bypass the age grace.
+            let scanned =
+                std::time::SystemTime::UNIX_EPOCH + Duration::from_secs(retention.issued_at);
+            self.remove_unused_image(
+                &address,
+                &image,
+                if pressured { Duration::ZERO } else { grace },
+                scanned,
+            );
         }
     }
 
+    /// An agent-owned, fresh projection of the Controller's reference scan.
+    /// This only narrows autonomous cache collection; it never authorizes a
+    /// container removal or bypasses Docker's in-use image check.
+    fn store_retention_request(
+        &self,
+    ) -> Option<vonk_agent_protocol::generated::StoreRetentionRequest> {
+        let file = OpenOptions::new()
+            .read(true)
+            .custom_flags(
+                (rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::NONBLOCK).bits() as i32,
+            )
+            .open(self.roots.agent_data.join("store-retention.json"))
+            .ok()?;
+        let metadata = file.metadata().ok()?;
+        if !metadata.is_file() || metadata.len() > 1024 * 1024 {
+            return None;
+        }
+        let mut body = Vec::new();
+        file.take(1024 * 1024 + 1).read_to_end(&mut body).ok()?;
+        let request: vonk_agent_protocol::generated::StoreRetentionRequest =
+            serde_json::from_slice(&body).ok()?;
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::SystemTime::UNIX_EPOCH)
+            .ok()?
+            .as_secs();
+        (request.issued_at <= now
+            && request.expires_at > now
+            && request.expires_at <= request.issued_at.saturating_add(600))
+        .then_some(request)
+    }
+
     /// Remove one image unless a pull is in flight or renewed it since.
-    fn remove_unused_image(&self, address: &str, image: &str, grace: Duration) {
+    fn remove_unused_image(
+        &self,
+        address: &str,
+        image: &str,
+        grace: Duration,
+        scanned: std::time::SystemTime,
+    ) {
         // A pull holds this for its whole duration, so no image is removed
         // under a pull that found it present.
         let _no_pull = match self.image_pulls.try_write() {
@@ -91,6 +167,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
         let Some(unused_for) = fs::symlink_metadata(&receipt)
             .and_then(|metadata| metadata.modified())
             .ok()
+            .filter(|pulled| *pulled <= scanned)
             .map(|pulled| pulled.elapsed().unwrap_or_default())
             .filter(|age| *age >= grace)
         else {

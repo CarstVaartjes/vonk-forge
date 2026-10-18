@@ -276,9 +276,15 @@ fn run() -> Result<(), String> {
     // An exited serving container of an ended run goes after its grace.
     let mut next_serving_sweep = Instant::now();
     let mut serving_sweep: Option<thread::JoinHandle<()>> = None;
-    // An image no installation names goes after its grace; pulls bring it back.
-    let mut next_image_sweep = Instant::now();
-    let mut image_sweep: Option<thread::JoinHandle<()>> = None;
+    // Disk-waiting loads issue no helper requests. Image relief must keep
+    // ticking independently of the blocking accept loop below.
+    let images = Arc::clone(&executor);
+    thread::spawn(move || {
+        loop {
+            images.sweep_unused_runtime_images();
+            thread::sleep(UNUSED_IMAGE_SWEEP_INTERVAL);
+        }
+    });
     // A Spark runs headless; drift (a reboot to the desktop) is corrected at
     // start and then hourly.
     let settings = Arc::clone(&executor);
@@ -310,15 +316,6 @@ fn run() -> Result<(), String> {
             let sweeper = Arc::clone(&executor);
             serving_sweep = Some(thread::spawn(move || sweeper.sweep_exited_serving()));
             next_serving_sweep = Instant::now() + EXITED_SERVING_SWEEP_INTERVAL;
-        }
-        if Instant::now() >= next_image_sweep
-            && image_sweep
-                .as_ref()
-                .is_none_or(thread::JoinHandle::is_finished)
-        {
-            let images = Arc::clone(&executor);
-            image_sweep = Some(thread::spawn(move || images.sweep_unused_runtime_images()));
-            next_image_sweep = Instant::now() + UNUSED_IMAGE_SWEEP_INTERVAL;
         }
         if Instant::now() >= next_host_settings
             && host_settings

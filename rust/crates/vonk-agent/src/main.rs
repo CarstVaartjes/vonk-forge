@@ -584,7 +584,7 @@ async fn collect_stores(
     untracked: Option<vonk_agent::store_retention::Untracked>,
 ) -> Instant {
     const PASS: Duration = Duration::from_secs(60);
-    const INTERVAL: Duration = Duration::from_secs(60 * 60);
+    const INTERVAL: Duration = Duration::from_secs(60);
     let swept = tokio::task::spawn_blocking(move || {
         vonk_agent::store_retention::sweep(
             &data_root,

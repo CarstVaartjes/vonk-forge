@@ -928,7 +928,9 @@ def test_admission_relief_removes_the_installations_of_a_model_together_and_free
     result = collector.collect()
 
     assert sorted(lifecycle.removed) == sorted([*first, *second])
-    assert _scope(result, spark_scope(NODE))["estimated_freed_bytes"] == 150 * GIB
+    # Only 10 GiB per model is removed by uninstall. Its 130 GiB of shared
+    # objects remain in the agent's LRU, so they must not trigger a false pause.
+    assert _scope(result, spark_scope(NODE))["estimated_freed_bytes"] == 20 * GIB
     for group in (first, second):
         for installation in group:
             assert lifecycle.also_removing[installation] == tuple(
@@ -3082,3 +3084,23 @@ def test_installation_content_references_hold_but_provenance_does_not(
             assert provenance is not None
             unreferenced = replace(evidence, operations=frozenset((provenance,)))
             assert _installation_kept(session, installation_id, unreferenced) is None
+
+
+@pytest.mark.usefixtures("damaged_json_rows")
+def test_pressure_never_promises_profile_pinned_model_objects_as_reclaimable(
+    world: Catalog,
+) -> None:
+    """An unused installation may go, but its pinned model objects stay in the
+    native store: promising them makes a load wait for space that cannot arrive.
+    """
+    from collections import Counter
+    from dataclasses import replace
+
+    _hard_linked_models(world)
+    with world.sessions() as session:
+        evidence = replace(
+            _Evidence.read(session, world.now), pointed_models=frozenset({"1" * 64})
+        )
+        items = UnusedStorageCollector._spark_items(session, NODE, evidence, Counter())
+    # M1's A+B stay; M2 can free only C (30) and each model's private 10.
+    assert sum(item.freeable for item in items) == 50 * GIB

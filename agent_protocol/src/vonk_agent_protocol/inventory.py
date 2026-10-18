@@ -8,6 +8,7 @@ from typing import Annotated, ClassVar, Literal
 
 from pydantic import ConfigDict, Field, field_validator, model_validator
 
+from .contracts import canonical_message
 from .optional_evidence import (
     EvidenceGroup,
     OptionalEvidenceModel,
@@ -218,6 +219,28 @@ class InventoryRequest(OptionalEvidenceModel, WireModel):
     drop_invalid_optional_evidence = fail_open_on_optional_evidence()
 
 
+class StoreRetentionRequest(WireModel):
+    """Fresh Controller demand and references for the Spark's cache collectors.
+
+    Local installations and active transfers add their own references. Expiry
+    prevents an old demand or an incomplete reference scan authorizing removal.
+    """
+
+    issued_at: int = Field(ge=0, le=2**53 - 1)
+    expires_at: int = Field(ge=0, le=2**53 - 1)
+    required_free_bytes: int = Field(ge=0, le=16 * 1024**4)
+    protected_model_objects: list[Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]]
+    protected_image_addresses: list[Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]]
+
+    @model_validator(mode="after")
+    def bounded_reference_scan(self) -> StoreRetentionRequest:
+        if self.expires_at <= self.issued_at or self.expires_at - self.issued_at > 600:
+            raise ValueError("store retention reference scan has an invalid lifetime")
+        if len(canonical_message(self)) > 1024 * 1024:
+            raise ValueError("store retention reference scan exceeds its byte limit")
+        return self
+
+
 class InventoryVerdict(WireModel):
     """The Controller's answer to an inventory that named its installations.
 
@@ -232,6 +255,8 @@ class InventoryVerdict(WireModel):
     model_config = ConfigDict(
         extra="forbid", strict=True, frozen=True, allow_inf_nan=False
     )
+
+    store_retention: StoreRetentionRequest | None = None
 
     untracked_installations: list[InstallationId] = Field(
         max_length=MAX_REPORTED_INSTALLATIONS
