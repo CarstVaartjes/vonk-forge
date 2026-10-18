@@ -2012,12 +2012,12 @@ def test_terminal_job_retention_removes_only_unreferenced_cas_bytes(tmp_path) ->
     with sessions.begin() as session:
         stored = session.get(ArtifactJob, job.id)
         assert stored is not None
-        stored.completed_at = NOW - timedelta(hours=23, minutes=59)
+        stored.completed_at = stored.updated_at = NOW - timedelta(hours=23, minutes=59)
     assert service.reconcile_storage().expired_jobs == 0
     with sessions.begin() as session:
         stored = session.get(ArtifactJob, job.id)
         assert stored is not None
-        stored.completed_at = NOW - timedelta(hours=24, seconds=1)
+        stored.completed_at = stored.updated_at = NOW - timedelta(hours=24, seconds=1)
     report = service.reconcile_storage()
     assert report.remaining_work
     assert report.expired_jobs == 0
@@ -2136,7 +2136,7 @@ def test_reconcile_reclaims_only_the_expired_jobs_own_blobs(
     with sessions.begin() as session:
         stored = session.get(ArtifactJob, job.id)
         assert stored is not None
-        stored.completed_at = NOW - timedelta(days=8)
+        stored.completed_at = stored.updated_at = NOW - timedelta(days=8)
     # Remove the orphan grace so an unguarded store would unlink immediately.
     expired_path = next(root.glob(f"*/{expired_digest}"))
     os.utime(expired_path, (0, 0))

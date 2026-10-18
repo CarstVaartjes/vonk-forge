@@ -11,29 +11,37 @@ from sqlalchemy import event, select
 from vonk_agent_protocol import (
     AgentResult,
     AgentResultState,
+    FailureStage,
+    LifecycleState,
+    OutcomeKind,
     RecipeJobFile,
     RecipeJobRunResult,
     RecipeStopResult,
     RunState,
+    WaitReason,
     recipe_job_manifest_document,
     recipe_job_manifest_sha256,
 )
+from vonk_agent_protocol.outcome import OutcomeEvidence, OutcomeUnknown
 from vonk_control import artifact_job_states as ajs
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.artifact_jobs import ArtifactJobUnavailableError
 from vonk_control.bounded_retry import REQUEST_PAUSES
+from vonk_control.failure_evidence import FailureEvidenceService
 from vonk_control.inventory_repository import (
     InventoryRepository,
     InventorySnapshotInput,
 )
 from vonk_control.models import (
     AgentOperation,
+    AgentOperationAttempt,
     ArtifactJob,
     ArtifactJobFile,
     Job,
     RecipeRun,
 )
 from vonk_control.recipe_operations import RecipeOperationView, RecipeRetryLater
+from vonk_control.terminal_history_collection import TerminalHistoryCollector
 
 from .agent_fences import fenced_operation
 from .non_blocking import assert_ended_without_blocking, assert_no_orphaned_holds
@@ -525,3 +533,172 @@ def test_terminal_receipt_repairs_result_projection_without_reexecuting(tmp_path
     assert (
         fresh.operation_id is not None and fresh.operation_id != original.operation_id
     )
+
+
+@pytest.mark.postgres
+def test_cancelled_job_evidence_survives_uncertain_stop_and_history_collection(
+    tmp_path, postgres_engine
+):
+    """Catches hiding cancelled evidence and collecting its child before its owner.
+
+    A temporary Stop failure must retain the original account through restart,
+    exact cleanup and the artifact job's full terminal retention grace.
+    """
+    from datetime import timedelta
+
+    from .test_artifact_jobs import MutableClock
+    from .test_recipe_operations import NOW
+
+    sessions, operations, _queue, service, run_id, node_id = running_artifact_service(
+        tmp_path, engine=postgres_engine
+    )
+    clock = MutableClock(NOW)
+    service._clock = operations._clock = clock
+    agent_jobs = AgentJobService(sessions, clock=clock)
+
+    def consume(session, operation, attempt, message):
+        service.consume_agent_result(session, operation, attempt, message)
+        operations.consume_agent_result(session, operation, attempt, message)
+
+    agent_jobs.set_result_consumer(consume)
+    operations._agent_jobs = agent_jobs
+    assert claim_agent(agent_jobs, node_id, "serial-0") is None
+    job = submitted_artifact_job(service, run_id, request_suffix=1100)
+    claim = claim_agent(agent_jobs, node_id, "serial-0")
+    assert claim is not None and job.operation_id is not None
+    child_id = fenced_operation(sessions, claim).id
+    service.cancel(
+        job.id,
+        actor="operator",
+        request_id="00000000-0000-4000-8000-000000001101",
+        reason="newer workload intent",
+    )
+    cause = "injected helper Stop response lost"
+    agent_jobs.record_result(
+        AgentResult(
+            fence=claim.fence,
+            state=AgentResultState.OBSERVING,
+            result=OutcomeUnknown(
+                kind=OutcomeKind.UNKNOWN,
+                wait_reason=WaitReason.JOB_STOP_UNCONFIRMED,
+                reason="job cancellation stop remains unobserved",
+                evidence=OutcomeEvidence(
+                    stage=FailureStage.JOB_CANCEL_STOP, diagnostic=cause
+                ),
+            ),
+        )
+    )
+    # A restart and bounded stop observation end ownership, never prove absence.
+    restarted = AgentJobService(sessions, clock=clock)
+    restarted.set_result_consumer(consume)
+    operations._agent_jobs = restarted
+    for _ in range(10):
+        clock.advance(seconds=120)
+        restarted.reconcile_orders()
+        if service.get(job.id).state == LifecycleState.CANCELLED:
+            break
+    ended = service.get(job.id)
+    assert ended.state == LifecycleState.CANCELLED
+    assert ended.result_evidence is not None
+    assert ended.result_evidence.active_scope_may_remain is True
+    evidence = FailureEvidenceService(sessions, clock=clock)
+    before = evidence.read(job.operation_id, 1)
+    assert cause in (before.detail or before.summary)
+
+    # The next authorized exact Stop proves the original container absent.
+    clock.advance(seconds=600)
+    operations.stop(
+        run_id,
+        plan_digest=operations.preview_stop(run_id).plan_digest,
+        actor="operator",
+        request_id="00000000-0000-4000-8000-000000001102",
+    )
+    exact, payload, _grant = _issue_exact_stop_grant(
+        sessions, node_id=node_id, certificate_serial="serial-0", grant_now=clock()
+    )
+    assert payload.target_runtime_id == job.id
+    restarted.record_result(
+        AgentResult(
+            fence=exact.fence,
+            state=AgentResultState.SUCCEEDED,
+            result=RecipeStopResult(),
+        )
+    )
+    resolved = service.get(job.id)
+    assert resolved.result_evidence is not None
+    assert resolved.result_evidence.active_scope_may_remain is False
+    with sessions() as session:
+        assert_no_orphaned_holds(session)
+        run = session.get(RecipeRun, run_id)
+        assert run is not None and run.state == RunState.STOPPED
+        installation_id = run.installation_id
+
+    def request_key(view):
+        with sessions() as session:
+            parent = session.get(Job, view.id)
+            assert parent is not None
+            return parent.request_id
+
+    def released():
+        with sessions() as session:
+            assert_no_orphaned_holds(session)
+
+    InventoryRepository(sessions, clock=clock).record(
+        InventorySnapshotInput(
+            node_id,
+            clock(),
+            10_000,
+            8_000,
+            10_000,
+            8_000,
+            10_000,
+            8_000,
+            1,
+            False,
+            ("runtime.vonk.v1", "recipe.image.pull.v1", "recipe.operations.v1"),
+            memory_pool="shared",
+        )
+    )
+    stop_id = fenced_operation(sessions, exact).parent_job_id
+    assert_ended_without_blocking(
+        operations.preview_run(installation_id, "image-job"),
+        operations.get(stop_id),
+        end=lambda _: operations.get(stop_id),
+        fresh=lambda plan: operations.activate_job_run(
+            plan,
+            plan_digest=plan.plan_digest,
+            actor="operator",
+            request_id="00000000-0000-4000-8000-000000001103",
+        ),
+        request_key=request_key,
+        assert_released=released,
+    )
+
+    # Make the child's own clock expire before its still-retained owner. The
+    # collector must retain that receipt, not just an empty parent download.
+    with sessions.begin() as session:
+        child = session.get(AgentOperation, child_id)
+        assert child is not None
+        child.updated_at = clock() - timedelta(days=2)
+    collector = TerminalHistoryCollector(sessions, clock=clock)
+    collector.collect()
+    after = evidence.read(child_id, 1)
+    assert cause in (after.detail or after.summary)
+    clock.advance(seconds=23 * 3600 + 59 * 60)
+    service.reconcile_storage()
+    collector = TerminalHistoryCollector(sessions, clock=clock)
+    collector.collect()
+    assert evidence.read(job.operation_id, 1).summary == before.summary
+    assert cause in (evidence.read(child_id, 1).detail or after.summary)
+    clock.advance(seconds=60)
+    service.reconcile_storage()
+    assert evidence.read(job.operation_id, 1).summary == before.summary
+    with sessions() as session:
+        assert (
+            session.scalar(
+                select(AgentOperationAttempt).where(
+                    AgentOperationAttempt.operation_id == child_id
+                )
+            )
+            is not None
+        )

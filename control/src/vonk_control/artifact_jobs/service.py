@@ -93,6 +93,9 @@ class ArtifactJobService(OutputService):
                         ArtifactJob.state.in_(ajs.ENDED),
                         ArtifactJob.completed_at.is_not(None),
                         ArtifactJob.completed_at < cutoff,
+                        # Newly confirmed cleanup is evidence too: give the
+                        # final account its full grace after reconciliation.
+                        ArtifactJob.updated_at < cutoff,
                     )
                     .limit(batch_limit)
                 )
