@@ -1,10 +1,6 @@
-"""Unused installations, image receipts and cached models are removed to make room.
+"""Unused non-model assets expire; pressure also evicts younger cache entries.
 
-They are removed only while disk is short (work was refused for lack of it, or
-free space is below the low line), least recently used first and no more than
-the shortfall needs, and are kept while a saved profile points to them, a
-workload runs, or a live operation names them. A load that starts after the
-pass looked is never raced.
+Model files retain pressure-only LRU. Every removal rechecks live references.
 """
 
 from __future__ import annotations
@@ -125,7 +121,9 @@ class FakeLifecycle:
         assert actor == ACTOR and workload_intent_ordinal is not None
         self.stopped.append(run_id)
 
-    def preview_uninstall(self, installation_id: str, *, also_removing=()):
+    def preview_uninstall(
+        self, installation_id: str, *, also_removing=(), preserve_model_files=False
+    ):
         # The sweep has judged the installation unused; a load can still
         # arrive before the removal is queued.
         if self._between is not None:
@@ -141,8 +139,10 @@ class FakeLifecycle:
         request_id: str,
         unattended_guard: Callable[[Session], None] | None = None,
         also_removing=(),
+        preserve_model_files=False,
     ) -> None:
         assert actor == ACTOR and unattended_guard is not None
+        assert preserve_model_files
         self.also_removing[installation_id] = tuple(sorted(also_removing))
         if installation_id in self._refuse:
             raise RecipeOperationConflict("refused")
@@ -348,26 +348,33 @@ def test_installation_nothing_uses_is_uninstalled_and_a_superseded_one_goes_too(
     assert result.installations == 2
 
 
-def test_nothing_is_removed_while_disk_is_not_short(
+def test_old_non_model_items_expire_without_disk_pressure(
     world: Catalog, tmp_path: Path
 ) -> None:
-    """Catches time-based removal: an item idle for a month holds disk nobody is
-    waiting for, so it stays however much time passes."""
-
+    """Catches retaining non-model assets indefinitely on a roomy filesystem."""
     old = world.revision("glm", 1)
     world.revision("glm", 2, head="active")
-    world.workload(old, run="stopped", touched=NOW - timedelta(days=30))
+    idle, _ = world.workload(
+        old, run=RunState.STOPPED, touched=NOW - timedelta(days=30)
+    )
     receipt = _receipt(tmp_path, AN_IMAGE)
-    lifecycle = FakeLifecycle(world.sessions)
+    lifecycle = FakeLifecycle(world.sessions, apply=True)
+    result = _collector(
+        world, lifecycle, free=TOTAL // 2, image_cache_root=tmp_path
+    ).collect()
+    assert (result.installations, result.images, result.models) == (1, 1, 0)
+    assert lifecycle.removed == [idle]
+    assert not receipt.exists()
 
-    for now in (NOW, NOW + timedelta(days=90)):
-        result = _collector(
-            world, lifecycle, now=now, free=TOTAL // 2, image_cache_root=tmp_path
-        ).collect()
-        assert (result.installations, result.images, result.models) == (0, 0, 0)
 
-    assert lifecycle.removed == []
-    assert receipt.exists()
+def _within_grace(world: Catalog) -> None:
+    """Keep pressure tests inside the independent age grace, preserving LRU order."""
+    with world.sessions.begin() as session:
+        for model in (RecipeInstallation, InstallationNode, RecipeRun):
+            for row in session.scalars(select(model)):
+                from vonk_control.unused_storage_collection.references import _utc
+
+                row.updated_at = NOW - (NOW - _utc(row.updated_at)) / 100
 
 
 def test_the_least_recently_used_go_first_and_only_as_many_as_the_shortfall_needs(
@@ -380,6 +387,7 @@ def test_the_least_recently_used_go_first_and_only_as_many_as_the_shortfall_need
 
     # 90 GiB free of 1000: 10 GiB under the 100 GiB low line, so 10 GiB plus the
     # 20 GiB reserve is needed and the oldest 80 GiB covers it.
+    _within_grace(world)
     result = _collector(world, lifecycle, free=90 * GIB).collect()
 
     assert lifecycle.removed == [oldest]
@@ -401,6 +409,7 @@ def test_unused_model_files_the_spark_frees_itself_are_not_uninstalled_for(
 
     # 90 GiB free is 10 GiB under the line; 40 GiB of unused model files
     # cover it and the reserve.
+    _within_grace(world)
     _collector(world, lifecycle, free=90 * GIB, unused_models=40 * GIB).collect()
     assert lifecycle.removed == []
 
@@ -472,6 +481,7 @@ def test_the_low_line_is_a_tenth_of_the_disk_or_the_largest_install_known(
     lifecycle = FakeLifecycle(world.sessions)
 
     # 150 GiB free (15 %) with a largest install of 50 GiB: not short.
+    _within_grace(world)
     _collector(world, lifecycle, free=150 * GIB).collect()
     assert lifecycle.removed == []
 
@@ -699,6 +709,7 @@ def test_a_profile_edit_or_a_new_revision_alone_removes_nothing(
             profile.updated_at = NOW - timedelta(minutes=5)
     lifecycle = FakeLifecycle(world.sessions)
 
+    _within_grace(world)
     _collector(world, lifecycle, free=TOTAL // 2).collect()
     assert lifecycle.removed == []
 
@@ -717,6 +728,7 @@ def test_installations_of_one_model_go_together_or_not_at_all(world: Catalog) ->
     _size(world, second, 70 * GIB, model="c" * 64)
     lifecycle = FakeLifecycle(world.sessions)
 
+    _within_grace(world)
     result = _collector(world, lifecycle).collect()
 
     assert sorted(lifecycle.removed) == sorted([first, second])
@@ -839,6 +851,7 @@ def test_a_shared_file_a_staying_installation_links_is_not_counted_as_freed(
         run.state = "running"
     demands = StorageDemands(lambda: world.now)
     lifecycle = FakeLifecycle(world.sessions)
+    _within_grace(world)
     collector = _collector(world, lifecycle, free=400 * GIB, demands=demands)
 
     with world.sessions() as session:
@@ -873,6 +886,7 @@ def test_a_model_that_only_shares_files_with_one_that_stays_is_not_offered(
     _size(world, other, 50 * GIB, model="2" * 64)
     lifecycle = FakeLifecycle(world.sessions)
 
+    _within_grace(world)
     result = _collector(world, lifecycle).collect()
 
     assert lifecycle.removed == []
@@ -2421,6 +2435,7 @@ def test_work_refused_for_lack_of_disk_frees_exactly_what_it_asked_for(
     demands = StorageDemands(lambda: world.now)
     lifecycle = FakeLifecycle(world.sessions)
     # 400 GiB free is well above the low line: only the refused load asks.
+    _within_grace(world)
     collector = _collector(world, lifecycle, free=400 * GIB, demands=demands)
     assert collector.collect().installations == 0
 
@@ -2450,6 +2465,7 @@ def test_a_request_everything_removable_could_not_meet_removes_nothing_and_says_
     _three_idle(world, newest_age=timedelta(days=2))
     demands = StorageDemands(lambda: world.now)
     lifecycle = FakeLifecycle(world.sessions)
+    _within_grace(world)
     collector = _collector(world, lifecycle, free=400 * GIB, demands=demands)
 
     relief = collector.relief_for_spark(
@@ -2600,6 +2616,7 @@ def test_a_second_removal_waits_for_the_first_to_show_in_a_fresh_report(
 
     _three_idle(world, newest_age=timedelta(days=2))
     lifecycle = FakeLifecycle(world.sessions)
+    _within_grace(world)
     collector = _collector(world, lifecycle)
     _unattended_uninstall(world, state="running", updated=NOW)
 
@@ -2630,6 +2647,7 @@ def test_removals_that_free_far_less_than_promised_pause_eviction(
     oldest, middle, _newest = _three_idle(world, newest_age=timedelta(days=2))
     lifecycle = FakeLifecycle(world.sessions, apply=True)
     caplog.set_level("INFO")
+    _within_grace(world)
     collector = _collector(world, lifecycle, free=90 * GIB)
     collector.collect()
     assert lifecycle.removed == [oldest]
@@ -2657,6 +2675,7 @@ def test_removals_that_free_what_they_promised_do_not_pause_eviction(
 ) -> None:
     _oldest, _middle, _newest = _three_idle(world, newest_age=timedelta(days=2))
     lifecycle = FakeLifecycle(world.sessions, apply=True)
+    _within_grace(world)
     collector = _collector(world, lifecycle, free=1 * GIB)
     first = collector.collect().installations
     assert first == 2

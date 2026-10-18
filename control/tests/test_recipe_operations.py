@@ -30,6 +30,7 @@ from vonk_agent_protocol import (
     ContainerRuntimeAction,
     ExecuteContainerRuntimeRequestOperation,
     InstallAdmissionCode,
+    InvalidRequestReason,
     LifecycleState,
     RecipeInstallPayload,
     RecipeStartPayload,
@@ -112,6 +113,7 @@ from vonk_control.recipe_operations import (
     _recipe_model_identities,
     prepare_exact_recipe_run_observation_nodes,
 )
+from vonk_control.recipe_operations.errors import RecipeRequestInvalid
 from vonk_control.recipe_routes import (
     AtomicRecipeRoutePublisher,
     RecipeRouteService,
@@ -4490,7 +4492,7 @@ def test_profile_cleanup_new_load_reuses_completed_nodes_after_failed_uninstall(
         ) == {"uninstalled"}
 
 
-def test_uninstall_replans_after_installation_observation_changes(
+def test_uninstall_requires_fresh_review_after_installation_observation_changes(
     tmp_path: Path,
 ) -> None:
     sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
@@ -4514,9 +4516,26 @@ def test_uninstall_replans_after_installation_observation_changes(
         != stale.plan_digest
     )
 
+    with pytest.raises(RecipeRequestInvalid) as changed:
+        service.uninstall(
+            installation.owner_id,
+            plan_digest=stale.plan_digest,
+            actor="admin",
+            request_id="8" * 35 + "f",
+        )
+    assert changed.value.typed_reason == InvalidRequestReason.SUPERSEDED
+    with sessions() as session:
+        assert (
+            session.scalar(
+                select(AgentOperation.id).where(
+                    AgentOperation.kind == WireAgentOperation.RECIPE_UNINSTALL
+                )
+            )
+            is None
+        )
     operation = service.uninstall(
         installation.owner_id,
-        plan_digest=stale.plan_digest,
+        plan_digest=service.preview_uninstall(installation.owner_id).plan_digest,
         actor="admin",
         request_id="8" * 35 + "f",
     )
@@ -4549,6 +4568,16 @@ def test_uninstall_replans_after_installation_observation_changes(
         assert {child.payload["plan_digest"] for child in children} == {
             installation.plan_digest
         }
+    for node_id in nodes:
+        service.record_node_result(operation.id, node_id, succeeded=True, evidence={})
+    fresh = service.preview_install(mapping_id, build_id)
+    accepted = service.install(
+        fresh,
+        plan_digest=fresh.plan_digest,
+        actor="admin",
+        request_id=str(uuid.uuid4()),
+    )
+    assert accepted.owner_id != installation.owner_id
 
 
 def test_uninstall_queue_rollback_and_request_key_are_owner_bound(

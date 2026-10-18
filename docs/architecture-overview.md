@@ -161,9 +161,9 @@ filesystem, the link limit) is written as a private file instead. Containers
 still mount each file read-only and run as a non-root user with read access
 granted by ACL, so a workload cannot change the shared bytes. An installation
 that already holds a private copy keeps it until it is uninstalled. Removing an
-installation removes its links, and its model cleanup removes the store object
-when that was the last link, so the bytes are freed when the last name goes
-(see [unused storage](runbooks/model-cache.md#unused-storage-is-removed-only-when-disk-is-short)).
+installation automatically removes its links while retaining the shared store
+objects for pressure-only eviction (see
+[unused storage](runbooks/model-cache.md#unused-storage-retention)).
 Model files are the one cache kept until the space is needed: an object no
 installation links or names stays until the Spark is below the Controller's
 low-space line, and then the agent removes such objects least recently used

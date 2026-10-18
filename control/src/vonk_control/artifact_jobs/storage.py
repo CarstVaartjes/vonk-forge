@@ -58,6 +58,7 @@ from ..recipe_execution_contract import (
     parse_stored_run_plan,
 )
 from ..recipe_operations import RecipeOperationService
+from ..settings import ARTIFACT_JOB_RETENTION_SECONDS
 from ..strict_json import read_stored_model
 from .contracts import (
     ArtifactFileDeclaration,
@@ -87,7 +88,7 @@ class ArtifactJobService:
         recipe_operations: RecipeOperationService,
         blob_store: ArtifactBlobStore,
         clock: Callable[[], datetime],
-        retention_seconds: int = 7 * 24 * 60 * 60,
+        retention_seconds: int = ARTIFACT_JOB_RETENTION_SECONDS,
     ) -> None:
         if not 3600 <= retention_seconds <= 365 * 24 * 60 * 60:
             raise InvalidValue(

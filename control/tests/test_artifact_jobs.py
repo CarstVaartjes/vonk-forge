@@ -2012,7 +2012,12 @@ def test_terminal_job_retention_removes_only_unreferenced_cas_bytes(tmp_path) ->
     with sessions.begin() as session:
         stored = session.get(ArtifactJob, job.id)
         assert stored is not None
-        stored.completed_at = NOW - timedelta(days=8)
+        stored.completed_at = NOW - timedelta(hours=23, minutes=59)
+    assert service.reconcile_storage().expired_jobs == 0
+    with sessions.begin() as session:
+        stored = session.get(ArtifactJob, job.id)
+        assert stored is not None
+        stored.completed_at = NOW - timedelta(hours=24, seconds=1)
     report = service.reconcile_storage()
     assert report.remaining_work
     assert report.expired_jobs == 0

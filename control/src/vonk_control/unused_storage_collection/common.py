@@ -37,40 +37,14 @@ if TYPE_CHECKING:
 """Unused storage collection: common concerns."""
 
 
-"""Free disk by removing what nothing uses, and only when disk is short.
+"""Unused non-model assets expire after 24 hours, independent of disk pressure.
 
-Installations, runtime image receipts and cached models are always refetchable,
-so they are removed only to make room: when work was refused for lack of disk
-(a profile load, an install, a build, a model download asked for free space on
-a Spark or the NAS, see :mod:`storage_demands`), or when a Spark or the NAS
-runs low on free space on its own (below a share of its capacity, or below the
-largest install or model set it has held). Time unused is never a reason, and a
-profile change alone removes nothing.
-
-A pass measures free space (a Spark's latest inventory, the NAS filesystem) and
-removes the least recently used unused items until the shortfall plus a small
-reserve is covered, then stops. Items used in the last 24 hours go only after
-everything older. Which items exist:
-
-1. **Spark installations** (state ``installed``, or ``failed``: a failed
-   install keeps what it wrote until it is removed). An installation a saved
-   profile points to (but that is not the loaded profile's) may go when space is
-   needed, after every installation no profile points to, least recently used
-   first within each group: its models stay on the NAS, so loading that profile
-   again reinstalls it. Removal is a real uninstall on
-   the Sparks, queued through the same lifecycle as ``vonkctl recipe
-   uninstall``; its model files go with it unless another installation on that
-   Spark still needs them. Installations that share one model are removed
-   together or not at all, and each is told which others go with it so the
-   Spark reclaims the shared files with the last. Model files are hard-linked
-   between installations (and between models that share a file), so what an
-   eviction frees is counted by file: a shared file is freed only when the last
-   group linking it goes, and a group whose files a staying one still links
-   frees nothing and is not offered.
-2. **Runtime image receipts** in the NAS ``image-cache``; the image store then
-   reclaims the blobs nothing else names.
-3. **Model files** in the NAS model cache, through the model cache's durable,
-   fenced removal.
+The existing exact uninstall and image-removal paths revalidate live references.
+Installation removal retains shared model files; the Spark store evicts those
+only under pressure, least recently used first. NAS model files likewise stay
+until pressure requires their fenced removal. Pressure may also evict younger
+unused runtime assets to admit work. Partial installations, orphaned directories,
+build workspaces and coordination history have their existing age collectors.
 
 Nothing is removed while it is
 
@@ -196,7 +170,11 @@ class InstallationRemoval(Protocol):
     ) -> object: ...
 
     def preview_uninstall(
-        self, installation_id: str, *, also_removing: Collection[str] = ()
+        self,
+        installation_id: str,
+        *,
+        also_removing: Collection[str] = (),
+        preserve_model_files: bool = False,
     ) -> UninstallPlan: ...
 
     def uninstall(
@@ -208,6 +186,7 @@ class InstallationRemoval(Protocol):
         request_id: str,
         unattended_guard: Callable[[Session], None] | None = None,
         also_removing: Collection[str] = (),
+        preserve_model_files: bool = False,
     ) -> object: ...
 
 

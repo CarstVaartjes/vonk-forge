@@ -39,13 +39,14 @@ if TYPE_CHECKING:
 def _uninstall(
     self: UnusedStorageCollector, installation_id: str, group: Collection[str] = ()
 ) -> None:
-    # The installations of one model go together: none of them keeps the
-    # shared files, so the uninstall asks the Spark to reclaim them (it
-    # removes only what no other installation still links).
+    # Uninstall runtime files and metadata while retaining shared model files.
+    # Model eviction remains the Spark store's pressure-only LRU responsibility.
 
     others = tuple(item for item in group if item != installation_id)
     self._stop_failed_runs(installation_id)
-    plan = self._lifecycle.preview_uninstall(installation_id, also_removing=others)
+    plan = self._lifecycle.preview_uninstall(
+        installation_id, also_removing=others, preserve_model_files=True
+    )
     if not plan.allowed:
         code = plan.blockers[0].code if plan.blockers else "not allowed"
         raise _Kept(f"uninstall blocked ({code})")
@@ -66,6 +67,7 @@ def _uninstall(
         request_id=str(uuid.uuid4()),
         unattended_guard=still_unused,
         also_removing=others,
+        preserve_model_files=True,
     )
 
 
