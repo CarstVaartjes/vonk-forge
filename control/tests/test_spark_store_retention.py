@@ -6,7 +6,7 @@ import json
 from datetime import timedelta
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, update
 from vonk_agent_protocol import (
     AgentOperation,
     InventoryVerdict,
@@ -173,21 +173,58 @@ def test_pinned_definition_protects_file_identity_without_a_matching_cache_owner
     """Cache provenance can belong to another model revision. A profile pins
     the accepted model's files, independently of that disposable cache index.
     """
-    from vonk_control.catalog_revision_contract import read_catalog_document
     from vonk_control.models import CatalogDocumentRevision
-    from vonk_forge_contracts import ModelDefinition
+    from vonk_forge_contracts import document_sha256, read_model
 
     model_id = world.revision("weights", 1, kind="model")
-    with world.sessions() as session:
+    with world.sessions.begin() as session:
         revision = session.get(CatalogDocumentRevision, model_id)
         assert revision is not None and revision.content_digest is not None
-        digest = revision.content_digest
-        definition = read_catalog_document(revision)
-        assert isinstance(definition, ModelDefinition)
+        definition = read_model(revision.document)
+        digest = document_sha256(revision.document)
+        session.execute(
+            update(CatalogDocumentRevision)
+            .where(CatalogDocumentRevision.id == model_id)
+            .values(content_digest=digest)
+        )
         expected = {file.sha256 for file in definition.files}
+        assert expected
     _head_recipe_naming(world, digest)
     _profile(world, "vonk-forge/glm")
     with world.sessions() as session:
         request = store_retention_request(session, NODE, world.now)
     assert request is not None
     assert expected <= set(request.protected_model_objects)
+
+
+def test_missing_model_dependency_defers_collection_instead_of_authorizing_partial_references(
+    world,
+) -> None:
+    """An incomplete definition graph is unknown, never a complete permission
+    to remove the dependency's Spark objects.
+    """
+    from vonk_control.models import CatalogDocumentRevision
+    from vonk_forge_contracts import document_sha256, read_model
+    from vonk_forge_contracts.model import ModelReference
+
+    model_id = world.revision("weights", 1, kind="model")
+    with world.sessions.begin() as session:
+        revision = session.get(CatalogDocumentRevision, model_id)
+        assert revision is not None and revision.content_digest is not None
+        definition = read_model(revision.document)
+        dependency = ModelReference(
+            publisher="vonk-forge", slug="missing", content_sha256="e" * 64
+        )
+        document = definition.model_copy(
+            update={"dependencies": [dependency]}
+        ).model_dump(mode="json")
+        digest = document_sha256(document)
+        session.execute(
+            update(CatalogDocumentRevision)
+            .where(CatalogDocumentRevision.id == model_id)
+            .values(document=document, content_digest=digest)
+        )
+    _head_recipe_naming(world, digest)
+    _profile(world, "vonk-forge/glm")
+    with world.sessions() as session:
+        assert store_retention_request(session, NODE, world.now) is None

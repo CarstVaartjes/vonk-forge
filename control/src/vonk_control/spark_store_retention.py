@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 import logging
-import time
 from datetime import datetime, timedelta
 
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import LifecycleState, StorageDemandCode, WaitReason
 from vonk_agent_protocol.inventory import StoreRetentionRequest
-from vonk_forge_contracts import read_model
+from vonk_forge_contracts import document_sha256, read_model
 
 from .fleet_profile_contract import FleetProfileApplicationProgress
 from .logging import log_event
@@ -22,7 +21,6 @@ from .models import (
     RecipeBuild,
 )
 from .strict_json import read_stored_model
-from .unused_storage_collection.common import SWEEP_BUDGET_SECONDS
 from .unused_storage_collection.evidence import _Evidence
 
 # An inventory arrives every two minutes. A stopped writer cannot keep demanding
@@ -54,25 +52,34 @@ def _store_retention_request(
     # the accepted model definitions own those file identities, not that index.
     pending = set(references)
     visited: set[str] = set()
-    deadline = time.monotonic() + SWEEP_BUDGET_SECONDS
+    required_dependencies: set[str] = set()
+    # This walk ends with the finite set of persisted definitions; cycles
+    # cannot revisit a content identity. It never waits or retries a missing row.
     while pending:
-        if time.monotonic() >= deadline:
-            raise ValueError("model reference scan deadline elapsed")
         batch, pending = pending - visited, set()
-        visited.update(batch)
+        unresolved = required_dependencies & batch
         for revision in session.scalars(
-            select(CatalogDocumentRevision).where(
+            select(CatalogDocumentRevision)
+            .where(
                 CatalogDocumentRevision.kind == "model",
                 CatalogDocumentRevision.content_digest.in_(batch),
             )
+            .execution_options(yield_per=1)
         ):
+            digest = revision.content_digest
+            if digest is None:
+                raise ValueError("model reference has no content identity")
+            unresolved.discard(digest)
+            visited.add(digest)
             definition = read_model(revision.document)
+            if document_sha256(revision.document) != digest:
+                raise ValueError("model reference document identity does not match")
             objects.update(file.sha256 for file in definition.files)
-            pending.update(
-                dependency.content_sha256
-                for dependency in definition.dependencies
-                if dependency.content_sha256 not in visited
-            )
+            dependencies = {item.content_sha256 for item in definition.dependencies}
+            required_dependencies.update(dependencies)
+            pending.update(dependencies - visited)
+        if unresolved:
+            raise ValueError("model dependency definition is unavailable")
     images = set(evidence.operations | evidence.pointed_archives)
     # Docker receipts name manifest digests; NAS retention names layout digests.
     # Resolve that content identity, including builds reused by recipe successors.
