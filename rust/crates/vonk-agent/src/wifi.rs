@@ -93,9 +93,9 @@ pub fn collect(interface: &mut NetworkInterface) {
 mod linux {
     use super::{NetworkInterface, attributes::*};
     use rustix::net::{
-        AddressFamily, RecvFlags, SendFlags, SocketType, bind,
+        AddressFamily, RecvFlags, SendFlags, SocketFlags, SocketType, bind,
         netlink::{self, SocketAddrNetlink},
-        recvfrom, sendto, socket,
+        recvfrom, sendto, socket_with,
         sockopt::{Timeout, set_socket_timeout},
     };
     use std::{
@@ -133,6 +133,22 @@ mod linux {
     }
 
     impl Connection {
+        fn open() -> Option<Self> {
+            let socket = socket_with(
+                AddressFamily::NETLINK,
+                SocketType::RAW,
+                SocketFlags::CLOEXEC,
+                Some(netlink::GENERIC),
+            )
+            .ok()?;
+            bind(&socket, &SocketAddrNetlink::new(0, 0)).ok()?;
+            Some(Self {
+                socket,
+                deadline: Instant::now() + Duration::from_millis(300),
+                sequence: 0,
+            })
+        }
+
         fn query(
             &mut self,
             family: u16,
@@ -230,18 +246,7 @@ mod linux {
             .trim()
             .parse()
             .ok()?;
-        let socket = socket(
-            AddressFamily::NETLINK,
-            SocketType::RAW,
-            Some(netlink::GENERIC),
-        )
-        .ok()?;
-        bind(&socket, &SocketAddrNetlink::new(0, 0)).ok()?;
-        let mut connection = Connection {
-            socket,
-            deadline: Instant::now() + Duration::from_millis(300),
-            sequence: 0,
-        };
+        let mut connection = Connection::open()?;
         let family = connection.query(
             GENL_ID_CTRL,
             CTRL_CMD_GETFAMILY,
@@ -268,21 +273,27 @@ mod linux {
         use super::*;
 
         #[test]
+        fn inventory_socket_is_not_inherited_by_spawned_commands() {
+            use std::os::fd::AsRawFd;
+            // Wrong implementation: an inventory socket survives exec and
+            // exposes its request channel and ownership to an agent child.
+            let connection = Connection::open().unwrap();
+            let status = std::process::Command::new("/bin/sh")
+                .args(["-c", "test ! -e /proc/self/fd/\"$1\"", "fd-check"])
+                .arg(connection.socket.as_raw_fd().to_string())
+                .status()
+                .unwrap();
+            assert!(
+                status.success(),
+                "the child inherited the inventory netlink socket"
+            );
+        }
+
+        #[test]
         fn kernel_refusal_does_not_poison_the_next_probe() {
             // Wrong implementation: a failed optional query latches failure,
             // or generic netlink reads accidentally require CAP_NET_ADMIN.
-            let socket = socket(
-                AddressFamily::NETLINK,
-                SocketType::RAW,
-                Some(netlink::GENERIC),
-            )
-            .unwrap();
-            bind(&socket, &SocketAddrNetlink::new(0, 0)).unwrap();
-            let mut connection = Connection {
-                socket,
-                deadline: Instant::now() + Duration::from_millis(300),
-                sequence: 0,
-            };
+            let mut connection = Connection::open().unwrap();
             // A missing required family identity deterministically returns EINVAL.
             assert!(
                 connection
