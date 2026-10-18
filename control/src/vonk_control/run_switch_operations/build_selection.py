@@ -11,6 +11,7 @@ from typing import cast as typing_cast
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
+    LifecycleState,
     RunSwitchCode,
     SecurityRefusalError,
     UnknownOutcomeError,
@@ -90,6 +91,10 @@ class BuildSelectionMixin:
         if callable(reusable_build_id):
             found_id = reusable_build_id(revision.id)
             found = session.get(RecipeBuild, found_id) if found_id else None
+            if found is not None:
+                # The lookup may observe completion in another transaction;
+                # this Session can still hold the earlier unfinished row.
+                session.refresh(found)
             if found is not None and service._build_is_available(found):
                 return _BuildSelection(build=found, candidate=found)
 
@@ -165,26 +170,23 @@ class BuildSelectionMixin:
             if selected is None:
                 errors.append(f"{node.node_id}: build preview receipt is unavailable")
                 continue
-            if selected.recipe_revision_id == revision.id:
+            # preview_build can finish or repair a build in its own transaction.
+            # Decide from the refreshed content receipt, not its revision.
+            if (
+                getattr(proposed, "build_input_sha256", None)
+                != selected.build_input_sha256
+            ):
+                errors.append(f"{node.node_id}: build preview receipt is unavailable")
+                continue
+            if service._build_is_available(selected):
+                return _BuildSelection(build=selected, candidate=selected)
+            if selected.state != LifecycleState.SUCCEEDED:
                 return _BuildSelection(
                     build=None,
                     candidate=selected,
                     builder_freshness=freshness,
                 )
-            # A succeeded receipt may be recorded under an earlier editorial
-            # revision of the same recipe while its executable input identity
-            # is identical (including the resolved runtime adapter).  That is
-            # the exact prepared image; require the recorded input identity and
-            # present bytes rather than the revision id, and never accept a
-            # mismatched identity.
-            if getattr(
-                proposed, "build_input_sha256", None
-            ) != selected.build_input_sha256 or not service._build_is_available(
-                selected
-            ):
-                errors.append(f"{node.node_id}: build preview receipt is unavailable")
-                continue
-            return _BuildSelection(build=selected, candidate=selected)
+            errors.append(f"{node.node_id}: build preview receipt is unavailable")
 
         if saw_builder:
             detail = "No compatible Controller builder could prepare the exact recipe source and runtime image."

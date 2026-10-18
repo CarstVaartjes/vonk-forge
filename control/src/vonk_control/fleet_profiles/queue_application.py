@@ -74,6 +74,7 @@ from .persistence import (
     _application_order_key,
     _intent_scope,
     _kept_fence_ordinal,
+    _newer_pending_profile_load,
     _newer_profile_intent_overlaps,
     _next_profile_acceptance_time,
     _persisted_profile_plan,
@@ -249,6 +250,12 @@ class FleetProfileService:
                 ):
                     raise _FleetProfileSupersededIntentConflict(
                         "Selected Fleet profile was replaced by a newer load"
+                    )
+                if pending_roster_reconciliation and _newer_pending_profile_load(
+                    session, selection_source
+                ):
+                    raise _FleetProfileSupersededIntentConflict(
+                        "Selected profile maintenance yielded to a newer pending load"
                     )
                 selected_generation = selection.generation
                 selected_application_id = selection.application_id

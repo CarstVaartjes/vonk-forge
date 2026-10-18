@@ -15,6 +15,7 @@ from typing import Any, cast
 
 import pytest
 from vonk_agent_protocol import (
+    LifecycleState,
     RecipeStopResult,
     SecurityRefusalError,
     SecurityRefusalReason,
@@ -246,14 +247,24 @@ def test_recipe_request_retries_raw_admission_contention(method, once, monkeypat
 
 def test_unknown_builder_evidence_is_waiting_and_reobserved(monkeypatch):
     """Catches unknown builder evidence preventing the next exact preparation."""
-    from vonk_control.models import CatalogDocumentRevision
+    from vonk_control.models import CatalogDocumentRevision, RecipeBuild
+    from vonk_control.recipe_builds import RecipeBuildPlan
     from vonk_control.run_switch_operations import RunSwitchOperationService
 
     from .test_recipe_image_availability import _recipe, _recipe_projection
 
     service: Any = object.__new__(RunSwitchOperationService)
     calls = []
-    selected = SimpleNamespace(recipe_revision_id="revision")
+    selected = RecipeBuild(
+        id="same-build",
+        recipe_revision_id="revision",
+        build_input_sha256="a" * 64,
+        state=LifecycleState.SUCCEEDED,
+        image_digest="sha256:" + "b" * 64,
+        oci_layout_sha256="c" * 64,
+        image_bytes=1,
+    )
+    service._build_archive_available = None
     revision = CatalogDocumentRevision(
         id="revision",
         kind="recipe",
@@ -264,7 +275,15 @@ def test_unknown_builder_evidence_is_waiting_and_reobserved(monkeypatch):
         calls.append(args)
         if len(calls) == 1:
             raise RunAdmissionBusy("builder receipt unavailable")
-        return SimpleNamespace(build_id="same-build")
+        return RecipeBuildPlan(
+            build_id=selected.id,
+            recipe_revision_id=selected.recipe_revision_id,
+            recipe_content_sha256="d" * 64,
+            builder_node_id="builder",
+            source_bundle_sha256="e" * 64,
+            build_input_sha256=selected.build_input_sha256,
+            agent_payload={},
+        )
 
     service._lifecycle = SimpleNamespace(preview_build=preview)
     monkeypatch.setattr(
@@ -284,6 +303,7 @@ def test_unknown_builder_evidence_is_waiting_and_reobserved(monkeypatch):
     waiting = service._select_build(*args, now=datetime.now(UTC))
     assert waiting.build is None and waiting.candidate is None
     recovered = service._select_build(*args, now=datetime.now(UTC))
+    assert recovered.build is selected
     assert recovered.candidate is selected
     assert calls == [("revision", "builder")] * 2
 
