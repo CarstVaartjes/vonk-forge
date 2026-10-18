@@ -205,6 +205,17 @@ def test_queued_upgrade_reports_the_order_holding_its_spark_then_proceeds(
         # vonkctl names the order and the Spark from the same response.
         assert f"recipe.stop {stop.id[:8]} on {NODE_A}" in progress_line(document)
 
+    # A queue summary must not hide a claim refusal that carries stronger evidence.
+    refusal = "claim refused: node identity inactive"
+    with sessions.begin() as session:
+        queued = session.get(AgentOperation, upgrade.id)
+        assert queued is not None
+        queued.status_reason = refusal
+    assert (
+        operation_detail_response(services.get_operation(upgrade.id)).status_reason
+        == refusal
+    )
+
     # The running Stop itself waits for nothing.
     assert not operation_detail_response(services.get_operation(stop.id)).blockers
 

@@ -44,7 +44,8 @@ def apply_queue_wait(item: OperationItem, wait: QueueWait | None) -> OperationIt
         item.wait_reason = wait.reason
         item.blockers = wait.blockers
         item.next_attempt_at = wait.next_check_at.isoformat()
-        item.status_reason = wait.blockers[0].detail
+        if item.status_reason is None:
+            item.status_reason = wait.blockers[0].detail
     return item
 
 
