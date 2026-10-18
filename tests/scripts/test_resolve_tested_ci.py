@@ -225,8 +225,12 @@ def test_intervening_main_change_runs_source_ci_again(proof):
 
 
 @pytest.mark.parametrize("lagging", ["pulls", "runs", "artifacts"])
-def test_evidence_github_lists_late_is_still_reused(proof, monkeypatch, lagging):
+def test_evidence_github_lists_late_is_still_reused(
+    proof, monkeypatch, lagging, tmp_path
+):
     """Auto-merge lands seconds after the tested run; GitHub lists it later."""
+    summary = tmp_path / "summary"
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
     resolver = proof["resolver"]
     visible = proof[lagging]
     proof[lagging] = []
@@ -239,6 +243,7 @@ def test_evidence_github_lists_late_is_still_reused(proof, monkeypatch, lagging)
     monkeypatch.setattr(resolver, "sleep", pause)
     assert resolver.resolve(proof["target"], REPO) == (0, 50)
     assert len(proof["pauses"]) == 1
+    assert summary.read_text() == "Source CI run 50 found after 2 lookups\n"
 
 
 def test_fallback_names_the_main_tree_and_the_trees_it_was_compared_with(proof, capsys):
