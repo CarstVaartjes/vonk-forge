@@ -296,7 +296,8 @@ jobs:
             [[ "$amd64" =~ ^sha256:[0-9a-f]{64}$ && "$arm64" =~ ^sha256:[0-9a-f]{64}$ ]]
             docker buildx imagetools create --tag "$tag" \
               "$repository@$amd64" "$repository@$arm64"
-            digest=$(docker buildx imagetools inspect "$tag" --format '{{.Manifest.Digest}}')
+            # The registry can briefly miss a tag it just accepted.
+            digest=$(scripts/retry-dependency-fetch docker buildx imagetools inspect "$tag" --format '{{.Manifest.Digest}}')
             [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
             # The merged index must carry both platforms and the provenance
             # and SBOM attestation of each leaf, exactly like a published image.
