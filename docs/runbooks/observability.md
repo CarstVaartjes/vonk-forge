@@ -83,6 +83,25 @@ Filter operations and Audit by action, inspect sanitized evidence, and verify th
 recipe revision and build evidence are still current. Re-plan after correcting
 persisted state; never retry a revoked or stale plan.
 
+## History retention stalled
+
+`vonk_history_rows_past_grace` counts ended coordination history older than the
+24-hour grace directly from PostgreSQL, independently of the retention worker.
+It includes evidence retained by live references; it never authorizes deletion.
+`HistoryRetentionStalled` warns when a nonempty backlog has no net decline
+against six hours earlier, continuously for six hours (earliest firing after
+twelve hours of observations). The hold exceeds Prometheus's five-minute
+lookback. A backlog that keeps shrinking, even over many hours, stays quiet.
+Growing history that collection cannot keep up with also warns.
+
+Inspect worker events `history.references_unavailable`, `history.scan_deferred`,
+`history.row_deferred`, and `history.pruned`. An unreadable owner is reported
+once per pass and retains itself and recognizable references while unrelated
+history drains. Check live consumers, worker health, database contention and
+storage before repairing the owning bookkeeping through its normal path.
+Protected evidence can legitimately remain past grace; do not delete it merely
+to clear the alert. A declining count clears the pending or firing alert.
+
 ## Stale backup
 
 Check `vonk_control_backup_successful`, the backup age, and the isolated restore

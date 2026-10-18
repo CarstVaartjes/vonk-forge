@@ -32,6 +32,7 @@ from .models import (
 )
 from .operation_progress import project_progress
 from .strict_json import read_stored_model
+from .terminal_history_collection import history_rows_past_grace
 from .worker_memory_contract import WorkerMemoryReport, WorkerTraceState
 
 if TYPE_CHECKING:
@@ -281,6 +282,11 @@ class MetricsRegistry:
         self._compose_bundle: ComposeBundle | None = None
         self._recent_job_failures: dict[str, int] = {}
         self._recent_operation_failures: dict[str, int] = {}
+        self._history_rows_past_grace: int | None = None
+
+    def set_history_rows_past_grace(self, count: int) -> None:
+        with self._lock:
+            self._history_rows_past_grace = count
 
     def set_compose_bundle(self, bundle: ComposeBundle | None) -> None:
         with self._lock:
@@ -538,6 +544,7 @@ class MetricsRegistry:
             agent_leases = dict(self._agent_leases)
             recent_job_failures = dict(self._recent_job_failures)
             recent_operation_failures = dict(self._recent_operation_failures)
+            history_rows = self._history_rows_past_grace
             worker_memory = self._worker_memory
             worker_memory_age = self._worker_memory_age
             compose_bundle = self._compose_bundle
@@ -711,6 +718,14 @@ class MetricsRegistry:
             lines.append(
                 f'vonk_agent_operations{{operation="{operation}",state="{state}"}} {count}'
             )
+        if history_rows is not None:
+            lines.extend(
+                (
+                    "# HELP vonk_history_rows_past_grace Ended history rows older than the retention grace, including protected evidence.",
+                    "# TYPE vonk_history_rows_past_grace gauge",
+                    f"vonk_history_rows_past_grace {history_rows}",
+                )
+            )
         # Every bounded kind is emitted, zero included, so a series never
         # vanishes and Prometheus never judges a previous process's sample.
         lines.extend(
@@ -815,6 +830,7 @@ class OperationalMetricsCollector:
     def refresh(self) -> None:
         now = _aware(self._clock())
         with self._sessions() as session:
+            history_rows = history_rows_past_grace(session, now)
             agent_nodes = list(
                 session.scalars(select(AgentNode).order_by(AgentNode.node_id))
             )
@@ -946,6 +962,7 @@ class OperationalMetricsCollector:
                 continue
             if projected.activity == "possibly_stalled":
                 stalled[kind] += 1
+        self._registry.set_history_rows_past_grace(history_rows)
         self._registry.replace_recent_failures(
             jobs=((kind, int(count)) for kind, count in recent_job_failures),
             operations=(
