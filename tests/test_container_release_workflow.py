@@ -410,7 +410,10 @@ def test_publisher_deep_scans_local_oci_content_without_uploading_archives() -> 
         for step in steps
         if "actions/download-artifact@" in step.get("uses", "")
     ]
-    assert [download["pattern"] for download in downloads] == ["acceptance-image-*"]
+    assert [download["pattern"] for download in downloads] == [
+        "acceptance-image-*",
+        "candidate-image-security-*",
+    ]
     assert (
         ".oci.tar\n"
         not in publisher[publisher.index("uses: actions/upload-artifact@") :]
@@ -1631,31 +1634,19 @@ def test_cached_image_is_reverified_before_current_run_receipt(
             json.dumps({"digest": digest, "build_commit": built})
         )
         (cache / "provenance.json").write_text("signed bundle fixture")
-    manifest = {
-        "mediaType": "application/vnd.oci.image.index.v1+json",
-        "manifests": [
-            image_descriptor("amd64", "c"),
-            image_descriptor("arm64", "d"),
-            attestation_descriptor("c", "e"),
-            attestation_descriptor("d", "f"),
-        ],
-    }
-    documents = {
-        "Manifest": manifest,
-        "Provenance": {
-            f"linux/{arch}": {
-                "predicateType": "https://slsa.dev/provenance/v1",
-                "revision": built,
-            }
-            for arch in ("amd64", "arm64")
-        },
-        "SBOM": {
-            f"linux/{arch}": {"SPDXID": "SPDXRef-DOCUMENT", "spdxVersion": "SPDX-2.3"}
-            for arch in ("amd64", "arm64")
-        },
-    }
+    documents = json.loads(
+        (ROOT / "tests/fixtures/buildx-inspection.json")
+        .read_text()
+        .replace("REVISION", built)
+    )
+    for platform, image in documents["inspection"]["image"].items():
+        image["config"]["Labels"] = dict(labels)
+        if fault == "platform_revision" and platform == "linux/arm64":
+            image["config"]["Labels"]["org.opencontainers.image.revision"] = "0" * 40
     if fault == "sbom":
-        documents["SBOM"].pop("linux/arm64")
+        documents["sbom"].pop("linux/arm64")
+    if fault == "digest":
+        documents["inspection"]["manifest"]["digest"] = "sha256:" + "0" * 64
     tool_bin = tmp_path / "bin"
     tool_bin.mkdir()
     requests = tmp_path / "requests"
@@ -1671,17 +1662,10 @@ if pathlib.Path(sys.argv[0]).name == "gh":
     else:
         assert args[args.index("--source-digest") + 1] == {accepted!r}
     sys.exit(1 if {fault!r} == "signature" else 0)
-if "--config" in args:
-    labels = {labels!r}
-    if {fault!r} == "platform_revision" and "sha256:" + "d" * 64 in " ".join(args):
-        labels["org.opencontainers.image.revision"] = "0" * 40
-    print(json.dumps({{"config": {{"Labels": labels}}}}))
-elif args[0] == "inspect":
+if args[0] == "inspect":
     print({("sha256:" + "0" * 64 if fault == "digest" else digest)!r})
 else:
-    documents = {documents!r}
-    field = next(field for field in documents if "." + field in " ".join(args))
-    print(json.dumps(documents[field]))
+    print(json.dumps({documents!r}))
 """
     for name in ("gh", "skopeo", "docker"):
         (tool_bin / name).write_text(fake)

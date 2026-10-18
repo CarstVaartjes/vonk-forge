@@ -1095,3 +1095,71 @@ def test_main_reuses_only_fresh_digest_bound_pr_security(fault, tmp_path):
         for step in uploads:
             assert evaluate(step["if"], context)
             assert (tmp_path / step["with"]["sarif_file"]).is_file()
+
+
+def test_candidate_litellm_smoke_uses_digest_only_registry_references(tmp_path):
+    """Skopeo rejects tag@digest even though Trivy accepts it. Exercise the
+    PR reference producer and both smoke architectures against its CLI seam."""
+    reference = "ghcr.io/carstvaartjes/vonk-forge-litellm"
+    digest = "sha256:" + "b" * 64
+    images = tmp_path / "images"
+    images.mkdir()
+    (images / "litellm").write_text(
+        f"{reference}:acceptance-{'c' * 40}-42-1@{digest}\n"
+    )
+    job = load(WORKFLOWS / "release-acceptance.yml")["jobs"]["image-security"]
+    producer = next(step for step in job["steps"] if step.get("id") == "image")
+    output = tmp_path / "output"
+    subprocess.run(
+        ["bash", "-c", producer["run"]],
+        cwd=tmp_path,
+        check=True,
+        env={
+            **os.environ,
+            "ROLE": "litellm",
+            "RUNNER_TEMP": str(tmp_path),
+            "GITHUB_OUTPUT": str(output),
+        },
+    )
+    values = dict(line.split("=", 1) for line in output.read_text().splitlines())
+    assert values["image"] == f"{reference}@{digest}"
+    tools = tmp_path / "bin"
+    tools.mkdir()
+    requests = tmp_path / "requests"
+    skopeo = tools / "skopeo"
+    skopeo.write_text(f"""#!/usr/bin/env python3
+import json, pathlib, sys
+args = sys.argv[1:]
+assert args[0] == "copy"
+assert args[-2] == {f"docker://{reference}@{digest}"!r}
+with pathlib.Path({str(requests)!r}).open("a") as output:
+    output.write(json.dumps(args) + "\\n")
+""")
+    skopeo.chmod(0o755)
+    docker = tools / "docker"
+    docker.write_text("#!/bin/sh\nexit 0\n")
+    docker.chmod(0o755)
+    (tmp_path / "scripts").symlink_to(ROOT / "scripts", target_is_directory=True)
+    action = load(ROOT / ".github/actions/image-security/action.yml")
+    smoke = next(
+        step
+        for step in action["runs"]["steps"]
+        if step.get("name", "").startswith("Smoke the exact")
+    )
+    subprocess.run(
+        ["bash", "-c", smoke["run"]],
+        cwd=tmp_path,
+        check=True,
+        env={
+            **os.environ,
+            "PATH": f"{tools}:{os.environ['PATH']}",
+            "IMAGE": values["image"],
+            "GITHUB_RUN_ID": "42",
+            "GITHUB_WORKSPACE": str(ROOT),
+        },
+    )
+    copies = [json.loads(line) for line in requests.read_text().splitlines()]
+    assert [args[args.index("--override-arch") + 1] for args in copies] == [
+        "amd64",
+        "arm64",
+    ]

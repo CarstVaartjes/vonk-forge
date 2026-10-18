@@ -362,7 +362,8 @@ jobs:
           image=$(cat "$RUNNER_TEMP/images/$ROLE")
           digest=${image##*@sha256:}
           [[ "$digest" =~ ^[0-9a-f]{64}$ ]]
-          printf 'image=%s\ndigest=%s\n' "$image" "$digest" >> "$GITHUB_OUTPUT"
+          printf 'image=ghcr.io/carstvaartjes/vonk-forge-%s@sha256:%s\ndigest=%s\n' \
+            "$ROLE" "$digest" "$digest" >> "$GITHUB_OUTPUT"
       - uses: ./.github/actions/apt-install
         if: matrix.role == 'litellm'
         with:
