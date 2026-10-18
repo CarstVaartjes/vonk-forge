@@ -9,8 +9,8 @@ from fastapi import FastAPI, HTTPException, Path, Query
 
 from cluster_profiles.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 
+from .api_availability import AVAILABILITY_ERRORS
 from .auth import CursorError
-from .bounded_json import BoundedJSONError
 from .cursor_contract import MAX_CURSOR_LENGTH
 from .library_contract import (
     ModelDetailResponse,
@@ -21,7 +21,6 @@ from .library_contract import (
 from .library_projection import LibrarySelectorAmbiguous
 from .operation_api import RequestValidationProblem, bounded_error_responses
 from .request_fault import RequestFault
-from .strict_json import stored_document_detail
 
 # Friendly names may contain spaces.  Keep selectors bounded and reject control
 # characters; path routing remains safe because the projection resolves only an
@@ -57,12 +56,9 @@ def _error(error: Exception) -> HTTPException:
         # As in the operator surface: only an explicit request fault is 422,
         # so unreadable stored state cannot be reported as a bad request.
         return HTTPException(status_code=422, detail=str(error)[:256])
-    detail = stored_document_detail(error)
-    if detail is not None:
-        return HTTPException(status_code=503, detail=detail[:256])
-    if isinstance(error, BoundedJSONError):
-        return HTTPException(status_code=503, detail=str(error)[:256])
-    return HTTPException(status_code=503, detail="library projection unavailable")
+    if isinstance(error, AVAILABILITY_ERRORS):
+        return HTTPException(status_code=503, detail="library projection unavailable")
+    raise error
 
 
 def install_library_routes(
@@ -122,7 +118,13 @@ def install_library_routes(
                 sort=sort,
                 cached=cached,
             )
-        except (KeyError, OSError, RuntimeError, TypeError, ValueError) as error:
+        except (
+            LibrarySelectorAmbiguous,
+            CursorError,
+            RequestFault,
+            KeyError,
+            *AVAILABILITY_ERRORS,
+        ) as error:
             raise _error(error) from None
 
     @app.get(
@@ -137,7 +139,13 @@ def install_library_routes(
     ) -> ModelDetailResponse:
         try:
             return library().model_detail(selector)
-        except (KeyError, OSError, RuntimeError, TypeError, ValueError) as error:
+        except (
+            LibrarySelectorAmbiguous,
+            CursorError,
+            RequestFault,
+            KeyError,
+            *AVAILABILITY_ERRORS,
+        ) as error:
             raise _error(error) from None
 
     @app.get(
@@ -185,7 +193,13 @@ def install_library_routes(
                 updated_since=updated_since,
                 sort=sort,
             )
-        except (KeyError, OSError, RuntimeError, TypeError, ValueError) as error:
+        except (
+            LibrarySelectorAmbiguous,
+            CursorError,
+            RequestFault,
+            KeyError,
+            *AVAILABILITY_ERRORS,
+        ) as error:
             raise _error(error) from None
 
     @app.get(
@@ -200,7 +214,13 @@ def install_library_routes(
     ) -> RecipeDetailResponse:
         try:
             return library().recipe_detail(selector)
-        except (KeyError, OSError, RuntimeError, TypeError, ValueError) as error:
+        except (
+            LibrarySelectorAmbiguous,
+            CursorError,
+            RequestFault,
+            KeyError,
+            *AVAILABILITY_ERRORS,
+        ) as error:
             raise _error(error) from None
 
 

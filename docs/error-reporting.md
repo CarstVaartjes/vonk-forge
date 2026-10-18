@@ -76,6 +76,13 @@ behavior. The Controller request boundary generates and propagates an ID,
 adds a safe code header, and logs unexpected route exceptions with the safe
 operation/path and request ID. Unexpected route exceptions are returned through
 the typed public envelope with the same correlation ID.
+Deterministic route faults (including `TypeError`, `ValueError`, and unexpected
+`RuntimeError`) return HTTP 500 with `ControllerErrorCode.INTERNAL_ERROR`, a
+terminal context, and the request ID used by `log_event` for the redacted
+traceback. Clients preserve that terminal decision instead of retrying until
+the observation deadline. Only proven dependency availability failures and
+explicit typed waits retain the 503 retry contract; SQL statement/validation
+faults are not evidence that a dependency is down.
 
 The Rust agent `ClientError::Controller` now preserves status, safe code,
 path, request ID, and retry/exit decision for non-success responses. Its

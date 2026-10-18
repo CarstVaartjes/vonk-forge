@@ -50,6 +50,8 @@ def observation_disposition(error: ControlClientError) -> str:
         and error.context.transport == "tls"
     ):
         return DISPOSITION_SECURITY
+    if isinstance(error, ControlHTTPError) and status == 500 and not error.retryable:
+        return DISPOSITION_FAIL
     if status is not None and status >= 400:
         return _status_disposition(status)
     if isinstance(error, ControlTransportError):

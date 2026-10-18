@@ -4,7 +4,7 @@ import re
 
 from fastapi import HTTPException, Query, Response
 
-from .bounded_json import BoundedJSONError
+from .api_availability import AVAILABILITY_ERRORS
 from .failure_evidence import FailureEvidenceBundle, FailureEvidenceService
 from .integer_domains import MAX_DATABASE_INTEGER
 from .operation_api import bounded_error_responses
@@ -32,7 +32,7 @@ def install_failure_evidence_routes(
             raise HTTPException(
                 404, "failure evidence unavailable for this attempt"
             ) from None
-        except (BoundedJSONError, ValueError, OSError):
+        except AVAILABILITY_ERRORS:
             raise HTTPException(503, "failure evidence unavailable") from None
         name = re.sub(r"[^A-Za-z0-9_-]", "_", operation_id)[:64]
         return Response(

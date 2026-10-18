@@ -7,6 +7,7 @@ from typing import Annotated, Any, NoReturn
 from fastapi import FastAPI, HTTPException, Path, Query, Request, status
 from vonk_agent_protocol import InvalidRequestError
 
+from .api_availability import AVAILABILITY_ERRORS
 from .auth import MUTATION_ROLES, Actor
 from .endpoint_contract import inference_gateway_api_base
 from .fleet_profile_contract import (
@@ -94,7 +95,7 @@ def install_fleet_profile_routes(
             return service().list()
         except HTTPException:
             raise
-        except (OSError, RuntimeError, TypeError, ValueError):
+        except AVAILABILITY_ERRORS:
             raise HTTPException(
                 status_code=503, detail="Profiles unavailable"
             ) from None
@@ -113,7 +114,7 @@ def install_fleet_profile_routes(
             return service().read_number(number)
         except HTTPException:
             raise
-        except (OSError, RuntimeError, TypeError, ValueError):
+        except AVAILABILITY_ERRORS:
             raise HTTPException(status_code=503, detail="Profile unavailable") from None
 
     @app.get(
@@ -130,7 +131,7 @@ def install_fleet_profile_routes(
             return service().definition_number(number)
         except HTTPException:
             raise
-        except (OSError, RuntimeError, TypeError, ValueError):
+        except AVAILABILITY_ERRORS:
             raise HTTPException(
                 status_code=503, detail="Profile definition unavailable"
             ) from None
@@ -166,7 +167,7 @@ def install_fleet_profile_routes(
                 status_code=404,
                 detail=f"endpoint alias is not part of profile {number}",
             ) from None
-        except (OSError, RuntimeError, TypeError, ValueError):
+        except AVAILABILITY_ERRORS:
             raise HTTPException(
                 status_code=503, detail="Profile endpoint projection unavailable"
             ) from None
@@ -191,7 +192,7 @@ def install_fleet_profile_routes(
             raise HTTPException(
                 status_code=422, detail="invalid profile number"
             ) from None
-        except (OSError, RuntimeError, TypeError, ValueError):
+        except AVAILABILITY_ERRORS:
             raise HTTPException(
                 status_code=503, detail="Profile save unavailable"
             ) from None
@@ -215,7 +216,7 @@ def install_fleet_profile_routes(
             raise HTTPException(status_code=404, detail="Profile not found") from None
         except FleetProfileConflict as error:
             raise_profile_conflict(error)
-        except (OSError, RuntimeError, TypeError, ValueError):
+        except AVAILABILITY_ERRORS:
             raise HTTPException(
                 status_code=503, detail="Profile preview unavailable"
             ) from None
@@ -248,7 +249,7 @@ def install_fleet_profile_routes(
             raise HTTPException(status_code=404, detail="Profile not found") from None
         except FleetProfileConflict as error:
             raise_profile_conflict(error)
-        except (OSError, RuntimeError, TypeError, ValueError):
+        except AVAILABILITY_ERRORS:
             raise HTTPException(
                 status_code=503, detail="Profile load unavailable"
             ) from None
@@ -274,7 +275,7 @@ def install_fleet_profile_routes(
             raise HTTPException(
                 status_code=404, detail="Profile application not found"
             ) from None
-        except (OSError, RuntimeError, TypeError, ValueError):
+        except AVAILABILITY_ERRORS:
             raise HTTPException(
                 status_code=503, detail="Profile application unavailable"
             ) from None
@@ -300,7 +301,7 @@ def install_fleet_profile_routes(
             raise HTTPException(
                 status_code=404, detail="Profile request not found"
             ) from None
-        except (OSError, RuntimeError, TypeError, ValueError):
+        except AVAILABILITY_ERRORS:
             raise HTTPException(
                 status_code=503, detail="Profile request unavailable"
             ) from None
@@ -321,7 +322,7 @@ def install_fleet_profile_routes(
             raise HTTPException(
                 status_code=404, detail="Profile progress not found"
             ) from None
-        except (OSError, RuntimeError, TypeError, ValueError):
+        except AVAILABILITY_ERRORS:
             raise HTTPException(
                 status_code=503, detail="Profile progress unavailable"
             ) from None

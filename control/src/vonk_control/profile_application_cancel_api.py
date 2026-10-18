@@ -6,6 +6,7 @@ from typing import Any
 
 from fastapi import FastAPI, HTTPException, Path, status
 
+from .api_availability import AVAILABILITY_ERRORS
 from .auth import MUTATION_ROLES, Actor
 from .fleet_profile_api import raise_profile_conflict
 from .fleet_profile_contract import (
@@ -64,7 +65,7 @@ def install_profile_application_cancel_route(
             ) from None
         except FleetProfileConflict as error:
             raise_profile_conflict(error)
-        except (OSError, RuntimeError, TypeError, ValueError):
+        except AVAILABILITY_ERRORS:
             raise HTTPException(
                 status_code=503, detail="Profile cancellation receipt unavailable"
             ) from None
@@ -100,7 +101,7 @@ def install_profile_application_cancel_route(
             ) from None
         except FleetProfileConflict as error:
             raise_profile_conflict(error)
-        except (OSError, RuntimeError, TypeError, ValueError):
+        except AVAILABILITY_ERRORS:
             raise HTTPException(
                 status_code=503, detail="Profile cancellation unavailable"
             ) from None
