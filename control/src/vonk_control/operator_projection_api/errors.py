@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-import logging
-import traceback
-
 from fastapi import HTTPException
 from vonk_agent_protocol import (
     ControllerErrorCode,
@@ -12,8 +9,8 @@ from vonk_agent_protocol import (
 )
 
 from ..agent_upgrades import AgentUpgradeConflict
+from ..api_availability import AVAILABILITY_ERRORS
 from ..auth import MUTATION_ROLES, Actor, CursorError
-from ..bounded_json import BoundedJSONError
 from ..enrollment import (
     EnrollmentDenied,
     RemoteRevocationUncertain,
@@ -23,11 +20,8 @@ from ..fleet_projection import (
     FleetSnapshot,
 )
 from ..library_projection import LibrarySelectorAmbiguous
-from ..logging import current_request_id, log_event, redact_text
+from ..logging import redact_text
 from ..request_fault import RequestFault
-from ..strict_json import stored_document_detail
-
-_LOGGER = logging.getLogger("vonk_control.operator_projection_api")
 
 
 def _node(snapshot: FleetSnapshot, selector: str) -> FleetNode:
@@ -67,9 +61,8 @@ def _operator_error(error: Exception) -> HTTPException:
     if isinstance(error, KeyError):
         return HTTPException(status_code=404, detail="operator object not found")
     if isinstance(error, (CursorError, RequestFault)):
-        # An explicit request fault keeps 422. Everything else, including a
-        # stored document that no longer validates, is the Controller's state
-        # and answers the declared 503 rather than blaming the request.
+        # Only an explicit request fault blames the caller. Stored-document
+        # faults reach the central typed 500 boundary.
         return HTTPException(status_code=422, detail=str(error)[:256])
     if isinstance(error, AgentUpgradeConflict):
         # The upgrade authority refused the plan. That is a conflict between the
@@ -99,25 +92,9 @@ def _operator_error(error: Exception) -> HTTPException:
                 "x-vonk-error-code": SecurityRefusalReason.CONTROLLER_FLEET_ENROLLMENT_DENIED.value
             },
         )
-    detail = stored_document_detail(error)
-    if detail is not None:
-        # Name the failing field path so the corrupt row can be found, without
-        # echoing the stored value.
-        return HTTPException(status_code=503, detail=detail[:256])
-    if isinstance(error, BoundedJSONError):
-        return HTTPException(status_code=503, detail=str(error)[:256])
-    # Nothing above explains this failure, so the caller only learns that the
-    # projection is unavailable. Record the redacted traceback against the
-    # request id the caller sees, so the 503 can be diagnosed from the log.
-    log_event(
-        _LOGGER,
-        "api.operator_projection_failed",
-        service="controller",
-        request_id=current_request_id.get(),
-        failure_type=type(error).__name__,
-        traceback=traceback.format_exception(error)[-64:],
-    )
-    return HTTPException(status_code=503, detail="operator projection unavailable")
+    if isinstance(error, AVAILABILITY_ERRORS):
+        return HTTPException(status_code=503, detail="operator projection unavailable")
+    raise error
 
 
 def _require_mutation(actor: Actor, method: str, route: str) -> None:

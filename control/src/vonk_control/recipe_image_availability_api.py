@@ -466,7 +466,7 @@ def install_recipe_operator_routes(
             if isinstance(operation, RecipeImageAvailabilityView):
                 return _view_document(operation)
             return removal_document(operation)
-        except (RecipeImageAvailabilityError, KeyError, ValueError) as error:
+        except (RecipeImageAvailabilityError, KeyError) as error:
             raise _recipe_error(error) from None
 
     @app.get(
@@ -491,7 +491,7 @@ def install_recipe_operator_routes(
             if isinstance(operation, RecipeImageAvailabilityView):
                 return _view_document(operation)
             return removal_document(operation)
-        except (RecipeImageAvailabilityError, KeyError, ValueError) as error:
+        except (RecipeImageAvailabilityError, KeyError) as error:
             raise _recipe_error(error) from None
 
     @app.post(
@@ -513,7 +513,7 @@ def install_recipe_operator_routes(
                     operation_id, actor=actor.subject, request_id=body.request_key
                 )
             )
-        except (RecipeImageAvailabilityError, KeyError, ValueError) as error:
+        except (RecipeImageAvailabilityError, KeyError) as error:
             raise _recipe_error(error) from None
 
     @app.post(
@@ -541,7 +541,7 @@ def install_recipe_operator_routes(
             ):
                 return operation
             return _view_document(operation)
-        except (RecipeImageAvailabilityError, KeyError, ValueError) as error:
+        except (RecipeImageAvailabilityError, KeyError) as error:
             raise _recipe_error(error) from None
 
     @app.post(
@@ -572,7 +572,7 @@ def install_recipe_operator_routes(
             )
         except HTTPException:
             raise
-        except (RecipeImageAvailabilityError, KeyError, ValueError) as error:
+        except (RecipeImageAvailabilityError, KeyError) as error:
             raise _recipe_error(error) from None
 
     @app.post(
@@ -603,7 +603,7 @@ def install_recipe_operator_routes(
             return removal_document(result)
         except HTTPException:
             raise
-        except (RecipeImageAvailabilityError, KeyError, ValueError) as error:
+        except (RecipeImageAvailabilityError, KeyError) as error:
             raise _recipe_error(error) from None
 
     @app.get(
@@ -627,7 +627,7 @@ def install_recipe_operator_routes(
             return service.review_removal(selector, with_model=with_model)
         except HTTPException:
             raise
-        except (RecipeImageAvailabilityError, KeyError, ValueError) as error:
+        except (RecipeImageAvailabilityError, KeyError) as error:
             raise _recipe_error(error) from None
 
     @app.post(
@@ -656,7 +656,7 @@ def install_recipe_operator_routes(
             )
         except HTTPException:
             raise
-        except (RecipeImageAvailabilityError, KeyError, ValueError) as error:
+        except (RecipeImageAvailabilityError, KeyError) as error:
             raise _recipe_error(error) from None
 
 

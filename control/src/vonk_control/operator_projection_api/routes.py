@@ -14,6 +14,7 @@ from vonk_agent_protocol import (
 )
 
 from ..agent_upgrade_contract import AgentUpgradeRequestIntent
+from ..api_availability import AVAILABILITY_ERRORS
 from ..auth import Actor
 from ..enrollment_contract import (
     ENROLLMENT_ID_PATTERN,
@@ -93,7 +94,7 @@ def install_operator_projection_routes(
             return fleet().read()
         except HTTPException:
             raise
-        except SQLAlchemyError as error:
+        except AVAILABILITY_ERRORS as error:
             raise ObservationCaptureUnavailable(phase="database-capture") from error
         except (KeyError, OSError, RuntimeError, TypeError, ValueError) as error:
             raise _operator_error(error) from None

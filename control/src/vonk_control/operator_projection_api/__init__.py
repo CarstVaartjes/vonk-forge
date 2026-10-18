@@ -114,7 +114,6 @@ from .contracts import FleetUpgradeRequest as FleetUpgradeRequest
 from .contracts import LogLevel as LogLevel
 from .contracts import LogSource as LogSource
 from .contracts import _fleet_work_state as _fleet_work_state
-from .errors import _LOGGER as _LOGGER
 from .errors import _domain_refusal_detail as _domain_refusal_detail
 from .errors import _node as _node
 from .errors import _operator_error as _operator_error

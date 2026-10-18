@@ -8,10 +8,13 @@ from typing import Annotated, Any
 
 from fastapi import FastAPI, HTTPException, Path, status
 from vonk_agent_protocol import (
+    Disposition,
     OperationProgress,
     SecurityRefusalError,
+    UnknownOutcomeError,
 )
 
+from .api_availability import AVAILABILITY_ERRORS
 from .auth import MUTATION_ROLES, Actor, CursorCodec
 from .bounded_json import require_integer, require_sequence
 from .cache_removal_review import CacheRemovalReview
@@ -133,6 +136,25 @@ def install_model_operator_routes(
             return HTTPException(status_code=409, detail=error.detail)
         if isinstance(error, ModelCacheResolutionError):
             return HTTPException(status_code=422, detail=error.detail)
+        if isinstance(error, ModelCacheError) and isinstance(
+            error, SecurityRefusalError
+        ):
+            return HTTPException(
+                status_code=403,
+                detail=error.detail,
+                headers={"x-vonk-error-code": error.code},
+            )
+        if isinstance(error, UnknownOutcomeError):
+            raise error
+        if isinstance(error, ModelCacheError):
+            if error.disposition != Disposition.OBSERVE:
+                return HTTPException(
+                    status_code=409,
+                    detail=error.detail,
+                    headers={"x-vonk-error-code": error.code},
+                )
+        elif not isinstance(error, AVAILABILITY_ERRORS):
+            raise error
         return HTTPException(status_code=503, detail="model cache unavailable")
 
     @app.get(
@@ -152,7 +174,7 @@ def install_model_operator_routes(
             return _model_operator_response(operation, action=action, selector=selector)
         except HTTPException:
             raise
-        except (ModelCacheError, OSError, RuntimeError, TypeError, ValueError) as error:
+        except (ModelCacheError, *AVAILABILITY_ERRORS) as error:
             raise failure(error) from None
 
     @app.get(
@@ -173,7 +195,7 @@ def install_model_operator_routes(
             return _model_operator_response(operation, action=action, selector=selector)
         except HTTPException:
             raise
-        except (ModelCacheError, OSError, RuntimeError, TypeError, ValueError) as error:
+        except (ModelCacheError, *AVAILABILITY_ERRORS) as error:
             raise failure(error) from None
 
     @app.get(
@@ -191,7 +213,7 @@ def install_model_operator_routes(
             return cache().review_model_removal(selector)
         except HTTPException:
             raise
-        except (ModelCacheError, OSError, RuntimeError, TypeError, ValueError) as error:
+        except (ModelCacheError, *AVAILABILITY_ERRORS) as error:
             raise failure(error) from None
 
     @app.post(
@@ -219,7 +241,7 @@ def install_model_operator_routes(
             )
         except HTTPException:
             raise
-        except (ModelCacheError, OSError, RuntimeError, TypeError, ValueError) as error:
+        except (ModelCacheError, *AVAILABILITY_ERRORS) as error:
             raise failure(error) from None
 
     @app.post(
@@ -246,7 +268,7 @@ def install_model_operator_routes(
             )
         except HTTPException:
             raise
-        except (ModelCacheError, OSError, RuntimeError, TypeError, ValueError) as error:
+        except (ModelCacheError, *AVAILABILITY_ERRORS) as error:
             raise failure(error) from None
 
     @app.post(
@@ -274,7 +296,7 @@ def install_model_operator_routes(
             return _model_operator_response(operation, action=action, selector=selector)
         except HTTPException:
             raise
-        except (ModelCacheError, OSError, RuntimeError, TypeError, ValueError) as error:
+        except (ModelCacheError, *AVAILABILITY_ERRORS) as error:
             raise failure(error) from None
 
 

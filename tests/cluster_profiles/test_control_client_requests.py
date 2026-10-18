@@ -1606,7 +1606,7 @@ def test_status_without_envelope_never_authorizes_retry(tmp_path, status, genera
             client.get("/api/artifact-jobs/12345678-1234-4123-8123-123456789abc")
 
 
-@pytest.mark.parametrize("fault", [503, 429, "timeout", "body_timeout"])
+@pytest.mark.parametrize("fault", [500, 503, 429, "timeout", "body_timeout"])
 @pytest.mark.parametrize("generated", [False, True])
 def test_retry_waits_for_hint_or_full_jitter(
     tmp_path, monkeypatch, observation_clock, fault, generated
@@ -1683,3 +1683,48 @@ def test_persistent_timeout_backoff_stays_jittered_and_capped(
     )
     assert client.get("/api/artifact-jobs/12345678-1234-4123-8123-123456789abc")["id"]
     assert min(ceilings) < max(ceilings) == 3.2
+
+
+@pytest.mark.parametrize("generated", [False, True])
+def test_typed_internal_error_is_not_retried(tmp_path, generated):
+    """A typed deterministic 500 must not be replayed until the request deadline."""
+    from vonk_agent_protocol import ControllerErrorCode
+    from vonk_agent_protocol.agent_words import AgentClientDecision
+    from vonk_control.operation_api import BoundedErrorResponse, ErrorContextResponse
+
+    calls = []
+    request_id = "47057540-fc9b-494e-ad37-152c0fb154cb"
+    problem = BoundedErrorResponse(
+        detail="internal server error",
+        context=ErrorContextResponse(
+            operation="reviewModelRemoval",
+            endpoint="/api/model/model/remove-review",
+            http_status=500,
+            code=ControllerErrorCode.INTERNAL_ERROR,
+            request_id=request_id,
+            source="unknown",
+            decision=AgentClientDecision.EXIT.value,
+            retryable=False,
+        ),
+    )
+
+    def opener(request, *, timeout):
+        calls.append(request.full_url)
+        assert len(calls) == 1, "deterministic error was retried"
+        return _Response(500, problem.model_dump(mode="json"))
+
+    client = ControlClient(
+        "https://forge.example.test", _token(tmp_path), opener=opener
+    )
+    from cluster_profiles.control_client import ControlHTTPError
+
+    with pytest.raises(ControlHTTPError) as caught:
+        if generated:
+            client.job("12345678-1234-4123-8123-123456789abc")
+        else:
+            client.get("/api/model/model/remove-review")
+    assert len(calls) == 1
+    assert caught.value.retryable is False
+    assert caught.value.context is not None
+    assert caught.value.context.request_id == request_id
+    assert caught.value.context.decision == AgentClientDecision.EXIT

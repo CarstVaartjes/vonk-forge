@@ -93,7 +93,7 @@ class _HTTPErrorFields(TypedDict, total=False):
 
     code: str | None
     recovery: tuple[str, ...]
-    retryable: bool
+    retryable: bool | None
     retry_time: str | None
     preserved: str | None
     required_bytes: int | None
@@ -217,7 +217,7 @@ class ControlHTTPError(ControlClientError):
         *,
         code: str | None = None,
         recovery: tuple[str, ...] = (),
-        retryable: bool = False,
+        retryable: bool | None = None,
         retry_time: str | None = None,
         preserved: str | None = None,
         required_bytes: int | None = None,
@@ -230,7 +230,8 @@ class ControlHTTPError(ControlClientError):
         endpoint: str | None = None,
         request_id: str | None = None,
     ) -> None:
-        retryable = status_code == 429 or 500 <= status_code <= 599
+        if status_code != 500 or retryable is None:
+            retryable = status_code == 429 or 500 <= status_code <= 599
         self.status_code = status_code
         self.code = safe_code(code, f"http.{status_code}")
         self.recovery = recovery
@@ -370,7 +371,22 @@ def _structured_http_error_fields(
     retry_after_seconds = _nonnegative_integer(
         problem.get("retry_after", problem.get("retry_after_seconds"))
     )
-    retryable = problem.get("retryable") is True
+    # Only a validated Controller problem can make a deterministic 500 terminal.
+    # Bare 5xx and other availability envelopes keep their HTTP retry contract.
+    from ..generated_control.models.bounded_error_response import BoundedErrorResponse
+    from ..generated_control.models.error_context_response import ErrorContextResponse
+
+    retryable = None
+    try:
+        bounded = BoundedErrorResponse.from_dict(dict(problem))
+    except (KeyError, TypeError, ValueError, AttributeError):
+        pass
+    else:
+        if (
+            isinstance(bounded.context, ErrorContextResponse)
+            and bounded.context.retryable is False
+        ):
+            retryable = False
     preserved = problem.get("preserved")
     log_excerpt = problem.get("log_excerpt")
     candidates = problem.get("candidates")

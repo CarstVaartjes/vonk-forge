@@ -32,6 +32,7 @@ from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import StreamingResponse
 from vonk_agent_protocol import CatalogCode, ControllerErrorCode, canonical_message
+from vonk_agent_protocol.agent_words import AgentClientDecision
 
 from cluster_profiles.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 
@@ -44,6 +45,7 @@ from ..agent_api import (
     install_agent_routes,
 )
 from ..agent_jobs import OperatorRetirementRefused
+from ..api_availability import AVAILABILITY_ERRORS
 from ..artifact_job_api import (
     MAX_ARTIFACT_INPUT_UPLOAD_BYTES,
     MAX_ARTIFACT_OUTPUT_UPLOAD_BYTES,
@@ -197,7 +199,7 @@ def create_app(
         version="1.0",
         docs_url=None,
         redoc_url=None,
-        responses=bounded_error_responses(422, 429, 503),
+        responses=bounded_error_responses(422, 429, 500, 503),
         lifespan=monitoring_lifespan,
     )
     app.router.route_class = ControllerAPIRoute
@@ -440,24 +442,37 @@ def create_app(
         except Exception as error:  # noqa: BLE001 - middleware safety net, see log below
             # Preserve the correlation key without serializing the exception,
             # request body, headers, or URL query into logs.
-            _log_request_failure(request, 500, error)
+            unavailable = isinstance(error, AVAILABILITY_ERRORS)
+            http_status = 503 if unavailable else 500
+            code = (
+                ControllerErrorCode.UNAVAILABLE
+                if unavailable
+                else ControllerErrorCode.INTERNAL_ERROR
+            )
+            decision = (
+                AgentClientDecision.RETRY if unavailable else AgentClientDecision.EXIT
+            )
+            _log_request_failure(request, http_status, error)
             response = Response(
                 content=_bounded_error_content(
-                    "internal server error",
+                    "Controller dependency unavailable"
+                    if unavailable
+                    else "internal server error",
                     context=ErrorContextResponse(
                         operation=f"{request.method} {request.url.path}",
                         endpoint=request.url.path,
-                        http_status=500,
-                        code=ControllerErrorCode.INTERNAL_ERROR,
+                        http_status=http_status,
+                        code=code,
                         request_id=request_id,
                         source="unknown",
-                        decision="exit",
+                        decision=decision.value,
+                        retryable=unavailable,
                     ),
                 ),
-                status_code=500,
+                status_code=http_status,
                 media_type="application/json",
             )
-            response.headers["x-vonk-error-code"] = ControllerErrorCode.INTERNAL_ERROR
+            response.headers["x-vonk-error-code"] = code
         response.headers["x-request-id"] = request_id
         response.headers["x-content-type-options"] = "nosniff"
         if response.status_code >= 400 and "x-vonk-error-code" not in response.headers:
@@ -823,7 +838,7 @@ def create_app(
                 total=None,
                 projection_issue="Stored operation observations are unreadable; membership and total are unknown.",
             )
-        except RuntimeError:
+        except AVAILABILITY_ERRORS:
             raise HTTPException(
                 status_code=503, detail="operation projection unavailable"
             ) from None
@@ -860,7 +875,7 @@ def create_app(
             item = _global_get_operation(operations, operation_id, now=projected_at)
         except KeyError:
             raise HTTPException(status_code=404, detail="operation not found") from None
-        except (RuntimeError, TypeError, ValueError):
+        except AVAILABILITY_ERRORS:
             raise HTTPException(
                 status_code=503, detail="operation projection unavailable"
             ) from None
@@ -870,11 +885,7 @@ def create_app(
                     item, tolerate_unreadable=True, projected_at=projected_at
                 )
             )
-        except BoundedJSONError as error:
-            raise HTTPException(status_code=503, detail=str(error)[:256]) from None
-        except (OSError, RuntimeError, TypeError, ValueError):
-            # A stored document that no longer validates is a declared server
-            # fault, not an undeclared 500 and not the caller's request fault.
+        except AVAILABILITY_ERRORS:
             raise HTTPException(
                 status_code=503, detail="operation projection unavailable"
             ) from None

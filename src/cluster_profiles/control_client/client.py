@@ -195,6 +195,8 @@ class ControlClient:
         if not isinstance(log_excerpt, str):
             log_excerpt = None
         retryable = status_code == 429 or 500 <= status_code <= 599
+        if status_code == 500 and getattr(context, "retryable", None) is False:
+            retryable = False
         candidates = getattr(parsed, "candidates", None)
         retry_after = _retry_after_seconds(headers.get("retry-after"))
         if retry_after is None:
