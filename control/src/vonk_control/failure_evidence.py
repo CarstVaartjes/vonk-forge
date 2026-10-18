@@ -140,9 +140,10 @@ class FailureEvidenceBundle(EvidenceModel):
 
 
 #: The states of an operation (of any kind) whose failure evidence is downloadable:
-#: a failure, or a wait for a person in either spelling.
+#: a failure, a cancellation, or a wait for a person in either spelling.
 FAILED_ATTEMPT_STATES = (
     LifecycleState.FAILED.value,
+    LifecycleState.CANCELLED.value,
     LifecycleState.NEEDS_OPERATOR.value,
     StateAlias.WAITING_FOR_OPERATOR.value,
 )
@@ -441,6 +442,7 @@ def failed_attempt_condition(operation, attempt):
 
     return or_(
         agent_operation_states.sql_attempt_failed_or_unknown(attempt),
+        attempt.state == LifecycleState.CANCELLED.value,
         and_(
             agent_operation_states.sql_attempt_lapsed(attempt),
             # A receipt is a JSON object.  An absent one is stored as the JSON
@@ -583,6 +585,10 @@ class FailureEvidenceService:
                         result = result.model_copy(
                             update={
                                 "diagnostics": child.diagnostics,
+                                "detail": result.detail
+                                or child.detail
+                                or child.diagnostic
+                                or child.reason,
                                 "exit_code": result.exit_code
                                 if result.exit_code is not None
                                 else child.exit_code,
@@ -657,7 +663,7 @@ class FailureEvidenceService:
     def _child_failure(
         session: Session, job_ids: list[str]
     ) -> OperationResultFacts | None:
-        """The Spark-side receipt facts of the newest failed child of these Jobs.
+        """Spark-side facts, preferring the newest child with captured diagnostics.
 
         A Controller-owned parent fails because a child operation failed on a
         Spark, and that child's receipt holds the container's exit facts and
@@ -674,21 +680,24 @@ class FailureEvidenceService:
             .where(
                 AgentOperation.parent_job_id.in_(job_ids),
                 failed_attempt_condition(AgentOperation, AgentOperationAttempt),
-                AgentOperationAttempt.result["diagnostics"].as_string().is_not(None),
             )
             .order_by(
+                AgentOperationAttempt.result["diagnostics"]
+                .as_string()
+                .is_not(None)
+                .desc(),
                 AgentOperation.updated_at.desc(),
                 AgentOperationAttempt.attempt.desc(),
             )
-            # Select the newest receipt that actually contains evidence, rather
-            # than cutting off an arbitrary window of unrelated empty receipts.
+            # Prefer captured diagnostics; otherwise retain the latest typed
+            # cause. Never cap the search behind unrelated empty receipts.
             # One persisted receipt has the producer's bounded evidence size.
             .limit(1)
         ).scalar_one_or_none()
         facts = OperationResultFacts.model_validate(result)
         diagnostics = facts.diagnostics
         if diagnostics is None:
-            return None
+            return facts
         try:
             sanitized = sanitize_diagnostics(diagnostics)
         except (TypeError, ValueError):

@@ -449,6 +449,13 @@ class TerminalHistoryCollector:
             ):
                 return False
         if isinstance(row, AgentOperation):
+            # A retained artifact job still advertises this operation tree.
+            # Keep the actual receipt for its owner's entire grace, even if
+            # this child ended earlier than its parent.
+            if session.scalar(
+                select(exists().where(ArtifactJob.operation_id == row.parent_job_id))
+            ):
+                return False
             parent = session.get(Job, row.parent_job_id)
             if parent is not None and parent.state not in _TERMINAL:
                 return False
