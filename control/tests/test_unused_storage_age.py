@@ -1,6 +1,7 @@
 # ruff: noqa: F811 - pytest fixture imports are intentionally reused as arguments
 """Age expiry is independent of pressure and never expires model files."""
 
+import uuid
 from datetime import timedelta
 from pathlib import Path
 
@@ -85,20 +86,45 @@ def test_age_uninstall_binds_model_retention_in_real_queue(
     """Catches preview retaining models while acceptance still asks the agent to erase them."""
     from sqlalchemy import select
     from vonk_agent_protocol import AgentOperation as Operation
-    from vonk_control.models import AgentOperation
+    from vonk_control.models import (
+        AgentOperation,
+        NodeInventorySnapshot,
+        RecipeInstallation,
+    )
     from vonk_control.unused_storage_collection import UnusedStorageCollector
 
     from .test_unused_storage_collection import (
         _REAL_CLOCK,
+        _agents_succeed,
         _real_lifecycle,
-        _report_disk,
     )
 
-    sessions, service, installation_id, nodes = _real_lifecycle(
+    sessions, service, installation_id, _nodes = _real_lifecycle(
         tmp_path, engine=postgres_engine
     )
-    for node in nodes:
-        _report_disk(sessions, TOTAL // 2, at=_REAL_CLOCK, node=node)
+    from vonk_control.recipe_operations.errors import RecipeRequestInvalid
+
+    with sessions() as session:
+        stored = session.get(RecipeInstallation, installation_id)
+        assert stored is not None and stored.recipe_build_id is not None
+        mapping_id, build_id = stored.mapping_id, stored.recipe_build_id
+
+    reviewed = service.preview_uninstall(installation_id, preserve_model_files=True)
+    with pytest.raises(RecipeRequestInvalid):
+        service.uninstall(
+            installation_id,
+            plan_digest=reviewed.plan_digest,
+            actor="test",
+            request_id=str(uuid.uuid4()),
+            preserve_model_files=False,
+        )
+    # Keep the real admission fixture's memory/capability observations when
+    # advancing the disk observation; a disk-only synthetic report cannot admit.
+    with sessions.begin() as session:
+        for snapshot in session.scalars(select(NodeInventorySnapshot)):
+            snapshot.observed_at = snapshot.received_at = _REAL_CLOCK
+            snapshot.disk_total_bytes = TOTAL
+            snapshot.disk_free_bytes = TOTAL // 2
     collector = UnusedStorageCollector(
         sessions, clock=lambda: _REAL_CLOCK, lifecycle=service
     )
@@ -113,3 +139,13 @@ def test_age_uninstall_binds_model_retention_in_real_queue(
         for operation in operations:
             assert operation.payload["installation_id"] == installation_id
             assert operation.payload.get("cleanup_model_content_sha256") is None
+
+    # Exact completion releases the old installation's claims; retained cache
+    # assets admit a fresh authorized install without any manual retirement.
+    for job_id in {operation.parent_job_id for operation in operations}:
+        _agents_succeed(sessions, service, job_id)
+    fresh = service.preview_install(mapping_id, build_id)
+    accepted = service.install(
+        fresh, plan_digest=fresh.plan_digest, actor="test", request_id=str(uuid.uuid4())
+    )
+    assert accepted.owner_id != installation_id

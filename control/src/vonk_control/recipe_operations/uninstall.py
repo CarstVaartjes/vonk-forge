@@ -261,6 +261,11 @@ class UninstallMixin:
                     also_removing=also_removing,
                     preserve_model_files=preserve_model_files,
                 )
+                if plan.plan_digest != plan_digest:
+                    raise RecipeRequestInvalid(
+                        "uninstall effects changed since review; request a fresh preview",
+                        reason=InvalidRequestReason.SUPERSEDED,
+                    )
                 if not plan.allowed:
                     raise RecipeRequestInvalid(
                         "uninstall plan is stale or blocked: "
