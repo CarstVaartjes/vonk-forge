@@ -55,7 +55,9 @@ def spark_busy_blockers(
 
     A live attempt owns its lane; an unconfirmed one needs reconciliation on
     the next authenticated poll. With neither, the order awaits the poll itself.
-    The check cadence is the claim lease interval. A fixed stall window since
+    The next check is due at the holder's lease boundary, or one claim lease
+    interval after enqueue without a live holder. Overdue checks stay overdue
+    across reads and restarts. A fixed stall window since
     the later of queue creation and blocker progress escalates without stopping
     work; heartbeat/lease renewal and reads never reset that window.
     """
@@ -101,6 +103,7 @@ def spark_busy_blockers(
         detail = "Awaiting this Spark's next authenticated claim poll"
         blocking_operation = None
         run_id = None
+        next_check_at = progressed_at + timedelta(seconds=CLAIM_LEASE_SECONDS)
         if holder is not None:
             running, attempt = holder
             live = attempt_is_live(running, attempt, now)
@@ -111,6 +114,8 @@ def spark_busy_blockers(
                 else f"Awaiting reconciliation of {running.kind} {running.id} "
                 "on this Spark; its effect is unconfirmed"
             )
+            if live and attempt is not None:
+                next_check_at = aware(attempt.lease_deadline)
             blocking_operation = BlockingOperation(id=running.id, kind=running.kind)
             workload = column_field(running, "payload", "run_id")
             run_id = workload if isinstance(workload, str) else None
@@ -139,6 +144,6 @@ def spark_busy_blockers(
         waits[operation.id] = QueueWait(
             reason=reason,
             blockers=blockers,
-            next_check_at=aware(now) + timedelta(seconds=CLAIM_LEASE_SECONDS),
+            next_check_at=next_check_at,
         )
     return waits

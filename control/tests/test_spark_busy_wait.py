@@ -87,6 +87,7 @@ def fleet(tmp_path, postgres_engine):
                     binary_digest="f" * 64,
                 )
             )
+            session.flush()
             session.add(
                 AgentCertificate(
                     serial=f"serial-{node_id}",
@@ -258,7 +259,7 @@ def test_unconfirmed_blocker_stalls_visibly_then_clears_without_changing_intent(
         assert document["blockers"][0]["operation"]["id"] == stop.id
         assert document["blockers"][0]["run_id"] == stop.payload["run_id"]
         assert document["blockers"][1]["code"] == ProgressAlarmCode.STALLED
-        assert datetime.fromisoformat(document["next_attempt_at"]) > clock.now
+        assert datetime.fromisoformat(document["next_attempt_at"]) < clock.now
     # A read never changes the queue identity, attempt, or stored schedule.
     with sessions() as session:
         queued = session.get(AgentOperation, upgrade.id)
