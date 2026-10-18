@@ -27,7 +27,6 @@ from .common import _freeable_in_order as _freeable_in_order
 from .common import _Kept as _Kept
 from .common import _kept_sentence as _kept_sentence
 from .common import _model_objects as _model_objects
-from .common import _waits_for_storage as _waits_for_storage
 from .common import spark_eviction_capacity as spark_eviction_capacity
 from .evidence import _Evidence as _Evidence
 from .evidence import _Item as _Item
@@ -68,7 +67,6 @@ from .common import job_states as job_states
 from .common import logging as logging
 from .common import replace as replace
 from .common import shutil as shutil
-from .evidence import _OWNER_JOB_KINDS as _OWNER_JOB_KINDS
 from .evidence import ArtifactDistributionAssignment as ArtifactDistributionAssignment
 from .evidence import CatalogDocumentHead as CatalogDocumentHead
 from .evidence import CatalogRecipeModelReference as CatalogRecipeModelReference

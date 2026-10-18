@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -1095,6 +1096,17 @@ def _another_recipe(sessions, installation_id: str) -> None:
         session.flush()
         installation.recipe_revision_id = copy.id
         installation.model_content_sha256 = "e" * 64
+        plan = parse_stored_installation_plan(installation.plan)
+        installation.image_digest = "sha256:" + "e" * 64
+        plan.image_digest = installation.image_digest
+        for compiled in plan.compiled_execution_plans.values():
+            compiled.runtime_image.image_digest = installation.image_digest
+            compiled.runtime_image.oci_layout_sha256 = "e" * 64
+            compiled.identity.model_artifact_set_sha256 = "e" * 64
+            for artifact in compiled.artifacts:
+                artifact.sha256 = "e" * 64
+                artifact.model.content_sha256 = "e" * 64
+        installation.plan = plan.model_dump(mode="json")
         # What it and its runs were accepted with names that recipe too.
         installation.plan = {**installation.plan, "recipe_revision_id": copy.id}
         for run in session.scalars(
@@ -1216,3 +1228,160 @@ def test_a_started_load_waiting_for_disk_lets_a_failed_run_be_stopped_and_evicte
             break
         _tick_profile_when_due(service, planner, lifecycle, accepted.id)
     assert issued("recipe.install") is not None
+
+
+def test_live_copy_on_other_spark_does_not_prevent_eviction_and_load(
+    postgres_engine, tmp_path: Path
+) -> None:
+    """A long copy on B used to pin A's unrelated installation for hours.
+
+    Keep the old application live while the second load's actual worker waits,
+    uninstalls through the lifecycle, observes disk and issues its install.
+    """
+    from vonk_agent_protocol import AgentOperation as OperationKind
+    from vonk_control.fleet_profile_contract import (
+        FleetProfileApplicationProgress,
+        FleetProfilePreview,
+    )
+
+    from .test_unused_storage_collection import _agents_succeed
+
+    sessions, lifecycle, _, mapping, build, nodes = setup_services(
+        tmp_path, nodes=2, mapping_node_count=1, engine=postgres_engine
+    )
+    unused = installed_recipe(
+        lifecycle, mapping, build, (nodes[0],), request_id=str(uuid4())
+    ).owner_id
+    _another_recipe(sessions, unused)
+    with sessions.begin() as session:
+        installation = session.get(RecipeInstallation, unused)
+        assert installation is not None
+        for snapshot in session.scalars(select(NodeInventorySnapshot)):
+            snapshot.disk_free_bytes = 0 if snapshot.node_id == nodes[0] else 8000
+    service, planner = _profile_service(sessions, lifecycle)
+    collector = UnusedStorageCollector(
+        sessions,
+        clock=lifecycle._clock,
+        lifecycle=lifecycle,
+        demands=StorageDemands(lifecycle._clock),
+    )
+    service.bind_storage_relief(collector.relief_for_spark)
+    profile = _installed_profile(service, sessions, (nodes[0],))
+    accepted = service.apply(profile.id, request_key=str(uuid4()), actor="admin")
+    for _ in range(4):
+        _tick_profile_when_due(service, planner, lifecycle, accepted.id)
+    waiting = service.application(accepted.id)
+    assert waiting.progress.blockers[0].code == STORAGE_EVICTING
+    # Fault injection: another accepted application still owns both Sparks.
+    # Its pending copy on B never ends during this scenario.
+    copying_id = str(uuid4())
+    with sessions.begin() as session:
+        current = session.get(FleetProfileApplication, accepted.id)
+        assert current is not None
+        copying_plan = FleetProfilePreview.model_validate_json(json.dumps(current.plan))
+        copying_plan.plan_digest = "f" * 64
+        assert set(copying_plan.scope.node_ids) == set(nodes)
+        copying = FleetProfileApplication(
+            id=copying_id,
+            request_key=str(uuid4()),
+            profile_id=current.profile_id,
+            profile_digest=current.profile_digest,
+            plan_digest=copying_plan.plan_digest,
+            plan=copying_plan.model_dump(mode="json"),
+            state=LifecycleState.RUNNING,
+            actor="admin",
+            current_operation_id=copying_id,
+            progress=FleetProfileApplicationProgress(
+                retry_due_at=lifecycle._clock() + timedelta(hours=2)
+            ).model_dump(mode="json"),
+            created_at=lifecycle._clock(),
+            updated_at=lifecycle._clock(),
+        )
+        session.add(copying)
+    assert collector.collect().installations == 1
+    with sessions() as session:
+        uninstall = session.scalar(
+            select(Job).where(Job.kind == OperationKind.RECIPE_UNINSTALL.value)
+        )
+        assert uninstall is not None
+    _agents_succeed(sessions, lifecycle, uninstall.id)
+    later = lifecycle._clock() + timedelta(seconds=1)
+    for owner in (service, planner, lifecycle, collector):
+        owner._clock = lambda: later
+    with sessions.begin() as session:
+        for snapshot in session.scalars(select(NodeInventorySnapshot)):
+            snapshot.observed_at = snapshot.received_at = later
+            snapshot.disk_free_bytes = 10000
+    for _ in range(8):
+        _tick_profile_when_due(service, planner, lifecycle, accepted.id)
+        with sessions() as session:
+            install = session.scalar(
+                select(Job).where(
+                    Job.kind == OperationKind.RECIPE_INSTALL.value,
+                    Job.created_at >= later,
+                )
+            )
+        if install is not None:
+            break
+    assert install is not None
+    with sessions() as session:
+        copying = session.get(FleetProfileApplication, copying_id)
+        assert copying is not None and copying.state == LifecycleState.RUNNING
+
+
+def test_prepared_installation_is_referenced_before_its_child_is_issued(
+    postgres_engine, tmp_path: Path
+) -> None:
+    """Catches replacing the node hold while ignoring the prepared result."""
+    from vonk_agent_protocol.agent_words import ProfileChildJobKind, ProfileChildPhase
+    from vonk_control.catalog_revision_collection import operation_tokens
+    from vonk_control.job_documents import RunSwitchJobPayload
+    from vonk_control.run_switch_contract import (
+        RunSwitchOperationResult,
+        RunSwitchRuntimeInstallResult,
+    )
+
+    sessions, lifecycle, _, _, _, nodes = setup_services(
+        tmp_path, engine=postgres_engine
+    )
+    _, planner = _profile_service(sessions, lifecycle)
+    plan = planner.preview(_request(sessions, nodes[0]), actor="admin")
+    prepared_id = str(uuid4())
+    payload = RunSwitchJobPayload(
+        schema_version=2,
+        operation_kind=ProfileChildJobKind.RUN_SWITCH.value,
+        action=plan.action,
+        plan_digest=plan.plan_digest,
+        plan=plan,
+        progress=RunSwitchOperationResult(),
+    )
+    result = RunSwitchOperationResult(
+        phase_results=[
+            RunSwitchRuntimeInstallResult(
+                phase=ProfileChildPhase.PREPARE.value,
+                subphase=ProfileChildPhase.RUNTIME_INSTALL.value,
+                installation_id=prepared_id,
+            )
+        ]
+    )
+    with sessions.begin() as session:
+        session.add(
+            Job(
+                request_id=str(uuid4()),
+                kind=ProfileChildJobKind.RUN_SWITCH.value,
+                state=LifecycleState.RUNNING,
+                actor="admin",
+                authority_revision="r",
+                targets=list(nodes),
+                payload_digest=plan.plan_digest,
+                payload=payload.model_dump(mode="json"),
+                result=result.model_dump(mode="json"),
+                current_attempt=1,
+                created_at=lifecycle._clock(),
+                updated_at=lifecycle._clock(),
+            )
+        )
+    with sessions() as session:
+        assert prepared_id in operation_tokens(
+            session, lifecycle._clock(), recent=False
+        )

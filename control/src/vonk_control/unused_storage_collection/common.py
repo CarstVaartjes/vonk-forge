@@ -23,7 +23,7 @@ from vonk_agent_protocol import (
 
 from .. import job_states
 from ..fleet_profile_contract import FleetProfileAssignmentInput
-from ..models import FleetProfileApplication, ModelCacheSet
+from ..models import ModelCacheSet
 from ..recipe_action_plans import StopPlan, UninstallPlan
 from ..storage_demands import (
     STORAGE_EVICTING,
@@ -67,15 +67,16 @@ a while. If everything that may go would still not cover a refused request,
 nothing is removed and the waiting load says so
 (``storage.insufficient_after_eviction``).
 
-A load waiting for disk (to be admitted, or with no child of its switch in
-flight) has nothing on its Sparks, so its plan does not keep the installations
-there (the space it waits for is theirs to give).
+Node ownership and profile scope are not asset references. Only the exact
+installation, run, plan or content named by live work keeps an installation;
+unrelated installations can free space even while another Spark is copying.
 
 Every removal is re-proven while the Sparks (or artifact gates) are locked, so
 a load that starts after the pass looked is never raced: the uninstall takes
 no new workload intent (it supersedes nothing and leaves recovery of a running
-workload alone) and is refused when an operation targets its Sparks. One item
-that cannot be removed is kept for the next pass and never stops the rest.
+workload alone) and is refused when live work names the installation or its
+content. One item that cannot be removed is kept for the next pass and never
+stops the rest.
 """
 
 
@@ -402,32 +403,6 @@ def spark_eviction_capacity(
     )
     return EvictionCapacity(
         sum(item.freeable for item in items), _kept_sentence(kept_bytes), tuple(items)
-    )
-
-
-def _waits_for_storage(application: FleetProfileApplication) -> bool:
-    """A load with nothing in flight on a Spark holds nothing there.
-
-    It must not keep the installations on its own Sparks: it waits for disk
-    that only those installations can free, so keeping them would make the
-    space it waits for impossible to free for ever. That holds both before
-    admission and after its profile switch started, while no child of the
-    switch is in flight (a child waiting for disk is never issued). The
-    selected profile's own installations stay kept by the loaded profile, and
-    an issued child's job keeps its Sparks as an operation that owns them.
-    """
-
-    progress = application.progress if isinstance(application.progress, dict) else {}
-    if application.current_operation_id is not None:
-        # Started: decide by what the switch has in flight, not by the id.
-        adapter = progress.get("switch_adapter")
-        return isinstance(adapter, dict) and adapter.get("pending_children") == []
-    if progress.get("admission_pending") is True:
-        return True
-    blockers = progress.get("blockers")
-    return isinstance(blockers, list) and any(
-        isinstance(item, dict) and item.get("code") in _STORAGE_WAIT_CODES
-        for item in blockers
     )
 
 
