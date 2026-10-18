@@ -22,8 +22,8 @@ from vonk_control.models import (
     FleetProfileSelection,
 )
 
-from .test_fleet_profiles import _node_id, _seed, _uuid
-from .test_selected_profile_postgres import NOW, _service
+from .test_fleet_profiles import _input, _node_id, _seed, _uuid
+from .test_selected_profile_postgres import NOW, _service, _tick_selected_when_due
 
 
 @pytest.mark.parametrize("pending", [True, False])
@@ -116,11 +116,22 @@ def test_roster_request_survives_repreview_and_worker_restart(
             reason="Injected admission failure before selection advanced",
         )
 
+        receipt = service.application(receipt.id)
+
     # Lose the submitting worker. Several ordinary ticks must neither compare a
     # new observation against this key nor rearm its durable retry indefinitely.
     restarted = _service(sessions)
     for _ in range(3):
         restarted.tick()
+    if not pending and not changed_observation:
+        # An identical deterministic refusal remains visible without resubmission.
+        with sessions() as session:
+            assert (
+                session.get_one(FleetProfileSelection, 1).application_id == accepted.id
+            )
+            assert len(session.scalars(select(FleetProfileApplication)).all()) == 2
+        assert restarted.application(receipt.id) == receipt
+        return
     if pending:
         held = restarted.application(receipt.id)
         assert held.next_attempt_at == receipt.next_attempt_at
@@ -150,4 +161,57 @@ def test_roster_request_survives_repreview_and_worker_restart(
     else:
         assert reconciled.id != receipt.id
         assert reconciled.request_key != key
-        assert restarted.application(receipt.id).state == LifecycleState.FAILED
+        assert restarted.application(receipt.id) == receipt
+
+
+def test_pending_drift_request_resumes_execution_after_restart(
+    postgres_engine: Engine,
+) -> None:
+    """Adopting a pending maintenance load must reach its actual switch steps."""
+    Base.metadata.create_all(postgres_engine)
+    sessions = sessionmaker(postgres_engine, expire_on_commit=False)
+    _, revision_id = _seed(sessions)
+    service = _service(sessions)
+    profile = service.create(_input(revision_id), actor="admin")
+    accepted = service.apply(profile.id, request_key=_uuid(989), actor="admin")
+    for _ in range(8):
+        if service.application(accepted.id).state == LifecycleState.SUCCEEDED:
+            break
+        _tick_selected_when_due(service, accepted.id)
+    assert service.application(accepted.id).state == LifecycleState.SUCCEEDED
+    with sessions() as session:
+        selected = service._selected_profile_snapshot(session)
+    assert isinstance(selected, _SelectedProfileSnapshot)
+    preview = service.preview(
+        profile.id,
+        execution_assignments=tuple(selected.intended.assignments),
+        profile_name=selected.plan.profile_name,
+        profile_digest=selected.intended.profile_digest,
+        accepted_intent=selected.intended,
+        accepted_profile_revision=selected.profile_revision,
+        accepted_profile_definition=selected.plan.profile_definition,
+    )
+    assert preview.steps
+    receipt = service._create_pending_application(
+        preview,
+        request_key=_uuid(990),
+        actor=selected.actor,
+        operation_kind=ProfileOperationKind.APPLY.value,
+        select_profile=True,
+        selection_precondition=selected,
+    )
+    receipt = service._defer_pending_application(
+        receipt.id, "Injected capacity writer wait", retry_delay=timedelta(seconds=30)
+    )
+    restarted = _service(sessions)
+    assert receipt.next_attempt_at is not None
+    due = receipt.next_attempt_at
+    restarted._clock = lambda: due
+    for _ in range(8):
+        if restarted.application(receipt.id).state == LifecycleState.SUCCEEDED:
+            break
+        _tick_selected_when_due(restarted, receipt.id)
+    assert restarted.application(receipt.id).state == LifecycleState.SUCCEEDED
+    with sessions() as session:
+        assert session.get_one(FleetProfileSelection, 1).application_id == receipt.id
+        assert len(session.scalars(select(FleetProfileApplication)).all()) == 2

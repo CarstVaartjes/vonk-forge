@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING
@@ -53,13 +52,13 @@ from .contracts import (
 )
 from .persistence import (
     _application_effect_scope,
+    _owns_pending_admission,
     _persisted_profile_plan,
     _persisted_profile_progress,
     _stored_progress,
 )
 from .projection_support import (
     _aware,
-    _roster_digest,
 )
 
 if TYPE_CHECKING:
@@ -360,6 +359,8 @@ class FleetProfileService:
         self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
         drift_signature: tuple[tuple[str, str], ...] = ()
         followed: tuple[FleetProfileIntendedConfiguration, str] | None = None
+        previous_request_id: str | None = None
+        previous_reviewed_digest: str | None = None
         with self._sessions() as session:
             selected = self._selected_profile_snapshot(session)
             if selected is None or isinstance(selected, Residue):
@@ -397,6 +398,30 @@ class FleetProfileService:
                 )
             if not roster_changed and not drift_signature and followed is None:
                 return False
+            if application is not None:
+                previous = session.scalar(
+                    select(FleetProfileApplication)
+                    .where(
+                        FleetProfileApplication.profile_id == selected.profile_id,
+                        FleetProfileApplication.selection_generation
+                        == selected.generation,
+                        FleetProfileApplication.created_at > application.created_at,
+                    )
+                    .order_by(FleetProfileApplication.created_at.desc())
+                    .limit(1)
+                )
+                if previous is not None:
+                    if _owns_pending_admission(
+                        previous, _persisted_profile_progress(previous)
+                    ):
+                        # The durable admission observer owns this retry, its
+                        # reviewed content and its clock. Re-previewing here
+                        # must neither conflict with it nor reset its backoff.
+                        return False
+                    previous_request_id = previous.id
+                    intended = self._intended_profile(previous, session=session)
+                    if not isinstance(intended, Residue):
+                        previous_reviewed_digest = intended.reviewed_plan_digest
 
         # Preserve the accepted topology exactly. Preview compares it with the
         # current roster and owns the incomplete multi-Spark cleanup decision.
@@ -411,19 +436,16 @@ class FleetProfileService:
             accepted_profile_revision=selected.profile_revision,
             accepted_profile_definition=selected.plan.profile_definition,
         )
+        if preview.plan_digest == previous_reviewed_digest:
+            # The same completed request has the same result. Its failure is
+            # already visible; only changed content warrants another attempt.
+            return False
         request_key = str(
             uuid.uuid5(
                 uuid.NAMESPACE_URL,
                 "vonk-forge:fleet-profile-reconcile:"
                 f"{selected.application_id}:{selected.generation}:"
-                f"{_roster_digest(roster)}:"
-                f"{hashlib.sha256(repr(drift_signature).encode()).hexdigest()}"
-                + (
-                    ":follows:"
-                    + ",".join(item.recipe_revision_id for item in assignments)
-                    if followed is not None
-                    else ""
-                ),
+                f"{previous_request_id}:{preview.plan_digest}",
             )
         )
         if not preview.allowed and (
