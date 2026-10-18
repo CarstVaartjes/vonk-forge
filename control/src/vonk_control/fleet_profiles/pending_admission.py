@@ -194,6 +194,7 @@ class FleetProfileService:
                 if row is None:
                     return False
                 intended = self._intended_profile(row, session=session)
+                roster_reconciliation = row.selection_generation is not None
             if isinstance(intended, Residue):
                 self._finish_pending_admission(
                     application_id,
@@ -209,7 +210,11 @@ class FleetProfileService:
             # enough refuses every try. After repeated refusals this retry
             # queues for them instead, bounded by the patient lock timeout.
             with patient_admission(refused):
-                self._prepare_pending_admission(application_id, plan)
+                # Maintenance is not selected until admission replaces its
+                # source. Use the same queue path as its initial attempt; that
+                # transaction validates the source selection and fences work.
+                if not roster_reconciliation:
+                    self._prepare_pending_admission(application_id, plan)
                 self._queue_application(
                     plan,
                     request_key=request_key,
