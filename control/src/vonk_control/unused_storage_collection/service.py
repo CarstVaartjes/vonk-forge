@@ -264,7 +264,9 @@ class UnusedStorageCollector:
             if time.monotonic() > deadline:
                 kept[f"{item.kind}: sweep budget"] += 1
                 continue
-            attempted[(item.kind, item.key)] = self._remove(item, kept, outcome)
+            attempted[(item.kind, item.key)] = self._remove(
+                item, kept, outcome, attempted
+            )
         if outcome.removed["image"]:
             self._reclaim_blobs()
         return outcome

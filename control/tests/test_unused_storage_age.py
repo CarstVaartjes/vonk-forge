@@ -10,6 +10,7 @@ from vonk_agent_protocol import InstallationState, RunState
 
 from .test_catalog_revision_collection import NOW, Catalog
 from .test_unused_storage_collection import (
+    A_MODEL,
     AN_IMAGE,
     TOTAL,
     FakeLifecycle,
@@ -149,3 +150,18 @@ def test_age_uninstall_binds_model_retention_in_real_queue(
         fresh, plan_digest=fresh.plan_digest, actor="test", request_id=str(uuid.uuid4())
     )
     assert accepted.owner_id != installation_id
+
+
+def test_failed_pressure_member_cannot_suppress_other_expired_installations(
+    world: Catalog,
+) -> None:
+    """Catches marking an entire shared-model group attempted after only its first member failed."""
+    revision = world.revision("glm", 1, head="active")
+    first, _ = world.workload(revision, run=RunState.STOPPED)
+    second, _ = world.workload(revision, run=RunState.STOPPED)
+    for installation_id in (first, second):
+        _size(world, installation_id, 1024, model=A_MODEL)
+    blocked, eligible = sorted((first, second))
+    lifecycle = FakeLifecycle(world.sessions, refuse=frozenset({blocked}))
+    _collector(world, lifecycle).collect()
+    assert lifecycle.removed == [eligible]
