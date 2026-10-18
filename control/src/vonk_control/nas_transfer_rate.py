@@ -30,6 +30,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import AgentOperation as OperationKind
 from vonk_agent_protocol import LifecycleState, stored_words
+from vonk_agent_protocol.inventory import NetworkInterface
 
 from .agent_operation_states import ORDER
 from .models import AgentOperation, AgentOperationAttempt
@@ -48,6 +49,7 @@ _SLOW_FRACTION = 0.25
 class NasTransferNotice:
     detail: str
     recommendation: str
+    compact_detail: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -135,5 +137,52 @@ def slow_nas_transfers(
             f"Check this Spark's network path to the NAS: its model copies take "
             f"about {best / rate.bytes_per_second:.0f}x as long as on "
             f"{names[fastest]}."[:256],
+            f"Copies from the NAS at {_mb(rate.bytes_per_second)} vs {_mb(best)} "
+            f"(median of {rate.transfers} recent transfer{plural})",
         )
     return notices
+
+
+def wifi_link_detail(
+    interfaces: list[NetworkInterface] | None, route: str | None
+) -> str:
+    """Observed PHY evidence for the NAS route, never a throughput estimate."""
+    link = next((item for item in interfaces or [] if item.name == route), None)
+    if link is None or link.kind != "wifi" or not link.carrier:
+        return ""
+    parts: list[str] = []
+    if link.signal_dbm is not None:
+        parts.append(f"signal {link.signal_dbm} dBm")
+    if link.frequency_mhz is not None:
+        frequency = link.frequency_mhz
+        band = (
+            "2.4 GHz"
+            if 2400 <= frequency < 2500
+            else "5 GHz"
+            if 4900 <= frequency < 5925
+            else "6 GHz"
+            if 5925 <= frequency <= 7125
+            else f"{frequency} MHz"
+        )
+        parts.append(f"on {band}")
+    for label, rate in (("TX", link.tx_bitrate_mbps), ("RX", link.rx_bitrate_mbps)):
+        if rate is not None:
+            parts.append(f"{label} {rate:g} Mbit/s")
+    return "; Wi-Fi " + ", ".join(parts) if parts else ""
+
+
+def nas_transfer_detail(
+    notice: NasTransferNotice,
+    interfaces: list[NetworkInterface] | None,
+    route: str | None,
+) -> str:
+    link = wifi_link_detail(interfaces, route)
+    if not link:
+        return notice.detail
+    detail = notice.detail.rstrip(".") + link + "."
+    if len(detail) > 256:
+        # Keep the measured comparison and link evidence within Text256.
+        # The recommendation still names the faster peer when its long display
+        # name leaves no room for the link measurements in the detail.
+        detail = notice.compact_detail + link + "."
+    return detail

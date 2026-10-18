@@ -4,12 +4,15 @@ import ast
 import fnmatch
 import importlib.machinery
 import importlib.util
+import os
 import re
 import subprocess
+import sys
 import tomllib
 from pathlib import Path
 
 import pytest
+import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 REPO = "owner/repo"
@@ -147,8 +150,14 @@ def github(monkeypatch):
         ("agent", "control/tests/fixtures/compiled_workload_v2.json", True),
         ("agent", "control/tests/test_x.py", False),
         ("agent", "docs/x.md", False),
+        ("agent", "schemas/example.json", False),
+        ("agent", "src/cluster_profiles/cli.py", False),
+        ("agent", "tools/openapi-client/package.json", False),
+        ("setups", "schemas/example.json", False),
+        ("setups", "src/cluster_profiles/cli.py", False),
+        ("setups", "tools/openapi-client/package.json", False),
         ("setups", "control/src/vonk_control/resources/site-ports.json", True),
-        ("setups", "schemas/install-release-manifest.schema.json", True),
+        ("setups", "schemas/install-release-manifest.schema.json", False),
         ("setups", "control/packaging/public-contracts.lock", False),
         ("setups", "tests/nodes/test_agent_package_native_lifecycle.sh", False),
     ],
@@ -306,10 +315,19 @@ def image_job_inputs() -> set[str]:
     for token in re.findall(r"[\w.-]+(?:/[\w.-]+)+", workflow):
         parts = token.split("/")
         for start in range(len(parts) - 1):
-            if (ROOT / "/".join(parts[start:])).is_file():
+            if (ROOT / "/".join(parts[start:])).is_file() and not local_output(
+                "/".join(parts[start:])
+            ):
                 inputs.add("/".join(parts[start:]))
-    for action in re.findall(r"uses:\s*\./(\S+)", workflow):
+    pending = re.findall(r"uses:\s*\./(\S+)", workflow)
+    while pending:
+        action = pending.pop()
+        if pattern(action) in inputs:
+            continue
         inputs.add(pattern(action))
+        pending += re.findall(
+            r"uses:\s*\./(\S+)", (ROOT / action / "action.yml").read_text()
+        )
     # A file inside a directory input is already covered by that directory.
     return {
         path
@@ -408,12 +426,12 @@ def local_output(path: str) -> bool:
     return False
 
 
-def named_inputs(path: str) -> set[str]:
+def named_inputs(path: str, *, text: str | None = None) -> set[str]:
     """Repository files a workflow, action or script names by path or import."""
     source = ROOT / path
-    text = "\n".join(
-        re.sub(r"(^|\s)#.*", "", line) for line in source.read_text().splitlines()
-    )
+    if text is None:
+        text = source.read_text()
+    text = "\n".join(re.sub(r"(^|\s)#.*", "", line) for line in text.splitlines())
     names: set[str] = set()
     for token in PATH_TOKEN.findall(text):
         parts = token.removeprefix("./").split("/")
@@ -470,8 +488,41 @@ def job_inputs(sources: tuple[str, ...], crates: set[str]) -> set[str]:
     pending = [
         f"{path[:-3]}/action.yml" if path.endswith("/**") else path for path in sources
     ]
+    test_cutoffs: dict[str, Path] = {}
+    python_action = ".github/actions/python-env/action.yml"
     while pending:
-        named = named_inputs(pending.pop())
+        path = pending.pop()
+        if path == python_action:
+            continue
+        named = named_inputs(path)
+        # Follow only enabled branches of the environment action, with the
+        # caller's options. Counting its disabled generators rebuilds artifacts
+        # whose actual inputs never changed.
+        document = (
+            yaml.safe_load((ROOT / path).read_text()) if path.endswith(".yml") else {}
+        )
+        jobs = document.get("jobs", {"action": document.get("runs", {})})
+        for job in jobs.values():
+            for step in job.get("steps", []):
+                run = step.get("run", "")
+                if cutoff := re.search(r"--confcutdir=(\S+)", run):
+                    for test in re.findall(r"tests/[\w/]+[.]py", run):
+                        test_cutoffs[test] = Path(cutoff[1])
+                if step.get("uses") != "./.github/actions/python-env":
+                    continue
+                options = step.get("with", {})
+                action = yaml.safe_load((ROOT / python_action).read_text())
+                enabled = [
+                    step
+                    for step in action["runs"]["steps"]
+                    if "if" not in step
+                    or step["if"]
+                    in (
+                        f"inputs.contracts == '{options.get('contracts', 'full')}'",
+                        f"inputs.cli-dependencies == '{options.get('cli-dependencies', 'true')}'",
+                    )
+                ]
+                named |= named_inputs(python_action, text=yaml.safe_dump(enabled))
         pending += [
             f"{path[:-3]}/action.yml"
             for path in named - inputs
@@ -485,6 +536,9 @@ def job_inputs(sources: tuple[str, ...], crates: set[str]) -> set[str]:
             # pytest also loads every conftest.py above the test it runs.
             if path.startswith("tests/") and path.endswith(".py"):
                 for parent in Path(path).parents:
+                    cutoff = test_cutoffs.get(path)
+                    if cutoff and parent != cutoff and cutoff not in parent.parents:
+                        continue
                     if (ROOT / parent / "conftest.py").is_file():
                         conftest = (parent / "conftest.py").as_posix()
                         inputs |= {conftest, *named_inputs(conftest)}
@@ -529,3 +583,38 @@ def test_producer_paths_are_exactly_the_job_inputs(producer):
     # artifact whose inputs did not change.
     assert sorted(inputs - paths) == [], f"{producer} inputs the producer ignores"
     assert sorted(paths - inputs) == [], f"{producer} paths no job reads"
+
+
+def test_cargo_wire_export_reads_only_declared_cli_inputs(tmp_path):
+    """Catches pruning real transitive inputs or letting Cargo need generated
+    CLI clients again: deny every undeclared read in the excluded directories."""
+    program = r"""
+import fnmatch, importlib.util, runpy, sys
+from pathlib import Path
+root = Path.cwd()
+spec = runpy.run_path("scripts/resolve-publication-producer")
+paths = spec["PRODUCERS"][spec["ProducerName"].AGENT].paths
+watched = ("schemas/", "src/cluster_profiles/", "tools/openapi-client/")
+def audit(event, args):
+    if event != "open" or not isinstance(args[0], str):
+        return
+    path = Path(args[0]).resolve()
+    if not path.is_relative_to(root):
+        return
+    if path.suffix == ".pyc":
+        path = Path(importlib.util.source_from_cache(str(path)))
+    relative = path.relative_to(root).as_posix()
+    if relative.startswith(watched) and not any(fnmatch.fnmatchcase(relative, pattern) for pattern in paths):
+        raise AssertionError(f"undeclared Cargo schema input: {relative}")
+sys.addaudithook(audit)
+sys.path.insert(0, str(root / "scripts"))
+sys.argv = ["scripts/export-agent-wire-schema", "--output", sys.argv[1]]
+runpy.run_path("scripts/export-agent-wire-schema", run_name="__main__")
+"""
+    subprocess.run(
+        [sys.executable, "-c", program, str(tmp_path / "wire.json")],
+        cwd=ROOT,
+        check=True,
+        timeout=60,
+        env={**os.environ, "UV_PROJECT_ENVIRONMENT": sys.prefix},
+    )

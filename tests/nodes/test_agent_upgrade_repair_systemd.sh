@@ -1759,21 +1759,26 @@ if [[ -n "$crash_watcher" ]]; then
       --property=ControlGroup --value "$helper_unit")
     case "$boot_helper_control_group" in
       */system.slice/"$helper_unit") ;;
+      # The injected kill can let systemd drop the helper's cgroup before this
+      # read: then nothing is frozen and there is nothing to normalize.
+      "") ;;
       *) printf 'unexpected frozen helper cgroup: %s\n' \
         "$boot_helper_control_group" >&2; exit 1 ;;
     esac
-    boot_helper_cgroup=/sys/fs/cgroup$boot_helper_control_group
-    if [[ -f "$boot_helper_cgroup/cgroup.freeze" ]]; then
-      printf '0\n' > "$boot_helper_cgroup/cgroup.freeze"
-    fi
-    for _ in {1..100}; do
-      systemctl --system thaw "$helper_unit" >/dev/null 2>&1 || true
-      [[ ! -e "$boot_helper_cgroup/cgroup.events" ]] && break
-      grep -Fxq 'frozen 0' "$boot_helper_cgroup/cgroup.events" && break
-      sleep 0.05
-    done
-    if [[ -e "$boot_helper_cgroup/cgroup.events" ]]; then
-      grep -Fxq 'frozen 0' "$boot_helper_cgroup/cgroup.events"
+    if [[ -n "$boot_helper_control_group" ]]; then
+      boot_helper_cgroup=/sys/fs/cgroup$boot_helper_control_group
+      if [[ -f "$boot_helper_cgroup/cgroup.freeze" ]]; then
+        printf '0\n' > "$boot_helper_cgroup/cgroup.freeze"
+      fi
+      for _ in {1..100}; do
+        systemctl --system thaw "$helper_unit" >/dev/null 2>&1 || true
+        [[ ! -e "$boot_helper_cgroup/cgroup.events" ]] && break
+        grep -Fxq 'frozen 0' "$boot_helper_cgroup/cgroup.events" && break
+        sleep 0.05
+      done
+      if [[ -e "$boot_helper_cgroup/cgroup.events" ]]; then
+        grep -Fxq 'frozen 0' "$boot_helper_cgroup/cgroup.events"
+      fi
     fi
     systemctl --system stop "$recovery_unit" "$agent_unit" "$helper_unit" \
       "$socket_unit" >/dev/null 2>&1 || true

@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
+import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_agent_protocol.inventory import InventoryRequest, NetworkInterface
 from vonk_control.models import (
     AgentNode,
     AgentOperation,
@@ -14,7 +17,12 @@ from vonk_control.models import (
     Base,
     Job,
 )
-from vonk_control.nas_transfer_rate import slow_nas_transfers
+from vonk_control.nas_transfer_rate import (
+    NasTransferNotice,
+    nas_transfer_detail,
+    slow_nas_transfers,
+    wifi_link_detail,
+)
 from vonk_control.stored_json import write_guard_mode
 
 NOW = datetime(2026, 10, 17, 20, 0, tzinfo=UTC)
@@ -40,7 +48,7 @@ def _sessions() -> sessionmaker[Session]:
                 kind="recipe.install",
                 state="running",
                 actor="test",
-                authority_revision="a" * 64,
+                authority_revision="a" * 200,
                 targets=[FAST, SLOW],
                 payload_digest="b" * 64,
                 payload={},
@@ -72,7 +80,7 @@ def _transfer(
                 kind=kind,
                 payload_digest="c" * 64,
                 payload={},
-                authority_revision="a" * 64,
+                authority_revision="a" * 200,
                 state=state,
                 current_attempt=1,
                 created_at=NOW - ago,
@@ -184,3 +192,92 @@ def test_unreadable_or_unmeasured_progress_is_skipped_not_fatal() -> None:
 
     _transfer(sessions, SLOW, 25 * GB, 7000)
     assert set(_notices(sessions)) == {SLOW}
+
+
+def test_agent_wifi_vector_reaches_the_warning_consumer() -> None:
+    # Wrong implementation: new link fields are dropped by the Controller's
+    # parser, or PHY rates are confused with the measured copy rate.
+    vector = (
+        Path(__file__).parents[2]
+        / "agent_protocol/src/vonk_agent_protocol/vectors/inventory-wifi-link-v1.json"
+    )
+    request = InventoryRequest.model_validate_json(vector.read_bytes())
+    assert not request.evidence_warnings
+    detail = nas_transfer_detail(
+        NasTransferNotice(
+            "Copies from the NAS at 3.6 MB/s.",
+            "Check the NAS path.",
+            "Copies from the NAS at 3.6 MB/s",
+        ),
+        request.network_interfaces,
+        request.nas_route_interface,
+    )
+    assert (
+        detail
+        == "Copies from the NAS at 3.6 MB/s; Wi-Fi signal -78 dBm, on 2.4 GHz, TX 866.7 Mbit/s, RX 6.5 Mbit/s."
+    )
+
+
+@pytest.mark.parametrize(
+    "frequency,band",
+    [(2412, "2.4 GHz"), (5180, "5 GHz"), (6115, "6 GHz"), (58320, "58320 MHz")],
+)
+def test_wifi_frequency_names_the_observed_band(frequency: int, band: str) -> None:
+    # Wrong implementation: a missing RSSI hides a readable band, or every
+    # frequency above 5 GHz is assumed to be the 5 GHz band.
+    nic = NetworkInterface(
+        name="wlan0", kind="wifi", carrier=True, frequency_mhz=frequency
+    )
+    assert wifi_link_detail([nic], nic.name) == f"; Wi-Fi on {band}"
+
+
+def test_unreadable_wired_and_unselected_links_leave_warning_unchanged() -> None:
+    # Wrong implementation: a Wi-Fi NIC elsewhere is treated as the NAS route,
+    # or missing readings turn into zero signal/rates.
+    notice = NasTransferNotice(
+        "Copies from the NAS at 3.6 MB/s.",
+        "Check the NAS path.",
+        "Copies from the NAS at 3.6 MB/s",
+    )
+    for nic in (
+        NetworkInterface(name="wlan0", kind="wifi", carrier=True),
+        NetworkInterface(name="eth0", kind="wired", carrier=True, signal_dbm=-78),
+        NetworkInterface(name="wlan0", kind="wifi", carrier=False, signal_dbm=-78),
+    ):
+        assert nas_transfer_detail(notice, [nic], nic.name) == notice.detail
+    assert nas_transfer_detail(notice, None, None) == notice.detail
+    nic = NetworkInterface(name="wlan0", kind="wifi", carrier=True, rx_bitrate_mbps=54)
+    assert wifi_link_detail([nic], "eth0") == ""
+    assert wifi_link_detail([nic], nic.name) == "; Wi-Fi RX 54 Mbit/s"
+
+
+def test_link_evidence_fits_the_warning_bound_without_cutting_it_off() -> None:
+    # Wrong implementation: appending link data exceeds ProjectionReason's
+    # bound and breaks the fleet view, or truncates away the link diagnosis.
+    from vonk_agent_protocol import ProjectionCode
+    from vonk_agent_protocol.agent_words import ProfileReasonSeverity
+    from vonk_control.fleet_projection import ProjectionReason
+
+    notice = NasTransferNotice(
+        "Copies from the NAS at 3.6 MB/s vs 64.1 MB/s on "
+        + "a" * 200
+        + " (median of 5 recent transfers; latest 25.8 GB in 7089 s).",
+        "Check the NAS path.",
+        "Copies from the NAS at 3.6 MB/s vs 64.1 MB/s (median of 5 recent transfers)",
+    )
+    nic = NetworkInterface(
+        name="wlan0",
+        kind="wifi",
+        carrier=True,
+        signal_dbm=-78,
+        frequency_mhz=2412,
+        tx_bitrate_mbps=866.7,
+        rx_bitrate_mbps=866.7,
+    )
+    reason = ProjectionReason(
+        code=ProjectionCode.NETWORK_NAS_TRANSFER_SLOW,
+        severity=ProfileReasonSeverity.WARNING.value,
+        detail=nas_transfer_detail(notice, [nic], nic.name),
+    )
+    assert "median of 5 recent transfers" in reason.detail
+    assert reason.detail.endswith("RX 866.7 Mbit/s.")

@@ -41,6 +41,9 @@ jobs:
           persist-credentials: false
       - name: Prepare Pydantic contracts for Cargo builds
         uses: ./.github/actions/python-env
+        with:
+          contracts: none
+          cli-dependencies: "false"
       - name: Install pinned Rust toolchain
         shell: bash
         run: |

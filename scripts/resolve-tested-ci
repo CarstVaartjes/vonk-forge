@@ -469,12 +469,15 @@ def resolve(source: str, repo: str) -> tuple[int, int | None]:
         raise EvidenceError("invalid release source")
     target_tree = git("rev-parse", f"{source}^{{tree}}")
     deadline = monotonic() + LOOKUP_SECONDS
-    for pause in (*LATE_LISTING_PAUSES, None):
+    for lookups, pause in enumerate((*LATE_LISTING_PAUSES, None), start=1):
         compared: list[str] = []
         run_id = _lookup(
             source, repo, target_tree, deadline=deadline, compared=compared
         )
         if run_id is not None:
+            if lookups > 1 and (summary := os.environ.get("GITHUB_STEP_SUMMARY")):
+                with Path(summary).open("a") as output:
+                    output.write(f"Source CI run {run_id} found after {lookups} lookups\n")
             return 0, run_id
         # A differing tested tree is a definitive miss; nothing seen may be lag.
         if compared or pause is None:

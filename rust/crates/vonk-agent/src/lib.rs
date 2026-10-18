@@ -37,3 +37,5 @@ pub mod telemetry;
 pub mod vocabulary;
 pub mod wire_prose;
 pub mod workloads;
+
+mod wifi;

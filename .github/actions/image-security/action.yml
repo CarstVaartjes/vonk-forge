@@ -1,0 +1,50 @@
+name: Scan and smoke an exact image index
+description: Run the same vulnerability policy and rootless runtime smoke for PR and main images
+inputs:
+  role:
+    required: true
+    description: Image role
+  image:
+    required: true
+    description: Digest-bound registry image
+runs:
+  using: composite
+  steps:
+    - uses: ./.github/actions/image-scan
+      env:
+        TRIVY_PLATFORM: linux/amd64
+      with:
+        image: ${{ inputs.image }}
+        category: development-${{ inputs.role }}
+        gate: ${{ inputs.role == 'api' || inputs.role == 'worker' }}
+        skip-dirs: /usr/local/lib/skopeo
+    - name: Smoke the exact rootless LiteLLM runtime on both architectures
+      if: inputs.role == 'litellm'
+      shell: bash
+      env:
+        IMAGE: ${{ inputs.image }}
+      run: |
+        set -euo pipefail
+        tags=()
+        cleanup() {
+          if ((${#tags[@]} > 0)); then
+            docker image rm --force "${tags[@]}" >/dev/null 2>&1 || true
+          fi
+        }
+        trap cleanup EXIT
+        for architecture in amd64 arm64; do
+          tag="vonk-forge-litellm-smoke:${architecture}-${GITHUB_RUN_ID}"
+          tags+=("$tag")
+          scripts/retry-dependency-fetch skopeo copy \
+            --override-os linux --override-arch "$architecture" \
+            "docker://$IMAGE" \
+            "docker-daemon:$tag"
+          docker run --rm --platform "linux/$architecture" \
+            --network none --read-only --cap-drop ALL \
+            --security-opt no-new-privileges \
+            --entrypoint python \
+            --env PRISMA_QUERY_ENGINE_BINARY=/opt/vonk-litellm/prisma/query-engine \
+            --volume "$GITHUB_WORKSPACE/deploy/compose/litellm/config_supervisor.py:/tmp/config_supervisor.py:ro" \
+            "$tag" -c \
+            'import importlib.util,sys; spec=importlib.util.spec_from_file_location("vonk_litellm_supervisor","/tmp/config_supervisor.py"); module=importlib.util.module_from_spec(spec); sys.modules[spec.name]=module; spec.loader.exec_module(module); module._prepare_query_engine()'
+        done
