@@ -13,7 +13,12 @@ from vonk_agent_protocol.state_machines import NodeIdentityState
 from vonk_control.fleet_profile_contract import FleetProfileInput
 from vonk_control.fleet_profiles import FleetProfileInvalid
 from vonk_control.jobs import JobService
-from vonk_control.models import AgentNode, FleetProfileApplication, RecipeBuild
+from vonk_control.models import (
+    AgentNode,
+    FleetProfileApplication,
+    FleetProfileSelection,
+    RecipeBuild,
+)
 from vonk_control.recipe_operation_worker import RecipeOperationWorker
 from vonk_control.worker import Worker
 
@@ -92,8 +97,11 @@ def test_due_queued_load_is_attempted_after_worker_restart(
         assert list(session.scalars(select(FleetProfileApplication.id))) == [pending.id]
 
 
-def test_roster_repair_cannot_starve_due_admission(tmp_path, postgres_engine):
-    """Catches roster contention returning before every due admission scan."""
+@pytest.mark.parametrize("same_profile", [False, True])
+def test_roster_repair_cannot_starve_due_admission(
+    tmp_path, postgres_engine, same_profile
+):
+    """Catches maintenance replacing a newer load while its admission is busy."""
     sessions, profiles, planner, *_ = _capacity_profile(tmp_path, postgres_engine)
     idle = profiles.create(
         FleetProfileInput(name="Selected idle", assignments=[]), actor="admin"
@@ -109,8 +117,12 @@ def test_roster_repair_cannot_starve_due_admission(tmp_path, postgres_engine):
                 architecture="linux-arm64",
             )
         )
-    newer = profiles.create(
-        FleetProfileInput(name="Newest idle", assignments=[]), actor="admin"
+    newer = (
+        idle
+        if same_profile
+        else profiles.create(
+            FleetProfileInput(name="Newest idle", assignments=[]), actor="admin"
+        )
     )
     pending = profiles._create_pending_application(
         profiles.preview(newer.id),
@@ -121,7 +133,7 @@ def test_roster_repair_cannot_starve_due_admission(tmp_path, postgres_engine):
     due = pending.progress.admission_retry_at
     assert due is not None
     recovered, _ = _profile_service(sessions, planner._lifecycle)
-    recovered._clock = lambda: due + timedelta(seconds=1)
+    recovered._clock = lambda: due - timedelta(seconds=1)
     worker = RecipeOperationWorker(
         sessions, _NoopRoutes(), clock=recovered._clock, fleet_profiles=recovered
     )
@@ -129,10 +141,25 @@ def test_roster_repair_cannot_starve_due_admission(tmp_path, postgres_engine):
     # maintenance tries to bind its new roster. It must not monopolize ticks.
     with sessions.begin() as holder:
         assert holder.get(AgentNode, joined, with_for_update=True) is not None
+        # Maintenance must yield to the newer load even during its backoff,
+        # without manufacturing a later request or resetting the retry clock.
+        for _ in range(2):
+            assert not recovered._reconcile_selected_roster(recovered._clock())
+        assert recovered.application(pending.id) == pending
+        recovered._clock = lambda: due + timedelta(seconds=1)
         for _ in range(2):
             worker.tick()
         attempted = recovered.application(pending.id)
+        assert attempted.state == LifecycleState.QUEUED, attempted.status_reason
         assert attempted.progress.admission_attempt > pending.progress.admission_attempt
+        with sessions() as session:
+            assert set(session.scalars(select(FleetProfileApplication.id))) == {
+                selected.id,
+                pending.id,
+            }
+            assert (
+                session.get_one(FleetProfileSelection, 1).application_id == selected.id
+            )
     next_due = attempted.progress.admission_retry_at
     assert next_due is not None
     recovered._clock = lambda: next_due + timedelta(seconds=1)
@@ -140,3 +167,5 @@ def test_roster_repair_cannot_starve_due_admission(tmp_path, postgres_engine):
     completed = recovered.application(pending.id)
     assert not completed.progress.admission_pending, completed.status_reason
     assert completed.state == LifecycleState.SUCCEEDED
+    with sessions() as session:
+        assert session.get_one(FleetProfileSelection, 1).application_id == pending.id

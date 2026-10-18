@@ -399,6 +399,25 @@ class FleetProfileService:
             if not roster_changed and not drift_signature and followed is None:
                 return False
             if application is not None:
+                for load in session.scalars(
+                    select(FleetProfileApplication).where(
+                        FleetProfileApplication.selection_generation.is_(None),
+                        FleetProfileApplication.created_at > application.created_at,
+                        FleetProfileApplication.state.in_(
+                            job_states.words(
+                                LifecycleState.QUEUED, LifecycleState.NEEDS_OPERATOR
+                            )
+                        ),
+                    )
+                ):
+                    progress = _stored_progress(load)
+                    if not isinstance(progress, Residue) and _owns_pending_admission(
+                        load, progress
+                    ):
+                        # Maintenance continues the old selection, never a new
+                        # operator decision. Let a newer load own its admission
+                        # and backoff, even when it selects the same profile.
+                        return False
                 previous = session.scalar(
                     select(FleetProfileApplication)
                     .where(
