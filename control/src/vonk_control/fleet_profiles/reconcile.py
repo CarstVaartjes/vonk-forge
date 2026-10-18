@@ -471,6 +471,7 @@ class FleetProfileService:
                             session=session,
                         )
                         return True
+                    owner_pending = False
                     owner_progress = _persisted_profile_progress(owner)
                     document = owner_progress.switch_adapter
                     for stop in effect.stops:
@@ -502,7 +503,7 @@ class FleetProfileService:
                                 for receipt in completed.result.run_switch.phase_results
                             )
                         ):
-                            waiting_for_adopted = True
+                            owner_pending = True
                     expected_images = {
                         item.assignment_id: item.runtime_image
                         for item in owner_plan.preparation_decisions
@@ -512,18 +513,29 @@ class FleetProfileService:
                         for item in plan.resolved_assignments
                         if item.id in effect.assignment_ids
                     ]
-                    waiting_for_adopted |= (
-                        owner.state != LifecycleState.SUCCEEDED
-                        or any(
-                            self._assignment_state(
-                                session,
-                                item,
-                                expected_image=expected_images.get(item.id),
-                            ).current_state
-                            != item.desired_state
-                            for item in assignments
-                        )
+                    owner_pending |= owner.state != LifecycleState.SUCCEEDED or any(
+                        self._assignment_state(
+                            session,
+                            item,
+                            expected_image=expected_images.get(item.id),
+                        ).current_state
+                        != item.desired_state
+                        for item in assignments
                     )
+                    if owner_pending and owner.state == LifecycleState.SUCCEEDED:
+                        # A terminal executor cannot produce missing evidence or
+                        # restore effects a later load changed. Review the current
+                        # intent again instead of polling the completed plan.
+                        self._replan_admitted(
+                            row,
+                            FleetProfileReviewStale(
+                                f"Completed continuing load {owner.id} no longer "
+                                "proves its Stop receipts or desired assignment state"
+                            ),
+                            now,
+                        )
+                        return True
+                    waiting_for_adopted |= owner_pending
                 if waiting_for_adopted:
                     progress.retry_due_at = FleetProfileAdapter.next_retry(
                         row.id, 1, now
