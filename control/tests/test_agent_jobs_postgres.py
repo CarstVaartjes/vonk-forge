@@ -1265,3 +1265,46 @@ def test_helper_time_window_replans_but_bad_authority_ends(service, security):
     with sessions() as session:
         stored = session.get(AgentOperation, operation.id)
         assert stored is not None and stored.state == LifecycleState.SUCCEEDED
+
+
+def test_unlaunched_job_keeps_its_offline_owner_recovery_window(service):
+    """Applying output retention before a job exits would expire this wait."""
+    from pathlib import Path
+
+    from vonk_agent_protocol import AgentClaim, RecipeJobRunRequest
+    from vonk_agent_protocol import AgentOperation as OperationKind
+    from vonk_control.agent_operation_facts import (
+        AGENT_ORDER_RECOVERY_BUDGET,
+        order_recovery_deadline,
+    )
+
+    sessions, clock = service
+    jobs = AgentJobService(sessions, clock=clock)
+    vector = AgentClaim.model_validate_json(
+        (
+            Path(__file__).parents[2]
+            / "agent_protocol/src/vonk_agent_protocol/vectors/recipe-job-run-claim-v1.json"
+        ).read_bytes()
+    )
+    request = RecipeJobRunRequest.model_validate_json(
+        canonical_message(vector["payload"])
+    )
+    operation = jobs.enqueue(
+        parent(sessions, clock).id,
+        NODE_A,
+        OperationKind.RECIPE_JOB_RUN,
+        COMMIT,
+        request,
+    )
+    with sessions.begin() as session:
+        row = session.get(AgentOperation, operation.id)
+        assert row is not None
+        deadline = clock.now + AGENT_ORDER_RECOVERY_BUDGET
+        row.recovery_deadline = deadline
+    clock.advance(seconds=2 * 60 * 60)
+    with sessions() as session:
+        row = session.get(AgentOperation, operation.id)
+        assert row is not None
+        resumed = order_recovery_deadline(row, clock.now)
+        assert resumed is not None and resumed > clock.now
+        assert row.recovery_deadline == deadline  # a read never advances the work

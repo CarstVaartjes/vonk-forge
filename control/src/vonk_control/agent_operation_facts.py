@@ -14,7 +14,7 @@ from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.orm import object_session
-from vonk_agent_protocol import AgentClaim, AgentOperation
+from vonk_agent_protocol import AgentClaim, AgentOperation, RecipeJobRunRequest
 
 from . import agent_operation_states
 from .models import AgentOperation as StoredOperation
@@ -26,6 +26,7 @@ from .stall_window import (
     progress_deadline,
     stall_deadline,
 )
+from .stored_json import read_row_column
 
 LIFECYCLE_RESTART_OPERATIONS = frozenset(
     {
@@ -372,8 +373,10 @@ def order_recovery_deadline(
         return None
     stored = aware(operation.recovery_deadline)
     if operation.kind == AgentOperation.RECIPE_JOB_RUN.value:
-        # Job evidence has a fixed retention bound, including time offline.
-        return stored
+        payload = read_row_column(operation, "payload")
+        if isinstance(payload, RecipeJobRunRequest) and payload.output_delivery_only:
+            # Exited output bytes expire even while their Spark is offline.
+            return stored
     session = object_session(operation)
     if session is None:
         return stored
