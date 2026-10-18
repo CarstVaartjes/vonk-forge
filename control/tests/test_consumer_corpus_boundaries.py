@@ -177,15 +177,14 @@ def test_actual_asgi_installed_cli_and_generated_http_preserve_same_leaf(
     leaf["stdout"]["dropped_bytes"] = 9007199254740993
     leaf_text = json.dumps(leaf)
     agent = AgentResult.model_validate_json(agent_envelope(leaf_text))
-    assert agent.stored_result().diagnostics == FailureDiagnostics.model_validate_json(
-        leaf_text
-    )
+    expected = FailureDiagnostics.model_validate_json(leaf_text)
+    assert agent.stored_result().diagnostics == expected
     api, headers = api_with_diagnostic(leaf)
     with api, _https_api_peer(tmp_path, api, headers) as (url, certificate, _peer):
         response = api.get(f"/api/jobs/{EnqueuedJob.id}", headers=headers)
         assert response.status_code == 200
         raw = JobDetailResponse.model_validate_json(response.content)
-        assert job_diagnostics(raw).model_dump(mode="json") == leaf
+        assert job_diagnostics(raw) == expected
         client = AuthenticatedClient(
             base_url=url,
             verify_ssl=str(certificate),
@@ -219,7 +218,7 @@ def test_actual_asgi_installed_cli_and_generated_http_preserve_same_leaf(
         assert cli.operations is not None
         assert cli.operations[0].progress is not None
         assert cli.operations[0].progress.completed_bytes == 9007199254740993
-        assert job_diagnostics(cli).model_dump(mode="json") == leaf
+        assert job_diagnostics(cli) == expected
 
 
 def test_real_state_writer_restart_replay_shares_leaf_with_job_response(
