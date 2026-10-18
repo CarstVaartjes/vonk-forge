@@ -26,6 +26,7 @@ from vonk_agent_protocol import (
     AgentProgress,
     AgentResult,
     AgentResultState,
+    FailureCode,
     InventoryRequest,
     OutcomeKind,
     RecipeStartResult,
@@ -68,6 +69,11 @@ REVIEWED_CORE_DEFAULTS = {
     "RecipeJobRunResult.ending",
     "RecipeJobEnding.diagnostic",
     "FailureDiagnostics.schema_version",
+    # Also reached through success receipts: absent layout evidence and an
+    # unavailable OS errno are canonical defaults, not required receipt facts.
+    # On failed results the outer diagnostics evidence group is tolerant.
+    "FailureDiagnostics.model_store_layout",
+    "ModelStoreLayoutFault.errno",
     "AgentFailureResult.error_code",
     "AgentFailureResult.failure_kind",
     "AgentFailureResult.operation",
@@ -450,6 +456,23 @@ def test_an_invalid_result_evidence_field_costs_only_itself(
             assert getattr(stored, name) == redact_host_paths(str(poison[name]))
         else:
             assert getattr(stored, name) is None, name
+
+
+def test_malformed_optional_layout_evidence_keeps_failure_identity() -> None:
+    """Catches a layout-detail validation error losing the failure receipt."""
+    diagnostics = _diagnostics()
+    diagnostics[FailureCode.MODEL_STORE_LAYOUT.value] = {
+        "path": "/outside/managed/storage",
+        "errno": -1,
+    }
+    accepted = AgentResult.model_validate_json(
+        json.dumps(_failed_result(diagnostics=diagnostics))
+    )
+    assert accepted.state == AgentResultState.FAILED
+    assert accepted.stored_result().diagnostics is None
+    assert accepted.evidence_warnings == (
+        AgentEvidenceCode.FAILURE_DIAGNOSTICS_DROPPED,
+    )
 
 
 def test_telemetry_batch_survives_one_samples_invalid_reading() -> None:
