@@ -1122,7 +1122,9 @@ def test_the_agent_grant_request_stand_in_is_the_agents_own_bytes() -> None:
         assert dumped == case["grant_request"], case["name"]
 
 
-@pytest.mark.parametrize("state", ["current", "cancelled", "superseded"])
+@pytest.mark.parametrize(
+    "state", ["current", "cancelled", "superseded", "delivery-only"]
+)
 def test_the_agents_job_run_grant_requests_are_granted_in_each_controller_state(
     state: str,
 ) -> None:
@@ -1138,6 +1140,27 @@ def test_the_agents_job_run_grant_requests_are_granted_in_each_controller_state(
         node_intent=2 if state == "superseded" else 1,
         claim_as_sent=True,
     )
+
+    if state == "delivery-only":
+        from sqlalchemy import select
+        from vonk_agent_protocol import AgentOperation as AgentOperationKind
+
+        with service._sessions.begin() as session:
+            row = session.scalar(
+                select(AgentOperation).where(
+                    AgentOperation.kind == AgentOperationKind.RECIPE_JOB_RUN
+                )
+            )
+            assert row is not None
+            request = RecipeJobRunRequest.model_validate_json(
+                canonical_message(row.payload)
+            )
+            row.payload = request.model_copy(
+                update={"output_delivery_only": True}
+            ).model_dump(mode="json")
+            row.payload_digest = hashlib.sha256(
+                canonical_message(row.payload)
+            ).hexdigest()
 
     def grant(body: HostRuntimeGrantRequest) -> SignedHostHelperGrant:
         return issue_host_runtime_grant(

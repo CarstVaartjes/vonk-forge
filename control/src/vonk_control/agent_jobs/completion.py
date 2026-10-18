@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from datetime import datetime, timedelta
 
 from sqlalchemy.orm import Session
@@ -13,11 +15,15 @@ from vonk_agent_protocol import (
     OutcomeDone,
     OutcomeFailed,
     OutcomeUnknown,
+    RecipeJobRunRequest,
+    RecipeJobRunResult,
+    canonical_message,
     outcome_state,
 )
-from vonk_agent_protocol.contracts import AgentResultPayload
+from vonk_agent_protocol.contracts import AgentResultPayload, canonical_payload
 
 from ..agent_operation_facts import aware as _aware
+from ..agent_operation_facts import job_output_retention_expiry
 from ..agent_operation_facts import (
     start_deadline as _start_deadline,
 )
@@ -53,6 +59,26 @@ def _report_event(
         return Reported(Outcome.DONE, fence=fence)
     if state is AgentResultState.CANCELLED:
         return Reported(Outcome.CANCELLED, fence=fence)
+    if isinstance(result, RecipeJobRunResult) and result.output_delivery_pending:
+        request = RecipeJobRunRequest.model_validate_json(
+            canonical_message(operation.payload)
+        )
+        if request.output_delivery_only is None:
+            operation.recovery_deadline = job_output_retention_expiry(now)
+        payload = canonical_payload(
+            AgentOperation.RECIPE_JOB_RUN,
+            request.model_copy(update={"output_delivery_only": True}),
+        )
+        operation.payload = json.loads(payload)
+        operation.payload_digest = hashlib.sha256(payload).hexdigest()
+        delay = min(300, 2 ** min(operation.current_attempt, 9))
+        return Reported.failed(
+            Disposition.WAIT,
+            fence=fence,
+            effect=Effect.NONE,
+            retry_after=_aware(now) + timedelta(seconds=delay),
+            reason=result.reason,
+        )
     raw_reason = result.get("reason")
     reason = (
         f"agent reported: {raw_reason[:200]}"

@@ -127,6 +127,12 @@ impl ControllerError {
 }
 
 impl ClientError {
+    /// Retained job evidence can be delivered after an ingress limit is
+    /// repaired. This never authorizes repeating the job's process.
+    pub(crate) fn output_delivery_retryable(&self) -> bool {
+        self.retryable() || self.status() == Some(413)
+    }
+
     // Unknown/protocol/local identity errors never authorize HTTP replay.
     pub fn retryable(&self) -> bool {
         matches!(

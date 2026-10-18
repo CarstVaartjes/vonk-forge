@@ -466,6 +466,23 @@ class ArtifactJobService(InputService):
                     breach,
                 )
                 return
+            if (
+                state == agent_operation_states.WIRE_UNKNOWN
+                and result.output_delivery_pending
+            ):
+                adapter.project(
+                    artifact_job,
+                    now,
+                    reason=receipt_account(result),
+                    evidence=ArtifactJobResultEvidence(
+                        recoverable=True,
+                        active_scope_may_remain=False,
+                        elapsed_milliseconds=result.elapsed_milliseconds,
+                        peak_memory_bytes=result.peak_memory_bytes,
+                        exit_code=result.exit_code,
+                    ),
+                )
+                return
             if state == agent_operation_states.WIRE_UNKNOWN:
                 if result.exit_code != 130 or result.outputs:
                     self._observe_result(

@@ -322,11 +322,7 @@ class ArtifactJob(Base):
         CheckConstraint(
             _state_in(
                 LifecycleSubject.ARTIFACT_JOB,
-                *(
-                    state
-                    for state in LifecycleState
-                    if state is not LifecycleState.BACKOFF
-                ),
+                *LifecycleState,
                 extra=tuple(stage.value for stage in ArtifactPreparation),
                 nullable=True,
             ),

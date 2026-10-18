@@ -346,6 +346,15 @@ def attempt_holds_order(
     )
 
 
+def job_output_retention_expiry(receipt_observed_at: datetime) -> datetime:
+    """The retained output bytes expire after 24 hours, across retries/offline.
+
+    This bounds evidence custody, rather than timing out a running process.
+    Anchor this once to the first undelivered exit receipt.
+    """
+    return aware(receipt_observed_at) + timedelta(hours=24)
+
+
 def order_recovery_deadline(
     operation: StoredOperation, now: datetime
 ) -> datetime | None:
@@ -362,6 +371,9 @@ def order_recovery_deadline(
     if operation.recovery_deadline is None:
         return None
     stored = aware(operation.recovery_deadline)
+    if operation.kind == AgentOperation.RECIPE_JOB_RUN.value:
+        # Job evidence has a fixed retention bound, including time offline.
+        return stored
     session = object_session(operation)
     if session is None:
         return stored

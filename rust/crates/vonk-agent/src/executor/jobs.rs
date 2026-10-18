@@ -252,7 +252,17 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         if *cancellation.borrow() {
             return cancelled_job(&request, started, "controller cancellation requested");
         }
-        let retained = match self.runtime.retained_job_completion(&request) {
+        let retained_completion = self.runtime.retained_job_completion(&request);
+        if request.output_delivery_only == Some(true)
+            && !matches!(&retained_completion, Ok(Some(_)))
+        {
+            return failed_stage_owned(
+                "retained job output receipt is unavailable; delivery-only retry cannot launch a process",
+                FailureStage::JobOutputDelivery,
+                "job output scope or receipt is missing or unreadable".to_owned(),
+            );
+        }
+        let retained = match retained_completion {
             // No record of its own does not prove the job never ran: its
             // whole scope can be gone while the helper keeps its exit. It is
             // re-observed by its identity, and dispatched only when unseen.
@@ -562,10 +572,24 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                     Some(Err(error)) => error.to_string(),
                     _ => "order authority ended during the upload".to_owned(),
                 };
+                if let Some(Err(error)) = &uploaded
+                    && !error.output_delivery_retryable()
+                {
+                    return ExecutionResult::Failed(
+                        Failure::new("job output upload was refused")
+                            .kind(recipe_build_client_failure_kind(error))
+                            .diagnostic(controller_denial_diagnostic(error))
+                            .receipt(receipt),
+                    );
+                }
                 return job.unknown_after_exit(
                     &receipt,
-                    FailureStage::JobState,
-                    "job output delivery remains unobserved",
+                    if uploaded.is_some() {
+                        FailureStage::JobOutputDelivery
+                    } else {
+                        FailureStage::JobState
+                    },
+                    "job output undelivered; retained files await re-delivery",
                     cause,
                 );
             }

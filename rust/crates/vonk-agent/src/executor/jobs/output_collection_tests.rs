@@ -63,7 +63,11 @@ fn exited_job(timeout_seconds: u32, stop_timeout_seconds: u32) -> Exited {
 
 impl Exited {
     async fn claim_again(&self) -> ExecutionResult {
-        let client = AgentHttpClient::for_http_test("http://127.0.0.1:9/", NODE_ID);
+        self.claim_at("http://127.0.0.1:9/").await
+    }
+
+    async fn claim_at(&self, endpoint: &str) -> ExecutionResult {
+        let client = AgentHttpClient::for_http_test(endpoint, NODE_ID);
         let executor = RecipeExecutor {
             client: &client,
             helper_socket: std::path::Path::new(crate::host_runtime::HELPER_SOCKET),
@@ -184,4 +188,89 @@ async fn an_unconfirmed_step_after_the_exit_carries_the_receipt() {
         panic!("unknown outcome");
     };
     assert!(outcome.receipt.is_some());
+}
+
+#[tokio::test]
+async fn refused_output_upload_is_redelivered_from_the_durable_exit_receipt() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let job = exited_job(60, 30);
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let endpoint = format!("http://{}/", listener.local_addr().unwrap());
+    let uploads = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let observed = uploads.clone();
+    let peer = tokio::spawn(async move {
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+        while tokio::time::Instant::now() < deadline {
+            let Ok(Ok((mut stream, _))) =
+                tokio::time::timeout_at(deadline, listener.accept()).await
+            else {
+                break;
+            };
+            let mut request = Vec::new();
+            let header_end = loop {
+                let mut byte = [0];
+                tokio::time::timeout_at(deadline, stream.read_exact(&mut byte))
+                    .await
+                    .unwrap()
+                    .unwrap();
+                request.push(byte[0]);
+                if request.ends_with(b"\r\n\r\n") {
+                    break request.len();
+                }
+            };
+            let headers = String::from_utf8_lossy(&request).to_ascii_lowercase();
+            let length: usize = headers
+                .lines()
+                .find_map(|line| line.strip_prefix("content-length:").map(str::trim))
+                .unwrap_or("0")
+                .parse()
+                .unwrap();
+            request.resize(header_end + length, 0);
+            stream.read_exact(&mut request[header_end..]).await.unwrap();
+            let status = if headers.starts_with("put ") {
+                assert_eq!(&request[header_end..], b"image");
+                if observed.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0 {
+                    "413 Payload Too Large"
+                } else {
+                    "204 No Content"
+                }
+            } else {
+                "204 No Content"
+            };
+            stream
+                .write_all(
+                    format!("HTTP/1.1 {status}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+                        .as_bytes(),
+                )
+                .await
+                .unwrap();
+        }
+    });
+    let first = job.claim_at(&endpoint).await;
+    let ExecutionResult::Unknown(pending) = first else {
+        panic!("refused upload must remain retryable");
+    };
+    assert_eq!(pending.evidence.stage, FailureStage::JobOutputDelivery);
+    assert_eq!(fs::read(job.outputs.join("result.png")).unwrap(), b"image");
+    // NoProcess panics if a retry executes the user's process. A new executor
+    // reads the saved receipt and repeats only the content-addressed PUT.
+    let mut job = job;
+    job.request.output_delivery_only = Some(true);
+    let delivered = job.claim_at(&endpoint).await;
+    assert_eq!(delivered.state(), AgentResultState::Succeeded);
+    assert_eq!(uploads.load(std::sync::atomic::Ordering::SeqCst), 2);
+    peer.abort();
+}
+
+#[tokio::test]
+async fn a_delivery_only_retry_with_a_lost_scope_never_dispatches_the_process() {
+    let mut job = exited_job(60, 30);
+    job.request.output_delivery_only = Some(true);
+    fs::remove_dir_all(job.outputs.parent().unwrap()).unwrap();
+    // NoProcess and the absent helper both detect falling through to launch.
+    let result = job.claim_again().await;
+    assert_eq!(result.state(), AgentResultState::Failed);
+    let failure = result.failure().unwrap();
+    assert_eq!(failure.stage, Some(FailureStage::JobOutputDelivery));
+    assert!(failure.reason.contains("delivery-only retry cannot launch"));
 }

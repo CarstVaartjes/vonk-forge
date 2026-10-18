@@ -424,7 +424,13 @@ class AgentOperationAdapter:
                 if operation is None or operation.current_attempt != row.attempt
                 else self.attempt_of(session, operation)
             )
-            effect = receipt_effect(attempt)
+            result = None if attempt is None else read_row_column(attempt, "result")
+            effect = (
+                Effect.NONE
+                if isinstance(result, RecipeJobRunResult)
+                and result.output_delivery_pending
+                else receipt_effect(attempt)
+            )
         # No reason of its own: the order keeps why its effect is in doubt
         # (a lapsed lease, an unreadable result), also when a receipt ends it.
         return Observed(Effect.UNKNOWN if effect is None else effect)

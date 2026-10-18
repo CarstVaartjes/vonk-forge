@@ -39,6 +39,7 @@ from vonk_agent_protocol.host_helper import (
     host_helper_grant_signing_bytes,
 )
 from vonk_agent_protocol.package_upgrade import PackageActivationReceipt
+from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest
 from vonk_agent_protocol.recipe_operations import (
     RecipeReconcilePayload,
     RecipeUninstallPayload,
@@ -600,6 +601,12 @@ class HostRuntimeAuthorityService:
                 raise HostHelperAuthorityError(
                     "container runtime action authority is stale"
                 )
+            if operation.kind == AgentOperation.RECIPE_JOB_RUN.value and not cleanup:
+                job_request = read_stored_model(RecipeJobRunRequest, operation.payload)
+                if job_request.output_delivery_only:
+                    raise HostHelperAuthorityError(
+                        "delivery-only job order cannot authorize runtime effects"
+                    )
             if action is ContainerRuntimeAction.INSTALLATION_CLEANUP:
                 try:
                     payload_bytes = canonical_message(operation.payload)
