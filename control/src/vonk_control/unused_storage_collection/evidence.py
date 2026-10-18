@@ -9,26 +9,20 @@ from datetime import datetime
 
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import canonical_message
 
 from ..artifact_reference_scan import _selector_revisions
-from ..attempt_residues import _OWNER_JOB_KINDS
 from ..catalog_revision_collection import GRACE, live_tokens, operation_tokens, tokens
 from ..models import (
     ArtifactDistributionAssignment,
     CatalogDocumentHead,
     CatalogDocumentRevision,
     CatalogRecipeModelReference,
-    FleetProfileApplication,
     FleetProfileSelection,
-    Job,
     RecipeBuild,
 )
 from ..owner_liveness import builds_in_flight
 from ..revision_images import revision_archives
-from .common import _waits_for_storage
 from .references import (
-    _UNFINISHED_LOADS,
     _applied_revision_ids,
     _profile_pointers,
     _utc,
@@ -60,8 +54,6 @@ class _Evidence:
     loaded_pointers: (
         Mapping[tuple[str, str], tuple[tuple[str, frozenset[str]], ...]] | None
     )
-    owned_nodes: frozenset[str]
-    active_scopes: tuple[str, ...]
     recent_sets: frozenset[str]
     recent_archives: frozenset[str]
     application_references_readable: bool
@@ -110,8 +102,8 @@ class _Evidence:
                 )
         # A load that is queued, admission-waiting or running needs the exact
         # revisions its plan resolved, whatever the saved profiles say now (a
-        # sweep rewrites its profile between steps).  Unlike the Spark scopes
-        # below, a load waiting for storage still needs its assets.
+        # sweep rewrites its profile between steps). A load waiting for
+        # storage still needs its exact assets.
         applied_ids = _applied_revision_ids(session)
         application_references_readable = applied_ids is not None
         applied_ids = applied_ids or frozenset()
@@ -154,28 +146,6 @@ class _Evidence:
                 )
             )
         )
-        owned = frozenset(
-            node_id
-            for targets in session.scalars(
-                select(Job.targets).where(
-                    Job.kind.in_(_OWNER_JOB_KINDS),
-                    Job.state.in_(("queued", "running")),
-                )
-            )
-            if isinstance(targets, list)
-            for node_id in targets
-            if isinstance(node_id, str)
-        )
-        scopes = tuple(
-            canonical_message(application.plan).decode()
-            for application in session.scalars(
-                select(FleetProfileApplication).where(
-                    FleetProfileApplication.state.in_(_UNFINISHED_LOADS)
-                )
-            )
-            if not _waits_for_storage(application)
-            and application.id not in superseded_applications
-        )
         return cls(
             now=now,
             application_references_readable=application_references_readable,
@@ -206,8 +176,6 @@ class _Evidence:
             newest=newest,
             pointers=pointers,
             loaded_pointers=loaded_pointers,
-            owned_nodes=owned,
-            active_scopes=scopes,
             recent_sets=frozenset(
                 session.scalars(
                     select(ArtifactDistributionAssignment.model_artifact_set_sha256)

@@ -733,6 +733,7 @@ class FailureCode(WireEnum):
     RECIPE_START_FAILED = "recipe_start_failed"
     RECIPE_STOP_FAILED = "recipe_stop_failed"
     RECIPE_UNINSTALL_FAILED = "recipe_uninstall_failed"
+    MODEL_STORE_LAYOUT = "model_store_layout"
     RUNTIME_OBSERVATION_UNAVAILABLE = "runtime_observation_unavailable"
     INSTALLATION_RECONCILIATION_BUSY = "installation_reconciliation_busy"
     RECIPE_RECONCILIATION_DEPENDENCY_UNAVAILABLE = (

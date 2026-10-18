@@ -4,23 +4,6 @@ use super::super::test_support::*;
 use super::*;
 
 #[test]
-fn releasing_a_models_pages_keeps_its_bytes_and_refuses_a_directory() {
-    // The hint must be exactly that: the artifact stays on disk, unchanged,
-    // and only its resident pages are dropped. A directory is a caller
-    // mistake rather than a silently ignored no-op.
-    let directory = tempdir().unwrap();
-    let path = directory.path().join("model.safetensors");
-    let content = vec![7_u8; 4 * 1024 * 1024];
-    fs::write(&path, &content).unwrap();
-    // Read it once so the pages are resident before the release.
-    let observed = fs::read(&path).unwrap();
-    assert_eq!(observed.len(), content.len());
-    release_page_cache(&path).unwrap();
-    assert_eq!(fs::read(&path).unwrap(), content);
-    assert!(release_page_cache(directory.path()).is_err());
-}
-
-#[test]
 fn preload_estimates_never_refuse_tight_kits_or_unknown_readings() {
     let directory = tempdir().unwrap();
     let meminfo = directory.path().join("meminfo");

@@ -45,6 +45,7 @@ pub struct Failure {
     pub retry_after_seconds: Option<u32>,
     pub stage: Option<FailureStage>,
     pub diagnostic: Option<String>,
+    pub model_store_layout: Option<vonk_agent_protocol::generated::ModelStoreLayoutFault>,
     pub helper_error_code: Option<HelperErrorCode>,
     pub helper_exit_code: Option<u32>,
     /// The rejected container's own output, when the helper read it.
@@ -63,6 +64,7 @@ impl Failure {
             retry_after_seconds: None,
             stage: None,
             diagnostic: None,
+            model_store_layout: None,
             helper_error_code: None,
             helper_exit_code: None,
             process_logs: None,

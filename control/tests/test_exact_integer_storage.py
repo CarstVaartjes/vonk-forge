@@ -76,7 +76,11 @@ class NoRemoval:
     """Read-only pressure proof must never invoke an external removal."""
 
     def preview_uninstall(
-        self, installation_id: str, *, also_removing: Collection[str] = ()
+        self,
+        installation_id: str,
+        *,
+        also_removing: Collection[str] = (),
+        preserve_model_files: bool = False,
     ) -> UninstallPlan:
         raise AssertionError("pressure observation attempted an uninstall preview")
 
@@ -89,6 +93,7 @@ class NoRemoval:
         request_id: str,
         unattended_guard: Callable[[Session], None] | None = None,
         also_removing: Collection[str] = (),
+        preserve_model_files: bool = False,
     ) -> object:
         raise AssertionError("pressure observation attempted an uninstall")
 

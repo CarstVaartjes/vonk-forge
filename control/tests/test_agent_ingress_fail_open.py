@@ -68,6 +68,10 @@ REVIEWED_CORE_DEFAULTS = {
     "RecipeJobRunResult.ending",
     "RecipeJobEnding.diagnostic",
     "FailureDiagnostics.schema_version",
+    # The failure code (model_store_layout) already names a layout fault; the
+    # struct only adds path and errno detail, absent from older agents.
+    "FailureDiagnostics.model_store_layout",
+    "ModelStoreLayoutFault.errno",
     "AgentFailureResult.error_code",
     "AgentFailureResult.failure_kind",
     "AgentFailureResult.operation",

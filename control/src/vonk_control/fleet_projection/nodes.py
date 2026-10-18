@@ -64,9 +64,10 @@ def _node(
     stalls: Sequence[str] = (),
     repeating: Sequence[str] = (),
     slow_nas: NasTransferNotice | None = None,
+    layout_notices: Sequence[ProjectionReason] = (),
     telemetry_unreadable: bool = False,
 ) -> FleetNode:
-    warnings: list[ProjectionReason] = []
+    warnings: list[ProjectionReason] = list(layout_notices)
     connection = self._connection(agent, certificate, current)
     inventory_unreadable = False
     try:

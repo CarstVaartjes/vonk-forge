@@ -144,30 +144,31 @@ complete only after verification; receipt ordering follows the manifest even
 when transfers finish out of order. A failed or cancelled download stops the
 remaining transfers and retains their on-disk checkpoints.
 
-## Unused storage is removed only when disk is short
+## Unused storage retention
 
-Installations, image receipts and cached models can always be fetched again, so
-nothing is removed because it has been idle; the worker removes them only to make
-room. It does so when work was refused for lack of disk (a profile load, an
-install, a build or a model download asked for free space on a Spark or the NAS)
-and, as a safety net, when a Spark or the NAS runs low on free space on its own.
-A profile change alone removes nothing.
+Unused installations and runtime images expire after more than 24 hours,
+regardless of free space. The worker uses the existing reference-checked removal
+paths, and retries failed removals on later passes. Running workloads, the loaded
+profile and live operations retain their exact assets. Terminal artifact jobs
+and their unreferenced evidence also use a 24-hour grace.
+
+Model files are different: NAS model files and shared Spark model objects stay
+until disk pressure requires least-recently-used eviction. Automatic installation
+removal retains the shared model files, even when it removes the last installation
+link. Pressure can also remove younger unused installations or runtime images.
 
 A Spark or the NAS counts as low when its free space is below the larger of 10 %
 of its capacity and the largest install (Spark) or model set (NAS) it has held,
 at most 25 % of its capacity (`STORAGE_LOW_FREE_*` in `settings.py`; these are
 tuning constants, not `.env` values). A refused request asks for more than that.
-Either way the worker frees the shortfall plus a reserve (2 % of the capacity, at
-least 5 GiB) and stops:
+For pressure relief the worker frees the shortfall plus a reserve (2 % of the capacity, at
+least 5 GiB) and stops; independent age expiry continues:
 
 - **Spark installations** (state `installed`). This is a real uninstall on the
-  Sparks, queued like `vonkctl recipe uninstall`; its model files go with it
-  unless another installation on that Spark needs them, and the agent then also
-  deletes the Spark's shared store copy of each model file no installation links
-  any more (installations hard-link store objects, so removing an installation
-  alone frees none of its model bytes). It takes no new workload intent, so it
-  cancels no other order and never disturbs recovery of a running workload.
-  Installations of one model on a Spark go together or not at all.
+  Sparks through the normal lifecycle, with model retention bound in the plan.
+  It takes no new workload intent and never disturbs running-workload recovery.
+  Age expiry judges each installation independently of other installations that
+  share the same model files.
 - **Runtime image receipts** in the NAS `image-cache`; the image store then
   reclaims their blobs at once.
 - **Cached model files**, through the same durable, fenced removal as `vonkctl

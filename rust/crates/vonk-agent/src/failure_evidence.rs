@@ -532,6 +532,7 @@ fn systemd_properties(deadline: Instant) -> std::io::Result<Vec<FailureProperty>
 pub fn collect(phase: &str, code: &str, stdout: &[u8], stderr: &[u8]) -> FailureDiagnostics {
     let start = Instant::now();
     let mut evidence = FailureDiagnostics {
+        model_store_layout: None,
         schema_version: 1,
         collected_at: Utc::now().to_rfc3339(),
         phase: sanitize_text(phase).chars().take(80).collect(),
@@ -633,6 +634,7 @@ pub fn from_failure(operation: &AgentOperation, failure: &Failure) -> FailureDia
     .collect::<Vec<_>>()
     .join(" ");
     let mut value = collect(&phase, &code, &[], &[]);
+    value.model_store_layout = failure.model_store_layout.clone();
     if let Some(logs) = &failure.process_logs {
         value.stdout = logs.stdout.clone();
         value.stderr = logs.stderr.clone();

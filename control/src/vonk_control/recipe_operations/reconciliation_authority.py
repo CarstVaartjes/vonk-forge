@@ -65,14 +65,20 @@ if TYPE_CHECKING:
 
 class ReconciliationAuthorityMixin:
     def preview_uninstall(
-        self, installation_id: str, *, also_removing: Collection[str] = ()
+        self,
+        installation_id: str,
+        *,
+        also_removing: Collection[str] = (),
+        preserve_model_files: bool = False,
     ) -> UninstallPlan:
         service = typing_cast("RecipeOperationService", self)
         last_error: UnknownOutcomeError | None = None
         for _attempt in admission_attempts():
             try:
                 return service._preview_uninstall_once(
-                    installation_id, also_removing=also_removing
+                    installation_id,
+                    also_removing=also_removing,
+                    preserve_model_files=preserve_model_files,
                 )
             except UnknownOutcomeError as error:
                 last_error = error
@@ -80,7 +86,11 @@ class ReconciliationAuthorityMixin:
         raise last_error
 
     def _preview_uninstall_once(
-        self, installation_id: str, *, also_removing: Collection[str] = ()
+        self,
+        installation_id: str,
+        *,
+        also_removing: Collection[str] = (),
+        preserve_model_files: bool = False,
     ) -> UninstallPlan:
         """The uninstall plan; ``also_removing`` names installations removed in
         the same sweep, which do not count as users of the shared model files."""
@@ -88,7 +98,11 @@ class ReconciliationAuthorityMixin:
 
         with service._sessions() as session:
             return service._uninstall_plan_in_session(
-                session, installation_id, lock=False, also_removing=also_removing
+                session,
+                installation_id,
+                lock=False,
+                also_removing=also_removing,
+                preserve_model_files=preserve_model_files,
             )
 
     def preview_reconciliation_authority(

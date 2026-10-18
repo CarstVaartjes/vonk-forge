@@ -1,14 +1,11 @@
-"""Unused installations, image receipts and cached models are removed to make room.
+"""Unused non-model assets expire; pressure also evicts younger cache entries.
 
-They are removed only while disk is short (work was refused for lack of it, or
-free space is below the low line), least recently used first and no more than
-the shortfall needs, and are kept while a saved profile points to them, a
-workload runs, or a live operation names them. A load that starts after the
-pass looked is never raced.
+Model files retain pressure-only LRU. Every removal rechecks live references.
 """
 
 from __future__ import annotations
 
+import json
 import os
 import threading
 import uuid
@@ -21,10 +18,14 @@ from types import SimpleNamespace
 import pytest
 from sqlalchemy import Engine, create_engine, event, func, select
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import LifecycleState, RunState
+from vonk_agent_protocol import InstallationState, LifecycleState, RunState
 from vonk_control.artifact_lifecycle import ArtifactLifecycleGate
 from vonk_control.catalog_revision_collection import operation_tokens
-from vonk_control.fleet_profile_contract import FleetProfilePreview
+from vonk_control.fleet_profile_contract import (
+    FleetProfileApplicationProgress,
+    FleetProfileEffectProgress,
+    FleetProfilePreview,
+)
 from vonk_control.model_cache import ModelCacheService
 from vonk_control.models import (
     AgentNode,
@@ -125,7 +126,9 @@ class FakeLifecycle:
         assert actor == ACTOR and workload_intent_ordinal is not None
         self.stopped.append(run_id)
 
-    def preview_uninstall(self, installation_id: str, *, also_removing=()):
+    def preview_uninstall(
+        self, installation_id: str, *, also_removing=(), preserve_model_files=False
+    ):
         # The sweep has judged the installation unused; a load can still
         # arrive before the removal is queued.
         if self._between is not None:
@@ -141,8 +144,10 @@ class FakeLifecycle:
         request_id: str,
         unattended_guard: Callable[[Session], None] | None = None,
         also_removing=(),
+        preserve_model_files=False,
     ) -> None:
         assert actor == ACTOR and unattended_guard is not None
+        assert preserve_model_files
         self.also_removing[installation_id] = tuple(sorted(also_removing))
         if installation_id in self._refuse:
             raise RecipeOperationConflict("refused")
@@ -247,20 +252,27 @@ def _profile(world: Catalog, selector: str, sparks: list[str] | None = None) -> 
         )
 
 
-def _queued_load(world: Catalog) -> None:
-    """A load that has been accepted and targets the Spark."""
+def _queued_load(world: Catalog, installation_id: str) -> None:
+    """A load that has been accepted and names this exact installation."""
+    from vonk_agent_protocol import AgentOperation as OperationKind
+    from vonk_control.job_documents import RecipeInstallParent
 
     with world.sessions.begin() as session:
         session.add(
             Job(
                 request_id=str(uuid.uuid4()),
-                kind="recipe.run-switch.v2",
-                state="queued",
+                kind=OperationKind.RECIPE_INSTALL.value,
+                state=LifecycleState.QUEUED,
                 actor="test",
                 authority_revision="r",
                 targets=[NODE],
                 payload_digest="0" * 64,
-                payload={},
+                payload=RecipeInstallParent(
+                    schema_version=1,
+                    owner_kind="installation",
+                    owner_id=installation_id,
+                    plan_digest="f" * 64,
+                ).model_dump(mode="json"),
                 current_attempt=0,
                 created_at=NOW,
                 updated_at=NOW,
@@ -348,26 +360,33 @@ def test_installation_nothing_uses_is_uninstalled_and_a_superseded_one_goes_too(
     assert result.installations == 2
 
 
-def test_nothing_is_removed_while_disk_is_not_short(
+def test_old_non_model_items_expire_without_disk_pressure(
     world: Catalog, tmp_path: Path
 ) -> None:
-    """Catches time-based removal: an item idle for a month holds disk nobody is
-    waiting for, so it stays however much time passes."""
-
+    """Catches retaining non-model assets indefinitely on a roomy filesystem."""
     old = world.revision("glm", 1)
     world.revision("glm", 2, head="active")
-    world.workload(old, run="stopped", touched=NOW - timedelta(days=30))
+    idle, _ = world.workload(
+        old, run=RunState.STOPPED, touched=NOW - timedelta(days=30)
+    )
     receipt = _receipt(tmp_path, AN_IMAGE)
-    lifecycle = FakeLifecycle(world.sessions)
+    lifecycle = FakeLifecycle(world.sessions, apply=True)
+    result = _collector(
+        world, lifecycle, free=TOTAL // 2, image_cache_root=tmp_path
+    ).collect()
+    assert (result.installations, result.images, result.models) == (1, 1, 0)
+    assert lifecycle.removed == [idle]
+    assert not receipt.exists()
 
-    for now in (NOW, NOW + timedelta(days=90)):
-        result = _collector(
-            world, lifecycle, now=now, free=TOTAL // 2, image_cache_root=tmp_path
-        ).collect()
-        assert (result.installations, result.images, result.models) == (0, 0, 0)
 
-    assert lifecycle.removed == []
-    assert receipt.exists()
+def _within_grace(world: Catalog) -> None:
+    """Keep pressure tests inside the independent age grace, preserving LRU order."""
+    with world.sessions.begin() as session:
+        for model in (RecipeInstallation, InstallationNode, RecipeRun):
+            for row in session.scalars(select(model)):
+                from vonk_control.unused_storage_collection.references import _utc
+
+                row.updated_at = NOW - (NOW - _utc(row.updated_at)) / 100
 
 
 def test_the_least_recently_used_go_first_and_only_as_many_as_the_shortfall_needs(
@@ -380,6 +399,7 @@ def test_the_least_recently_used_go_first_and_only_as_many_as_the_shortfall_need
 
     # 90 GiB free of 1000: 10 GiB under the 100 GiB low line, so 10 GiB plus the
     # 20 GiB reserve is needed and the oldest 80 GiB covers it.
+    _within_grace(world)
     result = _collector(world, lifecycle, free=90 * GIB).collect()
 
     assert lifecycle.removed == [oldest]
@@ -401,6 +421,7 @@ def test_unused_model_files_the_spark_frees_itself_are_not_uninstalled_for(
 
     # 90 GiB free is 10 GiB under the line; 40 GiB of unused model files
     # cover it and the reserve.
+    _within_grace(world)
     _collector(world, lifecycle, free=90 * GIB, unused_models=40 * GIB).collect()
     assert lifecycle.removed == []
 
@@ -472,6 +493,7 @@ def test_the_low_line_is_a_tenth_of_the_disk_or_the_largest_install_known(
     lifecycle = FakeLifecycle(world.sessions)
 
     # 150 GiB free (15 %) with a largest install of 50 GiB: not short.
+    _within_grace(world)
     _collector(world, lifecycle, free=150 * GIB).collect()
     assert lifecycle.removed == []
 
@@ -699,6 +721,7 @@ def test_a_profile_edit_or_a_new_revision_alone_removes_nothing(
             profile.updated_at = NOW - timedelta(minutes=5)
     lifecycle = FakeLifecycle(world.sessions)
 
+    _within_grace(world)
     _collector(world, lifecycle, free=TOTAL // 2).collect()
     assert lifecycle.removed == []
 
@@ -717,6 +740,7 @@ def test_installations_of_one_model_go_together_or_not_at_all(world: Catalog) ->
     _size(world, second, 70 * GIB, model="c" * 64)
     lifecycle = FakeLifecycle(world.sessions)
 
+    _within_grace(world)
     result = _collector(world, lifecycle).collect()
 
     assert sorted(lifecycle.removed) == sorted([first, second])
@@ -839,6 +863,7 @@ def test_a_shared_file_a_staying_installation_links_is_not_counted_as_freed(
         run.state = "running"
     demands = StorageDemands(lambda: world.now)
     lifecycle = FakeLifecycle(world.sessions)
+    _within_grace(world)
     collector = _collector(world, lifecycle, free=400 * GIB, demands=demands)
 
     with world.sessions() as session:
@@ -873,6 +898,7 @@ def test_a_model_that_only_shares_files_with_one_that_stays_is_not_offered(
     _size(world, other, 50 * GIB, model="2" * 64)
     lifecycle = FakeLifecycle(world.sessions)
 
+    _within_grace(world)
     result = _collector(world, lifecycle).collect()
 
     assert lifecycle.removed == []
@@ -948,64 +974,9 @@ def test_a_load_waiting_to_be_admitted_does_not_keep_what_it_waits_for_space_fro
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
-def test_a_load_that_issued_something_still_keeps_the_installations_it_uses(
+def test_a_review_can_evict_without_superseding_an_unrelated_load(
     world: Catalog,
 ) -> None:
-    old = world.revision("glm", 1)
-    world.revision("glm", 2, head="active")
-    world.workload(old, run="stopped")
-    _application(
-        world,
-        {"steps": [{"node_ids": [NODE]}]},
-        state="running",
-        progress={"admission_pending": False, "blockers": []},
-    )
-    lifecycle = FakeLifecycle(world.sessions)
-
-    result = _collector(world, lifecycle).collect()
-
-    assert lifecycle.removed == []
-    assert _kept(result, "live operation") == 1
-
-
-@pytest.mark.usefixtures("damaged_json_rows")
-@pytest.mark.parametrize("in_flight", [False, True])
-def test_a_started_load_keeps_its_sparks_only_while_a_child_is_in_flight(
-    world: Catalog, in_flight: bool
-) -> None:
-    """A started load whose switch has no child in flight (its child waits for
-    disk) holds nothing; one with a child in flight keeps what it uses."""
-
-    old = world.revision("glm", 1)
-    world.revision("glm", 2, head="active")
-    installation, _ = world.workload(old, run="stopped")
-    _size(world, installation, 80 * GIB)
-    pending = [{"queue_index": 0, "operation_id": str(uuid.uuid4()), "kind": "run"}]
-    _application(
-        world,
-        {"steps": [{"node_ids": [NODE]}]},
-        state="running",
-        canonical=True,
-        operation=str(uuid.uuid4()),
-        progress={
-            "admission_pending": False,
-            "blockers": [],
-            "switch_adapter": {
-                "children": [],
-                "pending_children": pending if in_flight else [],
-            },
-        },
-    )
-    lifecycle = FakeLifecycle(world.sessions)
-
-    result = _collector(world, lifecycle).collect()
-
-    assert lifecycle.removed == ([] if in_flight else [installation])
-    assert _kept(result, "live operation") == int(in_flight)
-
-
-@pytest.mark.usefixtures("damaged_json_rows")
-def test_a_review_plans_eviction_past_the_load_it_supersedes(world: Catalog) -> None:
     """Catches a review that refused a load for disk the load it replaces held:
     a sweep's previous load, still copying to the other Spark, kept every
     installation on this one as a live operation, so 88 GB that the new load
@@ -1037,8 +1008,7 @@ def test_a_review_plans_eviction_past_the_load_it_supersedes(world: Catalog) -> 
         held = spark_eviction_capacity(session, NODE, NOW)
         replaced = spark_eviction_capacity(session, NODE, NOW, (previous,))
 
-    assert held.freeable == 0
-    assert "a live operation names it" in held.kept
+    assert held.freeable == 80 * GIB
     assert replaced.freeable == 80 * GIB
 
 
@@ -1173,24 +1143,6 @@ def _application(
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
-def test_installation_a_profile_load_in_flight_on_its_sparks_is_kept(
-    world: Catalog,
-) -> None:
-    """A load accepted as a profile application may not have queued a job yet."""
-
-    old = world.revision("glm", 1)
-    world.revision("glm", 2, head="active")
-    world.workload(old, run="stopped")
-    _application(world, {"steps": [{"node_ids": [NODE]}]}, state="running")
-    lifecycle = FakeLifecycle(world.sessions)
-
-    result = _collector(world, lifecycle).collect()
-
-    assert lifecycle.removed == []
-    assert _kept(result, "live operation") == 1
-
-
-@pytest.mark.usefixtures("damaged_json_rows")
 def test_installation_the_selected_profile_application_names_is_kept(
     world: Catalog,
 ) -> None:
@@ -1221,7 +1173,10 @@ def test_a_load_accepted_before_the_removal_is_queued_stops_the_removal(
     old = world.revision("glm", 1)
     world.revision("glm", 2, head="active")
     world.workload(old, run="stopped")
-    lifecycle = FakeLifecycle(world.sessions, between=lambda _id: _queued_load(world))
+    lifecycle = FakeLifecycle(
+        world.sessions,
+        between=lambda installation_id: _queued_load(world, installation_id),
+    )
 
     result = _collector(world, lifecycle).collect()
 
@@ -2421,6 +2376,7 @@ def test_work_refused_for_lack_of_disk_frees_exactly_what_it_asked_for(
     demands = StorageDemands(lambda: world.now)
     lifecycle = FakeLifecycle(world.sessions)
     # 400 GiB free is well above the low line: only the refused load asks.
+    _within_grace(world)
     collector = _collector(world, lifecycle, free=400 * GIB, demands=demands)
     assert collector.collect().installations == 0
 
@@ -2450,6 +2406,7 @@ def test_a_request_everything_removable_could_not_meet_removes_nothing_and_says_
     _three_idle(world, newest_age=timedelta(days=2))
     demands = StorageDemands(lambda: world.now)
     lifecycle = FakeLifecycle(world.sessions)
+    _within_grace(world)
     collector = _collector(world, lifecycle, free=400 * GIB, demands=demands)
 
     relief = collector.relief_for_spark(
@@ -2600,6 +2557,7 @@ def test_a_second_removal_waits_for_the_first_to_show_in_a_fresh_report(
 
     _three_idle(world, newest_age=timedelta(days=2))
     lifecycle = FakeLifecycle(world.sessions)
+    _within_grace(world)
     collector = _collector(world, lifecycle)
     _unattended_uninstall(world, state="running", updated=NOW)
 
@@ -2630,6 +2588,7 @@ def test_removals_that_free_far_less_than_promised_pause_eviction(
     oldest, middle, _newest = _three_idle(world, newest_age=timedelta(days=2))
     lifecycle = FakeLifecycle(world.sessions, apply=True)
     caplog.set_level("INFO")
+    _within_grace(world)
     collector = _collector(world, lifecycle, free=90 * GIB)
     collector.collect()
     assert lifecycle.removed == [oldest]
@@ -2657,6 +2616,7 @@ def test_removals_that_free_what_they_promised_do_not_pause_eviction(
 ) -> None:
     _oldest, _middle, _newest = _three_idle(world, newest_age=timedelta(days=2))
     lifecycle = FakeLifecycle(world.sessions, apply=True)
+    _within_grace(world)
     collector = _collector(world, lifecycle, free=1 * GIB)
     first = collector.collect().installations
     assert first == 2
@@ -2963,3 +2923,162 @@ def test_orphaned_receipt_removal_fence_is_reconciled_by_a_fresh_sweep(
     fresh = _receipt(tmp_path, AN_IMAGE)
     assert _collector(world, image_cache_root=tmp_path).collect().images == 1
     assert not fresh.exists()
+
+
+@pytest.mark.parametrize("hold_source", ["application", "job"])
+def test_live_two_spark_owner_does_not_pin_unrelated_installations(
+    postgres_engine: Engine, tmp_path: Path, hold_source: str
+) -> None:
+    """Fault: a copy remains live on B while A needs eviction for another load.
+
+    Catches node ownership or a profile scope retaining every installation.
+    Exact installation/run references and a running workload must still survive.
+    """
+    from vonk_agent_protocol import AgentOperation as OperationKind
+    from vonk_agent_protocol.agent_words import (
+        ProfileEffectState,
+        ProfileSwitchChildKind,
+    )
+    from vonk_agent_protocol.state_machines import NodeIdentityState
+    from vonk_control.job_documents import RecipeInstallParent
+
+    Base.metadata.create_all(postgres_engine)
+    world = Catalog(postgres_engine)
+    other = "spk_" + "2" * 32
+    with world.sessions.begin() as session:
+        session.add(
+            AgentNode(
+                node_id=other, state=NodeIdentityState.ACTIVE, workload_intent_ordinal=1
+            )
+        )
+    revision = world.revision("old", 1, head="active")
+    unused, _ = world.workload(revision, run=RunState.STOPPED)
+    named, named_run = world.workload(revision, run=RunState.STOPPED)
+    running, _ = world.workload(revision, run=RunState.RUNNING)
+    for installation in (unused, named, running):
+        _size(world, installation, 80 * GIB)
+    application_id = _application(
+        world, {}, state=LifecycleState.RUNNING, canonical=True
+    )
+    with world.sessions.begin() as session:
+        application = _required(session.get(FleetProfileApplication, application_id))
+        plan = FleetProfilePreview.model_validate_json(json.dumps(application.plan))
+        plan.scope.node_ids = [NODE, other]
+        application.plan = plan.model_dump(mode="json")
+        # Exact reference in the durable progress, before another child starts.
+        application.progress = FleetProfileApplicationProgress(
+            effects=[
+                FleetProfileEffectProgress(
+                    effect_id="copy",
+                    application_id=application_id,
+                    plan_digest=plan.plan_digest,
+                    workload_intent_ordinal=1,
+                    queue_index=0,
+                    kind=ProfileSwitchChildKind.RUN.value,
+                    target_id=named_run,
+                    node_ids=[NODE, other],
+                    request_key=str(uuid.uuid4()),
+                    state=ProfileEffectState.PENDING.value,
+                )
+            ]
+        ).model_dump(mode="json")
+        if hold_source == "job":
+            application.state = LifecycleState.SUCCEEDED
+            session.add(
+                Job(
+                    request_id=str(uuid.uuid4()),
+                    kind=OperationKind.RECIPE_INSTALL.value,
+                    state=LifecycleState.RUNNING,
+                    actor="test",
+                    authority_revision="r",
+                    targets=[NODE, other],
+                    payload_digest="0" * 64,
+                    payload=RecipeInstallParent(
+                        schema_version=1,
+                        owner_kind="installation",
+                        owner_id=named,
+                        plan_digest="1" * 64,
+                    ).model_dump(mode="json"),
+                    current_attempt=1,
+                    created_at=OLD,
+                    updated_at=NOW,
+                )
+            )
+    lifecycle = FakeLifecycle(world.sessions, apply=True)
+    collector = _collector(world, lifecycle)
+    with world.sessions() as session:
+        capacity = spark_eviction_capacity(session, NODE, NOW)
+    assert capacity.freeable == 80 * GIB
+    assert (
+        _required(
+            collector.relief_for_spark(
+                NODE,
+                50 * GIB,
+                source="profile-load",
+                subject="second-load",
+                reason="disk",
+            )
+        ).code
+        == STORAGE_EVICTING
+    )
+    assert collector.collect().installations == 1
+    assert lifecycle.removed == [unused]
+    _report_disk(world.sessions, 81 * GIB, at=NOW + timedelta(seconds=1))
+    assert (
+        collector.relief_for_spark(
+            NODE, 50 * GIB, source="profile-load", subject="second-load", reason="disk"
+        )
+        is None
+    )
+    with world.sessions() as session:
+        assert (
+            _required(session.get(RecipeInstallation, named)).state
+            == InstallationState.INSTALLED
+        )
+        assert (
+            _required(session.get(RecipeInstallation, running)).state
+            == InstallationState.INSTALLED
+        )
+        assert _required(
+            session.get(FleetProfileApplication, application_id)
+        ).state == (
+            LifecycleState.RUNNING
+            if hold_source == "application"
+            else LifecycleState.SUCCEEDED
+        )
+
+
+def test_installation_content_references_hold_but_provenance_does_not(
+    postgres_engine: Engine, tmp_path: Path
+) -> None:
+    """Catches keeping only UUIDs, or treating recipe/build provenance as use."""
+    from dataclasses import replace
+
+    from vonk_control.recipe_execution_contract import parse_stored_installation_plan
+    from vonk_control.unused_storage_collection import _installation_kept
+
+    sessions, _, installation_id, _ = _real_lifecycle(tmp_path, engine=postgres_engine)
+    with sessions() as session:
+        installation = _required(session.get(RecipeInstallation, installation_id))
+        plan = parse_stored_installation_plan(installation.plan)
+        compiled = next(iter(plan.compiled_execution_plans.values()))
+        evidence = replace(_Evidence.read(session, _REAL_CLOCK), operations=frozenset())
+        assert _installation_kept(session, installation_id, evidence) is None
+        identities = (
+            installation.plan_digest,
+            compiled.identity.model_artifact_set_sha256,
+            compiled.runtime_image.image_digest.removeprefix("sha256:"),
+            compiled.runtime_image.oci_layout_sha256,
+            compiled.artifacts[0].sha256,
+            compiled.artifacts[0].model.content_sha256,
+        )
+        for identity in identities:
+            referenced = replace(evidence, operations=frozenset((identity,)))
+            assert _installation_kept(session, installation_id, referenced) is not None
+        for provenance in (
+            installation.recipe_revision_id,
+            installation.recipe_build_id,
+        ):
+            assert provenance is not None
+            unreferenced = replace(evidence, operations=frozenset((provenance,)))
+            assert _installation_kept(session, installation_id, unreferenced) is None

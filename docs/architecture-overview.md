@@ -156,14 +156,17 @@ new installation of a model the Spark already holds, including every recipe
 revision and every other recipe that uses the model, takes seconds and no
 extra disk. The object stays the one trusted inode: the agent accepts an
 installation file with more than one link only when it is exactly the store
-object of that file's digest, and a copy that cannot be linked (another
-filesystem, the link limit) is written as a private file instead. Containers
+object of that file's digest, and new installation files are always hardlinked.
+A hardlink failure (another filesystem, the link limit) reports a named model-store layout fault with the
+node, managed path and OS errno. It never allocates a private copy. Containers
 still mount each file read-only and run as a non-root user with read access
-granted by ACL, so a workload cannot change the shared bytes. An installation
-that already holds a private copy keeps it until it is uninstalled. Removing an
+granted by ACL, so a workload cannot change the shared bytes. A receipted private
+copy is replaced with the shared inode during normal preparation. The original
+operation retries within its existing recovery deadline after the filesystem
+layout is repaired; its Fleet warning clears on success. Removing an
 installation removes its links, and its model cleanup removes the store object
 when that was the last link, so the bytes are freed when the last name goes
-(see [unused storage](runbooks/model-cache.md#unused-storage-is-removed-only-when-disk-is-short)).
+(see [unused storage](runbooks/model-cache.md#unused-storage-retention)).
 Model files are the one cache kept until the space is needed: an object no
 installation links or names stays until the Spark is below the Controller's
 low-space line, and then the agent removes such objects least recently used

@@ -238,6 +238,7 @@ class ActionPlansMixin:
         *,
         lock: bool,
         also_removing: Collection[str] = (),
+        preserve_model_files: bool = False,
     ) -> UninstallPlan:
         service = typing_cast("RecipeOperationService", self)
         installation_statement = select(RecipeInstallation).where(
@@ -439,6 +440,7 @@ class ActionPlansMixin:
             model_content_sha256=model_content_sha256,
             model_title=model_title,
             dependent_recipe_ids_by_node=dependent_recipe_ids_by_node,
+            preserve_model_files=preserve_model_files,
         )
 
     def _model_dependents_on_nodes(

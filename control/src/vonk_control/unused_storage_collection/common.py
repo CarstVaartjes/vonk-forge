@@ -23,7 +23,7 @@ from vonk_agent_protocol import (
 
 from .. import job_states
 from ..fleet_profile_contract import FleetProfileAssignmentInput
-from ..models import FleetProfileApplication, ModelCacheSet
+from ..models import ModelCacheSet
 from ..recipe_action_plans import StopPlan, UninstallPlan
 from ..storage_demands import (
     STORAGE_EVICTING,
@@ -37,40 +37,14 @@ if TYPE_CHECKING:
 """Unused storage collection: common concerns."""
 
 
-"""Free disk by removing what nothing uses, and only when disk is short.
+"""Unused non-model assets expire after 24 hours, independent of disk pressure.
 
-Installations, runtime image receipts and cached models are always refetchable,
-so they are removed only to make room: when work was refused for lack of disk
-(a profile load, an install, a build, a model download asked for free space on
-a Spark or the NAS, see :mod:`storage_demands`), or when a Spark or the NAS
-runs low on free space on its own (below a share of its capacity, or below the
-largest install or model set it has held). Time unused is never a reason, and a
-profile change alone removes nothing.
-
-A pass measures free space (a Spark's latest inventory, the NAS filesystem) and
-removes the least recently used unused items until the shortfall plus a small
-reserve is covered, then stops. Items used in the last 24 hours go only after
-everything older. Which items exist:
-
-1. **Spark installations** (state ``installed``, or ``failed``: a failed
-   install keeps what it wrote until it is removed). An installation a saved
-   profile points to (but that is not the loaded profile's) may go when space is
-   needed, after every installation no profile points to, least recently used
-   first within each group: its models stay on the NAS, so loading that profile
-   again reinstalls it. Removal is a real uninstall on
-   the Sparks, queued through the same lifecycle as ``vonkctl recipe
-   uninstall``; its model files go with it unless another installation on that
-   Spark still needs them. Installations that share one model are removed
-   together or not at all, and each is told which others go with it so the
-   Spark reclaims the shared files with the last. Model files are hard-linked
-   between installations (and between models that share a file), so what an
-   eviction frees is counted by file: a shared file is freed only when the last
-   group linking it goes, and a group whose files a staying one still links
-   frees nothing and is not offered.
-2. **Runtime image receipts** in the NAS ``image-cache``; the image store then
-   reclaims the blobs nothing else names.
-3. **Model files** in the NAS model cache, through the model cache's durable,
-   fenced removal.
+The existing exact uninstall and image-removal paths revalidate live references.
+Installation removal retains shared model files; the Spark store evicts those
+only under pressure, least recently used first. NAS model files likewise stay
+until pressure requires their fenced removal. Pressure may also evict younger
+unused runtime assets to admit work. Partial installations, orphaned directories,
+build workspaces and coordination history have their existing age collectors.
 
 Nothing is removed while it is
 
@@ -93,15 +67,16 @@ a while. If everything that may go would still not cover a refused request,
 nothing is removed and the waiting load says so
 (``storage.insufficient_after_eviction``).
 
-A load waiting for disk (to be admitted, or with no child of its switch in
-flight) has nothing on its Sparks, so its plan does not keep the installations
-there (the space it waits for is theirs to give).
+Node ownership and profile scope are not asset references. Only the exact
+installation, run, plan or content named by live work keeps an installation;
+unrelated installations can free space even while another Spark is copying.
 
 Every removal is re-proven while the Sparks (or artifact gates) are locked, so
 a load that starts after the pass looked is never raced: the uninstall takes
 no new workload intent (it supersedes nothing and leaves recovery of a running
-workload alone) and is refused when an operation targets its Sparks. One item
-that cannot be removed is kept for the next pass and never stops the rest.
+workload alone) and is refused when live work names the installation or its
+content. One item that cannot be removed is kept for the next pass and never
+stops the rest.
 """
 
 
@@ -196,7 +171,11 @@ class InstallationRemoval(Protocol):
     ) -> object: ...
 
     def preview_uninstall(
-        self, installation_id: str, *, also_removing: Collection[str] = ()
+        self,
+        installation_id: str,
+        *,
+        also_removing: Collection[str] = (),
+        preserve_model_files: bool = False,
     ) -> UninstallPlan: ...
 
     def uninstall(
@@ -208,6 +187,7 @@ class InstallationRemoval(Protocol):
         request_id: str,
         unattended_guard: Callable[[Session], None] | None = None,
         also_removing: Collection[str] = (),
+        preserve_model_files: bool = False,
     ) -> object: ...
 
 
@@ -423,32 +403,6 @@ def spark_eviction_capacity(
     )
     return EvictionCapacity(
         sum(item.freeable for item in items), _kept_sentence(kept_bytes), tuple(items)
-    )
-
-
-def _waits_for_storage(application: FleetProfileApplication) -> bool:
-    """A load with nothing in flight on a Spark holds nothing there.
-
-    It must not keep the installations on its own Sparks: it waits for disk
-    that only those installations can free, so keeping them would make the
-    space it waits for impossible to free for ever. That holds both before
-    admission and after its profile switch started, while no child of the
-    switch is in flight (a child waiting for disk is never issued). The
-    selected profile's own installations stay kept by the loaded profile, and
-    an issued child's job keeps its Sparks as an operation that owns them.
-    """
-
-    progress = application.progress if isinstance(application.progress, dict) else {}
-    if application.current_operation_id is not None:
-        # Started: decide by what the switch has in flight, not by the id.
-        adapter = progress.get("switch_adapter")
-        return isinstance(adapter, dict) and adapter.get("pending_children") == []
-    if progress.get("admission_pending") is True:
-        return True
-    blockers = progress.get("blockers")
-    return isinstance(blockers, list) and any(
-        isinstance(item, dict) and item.get("code") in _STORAGE_WAIT_CODES
-        for item in blockers
     )
 
 

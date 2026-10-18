@@ -648,9 +648,10 @@ def test_a_late_failure_keeps_its_diagnostics_as_an_on_time_one_would(
             )
         )
         assert stored is not None
-        assert stored.result["diagnostics"] == sanitize_diagnostics(
-            diagnostics
-        ).model_dump(mode="json")
+        assert stored.result is not None
+        assert FailureDiagnostics.model_validate_json(
+            json.dumps(stored.result["diagnostics"])
+        ) == sanitize_diagnostics(diagnostics)
     bundle = evidence.read(operation.id, 1)
     assert bundle.diagnostics.stderr.text == stderr
     # The same bytes delivered again are the same evidence, not a conflict.

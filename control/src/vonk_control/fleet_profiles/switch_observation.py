@@ -14,7 +14,7 @@ from vonk_agent_protocol.agent_words import (
 
 from ..agent_jobs import AgentJobService
 from ..categorized_errors import MissingRecord
-from ..failure_classification import is_security_failure
+from ..failure_classification import is_definite
 from ..fleet_profile_contract import (
     FleetProfileAssignment,
     FleetProfileAssignmentFailure,
@@ -74,6 +74,7 @@ class RunSwitchFleetProfileAdapter:
         application_id: str,
         assignments: tuple[FleetProfileAssignment, ...],
     ) -> FleetProfileChildOperation:
+        from .run_switch_adapter import _ending_disposition
         from .service import FleetProfileService
 
         self = _typing_cast("_RunSwitchFleetProfileAdapter", self)  # noqa: PLW0642 -- assembled mixin interface
@@ -166,9 +167,7 @@ class RunSwitchFleetProfileAdapter:
                             child.status_reason
                             or f"Run/Switch child ended in {child.state}"
                         )[:512],
-                        terminal=is_security_failure(
-                            child.result.failure_code if child.result else None
-                        ),
+                        terminal=is_definite(_ending_disposition(child)),
                     )
                 )
         self._write_state(session, application, state)

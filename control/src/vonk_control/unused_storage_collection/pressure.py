@@ -213,7 +213,9 @@ def _relieve(
             if time.monotonic() > deadline:
                 kept[f"{item.kind}: sweep budget"] += 1
                 continue
-            done = attempted[(item.kind, item.key)] = self._remove(item, kept, outcome)
+            done = attempted[(item.kind, item.key)] = self._remove(
+                item, kept, outcome, attempted
+            )
         if done:
             queued += item.freeable
         if (item.kind, item.key) in self._stopping:
@@ -255,19 +257,25 @@ def _check_round(
 
 
 def _remove(
-    self: UnusedStorageCollector, item: _Item, kept: Counter[str], outcome: _Outcome
+    self: UnusedStorageCollector,
+    item: _Item,
+    kept: Counter[str],
+    outcome: _Outcome,
+    attempted: dict[tuple[str, str], bool],
 ) -> bool:
     """Remove one item; False when anything still keeps it."""
 
     label = "image receipt" if item.kind == "image" else item.kind
-    key = (item.kind, item.key)
-    retry_at = self._retry_at.get(key)
-    if retry_at is not None and self._clock() < retry_at:
-        kept[f"{label}: deferred until {retry_at.isoformat()}"] += 1
-        return False
-    self._retry_at.pop(key, None)
+    group_key = (item.kind, item.key)
     done = 0
     for member in item.members:
+        key = (item.kind, member)
+        attempted[key] = False
+        retry_at = self._retry_at.get(key)
+        if retry_at is not None and self._clock() < retry_at:
+            kept[f"{label}: deferred until {retry_at.isoformat()}"] += 1
+            break
+        self._retry_at.pop(key, None)
         try:
             if item.kind == "installation":
                 self._uninstall(member, item.members)
@@ -283,9 +291,9 @@ def _remove(
         except _Kept as why:
             kept[f"{label}: {why}"] += 1
             if isinstance(why, _Stopping):
-                self._stopping.add(key)
+                self._stopping.add(group_key)
             else:
-                self._refused[key] = str(why)
+                self._refused[group_key] = str(why)
             break
         except UnknownOutcomeError as error:
             # The failed member is retained and discovered again by the
@@ -315,7 +323,7 @@ def _remove(
             RuntimeImagePreparationError,
         ) as error:
             kept[f"{label}: refused {_code(error)}"] += 1
-            self._refused[key] = f"refused {_code(error)}"
+            self._refused[group_key] = f"refused {_code(error)}"
             log_event(
                 _LOGGER,
                 "unused_storage.refused",
@@ -326,6 +334,7 @@ def _remove(
                 detail=str(error)[:256],
             )
             break
+        attempted[key] = True
         done += 1
         outcome.removed["model" if item.kind == "model-set" else item.kind] += 1
         log_event(
