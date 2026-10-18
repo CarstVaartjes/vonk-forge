@@ -9,7 +9,7 @@ from typing import cast as _typing_cast
 
 from pydantic import ValidationError
 from sqlalchemy.orm import Session, object_session
-from vonk_agent_protocol import ProfileReasonCode, SupersedeCode
+from vonk_agent_protocol import LifecycleState, ProfileReasonCode, SupersedeCode
 from vonk_forge_contracts import RecipeDefinition
 
 from ..fleet_profile_contract import (
@@ -32,6 +32,7 @@ from .assessment_support import (
 )
 from .contracts import (
     FleetProfileConflict,
+    FleetProfileReviewStale,
 )
 from .dependencies import _LOGGER
 from .persistence import (
@@ -45,6 +46,7 @@ from .projection_support import (
     _aware,
     _digest,
     _profile_document,
+    _validate_remaining_effects,
 )
 
 if TYPE_CHECKING:
@@ -248,6 +250,16 @@ class FleetProfileService:
                 wait_for_space=True,
             )
             return None
+        try:
+            _validate_remaining_effects(blocked.effects, fresh.effects)
+        except FleetProfileReviewStale as error:
+            self._finish_pending_admission(
+                application_id,
+                state=LifecycleState.SUPERSEDED,
+                reason=str(error),
+                code=error.supersede_code,
+            )
+            return None
         if not fresh.allowed:
             self._wait_for_conditions(application_id, fresh, actor)
             return None
@@ -280,6 +292,9 @@ class FleetProfileService:
                             update={
                                 "reviewed_plan_digest": fresh.plan_digest,
                                 "assignments": list(fresh.resolved_assignments),
+                                "scope": progress.intended_profile.scope.model_copy(
+                                    update={"node_ids": fresh.scope.node_ids}
+                                ),
                             }
                         ),
                         "total_steps": len(fresh.steps),
@@ -352,6 +367,8 @@ class FleetProfileService:
                     accepted_profile_definition=plan.profile_definition,
                     excluded_application_id=application_id,
                 )
+                # Recipe following cannot acquire unreviewed destructive targets.
+                _validate_remaining_effects(plan.effects, fresh.effects)
         except (FleetProfileConflict, ValidationError, KeyError):
             # The ordinary admission path reports whatever is unresumable.
             return False
@@ -396,7 +413,12 @@ class FleetProfileService:
                 progress.model_copy(
                     update={
                         "intended_profile": followed.model_copy(
-                            update={"reviewed_plan_digest": fresh.plan_digest}
+                            update={
+                                "reviewed_plan_digest": fresh.plan_digest,
+                                "scope": followed.scope.model_copy(
+                                    update={"node_ids": fresh.scope.node_ids}
+                                ),
+                            }
                         ),
                         "total_steps": len(fresh.steps),
                     }

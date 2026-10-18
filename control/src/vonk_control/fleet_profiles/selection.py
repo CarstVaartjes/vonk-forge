@@ -57,8 +57,9 @@ def _admission_wait(error: BaseException) -> str:
     """A busy admission's reason: which lock refused it and who held the way."""
 
     return (
-        f"Profile admission is busy ({busy_detail(error)}); review again after "
-        "the current fleet, catalog, workload or capacity change completes"
+        f"Profile admission is busy ({busy_detail(error)}); the Controller will "
+        "retry automatically after the current fleet, catalog, workload or "
+        "capacity change completes."
     )
 
 

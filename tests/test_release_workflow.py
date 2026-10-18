@@ -572,7 +572,7 @@ def test_main_reruns_no_image_proof_the_pull_request_holds(pr_proof, tmp_path) -
     """Catches main re-verifying or deep-scanning the digests the pull request
     verified (scripts/reuse-pr-candidate-images prints reused=true only when it
     holds them; a missing or other digest builds instead), dropping a proof the
-    pull request does not hold (Trivy, the LiteLLM smoke), or skipping
+    pull request does not hold (fresh security evidence), or skipping
     publication or signing under main's identity."""
     context = {
         "inputs.reuse_run_id": "42",
@@ -593,12 +593,11 @@ def test_main_reruns_no_image_proof_the_pull_request_holds(pr_proof, tmp_path) -
     assert count("Accept the pull request images") == (1 if pr_proof else 0)
     for prefix in (
         "Scan the",
-        "Smoke the exact",
         "Publish immutable",
         "Verify immutable",
         "Sign accepted",
     ):
-        assert count(prefix) == (1 if prefix == "Smoke the exact" else 4), prefix
+        assert count(prefix) == 4, prefix
     if not pr_proof:
         return
     (step,) = (step for step in _image_steps() if step.get("id") == "pr_acceptance")
@@ -962,3 +961,205 @@ def test_a_failed_payload_match_says_why_the_lanes_run_here(
     assert summary.read_text() == (
         f"Spark and recipe refresh run here: matching pull request {expected}\n"
     )
+
+
+@pytest.mark.parametrize(
+    "fault",
+    [None, "digest", "stale", "future", "missing", "attempt", "failed", "denied"],
+)
+def test_main_reuses_only_fresh_digest_bound_pr_security(fault, tmp_path):
+    """Catches skipping scans for another digest/attempt or stale PR evidence,
+    losing main's SARIF, and treating denied evidence access as permission."""
+    from datetime import UTC, datetime, timedelta
+
+    roles = ("api", "worker", "hermes", "litellm")
+    digests = {role: "sha256:" + digit * 64 for role, digit in zip(roles, "abcd")}
+    pr = load(WORKFLOWS / "release-acceptance.yml")["jobs"]["image-security"]
+    assert pr["needs"] == ["source", "images"]
+    # The scan runs beside acceptance, with no candidate consumer waiting on it.
+    for name, job in load(WORKFLOWS / "release-acceptance.yml")["jobs"].items():
+        if name != "image-security":
+            assert "image-security" not in job.get("needs", [])
+    proof = next(
+        step
+        for step in pr["steps"]
+        if step.get("name", "").startswith("Bind successful")
+    )
+    evidence = tmp_path / "security"
+    sarif = tmp_path / "trivy-results"
+    sarif.mkdir()
+    for role in roles:
+        (sarif / f"development-{role}.sarif").write_text(
+            json.dumps(
+                {"version": "2.1.0", "runs": [{"tool": {"driver": {"name": "Trivy"}}}]}
+            )
+        )
+        subprocess.run(
+            ["bash", "-c", proof["run"]],
+            cwd=tmp_path,
+            check=True,
+            env={
+                **os.environ,
+                "RUNNER_TEMP": str(tmp_path),
+                "ROLE": role,
+                "DIGEST": digests[role].removeprefix("sha256:"),
+                "GITHUB_RUN_ID": "42",
+                "GITHUB_RUN_ATTEMPT": "1",
+            },
+        )
+        (sarif / f"development-{role}.sarif").unlink()
+    age = (
+        timedelta(hours=24)
+        if fault == "stale"
+        else timedelta(hours=-1 if fault == "future" else 1)
+    )
+    record = {
+        "id": 42,
+        "path": ".github/workflows/ci.yml",
+        "head_repository": {"full_name": "owner/repo"},
+        "event": "pull_request",
+        "status": "completed",
+        "conclusion": "failure" if fault == "failed" else "success",
+        "run_attempt": 2 if fault == "attempt" else 1,
+        "created_at": (datetime.now(UTC) - age).strftime("%Y-%m-%dT%H:%M:%SZ"),
+    }
+    if fault == "digest":
+        digests["worker"] = "sha256:" + "f" * 64
+    if fault == "missing":
+        (evidence / "api" / ("a" * 64) / "verified").unlink()
+    evidence.rename(tmp_path / "pr-security")
+    tools = tmp_path / "bin"
+    tools.mkdir()
+    gh = tools / "gh"
+    gh.write_text(
+        "#!/usr/bin/env python3\nimport json, sys\n"
+        + ("sys.exit(1)\n" if fault == "denied" else f"print(json.dumps({record!r}))\n")
+    )
+    gh.chmod(0o755)
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    (scripts / "reuse-pr-image-security").symlink_to(
+        ROOT / "scripts/reuse-pr-image-security"
+    )
+    step = next(step for step in _image_steps() if step.get("id") == "pr_security")
+    output, summary = tmp_path / "output", tmp_path / "summary"
+    context = {
+        "inputs.reuse_run_id": "42",
+        **{
+            f"steps.pr_images.outputs.{role}_digest": digest
+            for role, digest in digests.items()
+        },
+    }
+    result = subprocess.run(
+        ["bash", "-c", step["run"]],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+        env={
+            **os.environ,
+            **{key: render(value, context) for key, value in step["env"].items()},
+            "PATH": f"{tools}:{os.environ['PATH']}",
+            "RUNNER_TEMP": str(tmp_path),
+            "GITHUB_REPOSITORY": "owner/repo",
+            "GITHUB_OUTPUT": str(output),
+            "GITHUB_STEP_SUMMARY": str(summary),
+        },
+    )
+    if fault == "denied":
+        assert result.returncode != 0
+        return
+    assert result.returncode == 0, result.stderr
+    reused = "reused=true" in output.read_text()
+    assert reused == (fault is None)
+    context["steps.pr_security.outputs.reused"] = "true" if reused else ""
+    scans = [
+        step
+        for step in _image_steps()
+        if step.get("uses") == "./.github/actions/image-security"
+    ]
+    assert len(scans) == 4
+    assert sum(bool(evaluate(step["if"], context)) for step in scans) == (
+        0 if reused else 4
+    )
+    if reused:
+        assert "reused from pull request run 42" in summary.read_text()
+        uploads = [
+            step
+            for step in _image_steps()
+            if step.get("name", "").startswith("Upload reused")
+        ]
+        assert {step["with"]["category"] for step in uploads} == {
+            f"trivy-development-{role}" for role in roles
+        }
+        for step in uploads:
+            assert evaluate(step["if"], context)
+            assert (tmp_path / step["with"]["sarif_file"]).is_file()
+
+
+def test_candidate_litellm_smoke_uses_digest_only_registry_references(tmp_path):
+    """Skopeo rejects tag@digest even though Trivy accepts it. Exercise the
+    PR reference producer and both smoke architectures against its CLI seam."""
+    reference = "ghcr.io/carstvaartjes/vonk-forge-litellm"
+    digest = "sha256:" + "b" * 64
+    images = tmp_path / "images"
+    images.mkdir()
+    (images / "litellm").write_text(
+        f"{reference}:acceptance-{'c' * 40}-42-1@{digest}\n"
+    )
+    job = load(WORKFLOWS / "release-acceptance.yml")["jobs"]["image-security"]
+    producer = next(step for step in job["steps"] if step.get("id") == "image")
+    output = tmp_path / "output"
+    subprocess.run(
+        ["bash", "-c", producer["run"]],
+        cwd=tmp_path,
+        check=True,
+        env={
+            **os.environ,
+            "ROLE": "litellm",
+            "RUNNER_TEMP": str(tmp_path),
+            "GITHUB_OUTPUT": str(output),
+        },
+    )
+    values = dict(line.split("=", 1) for line in output.read_text().splitlines())
+    assert values["image"] == f"{reference}@{digest}"
+    tools = tmp_path / "bin"
+    tools.mkdir()
+    requests = tmp_path / "requests"
+    skopeo = tools / "skopeo"
+    skopeo.write_text(f"""#!/usr/bin/env python3
+import json, pathlib, sys
+args = sys.argv[1:]
+assert args[0] == "copy"
+assert args[-2] == {f"docker://{reference}@{digest}"!r}
+with pathlib.Path({str(requests)!r}).open("a") as output:
+    output.write(json.dumps(args) + "\\n")
+""")
+    skopeo.chmod(0o755)
+    docker = tools / "docker"
+    docker.write_text("#!/bin/sh\nexit 0\n")
+    docker.chmod(0o755)
+    (tmp_path / "scripts").symlink_to(ROOT / "scripts", target_is_directory=True)
+    action = load(ROOT / ".github/actions/image-security/action.yml")
+    smoke = next(
+        step
+        for step in action["runs"]["steps"]
+        if step.get("name", "").startswith("Smoke the exact")
+    )
+    subprocess.run(
+        ["bash", "-c", smoke["run"]],
+        cwd=tmp_path,
+        check=True,
+        env={
+            **os.environ,
+            "PATH": f"{tools}:{os.environ['PATH']}",
+            "IMAGE": values["image"],
+            "GITHUB_RUN_ID": "42",
+            "GITHUB_WORKSPACE": str(ROOT),
+        },
+    )
+    copies = [json.loads(line) for line in requests.read_text().splitlines()]
+    assert [args[args.index("--override-arch") + 1] for args in copies] == [
+        "amd64",
+        "arm64",
+    ]

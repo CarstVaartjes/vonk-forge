@@ -12,8 +12,12 @@ import threading
 from uuid import uuid4
 
 from sqlalchemy import select
+from vonk_agent_protocol import ProfileReasonCode
 from vonk_control.admission_locking import PATIENT_AFTER_RETRIES, label_transaction
-from vonk_control.fleet_profile_contract import FleetProfileApplicationProgress
+from vonk_control.fleet_profile_contract import (
+    FleetProfileApplicationProgress,
+    FleetProfileApplicationView,
+)
 from vonk_control.fleet_profiles.persistence import _persisted_profile_progress
 from vonk_control.models import AgentNode, FleetProfileApplication
 
@@ -62,6 +66,16 @@ def test_parked_load_names_its_lock_holder_then_queues_for_the_lock(
             json={"request_key": request_key},
         )
         assert response.status_code == 202, response.text
+        waiting = FleetProfileApplicationView.model_validate_json(response.content)
+        assert any(
+            blocker.code == ProfileReasonCode.ADMISSION_BUSY
+            and "retry automatically" in blocker.detail
+            and "review again" not in blocker.detail.lower()
+            for blocker in waiting.blockers
+        ), waiting.blockers
+        retry_at = waiting.progress.admission_retry_at
+        assert retry_at is not None
+        assert retry_at.isoformat() in (waiting.status_reason or "")
 
         # Each retry while the row stays held is refused, and the parked load
         # says which lock refused it and who holds it.
@@ -77,6 +91,22 @@ def test_parked_load_names_its_lock_holder_then_queues_for_the_lock(
             detail = " ".join(blocker.detail for blocker in refused.blockers)
             assert "agent_nodes" in detail, detail
             assert "agent-heartbeat" in detail, detail
+            assert "review again" not in detail.lower(), detail
+            assert any(
+                blocker.code == ProfileReasonCode.ADMISSION_BUSY
+                and "retry automatically" in blocker.detail
+                for blocker in refused.blockers
+            ), refused.blockers
+            retry_at = refused.admission_retry_at
+            assert retry_at is not None
+            with sessions() as session:
+                row = session.scalar(
+                    select(FleetProfileApplication).where(
+                        FleetProfileApplication.request_key == request_key
+                    )
+                )
+                assert row is not None
+                assert retry_at.isoformat() in (row.status_reason or "")
 
         # After repeated refusals the retry queues for the lock: the writer
         # lets go while it waits, and the load is admitted on that same retry.

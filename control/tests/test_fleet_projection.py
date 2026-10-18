@@ -2479,7 +2479,10 @@ def test_wifi_nas_route_is_a_typed_warning_with_a_recommendation() -> None:
     (warning,) = _route_warnings([_WIFI], "wlP9s9")
 
 
-def test_fleet_names_the_spark_that_copies_from_the_nas_far_slower() -> None:
+@pytest.mark.parametrize("with_link", [False, True])
+def test_fleet_names_the_spark_that_copies_from_the_nas_far_slower(
+    with_link: bool,
+) -> None:
     engine = create_engine("sqlite+pysqlite:///:memory:")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
@@ -2545,6 +2548,20 @@ def test_fleet_names_the_spark_that_copies_from_the_nas_far_slower() -> None:
                     },
                 )
             )
+    if with_link:
+        vector = (
+            Path(__file__).parents[2]
+            / "agent_protocol/src/vonk_agent_protocol/vectors/inventory-wifi-link-v1.json"
+        )
+        request = InventoryRequest.model_validate_json(vector.read_bytes())
+        with sessions.begin() as session:
+            inventory = _inventory(NODE_B, NOW, free_bytes=100)
+            inventory.network_interfaces = [
+                item.model_dump(mode="json")
+                for item in request.network_interfaces or []
+            ]
+            inventory.nas_route_interface = request.nas_route_interface
+            session.add(inventory)
     nodes = {
         node.id: node
         for node in FleetProjection(sessions, clock=lambda: NOW).read().nodes
@@ -2561,6 +2578,13 @@ def test_fleet_names_the_spark_that_copies_from_the_nas_far_slower() -> None:
     (detail,) = slow(NODE_B)
     assert detail.startswith("Copies from the NAS at 3.6 MB/s vs 88.1 MB/s")
     assert "on spark-3542" in detail
+    if with_link:
+        assert (
+            "Wi-Fi signal -78 dBm, on 2.4 GHz, TX 866.7 Mbit/s, RX 6.5 Mbit/s" in detail
+        )
+        assert nodes[NODE_B].inventory is not None
+    else:
+        assert "Wi-Fi" not in detail
 
 
 def test_wired_unknown_or_unreported_nas_route_raises_no_warning() -> None:

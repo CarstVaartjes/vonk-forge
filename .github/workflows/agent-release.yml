@@ -296,6 +296,9 @@ jobs:
           persist-credentials: false
       - name: Prepare Pydantic contracts for Cargo builds
         uses: ./.github/actions/python-env
+        with:
+          contracts: none
+          cli-dependencies: "false"
       - name: Revalidate main ARM64 acceptance source
         shell: bash
         run: |

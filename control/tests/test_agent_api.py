@@ -46,6 +46,7 @@ from vonk_agent_protocol.host_helper import (
     host_helper_grant_signing_bytes,
 )
 from vonk_agent_protocol.http_failure import HttpTransient, TransientReason
+from vonk_agent_protocol.inventory import InventoryRequest, NetworkInterface
 from vonk_control import agent_operation_states as aos
 from vonk_control.agent_api import (
     AgentApiServices,
@@ -679,7 +680,10 @@ def test_telemetry_streams_only_to_endpoint_body_limit(
     assert reads == 2
 
 
-def test_agent_posts_authenticated_runtime_and_fabric_inventory(agent_system) -> None:
+@pytest.mark.parametrize("with_link", [False, True])
+def test_agent_posts_authenticated_runtime_and_fabric_inventory(
+    agent_system, with_link: bool
+) -> None:
     client, services, _, clock = agent_system
     payload = {
         "schema_version": 1,
@@ -715,6 +719,27 @@ def test_agent_posts_authenticated_runtime_and_fabric_inventory(agent_system) ->
         "unused_model_bytes": 123,
     }
 
+    # Catch dropping new optional NIC evidence on ingress or persistence, while
+    # accepting older reports that omit it. Compare contracts, never a copied
+    # list of fields whose declared optional defaults may grow.
+    if with_link:
+        vector = InventoryRequest.model_validate_json(
+            files("vonk_agent_protocol")
+            .joinpath("vectors/inventory-wifi-link-v1.json")
+            .read_bytes()
+        )
+        assert vector.network_interfaces is not None
+        payload["network_interfaces"] = [
+            NetworkInterface(name="enP7s7", kind="wired", carrier=False).model_dump(
+                mode="json", exclude_none=True
+            ),
+            *[
+                item.model_dump(mode="json", exclude_none=True)
+                for item in vector.network_interfaces
+            ],
+        ]
+    expected = InventoryRequest.model_validate_json(canonical_message(payload))
+
     response = client.post(
         "/agent/inventory",
         headers=agent_headers(NODE_A, "serial-a"),
@@ -731,20 +756,11 @@ def test_agent_posts_authenticated_runtime_and_fabric_inventory(agent_system) ->
         assert row.nas_route_interface == "wlP9s9"
         assert row.host_settings == payload["host_settings"]
         assert row.unused_model_bytes == 123
-        assert row.network_interfaces == [
-            {
-                "name": "enP7s7",
-                "kind": "wired",
-                "link_speed_mbps": None,
-                "carrier": False,
-            },
-            {
-                "name": "wlP9s9",
-                "kind": "wifi",
-                "link_speed_mbps": None,
-                "carrier": True,
-            },
-        ]
+        assert row.network_interfaces is not None
+        assert [
+            NetworkInterface.model_validate_json(canonical_message(item))
+            for item in row.network_interfaces
+        ] == expected.network_interfaces
         assert row.capabilities == sorted(payload["capabilities"])
 
     # Optional evidence never costs the mandatory capacity report: a NAS route

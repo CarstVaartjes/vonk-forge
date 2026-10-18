@@ -252,10 +252,29 @@ def test_postgres_paired_profile_has_one_owner_and_lane_attributed_receipts(
                     # proves this was response loss after acceptance.
                     assert lost_responses
 
-    assert 1 <= len(lost_responses) <= 2
-    assert len(lost_responses) + len(responses) == 2
-    rejected = dict(responses)
-    assert all(response.status_code == 409 for response in rejected.values())
+    assert not responses, [(key, response.text) for key, response in responses]
+    assert set(lost_responses) == set(request_keys)
+
+    # Both requests have durable receipts even when one loses the admission
+    # race. Drive that queue before asserting ownership: the latest accepted
+    # request re-plans and retires the older owner without a new submission.
+    for _ in range(10):
+        pending = [
+            view
+            for receipt in lost_responses.values()
+            if (view := profiles.application(receipt.id)).state
+            in {LifecycleState.QUEUED, LifecycleState.NEEDS_OPERATOR}
+            and view.progress.admission_pending
+        ]
+        if not pending:
+            break
+        for waiting in pending:
+            due = waiting.progress.admission_retry_at
+            assert due is not None
+            now[0] = max(now[0], due)
+        assert profiles.tick()
+    else:
+        pytest.fail("concurrent profile admission did not settle")
 
     with sessions() as session:
         rows = list(session.scalars(select(FleetProfileApplication)))
@@ -264,10 +283,16 @@ def test_postgres_paired_profile_has_one_owner_and_lane_attributed_receipts(
     live_rows = [
         row
         for row in rows
-        if row.state in {"queued", "running", "waiting-for-operator"}
+        if row.state
+        in {
+            LifecycleState.QUEUED,
+            LifecycleState.RUNNING,
+            LifecycleState.NEEDS_OPERATOR,
+        }
     ]
     assert len(live_rows) == 1
     active = live_rows[0]
+    assert active.id == max(rows, key=lambda row: (row.created_at, row.id)).id
     accepted_key = active.request_key
     accepted_body = request_bodies[request_keys.index(accepted_key)]
     application_id = active.id
@@ -290,7 +315,7 @@ def test_postgres_paired_profile_has_one_owner_and_lane_attributed_receipts(
         # either lost response must resolve to that exact durable identity.
         assert replayed_receipt.id == original_receipt.id
         assert replayed_receipt.request_key == key
-        assert replayed_receipt.plan_digest == original_receipt.plan_digest
+        assert replayed_receipt.plan_digest == rows_by_key[key].plan_digest
         assert replayed_receipt.id == rows_by_key[key].id
 
     accepted = api.post(path, headers=headers, json=accepted_body)

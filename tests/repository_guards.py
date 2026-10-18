@@ -9,6 +9,7 @@ Do not add a whole-tree scan to SCOPED: select its file or node in GUARDS.
 GUARDS: tuple[str, ...] = (
     "tests/scripts/test_pull_test_images.py",
     "tests/test_guard_policy.py",
+    "tests/test_profile_blocker_operator_actions.py",
     "tests/test_ci_apt_install.py",
     "tests/cluster_profiles/test_cli_render.py::test_every_controller_command_has_a_registered_presentation",
     "tests/test_controller_startup_guard.py",
@@ -35,6 +36,10 @@ GUARDS: tuple[str, ...] = (
 )
 
 SCOPED: tuple[tuple[str, str], ...] = (
+    (
+        "tests/scripts/test_verify_published_image.py",
+        "Published image identity and attestation parsing against registry fixtures.",
+    ),
     (
         "tests/nas_setup/test_cli.py",
         "Portable NAS setup behavior and recovery; no whole-tree product scan.",

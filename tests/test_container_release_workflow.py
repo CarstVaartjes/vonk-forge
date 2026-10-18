@@ -410,7 +410,10 @@ def test_publisher_deep_scans_local_oci_content_without_uploading_archives() -> 
         for step in steps
         if "actions/download-artifact@" in step.get("uses", "")
     ]
-    assert [download["pattern"] for download in downloads] == ["acceptance-image-*"]
+    assert [download["pattern"] for download in downloads] == [
+        "acceptance-image-*",
+        "candidate-image-security-*",
+    ]
     assert (
         ".oci.tar\n"
         not in publisher[publisher.index("uses: actions/upload-artifact@") :]
@@ -443,140 +446,6 @@ def test_publisher_deep_scans_local_oci_content_without_uploading_archives() -> 
     assert '"$scan_root/local-runnable-platforms.tsv"' in scan
     assert '"$scan_root/remote-runnable-platforms.tsv"' in scan
     assert "docker-daemon:" not in scan
-
-
-def _source_commit(tmp_path: Path) -> tuple[Path, str, str]:
-    """A one-commit repository: its git dir, commit and tree."""
-    repo = tmp_path / "source"
-    repo.mkdir()
-    subprocess.run(["git", "init", "-q", str(repo)], check=True)
-    (repo / "file").write_text("content\n")
-    subprocess.run(["git", "-C", str(repo), "add", "file"], check=True)
-    subprocess.run(
-        [
-            "git",
-            "-C",
-            str(repo),
-            "-c",
-            "user.name=Test",
-            "-c",
-            "user.email=test@example.com",
-            "-c",
-            "commit.gpgsign=false",
-            "commit",
-            "-qm",
-            "source",
-        ],
-        check=True,
-    )
-
-    def rev(name: str) -> str:
-        return subprocess.check_output(
-            ["git", "-C", str(repo), "rev-parse", name], text=True
-        ).strip()
-
-    return repo / ".git", rev("HEAD"), rev("HEAD^{tree}")
-
-
-@pytest.mark.parametrize("fault", ["transient", "legacy", "digest", "tree", "sbom"])
-def test_published_image_fetch_recovery_still_verifies_identity_and_attestations(
-    tmp_path, fault
-):
-    """An exact-source image must be bound to the verified commit's tree. Its
-    revision label may name another commit with that tree; an image built
-    before the tree label ("legacy") is bound through its commit's tree."""
-    git_dir, commit, tree = _source_commit(tmp_path)
-    revision = commit
-    labels = {
-        "org.opencontainers.image.source": "https://github.com/CarstVaartjes/vonk-forge",
-        "org.opencontainers.image.revision": revision,
-    }
-    if fault != "legacy":
-        labels["ai.vonkforge.source.tree"] = "1" * 40 if fault == "tree" else tree
-    digest = "sha256:" + "b" * 64
-    manifest = {
-        "mediaType": "application/vnd.oci.image.index.v1+json",
-        "manifests": [
-            image_descriptor("amd64", "c"),
-            image_descriptor("arm64", "d"),
-            attestation_descriptor("c", "e"),
-            attestation_descriptor("d", "f"),
-        ],
-    }
-    documents = {
-        "Manifest": manifest,
-        "Provenance": {
-            f"linux/{arch}": {
-                "predicateType": "https://slsa.dev/provenance/v1",
-                "revision": revision,
-            }
-            for arch in ("amd64", "arm64")
-        },
-        "SBOM": {
-            f"linux/{arch}": {
-                "SPDXID": "SPDXRef-DOCUMENT",
-                "spdxVersion": "SPDX-2.3",
-            }
-            for arch in ("amd64", "arm64")
-        },
-    }
-    if fault == "sbom":
-        documents["SBOM"].pop("linux/arm64")
-    tool_bin = tmp_path / "bin"
-    tool_bin.mkdir()
-    requests = tmp_path / "requests"
-    # Stub only the remote reads. Execute the real shell, retry helper, jq
-    # validation and multiarch verifier against their documented CLI responses.
-    fake = f"""#!/usr/bin/env python3
-import json, pathlib, sys
-log = pathlib.Path({str(requests)!r})
-args = sys.argv[1:]
-key = " ".join(args)
-previous = log.read_text().splitlines() if log.exists() else []
-with log.open("a") as output: output.write(key + "\\n")
-if {fault!r} == "transient" and ".Provenance" in key and key not in previous:
-    print("partial response")
-    print("connection reset by peer", file=sys.stderr)
-    sys.exit(1)
-if "--config" in args:
-    print(json.dumps({{"config": {{"Labels": {labels!r}}}}}))
-elif args[0] == "inspect":
-    print({("sha256:" + "0" * 64 if fault == "digest" else digest)!r})
-else:
-    documents = {documents!r}
-    field = next(field for field in documents if "." + field in key)
-    print(json.dumps(documents[field]))
-"""
-    for name in ("docker", "skopeo"):
-        tool = tool_bin / name
-        tool.write_text(fake)
-        tool.chmod(0o755)
-    result = subprocess.run(
-        [
-            ROOT / "scripts/verify-published-image",
-            "api",
-            "ghcr.io/carstvaartjes/vonk-forge-api",
-            digest,
-            "dev-sha-" + commit,
-        ],
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
-        check=False,
-        env={
-            **os.environ,
-            "PATH": f"{tool_bin}:{os.environ['PATH']}",
-            "RUNNER_TEMP": str(tmp_path),
-            "GIT_DIR": str(git_dir),
-        },
-    )
-    assert (result.returncode == 0) == (fault in ("transient", "legacy")), result.stderr
-    calls = requests.read_text().splitlines()
-    if fault == "transient":
-        assert sum(".Provenance" in call for call in calls) == 2
-        assert sum("--config" in call for call in calls) == 2
-    else:
-        assert len(calls) == len(set(calls))  # validation failures never retry
 
 
 def _write_receipt_fixture(root: Path) -> None:
@@ -1765,31 +1634,19 @@ def test_cached_image_is_reverified_before_current_run_receipt(
             json.dumps({"digest": digest, "build_commit": built})
         )
         (cache / "provenance.json").write_text("signed bundle fixture")
-    manifest = {
-        "mediaType": "application/vnd.oci.image.index.v1+json",
-        "manifests": [
-            image_descriptor("amd64", "c"),
-            image_descriptor("arm64", "d"),
-            attestation_descriptor("c", "e"),
-            attestation_descriptor("d", "f"),
-        ],
-    }
-    documents = {
-        "Manifest": manifest,
-        "Provenance": {
-            f"linux/{arch}": {
-                "predicateType": "https://slsa.dev/provenance/v1",
-                "revision": built,
-            }
-            for arch in ("amd64", "arm64")
-        },
-        "SBOM": {
-            f"linux/{arch}": {"SPDXID": "SPDXRef-DOCUMENT", "spdxVersion": "SPDX-2.3"}
-            for arch in ("amd64", "arm64")
-        },
-    }
+    documents = json.loads(
+        (ROOT / "tests/fixtures/buildx-inspection.json")
+        .read_text()
+        .replace("REVISION", built)
+    )
+    for platform, image in documents["inspection"]["image"].items():
+        image["config"]["Labels"] = dict(labels)
+        if fault == "platform_revision" and platform == "linux/arm64":
+            image["config"]["Labels"]["org.opencontainers.image.revision"] = "0" * 40
     if fault == "sbom":
-        documents["SBOM"].pop("linux/arm64")
+        documents["sbom"].pop("linux/arm64")
+    if fault == "digest":
+        documents["inspection"]["manifest"]["digest"] = "sha256:" + "0" * 64
     tool_bin = tmp_path / "bin"
     tool_bin.mkdir()
     requests = tmp_path / "requests"
@@ -1805,17 +1662,10 @@ if pathlib.Path(sys.argv[0]).name == "gh":
     else:
         assert args[args.index("--source-digest") + 1] == {accepted!r}
     sys.exit(1 if {fault!r} == "signature" else 0)
-if "--config" in args:
-    labels = {labels!r}
-    if {fault!r} == "platform_revision" and "sha256:" + "d" * 64 in " ".join(args):
-        labels["org.opencontainers.image.revision"] = "0" * 40
-    print(json.dumps({{"config": {{"Labels": labels}}}}))
-elif args[0] == "inspect":
+if args[0] == "inspect":
     print({("sha256:" + "0" * 64 if fault == "digest" else digest)!r})
 else:
-    documents = {documents!r}
-    field = next(field for field in documents if "." + field in " ".join(args))
-    print(json.dumps(documents[field]))
+    print(json.dumps({documents!r}))
 """
     for name in ("gh", "skopeo", "docker"):
         (tool_bin / name).write_text(fake)

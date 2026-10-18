@@ -117,7 +117,7 @@ class RunSwitchFleetProfileAdapter:
             for reason in control.reasons
         ):
             raise FleetProfileInvalid(
-                "Profile workload effects can no longer be represented safely; review again",
+                "Profile workload effects can no longer be represented safely",
                 reason=InvalidRequestReason.SUPERSEDED,
             )
         _validate_remaining_effects(reviewed_effects, control.effects)
