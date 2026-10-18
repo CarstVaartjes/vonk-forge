@@ -361,9 +361,13 @@ pub fn sweep(
     // content too. Missing evidence is unknown, never an empty reference set.
     if let Some(retention) = untracked.and_then(|verdict| verdict.retention.as_ref()) {
         let path = data_root.join("store-retention.json");
-        let temporary = data_root.join(format!(".store-retention-{}.tmp", uuid::Uuid::new_v4()));
+        // Transfer scratch already has a 24-hour collector, including after a
+        // process dies before this projection's atomic rename.
+        let scratch = data_root.join("distribution");
+        let temporary = scratch.join(format!("retention-{}.partial", uuid::Uuid::new_v4()));
         let publish = || -> std::io::Result<()> {
             use std::io::Write;
+            fs::create_dir_all(&scratch)?;
             let mut file = fs::OpenOptions::new()
                 .write(true)
                 .create_new(true)
@@ -380,6 +384,7 @@ pub fn sweep(
         };
         if let Err(error) = publish() {
             let _ = fs::remove_file(&temporary);
+            let _ = fs::remove_file(&path);
             eprintln!("vonk-agent: store retention references unavailable: {error}");
         }
     } else {

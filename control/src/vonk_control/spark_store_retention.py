@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timedelta
 
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import LifecycleState, StorageDemandCode
+from vonk_agent_protocol import LifecycleState, StorageDemandCode, WaitReason
 from vonk_agent_protocol.inventory import StoreRetentionRequest
 
 from .fleet_profile_contract import FleetProfileApplicationProgress
+from .logging import log_event
 from .model_cache_contract import CacheManifest
 from .models import FleetProfileApplication, ModelCacheSet
 from .strict_json import read_stored_model
@@ -18,6 +20,7 @@ from .unused_storage_collection.evidence import _Evidence
 # An inventory arrives every two minutes. A stopped writer cannot keep demanding
 # space or authorizing deletion indefinitely.
 RETENTION_MAX_AGE = timedelta(minutes=10)
+_LOGGER = logging.getLogger(__name__)
 
 
 def _store_retention_request(
@@ -80,8 +83,18 @@ def store_retention_request(
     session: Session, node_id: str, now: datetime
 ) -> StoreRetentionRequest | None:
     try:
-        return _store_retention_request(session, node_id, now)
+        request = _store_retention_request(session, node_id, now)
     except ValueError:
+        request = None
+    if request is None:
         # An unreadable reference is unknown, not permission to collect; the
         # mandatory capacity inventory is still accepted.
-        return None
+        log_event(
+            _LOGGER,
+            "unused_storage.references_unavailable",
+            service="control-api",
+            node_id=node_id,
+            code=WaitReason.OBSERVATION_UNAVAILABLE,
+            detail="Controller reference scan unavailable; cache collection retries at the next inventory",
+        )
+    return request
