@@ -297,6 +297,7 @@ def uninstall_plan(
     model_content_sha256: str,
     model_title: str,
     dependent_recipe_ids_by_node: Mapping[str, Sequence[str]],
+    preserve_model_files: bool = False,
 ) -> UninstallPlan:
     """Bind exact cleanup authority while reporting unknown reclaimable bytes."""
 
@@ -319,10 +320,14 @@ def uninstall_plan(
         )
     )
     cleanup_node_ids = tuple(
-        node_id for node_id, recipe_ids in dependents_by_node.items() if not recipe_ids
+        node_id
+        for node_id, recipe_ids in dependents_by_node.items()
+        if not recipe_ids and not preserve_model_files
     )
     retained_node_ids = tuple(
-        node_id for node_id, recipe_ids in dependents_by_node.items() if recipe_ids
+        node_id
+        for node_id, recipe_ids in dependents_by_node.items()
+        if recipe_ids or preserve_model_files
     )
     model_effect = (
         "recipe-and-unused-model"

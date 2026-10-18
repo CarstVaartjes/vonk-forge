@@ -49,7 +49,7 @@ from .common import (
     _kept_sentence,
     _model_objects,
 )
-from .evidence import _Evidence, _Item, _Round
+from .evidence import _Evidence, _Item, _Outcome, _Round
 from .pressure import (
     _check_round,
     _nas_filesystems,
@@ -80,7 +80,7 @@ from .removal import (
 
 
 class UnusedStorageCollector:
-    """Frees disk on a Spark or the NAS, by removing unused items, when it is short."""
+    """Expires unused non-model assets; evicts model files only under disk pressure."""
 
     def __init__(
         self,
@@ -163,16 +163,13 @@ class UnusedStorageCollector:
         return bool(result.installations or result.images or result.models)
 
     def collect(self) -> Swept:
-        """One pass: free what the short Sparks and the NAS need, and no more."""
+        """One pass: relieve disk pressure and expire unused non-model assets."""
 
         now = self._clock()
         self._retry_at = {key: due for key, due in self._retry_at.items() if now < due}
         self._stopping.clear()
         self._refused.clear()
         pressures = self._pressures(now)
-        if not pressures:
-            self._last_outcome.clear()
-            return Swept(0, 0, 0, {})
         with self._sessions() as session:
             evidence = _Evidence.read(session, now)
         # The budget starts after the inventory so every pass reaches an item.
@@ -184,6 +181,9 @@ class UnusedStorageCollector:
             self._relieve(pressure, evidence, deadline, kept, attempted)
             for pressure in pressures
         ]
+        expired = self._expire(evidence, deadline, kept, attempted)
+        if expired.removed.total():
+            outcomes.append(expired)
         if any("sweep budget" in reason for reason in kept):
             self._due_at = now  # continue on the next worker pass
         removed: Counter[str] = Counter()
@@ -213,6 +213,61 @@ class UnusedStorageCollector:
             dict(kept),
             tuple(outcome.line() for outcome in outcomes),
         )
+
+    def _expire(
+        self,
+        evidence: _Evidence,
+        deadline: float,
+        kept: Counter[str],
+        attempted: dict[tuple[str, str], bool],
+    ) -> _Outcome:
+        """Expire non-model assets even without pressure, including zero-byte installs.
+
+        Judge installations independently: a live installation sharing a model
+        does not keep an unused installation's metadata or runtime cache.
+        The uninstall plan explicitly retains the shared model objects.
+        """
+        outcome = _Outcome(
+            "expiry", "unused for more than 24 hours", 0, STORAGE_EVICTING
+        )
+        with self._sessions() as session:
+            items = []
+            for installation_id in session.scalars(
+                select(RecipeInstallation.id).where(
+                    RecipeInstallation.state.in_(_COLLECTABLE_STATES)
+                )
+            ):
+                last_used = _installation_last_used(session, installation_id)
+                if last_used >= evidence.cutoff:
+                    continue
+                reason = _installation_kept(session, installation_id, evidence)
+                if reason is not None:
+                    continue
+                items.append(
+                    _Item(
+                        "installation",
+                        installation_id,
+                        (installation_id,),
+                        last_used,
+                        False,
+                        0,
+                    )
+                )
+            items.extend(
+                item
+                for item in self._image_items(evidence, Counter())
+                if not item.recent and item.last_used < evidence.cutoff
+            )
+        for item in items:
+            if (item.kind, item.key) in attempted:
+                continue
+            if time.monotonic() > deadline:
+                kept[f"{item.kind}: sweep budget"] += 1
+                continue
+            attempted[(item.kind, item.key)] = self._remove(item, kept, outcome)
+        if outcome.removed["image"]:
+            self._reclaim_blobs()
+        return outcome
 
     def relief_for_spark(
         self,

@@ -214,6 +214,8 @@ def _relieve(
                 kept[f"{item.kind}: sweep budget"] += 1
                 continue
             done = attempted[(item.kind, item.key)] = self._remove(item, kept, outcome)
+            for member in item.members:
+                attempted[(item.kind, member)] = done
         if done:
             queued += item.freeable
         if (item.kind, item.key) in self._stopping:

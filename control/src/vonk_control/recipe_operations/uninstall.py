@@ -210,6 +210,7 @@ class UninstallMixin:
         workload_intent_ordinal: int | None = None,
         unattended_guard: Callable[[Session], None] | None = None,
         also_removing: Collection[str] = (),
+        preserve_model_files: bool = False,
     ) -> RecipeOperationView:
         """Queue the removal of one installation from its Sparks.
 
@@ -254,7 +255,11 @@ class UninstallMixin:
                 if existing is not None:
                     return existing
                 plan = service._uninstall_plan_in_session(
-                    session, installation_id, lock=True, also_removing=also_removing
+                    session,
+                    installation_id,
+                    lock=True,
+                    also_removing=also_removing,
+                    preserve_model_files=preserve_model_files,
                 )
                 if not plan.allowed:
                     raise RecipeRequestInvalid(
