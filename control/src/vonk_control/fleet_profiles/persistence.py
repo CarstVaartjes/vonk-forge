@@ -251,6 +251,30 @@ def _owns_pending_admission(
     )
 
 
+def _newer_pending_profile_load(
+    session: Session, source: FleetProfileApplication
+) -> bool:
+    """Maintenance cannot turn an old selection into a newer operator intent."""
+    order = _application_order_key(session, source)
+    for load in session.scalars(
+        select(FleetProfileApplication).where(
+            FleetProfileApplication.selection_generation.is_(None),
+            FleetProfileApplication.created_at >= order[0],
+            FleetProfileApplication.state.in_(
+                job_states.words(LifecycleState.QUEUED, LifecycleState.NEEDS_OPERATOR)
+            ),
+        )
+    ):
+        progress = _stored_progress(load)
+        if (
+            not isinstance(progress, Residue)
+            and _owns_pending_admission(load, progress)
+            and _application_order_key(session, load) > order
+        ):
+            return True
+    return False
+
+
 def _persisted_profile_scope(row: FleetProfileApplication) -> tuple[str, ...] | None:
     """Read the frozen scope through its authoritative stored plan contract.
 
@@ -432,6 +456,12 @@ def _newer_profile_intent_overlaps(
         except FleetProfileConflict:
             continue
         if progress.admission_pending or progress.intended_profile is None:
+            continue
+        if (
+            candidate.selection_generation is not None
+            and progress.workload_intent_ordinal is None
+        ):
+            # Rejected maintenance never acquired authority over another load.
             continue
         if candidate_order <= order:
             continue

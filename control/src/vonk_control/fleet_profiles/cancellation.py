@@ -52,6 +52,7 @@ from .contracts import (
 )
 from .persistence import (
     _application_effect_scope,
+    _newer_pending_profile_load,
     _owns_pending_admission,
     _persisted_profile_plan,
     _persisted_profile_progress,
@@ -399,6 +400,8 @@ class FleetProfileService:
             if not roster_changed and not drift_signature and followed is None:
                 return False
             if application is not None:
+                if _newer_pending_profile_load(session, application):
+                    return False
                 previous = session.scalar(
                     select(FleetProfileApplication)
                     .where(
