@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import logging
 import uuid
 from collections import Counter
 from collections.abc import Iterator
@@ -8,12 +10,14 @@ from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
-from sqlalchemy import create_engine, event, select
+from sqlalchemy import create_engine, event, select, update
 from sqlalchemy.engine import Connection, Engine, ExecutionContext
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_agent_protocol import LifecycleState
 from vonk_control import terminal_history_collection
 from vonk_control.catalog_revision_collection import INTERVAL
+from vonk_control.metrics import MetricsRegistry, OperationalMetricsCollector
 from vonk_control.models import (
     AgentCertificate,
     AgentNode,
@@ -410,6 +414,89 @@ def test_terminal_history_prunes_old_rows_but_preserves_live_and_recent_referenc
         }
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
+@pytest.mark.parametrize("malformed_json", [False, True])
+def test_unreadable_live_row_keeps_evidence_without_stalling_collection(
+    history_sessions: sessionmaker[Session],
+    caplog: pytest.LogCaptureFixture,
+    malformed_json: bool,
+) -> None:
+    """A damaged owner must not turn unrelated retention into a global wait."""
+    now = datetime.now(UTC)
+    old = now - timedelta(days=2)
+    referenced, removable = _job(old), _job(old)
+    corrupt = _job(old, state=LifecycleState.RUNNING.value)
+    corrupt.kind = "recipe.start"
+    # Both invalid syntax and a valid JSON document with an invalid contract
+    # retain recognizable references; neither is evidence of absence.
+    raw = f'{{"operation_id":"{referenced.id}"'
+    raw_payload = raw if malformed_json else json.loads(raw + "}")
+    with history_sessions.begin() as session:
+        session.add_all((corrupt, referenced, removable))
+        session.flush()
+        session.execute(
+            update(Job).where(Job.id == corrupt.id).values(payload=raw_payload)
+        )
+    caplog.set_level(logging.INFO, logger=terminal_history_collection.__name__)
+    collector = TerminalHistoryCollector(history_sessions, clock=lambda: now, batch=1)
+    assert collector.collect()["jobs"] == 1
+    with history_sessions() as session:
+        assert set(session.scalars(select(Job.id))) == {corrupt.id, referenced.id}
+    events = [
+        json.loads(record.message)
+        for record in caplog.records
+        if record.name == terminal_history_collection.__name__
+        and "history.references_unavailable" in record.message
+    ]
+    assert len(events) == 1
+    assert events[0]["row_id"] == corrupt.id
+    # Evidence repeats once on the next pass, even if the residue reader has
+    # already reported this damage earlier in the process.
+    caplog.clear()
+    assert not collector.collect()
+    assert (
+        sum(
+            "history.references_unavailable" in record.message
+            for record in caplog.records
+            if record.name == terminal_history_collection.__name__
+        )
+        == 1
+    )
+    # Once the owning bookkeeping no longer names the old reference, normal
+    # collection reclaims it without resetting the collector or its cursor.
+    with history_sessions.begin() as session:
+        owner = session.get(Job, corrupt.id)
+        assert owner is not None
+        assert owner.payload == raw_payload
+        owner.kind = "history-test"
+        owner.payload = {}
+    assert collector.collect()["jobs"] == 1
+    with history_sessions() as session:
+        assert set(session.scalars(select(Job.id))) == {corrupt.id}
+
+
+def test_history_backlog_metric_tracks_collection_and_grace(
+    history_sessions: sessionmaker[Session],
+) -> None:
+    """Metrics must observe the retained backlog independently of the worker."""
+    now = datetime.now(UTC)
+    with history_sessions.begin() as session:
+        session.add_all(
+            (
+                _job(now - timedelta(days=2)),
+                _job(now - timedelta(days=3), state=LifecycleState.RUNNING.value),
+                _job(now - timedelta(hours=23)),
+            )
+        )
+    metrics = MetricsRegistry()
+    observer = OperationalMetricsCollector(metrics, history_sessions, clock=lambda: now)
+    observer.refresh()
+    assert "vonk_history_rows_past_grace 1\n" in metrics.render()
+    assert TerminalHistoryCollector(history_sessions, clock=lambda: now).collect()
+    observer.refresh()
+    assert "vonk_history_rows_past_grace 0\n" in metrics.render()
+
+
 def test_terminal_parent_with_unreconciled_attempt_is_kept_until_attempt_ends(
     history_sessions: sessionmaker[Session],
     monkeypatch: pytest.MonkeyPatch,
@@ -550,28 +637,6 @@ def test_an_ended_order_whose_last_attempt_lapsed_is_collected(
         )
     assert kept == (not collected, not collected)
     assert removed["agent_operations"] == removed["jobs"] == int(collected)
-
-
-def test_unreadable_live_authority_defers_pruning_until_repaired(
-    history_sessions: sessionmaker[Session],
-) -> None:
-    now = datetime.now(UTC)
-    old = now - timedelta(days=2)
-    removable = _job(old)
-    unreadable = _job(now, state="running")
-    # Empty documents are allowed fixture placeholders; the canonical reader
-    # correctly reports this as a missing required recipe-operation document.
-    unreadable.kind = "recipe.start"
-    with history_sessions.begin() as session:
-        session.add_all((removable, unreadable))
-    collector = TerminalHistoryCollector(history_sessions, clock=lambda: now)
-    assert not collector.collect()
-    with history_sessions.begin() as session:
-        assert session.get(Job, removable.id) is not None
-        owner = session.get(Job, unreadable.id)
-        assert owner is not None
-        owner.kind = "history-test"
-    assert collector.collect()["jobs"] == 1
 
 
 def test_retained_oldest_rows_do_not_starve_later_unreferenced_history(

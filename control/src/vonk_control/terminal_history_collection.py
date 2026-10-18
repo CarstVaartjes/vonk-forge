@@ -16,9 +16,10 @@ from collections import Counter
 from collections.abc import Callable
 from datetime import datetime, timedelta
 
-from sqlalchemy import and_, delete, exists, or_, select
+from sqlalchemy import and_, delete, exists, func, or_, select, union_all
 from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import InstrumentedAttribute, Session, sessionmaker
+from sqlalchemy.sql.elements import ColumnElement
 from vonk_agent_protocol import (
     ControllerErrorCode,
     DistributionAssignmentState,
@@ -31,7 +32,7 @@ from vonk_agent_protocol import (
     StateAlias,
 )
 
-from .catalog_revision_collection import GRACE, INTERVAL, live_tokens, tokens
+from .catalog_revision_collection import GRACE, INTERVAL, tokens
 from .lifecycle.evidence import Residue
 from .logging import log_event
 from .models import (
@@ -76,6 +77,106 @@ BACKLOG_PAUSE = timedelta(minutes=1)
 #: its retained receipt, never a live claim: the owner's end lapses it so
 #: (``lifecycle/agent_operation.py``), and nothing advances it afterwards.
 _LIVE_ATTEMPT = LifecycleState.RUNNING.value
+
+
+type HistoryRow = (
+    Job
+    | AgentOperation
+    | ModelCacheOperation
+    | FleetProfileApplication
+    | RecipeLibrarySyncRun
+    | ArtifactDistributionAssignment
+    | ResourceReservation
+    | NodeArtifact
+    | RecipeRun
+)
+
+
+def _history_specs() -> tuple[
+    tuple[
+        type[HistoryRow],
+        InstrumentedAttribute[datetime] | InstrumentedAttribute[datetime | None],
+        ColumnElement[bool],
+    ],
+    ...,
+]:
+    # Children precede parents. Never delete live descendants by cascade.
+    return (
+        (
+            AgentOperation,
+            AgentOperation.updated_at,
+            AgentOperation.state.in_(_TERMINAL),
+        ),
+        (Job, Job.updated_at, Job.state.in_(_TERMINAL)),
+        (
+            ModelCacheOperation,
+            ModelCacheOperation.updated_at,
+            ModelCacheOperation.state.in_(_TERMINAL),
+        ),
+        (
+            FleetProfileApplication,
+            FleetProfileApplication.updated_at,
+            FleetProfileApplication.state.in_(_TERMINAL),
+        ),
+        (
+            RecipeLibrarySyncRun,
+            RecipeLibrarySyncRun.completed_at,
+            RecipeLibrarySyncRun.state.in_(_TERMINAL),
+        ),
+        (
+            ArtifactDistributionAssignment,
+            ArtifactDistributionAssignment.updated_at,
+            ArtifactDistributionAssignment.state.in_(
+                (
+                    DistributionAssignmentState.REVOKED.value,
+                    DistributionAssignmentState.EXPIRED.value,
+                )
+            ),
+        ),
+        (
+            ResourceReservation,
+            ResourceReservation.released_at,
+            ResourceReservation.state == ReservationState.RELEASED.value,
+        ),
+        # Inventory history is removed only after an authenticated inventory
+        # said missing and there are no remaining consumers; never infer absence.
+        (
+            NodeArtifact,
+            NodeArtifact.updated_at,
+            (NodeArtifact.state == ModelFileState.MISSING.value)
+            & (NodeArtifact.ref_count == 0),
+        ),
+        (
+            RecipeRun,
+            RecipeRun.updated_at,
+            RecipeRun.state.in_((RunState.STOPPED.value, RunState.FAILED.value)),
+        ),
+    )
+
+
+def history_rows_past_grace(session: Session, now: datetime) -> int:
+    """Count ended history independently of collector health, without reading JSON.
+
+    Includes protected rows: their continuing retention is visible too. This is
+    an observation, never an admission decision or permission to remove them.
+    """
+    cutoff = now - GRACE
+    sources = [
+        select(model.id).where(stamp <= cutoff, ended)
+        for model, stamp, ended in _history_specs()
+    ]
+    sources.append(
+        select(RoutePublication.authority_id)
+        .join(RecipeRouteAuthority)
+        .where(
+            RecipeRouteAuthority.updated_at <= cutoff,
+            RoutePublication.state == RoutePublicationState.COMPLETED.value,
+        )
+    )
+    return (
+        session.scalar(select(func.count()).select_from(union_all(*sources).subquery()))
+        or 0
+    )
 
 
 class TerminalHistoryCollector:
@@ -130,8 +231,8 @@ class TerminalHistoryCollector:
         now = self._clock()
         cutoff = now - GRACE
         removed: Counter[str] = Counter()
-        # One reference inventory per pass, never per row. Unknown references
-        # defer the whole pass; the cursor is kept for the next interval.
+        # One reference inventory per pass, never per candidate. Damaged rows
+        # keep their recognizable references without blocking unrelated work.
         with self._sessions() as session:
             protected = _protected_tokens(session, now)
         if protected is None:
@@ -142,58 +243,7 @@ class TerminalHistoryCollector:
         # spend every pass before its first candidate.
         deadline = time.monotonic() + 2.0
         self._backlog = True
-        # Children precede parents. Never delete live descendants by cascade.
-        specs = (
-            (
-                AgentOperation,
-                AgentOperation.updated_at,
-                AgentOperation.state.in_(_TERMINAL),
-            ),
-            (Job, Job.updated_at, Job.state.in_(_TERMINAL)),
-            (
-                ModelCacheOperation,
-                ModelCacheOperation.updated_at,
-                ModelCacheOperation.state.in_(_TERMINAL),
-            ),
-            (
-                FleetProfileApplication,
-                FleetProfileApplication.updated_at,
-                FleetProfileApplication.state.in_(_TERMINAL),
-            ),
-            (
-                RecipeLibrarySyncRun,
-                RecipeLibrarySyncRun.completed_at,
-                RecipeLibrarySyncRun.state.in_(_TERMINAL),
-            ),
-            (
-                ArtifactDistributionAssignment,
-                ArtifactDistributionAssignment.updated_at,
-                ArtifactDistributionAssignment.state.in_(
-                    (
-                        DistributionAssignmentState.REVOKED.value,
-                        DistributionAssignmentState.EXPIRED.value,
-                    )
-                ),
-            ),
-            (
-                ResourceReservation,
-                ResourceReservation.released_at,
-                ResourceReservation.state == ReservationState.RELEASED.value,
-            ),
-            # Inventory history is removed only after an authenticated inventory
-            # said missing and there are no remaining consumers; never infer absence.
-            (
-                NodeArtifact,
-                NodeArtifact.updated_at,
-                (NodeArtifact.state == ModelFileState.MISSING.value)
-                & (NodeArtifact.ref_count == 0),
-            ),
-            (
-                RecipeRun,
-                RecipeRun.updated_at,
-                RecipeRun.state.in_((RunState.STOPPED.value, RunState.FAILED.value)),
-            ),
-        )
+        specs = _history_specs()
         while self._table_index < len(specs):
             if time.monotonic() >= deadline:
                 return +removed
@@ -338,15 +388,7 @@ class TerminalHistoryCollector:
     @staticmethod
     def _unused(
         session: Session,
-        row: Job
-        | AgentOperation
-        | ModelCacheOperation
-        | FleetProfileApplication
-        | RecipeLibrarySyncRun
-        | ArtifactDistributionAssignment
-        | ResourceReservation
-        | NodeArtifact
-        | RecipeRun,
+        row: HistoryRow,
         protected: frozenset[str],
     ) -> bool:
         identity = row.id
@@ -458,7 +500,7 @@ class TerminalHistoryCollector:
 
 
 def _protected_tokens(session: Session, now: datetime) -> frozenset[str] | None:
-    """Unknown accepted references defer retention instead of implying unused."""
+    """Keep damaged owners and recognizable references; unknown is not unused."""
     cutoff = now - GRACE
     selected = session.scalar(select(FleetProfileSelection.application_id))
     if selected is not None and session.get(FleetProfileApplication, selected) is None:
@@ -541,15 +583,18 @@ def _protected_tokens(session: Session, now: datetime) -> frozenset[str] | None:
                     row_id=owner.id,
                     code=decoded.reason.value,
                 )
-                return None
+                # Retain this owner even if its state changes before deletion.
+                # Raw tokens are conservative evidence only: validation failure
+                # cannot prove that a recognizable reference is unused.
+                extra.add(owner.id)
+            extra.update(tokens((getattr(owner, column),)))
             if isinstance(owner, ArtifactDistributionAssignment):
                 extra.update(
                     tokens(
                         (
-                            owner.objects,
                             owner.model_artifact_set_sha256,
                             owner.oci_archive_sha256,
                         )
                     )
                 )
-    return live_tokens(session, now) | frozenset(extra)
+    return frozenset(extra)
