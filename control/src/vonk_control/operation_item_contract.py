@@ -28,7 +28,12 @@ from pydantic import (
     field_validator,
     model_validator,
 )
-from vonk_agent_protocol import AgentOperation, LifecycleState, OperationProgress
+from vonk_agent_protocol import (
+    AgentOperation,
+    LifecycleState,
+    OperationProgress,
+    WaitReason,
+)
 from vonk_agent_protocol.contracts import (
     AgentFailureResult,
     validate_result_for_operation,
@@ -218,6 +223,7 @@ class OperationItem(BaseModel):
     detail: str | None = None
     blockers: list[OperationBlocker] | None = None
     next_attempt_at: str | None = None
+    wait_reason: WaitReason | None = None
     #: The failure the family itself recorded, by its own contract.
     failure: AvailabilityOperationFailure | OperationFailureEvidence | None = None
     cancellation: FleetProfileApplicationCancellationView | None = None

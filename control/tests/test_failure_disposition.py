@@ -127,6 +127,10 @@ class _Declared(RuntimeError):
             UnknownOutcomeError("upgrade", reason=WaitReason.UPGRADE_AWAITING_IDENTITY),
             Disposition.WAIT,
         ),
+        (
+            UnknownOutcomeError("Spark busy", reason=WaitReason.SPARK_BUSY),
+            Disposition.WAIT,
+        ),
         (AdmissionLockBusy("held"), Disposition.WAIT),
         (
             UnknownOutcomeError("stop?", reason=WaitReason.STOP_UNCONFIRMED),
