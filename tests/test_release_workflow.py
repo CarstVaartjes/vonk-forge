@@ -495,11 +495,11 @@ def test_pull_request_carry_follows_the_selector_and_the_release_always_carries(
     # Recipe refresh left the carry for its own Spark; signing requires it the
     # same way, and the two never share a concurrency group or report name.
     refresh = jobs["spark-recipe-refresh"]
-    # It runs wherever the carry runs, unless a pull request already accepted
-    # this exact payload (test_main_reuses_pull_request_spark_evidence_...).
+    # The independent refresh decision also skips an irrelevant merged change
+    # (test_main_reuses_each_spark_step_independently).
     assert " ".join(refresh["if"].split()) == (
         " ".join(jobs["spark-upgrade-acceptance"]["if"].split())
-        + " && needs.match-pr-acceptance.outputs.reuse != 'true'"
+        + " && needs.match-pr-acceptance.outputs.skip_refresh != 'true'"
     )
     assert refresh["uses"] == jobs["spark-upgrade-acceptance"]["uses"]
     assert refresh["with"]["scenario"] == "recipe-refresh"
@@ -892,7 +892,10 @@ def test_main_reuses_pull_request_spark_evidence_only_for_its_exact_payload() ->
     assert match["continue-on-error"] is True
     for name in ("spark-acceptance", "spark-recipe-refresh"):
         assert jobs[name]["needs"] == ["match-pr-acceptance"], name
-        assert "needs.match-pr-acceptance.outputs.reuse != 'true'" in jobs[name]["if"]
+        output = "reuse" if name == "spark-acceptance" else "skip_refresh"
+        assert (
+            f"needs.match-pr-acceptance.outputs.{output} != 'true'" in jobs[name]["if"]
+        )
     for name in ("nas-lane-acceptance", "spark-upgrade-acceptance"):
         assert "match-pr-acceptance" not in str(jobs[name].get("needs", [])), name
     signing = next(
@@ -910,6 +913,181 @@ def test_main_reuses_pull_request_spark_evidence_only_for_its_exact_payload() ->
     ):
         assert argument in signing["run"], argument
     assert 'if [[ "$REUSE" == true ]]' in signing["run"]
+
+
+@pytest.mark.parametrize(
+    ("changed_path", "refresh", "same_payload", "payload_error"),
+    [
+        ("control/src/change.py", None, True, False),
+        ("scripts/change", None, True, False),
+        ("scripts/change", "passed", True, False),
+        ("scripts/change", "failed", True, False),
+        ("scripts/change", "passed", False, False),
+        ("control/src/change.py", None, True, True),
+    ],
+)
+def test_main_reuses_each_spark_step_independently(
+    tmp_path: Path,
+    changed_path: str,
+    refresh: str | None,
+    same_payload: bool,
+    payload_error: bool,
+) -> None:
+    """Catches missing/failed refresh forcing a proven Spark install to rerun,
+    irrelevant refresh running on main, and errors accidentally granting reuse."""
+    jobs = load(ACCEPTANCE)["jobs"]
+    steps = {step["id"]: step for step in jobs["match-pr-acceptance"]["steps"]}
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    git = ["git", "-c", "user.name=Test", "-c", "user.email=test@example.org"]
+    subprocess.run([*git, "init", "-q"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(
+        [*git, "commit", "-qm", "base", "--allow-empty"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+    changed = repo / changed_path
+    changed.parent.mkdir(parents=True, exist_ok=True)
+    changed.write_text("changed\n")
+    subprocess.run([*git, "add", "."], cwd=repo, check=True)
+    subprocess.run(
+        [*git, "commit", "-qm", "change"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+    scripts = repo / "scripts"
+    scripts.mkdir(exist_ok=True)
+    (scripts / "select-ci-areas").symlink_to(ROOT / "scripts/select-ci-areas")
+    binaries = tmp_path / "bin"
+    binaries.mkdir()
+    generation = "a" * 64
+    artifacts = [
+        f"installer-candidate-dev-{generation}",
+        f"installer-spark-acceptance-{generation}-linux-arm64",
+    ]
+    if refresh is not None:
+        artifacts.append(f"spark-recipe-refresh-{generation}-1")
+        report = tmp_path / "pr-refresh/report.json"
+        report.parent.mkdir()
+        report.write_text(
+            json.dumps(
+                {"status": refresh, "proof": {"candidate": {"generation": generation}}}
+            )
+        )
+    (binaries / "gh").write_text(
+        "#!/bin/sh\nprintf '%s\\n' " + " ".join(artifacts) + "\n"
+    )
+    # Stub only expensive payload extraction; execute the real discovery,
+    # comparison, selector and workflow scheduling conditions.
+    (binaries / "uv").write_text(
+        "#!/bin/sh\n"
+        + (
+            "exit 1\n"
+            if payload_error
+            else 'case "$*" in *pr-candidate-publication*) echo '
+            + ("payload" if same_payload else "different")
+            + ";; *) echo payload;; esac\n"
+        )
+    )
+    for binary in binaries.iterdir():
+        binary.chmod(0o755)
+    release = (
+        tmp_path
+        / f"pr-candidate-publication/installer-publication/objects/artifacts/dev/releases/{generation}/release.json"
+    )
+    release.parent.mkdir(parents=True)
+    release.write_text(json.dumps({"source_sha": "c" * 40}))
+    output = tmp_path / "output"
+    output.touch()
+    env = {
+        **os.environ,
+        "PATH": f"{binaries}:{os.environ['PATH']}",
+        "CHANNEL": "dev",
+        "RUN_ID": "42",
+        "GITHUB_REPOSITORY": "o/r",
+        "RUNNER_TEMP": str(tmp_path),
+        "GITHUB_OUTPUT": str(output),
+        "GITHUB_STEP_SUMMARY": str(tmp_path / "summary"),
+        "GENERATION": "b" * 64,
+        "PR_GENERATION": generation,
+    }
+    context = {"inputs.upgrade_carry": "true"}
+    for step_id in ("find", "match"):
+        if step_id == "match":
+            assert context.get("steps.find.outputs.generation") == generation
+            assert bool(evaluate(steps["pull-request-refresh"]["if"], context)) == (
+                refresh is not None
+            )
+            env["PR_REFRESH"] = context.get("steps.find.outputs.refresh", "")
+        result = subprocess.run(
+            ["bash", "-c", steps[step_id]["run"]],
+            cwd=repo,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert (result.returncode != 0) == (payload_error and step_id == "match"), (
+            result.stderr
+        )
+        for line in output.read_text().splitlines():
+            key, value = line.split("=", 1)
+            context[f"steps.{step_id}.outputs.{key}"] = value
+        output.write_text("")
+    for key, expression in jobs["match-pr-acceptance"]["outputs"].items():
+        context[f"needs.match-pr-acceptance.outputs.{key}"] = str(
+            evaluate(expression, context)
+        )
+
+    def scheduled(name: str) -> bool:
+        expression = jobs[name]["if"].replace("!cancelled()", "True")
+        expression = re.sub(
+            r"\bneeds\.[\w.-]+",
+            lambda found: repr(context.get(found[0], "")),
+            expression,
+        )
+        return bool(evaluate(expression, context))
+
+    assert scheduled("spark-acceptance") == (not same_payload or payload_error)
+    refresh_required = changed_path.startswith("scripts/")
+    assert scheduled("spark-recipe-refresh") == (
+        payload_error
+        or (refresh_required and not (same_payload and refresh == "passed"))
+    )
+    # Signing must accept each legitimate skip, while a failed requested
+    # refresh still prevents publication.
+    signing = jobs["acceptance"]["if"].replace("always()", "True")
+    signing = re.sub(r"needs\['([^']+)'\]", r"needs.\1", signing)
+    for name in (
+        "nas-acceptance",
+        "spark-acceptance",
+        "spark-upgrade-acceptance",
+        "spark-recipe-refresh",
+    ):
+        context[f"needs.{name}.result"] = (
+            "skipped"
+            if name in ("spark-acceptance", "spark-recipe-refresh")
+            and not scheduled(name)
+            else "success"
+        )
+
+    def can_sign() -> bool:
+        return bool(
+            evaluate(
+                re.sub(
+                    r"\bneeds\.[\w.-]+",
+                    lambda found: repr(context.get(found[0], "")),
+                    signing,
+                ),
+                context,
+            )
+        )
+
+    assert can_sign()
+    context["needs.spark-recipe-refresh.result"] = "failure"
+    assert not can_sign()
 
 
 @pytest.mark.parametrize(

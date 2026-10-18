@@ -44,7 +44,7 @@ jobs:
     if: >-
       !cancelled() && !inputs.premerge && inputs.reuse_run_id != ''
     # Reuse only saves time: any error here leaves reuse unset, so the Spark
-    # lane and recipe refresh run, and never fails the release.
+    # lane and any requested recipe refresh run, and never fails the release.
     continue-on-error: true
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -53,6 +53,7 @@ jobs:
       contents: read
     outputs:
       reuse: ${{ steps.match.outputs.reuse }}
+      skip_refresh: ${{ steps.match.outputs.skip_refresh }}
       generation: ${{ steps.match.outputs.generation }}
       source_sha: ${{ steps.match.outputs.source_sha }}
     steps:
@@ -62,6 +63,7 @@ jobs:
         with:
           persist-credentials: false
           ref: ${{ inputs.source_sha }}
+          fetch-depth: 2
       - name: Install canonical publication model runtime
         id: runtime
         uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
@@ -84,7 +86,7 @@ jobs:
             --jq '.artifacts[] | select(.expired | not) | .name' || true)
           generation=$(sed -n "s/^installer-candidate-$CHANNEL-\([0-9a-f]\{64\}\)\$/\1/p" <<< "$names")
           refresh=$(grep -E "^spark-recipe-refresh-$generation-[1-9][0-9]*\$" <<< "$names" | sort -V | tail -n 1 || true)
-          if [[ "$(wc -w <<< "$generation")" == 1 && -n "$refresh" ]] &&
+          if [[ "$(wc -w <<< "$generation")" -eq 1 ]] &&
             grep -qx "installer-spark-acceptance-$generation-linux-arm64" <<< "$names"; then
             printf 'generation=%s\nrefresh=%s\n' "$generation" "$refresh" >> "$GITHUB_OUTPUT"
           else
@@ -101,7 +103,7 @@ jobs:
           github-token: ${{ github.token }}
       - name: Download the pull request recipe refresh report
         id: pull-request-refresh
-        if: steps.find.outputs.generation != ''
+        if: steps.find.outputs.refresh != ''
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: ${{ steps.find.outputs.refresh }}
@@ -115,7 +117,7 @@ jobs:
         with:
           name: installer-candidate-${{ inputs.channel }}-${{ inputs.generation }}
           path: ${{ runner.temp }}/candidate-publication
-      - name: Compare payloads and the refresh verdict
+      - name: Compare payloads and decide each Spark step
         id: match
         if: steps.find.outputs.generation != ''
         shell: bash
@@ -123,6 +125,7 @@ jobs:
           CHANNEL: ${{ inputs.channel }}
           GENERATION: ${{ inputs.generation }}
           PR_GENERATION: ${{ steps.find.outputs.generation }}
+          PR_REFRESH: ${{ steps.find.outputs.refresh }}
           RUN_ID: ${{ inputs.reuse_run_id }}
         run: |
           set -euo pipefail
@@ -136,18 +139,34 @@ jobs:
           }
           current=$(payload "$RUNNER_TEMP/candidate-publication" "$GENERATION")
           reused=$(payload "$RUNNER_TEMP/pr-candidate-publication" "$PR_GENERATION")
-          refresh=$(jq -er --arg generation "$PR_GENERATION" \
-            'select(.status == "passed" and .proof.candidate.generation == $generation)
-             | .status' "$RUNNER_TEMP/pr-refresh/report.json" || true)
-          if [[ "$current" == "$reused" && "$refresh" == passed ]]; then
+          # Apply the PR selector to the merged change. The upgrade carry still
+          # runs on every release; refresh only runs for relevant changes.
+          refresh_required=$(git diff --name-only --no-renames HEAD^ HEAD |
+            scripts/select-ci-areas --event pull_request | jq -er '.upgrade_carry | tostring')
+          skip_refresh=
+          if [[ -n "$PR_REFRESH" ]]; then
+            refresh=$(jq -r --arg generation "$PR_GENERATION" \
+              '.status == "passed" and .proof.candidate.generation == $generation' \
+              "$RUNNER_TEMP/pr-refresh/report.json")
+            if [[ "$current" == "$reused" && "$refresh" == true ]]; then
+              skip_refresh=true
+            fi
+          fi
+          if [[ "$refresh_required" == false ]]; then skip_refresh=true; fi
+          reuse=
+          source_sha=
+          if [[ "$current" == "$reused" ]]; then
             source_sha=$(jq -er '.source_sha | select(test("^[0-9a-f]{40}$"))' \
               "$RUNNER_TEMP/pr-candidate-publication/installer-publication/objects/artifacts/$CHANNEL/releases/$PR_GENERATION/release.json")
-            printf 'reuse=true\ngeneration=%s\nsource_sha=%s\n' \
-              "$PR_GENERATION" "$source_sha" >> "$GITHUB_OUTPUT"
-            echo "Spark and recipe refresh evidence: pull request run $RUN_ID accepted payload $current (candidate $PR_GENERATION)" >> "$GITHUB_STEP_SUMMARY"
+            reuse=true
+            echo "Spark acceptance evidence: pull request run $RUN_ID accepted payload $current (candidate $PR_GENERATION)" >> "$GITHUB_STEP_SUMMARY"
           else
-            echo "Spark and recipe refresh run here: payload $current differs from pull request candidate $PR_GENERATION ($reused) or its refresh did not pass" >> "$GITHUB_STEP_SUMMARY"
+            echo "Spark acceptance runs here: payload $current differs from pull request candidate $PR_GENERATION ($reused)" >> "$GITHUB_STEP_SUMMARY"
           fi
+          echo "Recipe refresh: relevant=$refresh_required, skipped=${skip_refresh:-false}" >> "$GITHUB_STEP_SUMMARY"
+          # Publish decisions only after every read/validation succeeded.
+          printf 'reuse=%s\nskip_refresh=%s\ngeneration=%s\nsource_sha=%s\n' \
+            "$reuse" "$skip_refresh" "$PR_GENERATION" "$source_sha" >> "$GITHUB_OUTPUT"
       - name: Say why the lanes run here after a match error
         id: fallback
         if: failure()
@@ -835,12 +854,12 @@ jobs:
     # The carry proves only the upgrade. Recipe refresh (a new editorial
     # revision replaces a serving workload; two Recipes that build one image
     # install and serve in turn) runs on its own Spark beside it, wherever the
-    # carry runs, and signing requires it the same way. A pull request run
-    # that accepted this exact payload already holds it.
+    # PR selector requests it. Reuse passed evidence for an identical payload;
+    # otherwise skip only when that selector finds the merged change irrelevant.
     needs: [match-pr-acceptance]
     if: >-
       !cancelled() && inputs.upgrade_carry &&
-      needs.match-pr-acceptance.outputs.reuse != 'true'
+      needs.match-pr-acceptance.outputs.skip_refresh != 'true'
     permissions:
       actions: read
       contents: read
@@ -864,8 +883,8 @@ jobs:
       - match-pr-acceptance
     # A carry or recipe refresh that was not requested is skipped, never
     # failed; one that was requested must have succeeded. The Spark lane and
-    # recipe refresh may be skipped only for a matched pull request payload,
-    # whose Spark evidence the signer then validates against that candidate.
+    # recipe refresh have independent decisions: the signer validates reused
+    # Spark evidence; refresh may also be irrelevant to the merged change.
     if: >-
       always() &&
       needs['nas-acceptance'].result == 'success' &&
@@ -876,7 +895,7 @@ jobs:
        (!inputs.upgrade_carry && needs['spark-upgrade-acceptance'].result == 'skipped')) &&
       (needs['spark-recipe-refresh'].result == 'success' ||
        (!inputs.upgrade_carry && needs['spark-recipe-refresh'].result == 'skipped') ||
-       (needs['match-pr-acceptance'].outputs.reuse == 'true' &&
+       (needs['match-pr-acceptance'].outputs.skip_refresh == 'true' &&
         needs['spark-recipe-refresh'].result == 'skipped'))
     runs-on: ubuntu-24.04
     timeout-minutes: 10
