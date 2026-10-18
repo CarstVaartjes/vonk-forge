@@ -8,7 +8,13 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import select
-from vonk_agent_protocol import LifecycleState, canonical_message
+from vonk_agent_protocol import (
+    FailureCode,
+    LifecycleState,
+    RunSwitchCode,
+    canonical_message,
+)
+from vonk_agent_protocol.agent_words import ProfileChildJobKind
 from vonk_control.fleet_profile_contract import (
     FleetProfileApplicationProgress,
     FleetProfileInput,
@@ -40,7 +46,13 @@ from .test_run_switch_operations import (
 )
 
 
-def _failed_profile(tmp_path: Path, *, crash: str | None = None, idle_sparks: int = 0):
+def _failed_profile(
+    tmp_path: Path,
+    *,
+    crash: str | None = None,
+    idle_sparks: int = 0,
+    ending: str = "definite",
+):
     """Fail a persisted Run/Switch child, leaving its parent recoverable.
 
     With ``crash`` the child ends definitely with that cause instead.  The
@@ -102,7 +114,7 @@ def _failed_profile(tmp_path: Path, *, crash: str | None = None, idle_sparks: in
             child.state = "failed"
             child.status_reason = "temporary runtime dependency unavailable"
         else:
-            _end_child(child, crash, "definite")
+            _end_child(child, crash, ending)
     assert service.tick()
     if crash is None:
         # The Controller retries this by itself, so it backs off, not failed.
@@ -127,15 +139,15 @@ def _end_child(child: Job, cause: str, ending: str) -> None:
     assert child.result is not None
     stall = ending == "stall"
     child.status_reason = (
-        "run-switch.final-verification-timeout"
+        RunSwitchCode.FINAL_VERIFICATION_TIMEOUT
         if stall
         else f"run-switch phase operation failed: failed: {cause}"
     )
     child.result = {
         **child.result,
-        "failure_code": "run-switch.final-verification-timeout"
+        "failure_code": RunSwitchCode.FINAL_VERIFICATION_TIMEOUT
         if stall
-        else "recipe_start_failed",
+        else FailureCode.RECIPE_START_FAILED,
         "retryable": stall,
         "retry_reason": cause if stall else None,
     }
@@ -1775,7 +1787,23 @@ def test_a_definite_failure_ends_the_load_once_with_its_cause(tmp_path: Path) ->
     with sessions() as session:
         assert len(tuple(session.scalars(select(FleetProfileApplication)))) == 1
     ended = service.application(first.id)
-    assert ended.state == "failed" and ended.next_attempt_at is None
+    assert ended.state == LifecycleState.FAILED and ended.next_attempt_at is None
+    adapter = ended.progress.switch_adapter
+    assert adapter is not None
+    (failure,) = adapter.assignment_failures
+    assert failure.terminal
+    assert failure.operation_id == _child
+    assert crash in failure.reason
+    (child,) = adapter.children
+    assert child.result is not None
+    assert child.result.run_switch.failure_code == FailureCode.RECIPE_START_FAILED
+    assert not child.result.run_switch.retryable
+    with sessions() as session:
+        assert tuple(
+            session.scalars(
+                select(Job.id).where(Job.kind == ProfileChildJobKind.RUN_SWITCH)
+            )
+        ) == (_child,)
     assert crash in (ended.status_reason or "")
     assert service._retry_ending(*_row_and_progress(sessions, first.id)) is not None
     # It ended on its own evidence, not by exhausting a repeat budget.
@@ -1783,6 +1811,30 @@ def test_a_definite_failure_ends_the_load_once_with_its_cause(tmp_path: Path) ->
         blocker.code != PROFILE_REPEATED_FAILURE_CODE
         for blocker in ended.progress.blockers
     )
+
+
+def test_observation_expiry_projects_nonterminal_and_recovery_continues(
+    tmp_path: Path,
+) -> None:
+    """Catches projecting every failed child as terminal and suppressing recovery."""
+    sessions, lifecycle, service, _profile, _desired, first, child_id, _nodes = (
+        _failed_profile(
+            tmp_path, crash="Waiting for fresh rank evidence", ending="stall"
+        )
+    )
+    observed = service.application(first.id)
+    adapter = observed.progress.switch_adapter
+    assert adapter is not None
+    (failure,) = adapter.assignment_failures
+    assert not failure.terminal
+    assert failure.operation_id == child_id
+    now = lifecycle._clock() + timedelta(hours=2)
+    service._clock = lambda: now
+    for _ in range(4):
+        service.tick()
+    with sessions() as session:
+        assert len(tuple(session.scalars(select(FleetProfileApplication)))) == 2
+        assert len(tuple(session.scalars(select(Job)))) > 1
 
 
 def _row_and_progress(sessions, application_id: str):
