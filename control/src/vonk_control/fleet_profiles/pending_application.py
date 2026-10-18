@@ -306,7 +306,7 @@ class FleetProfileService:
         self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
 
         now = _aware(self._clock())
-        relieved: list[tuple[str, StorageRelief]] = []
+        relieved: list[tuple[str, StorageRelief, int]] = []
         if storage is not None:
             with self._sessions() as session:
                 row = session.get(FleetProfileApplication, application_id)
@@ -314,10 +314,11 @@ class FleetProfileService:
             for node_id, needed in storage.shortfalls:
                 found = self._ask_storage_relief(node_id, needed, profile_id)
                 if found is not None:
-                    relieved.append((node_id, found))
+                    relieved.append((node_id, found, needed))
             if relieved:
                 relief_blockers = [
-                    _relief_blocker(node_id, item) for node_id, item in relieved
+                    _relief_blocker(node_id, item, needed)
+                    for node_id, item, needed in relieved
                 ]
                 if blockers is None or not wait_for_space:
                     blockers = relief_blockers
@@ -350,7 +351,7 @@ class FleetProfileService:
                 # everything unused is not enough, on the bounded backoff.
                 evicting = not relieved or any(
                     item.code != STORAGE_INSUFFICIENT or item.paused
-                    for _, item in relieved
+                    for _, item, _needed in relieved
                 )
                 if not evicting:
                     retry_delay = None

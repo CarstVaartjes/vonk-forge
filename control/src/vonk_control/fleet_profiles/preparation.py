@@ -374,7 +374,7 @@ class FleetProfileService:
             for node_id, needed in _disk_shortfalls(item.assessment):
                 found = self._ask_storage_relief(node_id, needed, preview.profile_id)
                 if found is not None:
-                    blockers.append(_relief_blocker(node_id, found))
+                    blockers.append(_relief_blocker(node_id, found, needed))
         return blockers
 
     def _ask_storage_relief(
@@ -398,20 +398,20 @@ class FleetProfileService:
             _LOGGER.warning("storage relief failed", exc_info=True)
             return None
 
-    def _child_storage_wait(self, error: Exception, profile_id: str) -> str | None:
-        """The storage code a child waiting for disk waits with, once the
-        disk is asked for again (a demand lapses unless repeated); ``None``
-        when the child does not wait for disk."""
+    def _child_storage_wait(
+        self, error: Exception, profile_id: str
+    ) -> tuple[OperationBlocker, ...]:
+        """Renew each disk demand and retain the plan and relief evidence."""
 
-        if not isinstance(error, FleetProfileChildPlanBlocked) or not error.shortfalls:
-            return None
-        codes = [
-            found.code
+        if not isinstance(error, FleetProfileChildPlanBlocked):
+            return ()
+        blockers = [
+            _relief_blocker(node_id, found, needed)
             for node_id, needed in error.shortfalls
             if (found := self._ask_storage_relief(node_id, needed, profile_id))
             is not None
         ]
-        return codes[0] if codes else RunSwitchCode.INSUFFICIENT_DISK
+        return (*blockers, *error.blockers)
 
     def _request_recovery_preparations(
         self, application_id: str

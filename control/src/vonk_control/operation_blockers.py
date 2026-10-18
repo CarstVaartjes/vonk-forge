@@ -50,6 +50,14 @@ class BlockingOperation(StrictJSONModel):
     kind: Annotated[str, StringConstraints(min_length=1, max_length=80)]
 
 
+class StorageReliefEvidence(StrictJSONModel):
+    """Free space and the collector's reclaim estimate for one node's demand."""
+
+    required_free_bytes: int = Field(ge=0)
+    available_bytes: int = Field(ge=0)
+    reclaimable_bytes: int = Field(ge=0)
+
+
 class OperationBlocker(StrictJSONModel):
     """One reason an operation is waiting or blocked, with the Sparks it concerns."""
 
@@ -60,6 +68,7 @@ class OperationBlocker(StrictJSONModel):
     identity_conflict: IdentityConflict | None = None
     #: The operation this wait is behind, when one is known.
     operation: BlockingOperation | None = None
+    storage: StorageReliefEvidence | None = None
 
 
 class QueueWaitCode(StrEnum):
@@ -154,6 +163,7 @@ __all__ = [
     "ProgressAlarmCode",
     "ProgressStall",
     "QueueWaitCode",
+    "StorageReliefEvidence",
     "bound_blockers",
     "dump_blockers",
     "make_blocker",

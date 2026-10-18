@@ -329,8 +329,7 @@ class FleetProfileService:
                         _persisted_profile_progress(row),
                         str(error),
                         now,
-                        code=self._child_storage_wait(error, row.profile_id)
-                        or ProfileReasonCode.RETRY_CONFLICT,
+                        blockers=self._child_storage_wait(error, row.profile_id),
                         ending=_ending(error) if is_definite(error) else (),
                     )
                     return True
@@ -667,8 +666,10 @@ class FleetProfileService:
                                 _aware(self._clock()),
                                 code=ProfileReasonCode.SWITCH_AUTHORITY_UNAVAILABLE
                                 if isinstance(error, FleetProfilePermissionDenied)
-                                else self._child_storage_wait(error, failed.profile_id)
-                                or ProfileReasonCode.RETRY_CONFLICT,
+                                else ProfileReasonCode.RETRY_CONFLICT,
+                                blockers=self._child_storage_wait(
+                                    error, failed.profile_id
+                                ),
                                 ending=_ending(error) if is_definite(error) else (),
                             )
                     elif isinstance(error, FleetProfileReviewStale):
