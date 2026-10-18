@@ -13,6 +13,7 @@ from vonk_forge_contracts import ModelDefinition, RecipeDefinition
 from vonk_forge_contracts.model import ModelReference
 
 from ..bounded_retry import bounded_attempts
+from ..catalog_queries import active_head_revision
 from ..catalog_revision_contract import (
     CatalogRevisionContractError,
     read_catalog_document,
@@ -44,8 +45,10 @@ from .constants import _DIGEST_PATTERN
 from .errors import (
     ModelCacheConflictInvalid,
     ModelCacheError,
+    ModelCacheNotFoundInvalid,
     ModelCacheResolutionInvalid,
     ModelCacheResolutionRefused,
+    ModelCacheSelectorAmbiguous,
     ModelCacheStorageUnknown,
 )
 from .source_helpers import _model_selector
@@ -146,7 +149,7 @@ class ResolutionMixin:
                 recipe_digest = resolved_recipe_digest
                 recipe_model_digests = _recipe_model_content_digests(recipe_document)
                 if not recipe_model_digests:
-                    raise ModelCacheStorageUnknown(
+                    raise ModelCacheResolutionInvalid(
                         ModelCacheCode.RECIPE_MODEL_MISSING,
                         "recipe does not bind an exact model definition",
                     )
@@ -260,7 +263,10 @@ class ResolutionMixin:
                         CatalogDocumentRevision.kind == "model",
                         CatalogDocumentRevision.state == "active",
                         (CatalogDocumentRevision.id == selector)
-                        | (CatalogDocumentRevision.document_id == selector),
+                        | (
+                            (CatalogDocumentRevision.document_id == selector)
+                            & active_head_revision()
+                        ),
                     )
                 )
             )
@@ -271,6 +277,7 @@ class ResolutionMixin:
             conditions = [
                 CatalogDocumentRevision.kind == "model",
                 CatalogDocumentRevision.state == "active",
+                active_head_revision(),
             ]
             if publisher is not None:
                 conditions.append(CatalogDocumentRevision.publisher == publisher)
@@ -283,16 +290,14 @@ class ResolutionMixin:
         # A catalog row whose identity digest is damaged cannot be pinned: it is
         # skipped like any row the catalog does not hold, and the rest carry on.
         rows = [row for row in rows if _is_digest(row.content_digest)]
-        if len(rows) != 1:
-            if not rows:
-                raise ModelCacheStorageUnknown(
-                    ModelCacheCode.SELECTOR_MISSING, "model selector was not found"
-                )
-            raise ModelCacheStorageUnknown(
-                ModelCacheCode.SELECTOR_AMBIGUOUS,
-                "model selector matches multiple models",
+        digests = sorted({row.content_digest for row in rows})
+        if not digests:
+            raise ModelCacheNotFoundInvalid(
+                ModelCacheCode.SELECTOR_MISSING, "model selector was not found"
             )
-        return str(rows[0].content_digest)
+        if len(digests) > 1:
+            raise ModelCacheSelectorAmbiguous(digests)
+        return digests[0]
 
     def resolve_latest_cached(
         self,
@@ -479,7 +484,7 @@ class ResolutionMixin:
                     unreadable_candidates = True
                     return "", None
                 if not isinstance(recipe, RecipeDefinition):
-                    raise ModelCacheStorageUnknown(
+                    raise ModelCacheResolutionInvalid(
                         ModelCacheCode.RECIPE_INVALID,
                         "recipe revision is not canonical",
                     )

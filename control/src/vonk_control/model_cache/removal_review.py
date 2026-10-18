@@ -34,7 +34,7 @@ from ..models import (
 from .catalog_helpers import _recipe_model_content_digests
 from .errors import (
     ModelCacheRemovalOwnerInvalid,
-    ModelCacheStorageUnknown,
+    ModelCacheStorageInvalid,
 )
 from .persistence import _operation_removal
 from .source_helpers import _model_selector, _request_key
@@ -595,7 +595,7 @@ class RemovalReviewMixin:
         )
         payload = _operation_removal(operation)
         if isinstance(payload, Residue) or not isinstance(operation.plan_digest, str):
-            raise ModelCacheStorageUnknown(
+            raise ModelCacheStorageInvalid(
                 ModelCacheCode.REMOVAL_PLAN_INVALID,
                 "model removal child has no readable immutable plan",
             )

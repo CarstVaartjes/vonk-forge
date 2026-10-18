@@ -11,14 +11,13 @@ import pytest
 from sqlalchemy import Engine, Table, select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_control.artifact_lifecycle import ArtifactLifecycleGate
+from vonk_control.catalog_entities import CatalogEntityService
 from vonk_control.model_cache import (
     CacheOperationView,
     ModelCacheService,
 )
 from vonk_control.models import (
     Base,
-    CatalogDocument,
-    CatalogDocumentRevision,
     FleetProfile,
     FleetProfileApplication,
     FleetProfileSelection,
@@ -49,35 +48,9 @@ def _removal_service(
 def _register_model(sessions: sessionmaker[Session], model: ModelDefinition) -> str:
     now = datetime.now(UTC)
     identity = model.identity
-    digest = document_sha256(model.model_dump(mode="json"))
-    with sessions.begin() as session:
-        document = CatalogDocument(
-            kind="model",
-            publisher=identity.publisher,
-            slug=identity.slug,
-            title=identity.model.title,
-            created_by="operator",
-            created_at=now,
-            updated_at=now,
-        )
-        session.add(document)
-        session.flush()
-        session.add(
-            CatalogDocumentRevision(
-                document_id=document.id,
-                kind="model",
-                publisher=identity.publisher,
-                slug=identity.slug,
-                revision_number=1,
-                schema_version=2,
-                state="active",
-                document=model.model_dump(mode="json"),
-                content_digest=digest,
-                projected={},
-                created_by="operator",
-                created_at=now,
-            )
-        )
+    catalog = CatalogEntityService(sessions, clock=lambda: now)
+    draft = catalog.create_draft(model.model_dump(mode="json"), actor="operator")
+    catalog.resolve(draft.id, actor="operator")
     return f"{identity.publisher}/{identity.slug}"
 
 

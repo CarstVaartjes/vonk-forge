@@ -26,7 +26,7 @@ from ..worker_memory_contract import WorkerMemoryComponent
 from . import constants
 from .artifacts import ArtifactSpec
 from .constants import _CHUNK_BYTES, _TRANSFER_CLAIM_SECONDS
-from .errors import ModelCacheStorageRefused, ModelCacheStorageUnknown
+from .errors import ModelCacheStorageUnknown
 from .persistence import _operation_cancellation
 
 if TYPE_CHECKING:
@@ -127,7 +127,7 @@ class SplitTransferMixin:
                 actual_bytes=0,
                 state=ModelFileState.CORRUPT,
             )
-            raise ModelCacheStorageRefused(
+            raise ModelCacheStorageUnknown(
                 ModelCacheCode.DIGEST_MISMATCH,
                 "assembled artifact failed SHA-256 verification; the bytes were discarded and the download restarts",
                 recovery="resume",
@@ -212,7 +212,7 @@ class SplitTransferMixin:
                 retained.truncate(boundary)
                 os.fsync(retained.fileno())
             part.unlink(missing_ok=True)
-            raise ModelCacheStorageRefused(
+            raise ModelCacheStorageUnknown(
                 ModelCacheCode.DIGEST_MISMATCH,
                 "downloaded part failed SHA-256 verification; the bytes were discarded and the part restarts",
                 recovery="resume",
