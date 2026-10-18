@@ -8,6 +8,8 @@ control/tests/test_api_failure_classification.py. This scan prevents new direct
 import ast
 from pathlib import Path
 
+from vonk_agent_protocol import ArtifactLifecycleCode, ModelCacheCode
+
 from control.tests.parsed_sources import parse_file
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -77,3 +79,77 @@ except Exception:
     return JSONResponse(status_code=503, content={})
 """)
     assert _deterministic_outages(tree) == [4, 12]
+
+
+# These describe missing observations, resumable transfers or a temporary owner.
+# Any other immutable cache condition needs a typed invalid/conflict/refusal.
+_CACHE_OBSERVATIONS = frozenset(
+    {
+        ModelCacheCode.SOURCE_UNAVAILABLE,
+        ModelCacheCode.RECIPE_REVISION_MISSING,
+        ModelCacheCode.RECIPE_IDENTITY_MISSING,
+        ModelCacheCode.MODEL_DEFINITION_MISSING,
+        ModelCacheCode.ENTRY_MISSING,
+        ModelCacheCode.COVERAGE_INCOMPLETE,
+        ModelCacheCode.ARTIFACT_UNVERIFIED,
+        ModelCacheCode.SOURCE_TRUNCATED,
+        ModelCacheCode.SOURCE_SIZE_MISMATCH,
+        # Unverified staging bytes were discarded; a fresh fetch must still
+        # prove the same accepted pin before anything can be published.
+        ModelCacheCode.DIGEST_MISMATCH,
+        ModelCacheCode.RATE_LIMITED,
+        ModelCacheCode.RANGE_INVALID,
+    }
+)
+
+
+def _cache_deterministic_observations(tree: ast.Module) -> list[int]:
+    violations = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Name):
+            continue
+        if not (
+            node.func.id.startswith("ModelCache") and node.func.id.endswith("Unknown")
+        ):
+            continue
+        if not node.args or not isinstance(node.args[0], ast.Attribute):
+            continue
+        code = node.args[0]
+        if not isinstance(code.value, ast.Name):
+            continue
+        if code.value.id == "ModelCacheCode":
+            deterministic = ModelCacheCode[code.attr] not in _CACHE_OBSERVATIONS
+        else:
+            deterministic = (
+                code.value.id == "ArtifactLifecycleCode"
+                and ArtifactLifecycleCode[code.attr]
+                in {
+                    ArtifactLifecycleCode.REFERENCE_IDENTITY_MISMATCH,
+                    ArtifactLifecycleCode.DELETION_FENCE_LOST,
+                }
+            )
+        if deterministic:
+            violations.append(node.lineno)
+    return violations
+
+
+def test_cache_deterministic_errors_are_not_observation_waits():
+    """Catch deterministic cache errors sent through the retryable error class."""
+    violations = [
+        f"{path.relative_to(ROOT)}:{line}"
+        for path in (ROOT / "control/src/vonk_control/model_cache").glob("*.py")
+        for line in _cache_deterministic_observations(parse_file(path).tree)
+    ]
+    assert not violations, violations
+
+
+def test_cache_observation_guard_rejects_conflicts_but_permits_unavailable_sources():
+    tree = ast.parse("""
+raise ModelCacheStorageUnknown(ModelCacheCode.SELECTOR_AMBIGUOUS, "choose digest")
+raise ModelCacheStorageUnknown(ModelCacheCode.SOURCE_UNAVAILABLE, "observe")
+raise ModelCacheStorageUnknown(ModelCacheCode.MODEL_DEPENDENCY_CYCLE, "invalid")
+raise ModelCacheConflictUnknown(ArtifactLifecycleCode.REFERENCE_IDENTITY_MISMATCH, "replan")
+raise ModelCacheConflictUnknown(ArtifactLifecycleCode.DELETION_FENCE_LOST, "replan")
+raise ModelCacheConflictUnknown(ArtifactLifecycleCode.REFERENCE_UNAVAILABLE, "observe")
+""")
+    assert _cache_deterministic_observations(tree) == [2, 4, 5, 6]

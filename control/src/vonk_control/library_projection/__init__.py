@@ -1,6 +1,8 @@
 """Library projection: public imports."""
 
 from ..auth import CursorError as CursorError
+from ..model_cache_contract import DIGEST_PATTERN as DIGEST_PATTERN
+from ..model_cache_contract import UUID_PATTERN as UUID_PATTERN
 from .catalog import Callable as Callable
 from .catalog import CatalogDocumentRevision as CatalogDocumentRevision
 from .catalog import LibraryFacetValues as LibraryFacetValues
@@ -83,8 +85,6 @@ from .service import datetime as datetime
 from .service import model_cache_states as model_cache_states
 from .service import sessionmaker as sessionmaker
 from .views import _MAX_PAGE_RECIPES as _MAX_PAGE_RECIPES
-from .views import DIGEST_PATTERN as DIGEST_PATTERN
-from .views import UUID_PATTERN as UUID_PATTERN
 from .views import Any as Any
 from .views import LibraryFilterValues as LibraryFilterValues
 from .views import LibraryRecipeAuthoringDetail as LibraryRecipeAuthoringDetail
@@ -93,4 +93,3 @@ from .views import ModelDetailResponse as ModelDetailResponse
 from .views import OperationalState as OperationalState
 from .views import RecipeAlternative as RecipeAlternative
 from .views import RecipeDetailResponse as RecipeDetailResponse
-from .views import re as re

@@ -22,6 +22,7 @@ from vonk_agent_protocol import (
     Disposition,
     InvalidRequestError,
     InvalidRequestReason,
+    ModelCacheCode,
     SecurityRefusalError,
     SecurityRefusalReason,
     UnknownOutcomeError,
@@ -40,6 +41,15 @@ from vonk_control.lifecycle import (
     State,
     Tick,
     transition,
+)
+from vonk_control.model_cache.errors import (
+    ModelCacheConflictInvalid,
+    ModelCacheNotFoundInvalid,
+    ModelCacheResolutionInvalid,
+    ModelCacheResolutionRefused,
+    ModelCacheStorageInvalid,
+    ModelCacheStorageRefused,
+    ModelCacheStorageUnknown,
 )
 from vonk_control.recovery_policy import RECOVERY, RecoveryPolicy, schedule
 
@@ -444,3 +454,87 @@ def test_no_agent_lane_reads_an_http_status_by_hand() -> None:
         )
     ]
     assert found == []
+
+
+@pytest.mark.parametrize(
+    "error_type,code",
+    [
+        (ModelCacheConflictInvalid, ModelCacheCode.STALE_PLAN),
+        (ModelCacheResolutionInvalid, ModelCacheCode.MODEL_PIN_INVALID),
+        (ModelCacheStorageInvalid, ModelCacheCode.PAYLOAD_INVALID),
+        (ModelCacheNotFoundInvalid, ModelCacheCode.SELECTOR_MISSING),
+    ],
+)
+def test_invalid_cache_errors_end_instead_of_spending_observation_attempts(
+    error_type, code
+):
+    """The cache's own disposition must not override typed invalid input as OBSERVE."""
+    error = error_type(code, "deterministic input")
+    assert disposition(error) is Disposition.FAIL
+
+
+@pytest.mark.parametrize(
+    "error_type,code",
+    [
+        (ModelCacheStorageRefused, ModelCacheCode.LOCK_UNAVAILABLE),
+        (ModelCacheStorageRefused, ModelCacheCode.REMOVAL_PATH_UNSAFE),
+        (ModelCacheResolutionRefused, ModelCacheCode.FIXTURE_SOURCES_FORBIDDEN),
+    ],
+)
+def test_cache_security_edges_do_not_spend_observation_attempts(error_type, code):
+    """A known unsafe path or forbidden source is a refusal, not a repair wait."""
+    assert (
+        disposition(error_type(code, "unsafe cache boundary")) is Disposition.SECURITY
+    )
+
+
+@pytest.mark.parametrize(
+    "code", [ModelCacheCode.DIGEST_MISMATCH, ModelCacheCode.SOURCE_SIZE_MISMATCH]
+)
+def test_discarded_unverified_bytes_can_be_fetched_again_under_the_same_pin(code):
+    """Ending every transfer mismatch would prevent the cache repairing its staging bytes."""
+    assert (
+        disposition(ModelCacheStorageUnknown(code, "discarded; fetch same pin again"))
+        is Disposition.OBSERVE
+    )
+
+
+@pytest.mark.parametrize(
+    "condition,expected",
+    [
+        ("invalid", Disposition.FAIL),
+        ("busy", Disposition.OBSERVE),
+        ("unknown_owner", Disposition.OBSERVE),
+        ("lost_fence", Disposition.SECURITY),
+    ],
+)
+def test_cache_reference_adapter_preserves_typed_unknowns_and_refusals(
+    condition, expected
+):
+    """A non-retryable effect is not necessarily known; lost authority remains a refusal."""
+    from vonk_agent_protocol import ArtifactLifecycleCode
+    from vonk_control.artifact_lifecycle import ArtifactLifecycleError
+    from vonk_control.model_cache.errors import (
+        ModelCacheDeletionFenceLost,
+        ModelCacheRemovalOwnerInvalid,
+        _reference_error_type,
+    )
+
+    if condition == "unknown_owner":
+        error = ModelCacheRemovalOwnerInvalid(
+            ArtifactLifecycleCode.REMOVAL_OWNER_INVALID, "unobserved owner"
+        )
+    elif condition == "lost_fence":
+        error = ModelCacheDeletionFenceLost(
+            ArtifactLifecycleCode.DELETION_FENCE_LOST, "lost authority"
+        )
+    else:
+        error = ArtifactLifecycleError(
+            ArtifactLifecycleCode.REFERENCE_UNAVAILABLE
+            if condition == "busy"
+            else ArtifactLifecycleCode.REFERENCE_IDENTITY_MISMATCH,
+            "reference condition",
+            retryable=condition == "busy",
+        )
+    wrapped = _reference_error_type(error)(error.code, error.detail)
+    assert disposition(wrapped) is expected

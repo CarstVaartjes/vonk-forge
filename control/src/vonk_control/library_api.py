@@ -19,6 +19,7 @@ from .library_contract import (
     RecipeLibraryResponse,
 )
 from .library_projection import LibrarySelectorAmbiguous
+from .model_cache.errors import ModelCacheError
 from .operation_api import RequestValidationProblem, bounded_error_responses
 from .request_fault import RequestFault
 
@@ -38,16 +39,30 @@ LIBRARY_OPERATION_IDS = {
 class SelectorAmbiguityHTTPError(HTTPException):
     """Carry canonical choices separately from bounded, redacted error copy."""
 
-    def __init__(self, error: LibrarySelectorAmbiguous) -> None:
+    def __init__(
+        self,
+        error: LibrarySelectorAmbiguous,
+        *,
+        status_code: int = 422,
+        code: str | None = None,
+    ) -> None:
         self.problem = RequestValidationProblem(
             detail="selector is ambiguous; choose an exact canonical candidate",
             issues=[],
             candidates=list(error.candidates),
         )
-        super().__init__(status_code=422, detail=self.problem.detail)
+        super().__init__(
+            status_code=status_code,
+            detail=self.problem.detail,
+            headers={"x-vonk-error-code": code} if code is not None else None,
+        )
 
 
 def _error(error: Exception) -> HTTPException:
+    if isinstance(error, ModelCacheError):
+        from .model_cache_api import model_cache_http_error
+
+        return model_cache_http_error(error)
     if isinstance(error, LibrarySelectorAmbiguous):
         return SelectorAmbiguityHTTPError(error)
     if isinstance(error, KeyError):
@@ -130,7 +145,7 @@ def install_library_routes(
     @app.get(
         "/api/model/{selector:path}",
         response_model=ModelDetailResponse,
-        responses=bounded_error_responses(401, 404, 422, 503),
+        responses=bounded_error_responses(401, 404, 409, 422, 503),
         operation_id="getModel",
     )
     def model_detail(
@@ -140,6 +155,7 @@ def install_library_routes(
         try:
             return library().model_detail(selector)
         except (
+            ModelCacheError,
             LibrarySelectorAmbiguous,
             CursorError,
             RequestFault,

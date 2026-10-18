@@ -22,10 +22,11 @@ from typing import Any
 
 import httpx2
 import pytest
-from sqlalchemy import Engine
+from sqlalchemy import Engine, select
+from vonk_control.catalog_entities import CatalogEntityService
 from vonk_control.distribution_executor import CompositeDistributionPhaseExecutor
 from vonk_control.model_cache import ModelCacheService
-from vonk_control.models import ModelCacheSet, RecipeBuild
+from vonk_control.models import CatalogDocumentRevision, ModelCacheSet, RecipeBuild
 from vonk_control.run_switch_contract import (
     ArtifactStorageImpact,
     RunSwitchModelDownloadResult,
@@ -95,7 +96,17 @@ class _Nas:
             build = session.get(RecipeBuild, build_id)
             assert build is not None
             self.recipe_revision_id = build.recipe_revision_id
+            model_revision_id = session.scalar(
+                select(CatalogDocumentRevision.id).where(
+                    CatalogDocumentRevision.kind == "model",
+                    CatalogDocumentRevision.content_digest == self.model_content_sha256,
+                )
+            )
+            assert model_revision_id is not None
         self.now = datetime(2026, 10, 13, tzinfo=UTC)
+        CatalogEntityService(sessions, clock=lambda: self.now).resolve(
+            model_revision_id, actor="operator"
+        )
         self.upstream = _Upstream()
         self.cache = ModelCacheService(
             sessions,

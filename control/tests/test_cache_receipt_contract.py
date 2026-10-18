@@ -192,7 +192,8 @@ def test_bad_ingress_digest_refuses_and_fresh_valid_ingress_is_admitted(
     controller, tmp_path
 ):
     """Local misses must not weaken verification when new bytes enter storage."""
-    from vonk_agent_protocol import SecurityRefusalError
+    from vonk_agent_protocol import Disposition, SecurityRefusalError
+    from vonk_control.failure_classification import disposition
 
     from .test_nas_cache_acceptance import _artifact, _download
 
@@ -215,8 +216,9 @@ def test_bad_ingress_digest_refuses_and_fresh_valid_ingress_is_admitted(
     spec = cache.manifest_for_artifact_set(digest).artifacts[0]
     ingress = tmp_path / "ingress.part"
     ingress.write_bytes(b"tampered")
-    with pytest.raises(SecurityRefusalError):
+    with pytest.raises(SecurityRefusalError) as refused:
         cache._publish_object(spec, ingress)
+    assert disposition(refused.value) is Disposition.SECURITY
     assert not ingress.exists()
     assert cache._object_path(spec.sha256).read_bytes() == b"expected"
     ingress.write_bytes(b"expected")

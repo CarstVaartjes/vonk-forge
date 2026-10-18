@@ -78,7 +78,7 @@ class RequestValidationProblem(BoundedErrorResponse):
             Annotated[
                 str,
                 Field(
-                    pattern=r"^(?:spk_[0-9a-f]{32}|[a-z0-9][a-z0-9._-]{0,62}/[a-z0-9][a-z0-9._-]{0,62})$",
+                    pattern=r"^(?:[0-9a-f]{64}|spk_[0-9a-f]{32}|[a-z0-9][a-z0-9._-]{0,62}/[a-z0-9][a-z0-9._-]{0,62})$",
                     max_length=127,
                 ),
             ]
@@ -115,6 +115,8 @@ def bounded_error_responses(
         status_code: {
             "model": RequestValidationProblem
             if status_code == 422
+            else BoundedErrorResponse | RequestValidationProblem
+            if status_code == 409
             else BoundedErrorResponse | CapabilityUnavailableReply | HttpTransient
             if status_code == 503
             else HttpTransient
