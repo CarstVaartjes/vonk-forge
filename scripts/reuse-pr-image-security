@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# A successful same-repository CI run may lend its exact-digest security proof
+# for less than 24 hours. Missing, changed or stale proof runs the checks again.
+set -euo pipefail
+if (($# != 2)); then
+  echo 'usage: reuse-pr-image-security DIRECTORY RUN_ID' >&2
+  exit 64
+fi
+directory=$1
+run_id=$2
+[[ "$run_id" =~ ^[1-9][0-9]*$ ]]
+record=$(gh api "repos/${GITHUB_REPOSITORY:?}/actions/runs/$run_id")
+if ! jq -e --argjson run "$run_id" --arg repo "$GITHUB_REPOSITORY" '
+    (now - (.created_at | fromdateiso8601)) as $age
+    | .id == $run and .path == ".github/workflows/ci.yml"
+    and .head_repository.full_name == $repo
+    and (.event == "pull_request" or .event == "merge_group")
+    and .status == "completed" and .conclusion == "success"
+    and $age >= 0 and $age < 86400
+  ' <<< "$record" >/dev/null; then
+  echo "PR run $run_id has no fresh scan and smoke proof; running checks" >> "$GITHUB_STEP_SUMMARY"
+  exit 0
+fi
+attempt=$(jq -er '.run_attempt | numbers | select(. > 0)' <<< "$record")
+roles=(api worker hermes litellm)
+for role in "${roles[@]}"; do
+  variable="${role^^}_DIGEST"
+  digest=${!variable}
+  [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+  evidence="$directory/$role/${digest#sha256:}"
+  if [[ ! -f "$evidence/verified" || -L "$evidence/verified" ]] \
+    || [[ "$(cat "$evidence/verified")" != "$run_id:$attempt" ]] \
+    || ! jq -e '.version == "2.1.0" and (.runs | type == "array" and length > 0)' \
+      "$evidence/development-$role.sarif" >/dev/null; then
+    echo "PR run $run_id has no scan and smoke proof for $role@$digest; running checks" >> "$GITHUB_STEP_SUMMARY"
+    exit 0
+  fi
+done
+mkdir -p trivy-results
+for role in "${roles[@]}"; do
+  variable="${role^^}_DIGEST"
+  digest=${!variable}
+  cp "$directory/$role/${digest#sha256:}/development-$role.sarif" "trivy-results/"
+done
+echo 'reused=true'
+echo "Trivy scans and LiteLLM smoke reused from pull request run $run_id for these exact digests (under 24 h old)" >> "$GITHUB_STEP_SUMMARY"

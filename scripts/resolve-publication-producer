@@ -132,6 +132,7 @@ PRODUCERS = {
             *ORCHESTRATION,
             ".dockerignore",
             ".github/actions/image-scan/**",
+            ".github/actions/image-security/**",
             ".github/workflows/dev-images.yml",
             "agent_protocol/pyproject.toml",
             "agent_protocol/src/**",
@@ -177,6 +178,7 @@ PRODUCERS = {
             "scripts/retry_dependency_fetch.py",
             "scripts/reuse-development-image",
             "scripts/reuse-pr-candidate-images",
+            "scripts/reuse-pr-image-security",
             "scripts/verify-multiarch-image-manifest",
             "scripts/verify-public-image-inputs",
             "scripts/verify-published-image",
@@ -301,7 +303,7 @@ def resolve(
 ) -> tuple[int, tuple[int, int, str] | None]:
     if producer not in PRODUCERS or not SHA.fullmatch(source):
         raise ValueError("invalid producer identity")
-    spec = PRODUCERS[producer]
+    spec = PRODUCERS[ProducerName(producer)]
     marker = marker_name(producer)
     page = 1
     while True:

@@ -315,10 +315,19 @@ def image_job_inputs() -> set[str]:
     for token in re.findall(r"[\w.-]+(?:/[\w.-]+)+", workflow):
         parts = token.split("/")
         for start in range(len(parts) - 1):
-            if (ROOT / "/".join(parts[start:])).is_file():
+            if (ROOT / "/".join(parts[start:])).is_file() and not local_output(
+                "/".join(parts[start:])
+            ):
                 inputs.add("/".join(parts[start:]))
-    for action in re.findall(r"uses:\s*\./(\S+)", workflow):
+    pending = re.findall(r"uses:\s*\./(\S+)", workflow)
+    while pending:
+        action = pending.pop()
+        if pattern(action) in inputs:
+            continue
         inputs.add(pattern(action))
+        pending += re.findall(
+            r"uses:\s*\./(\S+)", (ROOT / action / "action.yml").read_text()
+        )
     # A file inside a directory input is already covered by that directory.
     return {
         path
