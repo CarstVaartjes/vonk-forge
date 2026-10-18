@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import AgentOperation as ProtocolAgentOperation
-from vonk_agent_protocol import AgentResult
+from vonk_agent_protocol import AgentResult, LifecycleState
 from vonk_agent_protocol.failure_evidence import FailureDiagnostics
 from vonk_control import agent_operation_states as aos
 from vonk_control.agent_jobs import AgentJobService
@@ -794,8 +794,9 @@ def _child_diagnostics_document(stderr: str) -> dict[str, object]:
 
 
 @pytest.mark.parametrize("unrelated_jobs", [0, 205])
+@pytest.mark.parametrize("state", [LifecycleState.FAILED, LifecycleState.CANCELLED])
 def test_a_failed_parent_job_carries_its_failed_childs_diagnostics(
-    service, unrelated_jobs
+    service, unrelated_jobs, state
 ):
     """A Controller-owned parent shows what its Spark-side child captured.
 
@@ -815,7 +816,7 @@ def test_a_failed_parent_job_carries_its_failed_childs_diagnostics(
                 id=job_id,
                 request_id=str(uuid4()),
                 kind="recipe.run-switch.v2",
-                state="failed",
+                state=state.value,
                 actor="test",
                 authority_revision="a" * 64,
                 targets=[NODE_A],
@@ -837,7 +838,7 @@ def test_a_failed_parent_job_carries_its_failed_childs_diagnostics(
                 payload_digest="b" * 64,
                 payload={},
                 authority_revision=COMMIT,
-                state="failed",
+                state=state.value,
                 status_reason="failed",
                 current_attempt=1,
                 created_at=NOW,
@@ -852,7 +853,7 @@ def test_a_failed_parent_job_carries_its_failed_childs_diagnostics(
                 fence=str(uuid4()),
                 lease_deadline=NOW,
                 agent_certificate_serial="test-serial",
-                state="failed",
+                state=state.value,
                 progress=None,
                 result={
                     "error_code": "recipe_start_failed",
@@ -874,7 +875,7 @@ def test_a_failed_parent_job_carries_its_failed_childs_diagnostics(
                     payload_digest="b" * 64,
                     payload={},
                     authority_revision=COMMIT,
-                    state="failed",
+                    state=state.value,
                     status_reason="failed",
                     current_attempt=1,
                     created_at=NOW,
@@ -889,7 +890,7 @@ def test_a_failed_parent_job_carries_its_failed_childs_diagnostics(
                     fence=str(uuid4()),
                     lease_deadline=NOW,
                     agent_certificate_serial="test-serial",
-                    state="failed",
+                    state=state.value,
                     progress=None,
                     result={"error_code": "recipe_start_failed"},
                 )
@@ -900,7 +901,7 @@ def test_a_failed_parent_job_carries_its_failed_childs_diagnostics(
                     id=str(uuid4()),
                     request_id=str(uuid4()),
                     kind="recipe.run-switch.v2",
-                    state="failed",
+                    state=state.value,
                     actor="test",
                     authority_revision="a" * 64,
                     targets=[NODE_A],
