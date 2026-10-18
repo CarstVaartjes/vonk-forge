@@ -20,7 +20,7 @@ const MAX_NAME_BYTES: usize = 15;
 
 /// `interfaces` is `None` when the evidence could not be gathered at all, so
 /// the Controller treats it as unknown rather than as "no NICs".
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct NetworkEvidence {
     pub interfaces: Option<Vec<NetworkInterface>>,
     pub nas_route_interface: Option<String>,
@@ -115,7 +115,17 @@ pub async fn collect_optional(controller_url: Url) -> NetworkEvidence {
         move || {
             let runner = SystemProcessRunner;
             let route = nas_route(&controller_url, &runner);
-            collect_interfaces(Path::new("/sys/class/net"), route)
+            let mut evidence = collect_interfaces(Path::new("/sys/class/net"), route);
+            if let Some(interface) = evidence.interfaces.as_mut().and_then(|interfaces| {
+                interfaces.iter_mut().find(|interface| {
+                    Some(&interface.name) == evidence.nas_route_interface.as_ref()
+                        && interface.kind == NetworkInterfaceKind::Wifi
+                        && interface.carrier
+                })
+            }) {
+                super::wifi::collect(interface);
+            }
+            evidence
         },
         Duration::from_secs(2),
         &SLOT,
@@ -249,6 +259,10 @@ fn interface(path: &Path, name: String, rdma: bool) -> NetworkInterface {
         kind,
         link_speed_mbps: if carrier { link_speed_mbps } else { None },
         carrier,
+        signal_dbm: None,
+        frequency_mhz: None,
+        tx_bitrate_mbps: None,
+        rx_bitrate_mbps: None,
     }
 }
 

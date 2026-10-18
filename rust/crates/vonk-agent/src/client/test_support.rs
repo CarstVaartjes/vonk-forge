@@ -79,6 +79,10 @@ pub(super) fn interface(
         kind: vonk_agent_protocol::generated::NetworkInterfaceKind::Wired,
         link_speed_mbps: speed,
         carrier: true,
+        signal_dbm: None,
+        frequency_mhz: None,
+        tx_bitrate_mbps: None,
+        rx_bitrate_mbps: None,
     }
 }
 
