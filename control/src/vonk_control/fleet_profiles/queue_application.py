@@ -310,7 +310,7 @@ class FleetProfileService:
             frozen_nodes = tuple(node.node_id for node in scope_nodes)
             if frozen_nodes != tuple(preview.scope.node_ids):
                 raise FleetProfileStalePlanConflict(
-                    "Profile fleet scope changed during admission; review again"
+                    "Profile fleet scope changed during admission"
                 )
             if selected_application:
                 intended = (
@@ -465,8 +465,9 @@ class FleetProfileService:
                     for item in preview.assignments
                 )
             ):
+                _validate_remaining_effects(preview.effects, control.effects)
                 raise FleetProfileStalePlanConflict(
-                    "Profile workload effects changed during admission; review again"
+                    "Profile workload effects changed during admission"
                 )
             affected_nodes = [
                 node for node in scope_nodes if node.node_id in fenced_nodes
@@ -817,7 +818,7 @@ class FleetProfileService:
             )
             if current_scope != frozen_nodes:
                 raise FleetProfileStalePlanConflict(
-                    "Profile fleet scope changed during admission; review again"
+                    "Profile fleet scope changed during admission"
                 )
             if pending_roster_reconciliation:
                 if (

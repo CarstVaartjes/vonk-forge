@@ -21,6 +21,7 @@ from vonk_agent_protocol import canonical_message
 from vonk_control.admission_locking import acquire_admission_keys, node_admission_key
 from vonk_control.auth import Actor
 from vonk_control.fleet_profile_contract import (
+    FleetProfileApplicationView,
     FleetProfileInput,
     FleetProfileSwitchQueueItem,
 )
@@ -359,15 +360,18 @@ def test_load_retries_a_transient_admission_owner(postgres_engine, monkeypatch) 
 
 
 @pytest.mark.parametrize("change", ["roster", "authority", "profile"])
-def test_change_between_fresh_review_and_admission_refuses_load(
+def test_admission_change_preserves_consent_and_supersedes_a_newer_save(
     postgres_engine,
     monkeypatch,
     change,
 ):
     sessions, api, _codec, headers, _preview = _profile_api(postgres_engine)
     original = FleetProfileService._queue_application
+    owner: FleetProfileService | None = None
 
     def after_preview(service, reviewed, **kwargs):
+        nonlocal owner
+        owner = service
         with sessions.begin() as session:
             if change == "roster":
                 session.add(
@@ -400,12 +404,38 @@ def test_change_between_fresh_review_and_admission_refuses_load(
             "request_key": str(uuid4()),
         },
     )
-    assert response.status_code == (403 if change == "authority" else 409), (
-        response.text
-    )
+    assert (
+        response.status_code
+        == {"authority": 403, "roster": 202, "profile": 202}[change]
+    ), response.text
+    if change != "authority":
+        assert owner is not None
+        accepted = FleetProfileApplicationView.model_validate_json(response.content)
+        monkeypatch.setattr(FleetProfileService, "_queue_application", original)
+        owner._switch_adapter = _SwitchAdapter()
+        for _ in range(3):
+            waiting = owner.application(accepted.id)
+            if not waiting.progress.admission_pending:
+                break
+            due = waiting.progress.admission_retry_at
+            assert due is not None
+            owner._clock = lambda due=due: due
+            assert owner.tick()
+        ended = owner.application(accepted.id)
+        assert ended.state == (
+            LifecycleState.SUPERSEDED
+            if change == "profile"
+            else LifecycleState.SUCCEEDED
+        )
+        if change == "roster":
+            assert ended.progress.intended_profile is not None
+            assert "spk_" + "3" * 32 in ended.progress.intended_profile.scope.node_ids
     with sessions() as session:
-        assert session.scalar(select(FleetProfileApplication)) is None
-        assert session.get(FleetProfileSelection, 1) is None
+        assert (session.scalar(select(FleetProfileApplication)) is None) == (
+            change == "authority"
+        )
+        selection = session.get(FleetProfileSelection, 1)
+        assert (selection is not None) == (change == "roster")
 
 
 def test_concurrent_duplicate_reconciles_acceptance_before_reporting_stale_review(
@@ -494,21 +524,25 @@ def test_admission_serializes_insertion_of_a_previously_unknown_spark(postgres_e
             try:
                 assert snapshot_locked.wait(timeout=30)
                 # A row lock on the two known Sparks cannot block an unrelated
-                # enrollment. The final roster recheck rejects the stale plan.
+                # enrollment. The final roster recheck parks the stale plan
+                # for a fresh review instead of executing it or returning 409.
                 add_node()
             finally:
                 release.set()
             response = future.result(timeout=30)
-        assert response.status_code == 409, response.text
+        assert response.status_code == 202, response.text
+        accepted = FleetProfileApplicationView.model_validate_json(response.content)
+        assert accepted.progress.admission_pending
         with sessions() as session:
-            assert session.scalar(select(FleetProfileApplication)) is None
+            assert session.scalar(select(FleetProfileApplication.id)) == accepted.id
     finally:
         release.set()
         event.remove(postgres_engine, "after_cursor_execute", after_roster_read)
 
 
-def test_recipe_head_changed_after_review_is_not_substituted_into_admitted_intent(
-    postgres_engine, monkeypatch
+@pytest.mark.parametrize("roster_changed", [False, True])
+def test_recipe_head_changed_during_admission_is_followed_within_reviewed_scope(
+    postgres_engine, monkeypatch, roster_changed: bool
 ):
     Base.metadata.create_all(postgres_engine)
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)
@@ -537,6 +571,7 @@ def test_recipe_head_changed_after_review_is_not_substituted_into_admitted_inten
     preview = api.post("/api/profile/1/preview", headers=headers).json()
     assert preview["allowed"]
     original = FleetProfileService._queue_application
+    changed_revision_id = str(uuid4())
 
     def change_head(owner, reviewed, **kwargs):
         with sessions.begin() as session:
@@ -557,7 +592,7 @@ def test_recipe_head_changed_after_review_is_not_substituted_into_admitted_inten
             )
             session.add(
                 CatalogDocumentRevision(
-                    id=str(uuid4()),
+                    id=changed_revision_id,
                     document_id=previous.document_id,
                     kind="recipe",
                     publisher=previous.publisher,
@@ -582,9 +617,38 @@ def test_recipe_head_changed_after_review_is_not_substituted_into_admitted_inten
             "request_key": str(uuid4()),
         },
     )
-    assert response.status_code == 409, response.text
+    assert response.status_code == 202, response.text
+    accepted = FleetProfileApplicationView.model_validate_json(response.content)
+    assert accepted.progress.admission_pending
+    assert accepted.progress.intended_profile is not None
+    assert (
+        accepted.progress.intended_profile.assignments[0].recipe_revision_id
+        != changed_revision_id
+    )
+    monkeypatch.setattr(FleetProfileService, "_queue_application", original)
+    removed_node_id: str | None = None
+    if roster_changed:
+        with sessions.begin() as session:
+            # Revoke an idle member: the assigned Spark is still available,
+            # but the load's reviewed whole-fleet membership changed.
+            idle = session.get(AgentNode, preview["scope"]["idle_node_ids"][0])
+            assert idle is not None
+            removed_node_id = idle.node_id
+            idle.revoked_at = service._clock()
+    assert service.tick()
+    followed = service.application(accepted.id)
+    assert followed.progress.intended_profile is not None
+    if roster_changed:
+        assert removed_node_id is not None
+        assert removed_node_id not in followed.progress.intended_profile.scope.node_ids
+    assert (
+        followed.progress.intended_profile.assignments[0].recipe_revision_id
+        == changed_revision_id
+    )
     with sessions() as session:
-        assert session.scalar(select(FleetProfileApplication)) is None
+        assert list(session.scalars(select(FleetProfileApplication.id))) == [
+            accepted.id
+        ]
 
 
 def _running_profile_api(tmp_path, engine):
@@ -607,7 +671,7 @@ def _running_profile_api(tmp_path, engine):
 
 
 @pytest.mark.parametrize("change", ["run", "installation", "pending-job"])
-def test_workload_change_between_review_and_acceptance_is_refused(
+def test_workload_change_during_admission_rejects_only_unreviewed_destructive_targets(
     tmp_path, postgres_engine, monkeypatch, change
 ):
     sessions, api, headers, profile, installed, run, _preview = _running_profile_api(
@@ -677,9 +741,13 @@ def test_workload_change_between_review_and_acceptance_is_refused(
             "request_key": str(uuid4()),
         },
     )
-    assert response.status_code == 409, response.text
+    assert response.status_code == (202 if change == "pending-job" else 409), (
+        response.text
+    )
     with sessions() as session:
-        assert session.scalar(select(FleetProfileApplication)) is None
+        assert (session.scalar(select(FleetProfileApplication)) is None) == (
+            change != "pending-job"
+        )
         model, expected = {
             "run": (RecipeRun, "running"),
             "installation": (RecipeInstallation, "installed"),

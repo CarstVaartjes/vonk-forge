@@ -246,13 +246,13 @@ class FleetProfileService:
 
         if _digest(_profile_document(profile)) != profile_digest:
             raise FleetProfileStalePlanConflict(
-                "Fleet profile changed during application admission; review again"
+                "Fleet profile changed during application admission"
             )
         assignment_by_id = {item.id: item for item in assignments}
         choices = self._choices(profile)
         if set(assignment_by_id) != {_choice_id(choice) for choice in choices}:
             raise FleetProfileStalePlanConflict(
-                "Profile assignment set changed during admission; review again"
+                "Profile assignment set changed during admission"
             )
         for choice in choices:
             identity = self._recipe_identity(session, choice.recipe_selector)
@@ -262,7 +262,7 @@ class FleetProfileService:
                 assignment.recipe_revision_id,
             ) != tuple(identity):
                 raise FleetProfileStalePlanConflict(
-                    "Profile recipe head changed during admission; review again"
+                    "Profile recipe head changed during admission"
                 )
 
     def _execution_assignments(
