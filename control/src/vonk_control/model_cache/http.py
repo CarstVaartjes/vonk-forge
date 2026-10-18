@@ -362,7 +362,7 @@ class HttpMixin:
         cache = cast("ModelCacheService", self)
         if not cache._verify_file(part, spec):
             part.unlink(missing_ok=True)
-            raise ModelCacheStorageUnknown(
+            raise ModelCacheStorageRefused(
                 ModelCacheCode.DIGEST_MISMATCH,
                 "cache artifact failed verification; the bytes were discarded and the download restarts",
                 recovery="resume",
