@@ -47,7 +47,7 @@ from vonk_control.recipe_operations import RecipeOperationService
             "preview_uninstall",
             "_preview_uninstall_once",
             ("installation",),
-            {"also_removing": ()},
+            {"also_removing": (), "preserve_model_files": False},
         ),
         (
             "retry",
@@ -120,7 +120,7 @@ def test_request_reobserves_identical_input_with_a_finite_budget(
             "preview_uninstall",
             "_preview_uninstall_once",
             ("installation",),
-            {"also_removing": ()},
+            {"also_removing": (), "preserve_model_files": False},
         ),
         (
             "retry",
