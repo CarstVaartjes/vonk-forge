@@ -93,8 +93,9 @@ def _refusal_reason(code: str) -> SecurityRefusalReason | None:
 
 class _CacheRefusal(SecurityRefusalError, ModelCacheError):
     """A refusal at a security boundary (credentials, source trust, a redirect
-    off the trusted host, ingress bytes that fail their pin, an unsafe path):
-    fails closed.  A malformed source or identity is ``_CacheInvalid``."""
+    off the trusted host, an unsafe path): fails closed. Discarded, unverified
+    bytes can be fetched again under the same pin through ``_CacheUnknown``;
+    a malformed source or identity is ``_CacheInvalid``."""
 
     def __init__(
         self,
@@ -113,6 +114,10 @@ class _CacheRefusal(SecurityRefusalError, ModelCacheError):
             recovery=recovery,
         )
         self.typed_reason = reason if reason is not None else _refusal_reason(code)
+
+    @property
+    def disposition(self) -> Disposition:
+        return Disposition.SECURITY
 
 
 class _CacheInvalid(InvalidRequestError, ModelCacheError):
@@ -214,6 +219,15 @@ class ModelCacheStorageInvalid(_CacheInvalid, ModelCacheStorageError):
 
 class ModelCacheStorageUnknown(_CacheUnknown, ModelCacheStorageError):
     default_reason = WaitReason.OBSERVATION_UNAVAILABLE
+
+
+def _reference_error_type(error: ArtifactLifecycleError) -> type[ModelCacheError]:
+    """Preserve typed refusals and unknown effects across the cache adapter."""
+    if isinstance(error, SecurityRefusalError):
+        return ModelCacheStorageRefused
+    if isinstance(error, UnknownOutcomeError) or error.retryable:
+        return ModelCacheConflictUnknown
+    return ModelCacheConflictInvalid
 
 
 class ModelCacheRemovalOwnerInvalid(UnknownOutcomeError, ArtifactLifecycleError):

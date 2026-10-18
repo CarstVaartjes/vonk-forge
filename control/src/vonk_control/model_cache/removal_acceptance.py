@@ -42,9 +42,9 @@ from ..strict_json import serialize_json_value
 from .constants import SCHEMA_VERSION, SOURCE_POLICY
 from .errors import (
     ModelCacheConflictInvalid,
-    ModelCacheConflictUnknown,
     ModelCacheStorageRefused,
     _ArtifactWriterBusy,
+    _reference_error_type,
 )
 from .persistence import (
     _model_removal_intent_digest,
@@ -207,11 +207,7 @@ class RemovalAcceptanceMixin:
                 # stops new consumers and each destructive step waits until the
                 # current owners have released the set.
             except ArtifactLifecycleError as error:
-                raise (
-                    ModelCacheConflictUnknown
-                    if error.retryable
-                    else ModelCacheConflictInvalid
-                )(
+                raise _reference_error_type(error)(
                     error.code,
                     error.detail,
                     recovery=AvailabilityRecoveryAction.RETRY

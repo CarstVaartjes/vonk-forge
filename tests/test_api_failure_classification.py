@@ -94,6 +94,9 @@ _CACHE_OBSERVATIONS = frozenset(
         ModelCacheCode.ARTIFACT_UNVERIFIED,
         ModelCacheCode.SOURCE_TRUNCATED,
         ModelCacheCode.SOURCE_SIZE_MISMATCH,
+        # Unverified staging bytes were discarded; a fresh fetch must still
+        # prove the same accepted pin before anything can be published.
+        ModelCacheCode.DIGEST_MISMATCH,
         ModelCacheCode.RATE_LIMITED,
         ModelCacheCode.RANGE_INVALID,
     }

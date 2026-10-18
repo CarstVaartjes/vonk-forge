@@ -219,3 +219,16 @@ def test_model_cli_passes_exact_digest_to_the_real_api(
     )
     assert client.calls == [("GET", f"/api/model/{digest}{suffix}")]
     assert digest in capsys.readouterr().out
+
+
+def test_model_detail_uses_cache_selector_validation(world):
+    """The shared decision must reject invalid names with the canonical cache error."""
+    _catalog, cache, sessions, _client = world
+    projection = LibraryProjection(
+        sessions, cursors=TokenCodec(b"v" * 32).cursor_codec()
+    )
+    for resolve in (cache._resolve_model_selector, projection.model_detail):
+        with pytest.raises(ModelCacheError) as caught:
+            resolve(" ")
+        assert caught.value.code == ModelCacheCode.SELECTOR_INVALID
+        assert disposition(caught.value) is Disposition.FAIL

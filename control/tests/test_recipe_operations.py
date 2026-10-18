@@ -85,7 +85,6 @@ from vonk_control.models import (
     AgentPresence,
     Base,
     CatalogDocument,
-    CatalogDocumentHead,
     CatalogDocumentRevision,
     ClusterMapping,
     InstallationNode,
@@ -595,10 +594,8 @@ def setup_services(
         )
         session.add(model_catalog)
         session.flush()
-        model_revision_id = str(uuid.uuid4())
         session.add(
             CatalogDocumentRevision(
-                id=model_revision_id,
                 document_id=model_catalog.id,
                 kind="model",
                 publisher=model_catalog.publisher,
@@ -627,15 +624,6 @@ def setup_services(
             )
         )
         session.flush()
-        session.add(
-            CatalogDocumentHead(
-                kind=model_catalog.kind,
-                publisher=model_catalog.publisher,
-                slug=model_catalog.slug,
-                active_revision_id=model_revision_id,
-                generation=1,
-            )
-        )
     mappings = ClusterMappingService(sessions)
     mapping_plan = mappings.preview(
         revision.id, node_ids[:placement_count], {}, "admin"

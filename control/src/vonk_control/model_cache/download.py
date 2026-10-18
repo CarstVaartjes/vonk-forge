@@ -27,11 +27,11 @@ from ..categorized_faults import OperationInterrupted
 from ..lifecycle import State
 from ..model_cache_ranges import cleanup_ranges, download_ranges, range_partial_bytes
 from ..models import ModelCacheOperation, ModelCacheSet
+from ..operation_contract import AvailabilityRecoveryAction
 from .artifacts import ArtifactSpec
 from .catalog_helpers import _github_release_asset_binding
 from .constants import _CHUNK_BYTES, _GITHUB_API_HOST, _PARALLEL_RANGE_WORKERS
 from .errors import (
-    ModelCacheConflictInvalid,
     ModelCacheConflictUnknown,
     ModelCacheError,
     ModelCacheResolutionError,
@@ -40,6 +40,7 @@ from .errors import (
     ModelCacheStorageRefused,
     ModelCacheStorageUnknown,
     _ArtifactWriterBusy,
+    _reference_error_type,
 )
 from .source_helpers import _is_private_host
 
@@ -117,7 +118,7 @@ class DownloadMixin:
                             chunk = bytes(chunk)
                         next_received = received + len(chunk)
                         if next_received > spec.expected_bytes:
-                            raise ModelCacheStorageRefused(
+                            raise ModelCacheStorageUnknown(
                                 ModelCacheCode.SOURCE_SIZE_MISMATCH,
                                 "source returned more bytes than the immutable artifact pin",
                                 recovery="resume",
@@ -217,7 +218,7 @@ class DownloadMixin:
                 actual_bytes=0,
                 state=ModelFileState.CORRUPT,
             )
-            raise ModelCacheStorageRefused(
+            raise ModelCacheStorageUnknown(
                 ModelCacheCode.DIGEST_MISMATCH,
                 "downloaded artifact failed SHA-256 verification; the bytes were discarded and the download restarts",
                 recovery="resume",
@@ -292,8 +293,13 @@ class DownloadMixin:
     def _reference_unknown(
         error: ArtifactLifecycleError | ModelCacheConflictUnknown | DBAPIError,
     ) -> NoReturn:
-        if isinstance(error, ArtifactLifecycleError) and not error.retryable:
-            raise ModelCacheConflictInvalid(error.code, error.detail) from error
+        if isinstance(error, ArtifactLifecycleError):
+            raise _reference_error_type(error)(
+                error.code,
+                error.detail,
+                retry_after_seconds=1,
+                recovery=AvailabilityRecoveryAction.RETRY if error.retryable else None,
+            ) from error
         raise ModelCacheConflictUnknown(
             ArtifactLifecycleCode.REFERENCE_UNAVAILABLE
             if isinstance(error, DBAPIError)
@@ -302,7 +308,9 @@ class DownloadMixin:
             if isinstance(error, DBAPIError)
             else error.detail,
             retry_after_seconds=1,
-            recovery="retry" if getattr(error, "retryable", True) else None,
+            recovery=AvailabilityRecoveryAction.RETRY
+            if getattr(error, "retryable", True)
+            else None,
         ) from error
 
     def _validate_http_download(self, spec: ArtifactSpec) -> None:

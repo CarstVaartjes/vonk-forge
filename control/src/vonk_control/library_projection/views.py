@@ -26,6 +26,7 @@ from ..library_contract import (
     _utc,
 )
 from ..model_cache.resolution import ResolutionMixin
+from ..model_cache.source_helpers import _model_selector
 from ..models import CatalogDocumentRevision
 from ..request_fault import RequestFault
 from .common import (
@@ -208,7 +209,7 @@ def models(
 def model_detail(self: LibraryProjection, selector: str) -> ModelDetailResponse:
     with self._sessions() as session:
         digest = ResolutionMixin._resolve_model_selector_in_session(
-            session, selector.strip().casefold()
+            session, _model_selector(selector).casefold()
         )
     snapshot = self._local_state_snapshot()
     model_rows, recipe_rows = self._documents_for_snapshot(snapshot)
