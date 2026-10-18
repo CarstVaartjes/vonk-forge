@@ -10,7 +10,10 @@ from sqlalchemy import select
 from vonk_agent_protocol import InvalidRequestReason, LifecycleState
 from vonk_agent_protocol.agent_words import ProfileOperationKind
 from vonk_agent_protocol.state_machines import NodeIdentityState
-from vonk_control.fleet_profile_contract import FleetProfileInput
+from vonk_control.fleet_profile_contract import (
+    FleetProfileApplicationView,
+    FleetProfileInput,
+)
 from vonk_control.fleet_profiles import FleetProfileInvalid
 from vonk_control.jobs import JobService
 from vonk_control.models import (
@@ -167,5 +170,55 @@ def test_roster_repair_cannot_starve_due_admission(
     completed = recovered.application(pending.id)
     assert not completed.progress.admission_pending, completed.status_reason
     assert completed.state == LifecycleState.SUCCEEDED
+    with sessions() as session:
+        assert session.get_one(FleetProfileSelection, 1).application_id == pending.id
+
+
+def test_load_accepted_during_roster_preview_keeps_precedence(
+    tmp_path, postgres_engine, monkeypatch
+):
+    """Catches a newer load arriving after the maintenance scan but before admission."""
+    sessions, profiles, *_ = _capacity_profile(tmp_path, postgres_engine)
+    idle = profiles.create(
+        FleetProfileInput(name="Selected idle", assignments=[]), actor="admin"
+    )
+    selected = profiles.apply(idle.id, request_key=str(uuid4()), actor="admin")
+    assert selected.state == LifecycleState.SUCCEEDED
+    with sessions.begin() as session:
+        session.add(
+            AgentNode(
+                node_id="spk_" + "2" * 32,
+                state=NodeIdentityState.ACTIVE,
+                architecture="linux-arm64",
+            )
+        )
+    preview = profiles.preview
+    loads: list[FleetProfileApplicationView] = []
+
+    def preview_then_accept(*args, **kwargs):
+        reviewed = preview(*args, **kwargs)
+        loads.append(
+            profiles._create_pending_application(
+                preview(idle.id),
+                request_key=str(uuid4()),
+                actor="admin",
+                operation_kind=ProfileOperationKind.APPLY.value,
+            )
+        )
+        return reviewed
+
+    with monkeypatch.context() as injection:
+        injection.setattr(profiles, "preview", preview_then_accept)
+        assert profiles._reconcile_selected_roster(profiles._clock())
+    pending = loads[0]
+    with sessions() as session:
+        assert session.get_one(FleetProfileSelection, 1).application_id == selected.id
+    assert profiles.application(pending.id) == pending
+    due = pending.progress.admission_retry_at
+    assert due is not None
+    profiles._clock = lambda: due + timedelta(seconds=1)
+    profiles.tick()
+    completed = profiles.application(pending.id)
+    assert completed.state == LifecycleState.SUCCEEDED, completed.status_reason
     with sessions() as session:
         assert session.get_one(FleetProfileSelection, 1).application_id == pending.id
