@@ -16,6 +16,7 @@ import pytest
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import AgentOperation as OperationKind
 from vonk_agent_protocol import (
+    AgentResultState,
     LifecycleState,
     OperationProgress,
     ProgressPhase,
@@ -251,6 +252,20 @@ def test_any_queued_order_on_a_busy_spark_waits_visibly_and_only_there(
         assert document["wait_reason"] == WaitReason.JOB_STATE_UNCERTAIN
         assert document["blockers"][0]["operation"]["id"] == stop.id
 
+    # A known failed attempt awaiting retry/operator action is not an unknown
+    # effect and must not masquerade as the holder of another order's lane.
+    with sessions.begin() as session:
+        holder = session.get(AgentOperation, stop.id)
+        assert holder is not None
+        holder.state = LifecycleState.BACKOFF.value
+        attempt = (
+            session.query(AgentOperationAttempt).filter_by(operation_id=stop.id).one()
+        )
+        attempt.state = AgentResultState.FAILED.value
+    for document in _waits(services, behind.id, job_id):
+        assert document["wait_reason"] == WaitReason.OBSERVATION_UNAVAILABLE
+        assert not document["blockers"][0].get("operation")
+
 
 def test_unconfirmed_blocker_stalls_visibly_then_clears_without_changing_intent(fleet):
     """Catches lease loss hiding a queue wait, and heartbeat/read resetting its alarm."""
@@ -260,17 +275,19 @@ def test_unconfirmed_blocker_stalls_visibly_then_clears_without_changing_intent(
     upgrade = jobs.enqueue(
         job_id, NODE_A, OperationKind.AGENT_UPGRADE.value, COMMIT, _upgrade_payload()
     )
+    recheck_at = clock.now + timedelta(seconds=2 * CLAIM_LEASE_SECONDS)
     with sessions.begin() as session:
         holder = session.get(AgentOperation, stop.id)
         assert holder is not None
         holder.state = LifecycleState.OBSERVING.value
+        holder.next_action_at = recheck_at
     clock.now += timedelta(seconds=PROFILE_STALL_WINDOW_SECONDS + 1)
     for document in _waits(services, upgrade.id, job_id):
         assert document["wait_reason"] == WaitReason.JOB_STATE_UNCERTAIN
         assert document["blockers"][0]["operation"]["id"] == stop.id
         assert document["blockers"][0]["run_id"] == stop.payload["run_id"]
         assert document["blockers"][1]["code"] == ProgressAlarmCode.STALLED
-        assert datetime.fromisoformat(document["next_attempt_at"]) < clock.now
+        assert datetime.fromisoformat(document["next_attempt_at"]) == recheck_at
     # A read never changes the queue identity, attempt, or stored schedule.
     with sessions() as session:
         queued = session.get(AgentOperation, upgrade.id)

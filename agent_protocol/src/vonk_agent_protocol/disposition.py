@@ -51,6 +51,7 @@ FAILURE_KIND_DISPOSITION = MappingProxyType(
 #: agent's identity) is a wait; a busy owner declares its own ``WAIT``.
 WAIT_REASON_DISPOSITION = MappingProxyType(
     {
+        WaitReason.SPARK_BUSY: _WAIT,
         WaitReason.OPERATION_NOT_ENABLED: _WAIT,
         WaitReason.UPGRADE_AWAITING_IDENTITY: _WAIT,
         WaitReason.AGENT_RESTART_INTERRUPTED: _OBSERVE,

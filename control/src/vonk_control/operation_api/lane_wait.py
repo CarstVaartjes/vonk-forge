@@ -17,6 +17,7 @@ from vonk_agent_protocol.agent_words import ProfileReasonSeverity
 
 from .. import agent_operation_states
 from ..agent_jobs.contracts import CLAIM_LEASE_SECONDS
+from ..agent_jobs.retry import agent_upgrade_in_flight
 from ..agent_jobs.stored import column_field
 from ..agent_operation_facts import attempt_is_live, aware
 from ..models import AgentOperation, AgentOperationAttempt
@@ -56,9 +57,9 @@ def spark_busy_blockers(
 
     A live attempt owns its lane; an unconfirmed one needs reconciliation on
     the next authenticated poll. With neither, the order awaits the poll itself.
-    The next check is due at the holder's lease boundary, or one claim lease
-    interval after enqueue without a live holder. Overdue checks stay overdue
-    across reads and restarts. A fixed stall window since
+    The holder's scheduled observation/retry owns the next check; otherwise it
+    is due at the lease boundary, or one claim interval after enqueue. Overdue
+    checks stay overdue across reads and restarts. A fixed stall window since
     the later of queue creation and blocker progress escalates without stopping
     work; heartbeat/lease renewal and reads never reset that window.
     """
@@ -87,6 +88,15 @@ def spark_busy_blockers(
         )
         .order_by(AgentOperation.created_at, AgentOperation.id)
     ):
+        unconfirmed = running.state == agent_operation_states.OBSERVING or (
+            attempt is not None and agent_operation_states.attempt_is_observing(attempt)
+        )
+        if (
+            running.state != agent_operation_states.RUNNING
+            and not unconfirmed
+            and not agent_upgrade_in_flight(session, running, now)
+        ):
+            continue
         # Prefer the live executor over older uncertain history on this Spark.
         current = holders.get(running.node_id)
         if current is None or (
@@ -115,7 +125,9 @@ def spark_busy_blockers(
                 else f"Awaiting reconciliation of {running.kind} {running.id} "
                 "on this Spark; its effect is unconfirmed"
             )
-            if live and attempt is not None:
+            if running.next_action_at is not None:
+                next_check_at = aware(running.next_action_at)
+            elif live and attempt is not None:
                 next_check_at = aware(attempt.lease_deadline)
             blocking_operation = BlockingOperation(id=running.id, kind=running.kind)
             workload = column_field(running, "payload", "run_id")
