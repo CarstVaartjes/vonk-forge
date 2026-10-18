@@ -87,9 +87,11 @@ class FleetProfileService:
         )
         if self._switch_adapter is None:
             return converted
+        # A roster repair can remain busy on every tick. Give due accepted
+        # loads their turn before maintenance can return or re-arm its backoff.
+        pending_admission_observed = self._observe_pending_admissions(now) or converted
         if self._reconcile_selected_roster(now):
             return True
-        pending_admission_observed = self._observe_pending_admissions(now) or converted
         parked_observed = self._heal_legacy_applications(now)
         recovery_deferred = False
         cancellation_observed = self._observe_pending_cancellation(now)
