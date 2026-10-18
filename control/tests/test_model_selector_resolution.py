@@ -184,3 +184,38 @@ def test_changed_removal_scope_requires_a_new_plan_and_can_then_be_accepted(worl
             defer_scope=False,
         )
         assert accepted.id
+
+
+@pytest.mark.parametrize(
+    "action,options,suffix",
+    [("detail", (), ""), ("remove", ("--review",), "/remove-review")],
+)
+def test_model_cli_passes_exact_digest_to_the_real_api(
+    world, action, options, suffix, capsys
+):
+    """A digest reaches the Controller verbatim and its typed response reaches CLI output."""
+    from cluster_profiles import cli
+
+    catalog, _cache, _sessions, api = world
+    row = _activate(catalog, publisher="test", weight="a")
+    digest = row.content_digest
+
+    class Client:
+        request_timeout_seconds = 15.0
+
+        def __init__(self):
+            self.calls: list[tuple[str, str]] = []
+
+        def request(self, method, path, **kwargs):
+            self.calls.append((method, path))
+            response = api.request(method, path)
+            response.raise_for_status()
+            return response.json()
+
+    client = Client()
+    assert (
+        cli.main(("model", action, digest, *options, "--json"), control_client=client)
+        == 0
+    )
+    assert client.calls == [("GET", f"/api/model/{digest}{suffix}")]
+    assert digest in capsys.readouterr().out

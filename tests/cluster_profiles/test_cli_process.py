@@ -18,8 +18,8 @@ from cluster_profiles.control_client import ControlClient
 class Observations:
     request_timeout_seconds = 15.0
 
-    def __init__(self, *documents: Mapping[str, object]) -> None:
-        self.documents = [dict(document) for document in documents]
+    def __init__(self, *documents: dict[str, object]) -> None:
+        self.documents = list(documents)
         self.calls: list[tuple[str, str]] = []
 
     def request(self, method, path, payload=None, **kwargs):
@@ -503,44 +503,3 @@ def test_argparse_help_handles_a_closed_result_pipe(arguments) -> None:
         os.close(write_fd)
     assert result.returncode == 141, result.stderr.decode()
     assert not result.stderr
-
-
-@pytest.mark.parametrize(
-    "action,options,suffix",
-    [
-        ("detail", (), ""),
-        ("remove", ("--review",), "/remove-review"),
-    ],
-)
-def test_model_commands_pass_exact_digest_without_name_resolution(
-    action, options, suffix, capsys
-):
-    """A digest must reach the Controller verbatim, without a client-side name lookup."""
-    from vonk_control.cache_removal_review import (
-        CacheRemovalReviewContent,
-        seal_cache_removal_review,
-    )
-
-    digest = "a" * 64
-    document = seal_cache_removal_review(
-        CacheRemovalReviewContent(
-            resource_kind="model",
-            selector=digest,
-            target_identity=digest,
-            with_model=None,
-            assets=[],
-            references=[],
-            active_work=[],
-            blockers=[],
-            observed_at="2026-10-18T00:00:00Z",
-        )
-    ).model_dump(mode="json")
-    if action == "detail":
-        document = {"id": digest}
-    client = Observations(document)
-    assert (
-        cli.main(("model", action, digest, *options, "--json"), control_client=client)
-        == 0
-    )
-    assert client.calls == [("GET", f"/api/model/{digest}{suffix}")]
-    capsys.readouterr()
