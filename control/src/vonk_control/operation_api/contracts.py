@@ -10,7 +10,7 @@ from types import UnionType
 from typing import Annotated, Literal, Protocol
 
 from pydantic import Field, model_serializer
-from vonk_agent_protocol import OperationProgress, UnknownOutcomeError
+from vonk_agent_protocol import OperationProgress, UnknownOutcomeError, WaitReason
 from vonk_agent_protocol.http_failure import HttpTransient
 
 from ..auth import CursorCodec
@@ -163,11 +163,20 @@ class JobOperationResponse(StrictModel):
     evidence_download: OperationEvidenceDownload | None = None
     recovery: OperationRecovery | None = None
     blockers: list[OperationBlocker] | None = Field(default=None, max_length=16)
+    wait_reason: WaitReason | None = None
+    next_attempt_at: str | None = Field(default=None, max_length=64)
 
     @model_serializer(mode="wrap")
     def _serialize_without_unset_evidence(self, handler):
         document = handler(self)
-        for key in ("failure", "evidence_download", "recovery", "blockers"):
+        for key in (
+            "failure",
+            "evidence_download",
+            "recovery",
+            "blockers",
+            "wait_reason",
+            "next_attempt_at",
+        ):
             if document.get(key) is None:
                 document.pop(key, None)
         return document
@@ -209,7 +218,8 @@ class OperationDetailResponse(StrictModel):
     status_reason: str | None = Field(default=None, max_length=1024)
     #: What a queued or blocked operation is waiting for, as of its latest check.
     blockers: list[OperationBlocker] = Field(default_factory=list, max_length=16)
-    #: When the Controller will check again, for an operation that will retry.
+    wait_reason: WaitReason | None = None
+    #: Next check due; agent work is reconsidered on its next authenticated poll.
     next_attempt_at: str | None = Field(default=None, max_length=64)
 
     @model_serializer(mode="wrap")
@@ -225,6 +235,7 @@ class OperationDetailResponse(StrictModel):
             "owner",
             "status_reason",
             "next_attempt_at",
+            "wait_reason",
         ):
             if document.get(key) is None:
                 document.pop(key, None)

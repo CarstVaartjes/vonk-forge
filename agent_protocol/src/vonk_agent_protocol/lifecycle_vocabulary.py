@@ -590,6 +590,8 @@ class WaitReason(WireEnum):
     text of a report is for people; the Controller decides on this code.
     """
 
+    #: A queued order awaits its Spark's current operation.
+    SPARK_BUSY = "queue.spark_busy"
     OPERATION_NOT_ENABLED = "operation-not-enabled"
     UPGRADE_AWAITING_IDENTITY = "agent-upgrade-awaiting-identity"
     AGENT_RESTART_INTERRUPTED = "agent-restart-interrupted"

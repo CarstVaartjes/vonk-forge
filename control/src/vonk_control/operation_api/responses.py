@@ -115,6 +115,8 @@ def _job_operation_response(
             uncertain=_result_uncertain(item),
         ),
         blockers=item.blockers or None,
+        wait_reason=item.wait_reason,
+        next_attempt_at=item.next_attempt_at,
     )
 
 
@@ -363,6 +365,7 @@ def operation_detail_response(
         owner=item.owner,
         blockers=item.blockers or [],
         next_attempt_at=item.next_attempt_at,
+        wait_reason=item.wait_reason,
     )
 
 
