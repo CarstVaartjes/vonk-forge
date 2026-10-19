@@ -11,6 +11,7 @@ from vonk_agent_protocol import LifecycleState, StorageDemandCode, WaitReason
 from vonk_agent_protocol.inventory import StoreRetentionRequest
 from vonk_forge_contracts import document_sha256, read_model
 
+from .agent_operation_facts import aware
 from .fleet_model_removal_contract import (
     FLEET_REMOVAL_DEADLINE,
     STORE_RETENTION_MAX_AGE,
@@ -22,6 +23,7 @@ from .logging import log_event
 from .model_cache.persistence import _operation_removal
 from .model_cache_contract import CacheManifest, CacheOperationKind
 from .models import (
+    ArtifactLifecycleGate,
     CatalogDocumentRevision,
     FleetProfileApplication,
     ModelCacheOperation,
@@ -150,6 +152,18 @@ def _store_retention_request(
                     item.object.sha256
                     for item in target.objects
                     if item.disposition == FleetRemovalDisposition.REMOVE
+                    and (
+                        gate := session.get(
+                            ArtifactLifecycleGate, ("model-object", item.object.sha256)
+                        )
+                    )
+                    is not None
+                    and gate.removal_owner_kind == "model-cache-operation"
+                    and gate.removal_owner_id == operation.id
+                    and gate.removal_fence == payload.removal_fence
+                    and gate.removal_authority_expires_at is not None
+                    and aware(gate.removal_authority_expires_at)
+                    == payload.fleet.deadline_at
                 )
     return StoreRetentionRequest(
         remove_model_objects=sorted(remove - objects),

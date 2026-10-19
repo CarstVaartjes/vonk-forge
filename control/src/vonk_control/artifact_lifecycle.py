@@ -417,6 +417,8 @@ def reserve_removal_owners(
         row.removal_owner_kind = owner_kind
         row.removal_owner_id = owner_id
         row.removal_fence = fence
+        if not same_owner:
+            row.removal_authority_expires_at = None
         row.updated_at = now
 
 
@@ -663,25 +665,23 @@ def release_dead_removal_nowait(
         )
         if owner.state not in terminal:
             return False
-        if (
-            isinstance(owner, ModelCacheOperation)
-            and owner.state != LifecycleState.SUCCEEDED
-        ):
-            from .fleet_model_removal_contract import STORE_RETENTION_MAX_AGE
-            from .model_cache_contract import ModelCacheRemovalPayload
-            from .strict_json import read_stored_model
+    # This bound belongs to the gate, not the potentially damaged/deleted
+    # operation JSON. NAS-only gates have no outstanding remote authority.
+    expires_at = row.removal_authority_expires_at
+    if expires_at is not None:
+        from .fleet_model_removal_contract import STORE_RETENTION_MAX_AGE
 
-            payload = read_stored_model(
-                ModelCacheRemovalPayload, owner.payload, from_json=True
-            )
-            if payload.fleet is not None:
-                ended_at = owner.completed_at or owner.updated_at
-                ended_at = ended_at if ended_at.tzinfo else ended_at.replace(tzinfo=UTC)
-                if now < ended_at + STORE_RETENTION_MAX_AGE:
-                    return False
+        expires_at = expires_at if expires_at.tzinfo else expires_at.replace(tzinfo=UTC)
+        if isinstance(owner, ModelCacheOperation):
+            ended_at = owner.completed_at or owner.updated_at
+            ended_at = ended_at if ended_at.tzinfo else ended_at.replace(tzinfo=UTC)
+            expires_at = min(expires_at, ended_at + STORE_RETENTION_MAX_AGE)
+        if now < expires_at:
+            return False
     row.removal_owner_kind = None
     row.removal_owner_id = None
     row.removal_fence = None
+    row.removal_authority_expires_at = None
     row.updated_at = now
     return True
 
@@ -709,6 +709,7 @@ def clear_removal(
         row.removal_owner_kind = None
         row.removal_owner_id = None
         row.removal_fence = None
+        row.removal_authority_expires_at = None
         row.updated_at = now
 
 

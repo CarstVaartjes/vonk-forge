@@ -39,7 +39,12 @@ from ..model_cache_contract import (
     ModelCacheRetry,
 )
 from ..model_cache_progress import cache_progress, progress_document
-from ..models import ModelCacheOperation, ModelCacheSet, ModelCacheSetArtifact
+from ..models import (
+    ArtifactLifecycleGate,
+    ModelCacheOperation,
+    ModelCacheSet,
+    ModelCacheSetArtifact,
+)
 from ..operation_contract import AvailabilityRecoveryAction
 from ..strict_json import serialize_json_value
 from .constants import SCHEMA_VERSION, SOURCE_POLICY
@@ -237,6 +242,13 @@ class RemovalAcceptanceMixin:
                         fence=fence,
                         now=now,
                     )
+                if fleet is not None:
+                    for digest in sorted(fleet_objects):
+                        gate = session.get(
+                            ArtifactLifecycleGate, ("model-object", digest)
+                        )
+                        assert gate is not None  # reserved in this transaction
+                        gate.removal_authority_expires_at = fleet.deadline_at
                 locked_scope = cache._model_removal_scope_for_sets(session, selected)
                 if locked_scope != scope:
                     raise ModelCacheConflictInvalid(

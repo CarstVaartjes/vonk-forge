@@ -53,6 +53,7 @@ from ..lifecycle.evidence import Residue
 from ..model_cache_contract import CacheManifest, CacheOperationKind
 from ..models import (
     AgentNode,
+    ArtifactLifecycleGate,
     CatalogDocumentRevision,
     InstallationNode,
     Job,
@@ -434,6 +435,23 @@ class FleetRemovalMixin:
                 return False
             accepted_at, actor, key = aware(row.created_at), row.actor, row.request_key
             checkpoint = payload.fleet.model_copy(deep=True)
+            owned = all(
+                (gate := session.get(ArtifactLifecycleGate, ("model-object", digest)))
+                is not None
+                and gate.removal_owner_kind == "model-cache-operation"
+                and gate.removal_owner_id == row.id
+                and gate.removal_fence == payload.removal_fence
+                and gate.removal_authority_expires_at is not None
+                and aware(gate.removal_authority_expires_at) == checkpoint.deadline_at
+                for digest in checkpoint.removal_objects
+            )
+        if not owned:
+            cache._defer_model_removal(
+                operation_id,
+                detail="Fleet removal lost its exact object authority; a fresh review is required.",
+                cause=Disposition.FAIL,
+            )
+            return False
         if now >= checkpoint.deadline_at:
             cache._defer_model_removal(
                 operation_id,

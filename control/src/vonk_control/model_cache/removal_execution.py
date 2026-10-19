@@ -145,6 +145,9 @@ class RemovalExecutionMixin:
             if isinstance(checkpoint, Residue):
                 # Damaged and not re-derivable: the row ends (kept for
                 # inspection) and unrelated removals carry on.
+                # The terminal writer uses its own short transaction. Release
+                # this read's FOR UPDATE first, or PostgreSQL skips our own row.
+                session.rollback()
                 cache._retire_removal(operation_id, checkpoint, now=now)
                 return False
             # One clock: the column (a legacy payload clock is adopted by the

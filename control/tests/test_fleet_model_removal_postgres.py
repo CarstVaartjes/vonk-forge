@@ -6,7 +6,12 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
-from vonk_agent_protocol import AgentOperation, InstallationState, LifecycleState
+from vonk_agent_protocol import (
+    AgentOperation,
+    InstallationState,
+    LifecycleState,
+    ModelCacheCode,
+)
 from vonk_agent_protocol.inventory import ModelStoreObject
 from vonk_agent_protocol.state_machines import NodeIdentityState
 from vonk_control.fleet_model_removal_contract import FleetRemovalDisposition
@@ -22,7 +27,9 @@ from vonk_control.models import (
     Job,
     RecipeInstallation,
 )
+from vonk_control.operation_contract import AvailabilityOperationFailure
 from vonk_control.spark_store_retention import store_retention_request
+from vonk_control.strict_json import read_stored_model
 
 from .test_catalog_revision_collection import NODE, Catalog
 from .test_model_cache import _artifact, _download
@@ -432,14 +439,16 @@ def test_profile_added_after_review_replans_without_fencing_or_deleting(
         cache.close()
 
 
-def test_expired_request_keeps_remote_authority_fenced_then_allows_fresh_request(
-    postgres_engine, tmp_path: Path
+@pytest.mark.usefixtures("damaged_json_rows")
+@pytest.mark.parametrize("damage", ["deadline", "payload", "owner", "gate"])
+def test_lost_owner_authority_expires_before_fresh_reference(
+    postgres_engine, tmp_path: Path, damage: str
 ) -> None:
     """Catches an everlasting wait or releasing deletion gates while an agent
     still has a fresh eviction authority from the failed owner.
     """
     from vonk_control.fleet_model_removal_contract import STORE_RETENTION_MAX_AGE
-    from vonk_control.models import ArtifactLifecycleGate
+    from vonk_control.models import ArtifactLifecycleGate, ModelCacheOperation
 
     Base.metadata.create_all(postgres_engine)
     world = Catalog(postgres_engine)
@@ -473,20 +482,78 @@ def test_expired_request_keeps_remote_authority_fenced_then_allows_fresh_request
             review_digest=review.review_digest,
         )
         assert receipt.fleet is not None
-        now[0] = receipt.fleet.deadline_at + timedelta(seconds=1)
+        with world.sessions() as session:
+            grant = store_retention_request(session, NODE, now[0])
+            assert grant is not None and grant.remove_model_objects == [path.name]
+        if damage == "deadline":
+            now[0] = receipt.fleet.deadline_at + timedelta(seconds=1)
+        else:
+            with world.sessions.begin() as session:
+                row = session.get(ModelCacheOperation, receipt.id)
+                assert row is not None
+                if damage == "payload":
+                    row.payload = {}
+                elif damage == "owner":
+                    session.delete(row)
+                else:
+                    gate = session.get(
+                        ArtifactLifecycleGate, ("model-object", path.name)
+                    )
+                    assert gate is not None
+                    gate.removal_fence = str(uuid4())
         cache.advance_removals()
-        ended = cache.get_operation(receipt.id)
-        assert ended.state == LifecycleState.FAILED
-        assert ended.failure is not None and path.exists()
+        if damage != "owner":
+            ended = cache.get_operation(receipt.id)
+            assert ended.state == LifecycleState.FAILED
+            assert ended.failure is not None
+            failure = read_stored_model(
+                AvailabilityOperationFailure, ended.failure, from_json=True
+            )
+            assert failure.code == (
+                ModelCacheCode.DOCUMENT_UNREADABLE
+                if damage == "payload"
+                else ModelCacheCode.REMOVAL_WAIT
+            )
+        assert path.exists()
+        with world.sessions() as session:
+            grant = store_retention_request(session, NODE, now[0])
+            assert grant is not None and grant.remove_model_objects == []
         cache.reconcile_removal_gates()
         with world.sessions() as session:
             gate = session.get(ArtifactLifecycleGate, ("model-object", path.name))
-            assert gate is not None and gate.removal_owner_id == receipt.id
-        now[0] += STORE_RETENTION_MAX_AGE + timedelta(seconds=1)
-        cache.reconcile_removal_gates()
+            assert gate is not None
+            assert (gate.removal_owner_id is None) == (damage == "deadline")
+        # A lost owner retains its committed maximum authority bound. A
+        # terminal owner can no longer renew a grant, so only its last TTL is
+        # needed. Neither missing JSON nor a missing row becomes a forever wait.
+        now[0] = (
+            receipt.fleet.deadline_at + timedelta(seconds=1)
+            if damage == "owner"
+            else now[0] + STORE_RETENTION_MAX_AGE + timedelta(seconds=1)
+        )
+        # The bounded inventory cursor may be past this held gate. Let it wrap
+        # through the normal next worker pass instead of targeting it manually.
+        for _ in range(2):
+            cache.reconcile_removal_gates()
         with world.sessions() as session:
             gate = session.get(ArtifactLifecycleGate, ("model-object", path.name))
-            assert gate is not None and gate.removal_owner_id is None
+            row = session.get(ModelCacheOperation, receipt.id)
+            assert gate is not None and gate.removal_owner_id is None, (
+                now[0],
+                None if row is None else (row.state, row.updated_at, row.completed_at),
+                None if gate is None else gate.removal_authority_expires_at,
+            )
+        # Reacquire the exact content reference, rather than proving only that
+        # unrelated work can proceed after the failed request.
+        from vonk_control.artifact_lifecycle import (
+            ArtifactIdentity,
+            require_reference_open,
+        )
+
+        with world.sessions.begin() as session:
+            require_reference_open(
+                session, [ArtifactIdentity("model-object", path.name)], now=now[0]
+            )
         submit_model_download(cache, tmp_path)
     finally:
         cache.close()

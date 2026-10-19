@@ -264,6 +264,10 @@ class ArtifactLifecycleGate(Base):
     removal_owner_kind: Mapped[str | None] = mapped_column(String(32))
     removal_owner_id: Mapped[str | None] = mapped_column(String(36))
     removal_fence: Mapped[str | None] = mapped_column(String(36))
+    # Maximum remote authority lifetime, retained even if its owner is lost.
+    removal_authority_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )

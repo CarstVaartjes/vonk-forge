@@ -264,10 +264,13 @@ Spark is never reported as cleaned. The durable operation shows its dependency
 and next retry. Its 24-hour deadline survives restart; expiration keeps its
 unfinished effects in the receipt and ends the request. After failure or
 supersession, object fences remain for at most the ten-minute lifetime of the
-last possible Spark verdict. A fresh request reviews
-current evidence. No SSH or sweep-state changes are involved.
+last possible Spark verdict, capped by the accepted deadline. The object gate
+retains that maximum authority deadline even if its operation row is lost;
+a lost owner cannot renew it. A fresh request reviews current evidence. No SSH
+or sweep-state changes are involved.
 
 Profile saves take the same object reference gates as removal. A save that
 conflicts with an accepted deletion waits for that owner rather than acquiring
 a reference to bytes being removed. The nullable model-object inventory column
-is reconciled by Controller startup; missing observations remain unknown.
+and the nullable remote-authority deadline on object gates are reconciled by
+Controller startup; missing observations remain unknown.

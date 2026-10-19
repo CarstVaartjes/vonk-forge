@@ -321,12 +321,18 @@ class RemovalReconcileMixin:
                     )
                 # Missing, wrong-kind, damaged or now-terminal owners cannot
                 # execute this exact identity after its lock was acquired.
-                release_dead_removal_nowait(
-                    session,
-                    identity,
-                    owner_kind="model-cache-operation",
-                    now=cache._clock(),
-                )
+                if gate.removal_authority_expires_at is None:
+                    gate.removal_owner_kind = None
+                    gate.removal_owner_id = None
+                    gate.removal_fence = None
+                    gate.updated_at = cache._clock()
+                else:
+                    release_dead_removal_nowait(
+                        session,
+                        identity,
+                        owner_kind="model-cache-operation",
+                        now=cache._clock(),
+                    )
 
     def _model_removal_owner_snapshot(
         self,
