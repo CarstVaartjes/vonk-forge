@@ -1328,11 +1328,15 @@ def test_postgres_retirement_wins_completed_rotation_and_reconciles_issued_seria
         )
 
     assert not renewer.is_alive() and not revoker.is_alive()
-    assert not revocation_errors
     assert len(renewal_results) == 1
     if crash_new_revocation:
-        assert isinstance(renewal_results[0], SystemExit)
+        # Either caller can discover and revoke the completed issuance. The
+        # injected crash belongs to that effect, not to a particular thread.
+        assert authority.crashed_serials == {"2"}
+        assert all(isinstance(error, SystemExit) for error in revocation_errors)
+        assert isinstance(renewal_results[0], SystemExit | EnrollmentDenied)
     else:
+        assert not revocation_errors
         assert isinstance(renewal_results[0], EnrollmentDenied)
     with sessions() as session:
         node = session.get(AgentNode, NODE_ID)
@@ -1344,16 +1348,18 @@ def test_postgres_retirement_wins_completed_rotation_and_reconciles_issued_seria
         assert issued is not None and issued.state == "revoked"
         assert issued.revoked_at is not None
         if crash_new_revocation:
-            # The denied certificate owns pending revocation evidence. A
-            # concurrent reconciler may already have released the rotation.
-            assert issued.ca_revoked_at is None
+            # A concurrent reconciler can already have recovered the crash.
+            # Otherwise the denied certificate retains its exact retry intent.
             assert issued.state == CertificateRecordState.REVOKED
-            if intent is not None:
+            if issued.ca_revoked_at is None and intent is not None:
                 assert intent.state == CertificateRotationState.REVOCATION_PENDING
+            if issued.ca_revoked_at is not None:
+                assert intent is None
         else:
             assert issued.ca_revoked_at is not None
             assert intent is None
-    assert authority.revocations == [source.serial, "2"]
+    if not crash_new_revocation:
+        assert authority.revocations == [source.serial, "2"]
 
     if crash_new_revocation:
         revoking.revoke_node(NODE_ID, "admin")
