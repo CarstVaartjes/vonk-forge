@@ -273,7 +273,7 @@ class Worker:
         # Housekeeping runs before all work, so one failing maintenance task
         # must not deny the heartbeat and every source their turn.  Each task
         # is contained and reported; the outer loop retries it next pass.
-        self._run_housekeeping("due-waits", self._due_waits)
+        self._run_housekeeping("due-waits", self._due_waits, minimum_interval=1)
         self._run_housekeeping("telemetry", self._housekeeping)
         self._run_housekeeping("artifact", self._artifact_housekeeping)
         sources: list[tuple[str, Callable[[], bool]]] = []
@@ -323,7 +323,13 @@ class Worker:
         self._run_housekeeping(LifecycleEventKind.HEARTBEAT, self._loop_heartbeat)
         return advanced
 
-    def _run_housekeeping(self, name: str, task: Callable[[], object] | None) -> None:
+    def _run_housekeeping(
+        self,
+        name: str,
+        task: Callable[[], object] | None,
+        *,
+        minimum_interval: float = 0,
+    ) -> None:
         if task is None:
             return
         key = f"housekeeping:{name}"
@@ -344,7 +350,10 @@ class Worker:
                 traceback=redact_text(traceback.format_exc()),
             )
         else:
-            self._retry_at.pop(key, None)
+            if minimum_interval:
+                self._retry_at[key] = now + minimum_interval
+            else:
+                self._retry_at.pop(key, None)
 
     def _run_model_cache(self) -> bool:
         # The model cache is consumed structurally, like the distribution
@@ -730,12 +739,6 @@ def assemble_production_worker(
             return unavailable(wait.owner_kind)
         return model_cache.redrive(str(key[0]))
 
-    def recipe(key: RowKey, wait: WaitEvidence) -> object:
-        identity = str(key[0])
-        progressed = lifecycle.reconcile_retired_operations(identity)
-        progressed = lifecycle.reconcile_pending_service_stops(identity) or progressed
-        return lifecycle.reconcile_cancelled_builds(identity) or progressed
-
     def cleanup(key: RowKey, wait: WaitEvidence) -> object:
         progressed = residues.tick(str(key[0]))
         return storage_collector.redrive_installation(str(key[0])) or progressed
@@ -765,7 +768,9 @@ def assemble_production_worker(
         WaitOwnerKind.PREBUILT_IMAGE: prebuilt,
         WaitOwnerKind.JOB: lambda key, wait: worker._run_generic(str(key[0])),
         WaitOwnerKind.MODEL_CACHE: cache,
-        WaitOwnerKind.RECIPE_OPERATION: recipe,
+        WaitOwnerKind.RECIPE_OPERATION: lambda key, wait: lifecycle.redrive(
+            str(key[0])
+        ),
         WaitOwnerKind.RECIPE_UPDATE_BATCH: images,
         WaitOwnerKind.RUN_SWITCH: lambda key, wait: run_switch_operations.redrive(
             str(key[0])

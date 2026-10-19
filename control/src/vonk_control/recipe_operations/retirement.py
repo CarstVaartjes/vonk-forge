@@ -56,6 +56,13 @@ _ENDED_RUN_STATES = frozenset({RunState.STOPPING, RunState.FAILED, RunState.LOST
 
 
 class RetirementMixin:
+    def redrive(self, job_id: str) -> bool:
+        """Recheck one persisted owner without reviving its terminal result."""
+        service = typing_cast("RecipeOperationService", self)
+        progressed = service.reconcile_retired_operations(job_id)
+        progressed = service.reconcile_pending_service_stops(job_id) or progressed
+        return service.reconcile_cancelled_builds(job_id) or progressed
+
     def reconcile_retired_operations(self, job_id: str | None = None) -> bool:
         """Resume retired owners through the ordinary exact cleanup path.
 
