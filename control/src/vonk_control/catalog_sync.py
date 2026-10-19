@@ -337,6 +337,14 @@ class ManagedRecipeCatalogSyncService:
                 .limit(1)
             )
             view = _view(row)
+            waiting = session.scalar(
+                newest.where(
+                    RecipeLibrarySyncRun.repository == self._repository,
+                    RecipeLibrarySyncRun.wait_evidence.is_not(None),
+                )
+            )
+            if waiting is not None:
+                view = replace(view, wait=read_wait(waiting))
             if (
                 failure is None
                 or failure.completed_at is None
@@ -363,7 +371,10 @@ class ManagedRecipeCatalogSyncService:
         with self._sessions() as session:
             run = session.scalar(
                 select(RecipeLibrarySyncRun)
-                .where(RecipeLibrarySyncRun.trigger == CatalogSyncTrigger.AUTOMATIC)
+                .where(
+                    RecipeLibrarySyncRun.repository == self._repository,
+                    RecipeLibrarySyncRun.wait_evidence.is_not(None),
+                )
                 .order_by(
                     RecipeLibrarySyncRun.created_at.desc(), RecipeLibrarySyncRun.id
                 )
@@ -376,23 +387,28 @@ class ManagedRecipeCatalogSyncService:
                 else 0.0
             )
 
-    def record_automatic_wait(self, delay_seconds: int, *, failed: bool) -> None:
+    def record_automatic_wait(
+        self, delay_seconds: int, *, failed: bool, observed_id: str | None = None
+    ) -> None:
         with self._sessions.begin() as session:
-            run = session.scalar(
-                select(RecipeLibrarySyncRun)
-                .where(RecipeLibrarySyncRun.trigger == CatalogSyncTrigger.AUTOMATIC)
-                .order_by(
-                    RecipeLibrarySyncRun.created_at.desc(), RecipeLibrarySyncRun.id
+            run = (
+                session.get(RecipeLibrarySyncRun, observed_id)
+                if observed_id is not None
+                else session.scalar(
+                    select(RecipeLibrarySyncRun)
+                    .where(RecipeLibrarySyncRun.repository == self._repository)
+                    .order_by(
+                        RecipeLibrarySyncRun.created_at.desc(), RecipeLibrarySyncRun.id
+                    )
+                    .limit(1)
                 )
-                .limit(1)
             )
             if run is not None:
                 now = self._clock()
                 previous = tuple(
                     session.scalars(
                         select(RecipeLibrarySyncRun).where(
-                            RecipeLibrarySyncRun.trigger
-                            == CatalogSyncTrigger.AUTOMATIC,
+                            RecipeLibrarySyncRun.repository == self._repository,
                             RecipeLibrarySyncRun.id != run.id,
                             RecipeLibrarySyncRun.wait_evidence.is_not(None),
                         )
@@ -957,9 +973,13 @@ async def run_automatic_sync(
                     )
             except Exception as error:  # noqa: BLE001 - independent recovery path
                 errors.append(error)
+        observed_id = None
+        catalog_failed = False
         try:
             observation = await asyncio.to_thread(lambda: service.automatic())
+            observed_id = observation.id
             if observation.state != CatalogSyncState.CURRENT:
+                catalog_failed = True
                 errors.append(
                     CatalogSyncUnsettled(
                         observation.problems[0].code
@@ -971,8 +991,10 @@ async def run_automatic_sync(
                     )
                 )
         except (CatalogSyncError, RecipeLibraryError, OSError) as error:
+            catalog_failed = True
             errors.append(error)
         except Exception as error:  # noqa: BLE001 - the loop must never die
+            catalog_failed = True
             errors.append(error)
         if errors:
             failures += 1
@@ -981,7 +1003,10 @@ async def run_automatic_sync(
         delay = catalog_sync_retry_delay(failures, interval_seconds)
         try:
             await asyncio.to_thread(
-                service.record_automatic_wait, delay, failed=bool(errors)
+                service.record_automatic_wait,
+                delay,
+                failed=catalog_failed,
+                observed_id=observed_id,
             )
         except SQLAlchemyError as error:
             _log_automatic_failure(error, delay)

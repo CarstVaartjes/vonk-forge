@@ -355,6 +355,7 @@ class AttemptResidueReconciler:
                 # The lifecycle re-derives "never reached a node" under the
                 # installation row lock, so a concurrent install refuses this.
                 self._abandon(installation_id)
+                self._cleanup_settled(installation_id)
             except UnknownOutcomeError as error:
                 self._defer(installation_id, error)
                 continue
@@ -496,11 +497,21 @@ class AttemptResidueReconciler:
             ) as error:  # a conflict (RecipeOperationConflict) is a RuntimeError
                 self._log("incomplete-installation", installation_id, "refused", error)
                 continue
+            self._cleanup_settled(installation_id)
             self._log(
                 "incomplete-installation", installation_id, "released", reason=why
             )
             queued = True
         return queued
+
+    def _cleanup_settled(self, installation_id: str) -> None:
+        with self._sessions.begin() as session:
+            installation = session.get(RecipeInstallation, installation_id)
+            if (
+                installation is not None
+                and installation.state == InstallationState.UNINSTALLED
+            ):
+                schedule_wait(installation, None)
 
     def _cleanup_due(self, installation_id: str) -> bool:
         with self._sessions() as session:

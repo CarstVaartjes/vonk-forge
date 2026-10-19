@@ -67,7 +67,7 @@ def test_the_automatic_sync_is_asked_again_after_every_unsettled_attempt(
         def automatic_wait_delay(self):
             return 0.0
 
-        def record_automatic_wait(self, delay_seconds, *, failed):
+        def record_automatic_wait(self, delay_seconds, *, failed, observed_id=None):
             pass
 
         def automatic(self):
@@ -136,7 +136,7 @@ def test_partial_receipts_back_off_then_success_resets_the_retry_episode(
         def automatic_wait_delay(self):
             return 0.0
 
-        def record_automatic_wait(self, delay_seconds, *, failed):
+        def record_automatic_wait(self, delay_seconds, *, failed, observed_id=None):
             pass
 
         def automatic(self):
@@ -202,7 +202,7 @@ def test_periodic_reconciliation_restarts_ended_default_key_observations(tmp_pat
         def automatic_wait_delay(self):
             return 0.0
 
-        def record_automatic_wait(self, delay_seconds, *, failed):
+        def record_automatic_wait(self, delay_seconds, *, failed, observed_id=None):
             pass
 
         def automatic(self):
@@ -270,7 +270,7 @@ def test_periodic_recovery_paths_do_not_suppress_each_other(
         def automatic_wait_delay(self):
             return 0.0
 
-        def record_automatic_wait(self, delay_seconds, *, failed):
+        def record_automatic_wait(self, delay_seconds, *, failed, observed_id=None):
             pass
 
         def automatic(self):
@@ -349,7 +349,7 @@ def test_gateway_capability_recovers_without_blocking_fresh_catalog_requests(
         def automatic_wait_delay(self):
             return 0.0
 
-        def record_automatic_wait(self, delay_seconds, *, failed):
+        def record_automatic_wait(self, delay_seconds, *, failed, observed_id=None):
             pass
 
         def automatic(self):

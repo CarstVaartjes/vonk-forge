@@ -1325,12 +1325,21 @@ def test_unknown_removal_is_deferred_and_retried_without_blocking_other_items(
     result = collector.collect()
     assert lifecycle.removed == [second]
     assert _kept(result, "deferred") == 1
+    from vonk_control.persisted_waits import read_wait
+
+    with world.sessions() as session:
+        retained = session.get(RecipeInstallation, first)
+        assert retained is not None and read_wait(retained) is not None
+    collector = _collector(world, lifecycle, now=world.now)
     _report_disk(world.sessions, GIB + 2, at=world.now)
     collector.collect()
     assert calls.count(first) == 1, "unknown outcome retried without backoff"
     world.now += collector._scan_interval
     collector.collect()
     assert calls.count(first) == 2 and first in lifecycle.removed
+    with world.sessions() as session:
+        settled = session.get(RecipeInstallation, first)
+        assert settled is not None and read_wait(settled) is None
 
 
 def test_a_sweep_that_runs_out_of_budget_continues_on_the_next_pass(

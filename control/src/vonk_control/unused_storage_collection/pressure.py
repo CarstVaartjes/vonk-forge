@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import func, select
 from sqlalchemy.exc import SQLAlchemyError
-from vonk_agent_protocol import UnknownOutcomeError, WaitReason
+from vonk_agent_protocol import InstallationState, UnknownOutcomeError, WaitReason
 
 from ..artifact_lifecycle import (
     ArtifactIdentity,
@@ -376,6 +376,26 @@ def _remove(
                 detail=str(error)[:256],
             )
             break
+        # The removal returned, but an installation can still be uninstalling.
+        # Clear its retry only after the normal owner confirms settlement.
+        with self._sessions.begin() as session:
+            if item.kind == "installation":
+                completed_owner = session.get(RecipeInstallation, member)
+                settled = (
+                    completed_owner is not None
+                    and completed_owner.state == InstallationState.UNINSTALLED
+                )
+            else:
+                completed_owner = session.get(
+                    ArtifactLifecycleGate, (artifact_kind, member)
+                )
+                settled = True
+            if (
+                completed_owner is not None
+                and settled
+                and wait_due(completed_owner) == retry_at
+            ):
+                schedule_wait(completed_owner, None)
         attempted[key] = True
         done += 1
         outcome.removed["model" if item.kind == "model-set" else item.kind] += 1
