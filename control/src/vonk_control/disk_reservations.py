@@ -16,7 +16,13 @@ from vonk_agent_protocol import (
 
 from .content_identity import same_image
 from .inventory_repository import MAX_INVENTORY_FUTURE_SKEW
-from .models import InstallationNode, RecipeInstallation, ResourceReservation
+from .models import (
+    InstallationNode,
+    RecipeBuild,
+    RecipeInstallation,
+    ResourceReservation,
+)
+from .owner_liveness import OwnerKind, build_holds_disk
 from .profile_capacity import reservation_visible
 from .recipe_execution_contract import (
     RecipeExecutionContractError,
@@ -122,6 +128,7 @@ def outstanding_disk_charges(
     excluded_run_ids: Collection[str] = (),
     excluded_profile_application_ids: Collection[str] = (),
     excluded_installation_ids: Collection[str] = (),
+    excluded_build_ids: Collection[str] = (),
 ) -> tuple[DiskCharge, ...]:
     """Keep uncertain commitments; count completed download bytes only once.
 
@@ -165,6 +172,12 @@ def outstanding_disk_charges(
     )
     charges: list[DiskCharge] = []
     for reservation, installation, node in rows:
+        if reservation.owner_kind == OwnerKind.RECIPE_BUILD:
+            if reservation.owner_id in excluded_build_ids:
+                continue
+            build = session.get(RecipeBuild, reservation.owner_id)
+            if build is not None and not build_holds_disk(session, build):
+                continue
         materialized = 0
         if (
             inventory_observed_at is not None

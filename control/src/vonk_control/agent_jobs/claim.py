@@ -14,6 +14,7 @@ from vonk_agent_protocol import (
     AgentOperation,
     Disposition,
     LifecycleState,
+    RecipeBuildRequest,
     WaitReason,
 )
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
@@ -36,6 +37,7 @@ from ..models import AgentNode, AgentOperationAttempt, Job
 from ..models import AgentOperation as StoredOperation
 from ..operation_progress import stored_progress
 from ..own_cleanup import CLEANUP_KINDS
+from .claim_authority import recipe_build_disk_wait
 from .contracts import _MUTATING_OPERATIONS, CLAIM_LEASE_SECONDS
 from .endings import end_unobserved_order
 from .evidence import (
@@ -530,6 +532,23 @@ def _claim_once(
                 blocking_operation=installing.id,
             )
             return None
+        if (
+            operation.kind == AgentOperation.RECIPE_BUILD
+            and operation.current_attempt > 0
+            and isinstance(payload_document, RecipeBuildRequest)
+        ):
+            disk_wait = recipe_build_disk_wait(
+                self, session, node_id, payload_document, now
+            )
+            if disk_wait is not None:
+                self._record_claim_refusal(
+                    session,
+                    operation=operation,
+                    job_id=operation.parent_job_id,
+                    check=disk_wait.value,
+                    kind=operation.kind,
+                )
+                return None
         if operation.kind == AgentOperation.AGENT_UPGRADE.value:
             import secrets
 

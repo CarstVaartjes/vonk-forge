@@ -15,8 +15,8 @@ import uuid
 
 from sqlalchemy import select
 from vonk_agent_protocol import ReservationState
-from vonk_control.disk_reservations import outstanding_disk_reservation_bytes
 from vonk_control.attempt_residues import AttemptResidueReconciler
+from vonk_control.disk_reservations import outstanding_disk_reservation_bytes
 from vonk_control.memory_reservations import memory_reservations
 from vonk_control.models import Job, ResourceReservation
 from vonk_control.owner_liveness import OwnerKind

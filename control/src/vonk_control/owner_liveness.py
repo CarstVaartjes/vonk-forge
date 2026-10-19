@@ -326,6 +326,38 @@ def build_may_run(session: Session, build: RecipeBuild) -> bool:
     return False
 
 
+def build_holds_disk(session: Session, build: RecipeBuild) -> bool:
+    """A stopped or parked build cannot consume its future working-space envelope.
+
+    Retained files already reduce observed free disk. An open parent is not
+    evidence of another write: inspect its own Spark orders, including orders
+    whose parent ended. BACKOFF is between attempts; dispatch must admit the
+    full envelope again before starting the next attempt. Uncertain orders
+    still count, as do initial queued orders and live cleanup orders.
+    """
+    orders = tuple(
+        session.scalars(
+            select(AgentOperation)
+            .join(Job, Job.id == AgentOperation.parent_job_id)
+            .where(
+                Job.payload["owner_kind"].as_string() == OwnerKind.RECIPE_BUILD,
+                Job.payload["owner_id"].as_string() == build.id,
+            )
+        )
+    )
+    if orders:
+        return any(
+            operation.state in agent_operation_states.LIVE
+            and operation.state != LifecycleState.BACKOFF
+            for operation in orders
+        )
+    # Planning and initial enqueue share a transaction. Keep its promise until
+    # its first order is visible; a failed build has no such future writer.
+    return build.state in UNFINISHED_BUILD_STATES and referencing_active_job(
+        session, OwnerKind.RECIPE_BUILD, build.id
+    )
+
+
 def _agent_attempt(session: Session, ref: OwnerRef, now: datetime | None) -> Owner:
     from .agent_operation_facts import attempt_holds_order
 

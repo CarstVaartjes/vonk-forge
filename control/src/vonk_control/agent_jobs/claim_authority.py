@@ -13,6 +13,8 @@ from vonk_agent_protocol import (
     AgentResult,
     FailureCode,
     LifecycleState,
+    RecipeBuildCode,
+    RecipeBuildRequest,
     WaitReason,
     canonical_message,
 )
@@ -20,6 +22,8 @@ from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.contracts import AgentFailureResult
 
 from .. import agent_operation_states, job_states
+from ..disk_reservations import outstanding_disk_charges
+from ..inventory_repository import InventoryRepository
 from ..lifecycle import Outcome, Reported
 from ..lifecycle.agent_operation import AgentOperationAdapter, set_parent_state
 from ..lifecycle.evidence import BookkeepingReason, retire_as_unknown
@@ -28,10 +32,12 @@ from ..models import AgentOperation as StoredOperation
 from ..offline_stops import is_deferred_stop
 from ..own_cleanup import CLEANUP_KINDS
 from ..recipe_builds import BUILD_ARTIFACT_FORMAT
+from ..recipe_builds.common import _build_disk_envelope, _build_disk_reserve
 from ..recipe_execution_contract import (
     RecipeExecutionContractError,
     parse_stored_build_policy,
 )
+from ..spark_disk import spark_free_bytes
 from .contracts import _TERMINAL_PARENT_STATES, _WORKLOAD_INTENT_OPERATIONS
 from .endings import end_unobserved_order
 from .evidence import _failure_result
@@ -40,6 +46,49 @@ from .stored import column_field, column_is_document, column_value
 
 if TYPE_CHECKING:
     from .service import AgentJobService
+
+
+def recipe_build_disk_wait(
+    service: AgentJobService,
+    session: Session,
+    node_id: str,
+    payload: RecipeBuildRequest,
+    now: datetime,
+) -> RecipeBuildCode | None:
+    """Re-reserve a parked build's disk under the dispatcher's node lock.
+
+    Read-time accounting drops its envelope between attempts. A load may have
+    used that capacity, so a retry must fit again before its running state
+    restores the full charge in the same transaction.
+    """
+    try:
+        snapshot = InventoryRepository(service._sessions).latest(
+            node_id,
+            now=now,
+            maximum_age=300,
+            _session=session,
+        )
+    except KeyError:
+        return RecipeBuildCode.INVENTORY_MISSING
+    if snapshot.stale:
+        return RecipeBuildCode.INVENTORY_STALE
+    required = _build_disk_envelope(
+        base_image_bytes=payload.base_image_storage_bytes,
+        source_bytes=payload.source_bundle_bytes,
+        temporary_bytes=payload.limits.temporary_bytes,
+        output_bytes=payload.limits.output_bytes,
+    ) + _build_disk_reserve(snapshot.disk_total_bytes)
+    reserved = sum(
+        charge.amount_bytes
+        for charge in outstanding_disk_charges(
+            session,
+            node_id,
+            inventory_observed_at=snapshot.observed_at,
+            excluded_build_ids=(str(payload.build_id),),
+        )
+    )
+    free = spark_free_bytes(snapshot.disk_free_bytes, snapshot.unused_model_bytes)
+    return RecipeBuildCode.INSUFFICIENT_DISK if free - reserved < required else None
 
 
 def _reconcile_agent_upgrade(
