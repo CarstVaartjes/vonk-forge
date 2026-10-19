@@ -86,7 +86,8 @@ from tests.acceptance.runtime import (
 )
 from tests.acceptance.systemd_sandbox import SandboxError, verify_effective_sandbox
 from tests.acceptance.test_fresh_nas_install import (
-    DEFAULT_SERVICES,
+    LOCAL_SERVICES,
+    TAILSCALE_SERVICES,
     command_environment,
     generate_bundle,
     host_command_environment,
@@ -194,21 +195,9 @@ COMPOSE_IMAGE_ROLES = {
 ED25519_PKCS8_V2_PREFIX = bytes.fromhex("3051020101300506032b657004220420")
 ED25519_PKCS8_V2_PUBLIC_PREFIX = bytes.fromhex("812100")
 ED25519_PKCS8_V1_PREFIX = bytes.fromhex("302e020100")
-TAILSCALE_CONTROLLER_SERVICES = {
-    "tailscale-configurator",
-    "tailscale-gateway",
-}
-LOCAL_CONTROLLER_SERVICES = {
-    "caddy",
-    "control-api",
-    "control-worker",
-    "litellm",
-    "postgres",
-    "prometheus",
-    "registry",
-}
-if LOCAL_CONTROLLER_SERVICES | TAILSCALE_CONTROLLER_SERVICES != DEFAULT_SERVICES:
-    raise RuntimeError("Spark Controller service allowlist needs review")
+# The shared NAS acceptance contract owns the installed service topology.
+TAILSCALE_CONTROLLER_SERVICES = TAILSCALE_SERVICES
+LOCAL_CONTROLLER_SERVICES = LOCAL_SERVICES
 LOCAL_CONTROL_SERVICE = "svc:vonk-forge-spark-local"
 LOCAL_HERMES_API_SERVICE = "svc:hermes-api-spark-local"
 LOCAL_HERMES_DASHBOARD_SERVICE = "svc:hermes-dashboard-spark-local"

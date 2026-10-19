@@ -1036,10 +1036,6 @@ def test_parallel_spark_controller_start_cannot_create_tailscale_services() -> N
     run = lifecycle.SparkLifecycle.__new__(lifecycle.SparkLifecycle)
     run.project = "vonk-spark-42-arm64"
 
-    assert lifecycle.LOCAL_CONTROLLER_SERVICES == lifecycle.DEFAULT_SERVICES - {
-        "tailscale-configurator",
-        "tailscale-gateway",
-    }
     command = run._local_controller_up_command()
     assert command == [
         "docker",
