@@ -305,13 +305,15 @@ def test_owner_handler_runs_after_the_selection_connection_is_released(postgres_
     "superseded, missing_receipt", ((False, False), (True, False), (False, True))
 )
 def test_due_recipe_parent_uses_normal_phase_advancement_after_restart(
-    tmp_path, postgres_engine, monkeypatch, superseded, missing_receipt
+    tmp_path, postgres_engine, monkeypatch, request, superseded, missing_receipt
 ):
     """Catches registering a parent callback that only polls its cleanup paths."""
     from sqlalchemy import select
     from vonk_control.agent_jobs import AgentJobService
     from vonk_control.models import AgentOperation
-    from vonk_control.recipe_operations import RecipeOperationService
+    from vonk_control.presence import ManagementAddressPolicy
+    from vonk_control.route_runtime import AtomicRouteBundlePublisher
+    from vonk_control.worker import assemble_production_worker
 
     from .test_recipe_operations import (
         NOW as RECIPE_NOW,
@@ -394,25 +396,24 @@ def test_due_recipe_parent_uses_normal_phase_advancement_after_restart(
                 now=now,
             )
     queue = AgentJobService(sessions, clock=lambda: now)
-    reconstructed = RecipeOperationService(
-        sessions,
-        install_admission=service._install_admission,
-        run_admission=service._run_admission,
+    worker = assemble_production_worker(
+        jobs=JobService(sessions, clock=lambda: now),
+        sessions=sessions,
         agent_jobs=queue,
+        publisher=AtomicRouteBundlePublisher(tmp_path / "routes"),
+        management_policy=ManagementAddressPolicy.parse("10.0.0.0/24"),
         clock=lambda: now,
+        worker_id="phase-backstop",
+        artifact_job_root=tmp_path / "artifacts",
+        artifact_job_storage_max_bytes=1024**3,
+        artifact_job_retention_seconds=86400,
+        artifact_job_reconcile_interval_seconds=3600,
+        artifact_job_reconcile_batch_limit=16,
     )
-    backstop = DueWaitBackstop(
-        sessions,
-        [
-            WaitSource(
-                Job,
-                frozenset({WaitOwnerKind.RECIPE_OPERATION}),
-                lambda key, wait: reconstructed.redrive_parent(str(key[0]), queue),
-            )
-        ],
-        clock=lambda: now,
-    )
-    backstop.tick()
+    request.addfinalizer(worker.close)
+    backstop = worker._due_waits
+    assert backstop is not None
+    backstop()
     if missing_receipt:
         from vonk_agent_protocol import WaitReason
         from vonk_control.persisted_waits import read_wait
@@ -431,7 +432,7 @@ def test_due_recipe_parent_uses_normal_phase_advancement_after_restart(
             ) == {child.id for child in children}
             parent.result = saved_result
             now = wait.next_check
-        backstop.tick()
+        backstop()
     with sessions() as session:
         current = set(
             session.scalars(
