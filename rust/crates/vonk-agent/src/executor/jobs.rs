@@ -593,11 +593,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                 }
                 return job.unknown_after_exit(
                     &receipt,
-                    if uploaded.is_some() {
-                        FailureStage::JobOutputDelivery
-                    } else {
-                        FailureStage::JobState
-                    },
+                    FailureStage::JobOutputDelivery,
                     "job output undelivered; retained files await re-delivery",
                     cause,
                 );
