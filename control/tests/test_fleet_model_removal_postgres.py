@@ -621,3 +621,70 @@ def test_changed_persisted_scope_never_authorizes_remote_eviction(
         submit_model_download(cache, tmp_path)
     finally:
         cache.close()
+
+
+@pytest.mark.parametrize("spark_copy", [False, True])
+def test_profile_draft_cannot_cross_accepted_fleet_object_fence(
+    postgres_engine, tmp_path: Path, spark_copy: bool
+) -> None:
+    """Catches narrowing the draft guard to remote objects only: a fleet
+    removal also owns NAS bytes before a Spark has copied them.
+    """
+    import hashlib
+
+    from vonk_control.fleet_profile_contract import (
+        FleetProfileAssignmentInput,
+        FleetProfileInput,
+    )
+    from vonk_control.fleet_profiles.contracts import FleetProfileAdmissionEffectBusy
+
+    from .lifecycle_simulation.reach_world import (
+        MODEL_SELECTOR,
+        WEIGHTS,
+        build_reach_world,
+    )
+    from .lifecycle_simulation.world import SOLO
+
+    world = build_reach_world(tmp_path, postgres_engine)
+    cache = world.reach.cache
+    try:
+        downloaded = cache.download_model_selector(
+            MODEL_SELECTOR, actor="admin", request_key=str(uuid4())
+        )
+        cache.run_pending()
+        assert cache.get_operation(downloaded.id).state == LifecycleState.SUCCEEDED
+        now = cache._clock() + timedelta(seconds=1)
+        for node in world.nodes:
+            inventory(
+                world.sessions,
+                node,
+                now,
+                [
+                    ModelStoreObject(
+                        sha256=hashlib.sha256(WEIGHTS).hexdigest(), bytes=len(WEIGHTS)
+                    )
+                ]
+                if spark_copy
+                else [],
+            )
+        review = cache.review_fleet_model_removal(MODEL_SELECTOR)
+        cache.remove_fleet_model_selector(
+            MODEL_SELECTOR,
+            actor="admin",
+            request_key=str(uuid4()),
+            review_digest=review.review_digest,
+        )
+        with pytest.raises(FleetProfileAdmissionEffectBusy):
+            world.controller.profiles.create(
+                FleetProfileInput(
+                    name="New owner profile",
+                    assignments=[
+                        FleetProfileAssignmentInput.model_validate(
+                            world.assignment(SOLO, world.nodes[:1])
+                        )
+                    ],
+                ),
+                actor="admin",
+            )
+    finally:
+        world.close()

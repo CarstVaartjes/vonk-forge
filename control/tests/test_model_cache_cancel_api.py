@@ -46,6 +46,7 @@ def _client(service, role="administrator"):
 
 def test_remove_is_the_current_model_eviction_boundary():
     operation = Mock(spec=CacheOperationView)
+    operation.fleet = None
     operation.id = OPERATION_ID
     operation.request_key = REQUEST_KEY
     operation.model_content_sha256 = MODEL_CONTENT_SHA256
@@ -135,6 +136,7 @@ def test_remove_review_is_read_only_and_requires_operator_role():
 
 def test_model_operation_observation_is_readable_by_any_authenticated_actor():
     operation = Mock(spec=CacheOperationView)
+    operation.fleet = None
     operation.id = OPERATION_ID
     operation.request_key = REQUEST_KEY
     operation.model_content_sha256 = None
@@ -180,6 +182,7 @@ def test_model_operation_observation_is_readable_by_any_authenticated_actor():
 
 def test_cancel_route_requires_operator_and_returns_durable_intent():
     operation = Mock(spec=CacheOperationView)
+    operation.fleet = None
     operation.id = OPERATION_ID
     operation.request_key = REQUEST_KEY
     operation.model_content_sha256 = None
