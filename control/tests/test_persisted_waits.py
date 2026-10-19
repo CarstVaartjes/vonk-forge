@@ -13,6 +13,8 @@ from vonk_agent_protocol import LifecycleState, WaitReason
 from vonk_control.lifecycle.job import JobAdapter
 from vonk_control.models import Base, Job
 
+from tests.signed_recipe_release import signed_recipe_releases
+
 NOW = datetime(2026, 10, 19, tzinfo=UTC)
 
 
@@ -310,6 +312,7 @@ def test_corrupt_wait_does_not_erase_intent_or_hide_another_owner(
         assert projected is not None and projected.next_check == due
 
 
+@pytest.mark.usefixtures(signed_recipe_releases.__name__)
 def test_catalog_wait_survives_reconstruction_and_reuses_exact_observation(
     tmp_path, postgres_engine
 ) -> None:

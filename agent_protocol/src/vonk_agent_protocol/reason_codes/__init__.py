@@ -41,8 +41,10 @@ from .helpers import HelperOperationCode as HelperOperationCode
 from .images import ImageStoreCode as ImageStoreCode
 from .images import PrebuiltImageCode as PrebuiltImageCode
 from .model_cache import CacheReferenceReason as CacheReferenceReason
+from .model_cache import ModelAccessReason as ModelAccessReason
 from .model_cache import ModelCacheBlockerCode as ModelCacheBlockerCode
 from .model_cache import ModelCacheCode as ModelCacheCode
+from .model_cache import ModelCacheFailureCode as ModelCacheFailureCode
 from .profiles import ProfileReasonCode as ProfileReasonCode
 from .profiles import ProjectionCode as ProjectionCode
 from .recipes import RecipeBuildCode as RecipeBuildCode

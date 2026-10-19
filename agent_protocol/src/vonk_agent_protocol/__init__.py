@@ -302,6 +302,16 @@ HostRuntimeRequest.model_rebuild(
     }
 )
 
+from .lifecycle_vocabulary import ProgressAlarmCode as ProgressAlarmCode
+from .lifecycle_vocabulary import WaitOwnerKind as WaitOwnerKind
+from .lifecycle_vocabulary import WaitResumeCondition as WaitResumeCondition
+from .reason_codes.vocabulary import OperationReason as OperationReason
+
+from .reason_codes.runs import JournalRepairCode as JournalRepairCode
+
+from .reason_codes.model_cache import ModelAccessReason as ModelAccessReason
+from .reason_codes.model_cache import ModelCacheFailureCode as ModelCacheFailureCode
+
 __all__ = [
     "ATTEMPT_ALIAS_CAUSE",
     "CATEGORIZED_ERROR_BASES",
@@ -402,6 +412,7 @@ __all__ = [
     "InvalidRequestReason",
     "InventoryRequest",
     "InventoryVerdict",
+    "JournalRepairCode",
     "LibraryAssessmentCode",
     "LibraryProjectionCode",
     "LifecycleEffect",
@@ -410,8 +421,10 @@ __all__ = [
     "LifecycleSubject",
     "LifecycleVocabulary",
     "MigrationStep",
+    "ModelAccessReason",
     "ModelCacheBlockerCode",
     "ModelCacheCode",
+    "ModelCacheFailureCode",
     "ModelCacheOperatorStatus",
     "ModelFileState",
     "NetworkInterface",
@@ -424,6 +437,7 @@ __all__ = [
     "OperationMemberProgress",
     "OperationOutcome",
     "OperationProgress",
+    "OperationReason",
     "OperatorActionName",
     "OperatorSurface",
     "OutcomeCatalog",
@@ -440,6 +454,7 @@ __all__ = [
     "PlacementLoadState",
     "PrebuiltImageCode",
     "ProfileReasonCode",
+    "ProgressAlarmCode",
     "ProgressPhase",
     "ProjectionCode",
     "ReasonCodeVocabulary",
@@ -513,7 +528,9 @@ __all__ = [
     "UninstallPlanCode",
     "UnknownError",
     "UnknownOutcomeError",
+    "WaitOwnerKind",
     "WaitReason",
+    "WaitResumeCondition",
     "WaitVerdict",
     "WireModel",
     "adopt_machine_state",
@@ -554,13 +571,3 @@ __all__ = [
     "validate_result_for_operation",
     "validate_schema_message",
 ]
-
-from .lifecycle_vocabulary import ProgressAlarmCode as ProgressAlarmCode
-from .lifecycle_vocabulary import WaitOwnerKind as WaitOwnerKind
-from .lifecycle_vocabulary import WaitResumeCondition as WaitResumeCondition
-from .reason_codes.vocabulary import OperationReason as OperationReason
-
-from .reason_codes.runs import JournalRepairCode as JournalRepairCode
-
-from .reason_codes.model_cache import ModelAccessReason as ModelAccessReason
-from .reason_codes.model_cache import ModelCacheFailureCode as ModelCacheFailureCode

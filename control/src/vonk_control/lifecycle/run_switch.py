@@ -729,7 +729,7 @@ class RunSwitchAdapter:
         after = replace(
             before,
             state=state,
-            next_action_at=due if state is State.OBSERVING else None,
+            next_action_at=due,
         )
         self.apply(job, progress, before, after, now, visible=visible, reason=reason)
         return after

@@ -301,8 +301,6 @@ def resource_term_code(
 
 
 class ReasonCodeVocabulary(WireModel):
-    model_access_reason: ModelAccessReason
-    model_cache_failure_code: ModelCacheFailureCode
     """Carrier that publishes every reason-code enum into the wire schema.
 
     The model is never sent: it exists so the schema exporter, the Rust
@@ -310,6 +308,8 @@ class ReasonCodeVocabulary(WireModel):
     from this one module.
     """
 
+    model_access_reason: ModelAccessReason
+    model_cache_failure_code: ModelCacheFailureCode
     admission_code: AdmissionCode
     agent_evidence_code: AgentEvidenceCode
     artifact_lifecycle_code: ArtifactLifecycleCode
@@ -379,8 +379,10 @@ __all__ = [
     "InstallDegradedReason",
     "LibraryAssessmentCode",
     "LibraryProjectionCode",
+    "ModelAccessReason",
     "ModelCacheBlockerCode",
     "ModelCacheCode",
+    "ModelCacheFailureCode",
     "NodeOfflineReason",
     "OperationFailureCode",
     "PrebuiltImageCode",
