@@ -158,6 +158,17 @@ class RecoveryMixin:
                         continue
                     if parent.kind != KIND:
                         continue
+                    before = (
+                        parent.state,
+                        parent.result,
+                        tuple(
+                            session.scalars(
+                                select(AgentOperation.id)
+                                .where(AgentOperation.parent_job_id == parent.id)
+                                .order_by(AgentOperation.id)
+                            )
+                        ),
+                    )
                     if parent.state == LifecycleState.FAILED:
                         if parent.status_reason != UNSUPPORTED_DISPATCH:
                             continue
@@ -169,7 +180,18 @@ class RecoveryMixin:
                     ):
                         continue
                     service._advance(session, parent)
-                    healed = True
+                    after = (
+                        parent.state,
+                        parent.result,
+                        tuple(
+                            session.scalars(
+                                select(AgentOperation.id)
+                                .where(AgentOperation.parent_job_id == parent.id)
+                                .order_by(AgentOperation.id)
+                            )
+                        ),
+                    )
+                    healed = before != after or healed
             except AdmissionLockBusy:
                 continue
         if healed:

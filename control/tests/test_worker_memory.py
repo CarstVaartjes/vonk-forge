@@ -254,20 +254,12 @@ def test_production_worker_reports_every_declared_component(tmp_path) -> None:
     jobs = JobService(sessions, clock=Clock())
     model_cache = ModelCacheService(sessions, tmp_path / "models", clock=Clock())
 
-    class AgentJobs:
-        def enqueue_in_session(self, *_args, **_kwargs):
-            raise AssertionError("not exercised")
-
-        def notify_available(self):
-            return None
-
-        def reconcile_orders(self):
-            return False
+    from vonk_control.agent_jobs import AgentJobService
 
     worker = assemble_production_worker(
         jobs=jobs,
         sessions=sessions,
-        agent_jobs=AgentJobs(),
+        agent_jobs=AgentJobService(sessions, clock=Clock()),
         publisher=AtomicRouteBundlePublisher(tmp_path / "routes"),
         management_policy=ManagementAddressPolicy.parse("10.0.0.0/24"),
         clock=Clock(),
