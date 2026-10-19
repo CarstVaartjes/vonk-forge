@@ -1039,18 +1039,13 @@ async def run_automatic_sync(
             continue
         # The same owner computes and persists one delay. Gateway observation
         # remains independent of catalog discovery and shares its retry cadence.
-        try:
-            step = await asyncio.to_thread(
-                service.advance_automatic,
-                interval_seconds,
-                failures,
-                reconcile=reconcile,
-            )
-            failures, delay = step.failures, step.delay_seconds
-        except Exception as error:  # noqa: BLE001 - the loop must never die
-            failures += 1
-            delay = catalog_sync_retry_delay(failures, interval_seconds)
-            _log_automatic_failure(error, delay)
+        step = await asyncio.to_thread(
+            service.advance_automatic,
+            interval_seconds,
+            failures,
+            reconcile=reconcile,
+        )
+        failures, delay = step.failures, step.delay_seconds
         try:
             await asyncio.wait_for(
                 stop.wait(),
