@@ -18,6 +18,8 @@ from vonk_control.models import Base, Job
 from vonk_control.persisted_waits import schedule_wait
 from vonk_control.worker import Worker
 
+from tests.signed_recipe_release import signed_recipe_releases
+
 from .test_persisted_waits import NOW, _job
 
 
@@ -506,7 +508,7 @@ def test_due_recipe_parent_uses_normal_phase_advancement_after_restart(
             assert current > {child.id for child in children}
 
 
-@pytest.mark.usefixtures("signed_recipe_releases")
+@pytest.mark.usefixtures(signed_recipe_releases.__name__)
 def test_catalog_retry_clock_survives_dependency_recovery_and_reconstruction(
     tmp_path, postgres_engine, monkeypatch
 ):
