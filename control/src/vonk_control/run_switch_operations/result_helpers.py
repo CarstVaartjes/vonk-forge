@@ -13,6 +13,7 @@ from pydantic import BaseModel, TypeAdapter, ValidationError
 from vonk_agent_protocol import (
     AgentFailureResult,
     Disposition,
+    FailureStage,
     LifecycleState,
     OperationProgress,
     RunSwitchCode,
@@ -32,6 +33,7 @@ from ..models import (
 )
 from ..operation_blockers import (
     PHASE_RETRY_CODE,
+    BlockingOperation,
     OperationBlocker,
     make_blocker,
 )
@@ -169,6 +171,26 @@ def _wait_blockers(
                 _wait_code(reason, RunSwitchCode.WAITING),
                 reason or "waiting for the next check",
                 node_ids=nodes,
+            )
+        ]
+    if (
+        job.state == LifecycleState.RUNNING
+        and progress.child_operation_id is not None
+        and progress.retry_reason == RunSwitchCode.EFFECT_UNCERTAIN
+        and progress.observation_due_at is not None
+    ):
+        return [
+            make_blocker(
+                RunSwitchCode.EFFECT_UNCERTAIN,
+                reason,
+                node_ids=nodes,
+            ).model_copy(
+                update={
+                    "operation": BlockingOperation(
+                        id=progress.child_operation_id,
+                        kind=FailureStage.ARTIFACT_DISTRIBUTION,
+                    )
+                }
             )
         ]
     retry_reason = progress.retry_reason

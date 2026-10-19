@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -22,6 +22,7 @@ from vonk_agent_protocol.agent_words import (
 )
 
 from ..agent_jobs import abandon_idempotent_job_in_session
+from ..agent_operation_facts import aware
 from ..failure_classification import is_security_failure
 from ..job_documents import DistributionJobPayload
 from ..models import (
@@ -298,6 +299,7 @@ class DurableDistributionPhaseExecutor(DistributionChildren):
         members: list[RunSwitchMemberReceipt] = []
         measured_members: list[OperationMemberProgress] = []
         evidence: list[ArtifactVerificationEvidence] = []
+        next_checks: list[datetime] = []
         if payload is not None:
             for node_id in payload.cached_nodes:
                 total = payload.target_totals.get(node_id)
@@ -332,6 +334,22 @@ class DurableDistributionPhaseExecutor(DistributionChildren):
                     AgentOperationAttempt.attempt == operation.current_attempt,
                 )
             )
+            if operation.state not in {
+                LifecycleState.SUCCEEDED,
+                LifecycleState.FAILED,
+                LifecycleState.CANCELLED,
+            }:
+                # The worker will re-observe the exact order, including the
+                # agent's replayed receipt; a parked member is never silent.
+                due = operation.next_action_at
+                if due is None and attempt is not None:
+                    due = attempt.lease_deadline
+                next_checks.append(
+                    min(
+                        aware(due) if due is not None else now,
+                        now + timedelta(seconds=5),
+                    )
+                )
             state = DurableDistributionPhaseExecutor._member_state(operation.state)
             if (
                 state in {ProfileEffectState.PENDING, ProfileEffectState.UNKNOWN}
@@ -475,4 +493,8 @@ class DurableDistributionPhaseExecutor(DistributionChildren):
             error_code=denied,
             uncertain=bool(failed) or any(item.uncertain for item in evidence),
         )
-        return _ChildView(state=child.state, result=_child_receipt(receipt))
+        return _ChildView(
+            state=child.state,
+            result=_child_receipt(receipt),
+            retry_due_at=max(now, min(next_checks)) if next_checks else None,
+        )
