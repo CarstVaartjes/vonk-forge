@@ -81,7 +81,6 @@ pub enum RecipeBuildError {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PodmanImportDiagnostic {
     TemporaryStorageExhausted,
-    DeclaredStorageLimitExceeded,
     SubordinateIdMappingUnavailable,
     ArchiveFormatRejected,
     PermissionDenied,
@@ -164,7 +163,6 @@ impl fmt::Display for PodmanImportDiagnostic {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(match self {
             Self::TemporaryStorageExhausted => "temporary-storage-exhausted",
-            Self::DeclaredStorageLimitExceeded => "declared-storage-limit-exceeded",
             Self::SubordinateIdMappingUnavailable => "subordinate-id-mapping-unavailable",
             Self::ArchiveFormatRejected => "archive-format-rejected",
             Self::PermissionDenied => "permission-denied",
@@ -340,25 +338,44 @@ mod tests {
 
     #[test]
     fn podman_import_process_failures_have_stable_secret_free_evidence() {
-        for (error, _diagnostic) in [
-            (
-                ProcessError::StorageLimit,
-                "declared-storage-limit-exceeded",
-            ),
-            (ProcessError::Timeout, "deadline-exceeded"),
-            (
-                ProcessError::OutputLimit,
-                "diagnostic-output-limit-exceeded",
-            ),
-            (
-                ProcessError::Io(std::io::Error::other("/private/secret")),
-                "subprocess-unavailable",
-            ),
+        for error in [
+            ProcessError::StorageLimit,
+            ProcessError::Timeout,
+            ProcessError::OutputLimit,
+            ProcessError::Io(std::io::Error::other("/private/secret")),
         ] {
             let error = podman_import_process_error(error);
             assert!(!format!("{:?}", error.failure_evidence()).contains("private"));
             assert!(!format!("{:?}", error.failure_evidence()).contains("secret"));
         }
+    }
+
+    #[test]
+    fn import_host_disk_pressure_is_retryable_storage_not_a_plan_violation() {
+        use crate::process::{ProcessDiskReserve, ProcessRunner, Program, SystemProcessRunner};
+
+        let root = tempfile::tempdir().unwrap();
+        let archive = std::fs::File::create(root.path().join("base-image.tar")).unwrap();
+        // Exercise the import's real free-space guard before Podman starts.
+        // This is host pressure, not an oversized recipe working directory.
+        let error = SystemProcessRunner
+            .run_with_input_disk_reserve_cancellable(
+                Program::Podman,
+                &["load".to_owned()],
+                std::time::Duration::from_secs(1),
+                &archive,
+                ProcessDiskReserve::new(root.path(), u64::MAX),
+                &|| false,
+            )
+            .unwrap_err();
+        assert!(matches!(error, ProcessError::StorageLimit));
+        assert!(matches!(
+            podman_import_process_error(error),
+            RecipeBuildError::BaseImageImport {
+                diagnostic: PodmanImportDiagnostic::TemporaryStorageExhausted,
+                ..
+            }
+        ));
     }
 
     #[test]

@@ -49,6 +49,7 @@ from .fleet_profile_contract import (
     FLEET_PROFILE_ENDED_STATES,
     FleetProfileApplicationProgress,
 )
+from .inventory_repository import MAX_INVENTORY_FUTURE_SKEW
 from .models import (
     STOPPABLE_RUN_STATES,
     AgentCertificateRotation,
@@ -324,6 +325,55 @@ def build_may_run(session: Session, build: RecipeBuild) -> bool:
         if not states or states & set(agent_operation_states.LIVE):
             return True
     return False
+
+
+def build_holds_disk(
+    session: Session, build: RecipeBuild, inventory_observed_at: datetime | None
+) -> bool:
+    """A stopped or parked build cannot consume its future working-space envelope.
+
+    Retained files already reduce observed free disk. An open parent is not
+    evidence of another write: inspect its own Spark orders, including orders
+    whose parent ended. BACKOFF is between attempts; dispatch must admit the
+    full envelope again before starting the next attempt. Uncertain orders
+    still count, as do initial queued orders and live cleanup orders.
+    """
+    orders = tuple(
+        session.execute(
+            select(AgentOperation, Job.state)
+            .join(Job, Job.id == AgentOperation.parent_job_id)
+            .where(
+                Job.payload["owner_kind"].as_string() == OwnerKind.RECIPE_BUILD,
+                Job.payload["owner_id"].as_string() == build.id,
+            )
+        )
+    )
+    if orders:
+        if any(
+            operation.state in agent_operation_states.LIVE
+            and operation.state != LifecycleState.BACKOFF
+            and (
+                operation.state != LifecycleState.QUEUED
+                or parent_state not in JOB_ENDED_STATES
+            )
+            for operation, parent_state in orders
+        ):
+            return True
+        # A pre-exit sample cannot yet include the retained files. Discount
+        # only after authenticated inventory covers the last writer, including
+        # the accepted agent-clock skew. Claim-refusal notes do not advance
+        # an order's updated_at, so polling cannot postpone this observation.
+        return (
+            inventory_observed_at is None
+            or _aware(inventory_observed_at)
+            <= max(_aware(operation.updated_at) for operation, _state in orders)
+            + MAX_INVENTORY_FUTURE_SKEW
+        )
+    # Planning and initial enqueue share a transaction. Keep its promise until
+    # its first order is visible; a failed build has no such future writer.
+    return build.state in UNFINISHED_BUILD_STATES and referencing_active_job(
+        session, OwnerKind.RECIPE_BUILD, build.id
+    )
 
 
 def _agent_attempt(session: Session, ref: OwnerRef, now: datetime | None) -> Owner:

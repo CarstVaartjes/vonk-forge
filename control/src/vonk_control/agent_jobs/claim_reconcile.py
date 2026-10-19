@@ -216,7 +216,14 @@ def _claimable_operations(node_id: str, now: datetime):
             # drift from) the decision it explains.
             _claim_predicate(now).expression,
         )
-        .order_by(StoredOperation.created_at, StoredOperation.id)
+        .order_by(
+            # A parked build must not repeatedly win the node's poll while
+            # its disk is unavailable and a load's next step is eligible.
+            (StoredOperation.kind == AgentOperation.RECIPE_BUILD)
+            & (StoredOperation.state == agent_operation_states.BACKOFF),
+            StoredOperation.created_at,
+            StoredOperation.id,
+        )
         .execution_options(populate_existing=True)
         .limit(1)
     )
