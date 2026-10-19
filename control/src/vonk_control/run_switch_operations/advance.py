@@ -113,6 +113,7 @@ class AdvanceMixin:
     def _advance(self, operation_id: str) -> bool:
         service = typing_cast("RunSwitchOperationService", self)
         now = _now(service._clock)
+        from ..distribution_executor.receipts import _ChildView
         from ..run_switch_journal_contract import JournalRepairDisposition
         from ..run_switch_journal_repair import try_repair_zero_transfer_journal
 
@@ -516,12 +517,10 @@ class AdvanceMixin:
                     )
                     retry_due_at = (
                         child.retry_due_at
-                        if isinstance(child, RecipeOperationView)
+                        if isinstance(child, RecipeOperationView | _ChildView)
                         else None
                     )
-                    if child.state == LifecycleState.QUEUED.value and isinstance(
-                        retry_due_at, datetime
-                    ):
+                    if isinstance(retry_due_at, datetime):
                         progress.observation_due_at = _aware(retry_due_at)
                     else:
                         progress.observation_due_at = None
@@ -530,7 +529,18 @@ class AdvanceMixin:
                             progress.observation_due_at,
                             progress.observation_deadline_at,
                         )
-                    child_reason = child_progress.status_reason
+                    if (
+                        isinstance(child, _ChildView)
+                        and isinstance(child.result, RunSwitchDistributionChildResult)
+                        and any(
+                            member.state == ProfileEffectState.UNKNOWN
+                            for member in child.result.members
+                        )
+                    ):
+                        progress.retry_reason = RunSwitchCode.EFFECT_UNCERTAIN
+                    elif progress.retry_reason == RunSwitchCode.EFFECT_UNCERTAIN:
+                        progress.retry_reason = None
+                    child_reason = child_progress.status_reason or child_progress.reason
                     status_reason = (
                         child_reason[:512] if isinstance(child_reason, str) else None
                     )
@@ -724,6 +734,8 @@ class AdvanceMixin:
                     return False
                 progress.observation_due_at = None
                 progress.observation_deadline_at = None
+                if progress.retry_reason == RunSwitchCode.EFFECT_UNCERTAIN:
+                    progress.retry_reason = None
                 job.status_reason = None
                 phase_index = require_integer(progress.phase_index, "phase index")
                 item_index = require_integer(progress.item_index, "item index") + 1

@@ -9,8 +9,10 @@ from vonk_agent_protocol import (
     AgentOperation,
     AgentResult,
     AgentResultState,
+    ArtifactDistributionResult,
     FailureCode,
     InvalidRequestReason,
+    LifecycleState,
     SecurityRefusalReason,
     UnknownOutcomeError,
     canonical_message,
@@ -25,6 +27,7 @@ from ..agent_operation_facts import aware as _aware
 from ..agent_operation_facts import job_output_retention_expiry
 from ..agent_outcome import stored_report
 from ..auth import AgentSource
+from ..job_documents import DistributionJobPayload
 from ..lifecycle import CancelRequested, LeaseLapsed, Outcome, Reported
 from ..lifecycle.agent_operation import AgentOperationAdapter
 from ..models import AgentOperation as StoredOperation
@@ -204,6 +207,51 @@ def record_late_result(
             and operation.workload_intent_ordinal is not None
             and operation.workload_intent_ordinal != node.workload_intent_ordinal
         )
+        distribution = column_value(parent, "payload")
+        assignment = (
+            distribution.assignments.get(node_id)
+            if isinstance(distribution, DistributionJobPayload)
+            else None
+        )
+        if (
+            operation.kind == AgentOperation.ARTIFACT_DISTRIBUTION
+            and message.state == AgentResultState.SUCCEEDED
+            and isinstance(message.result, ArtifactDistributionResult)
+            and assignment is not None
+            and assignment.node_id == node_id
+            and assignment.plan_digest == operation.authority_revision
+            and message.result.downloaded_bytes
+            == sum({item.sha256: item.bytes for item in assignment.objects}.values())
+            and operation.current_attempt == attempt.attempt
+            and operation.state in agent_operation_states.RUNNING_OR_PARKED
+            and parent.state not in _ENDED_PARENT_STATES
+            and column_field(parent, "result", "cancel_requested") is not True
+            and not superseded_intent
+            and operation.workload_intent_ordinal
+            == column_field(parent, "payload", "workload_intent_ordinal")
+            and (
+                attempt.state == LifecycleState.RUNNING
+                or agent_operation_states.attempt_lapsed(attempt)
+            )
+            and column_value(attempt, "result") is None
+        ):
+            # A lease fences new effects, not the exact transfer's durable
+            # receipt. The agent replays it after restart on every loop pass.
+            # Adopt only this still-current fence: a newer attempt, cancellation
+            # or newer intent must never be revived by historical success.
+            adapter = AgentOperationAdapter(session)
+            adapter.record_report(attempt, message.state, message.result)
+            adapter.settle(
+                operation,
+                attempt,
+                parent,
+                Reported(Outcome.DONE, fence=attempt.fence),
+                now,
+            )
+            if self._result_consumer is not None:
+                self._result_consumer(session, operation, attempt, message)
+            self._aggregate_parent(session, operation.parent_job_id)
+            return True
         if (
             operation.kind == AgentOperation.RECIPE_JOB_RUN.value
             and isinstance(message.result, RecipeJobRunResult)

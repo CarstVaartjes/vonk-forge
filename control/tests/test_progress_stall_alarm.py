@@ -14,7 +14,12 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import select
-from vonk_agent_protocol import ProfileReasonCode, RecipeImageCode
+from vonk_agent_protocol import (
+    LifecycleState,
+    ObservedAssignmentState,
+    ProfileReasonCode,
+    RecipeImageCode,
+)
 from vonk_control.fleet_profiles import FleetProfileService
 from vonk_control.models import (
     FleetProfileApplication,
@@ -292,7 +297,7 @@ def test_a_backoff_declined_alike_on_every_retry_is_stalled() -> None:
     assert not listed()
 
 
-def test_a_load_waiting_for_the_load_it_continues_is_never_silent() -> None:
+def test_a_load_waiting_for_the_load_it_continues_is_never_silent(monkeypatch) -> None:
     """A newer load that continues an older load's assignments waits for it
     to finish them. That wait recorded nothing, so it could last for hours
     unseen; it is now a typed wait, shown stalled a whole window after it
@@ -301,6 +306,7 @@ def test_a_load_waiting_for_the_load_it_continues_is_never_silent() -> None:
     now = [NOW + timedelta(minutes=1)]
     service._clock = lambda: now[0]
     held = service.application(first.id).current_operation_id
+    assert held is not None
     real_advance = adapter.advance
 
     def advance(operation_id, *, session=None):
@@ -343,3 +349,29 @@ def test_a_load_waiting_for_the_load_it_continues_is_never_silent() -> None:
     )
 
     assert service.application(newer.id).state == "running"  # waiting, not ended
+
+    # Restoring the exact child receipt releases the dependent load through
+    # normal ticks. The escalation is informational, never an operator latch.
+    adapter.advance = real_advance
+    real_state = FleetProfileService._assignment_state.__func__
+
+    def observed_running(cls, session, assignment, **kwargs):
+        state = real_state(cls, session, assignment, **kwargs)
+        # The synthetic executor's matching workload observation arrives with
+        # its receipt. Production reads these facts from its run/installation.
+        if adapter.get(held).state == LifecycleState.SUCCEEDED:
+            state.current_state = ObservedAssignmentState.RUNNING
+        return state
+
+    monkeypatch.setattr(
+        FleetProfileService, "_assignment_state", classmethod(observed_running)
+    )
+    for _ in range(24):
+        now[0] += timedelta(seconds=30)
+        service.tick()
+        if service.application(newer.id).state == LifecycleState.SUCCEEDED:
+            break
+    else:
+        pytest.fail(service.application(newer.id).model_dump_json())
+    assert not waiting()
+    assert not listed()
