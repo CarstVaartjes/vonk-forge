@@ -25,7 +25,11 @@ import uuid
 from datetime import timedelta
 
 import pytest
-from vonk_agent_protocol import LifecycleState
+from vonk_agent_protocol import (
+    InvalidRequestError,
+    InvalidRequestReason,
+    LifecycleState,
+)
 from vonk_control import fleet_profile_states
 from vonk_control.agent_operation_facts import SUPERSEDED_CANCELLATION_SECONDS
 from vonk_control.fleet_profile_contract import (
@@ -413,9 +417,14 @@ def test_a_repeated_cancel_request_replays_and_a_different_one_is_refused(
     again = world.cancel(710)
     assert again.cancellation is not None and first.cancellation is not None
     assert again.cancellation.request_key == first.cancellation.request_key
-    later = world.cancel(711)
-    assert later.cancellation is not None
-    assert later.cancellation.request_key == first.cancellation.request_key
+    with pytest.raises(InvalidRequestError) as refused:
+        world.cancel(711)
+    assert refused.value.typed_reason == InvalidRequestReason.CONFLICT
+    receipt = world.service.application_cancellation_by_request(
+        world.id, _uuid(710), actor="admin"
+    )
+    assert receipt.cancellation is not None
+    assert receipt.cancellation.request_key == first.cancellation.request_key
     fresh = world.service.apply(world.profile.id, request_key=_uuid(712), actor="admin")
     assert fresh.id != world.id
 
