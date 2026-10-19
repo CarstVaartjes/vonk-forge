@@ -109,7 +109,9 @@ pub(crate) fn podman_build_diagnostic(
 
 pub(super) fn podman_import_process_error(error: ProcessError) -> RecipeBuildError {
     let diagnostic = match error {
-        ProcessError::StorageLimit => PodmanImportDiagnostic::DeclaredStorageLimitExceeded,
+        // Import uses the filesystem free-space guard, not a directory-size
+        // limit. Another disk consumer can clear this pressure before retry.
+        ProcessError::StorageLimit => PodmanImportDiagnostic::TemporaryStorageExhausted,
         ProcessError::Timeout => PodmanImportDiagnostic::DeadlineExceeded,
         ProcessError::OutputLimit => PodmanImportDiagnostic::DiagnosticOutputLimitExceeded,
         ProcessError::Io(_) => PodmanImportDiagnostic::SubprocessUnavailable,

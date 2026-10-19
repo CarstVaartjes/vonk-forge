@@ -370,7 +370,6 @@ mod import_tests {
     fn completed_podman_import_failure_retains_evidence_and_only_retries_transient_causes() {
         for diagnostic in [
             PodmanImportDiagnostic::TemporaryStorageExhausted,
-            PodmanImportDiagnostic::DeclaredStorageLimitExceeded,
             PodmanImportDiagnostic::SubordinateIdMappingUnavailable,
             PodmanImportDiagnostic::ArchiveFormatRejected,
             PodmanImportDiagnostic::PermissionDenied,

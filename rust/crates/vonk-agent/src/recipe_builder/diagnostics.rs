@@ -81,7 +81,6 @@ pub enum RecipeBuildError {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PodmanImportDiagnostic {
     TemporaryStorageExhausted,
-    DeclaredStorageLimitExceeded,
     SubordinateIdMappingUnavailable,
     ArchiveFormatRejected,
     PermissionDenied,
@@ -164,7 +163,6 @@ impl fmt::Display for PodmanImportDiagnostic {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(match self {
             Self::TemporaryStorageExhausted => "temporary-storage-exhausted",
-            Self::DeclaredStorageLimitExceeded => "declared-storage-limit-exceeded",
             Self::SubordinateIdMappingUnavailable => "subordinate-id-mapping-unavailable",
             Self::ArchiveFormatRejected => "archive-format-rejected",
             Self::PermissionDenied => "permission-denied",
@@ -340,20 +338,11 @@ mod tests {
 
     #[test]
     fn podman_import_process_failures_have_stable_secret_free_evidence() {
-        for (error, _diagnostic) in [
-            (
-                ProcessError::StorageLimit,
-                "declared-storage-limit-exceeded",
-            ),
-            (ProcessError::Timeout, "deadline-exceeded"),
-            (
-                ProcessError::OutputLimit,
-                "diagnostic-output-limit-exceeded",
-            ),
-            (
-                ProcessError::Io(std::io::Error::other("/private/secret")),
-                "subprocess-unavailable",
-            ),
+        for error in [
+            ProcessError::StorageLimit,
+            ProcessError::Timeout,
+            ProcessError::OutputLimit,
+            ProcessError::Io(std::io::Error::other("/private/secret")),
         ] {
             let error = podman_import_process_error(error);
             assert!(!format!("{:?}", error.failure_evidence()).contains("private"));
