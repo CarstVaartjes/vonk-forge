@@ -284,7 +284,12 @@ class RemovalReconcileMixin:
                     in (
                         checkpoint.selected
                         if identity.kind == "model-set"
-                        else checkpoint.delete_objects
+                        else set(checkpoint.delete_objects)
+                        | (
+                            set()
+                            if checkpoint.fleet is None
+                            else checkpoint.fleet.removal_objects
+                        )
                     )
                     and checkpoint.removal_fence == gate.removal_fence
                 )
@@ -316,10 +321,18 @@ class RemovalReconcileMixin:
                     )
                 # Missing, wrong-kind, damaged or now-terminal owners cannot
                 # execute this exact identity after its lock was acquired.
-                gate.removal_owner_kind = None
-                gate.removal_owner_id = None
-                gate.removal_fence = None
-                gate.updated_at = cache._clock()
+                if gate.removal_authority_expires_at is None:
+                    gate.removal_owner_kind = None
+                    gate.removal_owner_id = None
+                    gate.removal_fence = None
+                    gate.updated_at = cache._clock()
+                else:
+                    release_dead_removal_nowait(
+                        session,
+                        identity,
+                        owner_kind="model-cache-operation",
+                        now=cache._clock(),
+                    )
 
     def _model_removal_owner_snapshot(
         self,
@@ -353,6 +366,10 @@ class RemovalReconcileMixin:
             payload = cache._removal_or_none(operation)
             if payload is None or payload.removal_fence != fence:
                 return None  # unreadable: the step's entry retires the row
+            if payload.fleet is not None and payload.model_content_sha256 is not None:
+                effects = cache._fleet_effects(session, payload.model_content_sha256)
+                if not effects.nas_remove:
+                    return None
             return payload
 
     def _persist_model_removal_checkpoint(
@@ -675,7 +692,12 @@ class RemovalReconcileMixin:
                 covered = identity.sha256 in (
                     removal.selected
                     if identity.kind == "model-set"
-                    else removal.delete_objects
+                    else set(removal.delete_objects)
+                    | (
+                        set()
+                        if removal.fleet is None
+                        else removal.fleet.removal_objects
+                    )
                 )
                 return wanted and covered and removal.removal_fence == fence
 

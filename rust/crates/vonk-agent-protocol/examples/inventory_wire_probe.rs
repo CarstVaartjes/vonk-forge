@@ -26,6 +26,7 @@ fn main() {
         host_settings: None,
         installations: None,
         unused_model_bytes: None,
+        model_objects: None,
         runs: None,
         installation_bytes: None,
         nvidia_driver_version: "550.1".to_owned(),

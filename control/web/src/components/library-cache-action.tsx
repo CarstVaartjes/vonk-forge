@@ -1,3 +1,4 @@
+import { LifecycleState } from "../api/vocabulary.generated";
 import { compareWire, displayRatio } from "../api/contract-numeric";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { CacheRemovalReview, ControlApi, ModelCacheOperatorResponse } from "../api/types";
@@ -51,12 +52,14 @@ export function LibraryCacheAction({
   modelContentSha256,
   state,
   onPrepared,
+  fleetOnly = false,
 }: {
   api: ControlApi;
   selector: string;
   modelContentSha256: string;
   state: LibraryCacheState;
   onPrepared(): void;
+  fleetOnly?: boolean;
 }) {
   const [busy, setBusy] = useState(false);
   const [confirming, setConfirming] = useState(false);
@@ -150,7 +153,10 @@ export function LibraryCacheAction({
     setBusy(true);
     setError("");
     try {
-      const current = await api.modelRemovalReview(selector, controller.signal);
+      const current = fleetOnly
+        ? await api.modelRemovalReview(selector, controller.signal, true)
+        : await api.modelRemovalReview(selector, controller.signal);
+      if (fleetOnly && !current.fleet) throw new Error("Fleet removal review is unavailable.");
       if (controller.signal.aborted) return;
       validateRemovalReview(current, { kind: "model", selector, modelContentSha256 });
       setReview(current);
@@ -160,10 +166,15 @@ export function LibraryCacheAction({
     } finally {
       if (!controller.signal.aborted) setBusy(false);
     }
-  }, [api, modelContentSha256, selector]);
+  }, [api, modelContentSha256, selector, fleetOnly]);
 
   const remove = useCallback(async () => {
-    if (!review || review.blockers.length || review.target_identity !== modelContentSha256) return;
+    if (
+      !review ||
+      (!review.fleet && review.blockers.length) ||
+      review.target_identity !== modelContentSha256
+    )
+      return;
     abort.current?.abort();
     const controller = new AbortController();
     abort.current = controller;
@@ -181,6 +192,15 @@ export function LibraryCacheAction({
       setBusy(false);
       setConfirming(false);
       setReview(null);
+      if (review.fleet) {
+        toast.info(
+          result.state === LifecycleState.SUCCEEDED
+            ? "Fleet cleanup completed; retained parts are shown below."
+            : "Fleet model removal queued.",
+        );
+        setRemoval({ intent, initial: result });
+        return;
+      }
       if (result.state === "succeeded") {
         toast.success("Model removed from the cache.");
         onPrepared();
@@ -214,7 +234,7 @@ export function LibraryCacheAction({
         initial={removal.initial}
         initialError={removal.initialError}
         onComplete={() => {
-          setRemoval(null);
+          if (!fleetOnly) setRemoval(null);
           onPrepared();
         }}
         onDismiss={() => setRemoval(null)}
@@ -225,17 +245,22 @@ export function LibraryCacheAction({
       />
     );
 
-  if (state === "cached") {
+  if (state === "cached" || fleetOnly) {
     // Confirmation accepts exactly the Controller review shown here.
     return (
       <div className="library-cache-action">
-        <span className="library-cache-state is-ready">Cached</span>
+        {!fleetOnly && <span className="library-cache-state is-ready">Cached</span>}
         {confirming ? (
           <>
             <button
               type="button"
               className="button secondary"
-              disabled={busy || !review || review.blockers.length > 0}
+              disabled={
+                busy ||
+                !review ||
+                (!review.fleet && review.blockers.length > 0) ||
+                Boolean(review.fleet?.targets.some((target) => !target.observation_available))
+              }
               onClick={() => void remove()}
             >
               Confirm remove
@@ -256,7 +281,7 @@ export function LibraryCacheAction({
             disabled={busy}
             onClick={() => void reviewRemoval()}
           >
-            Remove from cache
+            {fleetOnly ? "Remove model from fleet" : "Remove from cache"}
           </button>
         )}
         {confirming && busy && <span role="status">Waiting for Controller…</span>}

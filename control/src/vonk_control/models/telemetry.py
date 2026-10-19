@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import Any
+from typing import Any, TypedDict
 
 from sqlalchemy import (
     JSON,
@@ -31,6 +31,13 @@ from vonk_agent_protocol import ModelFileState, machine_check
 from vonk_agent_protocol.inventory import MemoryPool
 
 from ..model_primitives import Base, _lower_hex, _Utf8ByteLength, _uuid_shape
+
+
+class ModelStoreObjectDocument(TypedDict):
+    """JSON encoding of the inventory contract, validated by stored_columns."""
+
+    sha256: str
+    bytes: int
 
 
 class NodeInventorySnapshot(Base):
@@ -89,6 +96,7 @@ class NodeInventorySnapshot(Base):
     host_settings: Mapped[dict[str, bool | None] | None] = mapped_column(JSON)
     # NULL: the agent did not report its unused model bytes (unknown).
     unused_model_bytes: Mapped[int | None] = mapped_column(BigInteger)
+    model_objects: Mapped[list[ModelStoreObjectDocument] | None] = mapped_column(JSON)
     nvidia_driver_version: Mapped[str] = mapped_column(
         String(256), nullable=False, default="unknown", server_default="unknown"
     )

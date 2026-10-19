@@ -1066,3 +1066,10 @@ Change them only together with the tests that pin them.
   results on stdout, everything else on stderr, one JSON document with
   `--json` (also with `--follow`), and exits 0/1/2/130/141 with the meanings
   given there.
+
+Fleet model cleanup uses `vonkctl model remove <model> --fleet --review` to show
+exact NAS and per-Spark effects, then `vonkctl model remove <model> --fleet --yes`
+to request removal. Saved/loaded profiles, running work, live operations, pins
+and shared content retain their bytes. The returned model-operation receipt is
+durable; the [cache runbook](model-cache.md#remove-a-model-from-the-fleet) explains
+confirmation, recovery and its deadline.

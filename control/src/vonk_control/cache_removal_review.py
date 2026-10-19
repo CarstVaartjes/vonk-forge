@@ -8,6 +8,7 @@ time, so a fresh read with unchanged effects retains the same review identity.
 from __future__ import annotations
 
 import hashlib
+from enum import StrEnum
 from typing import Annotated, Literal
 
 from pydantic import ConfigDict, Field, model_validator
@@ -21,11 +22,24 @@ from vonk_agent_protocol import (
 
 from cluster_profiles.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 
+from .fleet_model_removal_contract import FleetModelRemovalEffects
 from .strict_json import StrictJSONModel
 
 Digest = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
 ArtifactKind = Literal["model-set", "model-object", "runtime-image"]
-AssetDisposition = Literal["remove", "retain-shared"]
+
+
+class CacheAssetDisposition(StrEnum):
+    REMOVE = "remove"
+    RETAIN_SHARED = "retain-shared"
+    RETAIN_REFERENCED = "retain-referenced"
+
+
+AssetDisposition = Literal[
+    CacheAssetDisposition.REMOVE,
+    CacheAssetDisposition.RETAIN_SHARED,
+    CacheAssetDisposition.RETAIN_REFERENCED,
+]
 FindingClassification = Literal["saved-reference", "active-work"]
 MAX_CACHE_REMOVAL_REVIEW_BYTES = MAX_CONTROL_DOCUMENT_BYTES
 
@@ -85,6 +99,8 @@ class CacheRemovalReviewContent(_CacheRemovalModel):
     target_identity: str = Field(min_length=1, max_length=128)
     # Null for model removal; recipe removal binds the operator's exact choice.
     with_model: bool | None
+    fleet: FleetModelRemovalEffects | None = None
+    nas_reclaimable_bytes: int | None = Field(default=None, ge=0)
     assets: list[CacheRemovalAsset]
     references: list[CacheRemovalFinding]
     active_work: list[CacheRemovalFinding]

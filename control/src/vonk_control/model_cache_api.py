@@ -31,6 +31,7 @@ from .model_cache import (
 from .model_cache.errors import ModelCacheSelectorAmbiguous
 from .model_cache_contract import (
     UUID_PATTERN,
+    CacheOperationKind,
     ModelCacheCancellationRequest,
     ModelCacheOperatorAction,
     ModelCacheOperatorRequest,
@@ -86,6 +87,8 @@ def _model_operator_response(
         else []
     )
     return ModelCacheOperatorResponse(
+        fleet=operation.fleet,
+        review_digest=operation.review_digest,
         action=action,
         selector=selector,
         request_key=operation.request_key,
@@ -294,11 +297,16 @@ def install_model_operator_routes(
     )
     def review_removal(
         selector: Annotated[str, Path(min_length=1, max_length=256)],
+        fleet: bool = False,
         actor: Actor = actor_dependency,
     ) -> CacheRemovalReview:
         require_operator(actor, "/api/model/{selector:path}/remove")
         try:
-            return cache().review_model_removal(selector)
+            return (
+                cache().review_fleet_model_removal(selector)
+                if fleet
+                else cache().review_model_removal(selector)
+            )
         except HTTPException:
             raise
         except (ModelCacheError, *AVAILABILITY_ERRORS) as error:
@@ -326,7 +334,7 @@ def install_model_operator_routes(
                 force=True,
             )
             return _model_operator_response(
-                operation, action="download", selector=selector
+                operation, action=CacheOperationKind.DOWNLOAD, selector=selector
             )
         except HTTPException:
             raise
@@ -348,13 +356,20 @@ def install_model_operator_routes(
     ) -> ModelCacheOperatorResponse:
         require_operator(actor, "/api/model/{selector:path}/remove")
         try:
-            operation = cache().remove_model_selector(
-                selector,
-                actor=actor.subject,
-                request_key=body.request_key,
-            )
+            if body.fleet:
+                assert body.review_digest is not None
+                operation = cache().remove_fleet_model_selector(
+                    selector,
+                    actor=actor.subject,
+                    request_key=body.request_key,
+                    review_digest=body.review_digest,
+                )
+            else:
+                operation = cache().remove_model_selector(
+                    selector, actor=actor.subject, request_key=body.request_key
+                )
             return _model_operator_response(
-                operation, action="remove", selector=selector
+                operation, action=CacheOperationKind.REMOVE, selector=selector
             )
         except HTTPException:
             raise

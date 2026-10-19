@@ -166,6 +166,7 @@ fn retention(executor: &OperationExecutor<PullRunner>, required: u64, protected:
             .as_secs()
             + 300,
         required_free_bytes: required,
+        remove_model_objects: Vec::new(),
         protected_model_objects: Vec::new(),
         protected_image_addresses: protected,
     };

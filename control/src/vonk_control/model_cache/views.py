@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from concurrent.futures import Future
 from dataclasses import dataclass, field
 
+from ..fleet_model_removal_contract import FleetModelRemovalCheckpoint
 from ..model_cache_contract import ModelCacheOperationResult
 from ..operation_blockers import OperationBlocker
 from ..wait_contract import QueueWait
@@ -73,6 +74,7 @@ class CacheOperationView:
     blockers: tuple[OperationBlocker, ...] = ()
     wait: QueueWait | None = None
     next_attempt_at: str | None = None
+    fleet: FleetModelRemovalCheckpoint | None = None
 
 
 @dataclass(slots=True)

@@ -40,6 +40,7 @@ _ROW_LOCK_ORDER = (
     "node_inventory_snapshots",
     "resource_reservations",
     "fleet_profile_applications",
+    "model_cache_operations",
     "jobs",
     "agent_operations",
     "agent_operation_attempts",

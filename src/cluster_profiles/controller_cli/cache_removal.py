@@ -18,6 +18,7 @@ from ..cli_outcome import (
 from ..cli_render import render_payload
 from ..control_client import (
     ControlClientError,
+    ControlConflict,
     ControlMalformedResponse,
     ControlNotFound,
     validate_control_document,
@@ -105,9 +106,16 @@ def _cache_removal_review(
     *,
     with_model: bool | None,
     timeout_seconds: float | None = None,
+    fleet: bool = False,
 ) -> dict[str, object]:
     path = f"/api/{noun}/{_quoted(selector)}/remove-review"
-    query = {"with_model": with_model} if noun == "recipe" else None
+    query = (
+        {"with_model": with_model}
+        if noun != "model"
+        else {"fleet": True}
+        if fleet
+        else None
+    )
     document = client.request(
         "GET", path, query=query, timeout_seconds=timeout_seconds, retry=False
     )
@@ -117,6 +125,10 @@ def _cache_removal_review(
         raise ControlMalformedResponse(
             f"{noun} removal review does not match its canonical contract"
         ) from None
+    if fleet and not isinstance(review.get("fleet"), Mapping):
+        raise ControlMalformedResponse(
+            "Fleet removal review is missing its Spark effects"
+        )
     target_identity = review.get("target_identity")
     review_selector = review.get("selector")
     if (
@@ -168,9 +180,20 @@ def _confirm_removal(
         attempts=3,
         terminal=lambda _: True,
         fetch=lambda remaining: _cache_removal_review(
-            client, noun, selector, with_model=with_model, timeout_seconds=remaining
+            client,
+            noun,
+            selector,
+            with_model=with_model,
+            timeout_seconds=remaining,
+            fleet=bool(getattr(args, "fleet", False)),
         ),
     )
+    if args.observation.status != "complete" and getattr(args, "fleet", False):
+        raise ValueError(
+            "Fleet removal needs a complete current review; retry when inventory is available"
+        )
+    if getattr(args, "fleet", False):
+        args.fleet_review_digest = review["review_digest"]
     if args.observation.status != "complete":
         if not args.yes:
             return False
@@ -229,6 +252,12 @@ def _existing_cache_removal(
     def validate_receipt(observed: object) -> None:
         if not isinstance(observed, Mapping):
             raise ControlMalformedResponse("removal receipt is unreadable")
+        if noun == "model" and bool(observed.get("fleet")) != bool(
+            getattr(args, "fleet", False)
+        ):
+            raise ControlMalformedResponse(
+                "Removal receipt identifies a different fleet scope"
+            )
         _validate_cache_removal_receipt(
             noun, selector, key, observed, expected_with_model=with_model
         )
@@ -265,6 +294,10 @@ def _submit_model_removal(
     lookup = f"/api/model/requests/{_quoted(key)}"
 
     def validate(result: Mapping[str, object]) -> str:
+        if getattr(args, "fleet", False) and not isinstance(
+            result.get("fleet"), Mapping
+        ):
+            raise ControlMalformedResponse("Receipt is not a fleet removal")
         return _validate_cache_removal_receipt(
             "model",
             selector,
@@ -279,7 +312,14 @@ def _submit_model_removal(
         key=key,
         path=path,
         lookup=lookup,
-        body={"request_key": key},
+        body={
+            "request_key": key,
+            **(
+                {"fleet": True, "review_digest": args.fleet_review_digest}
+                if getattr(args, "fleet", False)
+                else {}
+            ),
+        },
         noun="model",
         action="remove",
         validate=validate,
@@ -290,6 +330,7 @@ def _submit_model_removal(
                 "model",
                 "remove",
                 selector,
+                *(["--fleet"] if getattr(args, "fleet", False) else []),
                 "--yes",
                 "--request-key",
                 key,
@@ -383,6 +424,7 @@ def _remove_model(
                 "model",
                 selector,
                 with_model=None,
+                fleet=bool(getattr(args, "fleet", False)),
                 timeout_seconds=remaining,
             ),
         )
@@ -399,7 +441,19 @@ def _remove_model(
         return existing
     if not _confirm_removal(client, "model", selector, args, with_model=None):
         return {}
-    return _submit_model_removal(client, args, factory)
+    try:
+        return _submit_model_removal(client, args, factory)
+    except ControlConflict:
+        if not getattr(args, "fleet", False):
+            raise
+        existing = _existing_cache_removal(
+            client, args, factory, noun="model", selector=selector, with_model=None
+        )
+        if existing is not None:
+            return existing
+        if not _confirm_removal(client, "model", selector, args, with_model=None):
+            return {}
+        return _submit_model_removal(client, args, factory)
 
 
 def _remove_recipe(

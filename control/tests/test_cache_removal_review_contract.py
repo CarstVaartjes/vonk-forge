@@ -9,6 +9,7 @@ from vonk_agent_protocol import (
 )
 from vonk_control import cache_removal_review as review_contract
 from vonk_control.cache_removal_review import (
+    CacheAssetDisposition,
     CacheRemovalAsset,
     CacheRemovalBlocker,
     CacheRemovalFinding,
@@ -31,7 +32,7 @@ def _content(
         expected_bytes=128,
         availability=AssetAvailability.VERIFIED,
         available_bytes=128,
-        disposition="remove",
+        disposition=CacheAssetDisposition.REMOVE,
     )
     second = CacheRemovalAsset(
         kind="model-object",
@@ -39,7 +40,7 @@ def _content(
         expected_bytes=256,
         availability=AssetAvailability.UNKNOWN,
         available_bytes=300,
-        disposition="retain-shared",
+        disposition=CacheAssetDisposition.RETAIN_SHARED,
     )
     finding = CacheRemovalFinding(
         classification="saved-reference",
@@ -94,7 +95,7 @@ def test_review_digest_binds_model_choice_and_observed_storage_bytes() -> None:
         expected_bytes=256,
         availability=AssetAvailability.UNKNOWN,
         available_bytes=400,
-        disposition="retain-shared",
+        disposition=CacheAssetDisposition.RETAIN_SHARED,
     )
     changed_storage = _content().model_copy(
         update={"assets": [_content().assets[0], damaged_asset]}
@@ -119,7 +120,7 @@ def test_review_validation_rejects_stale_digest_and_false_verified_bytes() -> No
             expected_bytes=50,
             availability=AssetAvailability.VERIFIED,
             available_bytes=49,
-            disposition="remove",
+            disposition=CacheAssetDisposition.REMOVE,
         )
 
     repaired = CacheRemovalReview.model_validate_json(canonical_message(sealed))

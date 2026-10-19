@@ -13,6 +13,7 @@ from ..categorized_errors import InvalidValue
 from ..lifecycle import State
 from ..logging import redact_text
 from ..model_cache_contract import (
+    CacheOperationKind,
     ModelCacheCancellation,
     ModelCacheOperationResponse,
     ModelCacheOperatorAction,
@@ -80,7 +81,9 @@ class OperationsMixin:
                     model_digest if isinstance(model_digest, str) else None,
                 )
             action: ModelCacheOperatorAction = (
-                "remove" if operation.kind == "remove" else "download"
+                CacheOperationKind.REMOVE
+                if operation.kind == CacheOperationKind.REMOVE
+                else CacheOperationKind.DOWNLOAD
             )
             return cache._operation_view(operation), action, selector
 
@@ -270,6 +273,7 @@ class OperationsMixin:
             artifact_set_sha256=operation.artifact_set_sha256,
             plan_digest=operation.plan_digest,
             review_digest=None if removal is None else removal.review_digest,
+            fleet=None if removal is None else removal.fleet,
             progress=serialize_json_value(progress),  # type: ignore[arg-type]
             result=result,
             last_error=operation.last_error,

@@ -5,10 +5,11 @@ from __future__ import annotations
 from datetime import datetime
 from typing import TYPE_CHECKING, cast
 
+from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import Disposition
+from vonk_agent_protocol import Disposition, InvalidRequestError, UnknownOutcomeError
 
 from .. import model_cache_states
 from ..agent_operation_facts import aware as _aware
@@ -38,6 +39,7 @@ from ..models import (
     ModelCacheSetArtifact,
     RecipeInstallation,
 )
+from ..validation_detail import validation_error_detail
 from .constants import _RETRY_BASE_SECONDS, SCHEMA_VERSION
 from .errors import _ArtifactWriterBusy
 from .persistence import (
@@ -76,6 +78,8 @@ class RemovalExecutionMixin:
         cache = cast("ModelCacheService", self)
         observed_at = now or cache._clock()
         try:
+            if not cache._advance_fleet_removal(operation_id, now=observed_at):
+                return False
             changed = cache._advance_model_removal_step(operation_id, now=observed_at)
             if changed:
                 return True
@@ -113,6 +117,14 @@ class RemovalExecutionMixin:
                 # The creation timestamp remains the durable budget anchor;
                 # failed retry recording cannot extend the request lifetime.
                 return False
+        except (InvalidRequestError, UnknownOutcomeError, OSError, ValueError) as error:
+            cache._defer_model_removal(
+                operation_id,
+                detail=validation_error_detail(error)
+                if isinstance(error, ValidationError)
+                else str(error),
+                cause=disposition(error),
+            )
         return False
 
     def _advance_model_removal_step(
@@ -133,6 +145,9 @@ class RemovalExecutionMixin:
             if isinstance(checkpoint, Residue):
                 # Damaged and not re-derivable: the row ends (kept for
                 # inspection) and unrelated removals carry on.
+                # The terminal writer uses its own short transaction. Release
+                # this read's FOR UPDATE first, or PostgreSQL skips our own row.
+                session.rollback()
                 cache._retire_removal(operation_id, checkpoint, now=now)
                 return False
             # One clock: the column (a legacy payload clock is adopted by the
@@ -376,7 +391,17 @@ class RemovalExecutionMixin:
         fence = checkpoint.removal_fence
         identities = (
             *(ArtifactIdentity("model-set", str(item)) for item in selected),
-            *(ArtifactIdentity("model-object", str(item)) for item in delete_objects),
+            *(
+                ArtifactIdentity("model-object", str(item))
+                for item in sorted(
+                    set(delete_objects)
+                    | (
+                        set()
+                        if checkpoint.fleet is None
+                        else checkpoint.fleet.removal_objects
+                    )
+                )
+            ),
         )
         for digest in delete_objects:
             external = session.scalar(

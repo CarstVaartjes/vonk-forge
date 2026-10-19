@@ -7,7 +7,11 @@ from typing import TYPE_CHECKING, cast
 
 from vonk_agent_protocol import AssetAvailability
 
-from ..cache_removal_review import AssetDisposition, CacheRemovalAsset
+from ..cache_removal_review import (
+    AssetDisposition,
+    CacheAssetDisposition,
+    CacheRemovalAsset,
+)
 from ..model_cache_ranges import range_partial_bytes
 from ..models import ModelCacheSet
 from . import constants
@@ -158,7 +162,7 @@ class RemovalScopeMixin:
                     expected_bytes=expected_bytes,
                     availability=availability,
                     available_bytes=available_bytes,
-                    disposition="remove",
+                    disposition=CacheAssetDisposition.REMOVE,
                 )
             )
 
@@ -168,7 +172,9 @@ class RemovalScopeMixin:
                 return _unknown_removal_assets(scope)
             availability, available_bytes = object_status[digest]
             disposition: AssetDisposition = (
-                "remove" if digest in delete_objects else "retain-shared"
+                CacheAssetDisposition.REMOVE
+                if digest in delete_objects
+                else CacheAssetDisposition.RETAIN_SHARED
             )
             assets.append(
                 CacheRemovalAsset(
@@ -192,7 +198,7 @@ def _unknown_removal_assets(
             kind="model-set",
             sha256=digest,
             availability=AssetAvailability.UNKNOWN,
-            disposition="remove",
+            disposition=CacheAssetDisposition.REMOVE,
         )
         for digest in scope.selected_sets
     )
@@ -201,7 +207,9 @@ def _unknown_removal_assets(
             kind="model-object",
             sha256=digest,
             availability=AssetAvailability.UNKNOWN,
-            disposition="remove" if digest in scope.delete_objects else "retain-shared",
+            disposition=CacheAssetDisposition.REMOVE
+            if digest in scope.delete_objects
+            else CacheAssetDisposition.RETAIN_SHARED,
         )
         for digest in scope.selected_objects
     )

@@ -164,6 +164,7 @@ pub struct Inventory {
     /// Bytes of the model objects no installation links or names; `None`
     /// when a plan could not be read.
     pub unused_model_bytes: Option<u64>,
+    pub model_objects: Option<Vec<vonk_agent_protocol::generated::ModelStoreObject>>,
     /// The run scopes (`runs/`, `run-metadata/`), by id; `None` when they
     /// could not be listed.
     pub runs: Option<Vec<uuid::Uuid>>,
@@ -202,6 +203,7 @@ impl Inventory {
             host_settings: self.host_settings.clone(),
             installations: self.installations.clone(),
             unused_model_bytes: self.unused_model_bytes,
+            model_objects: self.model_objects.clone(),
             runs: self.runs.clone(),
             installation_bytes: self.installation_bytes.clone(),
         }
@@ -472,6 +474,7 @@ impl<R: ProcessRunner> InventoryCollector<'_, R> {
             host_settings: host_settings(self.runner),
             installations: crate::store_retention::installation_names(self.store_path),
             unused_model_bytes: crate::store_retention::unused_model_bytes(self.store_path),
+            model_objects: crate::store_retention::model_objects(self.store_path),
             runs: crate::store_retention::run_scope_names(self.store_path),
             installation_bytes: crate::store_retention::installation_sizes(self.store_path),
         })
@@ -776,6 +779,7 @@ mod process_tests {
             host_settings: None,
             installations: None,
             unused_model_bytes: None,
+            model_objects: None,
             runs: None,
             installation_bytes: None,
             nvidia_driver_version: "590".into(),

@@ -217,11 +217,16 @@ export interface LibraryApi {
     requestKey: string,
     signal?: AbortSignal,
   ): Promise<ModelCacheOperatorResponse>;
-  modelRemovalReview(selector: string, signal?: AbortSignal): Promise<CacheRemovalReview>;
+  modelRemovalReview(
+    selector: string,
+    signal?: AbortSignal,
+    fleet?: boolean,
+  ): Promise<CacheRemovalReview>;
   removeModelCache(
     selector: string,
     requestKey: string,
     signal?: AbortSignal,
+    fleetReviewDigest?: string,
   ): Promise<ModelCacheOperatorResponse>;
   modelCacheRequest(requestKey: string, signal?: AbortSignal): Promise<ModelCacheOperatorResponse>;
   modelCacheOperation(

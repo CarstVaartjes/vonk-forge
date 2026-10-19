@@ -762,6 +762,7 @@ pub(crate) fn retention() -> vonk_agent_protocol::generated::StoreRetentionReque
             .as_secs()
             + 300,
         required_free_bytes: 0,
+        remove_model_objects: Vec::new(),
         protected_model_objects: Vec::new(),
         protected_image_addresses: Vec::new(),
     }
@@ -839,4 +840,45 @@ fn an_install_cannot_collect_without_current_controller_references() {
     .unwrap();
     assert_eq!(super::make_room(root.path(), u64::MAX, &BTreeSet::new()), 0);
     assert!(object.exists());
+}
+
+#[test]
+fn requested_model_objects_leave_without_pressure_but_shared_and_protected_bytes_stay() {
+    // Catches a pressure-only collector that acknowledges a fleet request
+    // without removing it, or an explicit request bypassing local references.
+    let root = tempfile::tempdir().unwrap();
+    let store = root.path().join("distribution/models");
+    let exclusive = file(&store.join(OBJECT), b"finished");
+    let shared = file(&store.join(OTHER), b"shared");
+    let protected = file(&store.join(THIRD), b"pinned");
+    let installation = root.path().join("installations").join(INSTALLATION);
+    fs::create_dir_all(&installation).unwrap();
+    fs::hard_link(&shared, installation.join("model")).unwrap();
+    let mut verdict = verdict(&[], None);
+    let retention = verdict.retention.as_mut().unwrap();
+    retention.remove_model_objects = vec![OBJECT.into(), OTHER.into(), THIRD.into()];
+    retention.protected_model_objects = vec![THIRD.into()];
+    let swept = swept_with(root.path(), SystemTime::now(), &verdict);
+    assert_eq!(swept.bytes, 8);
+    assert!(!exclusive.exists());
+    assert!(shared.exists() && protected.exists());
+    // The real inventory scanner confirms exact absence; replay removes no
+    // extra files and never counts protected bytes as reclaimed.
+    let objects = super::model_objects(root.path()).unwrap();
+    assert_eq!(objects.len(), 2);
+    assert_eq!(
+        swept_with(root.path(), SystemTime::now(), &verdict).bytes,
+        0
+    );
+}
+
+#[test]
+fn incomplete_object_inventory_is_unknown_instead_of_false_absence() {
+    // Catches filtering an unreadable or invalid digest path out of a scan,
+    // which would let the Controller report cleanup without exact evidence.
+    let root = tempfile::tempdir().unwrap();
+    let store = root.path().join("distribution/models");
+    file(&store.join(OBJECT), b"weights");
+    std::os::unix::fs::symlink(root.path().join("missing"), store.join(OTHER)).unwrap();
+    assert!(super::model_objects(root.path()).is_none());
 }

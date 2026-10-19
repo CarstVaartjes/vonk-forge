@@ -74,6 +74,7 @@ from vonk_agent_protocol import (
 from .agent_jobs import release_owned_reservations_in_session
 from .catalog_revision_contract import UnprojectedRevision
 from .logging import log_event
+from .model_cache_contract import CacheOperationKind
 from .models import (
     AgentOperation,
     ArtifactJob,
@@ -631,6 +632,7 @@ def operation_tokens(
     *,
     recent: bool = True,
     require_complete: bool = False,
+    include_removals: bool = True,
     deadline: float | None = None,
     superseded_applications: Collection[str] = (),
 ) -> frozenset[str]:
@@ -687,7 +689,10 @@ def operation_tokens(
             )
         ),
         select(ModelCacheOperation.payload).where(
-            live(ModelCacheOperation.state, ModelCacheOperation.updated_at)
+            live(ModelCacheOperation.state, ModelCacheOperation.updated_at),
+            ModelCacheOperation.kind.is_not(None)
+            if include_removals
+            else ModelCacheOperation.kind != CacheOperationKind.REMOVE,
         ),
         select(ArtifactJob.compiled_contract).where(
             # A job still being prepared has no lifecycle state yet.
@@ -710,6 +715,7 @@ def live_tokens(
     now: datetime,
     *,
     require_complete: bool = False,
+    include_removals: bool = True,
     deadline: float | None = None,
 ) -> frozenset[str]:
     """Operation tokens plus what every installation, run and build still names."""
@@ -723,7 +729,11 @@ def live_tokens(
     )
     found: set[str] = set(
         operation_tokens(
-            session, now, require_complete=require_complete, deadline=deadline
+            session,
+            now,
+            require_complete=require_complete,
+            deadline=deadline,
+            include_removals=include_removals,
         )
     )
     for statement in sources:

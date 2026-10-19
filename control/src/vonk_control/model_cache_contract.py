@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from enum import StrEnum
 from typing import Annotated, Literal
 
 from pydantic import (
@@ -43,10 +44,19 @@ UUID_PATTERN = (
 
 Digest = Annotated[str, Field(pattern=DIGEST_PATTERN)]
 
+
 # One named type per closed set. The contract field and every helper that
 # produces or consumes the value share the alias, so the vocabulary cannot
 # drift apart.
-ModelCacheOperationKind = Literal["download", "repair", "remove"]
+class CacheOperationKind(StrEnum):
+    DOWNLOAD = "download"
+    REPAIR = "repair"
+    REMOVE = "remove"
+
+
+ModelCacheOperationKind = Literal[
+    CacheOperationKind.DOWNLOAD, CacheOperationKind.REPAIR, CacheOperationKind.REMOVE
+]
 ModelCacheOperationStateValues = Literal[
     LifecycleState.QUEUED,
     LifecycleState.RUNNING,
@@ -65,7 +75,9 @@ ModelCacheOperatorState = Annotated[
     Literal[ModelCacheOperatorStatus.ACCEPTED, ModelCacheOperationStateValues],
     BeforeValidator(state_adopter(LifecycleSubject.MODEL_CACHE_OPERATION)),
 ]
-ModelCacheOperatorAction = Literal["download", "remove"]
+ModelCacheOperatorAction = Literal[
+    CacheOperationKind.DOWNLOAD, CacheOperationKind.REMOVE
+]
 ModelCacheOperationPhase = Literal[
     "queued",
     "downloading",
@@ -355,6 +367,9 @@ class ModelCacheRepairPayload(ModelCacheDownloadPayload):
     repair_checkpoint: ModelCacheRepairCheckpoint
 
 
+from .fleet_model_removal_contract import FleetModelRemovalCheckpoint
+
+
 class ModelCacheRemovalPayload(_ModelCacheOperationPayload):
     """Exact, restartable removal plan and its durable effect checkpoint."""
 
@@ -363,6 +378,7 @@ class ModelCacheRemovalPayload(_ModelCacheOperationPayload):
     review_digest: Digest | None
     removal_fence: str = Field(..., pattern=UUID_PATTERN)
     selected: list[Digest]
+    fleet: FleetModelRemovalCheckpoint | None = None
     scope_pending: bool = False
     scope_from_content: bool = False
     selected_objects: list[Digest]
@@ -376,6 +392,14 @@ class ModelCacheRemovalPayload(_ModelCacheOperationPayload):
 
     @model_validator(mode="after")
     def removal_checkpoint_is_consistent(self) -> ModelCacheRemovalPayload:
+        if self.fleet is not None and (
+            self.model_content_sha256 is None
+            or self.review_digest is None
+            or self.scope_pending
+        ):
+            raise ValueError(
+                "fleet removal requires its exact model, review and resolved scope"
+            )
         if self.operator_action != "remove-model":
             raise ValueError("model removal action is missing")
         if self.object_index > len(self.delete_objects):
@@ -499,7 +523,18 @@ class ModelCacheOperatorRequest(StrippedStrictModel):
 
 
 class ModelCacheRemovalRequest(ModelCacheOperatorRequest):
-    """Request key for removing the named model against current state."""
+    """Scope and exact review binding of a request-led removal."""
+
+    fleet: bool = False
+    review_digest: Digest | None = None
+
+    @model_validator(mode="after")
+    def fleet_requires_review(self) -> ModelCacheRemovalRequest:
+        if self.fleet and self.review_digest is None:
+            raise ValueError("fleet removal requires the reviewed effects digest")
+        if not self.fleet and self.review_digest is not None:
+            raise ValueError("review digest requires fleet removal scope")
+        return self
 
 
 class ModelCacheCancellationRequest(StrippedStrictModel):
@@ -510,7 +545,10 @@ class ModelCacheCancellationRequest(StrippedStrictModel):
 
 
 class ModelCacheOperatorResponse(StrippedStrictModel):
-    """CLI-shaped result without exposing an internal plan/digest workflow."""
+    """A durable model-operation receipt with its reviewed fleet effects."""
+
+    review_digest: Digest | None = None
+    fleet: FleetModelRemovalCheckpoint | None = None
 
     action: ModelCacheOperatorAction
     selector: str = Field(min_length=1, max_length=256)
@@ -670,6 +708,8 @@ def parse_model_cache_result(kind: str, value: object) -> ModelCacheOperationRes
 
 
 class ModelCacheOperationResponse(StrippedStrictModel):
+    fleet: FleetModelRemovalCheckpoint | None = None
+
     schema_version: Literal[2] = 2
     id: str = Field(pattern=UUID_PATTERN)
     request_key: str = Field(pattern=UUID_PATTERN)
