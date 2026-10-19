@@ -20,7 +20,11 @@ from ..artifact_lifecycle import ArtifactIdentity, has_pending_removal
 from ..bounded_json import require_integer
 from ..categorized_errors import InvalidValue
 from ..lifecycle import Effect, Outcome, Reported, State, Tick
-from ..model_cache_contract import ModelCacheDownloadPayload, ModelCacheDownloadResult
+from ..model_cache_contract import (
+    CacheOperationKind,
+    ModelCacheDownloadPayload,
+    ModelCacheDownloadResult,
+)
 from ..models import ModelCacheOperation, ModelCacheSet
 from .artifacts import ArtifactSetManifest, _unique_artifacts
 from .catalog_helpers import _iso
@@ -100,7 +104,7 @@ class SchedulerMixin:
             operation = session.get(ModelCacheOperation, operation_id)
             if operation is None:
                 return 0
-            removal = operation.kind == "remove"
+            removal = operation.kind == CacheOperationKind.REMOVE
         if removal:
             return int(cache._advance_model_removal(operation_id, now=cache._clock()))
         return cache.tick(requested_id=operation_id)
