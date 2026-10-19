@@ -19,10 +19,18 @@ from vonk_agent_protocol import (
     RecipeStartPayload,
     RecipeStartResult,
     RunState,
+    WaitReason,
     canonical_message,
 )
 from vonk_agent_protocol import AgentOperation as WireAgentOperation
 
+from ..admission_locking import (
+    AdmissionLockBusy,
+    AdmissionRowLock,
+    label_transaction,
+    lock_admission_rows,
+)
+from ..agent_operation_facts import aware
 from ..distributed_lifecycle import (
     DistributedLifecycleError,
 )
@@ -37,7 +45,7 @@ from ..lifecycle.evidence import (
     read_or_rebuild,
     retire_as_unknown,
 )
-from ..lifecycle.recipe_operation import RecipeOperationAdapter
+from ..lifecycle.recipe_operation import RecipeOperationAdapter, cancel_flagged
 from ..models import (
     AgentOperation,
     InstallationNode,
@@ -48,6 +56,7 @@ from ..models import (
     RunNode,
 )
 from ..offline_stops import deferred_stop_nodes
+from ..persisted_waits import schedule_wait
 from ..recipe_build_cancellation import (
     build_cancellation,
 )
@@ -83,12 +92,14 @@ from ..recipe_progress import (
 from ..stored_json import read_row_column
 from ..strict_json import read_stored_model, serialize_json_value
 from .constants import _INITIAL_OBSERVATION_GRACE_SECONDS
+from .errors import RecipeRequestInvalid
 from .interfaces import _TERMINAL_JOB_STATES
 from .observation_helpers import _PhaseGroups, _start_endpoint, record_build_evidence
 from .rank_authority import _run_observes_per_generation
 from .results import _RANK_FAILED, _node_result, _recorded_result, _validated_result
 
 if TYPE_CHECKING:
+    from ..agent_jobs import AgentJobService
     from .service import RecipeOperationService
 
 
@@ -524,6 +535,136 @@ class ProjectionMixin:
                 },
             )
         )
+        return service._advance_parent_in_session(
+            session,
+            job,
+            owner_id,
+            now,
+            node_evidence=node_evidence,
+            unproven_nodes=frozenset(unproven),
+            cleanup_queued=cleanup_queued,
+        )
+
+    def redrive_parent(self, job_id: str, queue: AgentJobService) -> bool:
+        service = typing_cast("RecipeOperationService", self)
+        now = service._clock()
+        with service._sessions() as session:
+            hint = session.execute(
+                select(AgentOperation.id, AgentOperation.node_id)
+                .where(AgentOperation.parent_job_id == job_id)
+                .order_by(AgentOperation.id)
+                .limit(1)
+            ).one_or_none()
+        if hint is None:
+            return False  # pending Stop/prebuilt owners have their own advancement
+        try:
+            with service._sessions.begin() as session:
+                label_transaction(session, "recipe-parent-redrive")
+                scopes = queue._lock_operation_scopes(
+                    session, (hint.id,), hint.node_id, nowait=True
+                )
+                if scopes is None or scopes[hint.id][0] != job_id:
+                    return False
+                locked = lock_admission_rows(
+                    session,
+                    (
+                        AdmissionRowLock(
+                            "recipe-parent-orders",
+                            AgentOperation,
+                            select(AgentOperation).where(
+                                AgentOperation.parent_job_id == job_id
+                            ),
+                        ),
+                    ),
+                )
+                children = locked["recipe-parent-orders"]
+                now = service._clock()
+                job = session.get(Job, job_id)
+                if (
+                    job is None
+                    or job.state in _TERMINAL_JOB_STATES
+                    or cancel_flagged(job)
+                ):
+                    return False
+                if job.next_action_at is not None and aware(job.next_action_at) > aware(
+                    now
+                ):
+                    return False
+                owner_id = _parent_identity(job, "owner_id")
+                if owner_id is None:
+                    raise RecipeRequestInvalid(
+                        "recipe parent has no exact accepted owner"
+                    )
+                before = (job.state, job.result, tuple(child.id for child in children))
+                if all(
+                    child.state in _TERMINAL_JOB_STATES for child in children
+                ) and not isinstance(
+                    _recorded_result(
+                        job.kind, read_row_column(job, "result"), subject=job.id
+                    ),
+                    (
+                        RecipeOperationResult,
+                        RecipeOperationProgressResult,
+                        RecipeOperationCancellationResult,
+                    ),
+                ):
+                    schedule_wait(
+                        job,
+                        now + timedelta(seconds=5),
+                        now=now,
+                        reason=WaitReason.RECEIPT_MISSING,
+                    )
+                    return False
+                service._advance_parent_in_session(session, job, owner_id, now)
+                if job.state not in _TERMINAL_JOB_STATES:
+                    schedule_wait(job, now + timedelta(seconds=5), now=now)
+                after = (
+                    job.state,
+                    job.result,
+                    tuple(
+                        session.scalars(
+                            select(AgentOperation.id)
+                            .where(AgentOperation.parent_job_id == job_id)
+                            .order_by(AgentOperation.id)
+                        )
+                    ),
+                )
+                progressed = before != after
+        except AdmissionLockBusy:
+            return False
+        if progressed:
+            queue.notify_available()
+        return progressed
+
+    def _advance_parent_in_session(
+        self,
+        session: Session,
+        job: Job,
+        owner_id: str,
+        now: datetime,
+        *,
+        node_evidence: dict[str, LifecycleNodeResult] | None = None,
+        unproven_nodes: frozenset[str] = frozenset(),
+        cleanup_queued: bool = False,
+    ) -> bool:
+        """The normal phase/terminal advancement, also used by due observation."""
+        service = typing_cast("RecipeOperationService", self)
+        if node_evidence is None:
+            recorded = _recorded_result(
+                job.kind, read_row_column(job, "result"), subject=job.id
+            )
+            node_evidence = dict(
+                (recorded.node_evidence or recorded.launch_evidence or {})
+                if isinstance(
+                    recorded,
+                    (
+                        RecipeOperationResult,
+                        RecipeOperationProgressResult,
+                        RecipeOperationCancellationResult,
+                    ),
+                )
+                else {}
+            )
         children = tuple(
             session.scalars(
                 select(AgentOperation).where(AgentOperation.parent_job_id == job.id)
@@ -539,7 +680,7 @@ class ProjectionMixin:
         recorded_for_phases = _recorded_result(
             job.kind, read_row_column(job, "result"), subject=job.id
         )
-        marker_nodes = set(unproven)
+        marker_nodes = set(unproven_nodes)
         if isinstance(
             recorded_for_phases,
             (

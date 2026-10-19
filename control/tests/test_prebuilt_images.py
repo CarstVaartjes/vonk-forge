@@ -722,7 +722,7 @@ def test_prebuilt_import_observes_cancellation_between_claim_and_io(
         assert current is not None
         request_build_cancellation(
             current,
-            actor=job.actor,
+            actor=current.actor,
             request_id=str(uuid4()),
             reason="Operator selected a newer request",
             now=NOW,

@@ -298,3 +298,94 @@ def test_owner_handler_runs_after_the_selection_connection_is_released(postgres_
         assert calls == [job.id]
     finally:
         engine.dispose()
+
+
+def test_due_recipe_parent_uses_normal_phase_advancement_after_restart(
+    tmp_path, postgres_engine, monkeypatch
+):
+    """Catches registering a parent callback that only polls its cleanup paths."""
+    from sqlalchemy import select
+    from vonk_control.agent_jobs import AgentJobService
+    from vonk_control.models import AgentOperation
+    from vonk_control.recipe_operations import RecipeOperationService
+
+    from .test_recipe_operations import (
+        NOW as RECIPE_NOW,
+    )
+    from .test_recipe_operations import (
+        _job_phases,
+        installed_recipe,
+        setup_services,
+        start_evidence,
+    )
+
+    sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
+        tmp_path, nodes=3, engine=postgres_engine
+    )
+    installed = installed_recipe(
+        service, mapping_id, build_id, nodes, request_id="redrive-install"
+    )
+    plan = service.preview_run(installed.owner_id, "redrive-phases")
+    started = service.start(
+        plan, plan_digest=plan.plan_digest, actor="admin", request_id="redrive-start"
+    )
+    with sessions() as session:
+        children = tuple(
+            session.scalars(
+                select(AgentOperation).where(AgentOperation.parent_job_id == started.id)
+            )
+        )
+        parent = session.get(Job, started.id)
+        assert parent is not None
+        expected = {
+            item["operation_id"]
+            for phase in _job_phases(parent.payload)
+            for item in phase
+        }
+        assert expected > {child.id for child in children}
+
+    # Inject loss of owner advancement after valid node evidence was durably
+    # accepted. Its one wait is committed with that unchanged waiting state.
+    def interrupted(session, job, *_args, **_kwargs):
+        schedule_wait(job, RECIPE_NOW + timedelta(seconds=5), now=RECIPE_NOW)
+        return False
+
+    monkeypatch.setattr(service, "_advance_parent_in_session", interrupted)
+    for child in children:
+        service.record_node_result(
+            started.id,
+            child.node_id,
+            succeeded=True,
+            evidence=start_evidence(child.payload),
+        )
+    now = RECIPE_NOW + timedelta(seconds=5)
+    queue = AgentJobService(sessions, clock=lambda: now)
+    reconstructed = RecipeOperationService(
+        sessions,
+        install_admission=service._install_admission,
+        run_admission=service._run_admission,
+        agent_jobs=queue,
+        clock=lambda: now,
+    )
+    backstop = DueWaitBackstop(
+        sessions,
+        [
+            WaitSource(
+                Job,
+                frozenset({WaitOwnerKind.RECIPE_OPERATION}),
+                lambda key, wait: reconstructed.redrive_parent(str(key[0]), queue),
+            )
+        ],
+        clock=lambda: now,
+    )
+    backstop.tick()
+    with sessions() as session:
+        current = set(
+            session.scalars(
+                select(AgentOperation.id).where(
+                    AgentOperation.parent_job_id == started.id
+                )
+            )
+        )
+        assert current == expected
+        assert current > {child.id for child in children}

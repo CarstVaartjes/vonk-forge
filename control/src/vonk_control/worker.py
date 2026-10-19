@@ -737,6 +737,7 @@ def assemble_production_worker(
 
     def recipe(key: RowKey, wait: WaitEvidence) -> object:
         progressed = lifecycle.redrive(str(key[0]))
+        progressed = lifecycle.redrive_parent(str(key[0]), agent_jobs) or progressed
         # A persisted recipe build may itself own a Controller prebuilt pull.
         # Its normal importer decides from the current typed build identity.
         if prebuilt_importer is not None:
