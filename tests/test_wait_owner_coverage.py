@@ -127,10 +127,11 @@ def test_every_persisted_wait_owner_is_redriven_by_the_worker() -> None:
 
     adapters = {
         node.name
-        for path in (SOURCE / "lifecycle").glob("*.py")
+        for path in SOURCE.rglob("*.py")
         for node in ast.walk(ast.parse(path.read_text()))
         if isinstance(node, ast.ClassDef)
         and node.name.endswith("Adapter")
+        and not any("Protocol" in ast.unparse(base) for base in node.bases)
         and any(
             isinstance(member, ast.FunctionDef) and member.name == "adopt"
             for member in node.body

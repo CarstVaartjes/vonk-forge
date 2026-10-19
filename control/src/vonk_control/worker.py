@@ -778,9 +778,7 @@ def assemble_production_worker(
         WaitOwnerKind.PREBUILT_IMAGE: prebuilt,
         WaitOwnerKind.JOB: lambda key, wait: worker._run_generic(str(key[0])),
         WaitOwnerKind.MODEL_CACHE: cache,
-        WaitOwnerKind.RECIPE_OPERATION: lambda key, wait: lifecycle.redrive(
-            str(key[0])
-        ),
+        WaitOwnerKind.RECIPE_OPERATION: recipe,
         WaitOwnerKind.RECIPE_UPDATE_BATCH: images,
         WaitOwnerKind.RUN_SWITCH: lambda key, wait: run_switch_operations.redrive(
             str(key[0])
