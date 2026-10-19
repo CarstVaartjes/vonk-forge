@@ -1757,6 +1757,7 @@ def _rollout(
                     else now,
                 )
             )
+            session.flush()  # Certificates reference the persisted node on PostgreSQL.
             session.add(
                 AgentCertificate(
                     serial=serial,
@@ -2164,3 +2165,99 @@ def test_invalid_upgrade_intent_has_no_targets_and_valid_intent_is_accepted() ->
         _request_intent({"all": "yes", "selectors": None}, None)
     intent = _request_intent({"all": True, "selectors": None}, None)
     assert intent.all is True and intent.selectors is None
+
+
+def test_upgrade_identity_warning_names_its_order_and_clears_on_confirmation(
+    tmp_path,
+    postgres_engine,
+    monkeypatch,
+) -> None:
+    from vonk_agent_protocol import (
+        AgentResult,
+        AgentResultState,
+        LifecycleState,
+        OutcomeKind,
+        OutcomeUnknown,
+        WaitReason,
+    )
+    from vonk_control.evidence_repeats import note_repeat
+    from vonk_control.models import AgentOperation, EvidenceRepeat
+
+    from .agent_fences import fenced_operation
+    from .test_evidence_repeats import LIMIT, _repeating
+
+    # Exercise the real PostgreSQL producer/store/projection/confirmation seam.
+    monkeypatch.setattr(f"{__name__}.create_engine", lambda *_: postgres_engine)
+    clock = Clock()
+    clock.value += timedelta(microseconds=123456)
+    sessions, operations, _upgrades, _job = _rollout(
+        tmp_path, "identity-warning", clock=clock
+    )
+    claim = _claim_upgrade(operations, NODE_A, "serial-a", OLD_IDENTITY)
+    operations.record_result(
+        AgentResult(
+            fence=claim.fence,
+            state=AgentResultState.OBSERVING,
+            result=OutcomeUnknown(
+                kind=OutcomeKind.UNKNOWN,
+                wait_reason=WaitReason.UPGRADE_AWAITING_IDENTITY,
+                reason="Installed; awaiting authenticated identity",
+            ),
+        )
+    )
+    operation = fenced_operation(sessions, claim)
+    # A bounded handoff is visible on its first occurrence, without waiting
+    # for an aggregate failure threshold.
+    assert operation.id in _repeating(sessions, NODE_A, clock())[0]
+    # Retained aggregates from the deployed code must resolve against current
+    # operations; the repeating count is never the authority on an open wait.
+    with sessions.begin() as session:
+        for _ in range(LIMIT):
+            note_repeat(
+                session,
+                operation.kind,
+                NODE_A,
+                WaitReason.UPGRADE_AWAITING_IDENTITY,
+                now=clock(),
+            )
+    with sessions() as session:
+        stored = session.get(AgentOperation, operation.id)
+        assert stored is not None and stored.recovery_deadline is not None
+        deadline = (
+            stored.recovery_deadline.replace(tzinfo=clock().tzinfo)
+            .isoformat()
+            .replace("+00:00", "Z")
+        )
+    [warning] = _repeating(sessions, NODE_A, clock())
+    assert operation.id in warning
+    assert PACKAGE_MODEL.target_build_digest in warning
+    assert PACKAGE_MODEL.target_binary_digest in warning
+    assert deadline in warning
+
+    # Mismatched identity leaves the bounded wait visible.
+    operations.claim(NODE_A, "serial-a", runtime_identity=OLD_IDENTITY)
+    assert operation.id in _repeating(sessions, NODE_A, clock())[0]
+    operations.claim(NODE_A, "serial-a", runtime_identity=NEW_IDENTITY)
+    assert _repeating(sessions, NODE_A, clock()) == []
+    with sessions() as session:
+        stored = session.get(AgentOperation, operation.id)
+        assert stored is not None and stored.state == LifecycleState.SUCCEEDED
+        assert (
+            session.query(EvidenceRepeat)
+            .filter_by(node_id=NODE_A, subject=operation.kind)
+            .count()
+            == 0
+        )
+
+    # A retained aggregate whose operation already resolved is not an open wait,
+    # even if its old ledger entry was never cleared by the deployed version.
+    with sessions.begin() as session:
+        for _ in range(LIMIT):
+            note_repeat(
+                session,
+                operation.kind,
+                NODE_A,
+                WaitReason.UPGRADE_AWAITING_IDENTITY,
+                now=clock(),
+            )
+    assert _repeating(sessions, NODE_A, clock()) == []
