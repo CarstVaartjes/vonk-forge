@@ -12,7 +12,8 @@ x-hermes-service: &hermes-service
   security_opt:
     - no-new-privileges:true
   cap_drop: [ALL]
-  cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETGID, SETUID]
+  # Root s6 supervision must signal services running as the Hermes UID.
+  cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETGID, SETUID, KILL]
   cpus: 4
   mem_limit: 8g
   mem_reservation: 4g

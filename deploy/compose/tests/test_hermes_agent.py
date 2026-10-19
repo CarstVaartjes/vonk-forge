@@ -4,6 +4,7 @@ import json
 import os
 import subprocess
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -21,7 +22,7 @@ def _environment() -> dict[str, str]:
     return environment
 
 
-def _rendered() -> dict[str, object]:
+def _rendered() -> dict[str, Any]:
     result = subprocess.run(
         [
             "docker",
@@ -76,6 +77,7 @@ def test_compose_hermes_is_unpublished_bounded_and_segmented() -> None:
         "FOWNER",
         "SETGID",
         "SETUID",
+        "KILL",
     ]
     assert not service.get("ports")
     assert not service.get("devices")
