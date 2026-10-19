@@ -267,6 +267,8 @@ CASES: list[
             "installation_bytes": _INVENTORY
             | {"installation_bytes": [{"installation_id": "x", "bytes": 1}]},
             "unused_model_bytes": _INVENTORY | {"unused_model_bytes": -1},
+            "model_objects": _INVENTORY
+            | {"model_objects": [{"sha256": "invalid", "bytes": 1}]},
         },
     ),
     (

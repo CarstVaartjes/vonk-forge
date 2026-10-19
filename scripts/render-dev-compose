@@ -118,6 +118,25 @@ def _compose_document(path: Path, seen: set[Path] | None = None) -> dict[str, ob
     if not isinstance(document, dict):
         raise TypeError(f"Compose document is not a mapping: {path}")
 
+    # File configs work in a source checkout. A self-contained bundle embeds
+    # this small standalone script in argv instead: Compose cannot inject an
+    # inline config into a read-only root filesystem. Preserve literal dollars
+    # against Compose interpolation in the rendered command.
+    configs = document.get("configs", {})
+    janitor = configs.get("image-janitor-script")
+    if janitor is not None:
+        source = path.parent / janitor["file"]
+        service = document["services"]["image-janitor"]
+        service["command"] = [
+            *service["command"][:-1],
+            "-c",
+            source.read_text(encoding="utf-8").replace("$", "$$"),
+        ]
+        del service["configs"]
+        del configs["image-janitor-script"]
+        if not configs:
+            document.pop("configs", None)
+
     merged: dict[str, object] = {}
     includes = document.pop("include", [])
     if not isinstance(includes, list):
@@ -270,6 +289,8 @@ def render(
             TOKENS["litellm"]: litellm_image,
         },
     )
+    if not isinstance(document, dict):
+        raise TypeError("Rendered Compose document must be a mapping")
     _resolve_runtime_images(document, channel)
     if channel != "pinned":
         _resolve_extension_images(document, channel)

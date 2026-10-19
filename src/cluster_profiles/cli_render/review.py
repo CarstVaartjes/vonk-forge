@@ -188,6 +188,20 @@ def _cache_removal_review(payload: Mapping[str, object]) -> None:
     _field("Review digest", payload.get("review_digest"))
     _field("Observed", _time(payload.get("observed_at")))
 
+    fleet = payload.get("fleet")
+    if isinstance(fleet, Mapping):
+        _field("NAS removal", fleet.get("nas_remove"))
+        _field("NAS bytes freed", _bytes(payload.get("nas_reclaimable_bytes")))
+        _field("NAS reason", fleet.get("nas_detail"))
+        for target in _records(fleet, "targets"):
+            _field("Spark", target.get("node_id"))
+            _field("  Observation available", target.get("observation_available"))
+            _field("  Model bytes freed", _bytes(target.get("reclaimable_bytes")))
+            for item in _records(target, "installations") + _records(target, "objects"):
+                _field("  Effect", item.get("disposition"))
+                _field("  Reason", item.get("detail"))
+                _field("  Installation", item.get("installation_id"))
+                _field("  Object", item.get("object"))
     assets = _records(payload, "assets")
     if not assets:
         print("Assets: none")

@@ -581,17 +581,19 @@ class UpgradeCarryLifecycle(SparkLifecycle):
             if role not in COMPOSE_IMAGE_ROLES
         }
 
-    def _local_controller_up_command(self) -> list[str]:
-        # The baseline installer supplies its own complete Compose graph. Retired
-        # services may not be dependencies of any service in the current lane.
-        return [
-            *super()._local_controller_up_command(),
-            *sorted(self._retired_services()),
-        ]
-
     def _expected_controller_services(self) -> set[str]:
-        # The baseline runs its retired services too; the candidate stays exact.
-        return super()._expected_controller_services() | self._retired_services()
+        services = super()._expected_controller_services()
+        if self._current_release() is not self.candidate:
+            # An added candidate service is absent from the published baseline.
+            # Consume that installed schema-2 bundle, not the candidate roster.
+            assert self.bundle is not None
+            document = require_object(
+                yaml.safe_load((self.bundle / "docker-compose.yaml").read_text()),
+                "installed baseline Compose document",
+            )
+            declared = require_object(document.get("services"), "baseline services")
+            services.intersection_update(declared)
+        return services | self._retired_services()
 
     def _acceptance_caddyfile(self) -> str | None:
         return self._current_release().caddyfile

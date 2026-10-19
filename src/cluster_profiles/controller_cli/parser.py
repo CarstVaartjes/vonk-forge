@@ -225,6 +225,11 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
     _selector(model_remove, "model", help="Exact model selector or friendly name")
     _action_flags(model_remove, followable=True)
     model_remove.add_argument(
+        "--fleet",
+        action="store_true",
+        help="Remove unused installations and model objects on the NAS and every Spark",
+    )
+    model_remove.add_argument(
         "--review",
         action="store_true",
         help="Show the Controller-owned removal impact without submitting it",

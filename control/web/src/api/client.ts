@@ -801,10 +801,14 @@ export class ApiClient implements ControlApi {
     );
   }
 
-  async modelRemovalReview(selector: string, signal?: AbortSignal): Promise<CacheRemovalReview> {
+  async modelRemovalReview(
+    selector: string,
+    signal?: AbortSignal,
+    fleet?: boolean,
+  ): Promise<CacheRemovalReview> {
     return resultData(
       await this.generated.GET("/api/model/{selector}/remove-review", {
-        params: { path: { selector } },
+        params: { path: { selector }, query: fleet ? { fleet: true } : {} },
         signal,
       }),
     );
@@ -814,12 +818,16 @@ export class ApiClient implements ControlApi {
     selector: string,
     requestKey: string,
     signal?: AbortSignal,
+    fleetReviewDigest?: string,
   ): Promise<ModelCacheOperatorResponse> {
     // Removal applies to what the selector resolves to when the Controller accepts it.
     return resultData(
       await this.generated.POST("/api/model/{selector}/remove", {
         params: { path: { selector } },
-        body: { request_key: requestKey },
+        body: {
+          request_key: requestKey,
+          ...(fleetReviewDigest ? { fleet: true, review_digest: fleetReviewDigest } : {}),
+        },
         signal,
       }),
     );

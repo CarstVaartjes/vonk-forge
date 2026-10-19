@@ -301,7 +301,7 @@ issued effects before ownership passes to the replacement.
    before acquisition; if new information requires an earlier lock, roll back
    and replan. Include implicit foreign-key, unique-index, and upsert locks in
    the audit; ordering explicit `FOR UPDATE` calls alone is insufficient.
-   The shared row order places Fleet profile applications before Jobs (matching
+   The shared row order places Fleet profile applications and model-cache operation owners before Jobs (matching
    acceptance ownership), and native Agent operation attempts after their Agent
    operations. A declared multi-Job set orders parent and child together by
    immutable primary key, rather than acquiring a parent first by convention.

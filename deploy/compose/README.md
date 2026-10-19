@@ -168,3 +168,41 @@ and atomic replacement. The startup window is an observation policy, not a
 measured guarantee of storage throughput. Local shell tests prove timeout and
 execution after staging; hosted Compose tests separately prove Docker restart
 and actual PostgreSQL readiness.
+
+## NAS daemon platform-image retention
+
+`image-janitor` is an independent, stdlib-only Python service using the reviewed
+slim Python image. It alone mounts the NAS Docker socket; neither Controller
+service has socket access. The renderer embeds its small script in the Python command of the signed NAS
+bundle, with no Controller or worker package in the janitor. This keeps the
+root filesystem read-only without Compose inline-config injection.
+
+The hourly scan considers images carrying the exact Vonk Forge source label or
+an exact API, worker, LiteLLM or Hermes repository identity (including repository
+digests after a tag moves). All third-party images are excluded, including old
+PostgreSQL, Caddy and Tailscale pins. A container reference from any project,
+running or stopped, protects an image and resets its unused grace. First-seen
+unused timestamps live in `image-janitor-state`, published atomically with fsync;
+restarting the service preserves them. Build age and disk pressure do not select
+an image for deletion. The first scan starts the 24-hour grace; it does not
+immediately remove old builds.
+
+Deletion addresses the exact image ID, with `force=false` and parent pruning
+disabled. Docker remains the final guard against a concurrent container create.
+A refusal (including multiple repository tags) retains the image, logs its cause
+and next hourly attempt, then re-plans from fresh inventory. The service never
+removes containers or volumes. Logs include every exclusion/grace refusal and
+Docker's exact deletion receipts. Reported image size includes shared layers
+and is not a measurement of freed disk space. Failed scans leave health stale;
+the healthcheck reports unhealthy after two hours without a successful scan.
+
+**Deployment requires rerunning the accepted NAS installer in the existing bundle
+directory**, preserving `.env`, secrets and volumes, then redeploying Compose.
+Pulling newer API/worker images alone cannot install this service or update its
+embedded script. Its named state volume must survive upgrades.
+
+This daemon store is separate from recipe availability: recipe preparation
+copies registry bytes with skopeo into the Controller's `image-cache/oci` layout,
+and the existing unused-storage and image-store collectors expire receipts and
+unreferenced OCI blobs there. They do not operate the NAS Docker daemon. The
+registry container's `registry-data` volume is another separate store.

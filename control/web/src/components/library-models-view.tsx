@@ -408,6 +408,15 @@ function ModelRevisionsRow({
           modelContentSha256={model.model.content_sha256}
           state={model.local.controller}
         />
+        <LibraryCacheAction
+          fleetOnly
+          key={`${key}-fleet`}
+          api={api}
+          onPrepared={onPrepared}
+          selector={`${model.model.publisher}/${model.model.slug}`}
+          modelContentSha256={model.model.content_sha256}
+          state={model.local.controller}
+        />
         {model.local.controller === "preparing" && preparation && (
           <span role="status">{preparation.phase ?? preparation.state}</span>
         )}

@@ -96,6 +96,13 @@ class HostSettings(WireModel):
     gpu_clock_cap_active: bool | None = None
 
 
+class ModelStoreObject(WireModel):
+    """Measured object identity in the Spark model store; absence needs a full scan."""
+
+    sha256: Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
+    bytes: int = Field(ge=0, le=16 * 1024**4)
+
+
 class InventoryRequest(OptionalEvidenceModel, WireModel):
     """Canonical Controller body and Rust agent inventory wire shape.
 
@@ -127,6 +134,9 @@ class InventoryRequest(OptionalEvidenceModel, WireModel):
         EvidenceGroup(
             AgentEvidenceCode.INVENTORY_UNUSED_MODEL_BYTES_DROPPED,
             (("unused_model_bytes",),),
+        ),
+        EvidenceGroup(
+            AgentEvidenceCode.INVENTORY_MODEL_OBJECTS_DROPPED, (("model_objects",),)
         ),
         EvidenceGroup(
             AgentEvidenceCode.INVENTORY_FABRIC_DROPPED,
@@ -180,6 +190,7 @@ class InventoryRequest(OptionalEvidenceModel, WireModel):
     # Spark frees itself, least recently used first, before a claim writes.
     # None: the agent predates this evidence or could not read every plan.
     unused_model_bytes: int | None = Field(default=None, ge=0, le=16 * 1024**4)
+    model_objects: list[ModelStoreObject] | None = None
     nvidia_driver_version: RuntimeVersion
     container_runtime_version: RuntimeVersion
 
@@ -187,6 +198,17 @@ class InventoryRequest(OptionalEvidenceModel, WireModel):
     @classmethod
     def parse_observed_at(cls, value: object) -> object:
         return strict_json_datetime(value)
+
+    @field_validator("model_objects")
+    @classmethod
+    def unique_model_objects(
+        cls, objects: list[ModelStoreObject] | None
+    ) -> list[ModelStoreObject] | None:
+        if objects is not None and len(objects) != len(
+            {item.sha256 for item in objects}
+        ):
+            raise ValueError("model-store observation repeats an object identity")
+        return objects
 
     @model_validator(mode="after")
     def internally_consistent(self) -> InventoryRequest:
@@ -231,6 +253,10 @@ class StoreRetentionRequest(WireModel):
     required_free_bytes: int = Field(ge=0, le=16 * 1024**4)
     protected_model_objects: list[Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]]
     protected_image_addresses: list[Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]]
+
+    remove_model_objects: list[Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]] = (
+        Field(default_factory=list)
+    )
 
     @model_validator(mode="after")
     def bounded_reference_scan(self) -> StoreRetentionRequest:

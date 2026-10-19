@@ -47,6 +47,7 @@ DEPENDENCY_FETCH = (
 DEPENDENCY_FETCH_TIMEOUT_SECONDS = 16 * 60
 
 DEFAULT_SERVICES = {
+    "image-janitor",
     "caddy",
     "control-api",
     "control-worker",

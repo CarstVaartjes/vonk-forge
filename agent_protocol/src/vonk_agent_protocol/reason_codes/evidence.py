@@ -31,6 +31,7 @@ class AgentEvidenceCode(WireEnum):
     INVENTORY_UNUSED_MODEL_BYTES_DROPPED = (
         "agent_evidence.inventory_unused_model_bytes_dropped"
     )
+    INVENTORY_MODEL_OBJECTS_DROPPED = "agent_evidence.inventory_model_objects_dropped"
     INVENTORY_NAS_ROUTE_DROPPED = "agent_evidence.inventory_nas_route_dropped"
     INVENTORY_NETWORK_DROPPED = "agent_evidence.inventory_network_dropped"
     INVENTORY_NETWORK_INTERFACE_DROPPED = (
