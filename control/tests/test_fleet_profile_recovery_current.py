@@ -450,9 +450,7 @@ def test_pending_admission_is_not_cancelled_by_parked_child_observer(
         progress_data = progress.model_dump(mode="json")
         progress_data["admission_pending"] = True
         progress_data["admission_attempt"] = 1
-        progress_data["admission_retry_at"] = (
-            lifecycle._clock() + timedelta(hours=1)
-        ).isoformat()
+        row.next_action_at = lifecycle._clock() + timedelta(hours=1)
         progress_data["workload_intent_ordinal"] = None
         row.progress = FleetProfileApplicationProgress.model_validate_json(
             canonical_message(progress_data), strict=True
@@ -493,7 +491,7 @@ def test_exhausted_profile_retry_keeps_an_automatic_due_time(
         progress = FleetProfileApplicationProgress.model_validate_json(
             canonical_message(row.progress), strict=True
         ).model_dump(mode="json")
-        progress["retry_due_at"] = due.isoformat()
+        row.next_action_at = due
         row.progress = FleetProfileApplicationProgress.model_validate_json(
             canonical_message(progress), strict=True
         ).model_dump(mode="json")
@@ -1276,7 +1274,7 @@ def test_a_legacy_failed_retry_parent_is_relabelled_superseded(
         row.state = "failed"
         row.status_reason = f"Automatically reconciled by profile retry {successor}"
         progress = dict(row.progress)
-        progress["retry_due_at"] = None
+        row.next_action_at = None
         row.progress = progress
 
     assert service._heal_legacy_applications(_lifecycle._clock())
@@ -1381,9 +1379,9 @@ def test_a_child_start_reobserves_stale_effects_without_new_intent(
     observed = service.application(application.id)
     assert observed.cancellation is None
     assert observed.current_operation_id is None
-    assert observed.progress.retry_due_at is not None
+    assert observed.next_attempt_at is not None
     monkeypatch.setattr(service, "_start_step", real_start)
-    due = observed.progress.retry_due_at
+    due = observed.next_attempt_at
     service._clock = lambda: due
     assert service.tick()
     resumed = service.application(application.id)
@@ -1535,7 +1533,7 @@ def test_missing_selection_keeps_waiting_and_admits_a_fresh_load(
         service.tick()
 
     waiting = service.application(first.id)
-    assert waiting.progress.retry_due_at is not None
+    assert waiting.next_attempt_at is not None
     assert waiting.progress.cancellation is None
     later = lifecycle._clock() + timedelta(hours=2)
     service._clock = lambda: later
@@ -1545,7 +1543,7 @@ def test_missing_selection_keeps_waiting_and_admits_a_fresh_load(
     still = service.application(first.id)
     assert still.state != LifecycleState.CANCELLED
     assert still.progress.cancellation is None
-    assert still.progress.retry_due_at is not None
+    assert still.next_attempt_at is not None
     fresh = service.apply(still.profile_id, request_key=_uuid(19301), actor="admin")
     assert fresh.id != still.id
 
@@ -1571,7 +1569,7 @@ def test_retry_unknown_reobserves_and_releases_its_episode(
     _expire_backoff(service, lifecycle)
     assert service.tick()
     waiting = service.application(first.id)
-    assert waiting.progress.retry_due_at is not None
+    assert waiting.next_attempt_at is not None
     assert waiting.progress.cancellation is None
     later = lifecycle._clock() + timedelta(hours=2)
     service._clock = lambda: later
@@ -1581,7 +1579,7 @@ def test_retry_unknown_reobserves_and_releases_its_episode(
     still = service.application(first.id)
     assert still.state != LifecycleState.CANCELLED
     assert still.progress.cancellation is None
-    assert still.progress.retry_due_at is not None
+    assert still.next_attempt_at is not None
     monkeypatch.setattr(service, "retry", real_retry)
     fresh = service.apply(still.profile_id, request_key=_uuid(19302), actor="admin")
     assert fresh.id != still.id
@@ -1739,10 +1737,10 @@ def test_child_observation_recovers_without_exception_taxonomy(
     assert world.service.tick()
     waiting = world.service.application(world.id)
     assert waiting.cancellation is None
-    assert waiting.progress.retry_due_at is not None
+    assert waiting.next_attempt_at is not None
     assert world.child_id() == child_id
     monkeypatch.setattr(world.service, "_start_step", real_start)
-    world.now[0] = waiting.progress.retry_due_at
+    world.now[0] = waiting.next_attempt_at
     assert world.service.tick()
     assert world.child_id() == child_id
     fresh = world.service.apply(

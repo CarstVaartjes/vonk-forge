@@ -41,6 +41,7 @@ from ..lifecycle.evidence import BookkeepingReason, Residue, retire_as_unknown
 from ..models import FleetProfileApplication, Job
 from ..operation_blockers import MAX_BLOCKERS, bound_blockers, make_blocker
 from ..operation_progress import project_progress
+from ..persisted_waits import read_wait
 from ..progress_stall import WAITING_STATES, is_stalled, stalled_blocker
 from ..run_switch_contract import RunSwitchStopResult
 from ..run_switch_operations import RunSwitchOperationService
@@ -219,6 +220,7 @@ class FleetProfileService:
             progress = _progress_from_receipt(row)
             detail = "Stored application state is inconsistent; effect unknown"
             return FleetProfileApplicationView(
+                wait=read_wait(row),
                 id=row.id,
                 request_key=row.request_key,
                 profile_id=row.profile_id,
@@ -264,10 +266,10 @@ class FleetProfileService:
             progress = outer_progress or _progress_from_receipt(row)
             progress.total_steps = total
             progress.current_label = "Reconciling exact retained cleanup journal"
-            progress.retry_due_at = observed.next_attempt_at
             progress.blockers = blockers
             state = _operation_state(row.state, default=LifecycleState.RUNNING)
             return FleetProfileApplicationView(
+                wait=read_wait(row),
                 id=row.id,
                 request_key=row.request_key,
                 profile_id=row.profile_id,
@@ -328,6 +330,7 @@ class FleetProfileService:
                 update={"effects": self._effect_progress(session, row, plan, progress)}
             )
         return FleetProfileApplicationView(
+            wait=read_wait(row),
             id=row.id,
             request_key=row.request_key,
             profile_id=row.profile_id,

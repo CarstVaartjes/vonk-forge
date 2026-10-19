@@ -71,6 +71,7 @@ class ActivityMixin:
             child.state in {"failed", "cancelled"} for child in view.children
         )
         return OperationItem(
+            wait=view.wait,
             id=view.id,
             owner=owner,
             kind=UPDATE_KIND,

@@ -24,6 +24,7 @@ from ..models import (
     RecipeRun,
 )
 from ..operation_blockers import OperationBlocker, bound_blockers
+from ..persisted_waits import schedule_wait
 from ..recipe_operations import (
     RecipeOperationView,
     RecipeRequestInvalid,
@@ -423,8 +424,8 @@ class EndingsMixin:
             )
             return
         _ADAPTER.retry(job, progress, reason, now)
-        if progress.observation_due_at is not None:
-            progress.observation_due_at = min(progress.observation_due_at, deadline)
+        if job.next_action_at is not None:
+            schedule_wait(job, min(job.next_action_at, deadline))
         job.result = _persisted_result(progress)
         job.updated_at = now
 

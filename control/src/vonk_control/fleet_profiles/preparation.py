@@ -461,8 +461,6 @@ class FleetProfileService:
             progress,
             [exhausted, *(item for item in blockers if item is not exhausted)],
             admission_pending=False,
-            admission_retry_at=None,
-            retry_due_at=None,
         ).model_dump(mode="json")
         self._lifecycle.fail(
             row, exhausted.detail, _aware(self._clock()), session=session

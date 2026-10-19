@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 from collections.abc import Mapping
 from datetime import datetime
 from typing import (
@@ -13,15 +12,12 @@ from pydantic import BaseModel, TypeAdapter, ValidationError
 from vonk_agent_protocol import (
     AgentFailureResult,
     Disposition,
-    FailureStage,
     LifecycleState,
     OperationProgress,
-    RunSwitchCode,
     WaitReason,
     canonical_message,
 )
 
-from .. import job_states
 from ..bounded_json import require_mapping
 from ..distribution_assignment import NodeDistributionAssignment
 from ..failure_classification import disposition, error_detail, is_security_failure
@@ -32,12 +28,10 @@ from ..models import (
     Job,
 )
 from ..operation_blockers import (
-    PHASE_RETRY_CODE,
-    BlockingOperation,
     OperationBlocker,
-    make_blocker,
 )
 from ..operation_progress import sample_progress
+from ..persisted_waits import read_wait
 from ..recipe_lifecycle_contract import RecipeLifecycleResult
 from ..recipe_operations import (
     RecipeOperationView,
@@ -133,100 +127,11 @@ def _read_progress(value: object) -> RunSwitchOperationResult:
     return result if result is not None else RunSwitchOperationResult()
 
 
-_WAIT_CODE = re.compile(
-    r"^(run-switch\.[a-z0-9-]+|[a-z][a-z0-9_]*\.[a-z0-9_.-]+)(?=[:;,]|$)"
-)
-
-
-_WAIT_PHRASES = (
-    ("Waiting for a target Spark", RunSwitchCode.TARGET_NOT_ACTIVE),
-    ("Runtime image preparation", RunSwitchCode.RUNTIME_IMAGE_PREPARING),
-    ("Waiting for exact run and route", RunSwitchCode.FINAL_VERIFICATION),
-    ("Lifecycle effect is uncertain", RunSwitchCode.EFFECT_UNCERTAIN),
-)
-
-
-def _wait_code(reason: str, fallback: str) -> str:
-    text = reason.strip()
-    match = _WAIT_CODE.match(text)
-    if match:
-        return match.group(1)
-    return next(
-        (code for phrase, code in _WAIT_PHRASES if text.startswith(phrase)), fallback
-    )
-
-
 def _wait_blockers(
     job: Job, progress: RunSwitchOperationResult
 ) -> list[OperationBlocker]:
-    """The reasons a queued, waiting or retrying operation is not moving."""
-
-    reason = job.status_reason or ""
-    nodes = job.targets if isinstance(job.targets, list) else []
-    if job.state in job_states.words(
-        LifecycleState.OBSERVING, LifecycleState.NEEDS_OPERATOR
-    ):
-        return [
-            make_blocker(
-                _wait_code(reason, RunSwitchCode.WAITING),
-                reason or "waiting for the next check",
-                node_ids=nodes,
-            )
-        ]
-    if (
-        job.state == LifecycleState.RUNNING
-        and progress.child_operation_id is not None
-        and progress.retry_reason == RunSwitchCode.EFFECT_UNCERTAIN
-        and progress.observation_due_at is not None
-    ):
-        return [
-            make_blocker(
-                RunSwitchCode.EFFECT_UNCERTAIN,
-                reason,
-                node_ids=nodes,
-            ).model_copy(
-                update={
-                    "operation": BlockingOperation(
-                        id=progress.child_operation_id,
-                        kind=FailureStage.ARTIFACT_DISTRIBUTION,
-                    )
-                }
-            )
-        ]
-    retry_reason = progress.retry_reason
-    if (
-        job.state == LifecycleState.RUNNING.value
-        and isinstance(retry_reason, str)
-        and retry_reason
-        and progress.observation_due_at is not None
-    ):
-        # A phase that will be tried again is waiting, not failed.  The retry
-        # names its own cause: the underlying typed code first, then the
-        # detail the phase reported (never just a generic busy marker).
-        cause = reason.split("; admission retry", 1)[0].strip()
-        return [
-            make_blocker(
-                PHASE_RETRY_CODE,
-                cause
-                if cause.startswith(retry_reason)
-                else f"{retry_reason}: {cause}"
-                if cause
-                else retry_reason,
-                node_ids=nodes,
-            )
-        ]
-    if job.state == LifecycleState.RUNNING.value and reason.startswith(
-        "Start result uncertain"
-    ):
-        return [
-            make_blocker(
-                RunSwitchCode.START_OBSERVATION,
-                reason,
-                severity="info",
-                node_ids=nodes,
-            )
-        ]
-    return []
+    wait = read_wait(job)
+    return wait.blockers if wait else []
 
 
 def _persisted_result(value: RunSwitchOperationResult) -> Any:

@@ -19,6 +19,7 @@ from ..model_cache_contract import (
 )
 from ..models import CatalogDocumentRevision, ModelCacheOperation, ModelCacheSet
 from ..operation_contract import AvailabilityOperationFailure
+from ..persisted_waits import read_wait
 from ..strict_json import serialize_json_value
 from .catalog_helpers import _datetime, _iso, _parse_iso
 from .constants import SCHEMA_VERSION
@@ -216,7 +217,14 @@ class OperationsMixin:
                 )
         removal = stored if isinstance(stored, ModelCacheRemovalPayload) else None
         waiting = operation.state in model_cache_states.WAITING_OR_FAILED
-        blockers = tuple(stored.blockers) if stored is not None and waiting else ()
+        wait = read_wait(operation)
+        blockers = (
+            tuple(wait.blockers)
+            if wait
+            else tuple(stored.blockers)
+            if stored is not None and waiting
+            else ()
+        )
         # The one retry clock is the column; a row written before the core still
         # carries it in the payload until its next transition.
         next_attempt = (
@@ -225,6 +233,7 @@ class OperationsMixin:
             else None
         )
         view = CacheOperationView(
+            wait=read_wait(operation),
             id=operation.id,
             request_key=operation.request_key,
             kind=operation.kind,

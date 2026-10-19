@@ -36,11 +36,13 @@ from typing import Any
 from vonk_agent_protocol import (
     Disposition,
     RecipeUpdateCode,
+    WaitOwnerKind,
 )
 
 from .. import job_states
 from ..agent_operation_facts import SUPERSEDED_CANCELLATION_SECONDS, aware
 from ..models import Job
+from ..persisted_waits import initialize_wait, lifecycle_wait, wait_due
 from ..recipe_update_contract import RecipeUpdateChild, RecipeUpdateDocument
 from .adapter import Dispatch
 from .composite import aggregate
@@ -128,15 +130,11 @@ class RecipeUpdateBatchAdapter:
 
         now = aware(now)
         stored = job.state
-        due: datetime | None = None
+        due: datetime | None = wait_due(job)
         lease: datetime | None = None
         fence: str | None = None
         if document is not None:
-            due = (
-                None
-                if document.next_attempt_at is None
-                else aware(document.next_attempt_at)
-            )
+            due = wait_due(job)
             if document.claim_until is not None and aware(document.claim_until) > now:
                 lease = aware(document.claim_until)
                 fence = document.claim_owner
@@ -256,6 +254,18 @@ class RecipeUpdateBatchAdapter:
             state = visible
         else:
             state = _STORED[after.state]
+        lifecycle_wait(
+            job,
+            identity=job.id,
+            kind=WaitOwnerKind.RECIPE_UPDATE_BATCH,
+            state=after.state,
+            now=now,
+            due=after.next_action_at,
+            detail=after.reason,
+            deadline=after.recovery_deadline,
+            cancelling=after.cancel_requested,
+            lease_deadline=after.lease_deadline,
+        )
         job.state = state
         if reason is not KEEP:
             job.status_reason = None if reason is None else reason[:_MAX_REASON]
@@ -421,7 +431,12 @@ class RecipeUpdateBatchAdapter:
     def new_batch(*, allowed: bool, **fields: Any) -> Job:
         """A new batch: ``queued``, or ``succeeded`` when it has nothing to update."""
 
-        return Job(state="queued" if allowed else "succeeded", **fields)
+        return initialize_wait(
+            Job(
+                state=State.QUEUED.value if allowed else State.SUCCEEDED.value, **fields
+            ),
+            WaitOwnerKind.RECIPE_UPDATE_BATCH,
+        )
 
 
 __all__ = [

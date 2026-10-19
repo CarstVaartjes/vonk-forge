@@ -512,8 +512,8 @@ def _retry_busy_admission(case: _WaitingContinuation, monkeypatch) -> None:
     assert case.profiles._observe_pending_admissions(case.clock[0])
     row, progress = _progress(case, case.waiting_id)
     assert progress.admission_pending, row.status_reason
-    assert progress.admission_retry_at is not None
-    case.clock[0] = max(case.clock[0], _aware(progress.admission_retry_at))
+    assert row.next_action_at is not None
+    case.clock[0] = max(case.clock[0], _aware(row.next_action_at))
 
 
 def test_postgres_waiting_load_keeps_the_lane_it_continues_and_is_admitted(
@@ -570,10 +570,10 @@ def test_postgres_waiting_load_is_admitted_when_the_lane_it_continued_ends(
     # The next retry finds the continued lane gone and plans it again (now
     # starting that lane itself), retrying at once: a conflict re-plans.
     assert profiles._observe_pending_admissions(case.clock[0])
-    _, replanned = _progress(case, case.waiting_id)
+    row, replanned = _progress(case, case.waiting_id)
     assert replanned.admission_pending
-    assert replanned.admission_retry_at is not None
-    assert _aware(replanned.admission_retry_at) <= case.clock[0]
+    assert row.next_action_at is not None
+    assert _aware(row.next_action_at) <= case.clock[0]
 
     assert profiles._observe_pending_admissions(case.clock[0])
 

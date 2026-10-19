@@ -44,6 +44,7 @@ from ..operation_blockers import (
     bound_blockers,
     make_blocker,
 )
+from ..persisted_waits import schedule_wait
 from ..profile_error_summary import _normalized_failure_text
 from ..recipe_operations import RecipeOperationConflict
 from ..reservation_owners import release_dead_owner_reservations
@@ -194,17 +195,8 @@ class FleetProfileService:
                     cancellation_state.not_in(fleet_profile_states.CANCEL_IN_FLIGHT),
                     admission_pending.is_(False),
                     or_(
-                        FleetProfileApplication.progress["retry_due_at"]
-                        .as_string()
-                        .is_(None),
-                        func.replace(
-                            FleetProfileApplication.progress[
-                                "retry_due_at"
-                            ].as_string(),
-                            "Z",
-                            "+00:00",
-                        )
-                        <= now.isoformat(),
+                        FleetProfileApplication.next_action_at.is_(None),
+                        FleetProfileApplication.next_action_at <= now,
                     ),
                 )
                 .order_by(
@@ -261,10 +253,7 @@ class FleetProfileService:
                     # Its evidence reads again: the residue window is over.
                     progress.residue_since = None
                     row.progress = progress.model_dump(mode="json")
-            if (
-                progress.retry_due_at is not None
-                and _aware(progress.retry_due_at) > now
-            ):
+            if row.next_action_at is not None and _aware(row.next_action_at) > now:
                 return (
                     pending_admission_observed
                     or cancellation_observed
@@ -387,9 +376,7 @@ class FleetProfileService:
                     )
                     row.progress = progress.model_dump(mode="json")
                 if child.state in _CHILD_PENDING_STATES:
-                    progress.retry_due_at = FleetProfileAdapter.next_retry(
-                        row.id, 1, now
-                    )
+                    schedule_wait(row, FleetProfileAdapter.next_retry(row.id, 1, now))
                     row.progress = progress.model_dump(mode="json")
                     row.updated_at = now
                     if (
@@ -433,7 +420,7 @@ class FleetProfileService:
                     kind=ProfileAction.SWITCH.value,
                     result=child.result,
                 )
-                progress.retry_due_at = None
+                schedule_wait(row, None)
                 row.progress = progress.model_dump(mode="json")
                 row.current_operation_id = None
 
@@ -538,9 +525,7 @@ class FleetProfileService:
                         return True
                     waiting_for_adopted |= owner_pending
                 if waiting_for_adopted:
-                    progress.retry_due_at = FleetProfileAdapter.next_retry(
-                        row.id, 1, now
-                    )
+                    schedule_wait(row, FleetProfileAdapter.next_retry(row.id, 1, now))
                     # A recorded wait is never silent: a whole stall window
                     # without movement shows it stalled.
                     adopted = plan.effects.adopted
@@ -704,7 +689,7 @@ class FleetProfileService:
                 return True
             try:
                 current_progress = _persisted_profile_progress(current)
-                current_progress.retry_due_at = None
+                schedule_wait(row, None)
                 progress_data = current_progress.model_dump(mode="json")
                 if synchronous:
                     current.current_step += 1

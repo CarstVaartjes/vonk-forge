@@ -65,9 +65,11 @@ from vonk_agent_protocol import (
     LifecycleState,
     RunState,
     UnknownOutcomeError,
+    WaitReason,
 )
 
 from . import job_states
+from .agent_operation_facts import aware as _aware
 from .covered_installation_claims import release_covered_installation_claims
 from .fleet_projection import _installation_payload_expectations
 from .logging import log_event
@@ -80,6 +82,7 @@ from .models import (
     RecipeInstallation,
     RecipeRun,
 )
+from .persisted_waits import schedule_wait
 from .recipe_action_plans import UninstallPlan
 from .reservation_owners import (
     ADOPTION_WINDOW,
@@ -296,13 +299,10 @@ class AttemptResidueReconciler:
         self._abandon = abandon_never_installed
         self._removal = removal
         self._clock = clock
-        self._retry_at: dict[str, datetime] = {}
 
     def tick(self) -> bool:
         """Release every current residue; True when anything was released."""
 
-        now = self._clock()
-        self._retry_at = {key: due for key, due in self._retry_at.items() if now < due}
         released = self._never_installed_plans()
         released = self._incomplete_installations() or released
         released = self._dead_owner_claims() or released
@@ -349,7 +349,7 @@ class AttemptResidueReconciler:
                 candidates.append(installation_id)
         released = False
         for installation_id in candidates:
-            if self._clock() < self._retry_at.get(installation_id, self._clock()):
+            if not self._cleanup_due(installation_id):
                 continue
             try:
                 # The lifecycle re-derives "never reached a node" under the
@@ -450,7 +450,7 @@ class AttemptResidueReconciler:
             return False
         queued = False
         for installation_id, why in self._leftover_candidates():
-            if self._clock() < self._retry_at.get(installation_id, self._clock()):
+            if not self._cleanup_due(installation_id):
                 continue
             try:
                 plan = self._removal.preview_uninstall(installation_id)
@@ -502,9 +502,26 @@ class AttemptResidueReconciler:
             queued = True
         return queued
 
+    def _cleanup_due(self, installation_id: str) -> bool:
+        with self._sessions() as session:
+            installation = session.get(RecipeInstallation, installation_id)
+            return (
+                installation is None
+                or installation.next_action_at is None
+                or _aware(installation.next_action_at) <= self._clock()
+            )
+
     def _defer(self, installation_id: str, error: UnknownOutcomeError) -> None:
         due = self._clock() + timedelta(seconds=5)
-        self._retry_at[installation_id] = due
+        with self._sessions.begin() as session:
+            installation = session.get(RecipeInstallation, installation_id)
+            if installation is not None:
+                schedule_wait(
+                    installation,
+                    due,
+                    now=self._clock(),
+                    reason=WaitReason.CLEANUP_UNCONFIRMED,
+                )
         self._log(
             "installation",
             installation_id,

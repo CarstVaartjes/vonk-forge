@@ -62,11 +62,12 @@ from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
-from vonk_agent_protocol import Disposition, LifecycleState
+from vonk_agent_protocol import Disposition, LifecycleState, WaitOwnerKind
 
 from .. import job_states
 from ..agent_operation_facts import SUPERSEDED_CANCELLATION_SECONDS, aware
 from ..models import Job
+from ..persisted_waits import initialize_wait, lifecycle_wait, wait_due
 from ..recipe_image_availability_clocks_contract import StoredAvailabilityClocks
 from ..recipe_image_removal_contract import RECIPE_CACHE_REMOVE_KIND
 from ..recipe_update_contract import UPDATE_KIND
@@ -169,18 +170,13 @@ class ImageAvailabilityAdapter:
         requested_at = cancellation.cancel_requested_at if cancellation else None
         request_key = cancellation.cancel_request_id if cancellation else None
         checkpoint = clocks.checkpoint
-        failure = checkpoint.failure if checkpoint else None
         retry_count = (
             ((checkpoint.retry_attempts or 0) if checkpoint else 0)
             if removal
             else ((clocks.retry.automatic_attempts or 0) if clocks.retry else 0)
         )
         stored = job.state
-        due = (
-            (failure.retry_time if failure else None)
-            if removal
-            else clocks.retry_after_at
-        )
+        due = wait_due(job)
         lease: datetime | None = None
         fence = clocks.claim_owner
         issued = (
@@ -311,20 +307,23 @@ class ImageAvailabilityAdapter:
             )
         else:
             state = _STORED[after.state]
+        lifecycle_wait(
+            job,
+            identity=job.id,
+            kind=WaitOwnerKind.IMAGE_AVAILABILITY,
+            state=after.state,
+            now=now,
+            due=after.next_action_at,
+            detail=after.reason,
+            deadline=after.recovery_deadline,
+            cancelling=after.cancel_requested,
+            lease_deadline=after.lease_deadline,
+        )
         job.state = state
         if not isinstance(reason, _Keep):
             job.status_reason = None if reason is None else reason[:_MAX_REASON]
         elif after.state is State.CANCELLED and after.effect is Effect.UNKNOWN:
             job.status_reason = (after.reason or "")[:_MAX_REASON] or None
-        if (
-            payload is not None
-            and job.kind != REMOVAL_KIND
-            and after.state is State.BACKOFF
-            and after.next_action_at is not None
-        ):
-            payload = payload.model_copy(
-                update={"retry_after_at": aware(after.next_action_at)}
-            )
         if after.state is State.CANCELLED and after.effect is Effect.UNKNOWN:
             # The claim is fenced by the ended state; its keys no longer mean a
             # live lease (the exact children stay recorded as the residue).
@@ -536,7 +535,9 @@ class ImageAvailabilityAdapter:
     def new_job(*, state: str = State.QUEUED.value, **fields: Any) -> Job:
         """A new job, ``queued`` and claimable now."""
 
-        return Job(state=state, **fields)
+        return initialize_wait(
+            Job(state=state, **fields), WaitOwnerKind.IMAGE_AVAILABILITY
+        )
 
 
 class PrebuiltImageAdapter:
@@ -577,6 +578,15 @@ class PrebuiltImageAdapter:
             Reported(Outcome.DONE) if ok else Reported.failed(Disposition.FAIL),
             self,
             now,
+        )
+        lifecycle_wait(
+            job,
+            identity=job.id,
+            kind=WaitOwnerKind.PREBUILT_IMAGE,
+            state=decision.row.state,
+            now=now,
+            due=decision.row.next_action_at,
+            detail=decision.row.reason,
         )
         job.state = _STORED[decision.row.state]
         job.updated_at = now

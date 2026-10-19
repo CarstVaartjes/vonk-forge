@@ -62,6 +62,7 @@ from vonk_agent_protocol import (
     Disposition,
     LifecycleState,
     SupersedeCode,
+    WaitOwnerKind,
 )
 
 from .. import job_states
@@ -74,6 +75,7 @@ from ..fleet_profile_contract import (
     FleetProfileSwitchChildState,
 )
 from ..models import FleetProfileApplication, Job
+from ..persisted_waits import initialize_wait, lifecycle_wait, schedule_wait, wait_due
 from ..recovery_policy import RECOVERY
 from .adapter import Dispatch
 from .composite import aggregate
@@ -237,30 +239,26 @@ class FleetProfileAdapter:
         document = None if progress is None else progress.switch_adapter
         stored = application.state
         cancellation = None if progress is None else progress.cancellation
-        due: datetime | None = None
+        due: datetime | None = wait_due(application)
         retry_count = 0
         if stored == "queued":
             if progress is not None and progress.admission_pending:
                 state = State.BACKOFF
-                due = (
-                    None
-                    if progress.admission_retry_at is None
-                    else aware(progress.admission_retry_at)
-                )
+                due = wait_due(application)
                 retry_count = progress.admission_attempt
             else:
                 state = State.QUEUED
         elif stored == "running":
             state = State.RUNNING
-            if document is not None and document.observation_due_at is not None:
-                due = aware(document.observation_due_at)
+            if document is not None and application.next_action_at is not None:
+                due = aware(application.next_action_at)
         elif stored == BACKOFF:
             # A failure the Controller retries by itself: a wait, not an end.
             state = State.BACKOFF
             if progress is not None:
                 retry_count = progress.attempt
-                if progress.retry_due_at is not None:
-                    due = aware(progress.retry_due_at)
+                if application.next_action_at is not None:
+                    due = aware(application.next_action_at)
         elif job_states.means(stored, State.NEEDS_OPERATOR):
             state = State.NEEDS_OPERATOR
         elif stored == "succeeded":
@@ -292,8 +290,8 @@ class FleetProfileAdapter:
         if cancellation is not None:
             requested_at = aware(cancellation.requested_at)
             request_key = cancellation.request_key
-            if cancellation.observation_due_at is not None:
-                due = aware(cancellation.observation_due_at)
+            if application.next_action_at is not None:
+                due = aware(application.next_action_at)
             attempts = 0 if document is None else document.stop_reissue_attempt
             observe_count = (
                 STOP_BUDGET
@@ -472,6 +470,22 @@ class FleetProfileAdapter:
             document["supersede_code"] = code
             document["superseded_by"] = successor
             application.progress = document
+        progress = _progress(application)
+        lifecycle_wait(
+            application,
+            identity=application.id,
+            kind=WaitOwnerKind.FLEET_PROFILE,
+            state=after.state,
+            now=now,
+            due=after.next_action_at,
+            detail=after.reason,
+            deadline=after.recovery_deadline,
+            cancelling=after.cancel_requested,
+            lease_deadline=after.lease_deadline,
+            blockers=list(progress.blockers)
+            if progress and progress.blockers
+            else None,
+        )
         application.state = state
         progress = _progress(application)
         if after.terminal and terminal_reason is not KEEP:
@@ -507,10 +521,10 @@ class FleetProfileAdapter:
         progress = _progress(application)
         if progress is None or progress.cancellation is None:
             return
-        cancellation = progress.cancellation
-        existing = cancellation.observation_due_at
-        cancellation.observation_due_at = aware(
-            due if existing is None or aware(existing) <= due else existing
+        existing = application.next_action_at
+        schedule_wait(
+            application,
+            aware(due if existing is None or aware(existing) <= due else existing),
         )
         application.progress = progress.model_dump(mode="json")
 
@@ -578,7 +592,9 @@ class FleetProfileAdapter:
     def new_application(*, state: str, **fields: Any) -> FleetProfileApplication:
         """A new application: ``queued`` (or ``succeeded`` when there is nothing to do)."""
 
-        return FleetProfileApplication(state=state, **fields)
+        return initialize_wait(
+            FleetProfileApplication(state=state, **fields), WaitOwnerKind.FLEET_PROFILE
+        )
 
     def reset(
         self,
@@ -677,7 +693,7 @@ class FleetProfileAdapter:
                 and self._retrying(hook_session, application)
             ):
                 due = self.next_retry(application.id, progress.attempt, now)
-                progress.retry_due_at = due
+                schedule_wait(application, due)
                 application.progress = progress.model_dump(mode="json")
                 after = replace(before, state=State.BACKOFF, next_action_at=due)
                 self.apply(
@@ -881,13 +897,13 @@ class FleetProfileAdapter:
         now = aware(now)
         before = self.lifecycle(application, progress, now)
         due = (
-            aware(progress.retry_due_at)
-            if progress.retry_due_at is not None
+            aware(application.next_action_at)
+            if application.next_action_at is not None
             else self.next_retry(
                 application.id, progress.attempt, aware(application.updated_at)
             )
         )
-        progress.retry_due_at = due
+        schedule_wait(application, due)
         application.progress = progress.model_dump(mode="json")
         after = replace(before, state=State.BACKOFF, next_action_at=due)
         self.apply(application, before, after, now, visible=BACKOFF, session=session)

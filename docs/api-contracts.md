@@ -560,6 +560,23 @@ reason and `typed_error()` returns the wire `SecurityRefusal` / `InvalidRequest`
 `UnknownError` for it. A raise in a lifecycle or operation path must use one of
 these types; the guard is described in [testing and CI](testing-and-ci.md).
 
+### Persisted Controller waits
+
+`wait_contract.WaitEvidence` owns the typed reason, dependency and owner identities,
+nonempty blockers, first-blocked and real-progress clocks, optional dependency
+expiry, and resume condition. Each existing durable owner stores this evidence
+in the transaction that parks its work. `QueueWait.next_check` is projected from
+that owner's SQL due field; the evidence JSON never stores a second due clock.
+A retry, heartbeat, refreshed description or progress read does not establish
+real progress or extend a dependency's deadline.
+
+The protocol enums own the reason and resume vocabulary. API wait projections
+use that same evidence rather than inferring codes from status prose. Older
+rows with no evidence retain their running attempts; retired progress clocks
+are adopted on the owner's next transition. Unreadable bookkeeping is reported
+and isolated from other owners. This contract does not introduce due-row redrive;
+the existing advancement functions continue to own execution and cancellation.
+
 ## Required launch checks
 
 The `Controller and Spark wire contract` CI job checks both sides of the

@@ -349,9 +349,9 @@ def test_accepted_plan_refresh_records_unknown_cause_and_resumes(tmp_path, monke
     with sessions() as session:
         row = session.get(Job, parent.operation_id)
         assert row is not None and isinstance(row.result, dict)
-        next_attempt = row.result["observation_due_at"]
-        assert isinstance(next_attempt, str)
-        clock[0] = datetime.fromisoformat(next_attempt)
+        next_attempt = row.next_action_at
+        assert isinstance(next_attempt, datetime)
+        clock[0] = next_attempt.replace(tzinfo=UTC)
     preview = service.preview
     calls = []
 
@@ -367,9 +367,9 @@ def test_accepted_plan_refresh_records_unknown_cause_and_resumes(tmp_path, monke
         stored_plan = row.payload["plan"]
         assert isinstance(stored_plan, dict)
         assert stored_plan["plan_digest"] == plan.plan_digest
-        next_attempt = row.result["observation_due_at"]
-        assert isinstance(next_attempt, str)
-        due = datetime.fromisoformat(next_attempt)
+        next_attempt = row.next_action_at
+        assert isinstance(next_attempt, datetime)
+        due = next_attempt.replace(tzinfo=UTC)
         assert due > clock[0]
     assert not service._refresh_blocked_plan(parent.operation_id, clock[0])
     assert len(calls) == 1
@@ -384,7 +384,7 @@ def test_accepted_plan_refresh_records_unknown_cause_and_resumes(tmp_path, monke
         assert isinstance(stored_plan, dict)
         assert stored_plan["plan_digest"] == plan.plan_digest
         assert row.result["force_replan"] is False
-        assert row.result["observation_due_at"] is None
+        assert row.next_action_at is None
 
 
 @pytest.mark.parametrize(

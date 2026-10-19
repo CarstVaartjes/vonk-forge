@@ -503,6 +503,10 @@
       "reason": "base class of the Controller contract models, shared by every *_contract module"
     },
     {
+      "module": "control/src/vonk_control/wait_contract.py",
+      "kind": "controller-contract"
+    },
+    {
       "module": "control/src/vonk_control/worker_memory_contract.py",
       "kind": "controller-contract"
     },

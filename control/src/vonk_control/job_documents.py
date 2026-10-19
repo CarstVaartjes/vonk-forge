@@ -416,7 +416,6 @@ class AvailabilityJobPayload(_Document):
     model_child: AvailabilityModelChild | None = None
     failure: AvailabilityOperationFailure | None = None
     blockers: list[OperationBlocker] | None = Field(default=None, max_length=16)
-    retry_after_at: AwareDatetime | None = None
     build_dependency: RecipeBuildDependency | None = None
     cancellation: RecipeOperationCancellationResult | None = None
     prebuilt_pull: bool | None = None

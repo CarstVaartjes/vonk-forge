@@ -131,7 +131,7 @@ def _try_repair_once(
                     or deadline_expired
                 ):
                     purpose = JournalRepairPurpose.OWNER_OBSERVATION
-            due = progress.observation_due_at
+            due = job.next_action_at
             if (
                 purpose == JournalRepairPurpose.MEASUREMENT
                 and due is not None

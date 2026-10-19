@@ -196,9 +196,9 @@ def test_a_retryable_failure_is_retried_at_the_cores_clock_with_the_floor() -> N
     payload = _payload()
     after = adapter.plan_failure(job, NOW, Disposition.OBSERVE, retry_after=floor)
     updated = adapter.commit(job, after, NOW, reason="boom", payload=payload)
-    assert updated is not None and payload.retry_after_at is None
+    assert updated is not None
     assert after.state is State.BACKOFF and job.state == "queued"
-    due = updated.retry_after_at
+    due = job.next_action_at
     assert due is not None
     assert due >= floor and due <= floor + timedelta(seconds=90)
 
@@ -229,7 +229,7 @@ def test_a_dependency_wait_is_partial_and_does_not_count_as_a_failure() -> None:
     updated = adapter.defer(job, NOW, NOW + timedelta(seconds=1), payload=payload)
     assert job.state == LifecycleState.BACKOFF
     assert adapter.lifecycle(job, NOW).state is State.BACKOFF
-    assert payload.retry_after_at is None and updated.retry_after_at is not None
+    assert updated is not None and job.next_action_at is not None
 
 
 def test_claim_takes_a_lapsed_running_and_a_legacy_parked_row() -> None:

@@ -39,6 +39,7 @@ from ..models import (
     AgentNode,
     Job,
 )
+from ..persisted_waits import schedule_wait
 from ..recipe_build_cancellation import (
     BuildConsumerError,
     lock_run_switch_build_dependency,
@@ -241,7 +242,7 @@ class CancellationRetryMixin:
                 if job.state in job_states.words(
                     LifecycleState.OBSERVING, LifecycleState.NEEDS_OPERATOR
                 ):
-                    progress.observation_due_at = cancellation.requested_at
+                    schedule_wait(job, cancellation.requested_at)
                 job.status_reason = (
                     "Cancellation requested; finishing the current preparation safely."
                 )
@@ -445,7 +446,6 @@ class CancellationRetryMixin:
             # verified phase effects, never its predecessor's spent clocks.
             progress.retry_attempt = None
             progress.retry_reason = None
-            progress.observation_due_at = None
             progress.observation_deadline_at = None
             progress.recovery_deadline_at = None
             progress.start_deadline = None

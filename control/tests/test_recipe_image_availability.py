@@ -2498,9 +2498,9 @@ def test_postgres_model_child_lock_contention_resumes_same_preparation(
         assert isinstance(retry_state, Mapping)
         # Dependency observations have the same request-owned retry deadline.
         assert retry_state["automatic_attempts"] >= 1
-        retry_after_at = stored_waiting.payload["retry_after_at"]
-        assert isinstance(retry_after_at, str)
-        retry_at = datetime.fromisoformat(retry_after_at)
+        retry_after_at = stored_waiting.next_action_at
+        assert isinstance(retry_after_at, datetime)
+        retry_at = retry_after_at.replace(tzinfo=UTC)
         assert 0 < (retry_at - now[0]).total_seconds() <= 5
         assert stored_waiting.payload.get("model_child") is None
 
@@ -2508,9 +2508,9 @@ def test_postgres_model_child_lock_contention_resumes_same_preparation(
     with sessions() as session:
         still_waiting = session.get(Job, queued.id)
         assert still_waiting is not None
-        retry_after = still_waiting.payload["retry_after_at"]
-        assert isinstance(retry_after, str)
-        assert datetime.fromisoformat(retry_after) == retry_at
+        retry_after = still_waiting.next_action_at
+        assert isinstance(retry_after, datetime)
+        assert retry_after.replace(tzinfo=UTC) == retry_at
 
     # Let the original bounded retry deadline elapse. The retry must select the
     # existing completed model operation under the same parent request.

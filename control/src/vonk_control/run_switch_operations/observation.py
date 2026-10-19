@@ -106,9 +106,7 @@ class ObservationMixin:
 
         # Canonical JSON emits UTC as Z; the clock's isoformat uses +00:00.
         # Compare the same spelling so an exactly due operation is eligible.
-        due_at = func.replace(
-            Job.result["observation_due_at"].as_string(), "Z", "+00:00"
-        )
+        due_at = Job.next_action_at
         deadline_at = func.replace(
             Job.result["observation_deadline_at"].as_string(), "Z", "+00:00"
         )
@@ -137,7 +135,7 @@ class ObservationMixin:
                     or_(
                         Job.id.in_(select(RunSwitchJournalRepairPending.job_id)),
                         due_at.is_(None),
-                        due_at <= _now(service._clock).isoformat(),
+                        due_at <= _now(service._clock),
                         deadline_at <= _now(service._clock).isoformat(),
                         recovery_deadline_at <= _now(service._clock).isoformat(),
                         # A cancel in flight is looked at on every tick: it ends as

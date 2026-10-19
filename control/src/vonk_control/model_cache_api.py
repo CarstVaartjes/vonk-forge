@@ -102,6 +102,7 @@ def _model_operator_response(
             else None
         ),
         blockers=list(operation.blockers),
+        wait=operation.wait,
         next_attempt_at=operation.next_attempt_at,
     )
 
@@ -469,6 +470,7 @@ class ModelCacheOperationProvider:
             failure=operation.failure,
             model_cache_cancellation=operation.cancellation,
             blockers=list(operation.blockers),
+            wait=operation.wait,
             next_attempt_at=operation.next_attempt_at,
             owner=OperationOwnerReference(
                 kind="model-cache-operation",

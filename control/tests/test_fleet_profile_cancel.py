@@ -1429,7 +1429,8 @@ def test_pending_cancellation_observation_does_not_suppress_recovery(tmp_path) -
     assert pending.pending_effects[0].operation_id == child_id
     progress_cancellation = service.application(application.id).progress.cancellation
     assert progress_cancellation is not None
-    assert progress_cancellation.observation_due_at is not None
+    wait = service.application(application.id).wait
+    assert wait is not None and wait.next_check is not None
 
     # The next worker pass can service other work instead of polling this
     # unresolved owner again before its next bounded observation time.

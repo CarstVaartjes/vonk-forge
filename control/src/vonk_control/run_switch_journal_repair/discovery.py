@@ -9,6 +9,7 @@ from datetime import datetime
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+from vonk_agent_protocol import JournalRepairCode
 
 from ..admission_locking import AdmissionRowLock, lock_admission_rows
 from ..models import (
@@ -20,9 +21,6 @@ from ..models import (
 )
 from ..run_switch_contract import (
     RunSwitchOperationResult,
-)
-from ..run_switch_journal_contract import (
-    JournalRepairCode,
 )
 
 REPAIR_WAIT = JournalRepairCode.EVIDENCE_UNAVAILABLE

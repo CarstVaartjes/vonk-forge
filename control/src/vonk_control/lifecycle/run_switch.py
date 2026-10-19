@@ -59,6 +59,7 @@ from vonk_agent_protocol import (
     Disposition,
     LifecycleState,
     RunSwitchCode,
+    WaitOwnerKind,
     canonical_message,
 )
 
@@ -66,6 +67,7 @@ from .. import job_states
 from ..agent_operation_facts import aware
 from ..models import AgentOperation as StoredOperation
 from ..models import Job
+from ..persisted_waits import lifecycle_wait, schedule_wait, wait_due
 from ..run_switch_contract import (
     RunSwitchMemberReceipt,
     RunSwitchMemberState,
@@ -218,7 +220,6 @@ class RunSwitchAdapter:
             result = RunSwitchOperationResult(
                 child_operation_id=retained.child_operation_id,
                 cancellation=retained.cancellation,
-                observation_due_at=retained.observation_due_at,
                 retry_attempt=retained.retry_attempt,
                 retry_reason=retained.retry_reason,
             )
@@ -238,11 +239,7 @@ class RunSwitchAdapter:
         """
 
         now = aware(now)
-        due = (
-            aware(progress.observation_due_at)
-            if progress.observation_due_at is not None
-            else None
-        )
+        due = wait_due(job) if wait_due(job) is not None else None
         retry_reason = progress.retry_reason
         retrying = isinstance(retry_reason, str) and bool(retry_reason)
         stored = job.state
@@ -416,13 +413,28 @@ class RunSwitchAdapter:
 
         now = aware(now)
         state = visible if visible and not after.terminal else _STORED[after.state]
+        lifecycle_wait(
+            job,
+            identity=job.id,
+            kind=WaitOwnerKind.RUN_SWITCH,
+            state=after.state,
+            now=now,
+            due=after.next_action_at,
+            detail=after.reason,
+            deadline=after.recovery_deadline,
+            cancelling=after.cancel_requested,
+            lease_deadline=after.lease_deadline,
+            blockers=list(progress.blockers)
+            if progress and progress.blockers
+            else None,
+        )
         job.state = state
         if reason is not _KEEP:
             job.status_reason = None if reason is None else reason[:_MAX_REASON]
         if progress is not None:
             if after.state in {State.BACKOFF, State.OBSERVING}:
                 if after.next_action_at is not None:
-                    progress.observation_due_at = aware(after.next_action_at)
+                    schedule_wait(job, aware(after.next_action_at))
                 count = (
                     after.retry_count
                     if after.state is State.BACKOFF

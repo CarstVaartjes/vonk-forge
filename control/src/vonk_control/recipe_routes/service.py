@@ -35,6 +35,7 @@ from ..models import (
     RoutePublication,
     RoutePublicationOwner,
 )
+from ..persisted_waits import schedule_wait
 from ..presence import ManagementAddressPolicy
 from ..recipe_execution_contract import RouteWithdrawalFollowUp
 from ..recipe_lifecycle_contract import RecipeOperationResult
@@ -122,7 +123,7 @@ class RecipeRouteService:
                 owner = session.get(RoutePublicationOwner, 1)
                 if owner is not None:
                     owner.reconciliation_attempts = 0
-                    owner.reconciliation_next_at = None
+                    schedule_wait(owner, None)
                     owner.reconciliation_deadline_at = None
             except RecipeRecoveryDeadlineError as error:
                 committed_error = error
@@ -398,7 +399,7 @@ class RecipeRouteService:
             included.route_digest = generation.route_digest
             included.route_error = None
             included.route_attempts = 0
-            included.route_next_attempt_at = None
+            schedule_wait(included, None)
             included.observation_deadline_at = None
             included.updated_at = self._clock()
 
@@ -632,9 +633,7 @@ class RecipeRouteService:
             owner = session.get(RoutePublicationOwner, 1)
             if owner is None:
                 raise RecipeRouteNotReady("route publication owner is unavailable")
-            if owner.reconciliation_next_at is not None and now < _aware(
-                owner.reconciliation_next_at
-            ):
+            if owner.next_action_at is not None and now < _aware(owner.next_action_at):
                 return False
             # Standing desired routes survive an ended observation attempt.
             # The next scheduled reconciliation begins a fresh finite budget;
@@ -664,11 +663,11 @@ class RecipeRouteService:
                     now,
                 )
                 owner.reconciliation_attempts = step.failures
-                owner.reconciliation_next_at = step.next_at
-                if owner.reconciliation_next_at is None:
+                schedule_wait(owner, step.next_at, now=now, detail=str(error))
+                if owner.next_action_at is None:
                     owner.reconciliation_deadline_at = None
-                    owner.reconciliation_next_at = now + timedelta(
-                        seconds=ROUTE_RECOVERY.max_delay_seconds
+                    schedule_wait(
+                        owner, now + timedelta(seconds=ROUTE_RECOVERY.max_delay_seconds)
                     )
             log_event(
                 _LOGGER,
@@ -682,7 +681,7 @@ class RecipeRouteService:
             if owner is None:
                 raise RecipeRouteNotReady("route publication owner is unavailable")
             owner.reconciliation_attempts = 0
-            owner.reconciliation_next_at = None
+            schedule_wait(owner, None)
             owner.reconciliation_deadline_at = None
         return result
 

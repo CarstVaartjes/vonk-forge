@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Annotated, Literal
 
 from pydantic import (
@@ -32,6 +31,7 @@ from .machine_states import ModelFileStateField
 from .operation_blockers import OperationBlocker
 from .operation_contract import AvailabilityOperationFailure, OperationProgress
 from .strict_json import StrictJSONModel, StrictModel, read_stored_model
+from .wait_contract import QueueWait
 
 DIGEST_PATTERN = r"^[0-9a-f]{64}$"
 ARTIFACT_KEY_PATTERN = r"^[a-z][a-z0-9_.:-]{0,255}$"
@@ -193,8 +193,6 @@ class ModelCacheRetry(StrippedStrictModel):
     automatic_attempts: int = Field(ge=1)
     operator_retries: int = Field(ge=0)
     missing_source: ModelCacheMissingSourceObservation | None = None
-    next_retry_at: str | None = None
-    retry_after_seconds: int | None = Field(default=None, ge=0)
     access_checks: int = Field(default=0, ge=0)
     # Content identity of the credential file observed at an authorization
     # failure; a different value lets the worker resume automatically.
@@ -378,11 +376,6 @@ class ModelCacheRemovalPayload(_ModelCacheOperationPayload):
 
     @model_validator(mode="after")
     def removal_checkpoint_is_consistent(self) -> ModelCacheRemovalPayload:
-        if (
-            self.retry.next_retry_at is not None
-            and datetime.fromisoformat(self.retry.next_retry_at).tzinfo is None
-        ):
-            raise ValueError("model removal retry timestamp must include a timezone")
         if self.operator_action != "remove-model":
             raise ValueError("model removal action is missing")
         if self.object_index > len(self.delete_objects):
@@ -538,6 +531,7 @@ class ModelCacheOperatorResponse(StrippedStrictModel):
     failure: AvailabilityOperationFailure | None = None
     #: What a queued operation waits for, and when it is checked again.
     blockers: list[OperationBlocker] = Field(default_factory=list, max_length=16)
+    wait: QueueWait | None = None
     next_attempt_at: str | None = Field(default=None, max_length=64)
 
     @model_validator(mode="after")

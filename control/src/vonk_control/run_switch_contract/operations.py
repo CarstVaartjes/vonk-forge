@@ -19,6 +19,7 @@ from ..lifecycle_preflight import LifecyclePreflightCheckpoint
 from ..operation_blockers import OperationBlocker
 from ..run_switch_identity_contract import NodeId, RunSwitchCancellation, UuidId
 from ..strict_json import StrictModel
+from ..wait_contract import QueueWait
 from .phase_results import RunSwitchPhaseResult
 from .progress import RunSwitchMemberReceipt, RunSwitchProgress
 from .vocabulary import (
@@ -106,7 +107,6 @@ class RunSwitchOperationResult(StrictModel):
     ) = None
     retry_attempt: int | None = Field(default=None, ge=2)
     retry_reason: Annotated[str, StringConstraints(max_length=512)] | None = None
-    observation_due_at: datetime | None = None
     observation_deadline_at: datetime | None = None
     recovery_deadline_at: datetime | None = None
     recovery_child_operation_id: UuidId | None = None
@@ -150,6 +150,7 @@ class RunSwitchOperation(StrictModel):
     #: What a waiting or retrying operation waits for; empty once it settles.
     blockers: list[OperationBlocker] = Field(default_factory=list, max_length=16)
     #: When the Controller checks again; a retry is waiting, never failed.
+    wait: QueueWait | None = None
     next_attempt_at: datetime | None = None
 
     @model_validator(mode="after")

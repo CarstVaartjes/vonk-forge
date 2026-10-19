@@ -1131,3 +1131,14 @@ def test_no_waiting_load_reads_a_joining_spark_as_a_newer_intent_anywhere():
     ]
     assert len(sources) > 100  # the scan sees the Controller
     assert sites == []
+
+
+@pytest.mark.parametrize(
+    "event_type,bounded", [("asyncio.Event", True), ("threading.Event", False)]
+)
+def test_wait_for_bounds_only_an_async_event(event_type: str, bounded: bool) -> None:
+    source = f"async def tick(stop: {event_type}):\n    await asyncio.wait_for(stop.wait(), timeout=5)\n"
+    assert bool(scan_source(source, path="worker.py", mode="waits")) is not bounded
+    assert scan_source(
+        source.replace("timeout=5", "timeout=None"), path="worker.py", mode="waits"
+    )

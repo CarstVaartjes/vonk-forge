@@ -213,7 +213,6 @@ class RequestsMixin:
                 )
         document = RecipeUpdateDocument(request=scope, children=children)
         now = _now(service.owner._clock())
-        document.next_attempt_at = now if children else None
         job = service._lifecycle.new_batch(
             allowed=bool(children),
             id=str(uuid.uuid4()),
@@ -261,7 +260,7 @@ class RequestsMixin:
             )
             child.observed_at = child.retry_at = now
         worst.claim_owner = "\x01" * 128
-        worst.claim_until = worst.next_attempt_at = now
+        worst.claim_until = now
         worst.cancellation = RecipeOperationCancellationResult(
             cancel_requested=True,
             cancel_requested_at=now,

@@ -266,7 +266,6 @@ def retry(
                 )
             }
         )
-        payload = payload.model_copy(update={"retry_after_at": None})
         payload = payload.model_copy(update={"failure": None})
         payload = payload.model_copy(update={"build_dependency": None})
         now = self._clock()

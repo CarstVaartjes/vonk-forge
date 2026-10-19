@@ -92,15 +92,6 @@ class RecipeCacheRemovalCheckpoint(StrictJSONModel):
     retry_attempts: int = Field(ge=0)
     failure: AvailabilityOperationFailure | None
 
-    @model_validator(mode="after")
-    def retry_state_is_consistent(self) -> RecipeCacheRemovalCheckpoint:
-        if self.failure is not None:
-            if self.failure.retryable and self.failure.retry_time is None:
-                raise ValueError("retryable removal failure requires a retry time")
-            if not self.failure.retryable and self.failure.retry_time is not None:
-                raise ValueError("terminal removal failure cannot have a retry time")
-        return self
-
 
 class RecipeCacheRemovalOwner(StrictJSONModel):
     """One accepted exact plan plus its canonical durable effect checkpoint."""

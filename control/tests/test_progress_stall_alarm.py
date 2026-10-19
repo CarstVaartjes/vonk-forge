@@ -111,7 +111,7 @@ def test_a_repeated_wait_raises_the_alarm_and_progress_clears_it(
         _follow_due(load)
         load.profiles.tick()
         rechecked = _application(load)
-        checks.add(rechecked.progress.retry_due_at)
+        checks.add(rechecked.next_attempt_at)
         assert rechecked.progress.child_progress.retry_attempt == child_attempt
         assert rechecked.progress.stall == stall
     assert len(checks) > 1

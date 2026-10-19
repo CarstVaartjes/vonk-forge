@@ -6,7 +6,7 @@ import math
 import re
 import threading
 from collections import defaultdict
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
@@ -108,7 +108,7 @@ def protocol_version_bucket(
 
 
 def runnable_job_ages(
-    rows: Iterable[tuple[str, datetime, object]],
+    rows: Iterable[tuple[str, datetime, datetime | None]],
     now: datetime,
 ) -> dict[str, float]:
     """Return the oldest queued-but-runnable age per job kind.
@@ -120,19 +120,11 @@ def runnable_job_ages(
     """
 
     ages: dict[str, float] = {}
-    for kind, created_at, result in rows:
-        if isinstance(result, Mapping):
-            due = result.get("observation_due_at")
-            if isinstance(due, str):
-                try:
-                    due_at = datetime.fromisoformat(due)
-                except ValueError:
-                    due_at = None
-                if due_at is not None:
-                    if due_at.tzinfo is None:
-                        due_at = due_at.replace(tzinfo=UTC)
-                    if due_at > now:
-                        continue
+    for kind, created_at, due in rows:
+        if isinstance(due, datetime):
+            due_at = due if due.tzinfo else due.replace(tzinfo=UTC)
+            if due_at > now:
+                continue
         created = created_at
         if created.tzinfo is None:
             created = created.replace(tzinfo=UTC)
@@ -149,13 +141,13 @@ def read_runnable_job_ages(session: Session, now: datetime) -> dict[str, float]:
     """
 
     rows = session.execute(
-        select(Job.kind, Job.created_at, Job.result).where(
+        select(Job.kind, Job.created_at, Job.next_action_at).where(
             Job.state.in_(job_states.words(LifecycleState.QUEUED)),
             without_agent_operation(),
         )
     )
     return runnable_job_ages(
-        ((row.kind, row.created_at, row.result) for row in rows), now
+        ((row.kind, row.created_at, row.next_action_at) for row in rows), now
     )
 
 

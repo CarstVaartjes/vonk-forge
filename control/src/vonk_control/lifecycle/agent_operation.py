@@ -69,6 +69,7 @@ from vonk_agent_protocol import (
     LifecycleSubject,
     OperationProgress,
     RecipeJobRunResult,
+    WaitOwnerKind,
     adopt_state,
     canonical_message,
 )
@@ -96,6 +97,7 @@ from ..models import AgentOperation as StoredOperation
 from ..models import AgentOperationAttempt, Job
 from ..offline_stops import is_deferred_stop
 from ..operation_progress import progress_document
+from ..persisted_waits import initialize_wait, lifecycle_wait, schedule_wait
 from ..stall_window import stall_deadline
 from ..stored_json import read_row_column
 from .adapter import Dispatch
@@ -539,7 +541,7 @@ class AgentOperationAdapter:
             or (reason is not None and operation.status_reason != reason)
         ):
             operation.state = state
-            operation.next_action_at = next_action
+            schedule_wait(operation, next_action)
             operation.observe_count = observed
             if reason is not None:
                 operation.status_reason = reason
@@ -569,6 +571,18 @@ class AgentOperationAdapter:
 
             assert self._session is not None
             note_success(self._session, operation.kind, operation.node_id)
+        changed |= lifecycle_wait(
+            operation,
+            identity=operation.id,
+            kind=WaitOwnerKind.AGENT_OPERATION,
+            state=after.state,
+            now=now,
+            due=after.next_action_at,
+            detail=after.reason,
+            deadline=after.recovery_deadline,
+            cancelling=after.cancel_requested,
+            lease_deadline=after.lease_deadline,
+        )
         return changed
 
     @staticmethod
@@ -767,7 +781,7 @@ class AgentOperationAdapter:
             return None
         operation.current_attempt += 1
         operation.state = "running"
-        operation.next_action_at = None
+        schedule_wait(operation, None)
         operation.observe_count = 0
         operation.retry_disposition = None
         operation.retry_disposition_attempt = None
@@ -812,7 +826,7 @@ class AgentOperationAdapter:
         now = aware(now)
         operation.current_attempt += 1
         operation.state = "failed"
-        operation.next_action_at = None
+        schedule_wait(operation, None)
         operation.retry_disposition = None
         operation.retry_disposition_attempt = None
         operation.updated_at = now
@@ -834,7 +848,10 @@ class AgentOperationAdapter:
     def new_order(**fields: Any) -> StoredOperation:
         """Create an order: it is born ``queued`` with no attempt."""
 
-        return StoredOperation(state="queued", **fields)
+        return initialize_wait(
+            StoredOperation(state=State.QUEUED.value, **fields),
+            WaitOwnerKind.AGENT_OPERATION,
+        )
 
     def record_outcome(
         self,
@@ -883,7 +900,7 @@ class AgentOperationAdapter:
         """
 
         operation.state = aos.OBSERVING
-        operation.next_action_at = None
+        schedule_wait(operation, None)
         operation.observe_count = 0
         operation.retry_disposition = None
         operation.retry_disposition_attempt = None
@@ -905,7 +922,7 @@ class AgentOperationAdapter:
         operation.retry_due_at = None
         if operation.observe_count:
             return
-        operation.next_action_at = None
+        schedule_wait(operation, None)
         operation.observe_count = 0
 
     @staticmethod

@@ -299,7 +299,7 @@ class ReservationMixin:
                 service._scope_intent_status(session, row) != "current"
             ):
                 return False
-            due = persisted_progress.observation_due_at
+            due = row.next_action_at
             if due is not None and now < _aware(due):
                 return False
             parent = _run_switch_payload(row)
@@ -429,7 +429,6 @@ class ReservationMixin:
                         else None,
                         "total_bytes": total_bytes,
                         "total_bytes_known": total_bytes is not None,
-                        "observation_due_at": None,
                         "force_replan": False,
                     }
                 )

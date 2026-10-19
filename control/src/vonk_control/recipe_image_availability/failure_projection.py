@@ -41,6 +41,7 @@ from ..operation_contract import (
     sanitize_failure_evidence,
 )
 from ..operation_progress import aggregate_progress
+from ..persisted_waits import read_wait, schedule_wait
 from ..recipe_image_availability_reader_contract import (
     StoredAvailabilityIdentity,
 )
@@ -267,7 +268,7 @@ def _fail(
             # The failed effect is settled; a later execution claim may
             # create a new child. Observation waits retain the exact child.
             payload = payload.model_copy(update={"build_dependency": None})
-        payload = payload.model_copy(update={"retry_after_at": None})
+        schedule_wait(operation, None)
         payload = payload.model_copy(update={"claim_owner": None})
         payload = payload.model_copy(update={"claim_until": None})
         updated = self._lifecycle.commit(
@@ -285,6 +286,7 @@ def _unknown_view(
         StoredAvailabilityIdentity, operation.payload, subject=operation.id
     )
     return RecipeImageAvailabilityView(
+        wait=read_wait(operation),
         id=operation.id,
         request_id=operation.request_id,
         request=identity.request if identity else None,
@@ -394,12 +396,13 @@ def _view(
         else image_progress.model_copy(update={"members": members})
     )
     next_attempt_at = (
-        _iso(payload.retry_after_at)
-        if payload.retry_after_at is not None
+        _iso(operation.next_action_at)
+        if operation.next_action_at is not None
         and state in job_states.words(LifecycleState.QUEUED, LifecycleState.BACKOFF)
         else None
     )
     return RecipeImageAvailabilityView(
+        wait=read_wait(operation),
         id=operation.id,
         request_id=operation.request_id,
         request=payload.request,

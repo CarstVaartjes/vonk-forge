@@ -35,6 +35,7 @@ from ..preparation_contract import RuntimeImageIdentity
 from ..run_switch_contract import RunSwitchAssessment
 from ..run_switch_operations import RunSwitchOperationConflict
 from ..storage_demands import StorageRelief
+from ..wait_contract import QueueWait
 
 if TYPE_CHECKING:
     from .service import FleetProfileService
@@ -140,6 +141,7 @@ class _SelectedProfileSnapshot:
     actor: str
     intended: FleetProfileIntendedConfiguration
     plan: FleetProfilePreview
+    wait: QueueWait | None = None
 
 
 class FleetProfileConflict(RuntimeError):

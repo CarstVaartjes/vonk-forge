@@ -351,7 +351,7 @@ def test_retry_cannot_expand_destructive_effects_outside_original_consent(
                 )
     observed = service.retry(application.id, request_key=str(uuid4()), actor="admin")
     assert observed.id == application.id
-    assert observed.progress.retry_due_at is not None
+    assert observed.next_attempt_at is not None
     with sessions() as session:
         assert len(tuple(session.scalars(select(FleetProfileApplication)))) == 1
         if new_effect == "stop":

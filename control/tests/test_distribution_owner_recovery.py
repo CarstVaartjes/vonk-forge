@@ -105,7 +105,7 @@ def test_distribution_observation_deadline_survives_restart_and_fresh_admission(
     for _ in range(30):
         view = restarted.get(fresh.operation_id)
         assert view.result is not None
-        due = view.next_attempt_at or view.result.observation_due_at
+        due = view.next_attempt_at or view.next_attempt_at
         if due is not None and due > switch.clock.now:
             switch.clock.now = due
         restarted.tick()

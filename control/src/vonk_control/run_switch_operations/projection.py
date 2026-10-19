@@ -16,6 +16,7 @@ from ..models import (
 from ..operation_blockers import (
     make_blocker,
 )
+from ..persisted_waits import read_wait, wait_due
 from ..run_switch_contract import (
     RunSwitchOperation,
 )
@@ -51,7 +52,7 @@ class ProjectionMixin:
         if (
             projected_state == LifecycleState.NEEDS_OPERATOR
             and persisted_result is not None
-            and persisted_result.observation_due_at is not None
+            and job.next_action_at is not None
         ):
             # Existing accepted rows parked by the prior automatic-observation
             # state are still auto-observed; present their actual behavior.
@@ -97,7 +98,7 @@ class ProjectionMixin:
                 read_row_column(pending, "progress") if pending is not None else None
             )
             if isinstance(retained, RunSwitchJournalRepairPendingState):
-                repair_due = retained.next_attempt_at
+                repair_due = wait_due(job)
             projected_state = "unknown"
             blockers = [
                 make_blocker(
@@ -107,7 +108,7 @@ class ProjectionMixin:
                     node_ids=list(job.targets),
                 )
             ]
-        from ..run_switch_journal_contract import JournalRepairCode
+        from vonk_agent_protocol import JournalRepairCode
 
         if (job.status_reason or "").startswith(JournalRepairCode.EXHAUSTED):
             blockers = [
@@ -118,6 +119,7 @@ class ProjectionMixin:
                 )
             ]
         return RunSwitchOperation(
+            wait=read_wait(job),
             operation_id=job.id,
             kind=_OPERATION_KIND_ADAPTER.validate_python(job.kind, strict=True),
             action=action,
@@ -143,9 +145,5 @@ class ProjectionMixin:
             result=persisted_result,
             blockers=blockers,
             next_attempt_at=repair_due
-            or (
-                persisted_result.observation_due_at
-                if blockers and persisted_result is not None
-                else None
-            ),
+            or (wait_due(job) if blockers and persisted_result is not None else None),
         )

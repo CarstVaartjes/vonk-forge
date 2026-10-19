@@ -64,6 +64,12 @@ def test_the_automatic_sync_is_asked_again_after_every_unsettled_attempt(
         def __init__(self) -> None:
             self.attempts = 0
 
+        def automatic_wait_delay(self):
+            return 0.0
+
+        def record_automatic_wait(self, delay_seconds, *, failed):
+            pass
+
         def automatic(self):
             self.attempts += 1
             if self.attempts == 1:
@@ -127,6 +133,12 @@ def test_partial_receipts_back_off_then_success_resets_the_retry_episode(
     class Service:
         attempts = 0
 
+        def automatic_wait_delay(self):
+            return 0.0
+
+        def record_automatic_wait(self, delay_seconds, *, failed):
+            pass
+
         def automatic(self):
             self.attempts += 1
             if self.attempts < 3:
@@ -187,6 +199,12 @@ def test_periodic_reconciliation_restarts_ended_default_key_observations(tmp_pat
     stop = asyncio.Event()
 
     class Catalog:
+        def automatic_wait_delay(self):
+            return 0.0
+
+        def record_automatic_wait(self, delay_seconds, *, failed):
+            pass
+
         def automatic(self):
             stop.set()
             return completed
@@ -249,6 +267,12 @@ def test_periodic_recovery_paths_do_not_suppress_each_other(
         observe("reconcile")
 
     class Catalog:
+        def automatic_wait_delay(self):
+            return 0.0
+
+        def record_automatic_wait(self, delay_seconds, *, failed):
+            pass
+
         def automatic(self):
             observe("catalog")
             if attempts["catalog"] == 3:
@@ -322,6 +346,12 @@ def test_gateway_capability_recovers_without_blocking_fresh_catalog_requests(
     )
 
     class Catalog:
+        def automatic_wait_delay(self):
+            return 0.0
+
+        def record_automatic_wait(self, delay_seconds, *, failed):
+            pass
+
         def automatic(self):
             receipt = _sync(tmp_path, catalog, item)
             if ready:

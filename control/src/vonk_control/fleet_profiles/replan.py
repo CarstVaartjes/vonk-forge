@@ -23,6 +23,7 @@ from ..lifecycle.fleet_profile import FleetProfileAdapter
 from ..lifecycle.types import State as _LifecycleState
 from ..models import CatalogDocumentRevision, FleetProfile, FleetProfileApplication
 from ..operation_blockers import OperationBlocker, bound_blockers, make_blocker
+from ..persisted_waits import schedule_wait
 from ..settings import PROFILE_STALL_WINDOW_SECONDS
 from ..stall_window import Verdict, progress_verdict
 from .assessment_support import (
@@ -97,14 +98,11 @@ class FleetProfileService:
         ):
             return
         progress.attempt += 1
-        progress.retry_due_at = FleetProfileAdapter.next_retry(
-            row.id, progress.attempt, now
-        )
+        due = FleetProfileAdapter.next_retry(row.id, progress.attempt, now)
+        schedule_wait(row, due)
         progress.blockers = bound_blockers(blockers or [make_blocker(code, reason)])
         row.progress = progress.model_dump(mode="json")
-        row.status_reason = f"Waiting for exact accepted effect ({reason}); next attempt at {progress.retry_due_at.isoformat()}"[
-            :512
-        ]
+        row.status_reason = code
         row.updated_at = now
 
     def _replan_admitted(
@@ -154,7 +152,7 @@ class FleetProfileService:
         ):
             session = object_session(row)
             assert session is not None
-            progress.retry_due_at = None
+            schedule_wait(row, None)
             progress.blockers = bound_blockers(
                 [make_blocker(ProfileReasonCode.RETRY_CONFLICT, residue.note)]
             )
@@ -285,6 +283,7 @@ class FleetProfileService:
             row.plan = fresh.model_copy(
                 update={"plan_digest": pending_digest}
             ).model_dump(mode="json")
+            schedule_wait(row, _aware(self._clock()))
             row.plan_digest = pending_digest
             row.progress = _progress_with_blockers(
                 progress.model_copy(
@@ -409,6 +408,7 @@ class FleetProfileService:
             row.plan = fresh.model_copy(
                 update={"plan_digest": pending_digest}
             ).model_dump(mode="json")
+            schedule_wait(row, now)
             row.plan_digest = pending_digest
             row.progress = _progress_with_blockers(
                 progress.model_copy(
@@ -427,7 +427,6 @@ class FleetProfileService:
                 blockers,
                 admission_pending=True,
                 admission_attempt=0,
-                admission_retry_at=now.isoformat(),
             ).model_dump(mode="json")
             self._lifecycle.project(
                 row, now, state=_LifecycleState.QUEUED, reason=reason, session=session

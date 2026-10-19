@@ -19,6 +19,7 @@ from vonk_agent_protocol import (
 from ..integer_domains import MAX_DATABASE_INTEGER
 from ..operation_blockers import OperationBlocker
 from ..strict_json import StrictModel
+from ..wait_contract import QueueWait
 from .applications import (
     FleetProfileApplicationCancellationView,
     FleetProfileApplicationProgress,
@@ -143,6 +144,7 @@ class FleetProfileApplicationView(StrictModel):
     blockers: list[OperationBlocker] = Field(default_factory=list, max_length=16)
     #: When the Controller will check again; an application that will retry is
     #: reported as ``queued`` with this time, never as ``failed``.
+    wait: QueueWait | None = None
     next_attempt_at: datetime | None = None
     created_at: datetime
     updated_at: datetime

@@ -56,6 +56,7 @@ from ..models import (
     Job,
 )
 from ..owner_liveness import OwnerKind, OwnerRef, owner
+from ..persisted_waits import schedule_wait
 from ..pki import IssuedCertificate
 from ..security.enrollment import (
     require_activation_identity,
@@ -223,8 +224,8 @@ class EnrollmentService(RotationService):
                         AgentCertificate.revoked_at.is_not(None),
                         AgentCertificate.ca_revoked_at.is_(None),
                         (
-                            AgentCertificate.ca_next_attempt_at.is_(None)
-                            | (AgentCertificate.ca_next_attempt_at <= now)
+                            AgentCertificate.next_action_at.is_(None)
+                            | (AgentCertificate.next_action_at <= now)
                         ),
                     )
                 )
@@ -234,8 +235,8 @@ class EnrollmentService(RotationService):
                     select(AgentIssuedCertificateRevocation).where(
                         AgentIssuedCertificateRevocation.ca_revoked_at.is_(None),
                         (
-                            AgentIssuedCertificateRevocation.next_attempt_at.is_(None)
-                            | (AgentIssuedCertificateRevocation.next_attempt_at <= now)
+                            AgentIssuedCertificateRevocation.next_action_at.is_(None)
+                            | (AgentIssuedCertificateRevocation.next_action_at <= now)
                         ),
                     )
                 )
@@ -250,7 +251,12 @@ class EnrollmentService(RotationService):
                 current = session.get(AgentIssuedCertificateRevocation, row.serial)
                 if current is None or current.ca_revoked_at is not None:
                     continue
-                current.next_attempt_at = now + timedelta(seconds=5)
+                schedule_wait(
+                    current,
+                    now + timedelta(seconds=5),
+                    now=now,
+                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
+                )
             try:
                 if binding is not None:
                     if row.csr_pem is None:
@@ -283,7 +289,7 @@ class EnrollmentService(RotationService):
                     or current_certificate.ca_revoked_at is not None
                 ):
                     continue
-                current_certificate.ca_next_attempt_at = now + timedelta(seconds=5)
+                schedule_wait(current_certificate, now + timedelta(seconds=5))
             try:
                 self._authority.revoke_node(row.serial, now)
                 self._confirm_remote_revocation(row.node_id, row.serial, now)

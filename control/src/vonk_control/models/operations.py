@@ -18,10 +18,15 @@ from sqlalchemy.orm import Mapped, mapped_column
 from vonk_agent_protocol import DistributionAssignmentState, machine_check
 
 from ..model_primitives import Base, _lower_hex
+from .waits import Residue, WaitEvidence, wait_due_column, wait_evidence_column
 
 
 class AgentOperation(Base):
     __tablename__ = "agent_operations"
+    wait_evidence: Mapped[WaitEvidence | Residue | None] = wait_evidence_column(
+        __tablename__
+    )
+    next_action_at: Mapped[datetime | None] = wait_due_column("next_action_at")
     id: Mapped[str] = mapped_column(
         String(36), primary_key=True, default=lambda: str(uuid.uuid4())
     )
@@ -47,9 +52,6 @@ class AgentOperation(Base):
     #: claimed (an automatic retry, a safety fence or an operator's resume); it is
     #: cleared by the claim.  ``NULL`` on a waiting order means a real operator
     #: wait.
-    next_action_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), index=True
-    )
     #: How many times the lifecycle core has looked at this waiting order since it
     #: last ran (an observation, or a stop of a cancelled order).  Above zero the
     #: order is being observed, not retried: it is not claimable and its

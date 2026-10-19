@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 
 from ..model_cache_contract import ModelCacheOperationResult
 from ..operation_blockers import OperationBlocker
+from ..wait_contract import QueueWait
 from .artifacts import ArtifactSetManifest, ArtifactSpec
 from .constants import SCHEMA_VERSION
 
@@ -70,6 +71,7 @@ class CacheOperationView:
     cancellation: Mapping[str, object] | None = None
     #: What a queued or interrupted operation waits for, and when it retries.
     blockers: tuple[OperationBlocker, ...] = ()
+    wait: QueueWait | None = None
     next_attempt_at: str | None = None
 
 

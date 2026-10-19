@@ -28,6 +28,7 @@ from ..operation_contract import (
 )
 from ..operation_item_contract import OperationOwnerReference, OperationRow
 from ..strict_json import StrictModel
+from ..wait_contract import QueueWait
 from .constants import DIGEST_PATTERN, NODE_PATTERN, BoundedIdentifier, NodeIdentifier
 
 
@@ -163,6 +164,7 @@ class JobOperationResponse(StrictModel):
     evidence_download: OperationEvidenceDownload | None = None
     recovery: OperationRecovery | None = None
     blockers: list[OperationBlocker] | None = Field(default=None, max_length=16)
+    wait: QueueWait | None = None
     wait_reason: WaitReason | None = None
     next_attempt_at: str | None = Field(default=None, max_length=64)
 
@@ -218,6 +220,7 @@ class OperationDetailResponse(StrictModel):
     status_reason: str | None = Field(default=None, max_length=1024)
     #: What a queued or blocked operation is waiting for, as of its latest check.
     blockers: list[OperationBlocker] = Field(default_factory=list, max_length=16)
+    wait: QueueWait | None = None
     wait_reason: WaitReason | None = None
     #: Next check due; agent work is reconsidered on its next authenticated poll.
     next_attempt_at: str | None = Field(default=None, max_length=64)

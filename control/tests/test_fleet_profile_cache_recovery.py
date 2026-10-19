@@ -502,13 +502,13 @@ def test_run_switch_cache_miss_retries_after_storage_recovers(tmp_path: Path) ->
     for _ in range(12):
         service._advance(operation.operation_id)
         waiting = service.get(operation.operation_id)
-        if waiting.result is not None and waiting.result.observation_due_at is not None:
+        if waiting.result is not None and waiting.next_attempt_at is not None:
             break
     else:
         pytest.fail("Run/Switch did not schedule cache recovery")
     assert waiting.state == LifecycleState.RUNNING
     assert waiting.result is not None
-    due_at = waiting.result.observation_due_at
+    due_at = waiting.next_attempt_at
     assert due_at is not None
     executor.missing = False
     service._clock = lambda: due_at
