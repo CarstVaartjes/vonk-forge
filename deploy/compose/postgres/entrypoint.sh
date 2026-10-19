@@ -50,8 +50,14 @@ fi
 postgres_pid=$!
 
 forward_signal() {
+  trap '' TERM INT
   if [ -n "${backup_pid:-}" ]; then kill -TERM "$backup_pid" 2>/dev/null || true; fi
-  kill -TERM "$postgres_pid" 2>/dev/null || true
+  # Match the official image's fast, clean shutdown, including active clients.
+  kill -INT "$postgres_pid" 2>/dev/null || true
+  wait "$postgres_pid" || true
+  if [ -n "${backup_pid:-}" ]; then wait "$backup_pid" || true; fi
+  printf '%s\n' 'PostgreSQL shutdown complete' >&2
+  exit 0
 }
 trap forward_signal TERM INT
 
@@ -67,6 +73,9 @@ while [ "$attempt" -lt 240 ]; do
       ready=1
       break
     fi
+  fi
+  if [ "$((attempt % 15))" -eq 0 ]; then
+    printf 'PostgreSQL waiting for database readiness (%s/240 seconds)\n' "$attempt" >&2
   fi
   attempt=$((attempt + 1))
   sleep 1
@@ -88,7 +97,7 @@ fi
 
 # Dump all databases and roles, including the configured Controller database and
 # LiteLLM. Publish only complete dumps; failed attempts never prune good backups.
-backup_loop() (
+backup_loop() {
   # This loop supervises attempts and must outlive any failed command, so it
   # runs without errexit. Each attempt runs under errexit in backup_once.
   set +e
@@ -204,7 +213,11 @@ backup_loop() (
     fi
     sleep "$interval" & wait $!
   done
-)
+}
 backup_loop &
 backup_pid=$!
-wait "$postgres_pid"
+status=0
+wait "$postgres_pid" || status=$?
+kill -TERM "$backup_pid" 2>/dev/null || true
+wait "$backup_pid" || true
+exit "$status"

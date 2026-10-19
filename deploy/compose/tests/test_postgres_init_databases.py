@@ -20,11 +20,17 @@ POSTGRES_IMAGE = json.loads(
 )["images"]["postgres"]
 
 
-def _deployed_security_options() -> list[str]:
+def _deployed_security_options(*, hermes: bool = False) -> list[str]:
     """The capability and security options Compose gives the postgres service."""
     service = yaml.safe_load(
         (ROOT / "deploy/compose/compose.yaml").read_text(encoding="utf-8")
     )["services"]["postgres"]
+    if hermes:
+        service = yaml.safe_load(
+            (ROOT / "deploy/compose/hermes-agent/compose.yaml").read_text(
+                encoding="utf-8"
+            )
+        )["x-hermes-service"]
     options = []
     for option, field in (
         ("--cap-drop", "cap_drop"),
@@ -438,6 +444,36 @@ def test_deployed_postgres_writes_a_restore_verified_backup(
         dumps = sorted(backups.glob("postgres-*.sql.gz"))
         assert len(dumps) == 1, dumps
         assert b"CREATE DATABASE litellm" in gzip.decompress(dumps[0].read_bytes())
+        service = yaml.safe_load((ROOT / "deploy/compose/compose.yaml").read_text())[
+            "services"
+        ]["postgres"]
+        grace = service.get("stop_grace_period", "10s")
+        assert grace.endswith("s")
+        subprocess.run(
+            ["docker", "stop", "--time", grace[:-1], container],
+            check=True,
+            capture_output=True,
+            timeout=int(grace[:-1]) + 10,
+        )
+        logs = subprocess.check_output(
+            ["docker", "logs", container],
+            stderr=subprocess.STDOUT,
+            text=True,
+            timeout=10,
+        )
+        # Catches PID 1 exiting from an interrupted wait while postgres is still
+        # shutting down: Docker must see the clean server exit within its grace.
+        assert "database system is shut down" in logs
+        assert "PostgreSQL shutdown complete" in logs
+        assert "waiting for database readiness" in logs
+        assert (
+            subprocess.check_output(
+                ["docker", "inspect", "--format", "{{.State.ExitCode}}", container],
+                text=True,
+                timeout=10,
+            ).strip()
+            == "0"
+        )
     finally:
         subprocess.run(
             ["docker", "rm", "--force", container],
@@ -624,4 +660,41 @@ def test_real_compose_restart_recovers_after_runtime_assets_arrive(
                 timeout=10,
             ).strip()
             == "1"
+        )
+
+
+def test_hermes_supervisor_can_signal_a_different_service_uid(
+    postgres_image: str,
+) -> None:
+    # Catches root s6 lacking CAP_KILL after it starts a service as another UID.
+    # Exercise the kernel permission with the deployed Hermes capability set.
+    container = f"vonk-hermes-signal-test-{uuid.uuid4().hex}"
+    try:
+        result = subprocess.run(
+            [
+                "docker",
+                "run",
+                "--name",
+                container,
+                "--network",
+                "none",
+                *_deployed_security_options(hermes=True),
+                "--entrypoint",
+                "/bin/sh",
+                postgres_image,
+                "-c",
+                'gosu postgres sleep 30 & child=$!; sleep 0.2; kill -0 "$child" && kill -TERM "$child" || exit 1; wait "$child"; test "$?" -eq 143',
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+    finally:
+        subprocess.run(
+            ["docker", "rm", "--force", container],
+            check=False,
+            capture_output=True,
+            timeout=10,
         )
