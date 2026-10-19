@@ -362,6 +362,34 @@ mod tests {
     }
 
     #[test]
+    fn import_host_disk_pressure_is_retryable_storage_not_a_plan_violation() {
+        use crate::process::{ProcessDiskReserve, ProcessRunner, Program, SystemProcessRunner};
+
+        let root = tempfile::tempdir().unwrap();
+        let archive = std::fs::File::create(root.path().join("base-image.tar")).unwrap();
+        // Exercise the import's real free-space guard before Podman starts.
+        // This is host pressure, not an oversized recipe working directory.
+        let error = SystemProcessRunner
+            .run_with_input_disk_reserve_cancellable(
+                Program::Podman,
+                &["load".to_owned()],
+                std::time::Duration::from_secs(1),
+                &archive,
+                ProcessDiskReserve::new(root.path(), u64::MAX),
+                &|| false,
+            )
+            .unwrap_err();
+        assert!(matches!(error, ProcessError::StorageLimit));
+        assert!(matches!(
+            podman_import_process_error(error),
+            RecipeBuildError::BaseImageImport {
+                diagnostic: PodmanImportDiagnostic::TemporaryStorageExhausted,
+                ..
+            }
+        ));
+    }
+
+    #[test]
     fn bounded_build_process_failures_have_stable_secret_free_evidence() {
         for (error, _diagnostic) in [
             (
