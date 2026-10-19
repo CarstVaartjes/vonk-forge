@@ -1,5 +1,7 @@
 """Lost terminal reports heal through the real queue, PostgreSQL and parent."""
 
+import subprocess
+import sys
 from dataclasses import dataclass
 from datetime import timedelta
 from pathlib import Path
@@ -373,3 +375,14 @@ def test_old_receipt_cannot_revive_newer_attempt_or_intent(
     peer.replay()
     child = executor.get(current.result.child_operation_id)
     assert child is not None and child.state != LifecycleState.SUCCEEDED
+
+
+def test_fresh_controller_contract_registration_starts_without_import_cycle():
+    """Catches a receipt-handler import breaking a fresh Controller process."""
+    subprocess.run(
+        [sys.executable, "-c", "import vonk_control.stored_columns"],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )

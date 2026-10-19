@@ -27,7 +27,6 @@ from ..agent_operation_facts import aware as _aware
 from ..agent_operation_facts import job_output_retention_expiry
 from ..agent_outcome import stored_report
 from ..auth import AgentSource
-from ..job_documents import DistributionJobPayload
 from ..lifecycle import CancelRequested, LeaseLapsed, Outcome, Reported
 from ..lifecycle.agent_operation import AgentOperationAdapter
 from ..models import AgentOperation as StoredOperation
@@ -123,6 +122,8 @@ def record_late_result(
     retire only the exact superseded order after the agent confirms its
     host action has ceased; it never applies that order's desired effect.
     """
+    from ..job_documents import DistributionJobPayload
+
     self._mark_started()
     with self._sessions.begin() as session:
         hint = session.execute(
