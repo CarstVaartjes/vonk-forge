@@ -720,7 +720,9 @@ export function ArtifactJobWorkspace({
     compareWire(timeoutSeconds, 1) < 0 ||
     compareWire(timeoutSeconds, maximumTimeout) > 0
   )
-    inputErrors.push(`Timeout must be between 1 and ${formatWire(maximumTimeout)} seconds.`);
+    inputErrors.push(
+      `Inactivity timeout must be between 1 and ${formatWire(maximumTimeout)} seconds.`,
+    );
   const output = jobInterface.output;
   const outputSlots = output?.slots ?? [];
   const outputContractReady =
@@ -1406,7 +1408,7 @@ export function ArtifactJobWorkspace({
             </ul>
           )}
           <label htmlFor="artifact-job-timeout">
-            <span>Maximum run time</span>
+            <span>Inactivity timeout</span>
             <input
               id="artifact-job-timeout"
               type="number"
@@ -1415,12 +1417,12 @@ export function ArtifactJobWorkspace({
               value={
                 typeof timeoutSeconds === "string" ? timeoutSeconds : formatWire(timeoutSeconds)
               }
-              aria-label="Maximum run time"
+              aria-label="Inactivity timeout"
               onChange={(event) => setTimeoutSeconds(integerInput(event.target.value))}
             />
             <small>
-              Seconds · the controller stops this job after at most {formatWire(maximumTimeout)}{" "}
-              seconds.
+              Seconds without reported job progress before stopping. Maximum:{" "}
+              {formatWire(maximumTimeout)} seconds.
             </small>
           </label>
           {capabilitiesError && (
