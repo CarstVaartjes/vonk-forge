@@ -12,6 +12,7 @@ import pytest
 from sqlalchemy import select
 from vonk_agent_protocol import (
     AgentResult,
+    JournalRepairCode,
     LifecycleState,
     OperationProgress,
     canonical_message,
