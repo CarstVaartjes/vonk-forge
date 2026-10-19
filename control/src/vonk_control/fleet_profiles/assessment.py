@@ -58,7 +58,7 @@ from .colocation import colocated_memory_overcommit
 from .contracts import (
     FleetProfileInvalid,
 )
-from .dependencies import _PREPARATION_RESOLVABLE_CODES
+from .dependencies import _DISK_REFUSALS, _PREPARATION_RESOLVABLE_CODES
 from .persistence import (
     _persisted_profile_plan,
     _stored_recipe,
@@ -630,10 +630,13 @@ class FleetProfileService:
                 for item in assignment_assessments
                 for reason in item.assessment.blockers
             }
+            # Disk preparation starts only after acceptance: a read-only review
+            # cannot publish an eviction demand. Expose the same waitable path
+            # even when the model and image are already cached.
             waits_for_preparation = bool(
-                preparation_steps
-                and blocker_count > 0
-                and blocking_codes <= _PREPARATION_RESOLVABLE_CODES
+                blocker_count > 0
+                and (preparation_steps or blocking_codes & _DISK_REFUSALS)
+                and blocking_codes <= (_PREPARATION_RESOLVABLE_CODES | _DISK_REFUSALS)
             )
             ordered_preparations = sorted(
                 assignment_preparations, key=lambda item: item.assignment_id

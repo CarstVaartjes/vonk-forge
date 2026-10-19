@@ -463,6 +463,20 @@ class ResourceFitMixin:
                     # Installation may reduce it for exact target-local reuse;
                     # it must never grow a claim after operator acceptance.
                     required_disk = disk_need.required_bytes + disk_need.floor_bytes
+                    if (
+                        snapshot is not None
+                        and required_disk > snapshot.disk_total_bytes
+                    ):
+                        node_blockers.append(
+                            _as_reason(
+                                RunSwitchCode.RESOURCE_DEMAND_EXCEEDS_CAPACITY,
+                                f"The disk allocation needs {required_disk} bytes, "
+                                f"exceeding this Spark's entire {snapshot.disk_total_bytes}-byte device; "
+                                "eviction cannot make it fit.",
+                                scope="node",
+                                node_ids=(item.node_id,),
+                            )
+                        )
                     disk_free = (
                         spark_free_bytes(
                             snapshot.disk_free_bytes, snapshot.unused_model_bytes

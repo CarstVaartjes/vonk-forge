@@ -581,8 +581,31 @@ def test_disk_only_review_submits_a_wait_that_reaches_spark_retention(
     later = lifecycle._clock() + timedelta(seconds=STORAGE_ADMISSION_RETRY_SECONDS + 1)
     for clocked in (service, planner, lifecycle):
         clocked._clock = lambda: later
-    _drive_to_job(service, planner, sessions, "recipe.install")
+    _drive_to_job(service, planner, sessions, OperationKind.RECIPE_INSTALL)
     assert service.application(waiting.id).current_operation_id is not None
+
+
+def test_disk_demand_beyond_the_device_is_not_an_eviction_wait(
+    tmp_path: Path, postgres_engine
+) -> None:
+    """Eviction cannot grow a device: catches parking impossible disk demand."""
+    sessions, lifecycle, _, _, _, nodes = setup_services(
+        tmp_path, engine=postgres_engine
+    )
+    with sessions.begin() as session:
+        snapshot = session.scalar(select(NodeInventorySnapshot))
+        assert snapshot is not None
+        snapshot.disk_free_bytes = 0
+        snapshot.disk_total_bytes = 1
+    service, _planner = _profile_service(sessions, lifecycle)
+    profile = _installed_profile(service, sessions, nodes)
+    review = service.preview(profile.id)
+    assert any(
+        reason.code == RunSwitchCode.RESOURCE_DEMAND_EXCEEDS_CAPACITY
+        for assessment in review.assessments
+        for reason in assessment.assessment.blockers
+    )
+    assert not review.waits_for_preparation
 
 
 def _disk_starved_load(tmp_path: Path, relief=None):
