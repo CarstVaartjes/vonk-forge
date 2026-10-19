@@ -244,6 +244,7 @@ mod tests {
                     error_code: None,
                     exit_code: None,
                     process_running: None,
+                    job_progress_at: None,
                 };
                 let bytes = canonical_json(&response).unwrap();
                 stream

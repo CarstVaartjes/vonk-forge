@@ -443,6 +443,7 @@ class CompiledJob(_Strict):
         "image-job", "audio-job", "video-job", "mesh-job", "artifact-job"
     ]
     input: CompiledJobInput | None
+    # Maximum inactivity since Docker start or its latest timestamped job output.
     timeout_seconds: int = Field(ge=1, le=3600)
 
 

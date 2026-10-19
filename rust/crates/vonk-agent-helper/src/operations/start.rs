@@ -274,7 +274,8 @@ impl<R: CommandRunner> OperationExecutor<R> {
         timeout_seconds: u16,
         started_at: Instant,
     ) -> Result<RuntimeRequestOutcome, OperationError> {
-        let deadline = started_at + Duration::from_secs(u64::from(timeout_seconds));
+        let window = Duration::from_secs(u64::from(timeout_seconds));
+        let mut deadline = started_at + window;
         let target = format!("vonk-{}", identity.runtime_id);
         let mut unread = 0u32;
         let end = loop {
@@ -285,7 +286,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
                     .run_with_timeout(
                         Path::new("/usr/bin/docker"),
                         &["wait".to_owned(), target.clone()],
-                        remaining,
+                        remaining.min(Duration::from_secs(10)),
                     )
                     .ok()
                     .filter(|output| output.success)
@@ -297,8 +298,18 @@ impl<R: CommandRunner> OperationExecutor<R> {
             // An unread wait concludes nothing: the container is read again
             // by identity, and a live or unreadable one is waited for again
             // until its deadline.
+            let observed = self.reobserve_by_identity(identity, logical_run_id, plan_digest);
+            if matches!(observed, Reobserved::Running)
+                && let Some(progress) = self.job_progress_at(identity.runtime_id)
+            {
+                let idle = chrono::Utc::now()
+                    .signed_duration_since(progress)
+                    .to_std()
+                    .unwrap_or_default();
+                deadline = Instant::now() + window.saturating_sub(idle);
+            }
             let expired = Instant::now() >= deadline;
-            match self.reobserve_by_identity(identity, logical_run_id, plan_digest) {
+            match observed {
                 Reobserved::Exited { code } => break JobEnd::Exited(code),
                 Reobserved::Absent => break JobEnd::Vanished,
                 Reobserved::Running if expired => break JobEnd::Deadline,

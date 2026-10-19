@@ -40,6 +40,43 @@ pub(super) fn stop_grace(request: &vonk_agent_protocol::RecipeJobRunRequest) -> 
 }
 
 impl<R: ProcessRunner> RecipeExecutor<'_, R> {
+    /// Feed measured job output activity to the order's existing heartbeat and
+    /// stall window while the helper waits. Re-reading a log is no activity.
+    pub(super) async fn observe_job_progress(
+        &self,
+        claim: &AgentClaim,
+        request: &vonk_agent_protocol::RecipeJobRunRequest,
+        lease: tokio::sync::watch::Receiver<DateTime<FixedOffset>>,
+        mut cancellation: tokio::sync::watch::Receiver<bool>,
+    ) {
+        let request_root = self.runtime_root.join("runtime-requests");
+        let boundary = HostRuntimeBoundary {
+            client: self.client,
+            request_root: &request_root,
+            helper_socket: self.helper_socket,
+        };
+        let mut last = None;
+        loop {
+            if remaining_lease(*lease.borrow()).is_zero() {
+                return;
+            }
+            if let Ok(JobReobservation::Running {
+                progressed_at: Some(stamp),
+            }) = boundary.reobserve_job(request).await
+                && last.is_none_or(|previous| stamp > previous)
+            {
+                self.client.note_process_activity(claim.fence, 1);
+                last = Some(stamp);
+            }
+            // The enclosing execution owns this observer's lifetime. Unread
+            // progress does not renew any deadline; the order's stall ends it.
+            tokio::select! {
+                () = wait_for_cancellation(&mut cancellation) => return,
+                () = tokio::time::sleep(MAX_PAUSE) => {}
+            }
+        }
+    }
+
     /// Re-observe the job until it shows its exit, is proven absent, or its
     /// deadline plus its stop grace passes; a cancellation stops it. `stage`
     /// and `cause` say why its answer was lost; they lead the evidence of a
@@ -47,13 +84,12 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
     pub(super) async fn reobserve_job(
         &self,
         job: &DispatchedJob<'_>,
-        deadline: Instant,
+        mut deadline: Instant,
         cancellation: &mut tokio::sync::watch::Receiver<bool>,
         stage: FailureStage,
         cause: String,
     ) -> Result<HostRuntimeOutcome, Box<ExecutionResult>> {
         // The job's deadline stops it; its stop grace bounds reading the exit.
-        let bound = deadline + stop_grace(job.request);
         let ended = |observed: String| Err(job.unobserved_failure(stage, &cause, &observed));
         let request_root = self.runtime_root.join("runtime-requests");
         let boundary = HostRuntimeBoundary {
@@ -93,7 +129,18 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                         |stop| format!("its container is absent after the deadline's stop; {stop}"),
                     ));
                 }
-                Ok(JobReobservation::Running) => "it was running".to_owned(),
+                Ok(JobReobservation::Running { progressed_at }) => {
+                    if let Some(stamp) = progressed_at {
+                        let window = job_deadline(Instant::now(), job.request)
+                            .saturating_duration_since(Instant::now());
+                        let idle = Utc::now()
+                            .signed_duration_since(stamp)
+                            .to_std()
+                            .unwrap_or_default();
+                        deadline = Instant::now() + window.saturating_sub(idle);
+                    }
+                    "it was running".to_owned()
+                }
                 // A helper that cannot re-observe a job: it is stopped, as it
                 // was before re-observation existed, and ends with that.
                 Err(HostRuntimeError::HelperRejected {
@@ -118,7 +165,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                         .unwrap_or_else(|| "job stopped".to_owned()),
                 );
             }
-            let remaining = bound.saturating_duration_since(now);
+            let remaining = (deadline + stop_grace(job.request)).saturating_duration_since(now);
             if remaining.is_zero() {
                 let stop = stopped.unwrap_or_default();
                 return ended(format!(
@@ -154,7 +201,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                 code: HelperErrorCode::OperationInvalid,
                 ..
             }) => return Ok(None),
-            Ok(JobReobservation::Running) => "it was running",
+            Ok(JobReobservation::Running { .. }) => "it was running",
             Ok(JobReobservation::Exited(_)) => "it had exited",
             Err(error) => return Err(error),
         };

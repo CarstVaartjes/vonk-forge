@@ -7,6 +7,7 @@ use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use chrono::{DateTime, FixedOffset, Utc};
 use thiserror::Error;
 use vonk_agent_protocol::generated::HostHelperResponse as HelperResponse;
 use vonk_agent_protocol::generated::{
@@ -87,7 +88,9 @@ pub struct RunInspectionReport {
 /// unreadable answer is the error, never one of these.
 pub enum JobReobservation {
     /// Its process is live.
-    Running,
+    Running {
+        progressed_at: Option<DateTime<FixedOffset>>,
+    },
     /// Its process exited: the recorded code, and for a failure its exit
     /// account and output.
     Exited(HostRuntimeOutcome),
@@ -289,7 +292,11 @@ impl HostRuntimeBoundary<'_> {
         };
         let evidence = response.diagnostic.is_some() || response.process_logs.is_some();
         match (response.process_running, response.exit_code) {
-            (Some(true), None) if !evidence => Ok(JobReobservation::Running),
+            (Some(true), None) if !evidence => Ok(JobReobservation::Running {
+                progressed_at: response
+                    .job_progress_at
+                    .filter(|stamp| *stamp <= Utc::now()),
+            }),
             (Some(false), Some(code)) if code <= 255 && (code != 0 || !evidence) => {
                 Ok(JobReobservation::Exited(HostRuntimeOutcome {
                     exit_code: Some(code as i32),
