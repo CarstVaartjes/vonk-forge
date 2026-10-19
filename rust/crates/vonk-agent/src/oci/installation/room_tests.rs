@@ -21,6 +21,7 @@ fn stocked() -> (
     PathBuf,
 ) {
     let data = tempdir().unwrap();
+    crate::store_retention::tests::authorize_retention(data.path());
     let plan: crate::workloads::CompiledExecutionPlan =
         serde_json::from_value(compiled_plan()).unwrap();
     let own = stock_store(data.path(), &plan);

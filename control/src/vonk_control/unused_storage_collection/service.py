@@ -348,7 +348,8 @@ class UnusedStorageCollector:
                 )
                 + ". "
                 + _kept_sentence(kept_bytes)
-                + "Stop or remove something on this Spark to make room."
+                + "The agent will check unused model objects and runtime images "
+                "against this demand; waiting for fresh inventory."
             )
         return StorageRelief(
             code, shortfall, freeable, detail, paused=paused is not None
@@ -396,6 +397,12 @@ class UnusedStorageCollector:
         for key in groups:
             for digest in objects.get(key, {}):
                 holders[digest].add(key)
+                if key in evidence.pointed_models or digest in (
+                    evidence.operations | evidence.pinned
+                ):
+                    # Uninstall can drop its link, but the Controller's native
+                    # retention verdict still pins this object in the store.
+                    holders[digest].add(f"protected:{digest}")
         candidates: list[_Item] = []
         for key, members in sorted(groups.items()):
             reasons = {

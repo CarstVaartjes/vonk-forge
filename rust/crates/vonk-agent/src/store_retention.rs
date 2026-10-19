@@ -9,9 +9,9 @@
 //! Two kinds of entry leave here:
 //!
 //! - Model files are the one cache kept until the space is needed: a model
-//!   object no installation links or names leaves only while the disk is below
-//!   the platform's low-space line, least recently used first, until free space
-//!   is back above the line plus the eviction reserve.
+//!   object no installation or Controller reference names leaves when a load
+//!   needs disk space or the platform low-space line is crossed, least recently
+//!   used first, until the demand or low-space reserve is met.
 //! - Everything else unused leaves once nothing has used or changed it for
 //!   [`GRACE`], whatever the free space: a transfer checkpoint or build export
 //!   whose claim ended, an isolated entry, a base image no build has opened, a
@@ -40,7 +40,7 @@ use Collector::*;
 pub const GRACE: Duration = Duration::from_secs(24 * 60 * 60);
 
 /// The Controller's low-space line (`STORAGE_LOW_FREE_FRACTION`) without its
-/// largest-install term, so the agent never evicts above the Controller's line.
+/// largest-install term; a current load can request more free space.
 pub const LOW_FREE_PERCENT: u64 = 10;
 /// The Controller's eviction reserve (`STORAGE_EVICTION_RESERVE_FRACTION` and
 /// `STORAGE_EVICTION_RESERVE_FLOOR_BYTES`).
@@ -109,6 +109,7 @@ pub const STORES: &[Store] = &[
     Store("tmp/", Claim, "the process that made each temporary file"),
     Store("credentials/", Bookkeeping, "the agent identity"),
     Store("state.sqlite", Bookkeeping, "the agent journal"),
+    Store("store-retention.json", Bookkeeping, "the Controller inventory verdict"),
     Store(".state-db-reserve", Bookkeeping, "the agent journal"),
     Store("runtime-preflight-cache.json", Bookkeeping, "the host fingerprint"),
     Store("registry-auth.json", Bookkeeping, "the base-image registry credential"),
@@ -151,12 +152,13 @@ pub fn disk_usage(path: &Path) -> Option<(u64, u64)> {
 pub struct LatestVerdict(Arc<Mutex<Option<(Instant, Untracked)>>>);
 
 /// What the Controller said it does not track, by name.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct Untracked {
     pub installations: BTreeSet<String>,
     /// `None`: the verdict judged no run scope (an older Controller, or none
     /// named), and none leaves.
     pub runs: Option<BTreeSet<String>>,
+    pub retention: Option<vonk_agent_protocol::generated::StoreRetentionRequest>,
 }
 
 impl LatestVerdict {
@@ -168,6 +170,7 @@ impl LatestVerdict {
             (
                 Instant::now(),
                 Untracked {
+                    retention: verdict.store_retention,
                     installations: names(&verdict.untracked_installations),
                     runs: verdict.untracked_runs.as_deref().map(names),
                 },
@@ -354,8 +357,51 @@ pub fn sweep(
         pass.swept.pending |=
             crate::oci::relink_private_model_copies(data_root, &started, deadline).pending;
     }
-    let unused_models = unused_model_objects(data_root, pass.owner, &BTreeSet::new());
-    pass.relieve(unused_models.unwrap_or_default(), disk);
+    // A fresh Controller scan protects not-yet-installed profile/operation
+    // content too. Missing evidence is unknown, never an empty reference set.
+    if let Some(retention) = untracked.and_then(|verdict| verdict.retention.as_ref()) {
+        let path = data_root.join("store-retention.json");
+        // Transfer scratch already has a 24-hour collector, including after a
+        // process dies before this projection's atomic rename.
+        let scratch = data_root.join("distribution");
+        let temporary = scratch.join(format!("retention-{}.partial", uuid::Uuid::new_v4()));
+        let publish = || -> std::io::Result<()> {
+            use std::io::Write;
+            fs::create_dir_all(&scratch)?;
+            let mut file = fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .mode(0o600)
+                .open(&temporary)?;
+            let body = serde_json::to_vec(retention)?;
+            if body.len() > 1024 * 1024 {
+                return Err(std::io::Error::other(
+                    "retention request exceeds byte limit",
+                ));
+            }
+            file.write_all(&body)?;
+            fs::rename(&temporary, &path)
+        };
+        if let Err(error) = publish() {
+            let _ = fs::remove_file(&temporary);
+            let _ = fs::remove_file(&path);
+            eprintln!("vonk-agent: store retention references unavailable: {error}");
+        }
+    } else {
+        // A failed current reference scan revokes the previous projection.
+        // Waiting for its expiry could collect newly referenced content.
+        let _ = fs::remove_file(data_root.join("store-retention.json"));
+    }
+    if let Some(retention) = read_retention(data_root) {
+        let keep = retention.protected_model_objects.into_iter().collect();
+        let unused_models = unused_model_objects(data_root, pass.owner, &keep);
+        pass.relieve(
+            unused_models.unwrap_or_default(),
+            disk,
+            retention.required_free_bytes,
+        );
+    }
+
     pass.swept
 }
 
@@ -394,8 +440,10 @@ pub fn unused_model_bytes(data_root: &Path) -> Option<u64> {
     if !owned_directory(data_root, owner) {
         return None;
     }
+    let retention = read_retention(data_root)?;
+    let keep = retention.protected_model_objects.into_iter().collect();
     Some(
-        unused_model_objects(data_root, owner, &BTreeSet::new())?
+        unused_model_objects(data_root, owner, &keep)?
             .iter()
             .map(|(_, _, metadata)| metadata.len())
             .sum(),
@@ -416,8 +464,13 @@ pub fn make_room(data_root: &Path, required: u64, keep: &BTreeSet<String>) -> u6
     if !owned_directory(data_root, owner) {
         return 0;
     }
+    let Some(retention) = read_retention(data_root) else {
+        return 0;
+    };
+    let mut keep = keep.clone();
+    keep.extend(retention.protected_model_objects);
     let mut removed = 0_u64;
-    for (_, path, metadata) in unused_model_objects(data_root, owner, keep).unwrap_or_default() {
+    for (_, path, metadata) in unused_model_objects(data_root, owner, &keep).unwrap_or_default() {
         if free().is_none_or(|free| free >= required) {
             break;
         }
@@ -625,15 +678,20 @@ impl Pass<'_> {
         &mut self,
         objects: Vec<(SystemTime, PathBuf, fs::Metadata)>,
         disk: &dyn Fn() -> Option<(u64, u64)>,
+        required: u64,
     ) {
         let Some((free, total)) = disk() else {
             return;
         };
         let line = total / 100 * LOW_FREE_PERCENT;
-        if free >= line {
+        if free >= line.max(required) {
             return;
         }
-        let target = line + RESERVE_FLOOR_BYTES.max(total / 100 * RESERVE_PERCENT);
+        let target = if free < line {
+            required.max(line + RESERVE_FLOOR_BYTES.max(total / 100 * RESERVE_PERCENT))
+        } else {
+            required
+        };
         for (_, path, metadata) in objects {
             if disk().is_none_or(|(free, _)| free >= target) || self.swept.pending {
                 return;
@@ -802,4 +860,33 @@ fn owned_directory(path: &Path, owner: u32) -> bool {
 #[cfg(test)]
 pub(crate) mod fake_disk;
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
+
+/// Read only a fresh, bounded Controller reference scan. Every cache collector
+/// treats missing or unreadable reference evidence as unknown.
+pub fn read_retention(
+    data_root: &Path,
+) -> Option<vonk_agent_protocol::generated::StoreRetentionRequest> {
+    use std::io::Read;
+    let file = fs::OpenOptions::new()
+        .read(true)
+        .custom_flags((rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::NONBLOCK).bits() as i32)
+        .open(data_root.join("store-retention.json"))
+        .ok()?;
+    let metadata = file.metadata().ok()?;
+    if !metadata.is_file() || metadata.len() > 1024 * 1024 {
+        return None;
+    }
+    let mut body = Vec::new();
+    file.take(1024 * 1024 + 1).read_to_end(&mut body).ok()?;
+    let request: vonk_agent_protocol::generated::StoreRetentionRequest =
+        serde_json::from_slice(&body).ok()?;
+    let now = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .ok()?
+        .as_secs();
+    (request.issued_at <= now
+        && request.expires_at > now
+        && request.expires_at <= request.issued_at.saturating_add(VERDICT_MAX_AGE.as_secs()))
+    .then_some(request)
+}

@@ -204,6 +204,7 @@ def _relieve(
         return outcome
     ordered = _eviction_order(items)
     queued = 0
+    measured_removal = 0
     for item in ordered:
         if queued >= pressure.need or outcome.stopping:
             # A failed run's Stop must land before more is judged needed.
@@ -218,14 +219,19 @@ def _relieve(
             )
         if done:
             queued += item.freeable
+            # Shared objects stay in the model store until the agent's LRU
+            # relieves pressure. Uninstall promises only its private bytes.
+            measured_removal += (
+                item.private if pressure.node_id is not None else item.freeable
+            )
         if (item.kind, item.key) in self._stopping:
             # Also when another Spark's pass in this sweep queued the Stop.
             outcome.stopping = True
-    outcome.estimated_freed = queued
+    outcome.estimated_freed = measured_removal
     if outcome.removed["image"]:
         self._reclaim_blobs()
-    if queued:
-        self._rounds[pressure.scope] = _Round(queued, pressure.free)
+    if measured_removal:
+        self._rounds[pressure.scope] = _Round(measured_removal, pressure.free)
     elif pressure.demanded and not outcome.stopping:
         outcome.outcome = "insufficient_after_eviction"
     elif not outcome.stopping:  # else evicting: removal follows the Stop

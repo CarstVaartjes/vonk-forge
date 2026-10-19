@@ -13,10 +13,17 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import select
+from vonk_agent_protocol import RunState
 from vonk_control.distributed_recovery import DistributedRecoveryCoordinator
 from vonk_control.fleet_profile_contract import FleetProfileInput
 from vonk_control.fleet_profiles import build_production_fleet_profile_service
-from vonk_control.models import Job, RecipeRun, ResourceReservation, RunNode
+from vonk_control.models import (
+    Job,
+    NodeInventorySnapshot,
+    RecipeRun,
+    ResourceReservation,
+    RunNode,
+)
 from vonk_control.recipe_operations import prepare_exact_recipe_run_observation_nodes
 from vonk_control.run_switch_operations import RunSwitchOperationService
 
@@ -296,3 +303,50 @@ def test_a_run_a_live_operation_owns_is_not_settled_by_absence(
             node.observation_observed_at is None
             for node in session.scalars(select(RunNode).where(RunNode.run_id == run_id))
         )
+
+
+def test_exact_running_claim_is_replaced_by_stop_and_fresh_inventory_on_postgres(
+    tmp_path: Path, postgres_engine
+) -> None:
+    """Aggregate inventory cannot measure resident bytes. A load must plan the
+    exact Stop automatically instead of waiting for an operator to reconcile it.
+    """
+    sessions, profiles, profile, recovery, run_id = _load_over(
+        tmp_path, state=RunState.RUNNING, plan_readable=True, engine=postgres_engine
+    )
+    assert _claims(sessions, run_id)
+    recovery.tick()
+    baseline = profiles.preview(profile.id)
+    requirements = {
+        requirement.node_id: requirement
+        for decision in baseline.admission_decisions
+        for requirement in decision.requirements
+    }
+    # Fresh inventory shows enough for one workload, even though its exact
+    # active claim has no resident-byte measurement. The old and new promises
+    # cannot fit together: dropping the claim on aggregate free would be wrong.
+    with sessions.begin() as session:
+        for snapshot in session.scalars(select(NodeInventorySnapshot)):
+            requirement = requirements[snapshot.node_id]
+            demand, floor = (
+                requirement.memory_required_bytes,
+                requirement.memory_floor_bytes,
+            )
+            assert demand is not None and floor is not None
+            capacity = demand + floor + 1
+            snapshot.host_memory_total_bytes = capacity
+            snapshot.host_memory_free_bytes = capacity
+            snapshot.gpu_memory_total_bytes = capacity
+            snapshot.gpu_memory_free_bytes = capacity
+    review = profiles.preview(profile.id)
+    assert review.allowed, _codes(review)
+    assert _claims(sessions, run_id), (
+        "fresh aggregate inventory cannot release an exact live claim"
+    )
+    assert review.admission_decisions
+    for decision in review.admission_decisions:
+        assert any(stop.run_id == run_id for stop in decision.stops)
+        assert decision.post_stop_memory_check is not None
+        assert decision.post_stop_memory_check.stop_run_ids == [run_id]
+        assert decision.stop_before_prepare
+    assert not _codes(review) & _CLAIM_BLOCKERS

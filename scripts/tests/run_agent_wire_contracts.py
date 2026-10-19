@@ -10,6 +10,7 @@ import sys
 from pathlib import Path
 
 PROBES = {
+    "VONK_STORE_RETENTION_PROBE": ("vonk-agent", "store_retention_probe"),
     "VONK_INSTALLER_RELEASE_WIRE_PROBE": (
         "vonk-spark-setup",
         "installer_release_wire_probe",

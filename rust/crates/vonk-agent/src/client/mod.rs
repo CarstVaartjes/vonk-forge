@@ -66,8 +66,8 @@ use tokio::sync::{RwLock, RwLockReadGuard};
 
 const MAX_BODY_BYTES: usize = 64 * 1024;
 const MAX_CLAIM_BODY_BYTES: usize = MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES;
-/// An inventory verdict names at most the installations one inventory reports.
-const MAX_VERDICT_BODY_BYTES: usize = 256 * 1024;
+/// Bounded reference scan (1 MiB), plus the inventory's installation/run names.
+const MAX_VERDICT_BODY_BYTES: usize = 2 * 1024 * 1024;
 /// Longest Controller validation digest retained in one refusal record.
 const MAX_REJECTION_CONTEXT_CHARS: usize = 256;
 /// Validation issues kept from one refusal.  A union payload fails every

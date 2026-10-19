@@ -157,6 +157,17 @@ until disk pressure requires least-recently-used eviction. Automatic installatio
 removal retains the shared model files, even when it removes the last installation
 link. Pressure can also remove younger unused installations or runtime images.
 
+The inventory response carries the current waiting load's disk target and the
+model objects and image addresses protected by profiles and live operations.
+The agent publishes this expiring reference scan for its LRU and the helper's
+image collector. Both check at least once a minute between claims. The model
+LRU frees objects up to the load's target even above the low-space line; the
+helper also removes younger unused images while that target remains unmet.
+Local installation plans, hard links, active pulls and Docker's container
+references continue to protect content. An image pulled after the reference
+scan waits for a later scan before pressure can remove it. Missing, unreadable
+or expired reference evidence defers collection; it never means no references.
+
 A Spark or the NAS counts as low when its free space is below the larger of 10 %
 of its capacity and the largest install (Spark) or model set (NAS) it has held,
 at most 25 % of its capacity (`STORAGE_LOW_FREE_*` in `settings.py`; these are
@@ -185,20 +196,23 @@ next pass and does not stop the others.
 
 A removal queued on a Spark is given time to land and show in a fresh inventory
 before the next one, so the Spark's own reported free space (not a guess at what
-hard links free) decides whether more must go. A round that frees less than half
-of what it promised pauses eviction there for 15 minutes. If everything that may
+hard links free) decides whether more must go. An uninstall's expected recovery counts only its private bytes; model objects
+retained in the shared store belong to the agent's LRU, not that uninstall's
+physical recovery estimate. A round that frees less than half of its expected
+private bytes pauses installation eviction there for 15 minutes; the native
+model and image collectors continue relieving the load's demand. If everything that may
 go would still not cover a refused request, nothing is removed.
 
 Disk admission counts what a Spark will actually write: while an installation of
 a model exists on a Spark, its shared store holds that model's files and a new
-installation links them, so a load's disk claim leaves them out. For the same
-reason an installation of a model a saved profile's recipe needs is never
-evicted (removing the last installation of a model deletes the store's copy).
+installation links them, so a load's disk claim leaves them out. The protected reference scan keeps model objects a saved profile names even
+when its installation is removed.
 
 A load that waits for disk is not failed: it shows `storage.evicting` (bytes
 needed and bytes that can be freed) while the Controller frees room, or
 `storage.insufficient_after_eviction` when all unused installations together
-would not be enough (stop or remove something on that Spark). It resumes by
+would not be enough. The agent checks unused model objects and images against
+the demand while the load waits for fresh inventory. It resumes by
 itself on its next retry once the Spark reports enough free space.
 
 Each pass that removes something, or whose answer changes, logs one

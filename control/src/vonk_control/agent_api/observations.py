@@ -46,6 +46,7 @@ from ..owner_liveness import builds_in_flight, run_has_live_operation
 from ..presence import PresenceError
 from ..recipe_operations import prepare_exact_recipe_run_observation_nodes
 from ..source_bundles import SourceBundleError
+from ..spark_store_retention import store_retention_request
 from ..telemetry import TelemetryRepository, TelemetrySampleInput
 from ..untracked_installations import untracked_installations, untracked_runs
 from .common import (
@@ -191,6 +192,7 @@ def install_observations_routes(
             return Response(status_code=status.HTTP_204_NO_CONTENT)
         with required.sessions() as session:
             verdict = InventoryVerdict(
+                store_retention=store_retention_request(session, identity.node_id, now),
                 untracked_installations=untracked_installations(
                     session, body.installations or ()
                 ),

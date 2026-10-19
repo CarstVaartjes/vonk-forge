@@ -32,6 +32,7 @@ from vonk_agent_protocol import (
     ContainerRuntimeAction,
     ExecuteContainerRuntimeRequestOperation,
     InstallVonkDebOperation,
+    InventoryVerdict,
     LifecycleState,
     PackageRollbackAuthority,
     RecipeStopPayload,
@@ -858,7 +859,10 @@ def test_an_inventory_naming_installations_gets_the_controllers_verdict(
 
     assert older.status_code == 204 and older.content == b""
     assert judged.status_code == 200
-    assert judged.json() == {"untracked_installations": [forgotten]}
+    verdict = InventoryVerdict.model_validate_json(judged.content)
+    assert verdict.untracked_installations == [forgotten]
+    assert verdict.store_retention is not None
+    assert verdict.store_retention.required_free_bytes == 0
     # An agent that named no runs gets no run verdict field (an older
     # agent reads the verdict strictly); one that names them gets it.
     runs = client.post(
@@ -871,7 +875,9 @@ def test_an_inventory_naming_installations_gets_the_controllers_verdict(
         },
     )
     assert runs.status_code == 200
-    assert runs.json() == {"untracked_installations": [], "untracked_runs": [forgotten]}
+    verdict = InventoryVerdict.model_validate_json(runs.content)
+    assert verdict.untracked_installations == []
+    assert verdict.untracked_runs == [forgotten]
 
 
 def test_an_inventory_measuring_installations_refreshes_their_recorded_size(
