@@ -13,13 +13,14 @@ from ..categorized_errors import InvalidValue
 from ..lifecycle import State
 from ..logging import redact_text
 from ..model_cache_contract import (
+    ModelCacheCancellation,
     ModelCacheOperationResponse,
     ModelCacheOperatorAction,
     ModelCacheRemovalPayload,
 )
 from ..models import CatalogDocumentRevision, ModelCacheOperation, ModelCacheSet
 from ..operation_contract import AvailabilityOperationFailure
-from ..strict_json import serialize_json_value
+from ..strict_json import read_stored_model, serialize_json_value
 from .catalog_helpers import _datetime, _iso, _parse_iso
 from .constants import SCHEMA_VERSION
 from .errors import ModelCacheConflictInvalid, ModelCacheNotFoundInvalid
@@ -131,6 +132,26 @@ class OperationsMixin:
                 )
             operation_id = operation.id
         return cache.get_operator_operation(operation_id)
+
+    def get_operator_cancellation(
+        self, operation_id: str, request_key: str, *, actor: str
+    ) -> tuple[CacheOperationView, ModelCacheOperatorAction, str]:
+        """Resolve only the accepted cancellation, including after restart."""
+        cache = cast("ModelCacheService", self)
+        operation, action, selector = cache.get_operator_operation(operation_id)
+        cancellation = (
+            None
+            if operation.cancellation is None
+            else read_stored_model(ModelCacheCancellation, operation.cancellation)
+        )
+        if cancellation is None or (cancellation.request_key, cancellation.actor) != (
+            request_key,
+            actor,
+        ):
+            raise ModelCacheNotFoundInvalid(
+                ModelCacheCode.OPERATION_MISSING, "cancellation receipt was not found"
+            )
+        return operation, action, selector
 
     def list_operations(self, *, limit: int = 100) -> tuple[CacheOperationView, ...]:
         cache = cast("ModelCacheService", self)

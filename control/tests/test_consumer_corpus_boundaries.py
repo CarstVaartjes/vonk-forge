@@ -164,7 +164,7 @@ def api_with_diagnostic(leaf: dict):
         job_operations=lambda _id, _cursor, _limit: OperationPage(
             (item,), None, JobProgress(completed=0, failed=1, running=0, total=1)
         ),
-        resume_job=lambda _id: None,
+        resume_job=lambda _id, *, receipt=None: None,
     )
     return _client(operations=services, jobs=jobs)[:2]
 

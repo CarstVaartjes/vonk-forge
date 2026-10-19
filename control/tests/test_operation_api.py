@@ -12,7 +12,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import Table, create_engine, select
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import canonical_message
+from vonk_agent_protocol import LifecycleState, canonical_message
 from vonk_control import agent_operation_states as aos
 from vonk_control import operation_api
 from vonk_control.agent_jobs import AgentJobService, OperatorRetirementRefused
@@ -32,6 +32,7 @@ from vonk_control.fleet_profile_contract import (
 )
 from vonk_control.fleet_profiles import FleetProfileService
 from vonk_control.fleet_projection import FleetSnapshot
+from vonk_control.job_operator_receipts import record_job_operator_receipt
 from vonk_control.jobs import JobService
 from vonk_control.models import (
     AgentCertificate,
@@ -145,6 +146,9 @@ def _first_diagnostic_target(
 
 @dataclass
 class EnqueuedJob:
+    operator_decisions: str | None = None
+    request_id: str = "22222222-2222-4222-8222-222222222222"
+    payload_digest: str = "a" * 64
     id: str = "11111111-1111-4111-8111-111111111111"
     state: str = "queued"
     kind: str = "reconcile"
@@ -255,7 +259,7 @@ def test_generic_operation_read_contract_projects_bounded_durable_state() -> Non
         job_operations=lambda _job_id, _cursor, _limit: OperationPage(
             (), None, JobProgress(completed=0, failed=0, running=0, total=0)
         ),
-        resume_job=lambda _job_id: None,
+        resume_job=lambda _job_id, *, receipt=None: None,
         list_operations=lambda _cursor, _limit, _state, _node_id, _request_id: (
             operation_api.OperationListPage((item,), None, 1)
         ),
@@ -442,7 +446,7 @@ def test_global_operation_projection_merges_typed_provider_families() -> None:
         job_operations=lambda _job_id, _cursor, _limit: OperationPage(
             (), None, JobProgress(completed=0, failed=0, running=0, total=0)
         ),
-        resume_job=lambda _job_id: None,
+        resume_job=lambda _job_id, *, receipt=None: None,
         operation_providers=(provider_for(("cache-1",)), provider_for(("run-1",))),
         cursor_codec=TokenCodec(b"p" * 32).cursor_codec(),
     )
@@ -751,14 +755,20 @@ def test_job_status_has_typed_progress_fields_without_payloads() -> None:
 
 def test_operator_resume_is_rbac_guarded_and_strict() -> None:
     resumed: list[str] = []
+    jobs = Jobs()
+
+    def resume(job_id, *, receipt=None):
+        resumed.append(job_id)
+        record_job_operator_receipt(cast(Job, jobs.job), receipt)
+
     services = OperationApiServices(
         agents=lambda: (),
         job_operations=lambda _job_id, _cursor, _limit: OperationPage(
             (), None, JobProgress(completed=0, failed=0, running=0, total=0)
         ),
-        resume_job=resumed.append,
+        resume_job=resume,
     )
-    client, operator, _reconciler = _client(operations=services)
+    client, operator, _reconciler = _client(operations=services, jobs=jobs)
     job_id = "11111111-1111-4111-8111-111111111111"
 
     unexpected = client.post(
@@ -1024,7 +1034,7 @@ def test_durable_resume_dispatches_agent_upgrade_to_its_operation_queue(
         tmp_path / "routes",
         clock=lambda: now,
         cursors=TokenCodec(b"k" * 32).cursor_codec(),
-        resume_agent_upgrade=resumed.append,
+        resume_agent_upgrade=lambda job_id, *, receipt=None: resumed.append(job_id),
     )
 
     services.resume_job(job.id)
@@ -1543,7 +1553,7 @@ def test_stored_operation_state_failure_is_not_reported_as_a_cursor_fault() -> N
     services = OperationApiServices(
         agents=lambda: (),
         job_operations=read_job,
-        resume_job=lambda _job_id: None,
+        resume_job=lambda _job_id, *, receipt=None: None,
         list_operations=unavailable,
         get_operation=lambda _operation_id: {},
     )
@@ -1803,7 +1813,7 @@ def test_agent_upgrade_diagnostics_omit_unreadable_optional_package() -> None:
     assert diagnostics(stored({})) is None
 
 
-def _parked_stop_services(tmp_path, *, clock: MutableClock):
+def _parked_stop_services(tmp_path, *, clock: MutableClock, engine=None):
     """Build the durable rows one real parked ``recipe.stop`` needs.
 
     Production resumes and claims in separate transactions, so the test keeps
@@ -1811,7 +1821,7 @@ def _parked_stop_services(tmp_path, *, clock: MutableClock):
     that resumes.
     """
 
-    engine = create_engine(
+    engine = engine or create_engine(
         f"sqlite:///{tmp_path / 'parked-resume.sqlite'}",
         connect_args={"check_same_thread": False},
     )
@@ -1831,6 +1841,7 @@ def _parked_stop_services(tmp_path, *, clock: MutableClock):
                 binary_digest="f" * 64,
             )
         )
+        session.flush()
         session.add(
             AgentCertificate(
                 serial="serial-parked",
@@ -1997,15 +2008,26 @@ def test_operator_retire_is_a_distinct_disposition() -> None:
 
     resumed: list[str] = []
     retired: list[str] = []
+    jobs = Jobs()
+
+    def resume(job_id, *, receipt=None):
+        resumed.append(job_id)
+        record_job_operator_receipt(cast(Job, jobs.job), receipt)
+
+    def retire(job_id: str, *, receipt=None) -> None:
+        retired.append(job_id)
+        record_job_operator_receipt(cast(Job, jobs.job), receipt)
+        jobs.job.state = LifecycleState.FAILED.value
+
     services = OperationApiServices(
         agents=lambda: (),
         job_operations=lambda _job_id, _cursor, _limit: OperationPage(
             (), None, JobProgress(completed=0, failed=0, running=0, total=0)
         ),
-        resume_job=resumed.append,
-        retire_job=retired.append,
+        resume_job=resume,
+        retire_job=retire,
     )
-    client, operator, _reconciler = _client(operations=services)
+    client, operator, _reconciler = _client(operations=services, jobs=jobs)
     job_id = "11111111-1111-4111-8111-111111111111"
 
     resumed_request = "33333333-3333-4333-8333-333333333333"
@@ -2031,7 +2053,7 @@ def test_operator_retire_is_a_distinct_disposition() -> None:
 def test_operator_retire_reports_a_live_operation_refusal() -> None:
     """A refusal is a typed 409, never a silent terminal transition."""
 
-    def refused(_job_id: str) -> None:
+    def refused(_job_id: str, *, receipt=None) -> None:
         raise OperatorRetirementRefused("op-1", "its bounded retry budget is not spent")
 
     services = OperationApiServices(
@@ -2039,7 +2061,7 @@ def test_operator_retire_reports_a_live_operation_refusal() -> None:
         job_operations=lambda _job_id, _cursor, _limit: OperationPage(
             (), None, JobProgress(completed=0, failed=0, running=0, total=0)
         ),
-        resume_job=lambda _job_id: None,
+        resume_job=lambda _job_id, *, receipt=None: None,
         retire_job=refused,
     )
     client, operator, *_ = _client(operations=services)
@@ -2204,7 +2226,7 @@ def test_zero_target_upgrade_job_still_projects_a_valid_progress_object() -> Non
         job_operations=lambda _job_id, _cursor, _limit: OperationPage(
             (), None, JobProgress(completed=0, failed=0, running=0, total=0)
         ),
-        resume_job=lambda _job_id: None,
+        resume_job=lambda _job_id, *, receipt=None: None,
     )
     client, operator, _ = _client(jobs=jobs, operations=services)
 

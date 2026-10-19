@@ -12,6 +12,7 @@ IDENTIFIER_PATTERN = r"^[a-z0-9][a-z0-9._-]{0,62}$"
 NODE_PATTERN = r"^spk_[0-9a-f]{32}$"
 _ACTIVE_PUBLICATION_STATES = frozenset({"completed"})
 _ADMIN_OPERATION_IDS = {
+    ("get", "/api/jobs/{job_id}/requests/{request_id}"): "getJobOperatorReceipt",
     ("get", "/api/cli/contract"): "getCliUpdateContract",
     ("get", "/api/platform"): "getPlatformObservation",
     ("get", "/api/fleet"): "getFleetStatus",

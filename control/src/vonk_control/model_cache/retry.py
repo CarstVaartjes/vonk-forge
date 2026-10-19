@@ -208,7 +208,10 @@ class RetryMixin:
                 )
             previous_payload = cache._transfer_or_retire(previous)
             if previous_payload is None:
-                return cache._operation_view(previous)
+                raise ModelCacheConflictInvalid(
+                    ModelCacheCode.DOCUMENT_UNREADABLE,
+                    "cannot record access recheck in unreadable operation",
+                )
             failure = cache._canonical_failure(previous)
             if (
                 previous.kind not in {"download", "repair"}

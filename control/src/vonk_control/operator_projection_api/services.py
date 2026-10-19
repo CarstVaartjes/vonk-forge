@@ -52,6 +52,8 @@ class FleetEnrollmentProvider(Protocol):
 
     def grant_status(self, grant_id: str, *, actor: str) -> EnrollmentGrantStatus: ...
 
+    def revocation_status(self, node_id: str) -> EnrollmentRevocationStatus: ...
+
     def revoke_grant(
         self, grant_id: str, *, actor: str
     ) -> EnrollmentGrantStatus | EnrollmentObservationOutcome: ...
@@ -201,6 +203,11 @@ class _AgentEnrollmentAdapter:
         if enrollment is None:
             raise RuntimeError("agent enrollment is unavailable")
         return enrollment.revoke_grant(grant_id, actor=actor)
+
+    def revocation_status(self, node_id: str) -> EnrollmentRevocationStatus:
+        services = self._required()
+        assert services.enrollment is not None
+        return services.enrollment.revocation_status(node_id)
 
     def revoke_node(self, node_id: str, actor: str) -> EnrollmentRevocationStatus:
         services = self._required()

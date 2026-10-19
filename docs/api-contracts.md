@@ -12,6 +12,33 @@ their current contracts; neither requires accepting an older document format.
 Declared optional fields and defaults are part of the current contract, not
 legacy compatibility.
 
+## Operator acceptance receipts
+
+A successful operator mutation carries `X-Vonk-Receipt`, the JSON-encoded
+`AcceptanceReceipt` from `vonk_control.operator_receipt_contract`, and a `Link` with
+`rel="receipt"`. Its owner, record identity, lookup URL and applicable request,
+revision and content identity resolve through the existing owner after commit.
+There is no separate receipt database. Job resume and retirement retain a typed
+history on the Job row, bounded by the control-document reader budget. Old keys
+remain replayable after newer decisions without authorizing another attempt.
+The history is canonical JSON text validated on reads and writes. Controller
+startup adds the nullable `operator_decisions` column without
+resetting existing rows. The reference proves acceptance, not physical
+completion. A save can refer to the committed resource revision.
+
+Replaying an accepted cancellation returns its existing receipt; another key,
+actor or request content cannot adopt it. Model and recipe cancellation lookup
+URLs resolve the cancellation key on the original operation. Key lookups expose
+only the existing managed mutation receipt's public status, never its secret.
+An unavailable owner returns a typed retryable response; an unchanged target
+without the requested acceptance cannot return success. Profile saves replay
+an identical committed definition without increasing its revision.
+
+Mounted operator mutations declare their semantic `ReceiptPolicy`. The guard
+also enumerates both browser-auth configurations and rejects new unclassified
+mutations. Previews declare observation semantics. Agent and authentication
+receipt coverage remains a separate implementation boundary.
+
 ## Ownership
 
 The complete inventory of data classes, their source models and their generated

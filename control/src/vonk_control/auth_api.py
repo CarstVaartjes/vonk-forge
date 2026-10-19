@@ -19,6 +19,7 @@ from .browser_auth import (
     BrowserIdentity,
 )
 from .http_errors import temporary_http_answer
+from .operator_acceptance import ReceiptPolicy, operator_acceptance
 
 _COOKIE_MAX_AGE = 43_200
 _CLI_TOKEN_TTL_SECONDS = 30 * 24 * 60 * 60
@@ -126,6 +127,7 @@ def install_auth_routes(
         },
         operation_id="loginBrowser",
     )
+    @operator_acceptance(ReceiptPolicy.AUTH)
     def login(body: LoginRequest, request: Request, response: Response) -> AuthSession:
         host = request.headers.get("host")
         if host is None or request.headers.get("origin") != f"https://{host}":
@@ -167,6 +169,7 @@ def install_auth_routes(
         operation_id="logoutBrowser",
         openapi_extra={"x-vonk-request-body": "none"},
     )
+    @operator_acceptance(ReceiptPolicy.AUTH)
     def logout(
         request: Request,
         response: Response,
@@ -217,6 +220,7 @@ def install_auth_routes(
             "x-vonk-streaming-transport": True,
         },
     )
+    @operator_acceptance(ReceiptPolicy.AUTH)
     def cli_token(
         request: Request,
         _authenticated_actor: Actor = authenticated,

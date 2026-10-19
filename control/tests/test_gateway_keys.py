@@ -15,6 +15,7 @@ from vonk_control.gateway_keys import (
     GatewayKeyService,
     install_gateway_key_routes,
 )
+from vonk_control.strict_json import ControllerAPIRoute
 
 
 @pytest.fixture(autouse=True)
@@ -146,6 +147,7 @@ def _service(litellm: FakeLiteLlm) -> GatewayKeyService:
 
 def _client(service, role="administrator") -> TestClient:
     app = FastAPI()
+    app.router.route_class = ControllerAPIRoute
     install_gateway_key_routes(
         app,
         actor_dependency=Depends(lambda: Actor("test", role)),
@@ -212,7 +214,7 @@ def test_create_list_and_revoke_client_keys():
     # No model list means every gateway model, and only inference routes.
     assert litellm.keys["laptop"]["models"] == []
     assert litellm.keys["laptop"]["allowed_routes"] == ["openai_routes"]
-    assert created.json()["expires_at"] is None
+    assert created.json().get("expires_at") is None
 
     scoped = client.post(
         "/api/key", json={"name": "ci", "models": ["qwen"], "expires": "30d"}
@@ -230,7 +232,7 @@ def test_create_list_and_revoke_client_keys():
     assert [key["name"] for key in listed.json()["keys"]] == ["ci", "laptop"]
     assert secret not in listed.text
 
-    assert client.post("/api/key/ci/revoke").json() == {"name": "ci"}
+    assert client.post("/api/key/ci/revoke").json()["name"] == "ci"
     assert set(litellm.keys) == {"laptop"}
     client.post("/api/key/ci/revoke")
     assert set(litellm.keys) == {"laptop"}
@@ -1004,7 +1006,7 @@ def test_revoke_succeeds_without_info_or_receipt(token_available, receipt_availa
     if not receipt_available:
         for path in service._intent_root.glob("*.json"):
             path.unlink()
-    assert _client(service).post("/api/key/client/revoke").json() == {"name": "client"}
+    assert _client(service).post("/api/key/client/revoke").json()["name"] == "client"
     assert not peer.keys
     assert not _authorizes(peer, original.key)
 
@@ -1026,9 +1028,7 @@ def test_revoke_succeeds_when_receipt_secret_is_already_absent():
     restarted = GatewayKeyService(
         master_key=lambda: MASTER, transport=httpx2.MockTransport(handle)
     )
-    assert _client(restarted).post("/api/key/client/revoke").json() == {
-        "name": "client"
-    }
+    assert _client(restarted).post("/api/key/client/revoke").json()["name"] == "client"
     assert restarted._pending_receipt("client") is None
     assert not _authorizes(peer, original.key)
 
