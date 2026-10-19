@@ -8,6 +8,7 @@ import subprocess
 import sys
 from datetime import timedelta
 
+import pytest
 from sqlalchemy import text
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import LifecycleState, WaitOwnerKind
@@ -300,8 +301,9 @@ def test_owner_handler_runs_after_the_selection_connection_is_released(postgres_
         engine.dispose()
 
 
+@pytest.mark.parametrize("superseded", (False, True))
 def test_due_recipe_parent_uses_normal_phase_advancement_after_restart(
-    tmp_path, postgres_engine, monkeypatch
+    tmp_path, postgres_engine, monkeypatch, superseded
 ):
     """Catches registering a parent callback that only polls its cleanup paths."""
     from sqlalchemy import select
@@ -359,6 +361,17 @@ def test_due_recipe_parent_uses_normal_phase_advancement_after_restart(
             evidence=start_evidence(child.payload),
         )
     now = RECIPE_NOW + timedelta(seconds=5)
+    if superseded:
+        from vonk_agent_protocol import AgentOperation as WireAgentOperation
+
+        with sessions.begin() as session:
+            service._admit_workload_intent(
+                session,
+                kind=WireAgentOperation.RECIPE_START,
+                targets=nodes,
+                workload_intent_ordinal=None,
+                now=now,
+            )
     queue = AgentJobService(sessions, clock=lambda: now)
     reconstructed = RecipeOperationService(
         sessions,
@@ -387,5 +400,10 @@ def test_due_recipe_parent_uses_normal_phase_advancement_after_restart(
                 )
             )
         )
-        assert current == expected
-        assert current > {child.id for child in children}
+        if superseded:
+            assert current == {child.id for child in children}
+            parent = session.get(Job, started.id)
+            assert parent is not None and parent.state == LifecycleState.CANCELLED
+        else:
+            assert current == expected
+            assert current > {child.id for child in children}

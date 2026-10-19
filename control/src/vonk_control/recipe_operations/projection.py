@@ -19,6 +19,7 @@ from vonk_agent_protocol import (
     RecipeStartPayload,
     RecipeStartResult,
     RunState,
+    SupersedeCode,
     WaitReason,
     canonical_message,
 )
@@ -91,8 +92,9 @@ from ..recipe_progress import (
 )
 from ..stored_json import read_row_column
 from ..strict_json import read_stored_model, serialize_json_value
-from .constants import _INITIAL_OBSERVATION_GRACE_SECONDS
+from .constants import _INITIAL_OBSERVATION_GRACE_SECONDS, _WORKLOAD_INTENT_KINDS
 from .errors import RecipeRequestInvalid
+from .intent import _intent_is_current, _job_workload_intent
 from .interfaces import _TERMINAL_JOB_STATES
 from .observation_helpers import _PhaseGroups, _start_endpoint, record_build_evidence
 from .rank_authority import _run_observes_per_generation
@@ -595,13 +597,39 @@ class ProjectionMixin:
                     raise RecipeRequestInvalid(
                         "recipe parent has no exact accepted owner"
                     )
+                if (
+                    job.kind in _WORKLOAD_INTENT_KINDS
+                    and job.kind != WireAgentOperation.RECIPE_STOP
+                ):
+                    ordinal = _job_workload_intent(session, job)
+                    if ordinal is None:
+                        raise RecipeRequestInvalid(
+                            "recipe parent workload authority is unavailable"
+                        )
+                    if not _intent_is_current(session, ordinal, job.targets):
+                        RecipeOperationAdapter().cancelled(
+                            job,
+                            now,
+                            reason=SupersedeCode.SUPERSEDED_BY_INTENT,
+                            keep=False,
+                        )
+                        return True
+                stored_result = read_row_column(job, "result")
+                if isinstance(stored_result, Residue):
+                    schedule_wait(
+                        job,
+                        now + timedelta(seconds=5),
+                        now=now,
+                        reason=WaitReason.RECEIPT_MISSING,
+                        detail=stored_result.note,
+                    )
+                    return False
+                recorded = _recorded_result(job.kind, stored_result, subject=job.id)
                 before = (job.state, job.result, tuple(child.id for child in children))
                 if all(
                     child.state in _TERMINAL_JOB_STATES for child in children
                 ) and not isinstance(
-                    _recorded_result(
-                        job.kind, read_row_column(job, "result"), subject=job.id
-                    ),
+                    recorded,
                     (
                         RecipeOperationResult,
                         RecipeOperationProgressResult,
@@ -650,9 +678,17 @@ class ProjectionMixin:
         """The normal phase/terminal advancement, also used by due observation."""
         service = typing_cast("RecipeOperationService", self)
         if node_evidence is None:
-            recorded = _recorded_result(
-                job.kind, read_row_column(job, "result"), subject=job.id
-            )
+            stored_result = read_row_column(job, "result")
+            if isinstance(stored_result, Residue):
+                schedule_wait(
+                    job,
+                    now + timedelta(seconds=5),
+                    now=now,
+                    reason=WaitReason.RECEIPT_MISSING,
+                    detail=stored_result.note,
+                )
+                return False
+            recorded = _recorded_result(job.kind, stored_result, subject=job.id)
             node_evidence = dict(
                 (recorded.node_evidence or recorded.launch_evidence or {})
                 if isinstance(
