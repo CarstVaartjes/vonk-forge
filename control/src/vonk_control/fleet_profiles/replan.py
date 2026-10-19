@@ -102,7 +102,7 @@ class FleetProfileService:
         schedule_wait(row, due)
         progress.blockers = bound_blockers(blockers or [make_blocker(code, reason)])
         row.progress = progress.model_dump(mode="json")
-        row.status_reason = code
+        row.status_reason = reason[:512]
         row.updated_at = now
 
     def _replan_admitted(

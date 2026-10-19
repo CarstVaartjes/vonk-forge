@@ -4,9 +4,9 @@ import io
 
 import pytest
 from sqlalchemy import select, update
-from vonk_agent_protocol import LifecycleState
+from vonk_agent_protocol import LifecycleState, PrebuiltImageCode
 from vonk_control.models import AgentNode, CatalogDocumentRevision, RecipeBuild
-from vonk_control.prebuilt_images import PREBUILT_PULL_FAILED, executable_build_key
+from vonk_control.prebuilt_images import executable_build_key
 from vonk_control.recipe_builds import RecipeBuildService
 from vonk_control.source_bundles import generate_source_bundle
 
@@ -84,7 +84,7 @@ def test_past_failed_pull_and_source_key_do_not_change_accepted_content(tmp_path
         build = session.get(RecipeBuild, first.build_id)
         assert build is not None
         build.state = LifecycleState.FAILED.value
-        build.error = PREBUILT_PULL_FAILED + ": past pull was unavailable"
+        build.error = PrebuiltImageCode.PULL_FAILED + ": past pull was unavailable"
     fresh = service.plan(revision.id, node_id, now=now)
     assert fresh.policy_report is not None
     assert fresh.policy_report["prebuilt_image"] == reference

@@ -62,12 +62,17 @@ from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
-from vonk_agent_protocol import Disposition, LifecycleState, WaitOwnerKind
+from vonk_agent_protocol import Disposition, LifecycleState, WaitOwnerKind, WaitReason
 
 from .. import job_states
 from ..agent_operation_facts import SUPERSEDED_CANCELLATION_SECONDS, aware
 from ..models import Job
-from ..persisted_waits import initialize_wait, lifecycle_wait, wait_due
+from ..persisted_waits import (
+    initialize_wait,
+    lifecycle_wait,
+    typed_wait_reason,
+    wait_due,
+)
 from ..recipe_image_availability_clocks_contract import StoredAvailabilityClocks
 from ..recipe_image_removal_contract import RECIPE_CACHE_REMOVE_KIND
 from ..recipe_update_contract import UPDATE_KIND
@@ -307,6 +312,7 @@ class ImageAvailabilityAdapter:
             )
         else:
             state = _STORED[after.state]
+        evidence = payload if payload is not None else read_row_column(job, "payload")
         lifecycle_wait(
             job,
             identity=job.id,
@@ -318,6 +324,14 @@ class ImageAvailabilityAdapter:
             deadline=after.recovery_deadline,
             cancelling=after.cancel_requested,
             lease_deadline=after.lease_deadline,
+            blockers=list(evidence.blockers)
+            if isinstance(evidence, AvailabilityJobPayload) and evidence.blockers
+            else None,
+            reason=typed_wait_reason(
+                evidence.failure.code, WaitReason.OBSERVATION_UNAVAILABLE
+            )
+            if isinstance(evidence, AvailabilityJobPayload) and evidence.failure
+            else None,
         )
         job.state = state
         if not isinstance(reason, _Keep):
