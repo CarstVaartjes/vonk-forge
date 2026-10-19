@@ -212,9 +212,15 @@ def render_config(routes: RouteState, policy: LiteLlmPolicy) -> bytes:
         quota = dict(models[alias])
         required = {"requests_per_minute", "tokens_per_minute"}
         fields = set(quota)
-        if fields not in (required, required | {"upstream_model"}):
+        if not required <= fields or not fields <= required | {
+            "upstream_model",
+            "upstream_provider",
+        }:
             raise LiteLlmPolicyError("LiteLLM model quota fields are invalid")
         upstream_model = quota.pop("upstream_model", alias)
+        provider = quota.pop("upstream_provider", "openai")
+        if provider not in {"openai", "hosted_vllm"}:
+            raise LiteLlmPolicyError("LiteLLM upstream provider is invalid")
         if (
             not isinstance(upstream_model, str)
             or _UPSTREAM_MODEL.fullmatch(upstream_model) is None
@@ -232,7 +238,7 @@ def render_config(routes: RouteState, policy: LiteLlmPolicy) -> bytes:
             LiteLlmModelEntry(
                 model_name=alias,
                 litellm_params=LiteLlmUpstreamParams(
-                    model=f"openai/{upstream_model}",
+                    model=f"{provider}/{upstream_model}",
                     api_base=routes.aliases[alias].rstrip("/"),
                     rpm=rpm,
                     tpm=tpm,

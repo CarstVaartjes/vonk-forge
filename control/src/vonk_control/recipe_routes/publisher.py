@@ -147,9 +147,11 @@ class AtomicRecipeRoutePublisher:
             return None
         params = entries[0].litellm_params
         model, rpm, tpm = params.model, params.rpm, params.tpm
+        provider, separator, upstream_model = model.partition("/")
         if (
-            not model.startswith("openai/")
-            or _UPSTREAM_MODEL.fullmatch(model[7:]) is None
+            not separator
+            or provider not in {"openai", "hosted_vllm"}
+            or _UPSTREAM_MODEL.fullmatch(upstream_model) is None
             or params.api_base != endpoint.api_base.rstrip("/")
             or params.api_key != "os.environ/LITELLM_UPSTREAM_KEY"
         ):
@@ -157,7 +159,8 @@ class AtomicRecipeRoutePublisher:
         quota = LiteLlmPolicy(
             {
                 alias: {
-                    "upstream_model": model[7:],
+                    "upstream_model": upstream_model,
+                    "upstream_provider": provider,
                     "requests_per_minute": rpm,
                     "tokens_per_minute": tpm,
                 }

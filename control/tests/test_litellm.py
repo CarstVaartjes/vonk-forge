@@ -124,3 +124,33 @@ def test_every_rendered_config_enables_bounded_prometheus_metrics() -> None:
         assert {"end_user", "user", "user_email", "client_ip", "user_agent"} <= set(
             settings["prometheus_exclude_labels"]
         )
+
+
+def test_native_decision_policy_keeps_alias_quota_and_credential_reference() -> None:
+    policy = LiteLlmPolicy(
+        models={
+            "deepseek": {
+                "requests_per_minute": 30,
+                "tokens_per_minute": 10000,
+                "upstream_model": "d3-edge",
+                "upstream_provider": "hosted_vllm",
+            }
+        }
+    )
+    config = json.loads(render_config(_snapshot(), policy))
+    entry = config["model_list"][0]
+    assert entry["model_name"] == "deepseek"
+    assert entry["litellm_params"]["model"] == "hosted_vllm/d3-edge"
+    assert entry["litellm_params"]["api_key"] == "os.environ/LITELLM_UPSTREAM_KEY"
+    assert entry["litellm_params"]["rpm"] == 30
+    assert entry["litellm_params"]["tpm"] == 10000
+    policy = LiteLlmPolicy(
+        models={
+            "deepseek": {
+                **policy.models["deepseek"],
+                "upstream_provider": "external-provider",
+            }
+        }
+    )
+    with pytest.raises(ValueError, match="provider"):
+        render_config(_snapshot(), policy)

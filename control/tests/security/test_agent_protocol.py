@@ -45,7 +45,7 @@ STOP_RESULT = RecipeStopResult()
 PROTOCOL_WHEEL = ROOT / "inventory/wheels/vonk_agent_protocol-4.1.0-py3-none-any.whl"
 PROTOCOL_WHEEL_HASH = hashlib.sha256(PROTOCOL_WHEEL.read_bytes()).hexdigest()
 PUBLIC_CONTRACTS_WHEEL = (
-    ROOT / "inventory/wheels/vonk_forge_public_contracts-2.2.0-py3-none-any.whl"
+    ROOT / "inventory/wheels/vonk_forge_public_contracts-2.3.0-py3-none-any.whl"
 )
 PUBLIC_CONTRACTS_WHEEL_HASH = hashlib.sha256(
     PUBLIC_CONTRACTS_WHEEL.read_bytes()

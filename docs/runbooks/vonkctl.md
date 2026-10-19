@@ -977,7 +977,30 @@ use, never a secret. The Controller keeps a key named `default` and writes it to
 Controller restart recreates it if it was revoked or lost.
 
 Then `GET https://<controller host>/v1/models` with `Authorization: Bearer
-<key>` lists the alias, and `POST /v1/chat/completions` serves it.
+<key>` lists the alias. Chat recipes serve `POST /v1/chat/completions`.
+Decision 3.0 recipes serve `POST /v1/systemone` with the same gateway key and
+public model alias. For example, send this JSON with `Content-Type: application/json`:
+
+```json
+{
+  "model": "decision-alias",
+  "state": "Explain a Python traceback",
+  "questions": {
+    "route": {
+      "type": "choice",
+      "criteria": {"code": "Programming help", "general": "Other requests"}
+    }
+  }
+}
+```
+
+The response contains typed answers and probabilities in `answers`, rather
+than generated chat text. Native image and video inputs use the upstream
+`images` and `videos` fields. The gateway resolves the alias to the accepted
+recipe's served model and uses its managed upstream credential; clients keep
+using their gateway key. This requires the Controller and gateway release
+with decision support as well as the recipe. Catalog presence alone does not
+prove cache readiness or physical Spark qualification.
 
 ## Output and recovery
 

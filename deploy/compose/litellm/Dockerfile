@@ -19,6 +19,9 @@ USER 0:0
 
 COPY --from=upstream --chmod=0555 /vonk-prisma/query-engine /opt/vonk-litellm/prisma/query-engine
 
+COPY --chmod=0444 deploy/compose/litellm/patch-vllm-passthrough.py /opt/vonk-litellm/patch-vllm-passthrough.py
+RUN python /opt/vonk-litellm/patch-vllm-passthrough.py
+
 COPY --chmod=0444 agent_protocol/src/vonk_agent_protocol/route_activation.py /opt/vonk-litellm/route_activation.py
 COPY --chmod=0444 agent_protocol/src/vonk_agent_protocol/route_activation_words.py /opt/vonk-litellm/route_activation_words.py
 

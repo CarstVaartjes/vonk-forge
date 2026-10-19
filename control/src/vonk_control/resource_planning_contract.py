@@ -5,15 +5,11 @@ canonical contracts. These projections consume their settings, topology and
 model-file contracts without duplicating those nested definitions.
 """
 
-from typing import Annotated
-
 from pydantic import BaseModel, ConfigDict, Field, StrictInt
 from vonk_forge_contracts.recipe import (
-    RecipeEmbeddingSettings,
-    RecipeGenerationSettings,
-    RecipeJobSettings,
     RecipeModelSelection,
     RecipeParallelism,
+    RecipeSettings,
 )
 
 
@@ -25,9 +21,6 @@ class ResourceTopologyProjection(BaseModel):
 
 class ResourceRecipeProjection(BaseModel):
     model_config = ConfigDict(extra="ignore", strict=True)
-    settings: Annotated[
-        RecipeGenerationSettings | RecipeEmbeddingSettings | RecipeJobSettings,
-        Field(discriminator="kind"),
-    ]
+    settings: RecipeSettings
     topology: ResourceTopologyProjection
     models: list[RecipeModelSelection] = Field(default_factory=list)

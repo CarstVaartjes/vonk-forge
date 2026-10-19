@@ -308,6 +308,8 @@ http://:8087 {
 			respond 404
 		}
 		handle /v1/* {
+			@systemone path /v1/systemone
+			rewrite @systemone /vllm/systemone
 			import browser_proxy_headers
 			reverse_proxy litellm:4000
 		}
@@ -346,6 +348,8 @@ https://{$VONK_CONTROL_HOSTNAME}:{$VONK_BACKEND_PORT:8443} {
 # LiteLLM's native listener or management routes.
 :8081 {
 	handle /v1/* {
+			@systemone path /v1/systemone
+			rewrite @systemone /vllm/systemone
 		reverse_proxy litellm:4000
 	}
 	respond 404

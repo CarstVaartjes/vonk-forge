@@ -143,6 +143,7 @@ def _candidate_once(
                     "recipe run alias is invalid or duplicated", run_id=run.id
                 )
             upstream_model = _primary_model_alias(session, run)
+            upstream_provider = parse_stored_run_plan(run.plan).upstream_provider
             if not nodes or any(node.state != RunState.RUNNING for node in nodes):
                 raise RecipeRouteNotReady(
                     "every recipe rank must be running", run_id=run.id
@@ -263,6 +264,7 @@ def _candidate_once(
                 plan_digest=run.plan_digest,
                 run_generation=run.run_generation,
                 upstream_model=upstream_model,
+                upstream_provider=upstream_provider,
                 ranks=[
                     RouteRankIdentity(
                         node_id=node.node_id, rank=node.rank, role=node.role
@@ -274,6 +276,7 @@ def _candidate_once(
                 "requests_per_minute": 60,
                 "tokens_per_minute": 1_000_000,
                 "upstream_model": upstream_model,
+                "upstream_provider": upstream_provider,
             }
             aliases[run.alias] = endpoint.api_base
             upstream_models[run.alias] = upstream_model

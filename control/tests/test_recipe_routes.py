@@ -2095,12 +2095,16 @@ def test_invalid_model_alias_leaves_out_only_its_route(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize("damage", ["plan", "alias", "ranks", "mapping", "endpoint"])
 @pytest.mark.usefixtures("damaged_json_rows")
+@pytest.mark.parametrize("provider", ["openai", "hosted_vllm"])
 def test_bookkeeping_damage_retains_the_accepted_serving_route(
-    tmp_path: Path, damage: str
+    tmp_path: Path, damage: str, provider: str
 ) -> None:
     clock = MutableClock(NOW)
     base, _publisher, _applied, run_id = setup(tmp_path / "database", clock=clock)
     service = atomic_service(base, tmp_path / "live", clock)
+    with service.sessions.begin() as session:
+        run = _recipe_run(session, run_id)
+        run.plan = {**run.plan, "upstream_provider": provider}
     service.publish_run(run_id)
     with service.sessions.begin() as session:
         run = _recipe_run(session, run_id)
@@ -2121,6 +2125,12 @@ def test_bookkeeping_damage_retains_the_accepted_serving_route(
         run = _recipe_run(session, run_id)
         assert run.state == "running"
         assert run.route_state == "published"
+    root = tmp_path / "live"
+    marker = json.loads((root / "activation.json").read_text())
+    config = json.loads(
+        (root / "generations" / marker["directory"] / "litellm.json").read_text()
+    )
+    assert config["model_list"][0]["litellm_params"]["model"].startswith(provider + "/")
 
 
 @pytest.mark.parametrize("damage", ["plan", "alias", "ranks", "mapping", "endpoint"])

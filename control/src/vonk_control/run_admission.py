@@ -1166,6 +1166,11 @@ class RunAdmissionService:
                     "plan_digest": plan.plan_digest,
                     "nodes": [_node_document(item) for item in plan.nodes],
                     "execution_mode": "one-shot-jobs" if logical_job else None,
+                    "upstream_provider": (
+                        "hosted_vllm"
+                        if read_recipe(revision.document).settings.kind == "decision"
+                        else "openai"
+                    ),
                     "upstream_model": next(
                         (
                             interface.model_aliases[0]
