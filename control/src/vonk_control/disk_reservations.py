@@ -176,7 +176,12 @@ def outstanding_disk_charges(
             if reservation.owner_id in excluded_build_ids:
                 continue
             build = session.get(RecipeBuild, reservation.owner_id)
-            if build is not None and not build_holds_disk(session, build):
+            if (
+                build is not None
+                and build.builder_node_id == reservation.node_id
+                and build.build_input_sha256 == reservation.plan_digest
+                and not build_holds_disk(session, build, inventory_observed_at)
+            ):
                 continue
         materialized = 0
         if (

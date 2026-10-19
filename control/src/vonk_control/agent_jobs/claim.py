@@ -37,6 +37,7 @@ from ..models import AgentNode, AgentOperationAttempt, Job
 from ..models import AgentOperation as StoredOperation
 from ..operation_progress import stored_progress
 from ..own_cleanup import CLEANUP_KINDS
+from ..recovery_policy import WAIT_STEP
 from .claim_authority import recipe_build_disk_wait
 from .contracts import _MUTATING_OPERATIONS, CLAIM_LEASE_SECONDS
 from .endings import end_unobserved_order
@@ -45,7 +46,7 @@ from .evidence import (
     _lease_expiry_reason,
     _profile_stop_covers_jobrun_mutations,
 )
-from .predicates import _anchor_start_budget, _claim_predicate
+from .predicates import _anchor_start_budget, _claim_predicate, _claim_refusal_reason
 from .retry import (
     _parked_retry_evidence,
     _renew_distribution_grant,
@@ -536,18 +537,31 @@ def _claim_once(
             operation.kind == AgentOperation.RECIPE_BUILD
             and operation.current_attempt > 0
             and isinstance(payload_document, RecipeBuildRequest)
+            # An expired retry must reach the core's expiry reconciliation,
+            # even when no disk is available. It will not issue an attempt.
+            and (
+                operation.recovery_deadline is None
+                or _aware(now) < _aware(operation.recovery_deadline)
+            )
         ):
             disk_wait = recipe_build_disk_wait(
                 self, session, node_id, payload_document, now
             )
             if disk_wait is not None:
-                self._record_claim_refusal(
-                    session,
-                    operation=operation,
-                    job_id=operation.parent_job_id,
-                    check=disk_wait.value,
+                next_check = now + timedelta(seconds=WAIT_STEP)
+                if operation.recovery_deadline is not None:
+                    next_check = min(next_check, _aware(operation.recovery_deadline))
+                operation.next_action_at = next_check
+                operation.status_reason = _claim_refusal_reason(
+                    disk_wait.value,
                     kind=operation.kind,
+                    node_id=node_id,
+                    retry_due_at=next_check.isoformat(),
+                    recovery_deadline=operation.recovery_deadline,
                 )
+                parent = session.get(Job, operation.parent_job_id)
+                if parent is not None:
+                    parent.status_reason = operation.status_reason
                 return None
         if operation.kind == AgentOperation.AGENT_UPGRADE.value:
             import secrets

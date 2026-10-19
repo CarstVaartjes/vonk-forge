@@ -218,18 +218,18 @@ def _port_promise(tmp_path: Path, engine: Engine, ending: str) -> None:
     assert holders == {fresh}
 
 
-def _build_memory_claim(tmp_path: Path, engine: Engine, ending: str) -> None:
-    """A build's memory claim, when the build stopped and its cleanup failed."""
+def _build_resource_claim(tmp_path: Path, engine: Engine, ending: str) -> None:
+    """A build's disk and memory claims after its cleanup failed."""
 
-    from .test_stopped_build_claims import stopped_build_releases_its_memory
+    from .test_stopped_build_claims import stopped_build_releases_its_resources
 
-    fresh = stopped_build_releases_its_memory(tmp_path, engine)
+    fresh = stopped_build_releases_its_resources(tmp_path, engine)
     assert fresh.state in {"queued", "running"}
 
 
 def _reservation(tmp_path: Path, engine: Engine, ending: str) -> None:
     if ending == _STOPPED_BUILD:
-        _build_memory_claim(tmp_path, engine, ending)
+        _build_resource_claim(tmp_path, engine, ending)
     else:
         _port_promise(tmp_path, engine, ending)
 
