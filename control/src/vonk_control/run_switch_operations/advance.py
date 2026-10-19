@@ -713,6 +713,9 @@ class AdvanceMixin:
                     # A deterministic failure (a workload that exited at start)
                     # ends here with its evidence: observing the same terminal
                     # child again can only repeat it until the window expires.
+                    # A failed preparation child has ended even if its cached
+                    # bytes are uncertain. End this attempt with its evidence;
+                    # profile recovery re-plans under its existing repeat bound.
                     service._fail(
                         operation_id,
                         reason,
@@ -720,7 +723,18 @@ class AdvanceMixin:
                         failure_code=_child_failure_code(evidence),
                         child_evidence=evidence,
                         checkpoint_guard=checkpoint_job,
-                        definite=is_definite(kind),
+                        definite=is_definite(kind)
+                        or (
+                            child is not None
+                            and child.state == LifecycleState.FAILED.value
+                            and plan.phases[phase_index].kind
+                            in {
+                                ProfileChildPhase.PREPARE,
+                                ProfileChildPhase.TRANSFER,
+                                ProfileChildPhase.VERIFY,
+                            }
+                        ),
+                        retryable=not is_definite(kind),
                     )
                     return True
             with service._sessions.begin() as session:
