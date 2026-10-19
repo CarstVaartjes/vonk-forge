@@ -237,6 +237,13 @@ class StorageItemKind(StrEnum):
 
 
 @dataclass(frozen=True, slots=True)
+class _DueRemovalTarget:
+    kind: StorageItemKind
+    key: str
+    members: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class _Item:
     """Something unused that can be removed, and what that is expected to free."""
 

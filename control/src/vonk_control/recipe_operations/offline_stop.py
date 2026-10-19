@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 from typing import cast as typing_cast
 
-from sqlalchemy import select
+from sqlalchemy import or_, select, true
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import AgentOperation as WireAgentOperation
@@ -18,6 +18,7 @@ from vonk_agent_protocol import (
     RunState,
     SecurityRefusalError,
     UnknownOutcomeError,
+    WaitReason,
     canonical_message,
 )
 
@@ -40,6 +41,7 @@ from ..models import (
     RunNode,
 )
 from ..offline_stops import deferred_stop_nodes
+from ..persisted_waits import schedule_wait
 from ..profile_stop_authority import (
     ProfileJobRunStopJob,
 )
@@ -65,22 +67,23 @@ if TYPE_CHECKING:
 
 
 class OfflineStopMixin:
-    def reconcile_pending_service_stops(self) -> bool:
+    def reconcile_pending_service_stops(self, job_id: str | None = None) -> bool:
         """Give one due Stop the external publication turn for this worker pass."""
         service = typing_cast("RecipeOperationService", self)
         now = service._clock()
-        offline_progressed = service.reconcile_offline_stops()
+        offline_progressed = service.reconcile_offline_stops(job_id)
         with service._sessions() as session:
             candidates = tuple(
                 session.scalars(
                     select(Job)
+                    .where(Job.id == job_id if job_id is not None else true())
                     .where(
                         Job.kind == WireAgentOperation.RECIPE_STOP.value,
                         Job.state == LifecycleState.RUNNING.value,
                         Job.payload["service_stop_review"]["stage"]
                         .as_string()
                         .in_(["accepted", "withdrawal-claimed"]),
-                        Job.updated_at <= now - timedelta(seconds=5),
+                        or_(Job.next_action_at.is_(None), Job.next_action_at <= now),
                     )
                     .order_by(Job.updated_at, Job.id)
                     .limit(1)
@@ -100,6 +103,12 @@ class OfflineStopMixin:
                     continue
                 # An accepted Stop is cleanup: a newer workload intent on its
                 # Sparks and the time it takes never end it (own_cleanup).
+                schedule_wait(
+                    claimed,
+                    now + timedelta(seconds=5),
+                    now=now,
+                    reason=WaitReason.CLEANUP_UNCONFIRMED,
+                )
                 claimed.updated_at = now
             try:
                 document = service._service_stop_document(candidate)
@@ -158,10 +167,17 @@ class OfflineStopMixin:
                         retained.status_reason = (
                             f"accepted exact Stop deferred: {redact_text(str(error))}; next reconciliation at {(now + timedelta(seconds=5)).isoformat()}"
                         )[:1024]
+                        schedule_wait(
+                            retained,
+                            now + timedelta(seconds=5),
+                            now=now,
+                            reason=WaitReason.CLEANUP_UNCONFIRMED,
+                            detail=retained.status_reason,
+                        )
                         retained.updated_at = now
         return progressed or offline_progressed
 
-    def reconcile_offline_stops(self) -> bool:
+    def reconcile_offline_stops(self, job_id: str | None = None) -> bool:
         """Detach unreachable ranks from foreground completion, retaining exact orders.
 
         No capacity is released for an unreachable rank. Its already authorized,
@@ -176,6 +192,7 @@ class OfflineStopMixin:
             candidates = tuple(
                 session.execute(
                     select(Job.id, Job.targets)
+                    .where(Job.id == job_id if job_id is not None else true())
                     .where(
                         Job.kind == WireAgentOperation.RECIPE_STOP.value,
                         Job.state.in_(

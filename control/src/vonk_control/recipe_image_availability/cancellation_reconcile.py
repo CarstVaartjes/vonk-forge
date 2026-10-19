@@ -313,9 +313,9 @@ def _reconcile_cancellation_pass(
 
 
 def claim_update(
-    self: RecipeImageAvailabilityService, owner: str
+    self: RecipeImageAvailabilityService, owner: str, operation_id: str | None = None
 ) -> RecipeUpdateClaim | None:
-    return self._updates.claim(owner)
+    return self._updates.claim(owner, operation_id)
 
 
 def run_update_claim(

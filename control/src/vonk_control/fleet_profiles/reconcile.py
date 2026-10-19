@@ -6,7 +6,7 @@ import uuid
 from typing import TYPE_CHECKING
 from typing import cast as _typing_cast
 
-from sqlalchemy import case, func, select
+from sqlalchemy import case, func, select, true
 from vonk_agent_protocol import (
     LifecycleState,
     ProfileReasonCode,
@@ -79,10 +79,11 @@ if TYPE_CHECKING:
 
 
 class FleetProfileService:
-    def tick(self) -> bool:
+    def tick(self, application_id: str | None = None) -> bool:
         """Observe one due cancellation, then advance one ordinary work item."""
         self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
 
+        requested_id = application_id
         now = _aware(self._clock())
         with self._sessions.begin() as session:
             released = bool(release_dead_owner_reservations(session, now))
@@ -93,13 +94,15 @@ class FleetProfileService:
             return converted
         # A roster repair can remain busy on every tick. Give due accepted
         # loads their turn before maintenance can return or re-arm its backoff.
-        pending_admission_observed = self._observe_pending_admissions(now) or converted
-        if self._reconcile_selected_roster(now):
+        pending_admission_observed = (
+            self._observe_pending_admissions(now, application_id) or converted
+        )
+        if application_id is None and self._reconcile_selected_roster(now):
             return True
-        parked_observed = self._heal_legacy_applications(now)
+        parked_observed = self._heal_legacy_applications(now, application_id)
         recovery_deferred = False
-        cancellation_observed = self._observe_pending_cancellation(now)
-        recovery = self._automatic_profile_recovery(now)
+        cancellation_observed = self._observe_pending_cancellation(now, application_id)
+        recovery = self._automatic_profile_recovery(now, application_id)
         if recovery is not None:
             application_id, actor = recovery
             request_key = str(
@@ -191,6 +194,11 @@ class FleetProfileService:
             )
             row = session.scalar(
                 select(FleetProfileApplication)
+                .where(
+                    FleetProfileApplication.id == requested_id
+                    if requested_id is not None
+                    else true()
+                )
                 .where(
                     FleetProfileApplication.state.in_(
                         (LifecycleState.QUEUED.value, LifecycleState.RUNNING.value)

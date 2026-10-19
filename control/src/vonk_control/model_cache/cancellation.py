@@ -6,7 +6,7 @@ import fcntl
 from typing import TYPE_CHECKING, cast
 
 from pydantic import ValidationError
-from sqlalchemy import select
+from sqlalchemy import select, true
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import ModelCacheCode
 
@@ -90,6 +90,11 @@ class CancellationMixin:
         with cache._session(write=True) as session:
             operation = session.scalar(
                 select(ModelCacheOperation)
+                .where(
+                    ModelCacheOperation.id == operation_id
+                    if operation_id is not None
+                    else true()
+                )
                 .where(ModelCacheOperation.id == operation_id)
                 .with_for_update()
                 .execution_options(populate_existing=True)
@@ -117,7 +122,7 @@ class CancellationMixin:
             settled = cache._lifecycle.settle(operation, event, when)
             return settled.state is State.CANCELLED
 
-    def _reconcile_pending_cancellations(self) -> int:
+    def _reconcile_pending_cancellations(self, requested_id: str | None = None) -> int:
         """Settle what is due: pending cancels, lapsed leases.
 
         A cancel whose transfers are already idle ends at once (that costs no
@@ -134,6 +139,11 @@ class CancellationMixin:
                 for operation in session.scalars(
                     select(ModelCacheOperation)
                     .where(
+                        ModelCacheOperation.id == requested_id
+                        if requested_id is not None
+                        else true()
+                    )
+                    .where(
                         ModelCacheOperation.kind == "download",
                         ModelCacheOperation.state.in_(model_cache_states.LIVE),
                     )
@@ -148,7 +158,18 @@ class CancellationMixin:
                 and cache.effects_settled(operation_id, payload)
             ):
                 settled += int(cache._try_settle_cancellation(operation_id))
-        return settled + cache._reconciler.reconcile().changed
+        if requested_id is None:
+            return settled + cache._reconciler.reconcile().changed
+        from ..lifecycle import Reconciler
+        from ..lifecycle.model_cache import ModelCacheStore
+
+        reconciler = Reconciler(
+            ModelCacheStore(cache._session, cache._lifecycle, cache, requested_id),
+            {cache._lifecycle.kind: cache._lifecycle},
+            clock=cache._clock,
+            enabled=True,
+        )
+        return settled + reconciler.reconcile().changed
 
     @staticmethod
     def _payload_of(

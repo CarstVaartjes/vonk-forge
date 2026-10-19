@@ -33,11 +33,12 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from sqlalchemy import select
+from sqlalchemy import select, true
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
     AgentFailureKind,
     AgentFailureResult,
+    LifecycleState,
     PrebuiltImageCode,
     UnknownOutcomeError,
     canonical_message,
@@ -513,16 +514,19 @@ class PrebuiltImageImporter:
     def close(self) -> None:
         self._executor.shutdown(wait=False, cancel_futures=True)
 
-    def tick(self) -> int:
+    def tick(self, job_id: str | None = None) -> int:
         """Start at most one import; never block the worker loop."""
 
         with self._lock:
             if self._active is not None and not self._active.done():
                 return 0
-            job_id = self._claim()
+            requested_id = job_id
+            job_id = self._claim(job_id)
             if job_id is not None:
                 self._active = self._executor.submit(self.run, job_id)
                 return 1
+            if requested_id is not None:
+                return 0
             build_id = self._uploaded_build()
             if build_id is None:
                 return 0
@@ -595,13 +599,16 @@ class PrebuiltImageImporter:
             image.manifest_digest,
         )
 
-    def _claim(self) -> str | None:
+    def _claim(self, job_id: str | None = None) -> str | None:
+        from .recipe_build_cancellation import build_cancellation
+
         now = self._clock()
         with self._sessions.begin() as session:
             candidates = session.scalars(
                 select(Job)
                 .where(
                     Job.kind == PREBUILT_BUILD_KIND,
+                    Job.id == job_id if job_id is not None else true(),
                     Job.state == "running",
                     # Only Controller pulls; Spark builds are never touched.
                     Job.payload["prebuilt_image"].as_string().is_not(None),
@@ -610,7 +617,10 @@ class PrebuiltImageImporter:
                 .with_for_update(skip_locked=True)
             )
             for job in candidates:
-                if prebuilt_reference(job) is None:
+                if (
+                    prebuilt_reference(job) is None
+                    or build_cancellation(job) is not None
+                ):
                     continue
                 payload = dict(job.payload)
                 claim_until = payload.get("prebuilt_claim_until")
@@ -641,9 +651,16 @@ class PrebuiltImageImporter:
                 }
 
     def run(self, job_id: str) -> None:
+        from .recipe_build_cancellation import build_cancellation
+
         with self._sessions() as session:
             job = session.get(Job, job_id)
-            if job is None:
+            if (
+                job is None
+                or job.state != LifecycleState.RUNNING
+                or job.payload.get("prebuilt_claim_owner") != self._owner
+                or build_cancellation(job) is not None
+            ):
                 return
             reference = prebuilt_reference(job)
             build_id = job.payload.get("owner_id")

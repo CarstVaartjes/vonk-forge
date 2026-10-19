@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from typing import TYPE_CHECKING, cast
 
-from sqlalchemy import select
+from sqlalchemy import select, true
 from sqlalchemy.exc import DBAPIError
 from vonk_agent_protocol import (
     InvalidRequestReason,
@@ -59,7 +59,9 @@ class CancellationMixin:
             )
         return service.get(operation_id)
 
-    def reconcile_cancellations(self, *, limit: int = 8) -> int:
+    def reconcile_cancellations(
+        self, *, limit: int = 8, requested_id: str | None = None
+    ) -> int:
         """Reconcile accepted child operations without claiming the batch slot."""
         service = cast("RecipeUpdateBatches", self)
 
@@ -79,6 +81,7 @@ class CancellationMixin:
                     select(Job.id)
                     .where(
                         Job.kind == UPDATE_KIND,
+                        Job.id == requested_id if requested_id is not None else true(),
                         Job.state.in_(
                             job_states.words(LifecycleState.OBSERVING, kind=UPDATE_KIND)
                         ),

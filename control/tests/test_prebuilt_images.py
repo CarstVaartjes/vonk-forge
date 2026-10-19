@@ -699,3 +699,41 @@ def test_a_spark_build_upload_is_converted_into_the_store_after_success(
             ADDRESS,
             IMAGE_BYTES,
         )
+
+
+def test_prebuilt_import_observes_cancellation_between_claim_and_io(
+    tmp_path: Path,
+) -> None:
+    """Catches a restarted importer pulling after a newer durable cancel won."""
+    from uuid import uuid4
+
+    from vonk_control.recipe_build_cancellation import request_build_cancellation
+
+    sessions, revision_id = _published_library(tmp_path)
+    builds, operations = _services(sessions, tmp_path)
+    _plan, job = _start(builds, operations, revision_id)
+    registry = _Registry(tmp_path)
+    importer = PrebuiltImageImporter(
+        sessions, tmp_path, clock=lambda: NOW, store=registry
+    )
+    assert importer._claim() == job.id
+    with sessions.begin() as session:
+        current = session.get(Job, job.id, with_for_update=True)
+        assert current is not None
+        request_build_cancellation(
+            current,
+            actor=current.actor,
+            request_id=str(uuid4()),
+            reason="Operator selected a newer request",
+            now=NOW,
+        )
+    importer.run(job.id)
+    assert not registry.copied
+    importer._release(job.id)
+    operations.reconcile_cancelled_builds()
+    _fresh_plan, fresh = _start(
+        builds, operations, revision_id, request_id=str(uuid4())
+    )
+    assert fresh.id != job.id
+    assert importer.run_pending() == 1
+    assert registry.copied == [REFERENCE]

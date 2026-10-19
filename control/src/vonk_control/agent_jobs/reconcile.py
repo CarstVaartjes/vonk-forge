@@ -89,7 +89,9 @@ def _order_reconciler(self: AgentJobService) -> Reconciler:
     return reconciler
 
 
-def _sweep_lapsed_attempts(self: AgentJobService, limit: int) -> bool:
+def _sweep_lapsed_attempts(
+    self: AgentJobService, limit: int, requested_id: str | None = None
+) -> bool:
     """Re-observe retained transfer receipts and decide lapsed running orders.
 
     This is the periodic form of what the claim path did only when a Spark
@@ -136,7 +138,12 @@ def _sweep_lapsed_attempts(self: AgentJobService, limit: int) -> bool:
             .order_by(StoredOperation.id)
             .limit(limit)
         )
-        cursor = self._order_sweep_cursor
+        candidate_query = (
+            candidate_query.where(StoredOperation.id == requested_id)
+            if requested_id is not None
+            else candidate_query
+        )
+        cursor = None if requested_id is not None else self._order_sweep_cursor
         if cursor is None:
             candidates = tuple(session.execute(candidate_query))
         else:

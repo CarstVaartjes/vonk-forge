@@ -79,12 +79,14 @@ from .recipe_image_availability.build_observation import (
 from .recipe_image_availability.build_observation import (
     reconcile_abandoned_builds,
 )
+from .recipe_image_availability.contracts import OPERATION_KIND, REMOVE_OPERATION_KIND
 from .recipe_operations import RecipeOperationConflict
 from .recipe_runtime_specs import (
     ResolvedRecipe,
     compile_runtime_spec,
     resolve_recipe_entities,
 )
+from .recipe_update_contract import UPDATE_KIND
 from .runtime_image_preparation import (
     FilesystemRuntimeImageStorage,
     OciLayoutImageTransport,
@@ -173,22 +175,41 @@ class RecipeImageAvailabilityScheduler:
 
         return self._executor
 
-    def tick(self) -> int:
+    def tick(self, operation_id: str | None = None) -> int:
         """Claim and submit due work without waiting for image I/O or builds."""
 
+        kind = None
+        if operation_id is not None:
+            with self._service._sessions() as session:
+                kind = session.scalar(select(Job.kind).where(Job.id == operation_id))
+            if kind is None:
+                return 0
         with self._lock:
             if self._closed:
                 return 0
-            self._service.reconcile_cancellations(limit=self._max_workers)
-            self._service.advance_removals(limit=1)
+            if operation_id is None:
+                self._service.reconcile_cancellations(limit=self._max_workers)
+                self._service.advance_removals(limit=1)
+            elif kind == OPERATION_KIND:
+                self._service._reconcile_availability_cancellation(operation_id)
+            elif kind == REMOVE_OPERATION_KIND:
+                return int(self._service._advance_recipe_removal(operation_id))
+            elif kind == UPDATE_KIND:
+                self._service._updates.reconcile_cancellations(
+                    limit=1, requested_id=operation_id
+                )
             submitted = 0
-            if self._update_future is None or self._update_future.done():
-                update_claim = self._service.claim_update(self._owner_id)
+            if kind in (None, UPDATE_KIND) and (
+                self._update_future is None or self._update_future.done()
+            ):
+                update_claim = self._service.claim_update(self._owner_id, operation_id)
                 if update_claim is not None:
                     self._update_future = self._executor.submit(
                         self._service.run_update_claim, update_claim
                     )
                     submitted += 1
+            if kind == UPDATE_KIND:
+                return submitted
             self._futures = {future for future in self._futures if not future.done()}
             capacity = self._max_workers - len(self._futures)
             if capacity <= 0:
@@ -200,6 +221,7 @@ class RecipeImageAvailabilityScheduler:
             claims = self._service.claim_pending(
                 limit=capacity,
                 owner_id=self._owner_id,
+                operation_id=operation_id,
             )
             for claim in claims:
                 self._futures.add(self._executor.submit(self._run, claim))

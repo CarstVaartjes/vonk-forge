@@ -161,6 +161,38 @@ class UnusedStorageCollector:
             return False
         return bool(result.installations or result.images or result.models)
 
+    def redrive_installation(self, installation_id: str) -> bool:
+        from ..persisted_waits import read_wait
+        from .evidence import StorageItemKind, _DueRemovalTarget
+
+        with self._sessions() as session:
+            row = session.get(RecipeInstallation, installation_id)
+            if row is None or read_wait(row) is None:
+                return False
+        return self._remove(
+            _DueRemovalTarget(
+                StorageItemKind.INSTALLATION, installation_id, (installation_id,)
+            ),
+            Counter(),
+            Counter(),
+            {},
+        )
+
+    def redrive_artifact(self, artifact_kind: str, digest: str) -> bool:
+        from .evidence import StorageItemKind, _DueRemovalTarget
+
+        kinds = {
+            "runtime-image": StorageItemKind.IMAGE,
+            "model-set": StorageItemKind.MODEL_SET,
+            "model-object": StorageItemKind.MODEL,
+        }
+        return self._remove(
+            _DueRemovalTarget(kinds[artifact_kind], digest, (digest,)),
+            Counter(),
+            Counter(),
+            {},
+        )
+
     def collect(self) -> Swept:
         """One pass: relieve disk pressure and expire unused non-model assets."""
 
@@ -263,7 +295,7 @@ class UnusedStorageCollector:
                 kept[f"{item.kind}: sweep budget"] += 1
                 continue
             attempted[(item.kind, item.key)] = self._remove(
-                item, kept, outcome, attempted
+                item, kept, outcome.removed, attempted
             )
         if outcome.removed["image"]:
             self._reclaim_blobs()

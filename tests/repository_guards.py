@@ -42,6 +42,10 @@ GUARDS: tuple[str, ...] = (
 
 SCOPED: tuple[tuple[str, str], ...] = (
     (
+        "control/tests/test_due_waits.py",
+        "PostgreSQL due-row redrive, restart, fairness and cancellation behavior; coverage scan belongs to test_wait_owner_coverage.",
+    ),
+    (
         "tests/scripts/test_nas_image_janitor.py",
         "NAS daemon platform-image selection, persisted grace and deletion refusal recovery.",
     ),

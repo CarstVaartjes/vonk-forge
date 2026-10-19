@@ -74,9 +74,14 @@ class _Service(RecipeImageAvailabilityService):
         self.claimed = 0
 
     def claim_pending(
-        self, *, limit: int = 4, owner_id: str | None = None
+        self,
+        *,
+        limit: int = 4,
+        owner_id: str | None = None,
+        operation_id: str | None = None,
     ) -> tuple[RecipeImageAvailabilityClaim, ...]:
         del owner_id
+        assert operation_id is None  # this double exercises ordinary batch dispatch
         if self.claimed:
             return ()
         self.claimed += 1
@@ -95,8 +100,8 @@ class _Service(RecipeImageAvailabilityService):
         self.started.set()
         self.release.wait(30)
 
-    def claim_update(self, owner: str):
-        return None
+    def claim_update(self, owner: str, operation_id: str | None = None) -> None:
+        assert operation_id is None
 
     def reconcile_cancellations(self, *, limit: int = 8) -> int:
         return 0

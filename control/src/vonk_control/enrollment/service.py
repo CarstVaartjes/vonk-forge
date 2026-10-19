@@ -7,7 +7,7 @@ from collections.abc import Mapping
 from datetime import datetime, timedelta
 
 from cryptography import x509
-from sqlalchemy import select, update
+from sqlalchemy import select, true, update
 from sqlalchemy.exc import SQLAlchemyError
 from vonk_agent_protocol import ErrorCategory, LifecycleState, UnknownError, WaitReason
 from vonk_agent_protocol.enrollment import ExpiredRenewRequest
@@ -169,7 +169,7 @@ class EnrollmentService(RotationService):
             ca_confirmation_complete=pending is None and orphan is None,
         )
 
-    def reconcile_revocations(self) -> bool:
+    def reconcile_revocations(self, serial: str | None = None) -> bool:
         """Worker-owned, restart-safe confirmation without any admission gate.
 
         Each provider observation has its transport deadline. Failed serials
@@ -179,48 +179,56 @@ class EnrollmentService(RotationService):
         now = _utc(self._clock())
         from .ending import retain_ended_effect
 
-        with self._transaction() as session:
-            # An issuance is ended only when its owner is: the sweep asks.
-            abandoned = [
-                accepted
-                for accepted in session.scalars(
-                    select(AgentEnrollment)
-                    .where(AgentEnrollment.state == EnrollmentRecordState.ISSUING)
-                    .with_for_update(skip_locked=True)
-                )
-                if not owner(
-                    session, OwnerRef(OwnerKind.ENROLLMENT, accepted.id), now
-                ).live
-            ]
-            for accepted in abandoned:
-                retain_ended_effect(
-                    session,
-                    _issuance_binding(accepted.provider_request),
-                    accepted.csr_pem,
-                    now,
-                )
-                accepted.state = EnrollmentRecordState.ENDED
-            abandoned_rotations = [
-                rotation
-                for rotation in session.scalars(
-                    select(AgentCertificateRotation).with_for_update(skip_locked=True)
-                )
-                if not owner(
-                    session, OwnerRef(OwnerKind.RENEWAL_INTENT, rotation.node_id), now
-                ).live
-            ]
-            for accepted_rotation in abandoned_rotations:
-                retain_ended_effect(
-                    session,
-                    _issuance_binding(accepted_rotation.provider_request),
-                    accepted_rotation.csr_pem,
-                    now,
-                )
-                session.delete(accepted_rotation)
+        if serial is None:
+            with self._transaction() as session:
+                # An issuance is ended only when its owner is: the sweep asks.
+                abandoned = [
+                    accepted
+                    for accepted in session.scalars(
+                        select(AgentEnrollment)
+                        .where(AgentEnrollment.state == EnrollmentRecordState.ISSUING)
+                        .with_for_update(skip_locked=True)
+                    )
+                    if not owner(
+                        session, OwnerRef(OwnerKind.ENROLLMENT, accepted.id), now
+                    ).live
+                ]
+                for accepted in abandoned:
+                    retain_ended_effect(
+                        session,
+                        _issuance_binding(accepted.provider_request),
+                        accepted.csr_pem,
+                        now,
+                    )
+                    accepted.state = EnrollmentRecordState.ENDED
+                abandoned_rotations = [
+                    rotation
+                    for rotation in session.scalars(
+                        select(AgentCertificateRotation).with_for_update(
+                            skip_locked=True
+                        )
+                    )
+                    if not owner(
+                        session,
+                        OwnerRef(OwnerKind.RENEWAL_INTENT, rotation.node_id),
+                        now,
+                    ).live
+                ]
+                for accepted_rotation in abandoned_rotations:
+                    retain_ended_effect(
+                        session,
+                        _issuance_binding(accepted_rotation.provider_request),
+                        accepted_rotation.csr_pem,
+                        now,
+                    )
+                    session.delete(accepted_rotation)
         with self._sessions() as session:
             certificates = list(
                 session.scalars(
                     select(AgentCertificate).where(
+                        AgentCertificate.serial == serial
+                        if serial is not None
+                        else true(),
                         AgentCertificate.revoked_at.is_not(None),
                         AgentCertificate.ca_revoked_at.is_(None),
                         (
@@ -233,6 +241,9 @@ class EnrollmentService(RotationService):
             evidence = list(
                 session.scalars(
                     select(AgentIssuedCertificateRevocation).where(
+                        AgentIssuedCertificateRevocation.serial == serial
+                        if serial is not None
+                        else true(),
                         AgentIssuedCertificateRevocation.ca_revoked_at.is_(None),
                         (
                             AgentIssuedCertificateRevocation.next_action_at.is_(None)

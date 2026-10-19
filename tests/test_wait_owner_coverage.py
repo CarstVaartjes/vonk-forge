@@ -108,3 +108,78 @@ def test_all_lifecycle_adapters_and_durable_clock_writers_use_wait_custody() -> 
 )
 def test_owner_gate_rejects_uncovered_new_writer(source: str) -> None:
     assert _violations(source, "new_owner.py")
+
+
+def _backstop_gaps(adapters: set[str], models: set[str], kinds: set[str]):
+    tree = ast.parse((SOURCE / "wait_redrive.py").read_text())
+    registries = {
+        ast.unparse(target): node.value
+        for node in tree.body
+        if isinstance(node, ast.Assign | ast.AnnAssign)
+        for target in (node.targets if isinstance(node, ast.Assign) else [node.target])
+    }
+    adapter_map = registries["ADAPTER_WAIT_KINDS"]
+    owner_map = registries["WAIT_MODELS"]
+    assert isinstance(adapter_map, ast.Dict) and isinstance(owner_map, ast.Dict)
+    return (
+        adapters - {ast.literal_eval(key) for key in adapter_map.keys if key},
+        models - {ast.unparse(value) for value in owner_map.values},
+        kinds - {ast.unparse(key).rsplit(".", 1)[-1] for key in owner_map.keys if key},
+    )
+
+
+def test_every_persisted_wait_owner_is_redriven_by_the_worker() -> None:
+    """A new ORM wait owner, adapter or canonical kind cannot remain traffic-only."""
+    classes = [
+        node
+        for path in SOURCE.rglob("*.py")
+        for node in ast.walk(ast.parse(path.read_text()))
+        if isinstance(node, ast.ClassDef)
+        and not any("Protocol" in ast.unparse(base) for base in node.bases)
+    ]
+    adapters = {
+        node.name
+        for node in classes
+        if node.name.endswith("Adapter")
+        and any(
+            isinstance(member, ast.FunctionDef) and member.name == "adopt"
+            for member in node.body
+        )
+    }
+    models = {
+        node.name
+        for node in classes
+        if any(
+            isinstance(member, ast.AnnAssign)
+            and ast.unparse(member.target) == "wait_evidence"
+            for member in node.body
+        )
+    }
+    vocabulary = ast.parse(
+        (
+            ROOT / "agent_protocol/src/vonk_agent_protocol/lifecycle_vocabulary.py"
+        ).read_text()
+    )
+    kind_enum = next(
+        node
+        for node in vocabulary.body
+        if isinstance(node, ast.ClassDef) and node.name == "WaitOwnerKind"
+    )
+    kinds = {
+        target.id
+        for member in kind_enum.body
+        if isinstance(member, ast.Assign)
+        for target in member.targets
+        if isinstance(target, ast.Name)
+    }
+    assert adapters and models and kinds
+    assert _backstop_gaps(adapters, models, kinds) == (set(), set(), set())
+
+
+def test_backstop_gate_rejects_an_added_owner_and_adapter() -> None:
+    """Mutation witness: custody alone cannot satisfy the redrive guard."""
+    assert _backstop_gaps({"NewAdapter"}, {"NewWaitOwner"}, {"NEW_KIND"}) == (
+        {"NewAdapter"},
+        {"NewWaitOwner"},
+        {"NEW_KIND"},
+    )

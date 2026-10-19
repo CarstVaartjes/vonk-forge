@@ -16,6 +16,8 @@ from ..admission_locking import (
 )
 from ..lifecycle import Lifecycle
 from ..lifecycle.agent_operation import AgentOperationAdapter, parked_orders, same_order
+from ..lifecycle.reconciler import settle
+from ..lifecycle.types import Tick
 from ..models import AgentOperation as StoredOperation
 from ..models import AgentOperationAttempt, Job
 from .contracts import _LOGGER
@@ -61,6 +63,24 @@ class _OrderStore:
                 )
                 for order in orders
             )
+
+    def redrive(self, operation_id: str) -> bool:
+        now = self._service._clock()
+        self._service._sweep_lapsed_attempts(1, operation_id)
+        with self._service._sessions() as session:
+            order = session.get(StoredOperation, operation_id)
+            if order is None:
+                return False
+            row = self._adapter.lifecycle(
+                order,
+                AgentOperationAdapter.attempt_of(session, order),
+                session.get(Job, order.parent_job_id),
+                now,
+            )
+        result = settle(
+            row, Tick(), self._adapter, now, save=self.save, residue=self.record_residue
+        )
+        return bool(result.changed or result.commands)
 
     def save(self, before: Lifecycle, after: Lifecycle) -> bool:
         try:

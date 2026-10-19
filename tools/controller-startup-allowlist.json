@@ -56,6 +56,7 @@
       "path": "control/src/vonk_control/worker.py",
       "scope": "assemble_production_worker",
       "pure_or_core_calls": [
+        "AgentUpgradeService",
         "ArtifactJobService",
         "ArtifactMaintenanceCadence",
         "AtomicRecipeRoutePublisher",
@@ -66,6 +67,7 @@
         "CompositeDistributionPhaseExecutor",
         "DatabaseSourceBundleStore",
         "DistributedRecoveryCoordinator",
+        "DueWaitBackstop",
         "InstallAdmissionService",
         "PrebuiltImageImporter",
         "RecipeBuildService",

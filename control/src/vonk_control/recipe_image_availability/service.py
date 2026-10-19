@@ -520,8 +520,10 @@ class RecipeImageAvailabilityService:
     def _reconcile_cancellation_pass(self, operation_id: str) -> bool:
         return cancellation_reconcile._reconcile_cancellation_pass(self, operation_id)
 
-    def claim_update(self, owner: str) -> RecipeUpdateClaim | None:
-        return cancellation_reconcile.claim_update(self, owner)
+    def claim_update(
+        self, owner: str, operation_id: str | None = None
+    ) -> RecipeUpdateClaim | None:
+        return cancellation_reconcile.claim_update(self, owner, operation_id)
 
     def run_update_claim(self, claim: RecipeUpdateClaim) -> None:
         return cancellation_reconcile.run_update_claim(self, claim)

@@ -40,6 +40,7 @@ from .common import (
 )
 from .evidence import (
     StorageItemKind,
+    _DueRemovalTarget,
     _Evidence,
     _Item,
     _Outcome,
@@ -232,7 +233,7 @@ def _relieve(
                 kept[f"{item.kind}: sweep budget"] += 1
                 continue
             done = attempted[(item.kind, item.key)] = self._remove(
-                item, kept, outcome, attempted
+                item, kept, outcome.removed, attempted
             )
         if done:
             queued += item.freeable
@@ -281,9 +282,9 @@ def _check_round(
 
 def _remove(
     self: UnusedStorageCollector,
-    item: _Item,
+    item: _Item | _DueRemovalTarget,
     kept: Counter[str],
-    outcome: _Outcome,
+    removed: Counter[str],
     attempted: dict[tuple[str, str], bool],
 ) -> bool:
     """Remove one item; False when anything still keeps it."""
@@ -405,7 +406,7 @@ def _remove(
                 schedule_wait(completed_owner, None)
         attempted[key] = True
         done += 1
-        outcome.removed["model" if item.kind == "model-set" else item.kind] += 1
+        removed["model" if item.kind == "model-set" else item.kind] += 1
         log_event(
             _LOGGER,
             "unused_storage.removing",

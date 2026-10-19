@@ -75,6 +75,12 @@ def _controller_marker() -> str:
     return ";".join(parts)[:128]
 
 
+@dataclass(frozen=True)
+class _AutomaticSyncStep:
+    failures: int
+    delay_seconds: int
+
+
 class RecipeLibrarySyncReader(Protocol):
     def list(self) -> RecipeLibrarySnapshot: ...
     def fetch(self, uri: str) -> RecipeLibraryItem: ...
@@ -366,6 +372,79 @@ class ManagedRecipeCatalogSyncService:
             if row is None:
                 raise KeyError(sync_id)
             return _view(row)
+
+    def advance_automatic(
+        self,
+        interval_seconds: int,
+        failures: int = 0,
+        *,
+        reconcile: Callable[[], object] | None = None,
+    ) -> _AutomaticSyncStep:
+        """One automatic observation, shared by cadence and due-row redrive."""
+        errors: list[Exception] = []
+        if reconcile is not None:
+            try:
+                reconciled = reconcile()
+                if isinstance(reconciled, UnknownError):
+                    errors.append(
+                        CatalogSyncUnsettled(
+                            reconciled.reason,
+                            "default gateway key observation unavailable",
+                        )
+                    )
+            except Exception as error:  # noqa: BLE001 - independent recovery path
+                errors.append(error)
+        observed_id = None
+        catalog_failed = True
+        try:
+            observation = self.automatic()
+            observed_id = observation.id
+            catalog_failed = observation.state != CatalogSyncState.CURRENT
+            if catalog_failed:
+                errors.append(
+                    CatalogSyncUnsettled(
+                        observation.problems[0].code
+                        if observation.problems
+                        else CatalogSyncCode.FAILED,
+                        observation.problems[0].detail
+                        if observation.problems
+                        else "managed catalog observation unavailable",
+                    )
+                )
+        except Exception as error:  # noqa: BLE001 - retain automatic observation intent
+            errors.append(error)
+        failures = failures + 1 if errors else 0
+        delay = catalog_sync_retry_delay(failures, interval_seconds)
+        try:
+            self.record_automatic_wait(
+                delay, failed=catalog_failed, observed_id=observed_id
+            )
+        except SQLAlchemyError as error:
+            errors.append(error)
+        for error in errors:
+            _log_automatic_failure(error, delay)
+        return _AutomaticSyncStep(failures, delay)
+
+    def redrive(self, sync_id: str, interval_seconds: int) -> bool:
+        with self._sessions() as session:
+            current = session.scalar(
+                select(RecipeLibrarySyncRun)
+                .where(
+                    RecipeLibrarySyncRun.repository == self._repository,
+                    RecipeLibrarySyncRun.wait_evidence.is_not(None),
+                )
+                .order_by(
+                    RecipeLibrarySyncRun.created_at.desc(), RecipeLibrarySyncRun.id
+                )
+                .limit(1)
+            )
+            if current is None or current.id != sync_id:
+                return False
+            wait = read_wait(current)
+            if wait is None or wait.next_check > self._clock():
+                return False
+        self.advance_automatic(interval_seconds)
+        return True
 
     def automatic_wait_delay(self) -> float:
         with self._sessions() as session:
@@ -930,8 +1009,10 @@ async def run_automatic_sync(
     settle_seconds: float = 10.0,
     reconcile: Callable[[], object] | None = None,
 ) -> None:
-    """Run the automatic library sync until ``stop`` is set; it never dies.
+    """Retry recoverable library observations until ``stop`` is set.
 
+    The shared owner contains observation failures. Programming faults escape
+    the cadence rather than repeating an unchanged error.
     A sync that cannot finish (the library unreachable, another sync running, a
     document unreadable) is unknown, not failed for good: the previously imported
     catalog stays active and the sync is asked again with jittered backoff whose
@@ -958,60 +1039,15 @@ async def run_automatic_sync(
             except TimeoutError:
                 pass
             continue
-        # Each tick reconciles standing key intent independently of discovery.
-        # A failed observation must not suppress the other recovery path.
-        errors: list[Exception] = []
-        if reconcile is not None:
-            try:
-                reconciled = await asyncio.to_thread(reconcile)
-                if isinstance(reconciled, UnknownError):
-                    errors.append(
-                        CatalogSyncUnsettled(
-                            reconciled.reason,
-                            "default gateway key observation unavailable",
-                        )
-                    )
-            except Exception as error:  # noqa: BLE001 - independent recovery path
-                errors.append(error)
-        observed_id = None
-        catalog_failed = False
-        try:
-            observation = await asyncio.to_thread(lambda: service.automatic())
-            observed_id = observation.id
-            if observation.state != CatalogSyncState.CURRENT:
-                catalog_failed = True
-                errors.append(
-                    CatalogSyncUnsettled(
-                        observation.problems[0].code
-                        if observation.problems
-                        else CatalogSyncCode.FAILED,
-                        observation.problems[0].detail
-                        if observation.problems
-                        else "managed catalog observation unavailable",
-                    )
-                )
-        except (CatalogSyncError, RecipeLibraryError, OSError) as error:
-            catalog_failed = True
-            errors.append(error)
-        except Exception as error:  # noqa: BLE001 - the loop must never die
-            catalog_failed = True
-            errors.append(error)
-        if errors:
-            failures += 1
-        else:
-            failures = 0
-        delay = catalog_sync_retry_delay(failures, interval_seconds)
-        try:
-            await asyncio.to_thread(
-                service.record_automatic_wait,
-                delay,
-                failed=catalog_failed,
-                observed_id=observed_id,
-            )
-        except SQLAlchemyError as error:
-            _log_automatic_failure(error, delay)
-        for error in errors:
-            _log_automatic_failure(error, delay)
+        # The same owner computes and persists one delay. Gateway observation
+        # remains independent of catalog discovery and shares its retry cadence.
+        step = await asyncio.to_thread(
+            service.advance_automatic,
+            interval_seconds,
+            failures,
+            reconcile=reconcile,
+        )
+        failures, delay = step.failures, step.delay_seconds
         try:
             await asyncio.wait_for(
                 stop.wait(),

@@ -45,6 +45,7 @@ from ..lifecycle.evidence import (
     BookkeepingReason,
     retire_as_unknown,
 )
+from ..lifecycle.image_availability import PrebuiltImageAdapter
 from ..models import (
     AgentNode,
     CatalogDocumentRevision,
@@ -557,7 +558,7 @@ class BuildMixin:
             prebuilt_node_id=build.builder_node_id,
             force_rebuild=force,
         )
-        job = new_recipe_job(
+        job = PrebuiltImageAdapter.new_job(
             id=str(uuid.uuid4()),
             request_id=request_id,
             kind=WireAgentOperation.RECIPE_BUILD.value,

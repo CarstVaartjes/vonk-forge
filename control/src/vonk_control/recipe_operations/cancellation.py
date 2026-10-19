@@ -8,7 +8,7 @@ import uuid
 from typing import TYPE_CHECKING
 from typing import cast as typing_cast
 
-from sqlalchemy import or_, select
+from sqlalchemy import or_, select, true
 from vonk_agent_protocol import AgentOperation as WireAgentOperation
 from vonk_agent_protocol import (
     InvalidRequestReason,
@@ -277,12 +277,13 @@ class CancellationMixin:
             if job is not None:
                 RecipeOperationAdapter().heal(job, now)
 
-    def reconcile_cancelled_builds(self) -> bool:
+    def reconcile_cancelled_builds(self, job_id: str | None = None) -> bool:
         """Cancel unneeded dependent builds and resume exact issued cleanup."""
         service = typing_cast("RecipeOperationService", self)
         with service._sessions() as session:
             eligible = (
                 select(Job)
+                .where(Job.id == job_id if job_id is not None else true())
                 .where(
                     Job.kind == WireAgentOperation.RECIPE_BUILD.value,
                     Job.state.in_(

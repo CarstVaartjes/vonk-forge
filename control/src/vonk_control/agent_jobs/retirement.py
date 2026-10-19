@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from pydantic import BaseModel
 from sqlalchemy import and_, or_, select
@@ -15,6 +15,7 @@ from vonk_agent_protocol import (
     LifecycleState,
     ReservationState,
     RunState,
+    WaitReason,
     canonical_message,
 )
 
@@ -39,6 +40,7 @@ from ..models import (
     ResourceReservation,
 )
 from ..models import AgentOperation as StoredOperation
+from ..persisted_waits import schedule_wait
 from ..recipe_lifecycle_contract import (
     RecipeOperationCancellationResult,
 )
@@ -368,6 +370,13 @@ def retire_exhausted_operations_in_session(
                 strict=True,
             ).model_dump(mode="json", exclude_none=True)
     _release_retired_owner_in_session(session, job, job_reason, now)
+    if isinstance(column_value(job, "result"), RecipeOperationCancellationResult):
+        schedule_wait(
+            job,
+            now + timedelta(seconds=5),
+            now=now,
+            reason=WaitReason.CLEANUP_UNCONFIRMED,
+        )
     set_parent_state(job, "failed", job_reason, now)
     return tuple(operation.id for operation in operations)
 

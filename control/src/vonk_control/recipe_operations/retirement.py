@@ -7,7 +7,7 @@ from datetime import timedelta
 from typing import TYPE_CHECKING
 from typing import cast as typing_cast
 
-from sqlalchemy import select
+from sqlalchemy import or_, select, true
 from vonk_agent_protocol import AgentOperation as WireAgentOperation
 from vonk_agent_protocol import (
     InstallationState,
@@ -34,6 +34,7 @@ from ..models import (
     RecipeRun,
     ResourceReservation,
 )
+from ..persisted_waits import schedule_wait
 from ..recipe_progress import (
     _parent_identity as _parent_identity,  # noqa: PLC0414 -- shared helper export
 )
@@ -55,7 +56,14 @@ _ENDED_RUN_STATES = frozenset({RunState.STOPPING, RunState.FAILED, RunState.LOST
 
 
 class RetirementMixin:
-    def reconcile_retired_operations(self) -> bool:
+    def redrive(self, job_id: str) -> bool:
+        """Recheck one persisted owner without reviving its terminal result."""
+        service = typing_cast("RecipeOperationService", self)
+        progressed = service.reconcile_retired_operations(job_id)
+        progressed = service.reconcile_pending_service_stops(job_id) or progressed
+        return service.reconcile_cancelled_builds(job_id) or progressed
+
+    def reconcile_retired_operations(self, job_id: str | None = None) -> bool:
         """Resume retired owners through the ordinary exact cleanup path.
 
         A failed job with typed completed cancellation is the retirement
@@ -71,6 +79,7 @@ class RetirementMixin:
             candidates = tuple(
                 session.scalars(
                     select(Job)
+                    .where(Job.id == job_id if job_id is not None else true())
                     .where(
                         Job.kind.in_(
                             {
@@ -88,7 +97,7 @@ class RetirementMixin:
                         _JsonFlagIsTrue(Job.result, LifecycleState.CANCELLED.value),
                         _JsonFlagIsTrue(Job.result, "cancel_requested"),
                         Job.result["recovery"].as_string().is_(None),
-                        Job.updated_at <= now - interval,
+                        or_(Job.next_action_at.is_(None), Job.next_action_at <= now),
                     )
                     .order_by(Job.updated_at, Job.id)
                     # At most one child admission/publication per worker tick,
@@ -192,6 +201,7 @@ class RetirementMixin:
                                 },
                             )
                         )
+                    schedule_wait(stored, None if completed else now + interval)
                     stored.updated_at = now
         return progressed
 

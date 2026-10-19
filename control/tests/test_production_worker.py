@@ -8,6 +8,7 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from vonk_control import telemetry_maintenance
+from vonk_control.agent_jobs import AgentJobService
 from vonk_control.artifact_maintenance import ArtifactMaintenanceCadence
 from vonk_control.fleet_profiles import (
     FleetProfileService,
@@ -84,7 +85,7 @@ def test_recipe_worker_services_routes_while_coordinators_are_active(
     Base.metadata.create_all(engine)
 
     class Coordinator:
-        def tick(self) -> bool:
+        def tick(self, run_id: str | None = None) -> bool:
             calls.append(coordinator)
             return True
 
@@ -126,17 +127,7 @@ def test_production_builder_wires_recipe_operations_and_housekeeping(
         route_root,
     )
 
-    class SignerBackedAgentJobs:
-        def enqueue_in_session(self, *_args, **_kwargs):
-            raise AssertionError("validation enqueue is not exercised here")
-
-        def notify_available(self):
-            return None
-
-        def reconcile_orders(self):
-            return False
-
-    agent_jobs = SignerBackedAgentJobs()
+    agent_jobs = AgentJobService(sessions, clock=clock)
     model_cache = ModelCacheService(sessions, tmp_path / "models", clock=clock)
     request.addfinalizer(model_cache.close)
 
@@ -227,23 +218,13 @@ def test_production_worker_binds_build_reuse_to_the_image_cache_root(tmp_path) -
     jobs = JobService(sessions, clock=clock)
     publisher = AtomicRouteBundlePublisher(tmp_path / "routes")
 
-    class AgentJobs:
-        def enqueue_in_session(self, *_args, **_kwargs):
-            raise AssertionError("validation enqueue is not exercised here")
-
-        def notify_available(self):
-            return None
-
-        def reconcile_orders(self):
-            return False
-
     model_cache = ModelCacheService(sessions, tmp_path / "models", clock=clock)
     agent_root = tmp_path / "agent-artifacts"
     image_root = tmp_path / "recipe-image-artifacts"
     worker = assemble_production_worker(
         jobs=jobs,
         sessions=sessions,
-        agent_jobs=AgentJobs(),
+        agent_jobs=AgentJobService(sessions, clock=clock),
         publisher=publisher,
         management_policy=ManagementAddressPolicy.parse("10.0.0.0/24"),
         clock=clock,
@@ -299,7 +280,7 @@ def test_recipe_coordinator_fault_is_local_rate_limited_and_recovers(tmp_path, o
     now = datetime(2026, 8, 6, tzinfo=UTC)
     broken = True
 
-    def faulty():
+    def faulty(run_id: str | None = None):
         calls.append(owner)
         if broken:
             raise AssertionError("isolated fault")

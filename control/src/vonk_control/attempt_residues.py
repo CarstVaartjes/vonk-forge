@@ -300,11 +300,13 @@ class AttemptResidueReconciler:
         self._removal = removal
         self._clock = clock
 
-    def tick(self) -> bool:
+    def tick(self, installation_id: str | None = None) -> bool:
         """Release every current residue; True when anything was released."""
 
-        released = self._never_installed_plans()
-        released = self._incomplete_installations() or released
+        released = self._never_installed_plans(installation_id)
+        released = self._incomplete_installations(installation_id) or released
+        if installation_id is not None:
+            return released
         released = self._dead_owner_claims() or released
         return self._ownerless_grants() or released
 
@@ -326,7 +328,7 @@ class AttemptResidueReconciler:
                 plans.add(digest)
         return nodes, plans
 
-    def _never_installed_plans(self) -> bool:
+    def _never_installed_plans(self, only_id: str | None = None) -> bool:
         """Release plans nobody adopted within the adoption window."""
 
         now = self._clock()
@@ -335,6 +337,8 @@ class AttemptResidueReconciler:
             unowned = unowned_never_installed(session)
             superseded = superseded_plan_ids(session, unowned)
             for installation_id in unowned:
+                if only_id is not None and installation_id != only_id:
+                    continue
                 nodes = set(
                     session.scalars(
                         select(InstallationNode.node_id).where(
@@ -377,7 +381,7 @@ class AttemptResidueReconciler:
             released = True
         return released
 
-    def _leftover_candidates(self) -> list[tuple[str, str]]:
+    def _leftover_candidates(self, only_id: str | None = None) -> list[tuple[str, str]]:
         """Unowned incomplete installations that are due, with why."""
 
         now = self._clock()
@@ -389,6 +393,8 @@ class AttemptResidueReconciler:
             owned = _owned_nodes(session)
             superseded = superseded_plan_ids(session, incomplete)
             for installation_id in incomplete:
+                if only_id is not None and installation_id != only_id:
+                    continue
                 nodes = set(
                     session.scalars(
                         select(InstallationNode.node_id).where(
@@ -438,7 +444,7 @@ class AttemptResidueReconciler:
             for stamp in stamps
         )
 
-    def _incomplete_installations(self) -> bool:
+    def _incomplete_installations(self, only_id: str | None = None) -> bool:
         """Queue the lifecycle's uninstall for leftover incomplete installations.
 
         The uninstall re-proves, under its own locks, that nothing runs or is
@@ -450,7 +456,7 @@ class AttemptResidueReconciler:
         if self._removal is None:
             return False
         queued = False
-        for installation_id, why in self._leftover_candidates():
+        for installation_id, why in self._leftover_candidates(only_id):
             if not self._cleanup_due(installation_id):
                 continue
             try:

@@ -203,8 +203,10 @@ class AgentJobService:
     def _order_reconciler(self) -> Reconciler:
         return _order_reconciler(self)
 
-    def _sweep_lapsed_attempts(self, limit: int) -> bool:
-        return _sweep_lapsed_attempts(self, limit)
+    def _sweep_lapsed_attempts(
+        self, limit: int, operation_id: str | None = None
+    ) -> bool:
+        return _sweep_lapsed_attempts(self, limit, operation_id)
 
     def _sweep_would_act(self, operation_id: str, node_id: str) -> bool:
         return _sweep_would_act(self, operation_id, node_id)

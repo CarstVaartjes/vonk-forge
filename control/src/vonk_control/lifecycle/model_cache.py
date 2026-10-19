@@ -61,7 +61,7 @@ from contextlib import AbstractContextManager
 from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol
 
-from sqlalchemy import select, update
+from sqlalchemy import select, true, update
 from sqlalchemy.engine import Connection
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import Disposition, ModelAccessReason, WaitOwnerKind
@@ -829,10 +829,12 @@ class ModelCacheStore:
         scope: Callable[..., AbstractContextManager[Session]],
         adapter: ModelCacheAdapter,
         effects: CacheEffects,
+        operation_id: str | None = None,
     ) -> None:
         self._scope = scope
         self._adapter = adapter
         self._effects = effects
+        self._operation_id = operation_id
 
     def due(self, now: datetime, limit: int) -> Sequence[Lifecycle]:
         """Active operations whose clock, lease or cancel asks for a decision."""
@@ -843,6 +845,11 @@ class ModelCacheStore:
         with self._scope() as session:
             rows = session.scalars(
                 select(ModelCacheOperation)
+                .where(
+                    ModelCacheOperation.id == self._operation_id
+                    if self._operation_id is not None
+                    else true()
+                )
                 .where(ModelCacheOperation.state.in_(ACTIVE_STORED_STATES))
                 .order_by(ModelCacheOperation.updated_at, ModelCacheOperation.id)
                 .limit(SWEEP_LIMIT)

@@ -951,18 +951,19 @@ class ArtifactJobAdapter:
                 )
             )
         changed = 0
-        now = self.now()
         for job_id in ids:
-            with self._sessions.begin() as session:
-                job = _observe_job(
-                    session, select(ArtifactJob).where(ArtifactJob.id == job_id)
-                )
-                if job is None:
-                    continue
-                bound = ArtifactJobAdapter(session, clock=self._clock)
-                if bound.project(job, now):
-                    changed += 1
+            changed += int(self.redrive(job_id))
         return changed
+
+    def redrive(self, job_id: str) -> bool:
+        assert self._sessions is not None
+        with self._sessions.begin() as session:
+            job = _observe_job(
+                session, select(ArtifactJob).where(ArtifactJob.id == job_id)
+            )
+            return job is not None and ArtifactJobAdapter(
+                session, clock=self._clock
+            ).project(job, self.now())
 
 
 def _observe_job(

@@ -565,6 +565,10 @@ class PrebuiltImageAdapter:
 
     kind = "prebuilt-image"
 
+    @staticmethod
+    def new_job(**fields: Any) -> Job:
+        return initialize_wait(Job(**fields), WaitOwnerKind.PREBUILT_IMAGE)
+
     def __init__(self, *, clock: Callable[[], datetime] | None = None) -> None:
         self._clock = clock or (lambda: datetime.now(UTC))
 

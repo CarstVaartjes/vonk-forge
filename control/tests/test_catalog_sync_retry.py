@@ -3,10 +3,26 @@ from __future__ import annotations
 import pytest
 from vonk_agent_protocol import CatalogSyncCode, RecipePackageCode
 from vonk_control.catalog_sync import (
+    ManagedRecipeCatalogSyncService,
     catalog_sync_failure_reason,
     catalog_sync_retry_delay,
 )
 from vonk_control.recipe_packages import RecipePackageError
+
+
+class _PeriodicCatalog(ManagedRecipeCatalogSyncService):
+    """Real shared retry owner with test-provided observations and storage."""
+
+    def __init__(self) -> None:
+        pass
+
+    def automatic_wait_delay(self) -> float:
+        return 0.0
+
+    def record_automatic_wait(
+        self, delay_seconds: int, *, failed: bool, observed_id: str | None = None
+    ) -> None:
+        pass
 
 
 def test_failed_automatic_sync_retries_sooner_with_bounded_backoff(monkeypatch) -> None:
@@ -60,15 +76,9 @@ def test_the_automatic_sync_is_asked_again_after_every_unsettled_attempt(
     )
     stop = asyncio.Event()
 
-    class _Service:
+    class _Service(_PeriodicCatalog):
         def __init__(self) -> None:
             self.attempts = 0
-
-        def automatic_wait_delay(self):
-            return 0.0
-
-        def record_automatic_wait(self, delay_seconds, *, failed, observed_id=None):
-            pass
 
         def automatic(self):
             self.attempts += 1
@@ -88,7 +98,7 @@ def test_the_automatic_sync_is_asked_again_after_every_unsettled_attempt(
     async def run() -> None:
         await asyncio.wait_for(
             run_automatic_sync(
-                service,  # type: ignore[arg-type]
+                service,
                 stop,
                 interval_seconds=0,
                 settle_seconds=0.0,
@@ -130,14 +140,8 @@ def test_partial_receipts_back_off_then_success_resets_the_retry_episode(
             checks.append(scheduled_delay)
         return await wait_for(awaitable, timeout=timeout)
 
-    class Service:
+    class Service(_PeriodicCatalog):
         attempts = 0
-
-        def automatic_wait_delay(self):
-            return 0.0
-
-        def record_automatic_wait(self, delay_seconds, *, failed, observed_id=None):
-            pass
 
         def automatic(self):
             self.attempts += 1
@@ -153,7 +157,7 @@ def test_partial_receipts_back_off_then_success_resets_the_retry_episode(
     async def run():
         await asyncio.wait_for(
             catalog_sync.run_automatic_sync(
-                service,  # type: ignore[arg-type]
+                service,
                 stop,
                 interval_seconds=0,
                 settle_seconds=0,
@@ -198,13 +202,7 @@ def test_periodic_reconciliation_restarts_ended_default_key_observations(tmp_pat
     path = tmp_path / "client-key"
     stop = asyncio.Event()
 
-    class Catalog:
-        def automatic_wait_delay(self):
-            return 0.0
-
-        def record_automatic_wait(self, delay_seconds, *, failed, observed_id=None):
-            pass
-
+    class Catalog(_PeriodicCatalog):
         def automatic(self):
             stop.set()
             return completed
@@ -220,7 +218,7 @@ def test_periodic_reconciliation_restarts_ended_default_key_observations(tmp_pat
         ready[0] = True
         await asyncio.wait_for(
             run_automatic_sync(
-                Catalog(),  # type: ignore[arg-type] - peer fake only implements the exercised boundary
+                Catalog(),
                 stop,
                 interval_seconds=0,
                 settle_seconds=0,
@@ -266,13 +264,7 @@ def test_periodic_recovery_paths_do_not_suppress_each_other(
     def reconcile():
         observe("reconcile")
 
-    class Catalog:
-        def automatic_wait_delay(self):
-            return 0.0
-
-        def record_automatic_wait(self, delay_seconds, *, failed, observed_id=None):
-            pass
-
+    class Catalog(_PeriodicCatalog):
         def automatic(self):
             observe("catalog")
             if attempts["catalog"] == 3:
@@ -284,7 +276,7 @@ def test_periodic_recovery_paths_do_not_suppress_each_other(
     async def run():
         await asyncio.wait_for(
             catalog_sync.run_automatic_sync(
-                Catalog(),  # type: ignore[arg-type]
+                Catalog(),
                 stop,
                 interval_seconds=0,
                 settle_seconds=0,
@@ -345,13 +337,7 @@ def test_gateway_capability_recovers_without_blocking_fresh_catalog_requests(
         check=lambda service: ready,
     )
 
-    class Catalog:
-        def automatic_wait_delay(self):
-            return 0.0
-
-        def record_automatic_wait(self, delay_seconds, *, failed, observed_id=None):
-            pass
-
+    class Catalog(_PeriodicCatalog):
         def automatic(self):
             receipt = _sync(tmp_path, catalog, item)
             if ready:
@@ -388,7 +374,7 @@ def test_gateway_capability_recovers_without_blocking_fresh_catalog_requests(
     monkeypatch.setattr(asyncio, "wait_for", advance_dependency)
     asyncio.run(
         catalog_sync.run_automatic_sync(
-            Catalog(),  # type: ignore[arg-type] - actual catalog work above
+            Catalog(),
             stop,
             interval_seconds=60,
             settle_seconds=0,

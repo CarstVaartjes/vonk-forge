@@ -7,7 +7,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 from typing import cast as _typing_cast
 
-from sqlalchemy import select
+from sqlalchemy import select, true
 from vonk_agent_protocol import (
     DesiredAssignmentState,
     InvalidRequestReason,
@@ -289,7 +289,9 @@ class FleetProfileService:
                 )
         return self.application(application_id)
 
-    def _observe_pending_cancellation(self, now: datetime) -> bool:
+    def _observe_pending_cancellation(
+        self, now: datetime, application_id: str | None = None
+    ) -> bool:
         """Advance one due cancellation before selecting ordinary active work."""
         self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
 
@@ -314,6 +316,11 @@ class FleetProfileService:
         with self._sessions() as session:
             candidate = session.scalar(
                 select(FleetProfileApplication)
+                .where(
+                    FleetProfileApplication.id == application_id
+                    if application_id is not None
+                    else true()
+                )
                 .where(eligible)
                 .order_by(
                     FleetProfileApplication.updated_at,
@@ -339,6 +346,11 @@ class FleetProfileService:
         with self._sessions.begin() as session:
             row = session.scalar(
                 select(FleetProfileApplication)
+                .where(
+                    FleetProfileApplication.id == application_id
+                    if application_id is not None
+                    else true()
+                )
                 .where(eligible, FleetProfileApplication.id == application_id)
                 .with_for_update(skip_locked=True)
                 .limit(1)
