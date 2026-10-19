@@ -435,9 +435,16 @@ def test_numbered_autosave_uses_revision_and_load_freezes_whole_roster() -> None
         {"selector": NODE_2, "display_name": "Spark Two", "state": "Idle"},
     ]
 
-    changed = service.update_number(
+    replayed = service.update_number(
         2,
         FleetProfileInput(name="Second", expected_revision=1, assignments=[]),
+        actor="test",
+    )
+    assert replayed.revision == created.revision
+    assert replayed.profile_digest == created.profile_digest
+    changed = service.update_number(
+        2,
+        FleetProfileInput(name="Edited", expected_revision=1, assignments=[]),
         actor="test",
     )
     assert changed.revision == 2
