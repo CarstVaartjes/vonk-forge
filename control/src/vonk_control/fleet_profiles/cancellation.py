@@ -139,27 +139,42 @@ class FleetProfileService:
             if scope != snapshot_scope:
                 # Observation raced another owner. Preserve its exact scope;
                 # the next observer re-reads before taking admission locks.
-                return self._application_view(row)
+                raise FleetProfileInvalid(
+                    "Profile cancellation scope changed; submit the request again",
+                    reason=InvalidRequestReason.CONFLICT,
+                )
             previous = progress.cancellation
             if previous is not None:
-                if previous.request_key == request_key and previous.actor != actor:
+                if previous.request_key != request_key:
+                    raise FleetProfileInvalid(
+                        "Profile cancellation already has a different request key",
+                        reason=InvalidRequestReason.CONFLICT,
+                    )
+                if previous.actor != actor:
                     raise FleetProfileInvalid(
                         "Profile cancellation request key belongs to another actor",
                         reason=InvalidRequestReason.CONFLICT,
                     )
-                # A new observer of the same stop follows its original bounded
-                # receipt. Request history cannot force another cancellation.
+                # A replay follows the original durable receipt without
+                # accepting a second request identity for the same stop.
                 cancellation = previous
             else:
                 if self._adopted_application_scope(session, row) is not None:
                     # Continuing effects belong to the newer selected request.
                     # An older cancellation cannot mutate that newer authority.
-                    return self._application_view(row)
+                    raise FleetProfileInvalid(
+                        "Profile effects belong to a newer selected request; "
+                        "cancel that application instead",
+                        reason=InvalidRequestReason.CONFLICT,
+                    )
                 # A load backing off for its retry is live: cancelling stops
                 # that retry, and a child it still owns is reconciled by the same
                 # fence and cancellation as for any live application.
                 if row.state not in fleet_profile_states.LIVE:
-                    return self._application_view(row)
+                    raise FleetProfileInvalid(
+                        f"Profile application already ended in {row.state}",
+                        reason=InvalidRequestReason.CONFLICT,
+                    )
                 ordinal = progress.workload_intent_ordinal
                 # A workload fence precedes every workload effect, so an issued
                 # child without one is evidence this cancel cannot fence: it is not
