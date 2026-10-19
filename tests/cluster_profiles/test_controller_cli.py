@@ -14,6 +14,7 @@ from typing import cast
 
 import pytest
 from library_route_fixtures import _recipe_projection
+from vonk_agent_protocol import LifecycleState, OperatorActionName
 from vonk_forge_contracts import ModelDefinition, document_sha256
 
 from cluster_profiles import cli, controller_cli
@@ -31,6 +32,12 @@ from cluster_profiles.control_client import (
 )
 from cluster_profiles.generated_control.models.fleet_profile_endpoints_view import (
     FleetProfileEndpointsView,
+)
+from cluster_profiles.generated_control.models.job_operator_receipt import (
+    JobOperatorReceipt,
+)
+from cluster_profiles.generated_control.models.job_operator_receipt_action import (
+    check_job_operator_receipt_action,
 )
 from control.tests.consumer_outcomes import not_adopted
 
@@ -152,10 +159,12 @@ class FakeClient:
         }
         job_path = re.fullmatch(r"/api/jobs/[^/]+", path)
         resume_path = re.fullmatch(r"/api/jobs/[^/]+/resume", path)
+        job_request_path = re.fullmatch(r"/api/jobs/[^/]+/requests/[^/]+", path)
         known = (
             path in known_get
             or job_path is not None
             or resume_path is not None
+            or job_request_path is not None
             or profile_path is not None
             or application_path is not None
             or application_cancel_path is not None
@@ -1020,14 +1029,23 @@ def test_every_fleet_subcommand_has_a_presentation() -> None:
     assert missing == []
 
 
-def test_fleet_resume_rejects_a_receipt_for_another_job() -> None:
+@pytest.mark.parametrize("receipt_matches", [True, False])
+def test_fleet_resume_rejects_a_receipt_for_another_job(receipt_matches: bool) -> None:
     job_id = "11111111-1111-4111-8111-111111111111"
     other_job_id = "22222222-2222-4222-8222-222222222222"
+    lookup = f"/api/jobs/{job_id}/requests/{job_id}"
     client = FakeClient(
         {
+            ("GET", lookup): JobOperatorReceipt(
+                action=check_job_operator_receipt_action(OperatorActionName.RESUME),
+                actor="operator",
+                content_digest="a" * 64,
+                job_id=job_id if receipt_matches else other_job_id,
+                request_id=job_id,
+            ).to_dict(),
             ("GET", f"/api/jobs/{job_id}"): {
                 "id": job_id,
-                "state": "waiting-for-operator",
+                "state": LifecycleState.RUNNING.value,
                 "recovery": {"actions": ["resume"]},
             },
             ("POST", f"/api/jobs/{job_id}/resume"): {
@@ -1039,10 +1057,18 @@ def test_fleet_resume_rejects_a_receipt_for_another_job() -> None:
 
     status, payload = run(("fleet", "resume", job_id, "--yes", "--json"), client)
 
-    assert status == 0
-    assert payload["id"] == job_id
-    assert other_job_id not in json.dumps(payload)
-    assert [call[0] for call in client.calls] == ["POST", "GET"]
+    if receipt_matches:
+        assert status == 0, payload
+        assert payload["id"] == job_id
+        assert other_job_id not in json.dumps(payload)
+        assert [(method, path) for method, path, *_ in client.calls] == [
+            ("POST", f"/api/jobs/{job_id}/resume"),
+            ("GET", lookup),
+            ("GET", f"/api/jobs/{job_id}"),
+        ]
+    else:
+        assert status != 0
+        assert not any(path == f"/api/jobs/{job_id}" for _, path, *_ in client.calls)
     client.responses[("POST", f"/api/jobs/{job_id}/resume")] = {
         "id": job_id,
         "state": "queued",

@@ -72,7 +72,7 @@ def test_activity_read_without_optional_projections_is_empty():
     services = OperationApiServices(
         agents=lambda: (),
         job_operations=_unused_job_operations,
-        resume_job=lambda _: None,
+        resume_job=lambda _, *, receipt=None: None,
     )
     page = _global_list_operations(services, None, 10, None, None, None)
     assert page.items == ()
@@ -87,7 +87,7 @@ def test_activity_absent_projection_is_not_a_read_failure():
     services = OperationApiServices(
         agents=lambda: (),
         job_operations=_unused_job_operations,
-        resume_job=lambda _: None,
+        resume_job=lambda _, *, receipt=None: None,
     )
     with pytest.raises(KeyError):
         _global_get_operation(services, "missing")

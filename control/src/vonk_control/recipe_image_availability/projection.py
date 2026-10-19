@@ -249,7 +249,10 @@ def retry(
             )
         previous_payload = self._payload(previous)
         if isinstance(previous_payload, Residue):
-            return self._unknown_view(previous, previous_payload)
+            raise RecipeImageAvailabilityInvalid(
+                RecipeImageCode.NOT_RETRYABLE,
+                "cannot record retry for unreadable recipe operation",
+            )
         retry_count = previous_payload.retry.operator_retries
         previous_authority = previous.authority_revision
         previous_targets = list(previous.targets)

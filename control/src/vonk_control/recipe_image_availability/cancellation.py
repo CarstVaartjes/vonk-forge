@@ -216,6 +216,11 @@ def _request_cancellation(
     else:
         payload = self._payload(job)
         if isinstance(payload, Residue):
+            if authorize:
+                raise RecipeImageAvailabilityInvalid(
+                    RecipeImageCode.NOT_CANCELLABLE,
+                    "cannot record cancellation in unreadable operation",
+                )
             return payload
         payload = payload.model_copy(update={"cancellation": cancellation})
         job.payload = serialize_json_value(payload)
@@ -585,3 +590,29 @@ def _build_child_cancellation_pending(
         if getattr(error.orig, "sqlstate", None) == "55P03":
             return True
         raise
+
+
+def cancellation_by_request(
+    self: RecipeImageAvailabilityService,
+    operation_id: str,
+    request_id: str,
+    *,
+    actor: str,
+) -> RecipeImageAvailabilityView | RecipeUpdateResponse:
+    """Read the accepted cancellation without advancing its target."""
+    with self._sessions() as session:
+        job = session.get(Job, operation_id)
+        if job is None:
+            raise MissingRecord(operation_id)
+        receipt = self._stored_cancellation(job)
+        if receipt is None or (receipt.cancel_request_id, receipt.cancel_actor) != (
+            request_id,
+            actor,
+        ):
+            raise MissingRecord(request_id)
+        kind = job.kind
+    return (
+        self._updates.get(operation_id)
+        if kind == UPDATE_KIND
+        else self.get(operation_id)
+    )

@@ -8,7 +8,7 @@ import inspect
 import json
 import logging
 from collections.abc import Callable, Mapping, Sequence
-from typing import Any, overload
+from typing import TYPE_CHECKING, Any, overload
 
 from fastapi import Response
 from fastapi.concurrency import run_in_threadpool
@@ -22,6 +22,9 @@ from .platform_observation_errors import (
     ObservationCaptureUnavailable,
     observation_capture_unavailable_response,
 )
+
+if TYPE_CHECKING:
+    from .operator_acceptance import OperatorReceiptResolver
 
 
 def _serialized_field_name(field_name: str, field: Any, *, by_alias: bool) -> str:
@@ -222,7 +225,26 @@ def _presence_policy_endpoint(
         current = route()
         response_field = current.response_field
         if isinstance(result, Response) or response_field is None:
-            return result
+            from .operator_acceptance import (
+                acceptance_arguments,
+                apply_receipt,
+                receipt_policy,
+            )
+
+            response = result if isinstance(result, Response) else injected_response
+            if not isinstance(response, Response):
+                response = Response(status_code=current.status_code or 200)
+            if response.status_code is None:
+                response.status_code = current.status_code or 200
+            checked = await run_in_threadpool(
+                apply_receipt,
+                receipt_policy(endpoint),
+                getattr(current, "operator_receipts", None),
+                result,
+                response,
+                acceptance_arguments(receipt_policy(endpoint), **values),
+            )
+            return checked if isinstance(result, Response) else result
         value, errors = response_field.validate(result, {}, loc=("response",))
         if errors:
             return result
@@ -240,7 +262,20 @@ def _presence_policy_endpoint(
         )
         if isinstance(injected_response, Response):
             response.headers.raw.extend(injected_response.headers.raw)
-        return response
+        from .operator_acceptance import (
+            acceptance_arguments,
+            apply_receipt,
+            receipt_policy,
+        )
+
+        return await run_in_threadpool(
+            apply_receipt,
+            receipt_policy(endpoint),
+            getattr(current, "operator_receipts", None),
+            value,
+            response,
+            acceptance_arguments(receipt_policy(endpoint), **values),
+        )
 
     # Copy the identity FastAPI derives names, operation ids and descriptions
     # from, but no ``__wrapped__``: FastAPI must see an async endpoint.
@@ -253,6 +288,8 @@ def _presence_policy_endpoint(
 
 class ControllerAPIRoute(APIRoute):
     """Apply the presence policy after response validation for every JSON route."""
+
+    operator_receipts: OperatorReceiptResolver | None = None
 
     def __init__(self, path: str, endpoint: Callable[..., Any], **kwargs: Any) -> None:
         if not hasattr(endpoint, "__vonk_endpoint__"):

@@ -24,6 +24,11 @@ from .fleet_profile_contract import (
 from .fleet_profiles import FleetProfileConflict, FleetProfilePermissionDenied
 from .integer_domains import MAX_DATABASE_INTEGER
 from .operation_api import bounded_error_responses
+from .operator_acceptance import (
+    OperatorReceiptResolver,
+    ReceiptPolicy,
+    operator_acceptance,
+)
 
 #: The canonical lowercase UUID shape every durable identity in this API uses.
 _UUID = r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
@@ -178,6 +183,7 @@ def install_fleet_profile_routes(
         responses=bounded_error_responses(401, 403, 409, 422, 503),
         operation_id="autosaveProfile",
     )
+    @operator_acceptance(ReceiptPolicy.PROFILE_SAVE)
     def autosave_profile(
         number: Annotated[int, Path(ge=1, le=MAX_DATABASE_INTEGER)],
         body: FleetProfileInput,
@@ -204,6 +210,7 @@ def install_fleet_profile_routes(
         responses=bounded_error_responses(401, 404, 409, 422, 503),
         operation_id="previewProfile",
     )
+    @operator_acceptance(ReceiptPolicy.OBSERVATION)
     def preview_profile(
         number: Annotated[int, Path(ge=1, le=MAX_DATABASE_INTEGER)],
         actor: Actor = authenticated,
@@ -228,6 +235,7 @@ def install_fleet_profile_routes(
         status_code=status.HTTP_202_ACCEPTED,
         operation_id="loadProfile",
     )
+    @operator_acceptance(ReceiptPolicy.PROFILE_LOAD)
     def load_profile(
         number: Annotated[int, Path(ge=1, le=MAX_DATABASE_INTEGER)],
         body: FleetProfileLoadRequest,
@@ -326,6 +334,8 @@ def install_fleet_profile_routes(
             raise HTTPException(
                 status_code=503, detail="Profile progress unavailable"
             ) from None
+
+    OperatorReceiptResolver(profiles=profiles).bind(app)
 
 
 __all__ = ["FLEET_PROFILE_OPERATION_IDS", "install_fleet_profile_routes"]

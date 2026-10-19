@@ -23,12 +23,13 @@ from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from datetime import UTC, datetime
+from enum import StrEnum
 from pathlib import Path
 from typing import Annotated, Any
 from uuid import uuid4
 
 import httpx2
-from fastapi import FastAPI, HTTPException, Response, status
+from fastapi import FastAPI, HTTPException, Query, status
 from fastapi import Path as PathParameter
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, field_validator
 from vonk_agent_protocol import (
@@ -42,6 +43,11 @@ from vonk_agent_protocol import (
 
 from .auth import MUTATION_ROLES, Actor
 from .operation_api import bounded_error_responses
+from .operator_acceptance import (
+    OperatorReceiptResolver,
+    ReceiptPolicy,
+    operator_acceptance,
+)
 from .settings import SECRETS_ROOT
 from .strict_json import StrictJSONModel
 
@@ -64,6 +70,7 @@ _KEY_ROUTES = ["openai_routes"]
 _KEY_PATH = "/api/key"
 _REVOKE_PATH = "/api/key/{name}/revoke"
 _ROLL_PATH = "/api/key/{name}/roll"
+_RECEIPT_PATH = "/api/key/{name}/requests"
 
 
 class GatewayKeyError(UnknownOutcomeError, RuntimeError):
@@ -91,7 +98,7 @@ def _observe_gateway[T](
                 error.detail == SecurityRefusalReason.AGENT_IDENTITY_MISMATCH
             ):
                 raise
-            if error.status_code == 422:
+            if error.status_code in {409, 422}:
                 raise
         except (GatewayKeyError, OSError, ValueError):
             pass
@@ -129,6 +136,7 @@ class GatewayKeyCreated(GatewayKeyView):
     """The retained key for this mutation; the exact receipt can be replayed."""
 
     key: str = Field(min_length=1, max_length=512)
+    request_id: str | None = Field(default=None, min_length=1, max_length=128)
 
 
 class GatewayKeyList(StrictJSONModel):
@@ -141,6 +149,7 @@ class GatewayKeyRevoked(StrictJSONModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     name: str = Field(min_length=1, max_length=63)
+    request_id: str | None = Field(default=None, min_length=1, max_length=128)
 
 
 class _LiteLlmRequest(BaseModel):
@@ -162,7 +171,26 @@ class _KeyGenerateRequest(_LiteLlmRequest):
     key: str | None = None
 
 
+class GatewayMutationAction(StrEnum):
+    CREATE = "create"
+    ROLL = "roll"
+    REVOKE = "revoke"
+
+
+class GatewayMutationStatus(StrictJSONModel):
+    name: str
+    request_id: str
+    actor: str | None
+    action: GatewayMutationAction
+    completed: bool
+    superseded: bool
+    models: list[str]
+    expires: str | None
+
+
 class GatewayMutationReceipt(StrictJSONModel):
+    actor: str | None = None
+    action: GatewayMutationAction = GatewayMutationAction.CREATE
     request_id: str
     body: _KeyGenerateRequest
     completed: bool = False
@@ -299,6 +327,10 @@ class GatewayKeyService:
     """Create, list and revoke LiteLLM virtual keys with the master key."""
 
     _request: ContextVar[str | None] = ContextVar("gateway_request", default=None)
+    _actor: ContextVar[str | None] = ContextVar("gateway_actor", default=None)
+    _action: ContextVar[GatewayMutationAction] = ContextVar(
+        "gateway_action", default=GatewayMutationAction.CREATE
+    )
 
     def __init__(
         self,
@@ -331,6 +363,7 @@ class GatewayKeyService:
         expires: str | None = None,
         key: str | None = None,
         request_id: str | None = None,
+        actor: str | None = None,
     ) -> GatewayKeyCreated | UnknownError:
         def create_once() -> GatewayKeyCreated | UnknownError:
             with self._mutation_claim(name) as acquired:
@@ -366,18 +399,60 @@ class GatewayKeyService:
                 )
                 else str(uuid4())
             )
-        return self._mutation_request(name, request_id, create_once)
+        return self._mutation_request(name, request_id, create_once, actor=actor)
 
-    def revoke(self, name: str) -> GatewayKeyRevoked | UnknownError:
+    def revoke(
+        self, name: str, *, request_id: str | None = None, actor: str | None = None
+    ) -> GatewayKeyRevoked | UnknownError:
+        identity = request_id or str(uuid4())
+        aliases = (name, _rolling_alias(name))
+
         def revoke_once() -> GatewayKeyRevoked | UnknownError:
             with self._mutation_claim(name) as acquired:
                 if not acquired:
                     raise GatewayKeyError("gateway mutation claim is busy")
+                retained = self._read_receipt(self._receipt_path(name, identity))
+                if retained is not None:
+                    if (
+                        retained.actor != actor
+                        or retained.action != GatewayMutationAction.REVOKE
+                    ):
+                        raise HTTPException(
+                            status_code=409, detail=InvalidRequestReason.CONFLICT
+                        )
+                    if retained.completed:
+                        return GatewayKeyRevoked(name=name, request_id=identity)
+                else:
+                    owners = [
+                        self._read_receipt(self._intent_path(alias))
+                        for alias in aliases
+                    ]
+                    if not any(
+                        owner is not None and not owner.superseded for owner in owners
+                    ) and not any(self._gateway_exists(alias) for alias in aliases):
+                        raise HTTPException(
+                            status_code=409, detail=InvalidRequestReason.NOT_READY
+                        )
+                    retained = GatewayMutationReceipt(
+                        request_id=identity,
+                        actor=actor,
+                        action=GatewayMutationAction.REVOKE,
+                        body=_KeyGenerateRequest(
+                            key_alias=name,
+                            models=[],
+                            allowed_routes=list(_KEY_ROUTES),
+                            metadata=_KeyMetadata(),
+                        ),
+                    )
+                    self._intent_root.mkdir(parents=True, exist_ok=True, mode=0o700)
+                    _write_private(
+                        self._receipt_path(name, identity), retained.model_dump_json()
+                    )
                 # Newest revoke includes the exact temporary alias of an
                 # interrupted rotation. Keep its secret until both are absent.
-                for alias in (name, _rolling_alias(name)):
+                for alias in aliases:
                     self._gateway_delete_alias(alias)
-                for alias in (name, _rolling_alias(name)):
+                for alias in aliases:
                     receipt = self._read_receipt(self._intent_path(alias))
                     if receipt is not None and receipt.body.key is not None:
                         secret = receipt.body.key
@@ -390,12 +465,16 @@ class GatewayKeyService:
                             )
                 self._forget_intent(name, superseded=True)
                 self._forget_intent(_rolling_alias(name), superseded=True)
-                return GatewayKeyRevoked(name=name)
+                completed = retained.model_copy(update={"completed": True})
+                _write_private(
+                    self._receipt_path(name, identity), completed.model_dump_json()
+                )
+                return GatewayKeyRevoked(name=name, request_id=identity)
 
         return _observe_gateway(revoke_once, attempts=3)
 
     def roll(
-        self, name: str, *, request_id: str | None = None
+        self, name: str, *, request_id: str | None = None, actor: str | None = None
     ) -> GatewayKeyCreated | UnknownError:
         def roll_once() -> GatewayKeyCreated | UnknownError:
             with self._mutation_claim(name) as acquired:
@@ -420,13 +499,22 @@ class GatewayKeyService:
                 self._restore_request_intent(temporary)
                 return self._gateway_roll(name)
 
-        return self._mutation_request(_rolling_alias(name), request_id, roll_once)
+        return self._mutation_request(
+            _rolling_alias(name),
+            request_id,
+            roll_once,
+            actor=actor,
+            action_kind=GatewayMutationAction.ROLL,
+        )
 
     def _mutation_request(
         self,
         alias: str,
         request_id: str | None,
         action: Callable[[], GatewayKeyCreated | UnknownError],
+        *,
+        actor: str | None = None,
+        action_kind: GatewayMutationAction = GatewayMutationAction.CREATE,
     ) -> GatewayKeyCreated | UnknownError:
         # Receipt identity outlives alias-history cleanup. A new request never
         # adopts a completed operation's secret, even if cleanup failed.
@@ -437,8 +525,16 @@ class GatewayKeyService:
             else str(uuid4())
         )
         token = self._request.set(identity)
+        actor_token = self._actor.set(actor)
+        action_token = self._action.set(action_kind)
         try:
             completed = self._read_receipt(self._receipt_path(alias, identity))
+            if completed is not None and (
+                completed.actor != actor or completed.action != action_kind
+            ):
+                raise HTTPException(
+                    status_code=409, detail=InvalidRequestReason.CONFLICT
+                )
             if completed is not None and completed.superseded:
                 return UnknownError(
                     category=ErrorCategory.UNKNOWN, reason=WaitReason.SCOPE_CHANGED
@@ -452,6 +548,7 @@ class GatewayKeyService:
                     name=alias.removesuffix(".rolling"),
                     models=completed.body.models,
                     key=completed.body.key,
+                    request_id=identity,
                 )
 
             def reconcile() -> GatewayKeyCreated | UnknownError:
@@ -472,9 +569,34 @@ class GatewayKeyService:
                     )
                 return action()
 
-            return _observe_gateway(reconcile, attempts=3)
+            result = _observe_gateway(reconcile, attempts=3)
+            return (
+                result.model_copy(update={"request_id": identity})
+                if isinstance(result, GatewayKeyCreated)
+                else result
+            )
         finally:
+            self._action.reset(action_token)
+            self._actor.reset(actor_token)
             self._request.reset(token)
+
+    def receipt(
+        self, name: str, request_id: str, *, actor: str
+    ) -> GatewayMutationStatus:
+        for alias in (name, _rolling_alias(name)):
+            retained = self._read_receipt(self._receipt_path(alias, request_id))
+            if retained is not None and retained.actor == actor:
+                return GatewayMutationStatus(
+                    name=name,
+                    request_id=request_id,
+                    actor=retained.actor,
+                    action=retained.action,
+                    completed=retained.completed,
+                    superseded=retained.superseded,
+                    models=retained.body.models,
+                    expires=retained.body.duration,
+                )
+        raise HTTPException(status_code=404, detail=InvalidRequestReason.NOT_FOUND)
 
     def ensure_default(self, path: Path = DEFAULT_KEY_FILE) -> bool | UnknownError:
         def ensure_once() -> bool:
@@ -659,7 +781,12 @@ class GatewayKeyService:
                     and not prior.completed
                 ):
                     self._forget_intent(name, superseded=True)
-                receipt = GatewayMutationReceipt(request_id=identity, body=body)
+                receipt = GatewayMutationReceipt(
+                    request_id=identity,
+                    body=body,
+                    actor=self._actor.get(),
+                    action=self._action.get(),
+                )
                 _write_private(
                     self._receipt_path(name, identity), receipt.model_dump_json()
                 )
@@ -789,8 +916,10 @@ class GatewayKeyService:
             receipt = GatewayMutationReceipt.model_validate_json(path.read_bytes())
             body = receipt.body
             if (
-                body.key is None
-                or _KEY_PATTERN.fullmatch(body.key) is None
+                (
+                    receipt.action != GatewayMutationAction.REVOKE
+                    and (body.key is None or _KEY_PATTERN.fullmatch(body.key) is None)
+                )
                 or body.allowed_routes != _KEY_ROUTES
                 or body.metadata != _KeyMetadata()
             ):
@@ -825,6 +954,8 @@ class GatewayKeyService:
         completed = GatewayMutationReceipt(
             request_id=receipt.request_id,
             body=receipt.body,
+            actor=receipt.actor,
+            action=receipt.action,
             completed=True,
             superseded=superseded,
         )
@@ -1016,6 +1147,14 @@ def _write_private(path: Path, content: str) -> None:
         Path(temporary).unlink(missing_ok=True)
 
 
+def _accepted_gateway_mutation[T](value: T | UnknownError) -> T:
+    if isinstance(value, UnknownError):
+        raise GatewayKeyError(
+            "gateway acceptance is not observable", reason=value.reason
+        )
+    return value
+
+
 def install_gateway_key_routes(
     app: FastAPI,
     *,
@@ -1032,6 +1171,24 @@ def install_gateway_key_routes(
     def authorize(actor: Actor, path: str) -> None:
         if actor.role not in MUTATION_ROLES[("POST", path)]:
             raise HTTPException(status_code=403, detail=SecurityRefusalReason.FORBIDDEN)
+
+    _ADMIN_OPERATION_IDS[("get", _RECEIPT_PATH)] = "getGatewayKeyReceipt"
+
+    @app.get(
+        _RECEIPT_PATH,
+        response_model=GatewayMutationStatus,
+        responses=bounded_error_responses(401, 403, 404, 422, 503),
+        operation_id="getGatewayKeyReceipt",
+    )
+    def key_receipt(
+        name: str = PathParameter(pattern=_NAME_PATTERN, max_length=63),
+        request_id: str = Query(min_length=1, max_length=128),
+        actor: Actor = actor_dependency,
+    ) -> GatewayMutationStatus:
+        authorize(actor, _KEY_PATH)
+        if service is None:
+            raise GatewayKeyError("gateway receipt unavailable")
+        return service.receipt(name, request_id, actor=actor.subject)
 
     @app.get(
         _KEY_PATH,
@@ -1051,26 +1208,19 @@ def install_gateway_key_routes(
 
     @app.post(
         _KEY_PATH,
-        response_model=GatewayKeyCreated | UnknownError,
-        responses={
-            202: {"model": UnknownError},
-            **bounded_error_responses(401, 403, 422, 502, 503),
-        },
+        response_model=GatewayKeyCreated,
+        responses=bounded_error_responses(401, 403, 409, 422, 502, 503),
         status_code=status.HTTP_201_CREATED,
         operation_id="createGatewayKey",
     )
+    @operator_acceptance(ReceiptPolicy.KEY)
     def create_gateway_key(
         body: GatewayKeyCreateRequest,
-        response: Response,
         actor: Actor = actor_dependency,
-    ) -> GatewayKeyCreated | UnknownError:
+    ) -> GatewayKeyCreated:
         authorize(actor, _KEY_PATH)
         if service is None:
-            response.status_code = status.HTTP_202_ACCEPTED
-            return UnknownError(
-                category=ErrorCategory.UNKNOWN,
-                reason=WaitReason.OBSERVATION_UNAVAILABLE,
-            )
+            raise GatewayKeyError("gateway acceptance owner is unavailable")
         available: GatewayKeyService = service
         result = _observe_gateway(
             lambda: available.create(
@@ -1078,47 +1228,55 @@ def install_gateway_key_routes(
                 models=body.models,
                 expires=body.expires,
                 request_id=body.request_id,
+                actor=actor.subject,
             )
         )
-        if isinstance(result, UnknownError):
-            response.status_code = status.HTTP_202_ACCEPTED
-        return result
+        return _accepted_gateway_mutation(result)
 
     @app.post(
         _REVOKE_PATH,
-        response_model=GatewayKeyRevoked | UnknownError,
-        responses=bounded_error_responses(401, 403, 502, 503),
+        response_model=GatewayKeyRevoked,
+        responses=bounded_error_responses(401, 403, 409, 422, 502, 503),
         operation_id="revokeGatewayKey",
     )
+    @operator_acceptance(ReceiptPolicy.KEY)
     def revoke_gateway_key(
+        request_id: Annotated[str | None, Query(min_length=1, max_length=128)] = None,
         name: str = PathParameter(pattern=_NAME_PATTERN, max_length=63),
         actor: Actor = actor_dependency,
-    ) -> GatewayKeyRevoked | UnknownError:
+    ) -> GatewayKeyRevoked:
         authorize(actor, _REVOKE_PATH)
         if service is None:
-            return UnknownError(
-                category=ErrorCategory.UNKNOWN,
-                reason=WaitReason.OBSERVATION_UNAVAILABLE,
-            )
+            raise GatewayKeyError("gateway acceptance owner is unavailable")
         available: GatewayKeyService = service
-        return _observe_gateway(lambda: available.revoke(name))
+        return _accepted_gateway_mutation(
+            _observe_gateway(
+                lambda: available.revoke(
+                    name, request_id=request_id, actor=actor.subject
+                )
+            )
+        )
 
     @app.post(
         _ROLL_PATH,
-        response_model=GatewayKeyCreated | UnknownError,
-        responses=bounded_error_responses(401, 403, 502, 503),
+        response_model=GatewayKeyCreated,
+        responses=bounded_error_responses(401, 403, 409, 422, 502, 503),
         operation_id="rollGatewayKey",
     )
+    @operator_acceptance(ReceiptPolicy.KEY)
     def roll_gateway_key(
         name: str = PathParameter(pattern=_NAME_PATTERN, max_length=63),
-        request_id: str | None = None,
+        request_id: Annotated[str | None, Query(min_length=1, max_length=128)] = None,
         actor: Actor = actor_dependency,
-    ) -> GatewayKeyCreated | UnknownError:
+    ) -> GatewayKeyCreated:
         authorize(actor, _ROLL_PATH)
         if service is None:
-            return UnknownError(
-                category=ErrorCategory.UNKNOWN,
-                reason=WaitReason.OBSERVATION_UNAVAILABLE,
-            )
+            raise GatewayKeyError("gateway acceptance owner is unavailable")
         available: GatewayKeyService = service
-        return _observe_gateway(lambda: available.roll(name, request_id=request_id))
+        return _accepted_gateway_mutation(
+            _observe_gateway(
+                lambda: available.roll(name, request_id=request_id, actor=actor.subject)
+            )
+        )
+
+    OperatorReceiptResolver(keys=service).bind(app)

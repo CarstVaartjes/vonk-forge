@@ -71,6 +71,9 @@ class _Enrollment:
     def revoke_node(self, node_id: str, actor: str) -> EnrollmentRevocationStatus:
         raise AssertionError("not used")
 
+    def revocation_status(self, node_id: str) -> EnrollmentRevocationStatus:
+        raise AssertionError("not used")
+
 
 def _app(actor: Actor, *, services: FleetOperatorServices | None = None) -> FastAPI:
     app = FastAPI()
