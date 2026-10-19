@@ -103,8 +103,10 @@ def _installation_kept(
         names.add(compiled.identity.model_artifact_set_sha256)
         names.add(compiled.runtime_image.oci_layout_sha256)
         names.add(compiled.runtime_image.image_digest.removeprefix("sha256:"))
+        # A shared tokenizer/metadata file names only that object, not this
+        # installation. The collector accounts for protected objects separately
+        # and uninstalls with preserve_model_files=True.
         for artifact in compiled.artifacts:
-            names.add(artifact.sha256)
             names.add(artifact.model.content_sha256)
     if not evidence.operations.isdisjoint(names):
         return "live operation"
