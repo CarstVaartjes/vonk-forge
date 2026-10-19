@@ -941,21 +941,25 @@ if __name__ == "__main__":
     from .settings import RECIPE_LIBRARY_API_URL, RECIPE_LIBRARY_ASSET_URL
     from .source_bundles import DatabaseSourceBundleStore
 
-    catalog_sync = ManagedRecipeCatalogSyncService(
-        sessions,
-        catalog=CatalogService(
+    catalog_sync = capabilities.guard(
+        ControllerCapability.RECIPE_LIBRARY,
+        ManagedRecipeCatalogSyncService,
+        lambda: ManagedRecipeCatalogSyncService(
             sessions,
+            catalog=CatalogService(
+                sessions,
+                clock=clock,
+                cursors=TokenCodec(settings.token_signing_key).cursor_codec(),
+                source_bundles=DatabaseSourceBundleStore(sessions),
+            ),
+            reader=RecipePackageClient(
+                cache_root=settings.state_path / "recipe-library-packages",
+                api_url=RECIPE_LIBRARY_API_URL,
+                asset_url=RECIPE_LIBRARY_ASSET_URL,
+                release=settings.recipe_library_release,
+            ),
             clock=clock,
-            cursors=TokenCodec(settings.token_signing_key).cursor_codec(),
-            source_bundles=DatabaseSourceBundleStore(sessions),
         ),
-        reader=RecipePackageClient(
-            cache_root=settings.state_path / "recipe-library-packages",
-            api_url=RECIPE_LIBRARY_API_URL,
-            asset_url=RECIPE_LIBRARY_ASSET_URL,
-            release=settings.recipe_library_release,
-        ),
-        clock=clock,
     )
     worker = assemble_production_worker(
         catalog_sync=catalog_sync,
