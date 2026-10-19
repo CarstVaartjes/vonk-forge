@@ -113,7 +113,7 @@ def runnable_job_ages(
 ) -> dict[str, float]:
     """Return the oldest queued-but-runnable age per job kind.
 
-    A queued job whose ``result.observation_due_at`` is still in the future is
+    A queued job whose ``next_action_at`` is still in the future is
     an intentional wait, so it is excluded: only work the durable queue could
     actually issue now may age into the starvation signal.  This is what keeps
     the alert honest while another job of a different kind is running.

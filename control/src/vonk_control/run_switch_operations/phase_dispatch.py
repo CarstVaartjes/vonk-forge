@@ -48,6 +48,7 @@ from ..logging import log_event
 from ..models import (
     Job,
 )
+from ..operation_blockers import make_blocker
 from ..persisted_waits import schedule_wait
 from ..preparation_contract import (
     RuntimeImageIdentity,
@@ -645,15 +646,16 @@ class PhaseDispatchMixin:
                         _aware(progress.recovery_deadline_at or now),
                         stall_deadline(now, None, RECOVERY_STALL_WINDOW),
                     )
-                    job.status_reason = execution.status_reason or (
+                    background_reason = execution.status_reason or (
                         "Runtime image preparation is running in the background; "
                         f"next check at {due.isoformat()}"
                     )
                     if progress.retry_reason:
-                        job.status_reason = (
-                            f"{job.status_reason} Attempt {progress.retry_attempt} "
+                        background_reason = (
+                            f"{background_reason} Attempt {progress.retry_attempt} "
                             f"after {progress.retry_reason}."
                         )[:512]
+                    job.status_reason = background_reason
                     _ADAPTER.project(
                         job,
                         progress,
@@ -661,6 +663,13 @@ class PhaseDispatchMixin:
                         state=_LifecycleState.OBSERVING,
                         due=due,
                         visible=_OBSERVING,
+                        wait_blockers=[
+                            make_blocker(
+                                RunSwitchCode.RUNTIME_IMAGE_PREPARING,
+                                background_reason,
+                                node_ids=list(job.targets),
+                            )
+                        ],
                     )
             elif execution.operation_id is not None:
                 progress.child_operation_id = execution.operation_id

@@ -31,7 +31,7 @@ core state                stored application
 ``running``               ``running``
 ``backoff``/``observing`` ``queued`` while admission retries (``admission_pending``),
                           ``backoff`` after a failure the Controller retries by
-                          itself (its next attempt is ``retry_due_at``), else
+                          itself (its next attempt is ``next_action_at``), else
                           ``running`` (a cancel being driven keeps the label)
 ``needs-operator``        ``waiting-for-operator``: legacy only, read and healed,
                           never written
@@ -49,7 +49,6 @@ operation ids kept as the residue.  It never parks the application for a person.
 
 from __future__ import annotations
 
-import json
 import uuid
 from collections.abc import Callable, Sequence
 from contextlib import contextmanager
@@ -77,6 +76,7 @@ from ..fleet_profile_contract import (
 from ..models import FleetProfileApplication, Job
 from ..persisted_waits import initialize_wait, lifecycle_wait, schedule_wait, wait_due
 from ..recovery_policy import RECOVERY
+from ..strict_json import read_stored_model
 from .adapter import Dispatch
 from .composite import aggregate
 from .core import STOP_BUDGET, transition
@@ -1000,15 +1000,13 @@ def _progress(
     """The typed progress, or ``None`` when the stored document is damaged."""
 
     try:
-        return FleetProfileApplicationProgress.model_validate_json(
-            _canonical(application.progress)
+        return read_stored_model(
+            FleetProfileApplicationProgress,
+            application.progress,
+            from_json=True,
         )
     except (ValueError, TypeError):
         return None
-
-
-def _canonical(value: object) -> str:
-    return json.dumps(value, default=str)
 
 
 __all__ = [

@@ -11,6 +11,7 @@ from vonk_agent_protocol import (
     InvalidRequestReason,
     LifecycleState,
     ProfileReasonCode,
+    ProgressAlarmCode,
 )
 from vonk_agent_protocol.agent_words import (
     ProfileCancellationCause,
@@ -323,6 +324,16 @@ class FleetProfileService:
                 *progress.blockers[: MAX_BLOCKERS - 1],
                 stalled_blocker(progress.stall),
             ]
+        wait = read_wait(row)
+        if wait is not None:
+            alarms = [
+                b for b in progress.blockers if b.code is ProgressAlarmCode.STALLED
+            ]
+            causes = [
+                b for b in wait.blockers if b.code is not ProgressAlarmCode.STALLED
+            ]
+            progress.blockers = [*causes[: MAX_BLOCKERS - len(alarms)], *alarms]
+            wait = wait.model_copy(update={"blockers": progress.blockers})
         state, next_attempt_at = self._presented_state(row, progress)
         session = object_session(row)
         if session is not None and not isinstance(plan, Residue):
@@ -330,7 +341,7 @@ class FleetProfileService:
                 update={"effects": self._effect_progress(session, row, plan, progress)}
             )
         return FleetProfileApplicationView(
-            wait=read_wait(row),
+            wait=wait,
             id=row.id,
             request_key=row.request_key,
             profile_id=row.profile_id,

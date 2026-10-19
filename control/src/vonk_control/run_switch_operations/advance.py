@@ -38,7 +38,7 @@ from ..lifecycle.types import (
 from ..models import (
     Job,
 )
-from ..persisted_waits import schedule_wait
+from ..persisted_waits import schedule_wait, wait_due
 from ..profile_capacity import (
     accepted_profile_runtime_image,
 )
@@ -306,7 +306,7 @@ class AdvanceMixin:
                 job.result = _persisted_result(progress)
                 session.commit()
                 return True
-            observation_due = job.next_action_at
+            observation_due = wait_due(job)
             if (
                 observation_due is not None
                 and now < _aware(observation_due)
@@ -571,6 +571,7 @@ class AdvanceMixin:
                         progress,
                         now,
                         state=_LifecycleState.RUNNING,
+                        due=job.next_action_at,
                         reason=status_reason,
                     )
                     job.result = _persisted_result(progress)

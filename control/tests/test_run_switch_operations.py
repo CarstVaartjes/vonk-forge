@@ -1257,13 +1257,8 @@ def test_due_scheduler_reaches_work_past_a_full_parked_batch(
                     targets=[f"spk_{index:032x}"],
                     payload_digest="a" * 64,
                     payload={},
-                    result={
-                        "observation_due_at": (
-                            NOW if index == 16 else NOW + timedelta(minutes=1)
-                        )
-                        .isoformat()
-                        .replace("+00:00", "Z")
-                    },
+                    result={},
+                    next_action_at=NOW if index == 16 else NOW + timedelta(minutes=1),
                     created_at=NOW,
                     updated_at=NOW,
                 )

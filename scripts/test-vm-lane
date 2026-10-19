@@ -37,7 +37,7 @@ orb -m vonk-ci bash -lc "
         UV_PROJECT_ENVIRONMENT=\"\$HOME/venv-$tag\" \
         VONK_CLI_DEPENDENCY_ENV=\"\$HOME/cli-deps-$tag\" \
         VONK_RECIPE_LIBRARY_ROOT=$(printf %q "$recipe_root") \
-        VONK_TEST_CONTAINER_SCOPE="${tag}-" \
+        VONK_TEST_CONTAINER_SCOPE=\"${tag}-\" \
         CARGO_TARGET_DIR=\"\$HOME/target-vonk-vm-lane\"
     trap 'rm -rf \"\${HOME:?}/venv-${tag:?}\" \"\${HOME:?}/cli-deps-${tag:?}\"' EXIT
     scripts/build-control-wheel

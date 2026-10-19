@@ -17,7 +17,7 @@ core state            stored job
 ====================  =========================================================
 ``queued``            ``queued``
 ``backoff``           ``queued`` (a preparation's failure, claimable once
-                      ``payload.retry_after_at`` has passed) or ``partial`` (a
+                      ``next_action_at`` has passed) or ``partial`` (a
                       wait for the model child, an interrupted removal)
 ``running``           ``running`` with the owner's claim in the payload
                       (``claim_owner``, ``claim_until`` is the lease); a removal
@@ -46,8 +46,8 @@ load): ``observe_count`` is derived from it in :meth:`lifecycle`.
 
 One retry clock.  The core's bounded jittered backoff decides when a failed
 preparation or removal is tried again; the owner's own delay (a provider's
-``Retry-After``) is only the floor.  ``payload.retry_after_at`` (preparation) and
-``checkpoint.failure.retry_time`` (removal) store the instant the core chose.
+``Retry-After``) is only the floor. The owner's SQL ``next_action_at`` stores
+the instant the core chose; typed wait evidence explains that one clock.
 
 Legacy rows need no startup rewrite: ``lifecycle`` is the ``adopt`` hook, a
 ``running`` preparation with a lapsed lease is already claimable (the owner's claim

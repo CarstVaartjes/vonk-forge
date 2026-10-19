@@ -34,6 +34,7 @@ from ..lifecycle.evidence import BookkeepingReason, Residue, retire_as_unknown
 from ..lifecycle.fleet_profile import FleetProfileAdapter
 from ..models import AgentNode, FleetProfileApplication, FleetProfileSelection
 from ..operation_blockers import OperationBlocker, make_blocker
+from ..persisted_waits import wait_due
 from ..profile_error_summary import _normalized_failure_text
 from ..recovery_policy import RECOVERY
 from .assessment_support import (
@@ -326,18 +327,12 @@ class FleetProfileService:
         state = _OPERATION_STATE_ADAPTER.validate_python(row.state, strict=True)
         if progress.cancellation is not None:
             return state, None
-        if state == LifecycleState.QUEUED and progress.admission_pending:
-            return state, _aware(
-                row.next_action_at
-            ) if row.next_action_at is not None else None
         if state in {
             LifecycleState.QUEUED,
             LifecycleState.RUNNING,
             LifecycleState.BACKOFF,
         }:
-            return state, _aware(
-                row.next_action_at
-            ) if row.next_action_at is not None else None
+            return state, wait_due(row)
         return state, None
 
     def _automatic_profile_recovery(self, now: datetime) -> tuple[str, str] | None:
@@ -423,9 +418,8 @@ class FleetProfileService:
                         continue
                     if not self._recovery_possible(session, row, progress):
                         continue
-                    if row.next_action_at is not None and _aware(
-                        row.next_action_at
-                    ) > _aware(now):
+                    due = wait_due(row)
+                    if due is not None and due > _aware(now):
                         continue
                     if now < FleetProfileAdapter.next_retry(
                         row.id, progress.attempt, _aware(row.updated_at)

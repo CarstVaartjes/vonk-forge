@@ -36,6 +36,7 @@ from vonk_control.models import (
     RecipeSourceBundle,
     User,
 )
+from vonk_control.persisted_waits import schedule_wait
 from vonk_control.recipe_builds import RecipeBuildPlan
 from vonk_control.recipe_operations import RecipeOperationService
 from vonk_control.run_switch_contract import RunSwitchApplyRequest
@@ -87,10 +88,7 @@ def _make_due(application: FleetProfileApplication) -> None:
     """The backoff's next attempt has come."""
 
     application.updated_at = datetime(2020, 1, 1, tzinfo=UTC)
-    application.progress = {
-        **application.progress,
-        "retry_due_at": datetime(2020, 1, 1, tzinfo=UTC).isoformat(),
-    }
+    schedule_wait(application, datetime(2020, 1, 1, tzinfo=UTC))
 
 
 @pytest.mark.parametrize("remove_author", [False, True])

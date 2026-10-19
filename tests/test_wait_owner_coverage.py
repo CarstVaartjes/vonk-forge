@@ -17,6 +17,7 @@ WRITERS = frozenset(
 def _violations(source: str, path: str) -> list[str]:
     tree = ast.parse(source)
     errors: list[str] = []
+    retired_clocks = {"retry_after_at", "admission_retry_at", "observation_due_at"}
     for node in ast.walk(tree):
         if (
             isinstance(node, ast.ClassDef)
@@ -35,13 +36,28 @@ def _violations(source: str, path: str) -> list[str]:
                 errors.append(
                     f"{path}:{node.lineno}: {node.name} bypasses persisted waits"
                 )
-        if path != "persisted_waits.py" and isinstance(node, ast.Assign):
-            for target in node.targets:
+        if path != "persisted_waits.py" and isinstance(
+            node, ast.Assign | ast.AnnAssign | ast.AugAssign
+        ):
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            for target in targets:
                 if isinstance(target, ast.Attribute) and target.attr in {
                     "next_action_at",
                     "wait_evidence",
                 }:
                     errors.append(f"{path}:{node.lineno}: direct wait writer")
+        if isinstance(node, ast.Dict) and any(
+            isinstance(key, ast.Constant) and key.value in retired_clocks
+            for key in node.keys
+        ):
+            errors.append(f"{path}:{node.lineno}: parallel JSON wait clock")
+        if (
+            isinstance(node, ast.Subscript)
+            and isinstance(node.ctx, ast.Store)
+            and isinstance(node.slice, ast.Constant)
+            and node.slice.value in retired_clocks
+        ):
+            errors.append(f"{path}:{node.lineno}: parallel JSON wait clock")
     return errors
 
 
@@ -61,6 +77,9 @@ def test_all_lifecycle_adapters_and_durable_clock_writers_use_wait_custody() -> 
         "class NewAdapter:\n def adopt(self, row): return row\n",
         "def defer(row, due):\n row.next_action_at = due\n",
         "def defer(row, evidence):\n row.wait_evidence = evidence\n",
+        "def defer(row, due):\n row.next_action_at: object = due\n",
+        "def defer(row, due):\n row.progress['retry_after_at'] = due\n",
+        "def defer(row, due):\n return {'observation_due_at': due}\n",
     ],
 )
 def test_owner_gate_rejects_uncovered_new_writer(source: str) -> None:

@@ -101,6 +101,14 @@ def note_waiting_for_worker(self: RecipeImageAvailabilityService, busy: int) -> 
                 ],
             )
             operation.payload = serialize_json_value(payload)
+            now = self._clock()
+            schedule_wait(
+                operation,
+                now,
+                now=now,
+                reason=RecipeImageCode.WAITING_FOR_WORKER,
+                blockers=list(payload.blockers or []),
+            )
 
 
 def _fail(
@@ -426,7 +434,9 @@ def _view(
         updated_at=_iso(operation.updated_at),
         model_child=model_child,
         cancellation=self._stored_cancellation(operation),
-        blockers=tuple(payload.blockers or [])
+        blockers=tuple(wait.blockers)
+        if (wait := read_wait(operation)) is not None
+        else tuple(payload.blockers or [])
         if state
         in job_states.words(
             LifecycleState.QUEUED, LifecycleState.BACKOFF, LifecycleState.FAILED

@@ -352,3 +352,22 @@ def test_catalog_wait_survives_reconstruction_and_reuses_exact_observation(
     assert latest.wait.next_check == now[0] + timedelta(seconds=30)
     assert latest.wait.first_blocked_at == before.first_blocked_at
     assert latest.wait.last_progress_at is None
+
+
+def test_stall_alarm_is_not_a_new_dependency_or_progress() -> None:
+    """Catches an attention warning resetting the dependency's original age."""
+    from vonk_agent_protocol import ProgressAlarmCode
+    from vonk_control.operation_blockers import make_blocker
+    from vonk_control.persisted_waits import read_wait, schedule_wait
+
+    job = _job()
+    cause = make_blocker(WaitReason.SPARK_BUSY, "exact child still owns the Spark")
+    schedule_wait(job, NOW, now=NOW, reason=WaitReason.SPARK_BUSY, blockers=[cause])
+    alarm = make_blocker(ProgressAlarmCode.STALLED, "No measured child progress")
+    later = NOW + timedelta(minutes=20)
+    schedule_wait(
+        job, later, now=later, reason=WaitReason.SPARK_BUSY, blockers=[cause, alarm]
+    )
+    wait = read_wait(job)
+    assert wait is not None
+    assert wait.first_blocked_at == NOW and wait.last_progress_at is None

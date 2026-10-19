@@ -685,7 +685,7 @@ def test_damaged_retry_projection_cannot_hide_a_waiting_admission():
         row = session.get(FleetProfileApplication, pending.id)
         assert row is not None
         progress = dict(row.progress)
-        progress["admission_retry_at"] = "zzz"
+        progress["admission_attempt"] = "zzz"
         row.progress = progress
     now[0] += timedelta(seconds=61)
     assert service._observe_pending_admissions(now[0])

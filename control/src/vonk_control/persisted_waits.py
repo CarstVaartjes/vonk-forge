@@ -9,6 +9,7 @@ from pydantic import BaseModel, TypeAdapter, ValidationError
 from vonk_agent_protocol import (
     LifecycleState,
     OperationReason,
+    ProgressAlarmCode,
     WaitOwnerKind,
     WaitReason,
     WaitResumeCondition,
@@ -85,10 +86,12 @@ def write_wait(
         and [
             (b.code, b.operation, b.node_ids, b.run_id, b.identity_conflict)
             for b in previous.blockers
+            if b.code is not ProgressAlarmCode.STALLED
         ]
         == [
             (b.code, b.operation, b.node_ids, b.run_id, b.identity_conflict)
             for b in blockers
+            if b.code is not ProgressAlarmCode.STALLED
         ]
     )
     evidence = WaitEvidence(
@@ -242,7 +245,9 @@ def wait_due(owner: ScheduledWaitOwner) -> datetime | None:
             return None
     elif isinstance(owner, FleetProfileApplication):
         document = owner.progress
-        cancellation = owner.progress.get("cancellation")
+        cancellation = (
+            document.get("cancellation") if isinstance(document, dict) else None
+        )
         if isinstance(cancellation, dict):
             due = _adopt_wait_instant(cancellation.get("observation_due_at"))
             if due is not None:
@@ -356,7 +361,9 @@ def schedule_wait(
         blockers=blockers
         or (
             previous.blockers
-            if previous and detail is None
+            if previous
+            and detail is None
+            and (reason is None or reason == previous.reason)
             else [
                 make_blocker(code, detail or code.value).model_copy(
                     update={"operation": identity}

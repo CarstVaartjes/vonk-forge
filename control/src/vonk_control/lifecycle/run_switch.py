@@ -9,10 +9,10 @@ admission); this module owns the rest, and it is the **only** writer of the
 operation's ``Job.state`` and of its retry and observation clock:
 
 * :meth:`RunSwitchAdapter.lifecycle` (the ``adopt`` hook) maps a stored, possibly
-  legacy, operation onto the core.  The clock already lives in the stored progress
-  (``observation_due_at`` is ``next_action_at``, ``retry_attempt`` is the retry or
-  observation count, ``cancellation`` is the monotonic cancel request), so no
-  column is added and nothing is rewritten until the row's next decision;
+  legacy, operation onto the core. ``next_action_at`` is the one SQL clock;
+  retired progress clocks are adopted on read until the next owner transition.
+  ``retry_attempt`` is the retry or observation count and ``cancellation`` is
+  the monotonic cancel request;
 * :meth:`RunSwitchAdapter.settle` feeds an event (a retryable failure, a definite
   end, a cancel request, a tick) through the core's ``transition`` and writes what
   it decides with :meth:`RunSwitchAdapter.apply`;
@@ -28,7 +28,7 @@ core state                stored operation
 ``queued``                ``queued``
 ``running``               ``running``
 ``backoff``               ``running`` (a phase retry) or ``waiting`` (a re-plan or
-                          an inactive Spark), with ``observation_due_at``
+                          an inactive Spark), with ``next_action_at``
 ``observing``             ``waiting`` (or ``running`` while a child is observed)
 ``needs-operator``        ``waiting-for-operator``: legacy only, re-evaluated and
                           never written (no Run/Switch action exists)
@@ -67,6 +67,7 @@ from .. import job_states
 from ..agent_operation_facts import aware
 from ..models import AgentOperation as StoredOperation
 from ..models import Job
+from ..operation_blockers import OperationBlocker, make_blocker
 from ..persisted_waits import lifecycle_wait, schedule_wait, wait_due
 from ..run_switch_contract import (
     RunSwitchMemberReceipt,
@@ -403,6 +404,7 @@ class RunSwitchAdapter:
         failure_code: str | None = None,
         retryable: bool = False,
         retry_reason: str | None = _KEEP,
+        wait_blockers: list[OperationBlocker] | None = None,
     ) -> None:
         """Project a core decision onto the stored operation; the only such writer.
 
@@ -424,9 +426,8 @@ class RunSwitchAdapter:
             deadline=after.recovery_deadline,
             cancelling=after.cancel_requested,
             lease_deadline=after.lease_deadline,
-            blockers=list(progress.blockers)
-            if progress and progress.blockers
-            else None,
+            blockers=wait_blockers
+            or (list(progress.blockers) if progress and progress.blockers else None),
         )
         job.state = state
         if reason is not _KEEP:
@@ -602,6 +603,11 @@ class RunSwitchAdapter:
             visible=visible,
             retry_reason=reason if record_reason else _KEEP,
             reason=reason,
+            wait_blockers=[
+                make_blocker(
+                    RunSwitchCode.PHASE_RETRY, reason, node_ids=list(job.targets)
+                )
+            ],
         )
         if row.state is State.BACKOFF and row.next_action_at is not None:
             due = aware(row.next_action_at)
@@ -718,6 +724,7 @@ class RunSwitchAdapter:
         reason: str | None = _KEEP,
         due: datetime | None = None,
         visible: str | None = None,
+        wait_blockers: list[OperationBlocker] | None = None,
     ) -> Lifecycle:
         """Show what the child or the phase is doing (a projection, not a decision):
         ``running``, ``queued``, or observing until ``due``."""
@@ -731,7 +738,16 @@ class RunSwitchAdapter:
             state=state,
             next_action_at=due,
         )
-        self.apply(job, progress, before, after, now, visible=visible, reason=reason)
+        self.apply(
+            job,
+            progress,
+            before,
+            after,
+            now,
+            visible=visible,
+            reason=reason,
+            wait_blockers=wait_blockers,
+        )
         return after
 
     def heal(

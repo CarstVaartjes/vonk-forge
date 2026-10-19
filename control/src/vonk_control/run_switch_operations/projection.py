@@ -69,6 +69,8 @@ class ProjectionMixin:
             )
             else []
         )
+        if (wait := read_wait(job)) is not None:
+            blockers = list(wait.blockers)
         repair_due: datetime | None = None
         from ..run_switch_journal_repair import (
             REPAIR_WAIT,
@@ -144,6 +146,5 @@ class ProjectionMixin:
             "recorded identity.",
             result=persisted_result,
             blockers=blockers,
-            next_attempt_at=repair_due
-            or (wait_due(job) if blockers and persisted_result is not None else None),
+            next_attempt_at=repair_due or wait_due(job),
         )

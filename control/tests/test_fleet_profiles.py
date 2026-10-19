@@ -67,6 +67,7 @@ from vonk_control.models import (
 )
 from vonk_control.operation_api import OperationQuery
 from vonk_control.operation_item_contract import operation_item
+from vonk_control.persisted_waits import wait_due
 from vonk_control.platform_ports import HOST_ENDPOINT_PORT
 from vonk_control.preparation_contract import (
     ControllerAssetState,
@@ -1083,7 +1084,7 @@ def _follow_profile_retry(
     with service._sessions() as session:
         row = session.get(FleetProfileApplication, application_id)
         assert row is not None
-        due = row.next_action_at
+        due = wait_due(row)
         child_id = row.current_operation_id
     if due is not None and due > now[0]:
         worked = service.tick()

@@ -21,7 +21,7 @@ from ..lifecycle import State
 from ..lifecycle.recipe_update_batch import CANCEL_BUDGET
 from ..logging import redact_text
 from ..models import CatalogDocumentRevision, Job
-from ..persisted_waits import schedule_wait
+from ..persisted_waits import schedule_wait, wait_due
 from ..recipe_availability_intent import RecipeRevisionIntent
 from ..recipe_image_availability import (
     RecipeImageAvailabilityRefused,
@@ -92,7 +92,7 @@ class ExecutionMixin:
                     continue
                 if document.claim_until is not None and document.claim_until > now:
                     continue
-                if job.next_action_at is not None and _now(job.next_action_at) > now:
+                if (due := wait_due(job)) is not None and due > now:
                     continue
                 claim_owner = f"{owner}:{uuid.uuid4().hex}"
                 claim_until = now + timedelta(

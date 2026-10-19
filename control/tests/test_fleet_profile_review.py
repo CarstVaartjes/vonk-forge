@@ -8,7 +8,7 @@ from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import inspect, select
 from vonk_agent_protocol import LifecycleState
 from vonk_control.fleet_profile_contract import FleetProfileInput
 from vonk_control.fleet_profiles import (
@@ -179,9 +179,9 @@ def _replace_run(sessions, run_id: str) -> str:
         session.add(
             RecipeRun(
                 **{
-                    column.name: getattr(original, column.name)
-                    for column in RecipeRun.__table__.columns
-                    if column.name != "id"
+                    column.key: getattr(original, column.key)
+                    for column in inspect(RecipeRun).column_attrs
+                    if column.key != "id"
                 },
                 id=replacement_id,
             )

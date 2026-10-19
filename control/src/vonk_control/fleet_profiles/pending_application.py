@@ -395,7 +395,7 @@ class FleetProfileService:
                     ),
                     next_retry.isoformat(),
                 )
-            # Admission retries itself at ``admission_retry_at``; no operator
+            # Admission retries itself at ``next_action_at``; no operator
             # action is required, so the row stays queued with its next due time.
             self._lifecycle.project(
                 row,

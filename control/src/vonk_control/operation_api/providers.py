@@ -482,7 +482,9 @@ class _StandaloneJobActivityProjection:
             wait=read_wait(job),
             status_reason=status_reason,
             blockers=(
-                read_blockers(job.payload.get("blockers"))
+                wait.blockers
+                if (wait := read_wait(job)) is not None
+                else read_blockers(job.payload.get("blockers"))
                 if isinstance(job.payload, Mapping)
                 else None
             ),
