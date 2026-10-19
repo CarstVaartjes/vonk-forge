@@ -110,6 +110,11 @@ def test_wait_round_trip_reconstruction_projection_and_rollback(
         assert "dependency_deadline" in raw
         assert "last_progress_at" in raw and raw["last_progress_at"] is None
         assert loaded.result == {"flag": False, "count": 0, "value": None}
+        from vonk_control.run_switch_journal_repair.discovery import _fingerprint
+
+        fingerprint = _fingerprint(loaded)
+        session.expire(loaded)
+        assert _fingerprint(loaded) == fingerprint
         item = OperationItem(
             id=job.id,
             node_ids=[],
@@ -159,6 +164,17 @@ def test_wait_round_trip_reconstruction_projection_and_rollback(
         assert changed.reason is changed.blockers[0].code is WaitReason.RECEIPT_MISSING
         assert changed.dependency_deadline == NOW + timedelta(minutes=5)
         assert changed.last_progress_at is None
+    with sessions.begin() as session:
+        loaded = session.get(Job, job.id)
+        assert loaded is not None
+        schedule_wait(loaded, due, deadline=NOW + timedelta(minutes=4))
+        schedule_wait(loaded, due, deadline=NOW + timedelta(minutes=9))
+    with sessions() as session:
+        loaded = session.get(Job, job.id)
+        assert loaded is not None
+        bounded = read_wait(loaded)
+        assert bounded is not None
+        assert bounded.dependency_deadline == NOW + timedelta(minutes=4)
 
 
 def test_startup_adds_wait_columns_without_restarting_a_live_attempt(

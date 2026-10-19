@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import datetime
 
 from sqlalchemy import select
@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from vonk_agent_protocol import JournalRepairCode
 
 from ..admission_locking import AdmissionRowLock, lock_admission_rows
+from ..lifecycle.evidence import Residue
 from ..models import (
     AgentNode,
     AgentOperation,
@@ -22,6 +23,7 @@ from ..models import (
 from ..run_switch_contract import (
     RunSwitchOperationResult,
 )
+from ..strict_json import serialize_json_value
 
 REPAIR_WAIT = JournalRepairCode.EVIDENCE_UNAVAILABLE
 
@@ -84,7 +86,9 @@ def _fingerprint(
         column.key: (
             value.isoformat()
             if isinstance(value := getattr(row, column.key), datetime)
-            else value
+            else asdict(value)
+            if isinstance(value, Residue)
+            else serialize_json_value(value)
         )
         for column in row.__mapper__.columns
     }

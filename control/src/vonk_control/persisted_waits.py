@@ -103,10 +103,18 @@ def write_wait(
         last_progress_at=aware(last_progress_at)
         if last_progress_at is not None
         else (previous.last_progress_at if previous else None),
-        dependency_deadline=(
-            previous.dependency_deadline
-            if same and previous and previous.dependency_deadline is not None
-            else dependency_deadline
+        dependency_deadline=min(
+            (
+                bound
+                for bound in (
+                    previous.dependency_deadline if same and previous else None,
+                    aware(dependency_deadline)
+                    if dependency_deadline is not None
+                    else None,
+                )
+                if bound is not None
+            ),
+            default=None,
         ),
         resume_condition=resume_condition,
     )
