@@ -5,6 +5,9 @@ from __future__ import annotations
 import importlib.machinery
 import importlib.util
 import json
+import os
+import re
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
@@ -205,3 +208,40 @@ def test_signed_bundle_runs_standalone_janitor_without_giving_controller_socket(
     assert service["command"][-1] == service["configs"][0]["target"]
     for name in ("control-api", "control-worker"):
         assert "docker.sock" not in yaml.safe_dump(document["services"][name])
+
+
+@pytest.mark.needs_docker
+@pytest.mark.needs_buildx
+def test_compose_digest_build_context_delivers_its_actual_copy_inputs(
+    tmp_path: Path,
+) -> None:
+    """Catches new digest inputs excluded by Docker's context allowlist."""
+    stage = re.search(
+        r"(?ms)^FROM [^\n]+ AS compose-bundle-digest\n(?P<body>.*?)(?=^FROM |\Z)",
+        (ROOT / "control/Dockerfile").read_text(),
+    )
+    assert stage is not None
+    copies = [line for line in stage["body"].splitlines() if line.startswith("COPY ")]
+    probe = tmp_path / "Dockerfile"
+    probe.write_text("FROM scratch\n" + "\n".join(copies) + "\n")
+    exported = tmp_path / "exported"
+    result = subprocess.run(
+        [
+            "docker",
+            "build",
+            "--file",
+            str(probe),
+            "--output",
+            f"type=local,dest={exported}",
+            str(ROOT),
+        ],
+        env={**os.environ, "BUILDX_CONFIG": str(tmp_path / "buildx")},
+        text=True,
+        capture_output=True,
+        timeout=120,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert (
+        exported / "compose/image-janitor/janitor.py"
+    ).read_bytes() == SCRIPT.read_bytes()

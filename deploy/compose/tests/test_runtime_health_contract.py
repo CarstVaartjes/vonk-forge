@@ -9,6 +9,7 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[3]
 COMPOSE_ROOT = ROOT / "deploy/compose"
 DEFAULT_SERVICES = {
+    "image-janitor",
     "caddy",
     "control-api",
     "control-worker",
@@ -76,6 +77,7 @@ def test_every_default_service_has_a_service_specific_readiness_probe() -> None:
     assert services["tailscale-configurator"]["profiles"] == ["secure-remote"]
 
     expected_evidence = {
+        "image-janitor": ("unused.json", "st_mtime"),
         "postgres": ("pg_isready", "psql", "SELECT 1"),
         "control-api": ("vonk_control.healthcheck",),
         "control-worker": ("vonk_control.worker_healthcheck",),
