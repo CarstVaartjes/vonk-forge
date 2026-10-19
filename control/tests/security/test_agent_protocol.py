@@ -353,7 +353,7 @@ def test_root_context_image_installs_contracts_and_protocol_from_build_inputs(
 
     assert installed == {
         "protocol": "4.1.0",
-        "contracts": "2.2.0",
+        "contracts": importlib.metadata.version("vonk-forge-public-contracts"),
         "model": "ModelDefinition",
         "recipe": "RecipeDefinition",
         "distribution": "DistributionObject",
