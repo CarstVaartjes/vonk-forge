@@ -71,6 +71,17 @@ from .test_run_switch_operations import (
 from .test_terminal_history_collection import _job
 
 
+class _SiblingMaintenance:
+    """Unrelated maintenance used to prove the recipe worker gives siblings a turn."""
+
+    def __init__(self, collector: TerminalHistoryCollector) -> None:
+        self._collector = collector
+
+    def tick(self, run_id: str | None = None) -> bool:
+        assert run_id is None  # this sibling never represents a run recovery
+        return self._collector.tick()
+
+
 def _selection(sessions):
     with sessions() as session:
         row = session.get(FleetProfileSelection, 1)
@@ -278,7 +289,9 @@ def test_serving_selection_completes_stop_and_cleanup_after_author_loses_authori
         clock=lambda: clock[0],
         fleet_profiles=profiles,
         run_switches=coordinator,
-        recoveries=TerminalHistoryCollector(sessions, clock=lambda: clock[0]),
+        recoveries=_SiblingMaintenance(
+            TerminalHistoryCollector(sessions, clock=lambda: clock[0])
+        ),
     )
     # Each native claim carries the host policy fingerprint, as the real agent
     # does; an omitted field truthfully invalidates old preflight evidence.
@@ -340,7 +353,7 @@ def test_serving_selection_completes_stop_and_cleanup_after_author_loses_authori
         clock=lambda: clock[0],
         fleet_profiles=profiles,
         run_switches=coordinator,
-        recoveries=sibling,
+        recoveries=_SiblingMaintenance(sibling),
     )
     assert worker.tick()
     assert _selection(sessions) == selection
