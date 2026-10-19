@@ -6,7 +6,7 @@ import uuid
 from datetime import timedelta
 from typing import TYPE_CHECKING, cast
 
-from sqlalchemy import select
+from sqlalchemy import select, true
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
     LifecycleState,
@@ -52,7 +52,9 @@ from .helpers import (
 
 
 class ExecutionMixin:
-    def claim(self, owner: str) -> RecipeUpdateClaim | None:
+    def claim(
+        self, owner: str, requested_id: str | None = None
+    ) -> RecipeUpdateClaim | None:
         service = cast("RecipeUpdateBatches", self)
         from ..recipe_image_availability import RecipeImageAvailabilityError
 
@@ -64,7 +66,9 @@ class ExecutionMixin:
                 session.scalars(
                     select(Job.id)
                     .where(
-                        Job.kind == UPDATE_KIND, Job.state.in_(("queued", "running"))
+                        Job.kind == UPDATE_KIND,
+                        Job.state.in_(("queued", "running")),
+                        Job.id == requested_id if requested_id is not None else true(),
                     )
                     .order_by(Job.updated_at, Job.id)
                 )

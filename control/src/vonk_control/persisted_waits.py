@@ -309,11 +309,39 @@ def owner_identity(
         previous = read_wait(owner)
         kind = previous.owner_kind if previous else WaitOwnerKind.JOB
         if previous is None:
-            from .job_documents import AvailabilityJobPayload, RunSwitchJobPayload
+            from .agent_upgrade_contract import AgentUpgradeRolloutPayload
+            from .job_documents import (
+                AvailabilityJobPayload,
+                RecipeBuildCleanupParent,
+                RecipeBuildParent,
+                RecipeInstallParent,
+                RecipeJobActivateParent,
+                RecipeJobRunParent,
+                RecipeReconcileParent,
+                RecipeStartParent,
+                RecipeStopParent,
+                RecipeUninstallParent,
+                RunSwitchJobPayload,
+            )
             from .recipe_image_removal_contract import RecipeCacheRemovalOwner
             from .recipe_update_contract import RecipeUpdateDocument
 
             for model, candidate in (
+                (AgentUpgradeRolloutPayload, WaitOwnerKind.AGENT_UPGRADE),
+                *(
+                    (contract, WaitOwnerKind.RECIPE_OPERATION)
+                    for contract in (
+                        RecipeBuildCleanupParent,
+                        RecipeBuildParent,
+                        RecipeInstallParent,
+                        RecipeStartParent,
+                        RecipeStopParent,
+                        RecipeUninstallParent,
+                        RecipeReconcileParent,
+                        RecipeJobRunParent,
+                        RecipeJobActivateParent,
+                    )
+                ),
                 (RunSwitchJobPayload, WaitOwnerKind.RUN_SWITCH),
                 (AvailabilityJobPayload, WaitOwnerKind.IMAGE_AVAILABILITY),
                 (RecipeCacheRemovalOwner, WaitOwnerKind.IMAGE_AVAILABILITY),

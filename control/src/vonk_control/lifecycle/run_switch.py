@@ -50,7 +50,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from contextlib import contextmanager
 from dataclasses import replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from sqlalchemy import select
@@ -60,6 +60,7 @@ from vonk_agent_protocol import (
     LifecycleState,
     RunSwitchCode,
     WaitOwnerKind,
+    WaitReason,
     canonical_message,
 )
 
@@ -430,6 +431,16 @@ class RunSwitchAdapter:
             or (list(progress.blockers) if progress and progress.blockers else None),
         )
         job.state = state
+        if after.state in (State.CANCELLED, State.FAILED):
+            # Terminal request result is final; the exact accepted Start may
+            # still need its cancellation handoff after a lost worker response.
+            schedule_wait(
+                job,
+                now + timedelta(seconds=5),
+                now=now,
+                reason=WaitReason.CLEANUP_UNCONFIRMED,
+            )
+
         if reason is not _KEEP:
             job.status_reason = None if reason is None else reason[:_MAX_REASON]
         if progress is not None:

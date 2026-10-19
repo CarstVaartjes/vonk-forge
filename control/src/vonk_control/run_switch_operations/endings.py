@@ -237,6 +237,12 @@ class EndingsMixin:
                 )
             )
         if start_id is None:
+            with service._sessions.begin() as session:
+                retained = session.get(
+                    Job, operation_id, with_for_update={"skip_locked": True}
+                )
+                if retained is not None and retained.state == state:
+                    schedule_wait(retained, None)
             return
         try:
             service._lifecycle.cancel(

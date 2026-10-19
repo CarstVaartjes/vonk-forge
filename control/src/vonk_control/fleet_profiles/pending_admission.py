@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 from typing import cast as _typing_cast
 
 from pydantic import ValidationError
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, or_, select, true
 from vonk_agent_protocol import LifecycleState
 from vonk_agent_protocol.agent_words import (
     ProfileCancellationCause,
@@ -74,7 +74,9 @@ if TYPE_CHECKING:
 
 
 class FleetProfileService:
-    def _observe_pending_admissions(self, now: datetime) -> bool:
+    def _observe_pending_admissions(
+        self, now: datetime, requested_id: str | None = None
+    ) -> bool:
         """Reconcile reviewed applications that could not acquire admission locks."""
         self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
 
@@ -86,6 +88,11 @@ class FleetProfileService:
             waiting = tuple(
                 session.execute(
                     select(FleetProfileApplication.id, FleetProfileApplication.actor)
+                    .where(
+                        FleetProfileApplication.id == requested_id
+                        if requested_id is not None
+                        else true()
+                    )
                     .where(
                         FleetProfileApplication.state.in_(
                             job_states.words(
@@ -106,6 +113,11 @@ class FleetProfileService:
             retry_at = FleetProfileApplication.next_action_at
             rows = session.scalars(
                 select(FleetProfileApplication)
+                .where(
+                    FleetProfileApplication.id == requested_id
+                    if requested_id is not None
+                    else true()
+                )
                 .where(
                     FleetProfileApplication.state.in_(
                         job_states.words(
@@ -384,7 +396,9 @@ class FleetProfileService:
             else:
                 self._lifecycle.fail(row, reason, now, session=session)
 
-    def _heal_legacy_applications(self, now: datetime) -> bool:
+    def _heal_legacy_applications(
+        self, now: datetime, application_id: str | None = None
+    ) -> bool:
         """Re-evaluate a legacy ``waiting-for-operator`` load: it runs again.
 
         An older Controller mirrored a child that waited for a person onto the load
@@ -402,6 +416,11 @@ class FleetProfileService:
             rows = tuple(
                 session.scalars(
                     select(FleetProfileApplication)
+                    .where(
+                        FleetProfileApplication.id == application_id
+                        if application_id is not None
+                        else true()
+                    )
                     .where(
                         FleetProfileApplication.state.in_(
                             job_states.words(LifecycleState.NEEDS_OPERATOR)
@@ -428,6 +447,11 @@ class FleetProfileService:
             legacy = tuple(
                 session.scalars(
                     select(FleetProfileApplication)
+                    .where(
+                        FleetProfileApplication.id == application_id
+                        if application_id is not None
+                        else true()
+                    )
                     .where(
                         or_(
                             *(

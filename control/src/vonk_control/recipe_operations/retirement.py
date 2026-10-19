@@ -7,7 +7,7 @@ from datetime import timedelta
 from typing import TYPE_CHECKING
 from typing import cast as typing_cast
 
-from sqlalchemy import select
+from sqlalchemy import select, true
 from vonk_agent_protocol import AgentOperation as WireAgentOperation
 from vonk_agent_protocol import (
     InstallationState,
@@ -34,6 +34,7 @@ from ..models import (
     RecipeRun,
     ResourceReservation,
 )
+from ..persisted_waits import schedule_wait
 from ..recipe_progress import (
     _parent_identity as _parent_identity,  # noqa: PLC0414 -- shared helper export
 )
@@ -55,7 +56,7 @@ _ENDED_RUN_STATES = frozenset({RunState.STOPPING, RunState.FAILED, RunState.LOST
 
 
 class RetirementMixin:
-    def reconcile_retired_operations(self) -> bool:
+    def reconcile_retired_operations(self, job_id: str | None = None) -> bool:
         """Resume retired owners through the ordinary exact cleanup path.
 
         A failed job with typed completed cancellation is the retirement
@@ -71,6 +72,7 @@ class RetirementMixin:
             candidates = tuple(
                 session.scalars(
                     select(Job)
+                    .where(Job.id == job_id if job_id is not None else true())
                     .where(
                         Job.kind.in_(
                             {
@@ -192,6 +194,7 @@ class RetirementMixin:
                                 },
                             )
                         )
+                    schedule_wait(stored, None if completed else now + interval)
                     stored.updated_at = now
         return progressed
 

@@ -175,35 +175,41 @@ class ObservationMixin:
             service._tick_cursor = str(job_ids[-1])
         advanced = False
         for job_id in job_ids:
-            advancing = True
-            try:
-                advanced = service._advance(str(job_id)) or advanced
-                advancing = False
-                service._record_wait(str(job_id))
-                service._cancel_ended_start(str(job_id))
-            except Exception as error:  # noqa: BLE001 - isolate every per-job failure
-                # One persisted operation must never deny unrelated operations
-                # their turn.  A malformed contract is rejected and retained by
-                # ``_advance`` itself; this contains an unexpected per-job
-                # failure, reports it, and lets the rest of the batch advance.
-                # Every type is contained: one that escaped (a database error
-                # from a background image preparation) left no retry state, so
-                # the next tick repeated the work with the same status forever.
-                log_event(
-                    _LOGGER,
-                    "run_switch.job_advance_failed",
-                    service="control-worker",
-                    job_id=str(job_id),
-                    error=type(error).__name__,
-                    message=redact_text(error),
-                    traceback=redact_text(traceback.format_exc()),
-                )
-                service._hold_after_advance_failure(
-                    str(job_id), error, definite=advancing and _definite(error)
-                )
-                continue
+            advanced = service.redrive(str(job_id)) or advanced
         if callable(collect):
             collect()
+        return advanced
+
+    def redrive(self, job_id: str) -> bool:
+        """Advance one identity through the same fenced observation path."""
+        service = typing_cast("RunSwitchOperationService", self)
+        advancing = True
+        try:
+            advanced = service._advance(str(job_id))
+            advancing = False
+            service._record_wait(str(job_id))
+            service._cancel_ended_start(str(job_id))
+        except Exception as error:  # noqa: BLE001 - isolate every per-job failure
+            # One persisted operation must never deny unrelated operations
+            # their turn.  A malformed contract is rejected and retained by
+            # ``_advance`` itself; this contains an unexpected per-job
+            # failure, reports it, and lets the rest of the batch advance.
+            # Every type is contained: one that escaped (a database error
+            # from a background image preparation) left no retry state, so
+            # the next tick repeated the work with the same status forever.
+            log_event(
+                _LOGGER,
+                "run_switch.job_advance_failed",
+                service="control-worker",
+                job_id=str(job_id),
+                error=type(error).__name__,
+                message=redact_text(error),
+                traceback=redact_text(traceback.format_exc()),
+            )
+            service._hold_after_advance_failure(
+                str(job_id), error, definite=advancing and _definite(error)
+            )
+            return False
         return advanced
 
     def _hold_after_advance_failure(

@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 from pydantic import TypeAdapter, ValidationError
-from sqlalchemy import ColumnElement, or_, select
+from sqlalchemy import ColumnElement, or_, select, true
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import InvalidRequestReason, SecurityRefusalError
 
@@ -362,7 +362,12 @@ class JobService:
         )
 
     def claim(
-        self, worker_id: str, lease_seconds: int, *, kinds: Sequence[str]
+        self,
+        worker_id: str,
+        lease_seconds: int,
+        *,
+        kinds: Sequence[str],
+        job_id: str | None = None,
     ) -> AttemptFence | None:
         if not worker_id.strip() or lease_seconds <= 0:
             raise InvalidValue(
@@ -377,6 +382,7 @@ class JobService:
                     # Claim only work this executor handles. Coordinators may
                     # be queued between turns without an AgentOperation yet.
                     Job.kind.in_(kinds),
+                    Job.id == job_id if job_id is not None else true(),
                     or_(Job.next_action_at.is_(None), Job.next_action_at <= now),
                     without_agent_operation(),
                     or_(

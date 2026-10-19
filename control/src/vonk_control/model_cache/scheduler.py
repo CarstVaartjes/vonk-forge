@@ -6,7 +6,7 @@ from concurrent.futures import Future
 from datetime import timedelta
 from typing import TYPE_CHECKING, cast
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, true
 from vonk_agent_protocol import (
     ArtifactLifecycleCode,
     Disposition,
@@ -94,7 +94,18 @@ class SchedulerMixin:
             cache._run_download(operation_id, force=kind == "repair" or refresh)
         return len(rows) + cache.advance_removals(limit=limit)
 
-    def tick(self, *, limit: int | None = None) -> int:
+    def redrive(self, operation_id: str) -> int:
+        cache = cast("ModelCacheService", self)
+        with cache._session() as session:
+            operation = session.get(ModelCacheOperation, operation_id)
+            if operation is None:
+                return 0
+            removal = operation.kind == "remove"
+        if removal:
+            return int(cache._advance_model_removal(operation_id, now=cache._clock()))
+        return cache.tick(requested_id=operation_id)
+
+    def tick(self, *, limit: int | None = None, requested_id: str | None = None) -> int:
         """Claim and submit due operations without blocking the worker loop."""
         cache = cast("ModelCacheService", self)
 
@@ -105,15 +116,17 @@ class SchedulerMixin:
         if not 1 <= requested <= _MAX_PARALLEL_DOWNLOADS:
             raise InvalidValue("cache worker batch limit is invalid")
         cache._streams.tick()
-        cache._reconcile_pending_cancellations()
-        cache._resume_after_credential_change()
+        cache._reconcile_pending_cancellations(requested_id)
+        cache._resume_after_credential_change() if requested_id is None else None
         # Removal steps use the same Controller model-cache worker boundary,
         # but never occupy a transfer slot while waiting: each artifact lock
         # and SQL ownership check is nonblocking and a contended step is
         # durably deferred before this bounded local filesystem action returns.
-        cache.reconcile_requested_removals()
-        removal_steps = cache.advance_removals(
-            limit=min(requested, cache._max_parallel_downloads)
+        cache.reconcile_requested_removals() if requested_id is None else None
+        removal_steps = (
+            cache.advance_removals(limit=min(requested, cache._max_parallel_downloads))
+            if requested_id is None
+            else 0
         )
         with cache._lock:
             completed = cache._advance_background_operations()
@@ -121,7 +134,9 @@ class SchedulerMixin:
             if not capacity:
                 return completed + removal_steps
             claimed = cache._claim_operations(
-                limit=min(requested, capacity), respect_backoff=True
+                limit=min(requested, capacity),
+                respect_backoff=True,
+                requested_id=requested_id,
             )
             for operation_id, kind in claimed:
                 with cache._session() as session:
@@ -388,7 +403,7 @@ class SchedulerMixin:
         )
 
     def _claim_operations(
-        self, *, limit: int, respect_backoff: bool
+        self, *, limit: int, respect_backoff: bool, requested_id: str | None = None
     ) -> list[tuple[str, str]]:
         cache = cast("ModelCacheService", self)
         now = cache._clock()
@@ -412,6 +427,11 @@ class SchedulerMixin:
             candidate_ids = list(
                 session.scalars(
                     select(ModelCacheOperation.id)
+                    .where(
+                        ModelCacheOperation.id == requested_id
+                        if requested_id is not None
+                        else true()
+                    )
                     .where(ModelCacheOperation.kind.in_(["download", "repair"]))
                     .where(ModelCacheOperation.state.in_(model_cache_states.LIVE))
                     .order_by(ModelCacheOperation.updated_at, ModelCacheOperation.id)

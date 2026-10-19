@@ -6,7 +6,7 @@ import logging
 from collections.abc import Callable
 from datetime import datetime, timedelta
 
-from sqlalchemy import or_, select
+from sqlalchemy import or_, select, true
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import Disposition, OperatorActionName, RouteState, RunState
 
@@ -74,9 +74,9 @@ class DistributedRecoveryCoordinator:
             validate_distributed_start_timeout_seconds(singleton_start_timeout_seconds)
         )
 
-    def tick(self) -> bool:
+    def tick(self, run_id: str | None = None) -> bool:
         try:
-            return self._tick()
+            return self._tick(run_id)
         except Exception as error:
             # A held route publication owner, a withdrawal that is not
             # observable yet, a busy database: a wait, not a failure. Nothing
@@ -92,19 +92,20 @@ class DistributedRecoveryCoordinator:
             )
             return False
 
-    def _tick(self) -> bool:
+    def _tick(self, run_id: str | None = None) -> bool:
         now = _aware(self._clock())
         queued = False
         # Claim, effect, conditional completion: the routes of runs about to be
         # recovered or settled are withdrawn with no transaction open, and the
         # transaction below acts on a run only while that withdrawal is
         # complete. A crash in between resumes here, from the durable intent.
-        worked = self._withdraw_routes(now)
+        worked = self._withdraw_routes(now, run_id)
         with self._routes.publication_transaction() as session:
-            worked = self._settle_unreadable_runs(session, now) or worked
+            worked = self._settle_unreadable_runs(session, now, run_id) or worked
             candidates = tuple(
                 session.scalars(
                     select(RecipeRun)
+                    .where(RecipeRun.id == run_id if run_id is not None else true())
                     .where(
                         RecipeRun.state == RunState.RUNNING,
                         or_(
@@ -381,13 +382,14 @@ class DistributedRecoveryCoordinator:
             self._agent_jobs.notify_available()
         return worked
 
-    def _withdraw_routes(self, now: datetime) -> bool:
+    def _withdraw_routes(self, now: datetime, run_id: str | None = None) -> bool:
         """Withdraw the routes of runs this pass may recover or settle."""
 
         with self._routes.publication_transaction() as session:
             candidates = {
                 *session.scalars(
                     select(RecipeRun.id)
+                    .where(RecipeRun.id == run_id if run_id is not None else true())
                     .where(
                         RecipeRun.state == RunState.RUNNING,
                         or_(
@@ -416,7 +418,9 @@ class DistributedRecoveryCoordinator:
         self._routes.withdraw_runs(pending, pending=OperatorActionName.RETRY)
         return True
 
-    def _settle_unreadable_runs(self, session: Session, now: datetime) -> bool:
+    def _settle_unreadable_runs(
+        self, session: Session, now: datetime, only_id: str | None = None
+    ) -> bool:
         """Retain exact live ownership when its historical plan is unreadable.
 
         Plan projection failure does not prove that a workload exited. Durable
@@ -426,6 +430,8 @@ class DistributedRecoveryCoordinator:
 
         changed = False
         for run_id in _unreadable_run_ids(session):
+            if only_id is not None and run_id != only_id:
+                continue
             run = session.get(RecipeRun, run_id, with_for_update=True)
             if run is None or run.state not in STOPPABLE_RUN_STATES:
                 continue

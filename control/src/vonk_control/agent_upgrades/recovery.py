@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import TYPE_CHECKING, cast
 
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, or_, select, true
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
     AgentResult,
@@ -89,7 +89,7 @@ class RecoveryMixin:
                 operation.status_reason = (f"{detail}; {operation.status_reason}")[:512]
         service._advance(session, parent)
 
-    def heal_rollouts(self, limit: int = 8) -> bool:
+    def heal_rollouts(self, limit: int = 8, requested_id: str | None = None) -> bool:
         """Heal legacy rollouts no order change will reach (a periodic tick).
 
         A rollout that waits for an operator (nothing advertises an action for it),
@@ -108,6 +108,7 @@ class RecoveryMixin:
                     select(Job.id)
                     .where(
                         Job.kind == "agent-upgrade",
+                        Job.id == requested_id if requested_id is not None else true(),
                         or_(
                             Job.state.in_(
                                 job_states.words(

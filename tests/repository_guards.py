@@ -42,6 +42,10 @@ GUARDS: tuple[str, ...] = (
 
 SCOPED: tuple[tuple[str, str], ...] = (
     (
+        "control/tests/test_due_waits.py",
+        "PostgreSQL due-row redrive, restart, fairness and cancellation behavior; coverage scan belongs to test_wait_owner_coverage.",
+    ),
+    (
         "tests/cluster_profiles/test_cli_job_receipts.py",
         "Exact operator request replay through the CLI transport; no whole-tree scan.",
     ),

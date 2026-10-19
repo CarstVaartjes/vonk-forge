@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 from typing import cast as _typing_cast
 
 from pydantic import ValidationError
-from sqlalchemy import or_, select
+from sqlalchemy import or_, select, true
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
     FailureCode,
@@ -335,7 +335,9 @@ class FleetProfileService:
             return state, wait_due(row)
         return state, None
 
-    def _automatic_profile_recovery(self, now: datetime) -> tuple[str, str] | None:
+    def _automatic_profile_recovery(
+        self, now: datetime, application_id: str | None = None
+    ) -> tuple[str, str] | None:
         """Find one backing-off profile load whose replay is due and admissible.
 
         The same bounded scan ends a backoff that will not be retried any more
@@ -357,6 +359,11 @@ class FleetProfileService:
                 retry_cutoff = _aware(now)
                 statement = (
                     select(FleetProfileApplication)
+                    .where(
+                        FleetProfileApplication.id == application_id
+                        if application_id is not None
+                        else true()
+                    )
                     .where(
                         FleetProfileApplication.state.in_(
                             (

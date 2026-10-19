@@ -7,7 +7,7 @@ from collections.abc import Mapping
 from datetime import datetime, timedelta
 
 from cryptography import x509
-from sqlalchemy import select, update
+from sqlalchemy import select, true, update
 from sqlalchemy.exc import SQLAlchemyError
 from vonk_agent_protocol import ErrorCategory, LifecycleState, UnknownError, WaitReason
 from vonk_agent_protocol.enrollment import ExpiredRenewRequest
@@ -169,7 +169,7 @@ class EnrollmentService(RotationService):
             ca_confirmation_complete=pending is None and orphan is None,
         )
 
-    def reconcile_revocations(self) -> bool:
+    def reconcile_revocations(self, serial: str | None = None) -> bool:
         """Worker-owned, restart-safe confirmation without any admission gate.
 
         Each provider observation has its transport deadline. Failed serials
@@ -221,6 +221,9 @@ class EnrollmentService(RotationService):
             certificates = list(
                 session.scalars(
                     select(AgentCertificate).where(
+                        AgentCertificate.serial == serial
+                        if serial is not None
+                        else true(),
                         AgentCertificate.revoked_at.is_not(None),
                         AgentCertificate.ca_revoked_at.is_(None),
                         (
@@ -233,6 +236,9 @@ class EnrollmentService(RotationService):
             evidence = list(
                 session.scalars(
                     select(AgentIssuedCertificateRevocation).where(
+                        AgentIssuedCertificateRevocation.serial == serial
+                        if serial is not None
+                        else true(),
                         AgentIssuedCertificateRevocation.ca_revoked_at.is_(None),
                         (
                             AgentIssuedCertificateRevocation.next_action_at.is_(None)

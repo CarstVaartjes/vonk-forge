@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 from typing import cast as typing_cast
 
-from sqlalchemy import select
+from sqlalchemy import select, true
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import AgentOperation as WireAgentOperation
@@ -65,15 +65,16 @@ if TYPE_CHECKING:
 
 
 class OfflineStopMixin:
-    def reconcile_pending_service_stops(self) -> bool:
+    def reconcile_pending_service_stops(self, job_id: str | None = None) -> bool:
         """Give one due Stop the external publication turn for this worker pass."""
         service = typing_cast("RecipeOperationService", self)
         now = service._clock()
-        offline_progressed = service.reconcile_offline_stops()
+        offline_progressed = service.reconcile_offline_stops(job_id)
         with service._sessions() as session:
             candidates = tuple(
                 session.scalars(
                     select(Job)
+                    .where(Job.id == job_id if job_id is not None else true())
                     .where(
                         Job.kind == WireAgentOperation.RECIPE_STOP.value,
                         Job.state == LifecycleState.RUNNING.value,
@@ -161,7 +162,7 @@ class OfflineStopMixin:
                         retained.updated_at = now
         return progressed or offline_progressed
 
-    def reconcile_offline_stops(self) -> bool:
+    def reconcile_offline_stops(self, job_id: str | None = None) -> bool:
         """Detach unreachable ranks from foreground completion, retaining exact orders.
 
         No capacity is released for an unreachable rank. Its already authorized,
@@ -176,6 +177,7 @@ class OfflineStopMixin:
             candidates = tuple(
                 session.execute(
                     select(Job.id, Job.targets)
+                    .where(Job.id == job_id if job_id is not None else true())
                     .where(
                         Job.kind == WireAgentOperation.RECIPE_STOP.value,
                         Job.state.in_(

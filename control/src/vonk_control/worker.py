@@ -13,9 +13,14 @@ from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from vonk_agent_protocol import LifecycleEventKind, UnknownOutcomeError, WaitReason
+from vonk_agent_protocol import (
+    LifecycleEventKind,
+    UnknownOutcomeError,
+    WaitOwnerKind,
+    WaitReason,
+)
 from vonk_agent_protocol.compiled_execution_plan import (
     CompiledExecutionPlan as WireCompiledExecutionPlan,
 )
@@ -27,6 +32,10 @@ from .jobs import JobService
 from .logging import log_event, redact_text
 from .resource_planning import PLATFORM_MEMORY_FLOOR_BYTES
 from .worker_memory_contract import WorkerMemoryComponent
+
+if TYPE_CHECKING:
+    from .catalog_sync import ManagedRecipeCatalogSyncService
+    from .enrollment import EnrollmentService
 
 _PROCESS_INSTANCE = re.compile(r"[0-9a-f]{64}\Z")
 
@@ -197,10 +206,12 @@ class Worker:
         background_closers: Sequence[Callable[[], object]] = (),
         loop_heartbeat: Callable[[], object] | None = None,
         memory_sources: Sequence[object] = (),
+        due_waits: Callable[[], object] | None = None,
     ) -> None:
         self._jobs = jobs
         self._worker_id = worker_id
         self._handlers = dict(handlers)
+        self._due_waits = due_waits
         self._housekeeping = housekeeping
         self._artifact_housekeeping = artifact_housekeeping
         self._recipes = recipes
@@ -262,6 +273,7 @@ class Worker:
         # Housekeeping runs before all work, so one failing maintenance task
         # must not deny the heartbeat and every source their turn.  Each task
         # is contained and reported; the outer loop retries it next pass.
+        self._run_housekeeping("due-waits", self._due_waits)
         self._run_housekeeping("telemetry", self._housekeeping)
         self._run_housekeeping("artifact", self._artifact_housekeeping)
         sources: list[tuple[str, Callable[[], bool]]] = []
@@ -349,8 +361,10 @@ class Worker:
             reason=WaitReason.OBSERVATION_UNAVAILABLE,
         )
 
-    def _run_generic(self) -> bool:
-        attempt = self._jobs.claim(self._worker_id, 30, kinds=tuple(self._handlers))
+    def _run_generic(self, job_id: str | None = None) -> bool:
+        attempt = self._jobs.claim(
+            self._worker_id, 30, kinds=tuple(self._handlers), job_id=job_id
+        )
         if attempt is None:
             return False
         handler = self._handlers[attempt.kind]
@@ -398,9 +412,14 @@ def assemble_production_worker(
     runtime_image_preparer: Callable[..., object] | None = None,
     loop_heartbeat: Callable[[], object] | None = None,
     capabilities: CapabilityRegistry | None = None,
+    catalog_sync: ManagedRecipeCatalogSyncService | None = None,
+    enrollment: EnrollmentService | None = None,
 ) -> Worker:
     """Compose the worker-owned recipe and maintenance runtime."""
 
+    from .agent_jobs.persistence import _OrderStore
+    from .agent_jobs.retirement import operator_resume_candidates_in_session
+    from .agent_upgrades import AgentUpgradeService
     from .artifact_blob_store import ArtifactBlobStore
     from .artifact_jobs import ArtifactJobService
     from .artifact_maintenance import ArtifactMaintenanceCadence
@@ -413,10 +432,13 @@ def assemble_production_worker(
         build_distribution_service_from_components,
     )
     from .distribution_executor import CompositeDistributionPhaseExecutor
+    from .due_waits import AdvanceWait, DueWaitBackstop, RowKey
     from .fleet_profiles import build_production_fleet_profile_service
     from .install_admission import (
         InstallAdmissionService,
     )
+    from .lifecycle.agent_operation import AgentOperationAdapter
+    from .lifecycle.artifact_job import ArtifactJobAdapter
     from .recipe_builds import RecipeBuildService
     from .recipe_operation_worker import RecipeOperationWorker
     from .recipe_operations import RecipeOperationService
@@ -432,6 +454,8 @@ def assemble_production_worker(
     )
     from .terminal_history_collection import TerminalHistoryCollector
     from .unused_storage_collection import UnusedStorageCollector
+    from .wait_contract import WaitEvidence
+    from .wait_redrive import wait_sources
 
     registry = capabilities or CapabilityRegistry(clock=clock)
     if model_cache is not None:
@@ -531,6 +555,13 @@ def assemble_production_worker(
             model_cache.resolve_latest_cached if model_cache is not None else None
         ),
     )
+    residues = AttemptResidueReconciler(
+        sessions,
+        abandon_never_installed=lifecycle.abandon_never_installed,
+        removal=lifecycle,
+        clock=clock,
+    )
+    upgrades = AgentUpgradeService(sessions, agent_jobs, clock=clock)
     recipe_operations = RecipeOperationWorker(
         sessions,
         recipe_routes,
@@ -539,12 +570,7 @@ def assemble_production_worker(
         build_cleanup=lifecycle.reconcile_cancelled_builds,
         retirement_cleanup=lifecycle.reconcile_retired_operations,
         stop_admission_cleanup=lifecycle.reconcile_pending_service_stops,
-        residue_cleanup=AttemptResidueReconciler(
-            sessions,
-            abandon_never_installed=lifecycle.abandon_never_installed,
-            removal=lifecycle,
-            clock=clock,
-        ).tick,
+        residue_cleanup=residues.tick,
         fleet_profiles=fleet_profiles,
         run_switches=run_switch_operations,
         recoveries=DistributedRecoveryCoordinator(
@@ -557,11 +583,13 @@ def assemble_production_worker(
         ),
     )
     worker_background_services = tuple(background_services)
-    worker_background_closers = tuple(background_closers)
+    worker_background_closers = (*background_closers, upgrades.close)
     memory_sources: list[object] = [model_cache, artifact_phase_executor]
     close_artifact_executor = getattr(artifact_phase_executor, "close", None)
     if callable(close_artifact_executor):
         worker_background_closers += (close_artifact_executor,)
+    prebuilt_importer = None
+    image_production = None
     image_store_collector = None
     if image_cache_root is not None:
         from .image_store_collection import ImageStoreCollector
@@ -650,7 +678,7 @@ def assemble_production_worker(
         clock=clock,
         retention_seconds=artifact_job_retention_seconds,
     )
-    return Worker(
+    worker = Worker(
         jobs,
         worker_id,
         {},
@@ -672,6 +700,94 @@ def assemble_production_worker(
         loop_heartbeat=loop_heartbeat,
         memory_sources=memory_sources,
     )
+
+    def unavailable(owner: WaitOwnerKind) -> None:
+        raise UnknownOutcomeError(
+            f"due wait owner capability unavailable: {owner}",
+            reason=WaitReason.OBSERVATION_UNAVAILABLE,
+        )
+
+    def agent_order(key: RowKey, wait: WaitEvidence) -> object:
+        adapter = AgentOperationAdapter(
+            sessions=sessions,
+            clock=clock,
+            resume_candidates=operator_resume_candidates_in_session,
+        )
+        return _OrderStore(agent_jobs, adapter).redrive(str(key[0]))
+
+    def images(key: RowKey, wait: WaitEvidence) -> object:
+        if image_production is None or image_production.scheduler is None:
+            return unavailable(wait.owner_kind)
+        return image_production.scheduler.tick(str(key[0]))
+
+    def prebuilt(key: RowKey, wait: WaitEvidence) -> object:
+        if prebuilt_importer is None:
+            return unavailable(wait.owner_kind)
+        return prebuilt_importer.tick(str(key[0]))
+
+    def cache(key: RowKey, wait: WaitEvidence) -> object:
+        if model_cache is None:
+            return unavailable(wait.owner_kind)
+        return model_cache.redrive(str(key[0]))
+
+    def recipe(key: RowKey, wait: WaitEvidence) -> object:
+        identity = str(key[0])
+        progressed = lifecycle.reconcile_retired_operations(identity)
+        progressed = lifecycle.reconcile_pending_service_stops(identity) or progressed
+        return lifecycle.reconcile_cancelled_builds(identity) or progressed
+
+    def cleanup(key: RowKey, wait: WaitEvidence) -> object:
+        progressed = residues.tick(str(key[0]))
+        return storage_collector.redrive_installation(str(key[0])) or progressed
+
+    def certificate(key: RowKey, wait: WaitEvidence) -> object:
+        if enrollment is None:
+            return unavailable(wait.owner_kind)
+        return enrollment.reconcile_revocations(str(key[0]))
+
+    def catalog(key: RowKey, wait: WaitEvidence) -> object:
+        from .settings import RECIPE_LIBRARY_SYNC_INTERVAL_SECONDS
+
+        if catalog_sync is None:
+            return unavailable(wait.owner_kind)
+        return catalog_sync.redrive(str(key[0]), RECIPE_LIBRARY_SYNC_INTERVAL_SECONDS)
+
+    advancers: dict[WaitOwnerKind, AdvanceWait] = {
+        WaitOwnerKind.AGENT_OPERATION: agent_order,
+        WaitOwnerKind.AGENT_UPGRADE: lambda key, wait: upgrades.heal_rollouts(
+            1, str(key[0])
+        ),
+        WaitOwnerKind.ARTIFACT_JOB: lambda key, wait: ArtifactJobAdapter(
+            sessions=sessions, clock=clock
+        ).redrive(str(key[0])),
+        WaitOwnerKind.FLEET_PROFILE: lambda key, wait: fleet_profiles.tick(str(key[0])),
+        WaitOwnerKind.IMAGE_AVAILABILITY: images,
+        WaitOwnerKind.PREBUILT_IMAGE: prebuilt,
+        WaitOwnerKind.JOB: lambda key, wait: worker._run_generic(str(key[0])),
+        WaitOwnerKind.MODEL_CACHE: cache,
+        WaitOwnerKind.RECIPE_OPERATION: recipe,
+        WaitOwnerKind.RECIPE_UPDATE_BATCH: images,
+        WaitOwnerKind.RUN_SWITCH: lambda key, wait: run_switch_operations.redrive(
+            str(key[0])
+        ),
+        WaitOwnerKind.SELECTED_PROFILE: lambda key, wait: (
+            fleet_profiles._reconcile_selected_roster(clock())
+        ),
+        WaitOwnerKind.ROUTE_PUBLICATION: lambda key, wait: recipe_routes.maintain(),
+        WaitOwnerKind.ROUTE_RECOVERY: lambda key, wait: recipe_operations.redrive_run(
+            str(key[0])
+        ),
+        WaitOwnerKind.STORAGE_RELIEF: lambda key, wait: (
+            storage_collector.redrive_artifact(str(key[0]), str(key[1]))
+        ),
+        WaitOwnerKind.CLEANUP: cleanup,
+        WaitOwnerKind.CATALOG_SYNC: catalog,
+        WaitOwnerKind.CERTIFICATE: certificate,
+        WaitOwnerKind.CERTIFICATE_REVOCATION: certificate,
+    }
+    backstop = DueWaitBackstop(sessions, wait_sources(advancers), clock=clock)
+    worker._due_waits = backstop.tick
+    return worker
 
 
 if __name__ == "__main__":
@@ -805,7 +921,32 @@ if __name__ == "__main__":
             return False
         return enrollment.reconcile_revocations()
 
+    from .auth import TokenCodec
+    from .catalog_service import CatalogService
+    from .catalog_sync import ManagedRecipeCatalogSyncService
+    from .recipe_packages import RecipePackageClient
+    from .settings import RECIPE_LIBRARY_API_URL, RECIPE_LIBRARY_ASSET_URL
+    from .source_bundles import DatabaseSourceBundleStore
+
+    catalog_sync = ManagedRecipeCatalogSyncService(
+        sessions,
+        catalog=CatalogService(
+            sessions,
+            clock=clock,
+            cursors=TokenCodec(settings.token_signing_key).cursor_codec(),
+            source_bundles=DatabaseSourceBundleStore(sessions),
+        ),
+        reader=RecipePackageClient(
+            cache_root=settings.state_path / "recipe-library-packages",
+            api_url=RECIPE_LIBRARY_API_URL,
+            asset_url=RECIPE_LIBRARY_ASSET_URL,
+            release=settings.recipe_library_release,
+        ),
+        clock=clock,
+    )
     worker = assemble_production_worker(
+        catalog_sync=catalog_sync,
+        enrollment=enrollment,
         background_services=(reconcile_enrollment,),
         capabilities=capabilities,
         distributed_start_timeout_seconds=DISTRIBUTED_START_TIMEOUT_SECONDS,

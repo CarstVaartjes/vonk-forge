@@ -367,6 +367,53 @@ class ManagedRecipeCatalogSyncService:
                 raise KeyError(sync_id)
             return _view(row)
 
+    def advance_automatic(self, interval_seconds: int, failures: int = 0) -> int:
+        """One automatic observation, shared by cadence and due-row redrive."""
+        observed_id = None
+        failed = True
+        try:
+            observation = self.automatic()
+            observed_id = observation.id
+            failed = observation.state != CatalogSyncState.CURRENT
+            if failed:
+                raise CatalogSyncUnsettled(
+                    observation.problems[0].code
+                    if observation.problems
+                    else CatalogSyncCode.FAILED,
+                    observation.problems[0].detail
+                    if observation.problems
+                    else "managed catalog observation unavailable",
+                )
+        finally:
+            failures = failures + 1 if failed else 0
+            self.record_automatic_wait(
+                catalog_sync_retry_delay(failures, interval_seconds),
+                failed=failed,
+                observed_id=observed_id,
+            )
+        return failures
+
+    def redrive(self, sync_id: str, interval_seconds: int) -> bool:
+        with self._sessions() as session:
+            current = session.scalar(
+                select(RecipeLibrarySyncRun)
+                .where(
+                    RecipeLibrarySyncRun.repository == self._repository,
+                    RecipeLibrarySyncRun.wait_evidence.is_not(None),
+                )
+                .order_by(
+                    RecipeLibrarySyncRun.created_at.desc(), RecipeLibrarySyncRun.id
+                )
+                .limit(1)
+            )
+            if current is None or current.id != sync_id:
+                return False
+            wait = read_wait(current)
+            if wait is None or wait.next_check > self._clock():
+                return False
+        self.advance_automatic(interval_seconds)
+        return True
+
     def automatic_wait_delay(self) -> float:
         with self._sessions() as session:
             run = session.scalar(
@@ -973,43 +1020,14 @@ async def run_automatic_sync(
                     )
             except Exception as error:  # noqa: BLE001 - independent recovery path
                 errors.append(error)
-        observed_id = None
-        catalog_failed = False
         try:
-            observation = await asyncio.to_thread(lambda: service.automatic())
-            observed_id = observation.id
-            if observation.state != CatalogSyncState.CURRENT:
-                catalog_failed = True
-                errors.append(
-                    CatalogSyncUnsettled(
-                        observation.problems[0].code
-                        if observation.problems
-                        else CatalogSyncCode.FAILED,
-                        observation.problems[0].detail
-                        if observation.problems
-                        else "managed catalog observation unavailable",
-                    )
-                )
-        except (CatalogSyncError, RecipeLibraryError, OSError) as error:
-            catalog_failed = True
-            errors.append(error)
-        except Exception as error:  # noqa: BLE001 - the loop must never die
-            catalog_failed = True
-            errors.append(error)
-        if errors:
-            failures += 1
-        else:
-            failures = 0
-        delay = catalog_sync_retry_delay(failures, interval_seconds)
-        try:
-            await asyncio.to_thread(
-                service.record_automatic_wait,
-                delay,
-                failed=catalog_failed,
-                observed_id=observed_id,
+            failures = await asyncio.to_thread(
+                service.advance_automatic, interval_seconds, failures
             )
-        except SQLAlchemyError as error:
-            _log_automatic_failure(error, delay)
+        except Exception as error:  # noqa: BLE001 - retain the shared owner's scheduled retry
+            failures += 1
+            errors.append(error)
+        delay = catalog_sync_retry_delay(failures, interval_seconds)
         for error in errors:
             _log_automatic_failure(error, delay)
         try:

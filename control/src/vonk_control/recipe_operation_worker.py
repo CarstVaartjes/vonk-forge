@@ -7,7 +7,7 @@ from collections.abc import Callable, Mapping
 from datetime import UTC, datetime, timedelta
 from typing import Protocol
 
-from sqlalchemy import or_, select
+from sqlalchemy import or_, select, true
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
     TERMINAL_LIFECYCLE_STATES,
@@ -55,7 +55,7 @@ class _RoutePublisher(Protocol):
 
 
 class _RecoveryCoordinator(Protocol):
-    def tick(self) -> bool: ...
+    def tick(self, run_id: str | None = None) -> bool: ...
 
 
 class _FleetProfileCoordinator(Protocol):
@@ -120,6 +120,24 @@ class RecipeOperationWorker:
                 self._advance(self._recoveries.tick)
         progressed = self._advance(self._publish_routes) or progressed
         return self._advance(self._maintain_routes) or progressed
+
+    def redrive_run(self, run_id: str) -> bool:
+        progressed = (
+            self._recoveries.tick(run_id) if self._recoveries is not None else False
+        )
+        progressed = self._expire_initial_observation_deadline(run_id) or progressed
+        with self._sessions() as session:
+            run = session.get(RecipeRun, run_id)
+            publish = (
+                run is not None
+                and run.state == RunState.RUNNING
+                and run.route_state == RouteState.PENDING
+            )
+        return (
+            self._with_route_owner(lambda: self._publish_runs((run_id,)))
+            if publish
+            else False
+        ) or progressed
 
     def _advance(self, task: Callable[[], bool] | None) -> bool:
         if task is None:
@@ -299,7 +317,7 @@ class RecipeOperationWorker:
                 run.route_error = str(error)[:512]
                 run.updated_at = self._clock()
 
-    def _expire_initial_observation_deadline(self) -> bool:
+    def _expire_initial_observation_deadline(self, run_id: str | None = None) -> bool:
         now = self._clock()
         if now.tzinfo is None or now.utcoffset() is None:
             raise InvalidValue("recipe operation worker clock must be timezone-aware")
@@ -308,6 +326,7 @@ class RecipeOperationWorker:
             runs = tuple(
                 session.scalars(
                     select(RecipeRun)
+                    .where(RecipeRun.id == run_id if run_id is not None else true())
                     .where(
                         RecipeRun.state == RunState.RUNNING,
                         or_(
