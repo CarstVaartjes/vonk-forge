@@ -37,6 +37,7 @@ services:
       - 'attempts=0; until [ -f /run/vonk-runtime-assets/postgres/init-databases.sh ]; do attempts=$$((attempts + 1)); if [ "$$attempts" -ge 120 ]; then echo "vonk-startup: runtime-asset-timeout: /run/vonk-runtime-assets/postgres/init-databases.sh; retry via restart policy" >&2; exit 1; fi; sleep 1; done; exec /bin/sh /run/vonk-runtime-assets/postgres/entrypoint.sh "$$@"'
       - vonk-postgres-entrypoint
     command: [postgres]
+    stop_grace_period: 60s
     restart: unless-stopped
     logging: *bounded-logging
     # The entrypoint stages the initdb secret as postgres, drops privileges via

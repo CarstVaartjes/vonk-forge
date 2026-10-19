@@ -43,8 +43,8 @@ const PULL_INACTIVITY: Duration = Duration::from_secs(610);
 
 /// Report each byte Docker reads through the store as the pull's progress:
 /// to its inactivity window, and to the order's heartbeat. The helper's pull
-/// counts as activity (items), never as the order's artifact bytes, which the
-/// Controller reconciles against the distribution's own byte evidence.
+/// contributes transferred bytes, not completed items. Artifact availability
+/// remains established by the distribution's receipt, not this progress.
 pub(super) fn pull_progress<'a>(
     client: &'a crate::client::AgentHttpClient,
     fence: uuid::Uuid,
@@ -52,7 +52,7 @@ pub(super) fn pull_progress<'a>(
 ) -> impl Fn(u64) + Sync + 'a {
     move |bytes| {
         pulled.observe_bytes(bytes);
-        client.note_process_activity(fence, bytes);
+        client.add_progress_bytes(fence, bytes);
     }
 }
 

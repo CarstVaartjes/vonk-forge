@@ -171,7 +171,9 @@ fn subprocess_activity_advances_the_http_clients_order_progress() {
     // Re-reporting the same phase keeps the activity already observed.
     client.set_progress_phase(fence, ProgressPhase::Building);
     let rereported = LoopClient::progress_observation(&client, fence).unwrap();
-    assert_eq!(rereported.completed_items, after.completed_items);
+    assert_eq!(after.completed_items, None);
+    assert_eq!(after.activity_sequence, Some(4096_u64.into()));
+    assert_eq!(rereported.activity_sequence, after.activity_sequence);
     // Outside the scope, and for another order, nothing advances.
     crate::process::note_activity(4096);
     client.note_process_activity(Uuid::new_v4(), 4096);

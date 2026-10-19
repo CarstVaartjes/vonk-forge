@@ -586,6 +586,7 @@ pub(super) fn progress() -> AgentProgress {
             completed_bytes: 21_u64.into(),
             total_bytes: Some(42_u64.into()),
             total_bytes_known: true,
+            activity_sequence: None,
             completed_items: Some(1_u64.into()),
             total_items: Some(2_u64.into()),
             object_sha256: None,
