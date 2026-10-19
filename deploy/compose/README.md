@@ -173,8 +173,9 @@ and actual PostgreSQL readiness.
 
 `image-janitor` is an independent, stdlib-only Python service using the reviewed
 slim Python image. It alone mounts the NAS Docker socket; neither Controller
-service has socket access. Its script is embedded as a Compose config in the
-signed NAS bundle, with no Controller or worker package in the janitor.
+service has socket access. The renderer embeds its small script in the Python command of the signed NAS
+bundle, with no Controller or worker package in the janitor. This keeps the
+root filesystem read-only without Compose inline-config injection.
 
 The hourly scan considers images carrying the exact Vonk Forge source label or
 an exact API, worker, LiteLLM or Hermes repository identity (including repository

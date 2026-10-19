@@ -335,7 +335,7 @@ services:
       timeout: 5s
       retries: 10
 
-# The renderer embeds this standalone code into the signed Compose bundle.
+# Source-checkout mount; the renderer embeds the script in the bundle command.
 # No Controller or worker code or socket access is involved.
 configs:
   image-janitor-script:

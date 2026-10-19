@@ -118,14 +118,24 @@ def _compose_document(path: Path, seen: set[Path] | None = None) -> dict[str, ob
     if not isinstance(document, dict):
         raise TypeError(f"Compose document is not a mapping: {path}")
 
-    # Embed standalone sidecar source so the installer needs no host script.
-    # Compose interpolates config content too, so preserve literal dollars.
-    for config in document.get("configs", {}).values():
-        source_path = config.get("file")
-        if isinstance(source_path, str):
-            source = path.parent / source_path
-            del config["file"]
-            config["content"] = source.read_text(encoding="utf-8").replace("$", "$$")
+    # File configs work in a source checkout. A self-contained bundle embeds
+    # this small standalone script in argv instead: Compose cannot inject an
+    # inline config into a read-only root filesystem. Preserve literal dollars
+    # against Compose interpolation in the rendered command.
+    configs = document.get("configs", {})
+    janitor = configs.get("image-janitor-script")
+    if janitor is not None:
+        source = path.parent / janitor["file"]
+        service = document["services"]["image-janitor"]
+        service["command"] = [
+            *service["command"][:-1],
+            "-c",
+            source.read_text(encoding="utf-8").replace("$", "$$"),
+        ]
+        del service["configs"]
+        del configs["image-janitor-script"]
+        if not configs:
+            document.pop("configs", None)
 
     merged: dict[str, object] = {}
     includes = document.pop("include", [])

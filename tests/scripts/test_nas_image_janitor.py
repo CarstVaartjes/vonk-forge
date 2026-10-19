@@ -9,6 +9,7 @@ import os
 import re
 import subprocess
 import sys
+import uuid
 from pathlib import Path
 from typing import Any
 from urllib.parse import unquote
@@ -189,7 +190,7 @@ def test_signed_bundle_runs_standalone_janitor_without_giving_controller_socket(
     loader.exec_module(renderer)
     document = renderer._compose_document(ROOT / "deploy/compose/compose.yaml")
     service = document["services"]["image-janitor"]
-    source = document["configs"][service["configs"][0]["source"]]["content"]
+    source = service["command"][-1]
     # Execute the installed bytes, not just the source module used above.
     installed = tmp_path / "installed.py"
     installed.write_text(source.replace("$$", "$"))
@@ -205,7 +206,7 @@ def test_signed_bundle_runs_standalone_janitor_without_giving_controller_socket(
     module.sweep(daemon, state, 100_000)
     module.sweep(daemon, state, 100_000 + module.GRACE)
     assert daemon.deleted == [identity(1)]
-    assert service["command"][-1] == service["configs"][0]["target"]
+    assert service["command"][-2] == "-c"
     for name in ("control-api", "control-worker"):
         assert "docker.sock" not in yaml.safe_dump(document["services"][name])
 
@@ -245,3 +246,76 @@ def test_compose_digest_build_context_delivers_its_actual_copy_inputs(
     assert (
         exported / "compose/image-janitor/janitor.py"
     ).read_bytes() == SCRIPT.read_bytes()
+
+
+@pytest.mark.needs_docker
+@pytest.mark.slow(60)
+def test_rendered_janitor_starts_with_a_read_only_root(tmp_path: Path) -> None:
+    """Catches Compose config injection that parses but cannot start read-only."""
+    loader = importlib.machinery.SourceFileLoader(
+        "running_janitor_renderer", str(ROOT / "scripts/render-dev-compose")
+    )
+    renderer_spec = importlib.util.spec_from_loader(loader.name, loader)
+    assert renderer_spec is not None
+    renderer = importlib.util.module_from_spec(renderer_spec)
+    loader.exec_module(renderer)
+    document = renderer._compose_document(ROOT / "deploy/compose/compose.yaml")
+    standalone = {
+        "services": {"image-janitor": document["services"]["image-janitor"]},
+        "volumes": {"image-janitor-state": {}},
+    }
+    if "configs" in document:
+        standalone["configs"] = document["configs"]
+    compose = tmp_path / "compose.yaml"
+    compose.write_text(yaml.safe_dump(standalone))
+    command = [
+        "docker",
+        "compose",
+        "-p",
+        f"nasimages-{uuid.uuid4().hex}",
+        "-f",
+        str(compose),
+    ]
+    try:
+        result = subprocess.run(
+            [*command, "up", "-d", "--wait", "--wait-timeout", "120"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=180,
+        )
+        assert result.returncode == 0, result.stderr
+        container = subprocess.check_output(
+            [*command, "ps", "-q", "image-janitor"], text=True, timeout=30
+        ).strip()
+        readonly = subprocess.check_output(
+            [
+                "docker",
+                "inspect",
+                "--format",
+                "{{.HostConfig.ReadonlyRootfs}}",
+                container,
+            ],
+            text=True,
+            timeout=30,
+        )
+        assert readonly.strip() == "true"
+        # A fresh, private state volume guarantees a new grace window. This
+        # runtime smoke must not remove any images from the shared test daemon.
+        logs = subprocess.check_output(
+            [*command, "logs", "--no-log-prefix", "image-janitor"],
+            text=True,
+            timeout=30,
+        )
+        assert all(
+            json.loads(line)["reason"] != janitor.Reason.REMOVED
+            for line in logs.splitlines()
+        )
+    finally:
+        subprocess.run(
+            [*command, "down", "--volumes", "--remove-orphans"],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=60,
+        )

@@ -198,7 +198,7 @@ def test_bundle_digest_follows_the_compose_graph_not_its_formatting(
     tmp_path: Path,
 ) -> None:
     includes = ("tailscale/compose.yaml", "hermes-agent/compose.yaml")
-    for relative in ("compose.yaml", *includes):
+    for relative in ("compose.yaml", *includes, "image-janitor/janitor.py"):
         target = tmp_path / relative
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes((TEMPLATE.parent / relative).read_bytes())
@@ -213,6 +213,14 @@ def test_bundle_digest_follows_the_compose_graph_not_its_formatting(
     # Comments, anchors, key order and layout are not the graph.
     rewrite(template, lambda document: None)
     assert _embedded_digest(template) == released
+
+    # The installed standalone command is part of the graph too. Changing its
+    # bytes must ask the operator to rerun the installer, even with identical YAML.
+    script = tmp_path / "image-janitor/janitor.py"
+    original = script.read_bytes()
+    script.write_bytes(original + b"\n# updated standalone command\n")
+    assert _embedded_digest(template) != released
+    script.write_bytes(original)
 
     # A third-party image bump in the main file changes it.
     def bump(document: dict) -> None:

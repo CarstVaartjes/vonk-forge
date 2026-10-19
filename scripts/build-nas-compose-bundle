@@ -285,14 +285,10 @@ def _payload(document: dict[str, Any], channel: str) -> dict[str, object]:
             f"Compose control-api lacks the {renderer.COMPOSE_BUNDLE_DIGEST} "
             "that the renderer stamps"
         )
-    # Only the independent janitor ships code in Compose; application runtime
-    # assets still ship in the Controller image. Never admit host config files.
-    configs = _mapping(document.get("configs"), "configs")
-    if set(configs) != {"image-janitor-script"}:
-        raise BundleError("Compose must carry only the standalone janitor config")
-    janitor = _mapping(configs["image-janitor-script"], "janitor config")
-    if set(janitor) != {"content"} or not isinstance(janitor["content"], str):
-        raise BundleError("Compose janitor config must be embedded content")
+    # Runtime configuration ships in the Controller image; the standalone
+    # janitor ships in its command. No external runtime configs are needed.
+    if "configs" in document:
+        raise BundleError("Compose must not carry runtime configs")
     _validate_secret_paths(document)
     # The project name is fixed here, the single source of truth, so it never
     # depends on the install directory or a `.env` entry.
