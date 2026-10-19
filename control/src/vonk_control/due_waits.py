@@ -8,6 +8,7 @@ functions can change them. Selection holds no transaction across a handler.
 from __future__ import annotations
 
 import logging
+import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -45,6 +46,8 @@ class DueWaitBackstop:
         *,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
         batch_limit: int = 16,
+        pass_budget_seconds: float = 1,
+        monotonic: Callable[[], float] = time.monotonic,
     ) -> None:
         if batch_limit < 1:
             raise ValueError("due wait batch must be positive")
@@ -53,20 +56,30 @@ class DueWaitBackstop:
         if len({source.table.name for source in sources}) != len(sources):
             raise ValueError("a wait table must have one advancement binding")
         self._clock = clock
+        if pass_budget_seconds <= 0:
+            raise ValueError("due wait observation budget must be positive")
         self._limit = batch_limit
+        self._pass_budget = pass_budget_seconds
+        self._monotonic = monotonic
         self._owner_cursor = 0
         self._row_cursors: dict[str, RowKey] = {}
 
     def tick(self) -> int:
-        """Give a bounded set of rows a turn, including unresolved terminal waits."""
+        """Return rows examined; this is never a measure of work completed.
+
+        Stop between handlers when the scheduler's observation budget is spent.
+        Each handler retains its own transport/transaction deadline. Owner and
+        row cursors move before it runs, so a slow owner yields the next pass.
+        """
         examined = 0
         visited: dict[str, set[RowKey]] = {}
         now = self._clock()
+        deadline = self._monotonic() + self._pass_budget
         # No row gets a second turn in this pass, even if its handler cannot
         # move its clock. Rotate owners as well when the batch is smaller than
         # the owner inventory. Cursor movement is never measured progress.
         exhausted: set[str] = set()
-        while self._sources and examined < self._limit:
+        while self._sources and examined < self._limit and self._monotonic() < deadline:
             source = self._sources[self._owner_cursor]
             self._owner_cursor = (self._owner_cursor + 1) % len(self._sources)
             table = source.table
