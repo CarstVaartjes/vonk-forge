@@ -10,6 +10,7 @@ from typing import cast as typing_cast
 
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
+    AgentOperation,
     Disposition,
     LifecycleState,
     RunSwitchCode,
@@ -38,6 +39,7 @@ from ..lifecycle.types import (
 from ..models import (
     Job,
 )
+from ..operation_blockers import BlockingOperation, make_blocker
 from ..persisted_waits import schedule_wait, wait_due
 from ..profile_capacity import (
     accepted_profile_runtime_image,
@@ -573,6 +575,22 @@ class AdvanceMixin:
                         state=_LifecycleState.RUNNING,
                         due=job.next_action_at,
                         reason=status_reason,
+                        wait_blockers=[
+                            make_blocker(
+                                RunSwitchCode.EFFECT_UNCERTAIN,
+                                status_reason or "Awaiting the exact child effect",
+                                node_ids=job.targets,
+                            ).model_copy(
+                                update={
+                                    "operation": BlockingOperation(
+                                        id=child_id,
+                                        kind=AgentOperation.ARTIFACT_DISTRIBUTION.value,
+                                    )
+                                }
+                            )
+                        ]
+                        if progress.retry_reason == RunSwitchCode.EFFECT_UNCERTAIN
+                        else None,
                     )
                     job.result = _persisted_result(progress)
                     job.updated_at = now

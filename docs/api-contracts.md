@@ -568,7 +568,10 @@ expiry, and resume condition. Each existing durable owner stores this evidence
 in the transaction that parks its work. `QueueWait.next_check` is projected from
 that owner's SQL due field; the evidence JSON never stores a second due clock.
 A retry, heartbeat, refreshed description or progress read does not establish
-real progress or extend a dependency's deadline.
+real progress or extend a dependency's deadline. A check clock on an operator
+wait does not authorize another attempt; only the explicit resume/retry path
+changes its lifecycle authority. Parent polling preserves the exact child
+identity and cannot conceal an already completed receipt.
 
 The protocol enums own the reason and resume vocabulary. API wait projections
 use that same evidence rather than inferring codes from status prose. Older

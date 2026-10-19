@@ -1321,7 +1321,7 @@ def test_stale_singleton_wait_does_not_starve_later_recovery_or_hot_loop(
                 route_state="withdrawn",
                 route_error=wait_reason,
                 route_attempts=0,
-                route_next_attempt_at=None,
+                next_action_at=None,
                 actor="test",
                 created_at=NOW - timedelta(seconds=1),
                 updated_at=NOW - timedelta(seconds=1),

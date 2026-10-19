@@ -12,6 +12,7 @@ from vonk_agent_protocol import (
     ProfileReasonCode,
     SupersedeCode,
     UnknownOutcomeError,
+    WaitOwnerKind,
     WaitReason,
     canonical_message,
 )
@@ -19,6 +20,7 @@ from vonk_agent_protocol.agent_words import (
     ProfileAction,
     ProfileChildPhase,
     ProfileChildSource,
+    ProfileReasonSeverity,
 )
 
 from .. import fleet_profile_states, job_states
@@ -40,6 +42,7 @@ from ..lifecycle.types import State as _LifecycleState
 from ..models import FleetProfileApplication
 from ..operation_blockers import (
     PHASE_RETRY_CODE,
+    BlockingOperation,
     OperationBlocker,
     bound_blockers,
     make_blocker,
@@ -372,7 +375,35 @@ class FleetProfileService:
                     )
                     row.progress = progress.model_dump(mode="json")
                 if child.state in _CHILD_PENDING_STATES:
-                    schedule_wait(row, FleetProfileAdapter.next_retry(row.id, 1, now))
+                    pending = progress.switch_adapter
+                    dependencies = (
+                        [
+                            make_blocker(
+                                WaitReason.RECEIPT_MISSING,
+                                "Waiting for the exact Run/Switch child receipt",
+                                severity=ProfileReasonSeverity.INFO.value,
+                            ).model_copy(
+                                update={
+                                    "operation": BlockingOperation(
+                                        id=item.operation_id,
+                                        kind=WaitOwnerKind.RUN_SWITCH.value,
+                                    )
+                                }
+                            )
+                            for item in pending.pending_children
+                        ]
+                        if pending is not None
+                        else []
+                    )
+                    schedule_wait(
+                        row,
+                        FleetProfileAdapter.next_retry(row.id, 1, now),
+                        now=now,
+                        reason=WaitReason.RECEIPT_MISSING
+                        if not progress.blockers
+                        else None,
+                        blockers=list(progress.blockers) or dependencies or None,
+                    )
                     row.progress = progress.model_dump(mode="json")
                     row.updated_at = now
                     if (
@@ -685,7 +716,7 @@ class FleetProfileService:
                 return True
             try:
                 current_progress = _persisted_profile_progress(current)
-                schedule_wait(row, None)
+                schedule_wait(current, None)
                 progress_data = current_progress.model_dump(mode="json")
                 if synchronous:
                     current.current_step += 1

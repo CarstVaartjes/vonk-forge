@@ -14,11 +14,27 @@ WRITERS = frozenset(
 )
 
 
-def _violations(source: str, path: str) -> list[str]:
+def _violations(
+    source: str, path: str, *, constructors_only: bool = False
+) -> list[str]:
     tree = ast.parse(source)
     errors: list[str] = []
     retired_clocks = {"retry_after_at", "admission_retry_at", "observation_due_at"}
+    retired_constructor_clocks = {
+        "RecipeRun": {"route_next_attempt_at"},
+        "AgentCertificate": {"ca_next_attempt_at"},
+        "RoutePublicationOwner": {"reconciliation_next_at"},
+        "AgentIssuedCertificateRevocation": {"next_attempt_at"},
+    }
     for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            retired = retired_constructor_clocks.get(
+                ast.unparse(node.func).split(".")[-1], set()
+            )
+            if any(keyword.arg in retired for keyword in node.keywords):
+                errors.append(f"{path}:{node.lineno}: retired owner clock")
+        if constructors_only:
+            continue
         if (
             isinstance(node, ast.ClassDef)
             and node.name.endswith("Adapter")
@@ -65,8 +81,14 @@ def test_all_lifecycle_adapters_and_durable_clock_writers_use_wait_custody() -> 
     """A future adapter or direct clock write cannot evade an added-line gate."""
     errors = [
         error
-        for file in SOURCE.rglob("*.py")
-        for error in _violations(file.read_text(), file.relative_to(SOURCE).as_posix())
+        for file in [*SOURCE.rglob("*.py"), *(ROOT / "control/tests").rglob("*.py")]
+        for error in _violations(
+            file.read_text(),
+            file.relative_to(SOURCE).as_posix()
+            if file.is_relative_to(SOURCE)
+            else file.relative_to(ROOT).as_posix(),
+            constructors_only=not file.is_relative_to(SOURCE),
+        )
     ]
     assert not errors, "\n".join(errors)
 
@@ -80,6 +102,8 @@ def test_all_lifecycle_adapters_and_durable_clock_writers_use_wait_custody() -> 
         "def defer(row, due):\n row.next_action_at: object = due\n",
         "def defer(row, due):\n row.progress['retry_after_at'] = due\n",
         "def defer(row, due):\n return {'observation_due_at': due}\n",
+        "RecipeRun(route_next_attempt_at=None)",
+        "AgentCertificate(ca_next_attempt_at=None)",
     ],
 )
 def test_owner_gate_rejects_uncovered_new_writer(source: str) -> None:

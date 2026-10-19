@@ -173,6 +173,7 @@ def lifecycle_wait(
     )
     if reason is None and not blockers and code == fallback and previous is not None:
         code = previous.reason
+        blockers = list(previous.blockers)
     owner_ref = BlockingOperation(id=identity, kind=kind.value)
     return write_wait(
         owner,
@@ -194,6 +195,8 @@ def lifecycle_wait(
             if cancelling or state is LifecycleState.OBSERVING
             else WaitResumeCondition.OPERATOR_ACTION
             if state is LifecycleState.NEEDS_OPERATOR
+            else WaitResumeCondition.RETRY_DUE
+            if state in {LifecycleState.BACKOFF, LifecycleState.QUEUED}
             else WaitResumeCondition.DEPENDENCY_CHANGED
         ),
     )

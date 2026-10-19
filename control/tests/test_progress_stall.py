@@ -28,7 +28,6 @@ BURST = 5
 def _waiting(detail: str = "recipe start payload observation is unavailable", **extra):
     document = {
         "attempt": 7,
-        "retry_due_at": "2026-10-14T02:01:00Z",
         "completed_steps": 0,
         "total_steps": 2,
         "blockers": [
@@ -73,11 +72,10 @@ def _repeat(times: int):
 def test_the_same_wait_is_an_alarm_after_a_whole_window_without_movement() -> None:
     stall = None
     for index in range(BURST):
-        # Attempts, due times and numbers quoted in the text are not movement.
+        # Attempts and numbers quoted in the text are not movement.
         progress = _waiting(
             f"next attempt in {index * 7}s",
             attempt=index + 1,
-            retry_due_at=f"2026-10-14T02:0{index}:00Z",
         )
         stall = _observe(stall, progress, START + timedelta(minutes=index))
     assert stall is not None
@@ -182,7 +180,7 @@ def test_re_checks_within_one_attempt_never_count() -> None:
     progress = _child_retrying(3)
     for index in range(25):
         before = progress
-        progress = _child_retrying(3, retry_due_at=f"2026-10-14T02:00:{index * 2:02d}Z")
+        progress = _child_retrying(3)
         stall = _observe(
             stall, progress, START + timedelta(seconds=6 * index), before=before
         )

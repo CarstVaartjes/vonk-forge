@@ -205,7 +205,10 @@ def receipt_effect(attempt: AgentOperationAttempt | None) -> Effect | None:
 def retry_scheduled(operation: StoredOperation) -> datetime | None:
     """When a waiting order's automatic retry becomes claimable, if it has one."""
 
-    if not aos.order_is_parked(operation.state):
+    if (
+        not aos.order_is_parked(operation.state)
+        or operation.state == aos.NEEDS_OPERATOR
+    ):
         return None
     if operation.next_action_at is not None:
         # Above zero the order is being observed, which is not a retry.
@@ -324,6 +327,8 @@ class AgentOperationAdapter:
                     assert deadline is not None
                     lease = max(lease, aware(deadline))
             next_action = lease
+        elif stored == aos.NEEDS_OPERATOR:
+            state = State.NEEDS_OPERATOR
         elif stored in aos.PARKED:
             scheduled = retry_scheduled(operation)
             if scheduled is not None:

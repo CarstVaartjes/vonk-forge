@@ -114,7 +114,11 @@ def record_queue_waits(
             blocking_operation = BlockingOperation(id=running.id, kind=running.kind)
             workload = column_field(running, "payload", "run_id")
             run_id = workload if isinstance(workload, str) else None
-            movement = last_progress_at(stored_progress(attempt))
+            movement = (
+                last_progress_at(stored_progress(attempt))
+                if attempt is not None
+                else None
+            )
             if movement is not None:
                 progressed_at = max(progressed_at, aware(movement))
         deadline = progressed_at + timedelta(seconds=PROFILE_STALL_WINDOW_SECONDS)

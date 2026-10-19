@@ -486,6 +486,7 @@ class RunSwitchFleetProfileAdapter:
             not before_dispatch
             and progress.cancellation is None
             and state.state == LifecycleState.RUNNING.value
+            and state.pending_operation_ids
             and application.next_action_at is not None
             and now < _aware(application.next_action_at)
         ):
