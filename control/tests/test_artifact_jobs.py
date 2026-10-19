@@ -2379,8 +2379,11 @@ def test_artifact_cancel_preserves_declared_evidence_and_meaningful_values(
 
 @pytest.mark.postgres
 @pytest.mark.parametrize("expires", (False, True))
+@pytest.mark.parametrize(
+    ("lease_lapses", "reconcile"), ((False, False), (True, False), (True, True))
+)
 def test_undelivered_job_outputs_resume_without_repeating_the_process(
-    tmp_path, postgres_engine, expires
+    tmp_path, postgres_engine, expires, lease_lapses, reconcile
 ):
     """Ending on 413, losing the receipt, or resetting retention fails this flow."""
     from vonk_agent_protocol import (
@@ -2445,8 +2448,19 @@ def test_undelivered_job_outputs_resume_without_repeating_the_process(
             ),
         )
 
-    clock.advance(seconds=5)
-    jobs.record_result(undelivered(first))
+    # Inference finished, but the lease expired before output delivery.
+    clock.advance(seconds=31 if lease_lapses else 5)
+    if reconcile:
+        jobs.reconcile_orders()
+    if lease_lapses:
+        from vonk_control.agent_jobs import StaleAgentFence
+
+        with pytest.raises(StaleAgentFence):
+            jobs.record_result(undelivered(first))
+        # The HTTP ingress reconciles a stale result through this same path.
+        jobs.record_late_result(undelivered(first))
+    else:
+        jobs.record_result(undelivered(first))
     waiting = service.get(job.id)
     assert waiting.state == LifecycleState.BACKOFF
     assert waiting.result_evidence is not None

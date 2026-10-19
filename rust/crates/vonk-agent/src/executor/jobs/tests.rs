@@ -398,6 +398,19 @@ async fn completed_job_upload_recovers_without_reexecution_and_new_jobs_are_admi
     };
     let (_lease, lease) = tokio::sync::watch::channel(claim.deadline);
     let (_cancel, cancel) = tokio::sync::watch::channel(false);
+    // Inject authority loss after inference has durably completed, before
+    // the first PUT. The Controller must receive the delivery-only stage,
+    // so a fresh fence can replay these bytes without another process run.
+    let (_expired, expired) =
+        tokio::sync::watch::channel((Utc::now() - chrono::Duration::seconds(1)).fixed_offset());
+    let expired = executor
+        .execute_job_run(&claim, expired, cancel.clone(), request.clone())
+        .await;
+    let ExecutionResult::Unknown(expired) = expired else {
+        panic!("completed output must remain retryable");
+    };
+    assert_eq!(expired.evidence.stage, FailureStage::JobOutputDelivery);
+    assert_eq!(expired.receipt.as_ref(), Some(&receipt));
     let started = Instant::now();
     let first = executor
         .execute_job_run(&claim, lease.clone(), cancel.clone(), request.clone())
