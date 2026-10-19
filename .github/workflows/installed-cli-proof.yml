@@ -72,6 +72,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          scripts/ensure-project-venv "$RUNNER_TEMP/signed-update-dependencies"
           UV_CACHE_DIR="$RUNNER_TEMP/signed-update-cache" \
           UV_PROJECT_ENVIRONMENT="$RUNNER_TEMP/signed-update-dependencies" \
             scripts/retry-dependency-fetch uv sync --project . --frozen --no-dev --no-install-project

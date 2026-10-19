@@ -198,7 +198,10 @@ def test_test_local_checks_environment_before_uv_run(tmp_path: Path, unsafe: boo
 def test_every_project_environment_setter_uses_shared_check():
     # Reading an override is not setting it; cover shell and container command strings.
     unchecked = []
-    for script in (ROOT / "scripts").rglob("*"):
+    for script in [
+        *(ROOT / "scripts").rglob("*"),
+        *(ROOT / ".github").rglob("*"),
+    ]:
         if not script.is_file() or "__pycache__" in script.parts:
             continue
         source = script.read_text(errors="replace")
