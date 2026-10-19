@@ -24,6 +24,7 @@ IMAGES = {
     "litellm_image": "ghcr.io/carstvaartjes/vonk-forge-litellm:v1.2.3",
 }
 SERVICES = {
+    "image-janitor",
     "tailscale-gateway",
     "tailscale-configurator",
     "hermes-agent",

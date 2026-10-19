@@ -39,6 +39,7 @@ def _version_pinned(image: str) -> bool:
 
 PROJECT_NAME = "vonk-forge"
 SERVICES = {
+    "image-janitor",
     "tailscale-gateway",
     "tailscale-configurator",
     "hermes-agent",
@@ -169,6 +170,11 @@ def _validate_services(document: dict[str, Any]) -> dict[str, Any]:
                 "bind": {"create_host_path": True},
             }:
                 continue
+            if (
+                name == "image-janitor"
+                and volume == "/var/run/docker.sock:/var/run/docker.sock"
+            ):
+                continue
             source = _volume_source(volume)
             if source is not None and (
                 source.startswith((".", "/", "~")) or "/" in source
@@ -279,8 +285,8 @@ def _payload(document: dict[str, Any], channel: str) -> dict[str, object]:
             f"Compose control-api lacks the {renderer.COMPOSE_BUNDLE_DIGEST} "
             "that the renderer stamps"
         )
-    # Runtime configuration ships in the Controller image, so a pulled release
-    # updates it. The bundle carries only Compose, .env and secrets.
+    # Runtime configuration ships in the Controller image; the standalone
+    # janitor ships in its command. No external runtime configs are needed.
     if "configs" in document:
         raise BundleError("Compose must not carry runtime configs")
     _validate_secret_paths(document)

@@ -149,6 +149,7 @@ PRODUCERS = {
             "deploy/compose/caddy/entrypoint.sh",
             "deploy/compose/compose.yaml",
             "deploy/compose/hermes-agent/**",
+            "deploy/compose/image-janitor/janitor.py",
             "deploy/compose/litellm/**",
             "deploy/compose/postgres/**",
             "deploy/compose/prometheus/**",

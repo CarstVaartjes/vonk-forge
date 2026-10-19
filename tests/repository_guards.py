@@ -42,6 +42,10 @@ GUARDS: tuple[str, ...] = (
 
 SCOPED: tuple[tuple[str, str], ...] = (
     (
+        "tests/scripts/test_nas_image_janitor.py",
+        "NAS daemon platform-image selection, persisted grace and deletion refusal recovery.",
+    ),
+    (
         "tests/cluster_profiles/test_cli_job_receipts.py",
         "Exact operator request replay through the CLI transport; no whole-tree scan.",
     ),

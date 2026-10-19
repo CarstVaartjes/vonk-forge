@@ -1375,3 +1375,38 @@ def test_controller_provenance_waits_only_for_missing_completed_worker_loop(
     assert len(reads) == expected_reads
     assert reads == [20 - index for index in range(expected_reads)]
     assert elapsed[0] <= 20
+
+
+@pytest.mark.needs_docker
+@pytest.mark.parametrize("hermes", [False, True])
+def test_reference_acceptance_accepts_the_installer_service_topology(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, hermes: bool
+) -> None:
+    """Catches an installer service rejected before the real acceptance rollout."""
+    acceptance = _acceptance_module()
+    rendered = tmp_path / "rendered.yaml"
+    _script_module(PRODUCTION_RENDERER, "acceptance_topology_renderer").render(
+        COMPOSE_TEMPLATE,
+        rendered,
+        **{
+            f"{role}_image": f"ghcr.io/carstvaartjes/vonk-forge-{role}:v1.2.3"
+            for role in ("api", "worker", "hermes", "litellm")
+        },
+        channel="pinned",
+    )
+    document = yaml.safe_load(rendered.read_text())
+    payload = _script_module(PAYLOAD_BUILDER, "acceptance_topology_builder")._payload(
+        document, "dev"
+    )
+    (tmp_path / "docker-compose.yaml").write_text(payload["docker_compose_yaml"])
+    (tmp_path / ".env").write_text(
+        "NAS_LAN_IP=192.0.2.10\nVONK_CONTROL_HOSTNAME=control.acceptance.test\n"
+        + (
+            "COMPOSE_PROFILES=secure-remote,hermes\n"
+            if hermes
+            else "COMPOSE_PROFILES=secure-remote\n"
+        )
+    )
+    monkeypatch.setattr(acceptance, "reference_compose", lambda: ["docker", "compose"])
+    expected = acceptance.HERMES_SERVICES if hermes else acceptance.DEFAULT_SERVICES
+    assert acceptance.compose_services(tmp_path) == expected
