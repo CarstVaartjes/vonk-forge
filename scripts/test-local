@@ -81,8 +81,13 @@ portable_markers='not linux_only and not needs_systemd and not needs_rust_probe 
 
 # Every suite runs in the one locked control environment, as in CI.
 uv_control() {
+    local environment=${UV_CONTROL_PROJECT_ENVIRONMENT:-"/private/tmp/vonk-ci-infra-test-control-venv"}
+    if [[ "$environment" != /* ]]; then
+        environment="$root/control/$environment"
+    fi
+    "$root/scripts/ensure-project-venv" "$environment" || return
     UV_CACHE_DIR=${UV_CACHE_DIR:-"/private/tmp/vonk-test-local-uv-cache"} \
-        UV_PROJECT_ENVIRONMENT=${UV_CONTROL_PROJECT_ENVIRONMENT:-"/private/tmp/vonk-ci-infra-test-control-venv"} \
+        UV_PROJECT_ENVIRONMENT=$environment \
         uv run --project "$root/control" --frozen "$@"
 }
 
