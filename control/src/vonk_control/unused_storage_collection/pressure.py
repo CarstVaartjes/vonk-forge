@@ -38,7 +38,14 @@ from .common import (
     _Kept,
     _Stopping,
 )
-from .evidence import _Evidence, _Item, _Outcome, _Pressure, _Round
+from .evidence import (
+    StorageItemKind,
+    _Evidence,
+    _Item,
+    _Outcome,
+    _Pressure,
+    _Round,
+)
 from .references import (
     _code,
     _latest_snapshots,
@@ -288,7 +295,7 @@ def _remove(
         key = (item.kind, member)
         attempted[key] = False
         with self._sessions() as session:
-            if item.kind == "installation":
+            if item.kind == StorageItemKind.INSTALLATION:
                 wait_owner = session.get(RecipeInstallation, member)
             else:
                 artifact_kind = (
@@ -327,7 +334,7 @@ def _remove(
             # next sweep. Other eligible items continue in this pass.
             retry_at = self._clock() + self._scan_interval
             with self._sessions.begin() as session:
-                if item.kind == "installation":
+                if item.kind == StorageItemKind.INSTALLATION:
                     wait_owner = session.get(RecipeInstallation, member)
                 else:
                     (wait_owner,) = lock_reference_gates(
@@ -379,7 +386,7 @@ def _remove(
         # The removal returned, but an installation can still be uninstalling.
         # Clear its retry only after the normal owner confirms settlement.
         with self._sessions.begin() as session:
-            if item.kind == "installation":
+            if item.kind == StorageItemKind.INSTALLATION:
                 completed_owner = session.get(RecipeInstallation, member)
                 settled = (
                     completed_owner is not None
