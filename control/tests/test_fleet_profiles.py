@@ -4506,9 +4506,11 @@ def test_exhausted_preparation_ends_and_a_fresh_load_is_admitted(
             "_heal_legacy_applications",
             "_observe_pending_cancellation",
         ):
-            monkeypatch.setattr(service, method, lambda now: False)
+            monkeypatch.setattr(service, method, lambda now, application_id=None: False)
         monkeypatch.setattr(
-            service, "_automatic_profile_recovery", lambda now: (ended.id, "admin")
+            service,
+            "_automatic_profile_recovery",
+            lambda now, application_id=None: (ended.id, "admin"),
         )
         monkeypatch.setattr(service, "_retry_eligible", lambda session, row: True)
         error = (
