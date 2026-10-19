@@ -281,25 +281,48 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                 builder.discard_export(request.build_id);
                 ExecutionResult::done(evidence)
             }
-            Err(error) => {
-                // Actual source/adapter digest ingress still refuses substitution.
-                if matches!(
-                    error,
-                    crate::recipe_builder::RecipeBuildError::Source(
-                        crate::build_source::BuildSourceError::Archive
-                            | crate::build_source::BuildSourceError::Path
-                            | crate::build_source::BuildSourceError::Entry
-                            | crate::build_source::BuildSourceError::Size
-                            | crate::build_source::BuildSourceError::Digest
-                    ) | crate::recipe_builder::RecipeBuildError::AdapterInvalid
-                ) {
-                    return ExecutionResult::Failed(error.failure_evidence());
-                }
-                ExecutionResult::unknown(WaitReason::ObservationUnavailable, error.to_string(),
-                    UnknownEvidence::at(FailureStage::BoundedBuildProcess).because("bounded build observation ended; retained content and exact units are reconciled on the next request"))
-            }
+            Err(error) => build_error_outcome(&error),
         }
     }
+}
+
+/// The builder has returned: a nonzero import is a definite attempt result,
+/// not a lost observation. Keep its bounded output so the next action follows
+/// the cause. Only classified temporary pressure or a deadline warrants retry.
+pub(super) fn build_error_outcome(
+    error: &crate::recipe_builder::RecipeBuildError,
+) -> ExecutionResult {
+    use crate::recipe_builder::{PodmanImportDiagnostic, RecipeBuildError};
+
+    if let RecipeBuildError::BaseImageImport { diagnostic, .. } = error {
+        let failure = error.failure_evidence();
+        return ExecutionResult::Failed(match diagnostic {
+            PodmanImportDiagnostic::TemporaryStorageExhausted => failure
+                .kind(AgentFailureKind::ResourcePrerequisite)
+                .retry_after(Some(30)),
+            PodmanImportDiagnostic::DeadlineExceeded => failure
+                .kind(AgentFailureKind::TemporaryDependency)
+                .retry_after(Some(30)),
+            // Unknown output is evidence to inspect, not evidence of a
+            // transient fault. Retrying the same verified bytes hides it.
+            _ => failure,
+        });
+    }
+    // Actual source/adapter digest ingress still refuses substitution.
+    if matches!(
+        error,
+        crate::recipe_builder::RecipeBuildError::Source(
+            crate::build_source::BuildSourceError::Archive
+                | crate::build_source::BuildSourceError::Path
+                | crate::build_source::BuildSourceError::Entry
+                | crate::build_source::BuildSourceError::Size
+                | crate::build_source::BuildSourceError::Digest
+        ) | crate::recipe_builder::RecipeBuildError::AdapterInvalid
+    ) {
+        return ExecutionResult::Failed(error.failure_evidence());
+    }
+    ExecutionResult::unknown(WaitReason::ObservationUnavailable, error.to_string(),
+        UnknownEvidence::at(FailureStage::BoundedBuildProcess).because("bounded build observation ended; retained content and exact units are reconciled on the next request"))
 }
 
 fn build_transfer_outcome(
@@ -337,3 +360,65 @@ fn build_transfer_outcome_because(
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod import_tests {
+    use super::*;
+    use crate::recipe_builder::{PodmanImportDiagnostic, RecipeBuildError};
+
+    #[test]
+    fn completed_podman_import_failure_retains_evidence_and_only_retries_transient_causes() {
+        for diagnostic in [
+            PodmanImportDiagnostic::TemporaryStorageExhausted,
+            PodmanImportDiagnostic::SubordinateIdMappingUnavailable,
+            PodmanImportDiagnostic::ArchiveFormatRejected,
+            PodmanImportDiagnostic::PermissionDenied,
+            PodmanImportDiagnostic::DeadlineExceeded,
+            PodmanImportDiagnostic::DiagnosticOutputLimitExceeded,
+            PodmanImportDiagnostic::SubprocessUnavailable,
+            PodmanImportDiagnostic::Unknown,
+        ] {
+            let error = RecipeBuildError::BaseImageImport {
+                diagnostic,
+                logs: Some(Box::new(crate::failure_evidence::FailureProcessLogs {
+                    stdout: crate::failure_evidence::log_tail(b""),
+                    stderr: crate::failure_evidence::log_tail(
+                        b"import rejected\nAuthorization: Bearer never-persist\n",
+                    ),
+                })),
+            };
+            let ExecutionResult::Failed(failure) = build_error_outcome(&error) else {
+                panic!("a completed import failure must not become an unknown observation");
+            };
+            assert_eq!(failure.stage, Some(FailureStage::BaseImageImport));
+            assert_eq!(failure.diagnostic, Some(diagnostic.to_string()));
+            let logs = failure.process_logs.as_ref().expect("retain import stderr");
+            assert!(logs.stderr.text.contains("import rejected"));
+            assert!(!logs.stderr.text.contains("never-persist"));
+            let kind = match diagnostic {
+                PodmanImportDiagnostic::TemporaryStorageExhausted => {
+                    Some(AgentFailureKind::ResourcePrerequisite)
+                }
+                PodmanImportDiagnostic::DeadlineExceeded => {
+                    Some(AgentFailureKind::TemporaryDependency)
+                }
+                _ => None,
+            };
+            assert_eq!(failure.failure_kind, kind);
+            assert_eq!(failure.retry_after_seconds, kind.map(|_| 30));
+            let wire = ExecutionResult::Failed(failure)
+                .finish_for(&vonk_agent_protocol::generated::AgentOperation::RecipeBuildV1);
+            let vonk_agent_protocol::generated::AgentResultResult::OutcomeFailed(outcome) =
+                wire.result
+            else {
+                panic!("the Controller must receive a definite failure");
+            };
+            assert_eq!(outcome.failure_kind, kind);
+            assert_eq!(outcome.retry_after_seconds, kind.map(|_| 30));
+            assert_eq!(
+                outcome.evidence.unwrap().stage.as_deref(),
+                Some(FailureStage::BaseImageImport.as_str())
+            );
+        }
+    }
+}

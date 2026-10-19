@@ -4,9 +4,8 @@ Fault injection of the production shape: a build cancelled after its order was
 issued (attempt > 0) queues one Spark cleanup; when that cleanup fails with an
 unconfirmed effect, the build Job stays open (its cancel in flight) and nothing
 issues another cleanup. Once the build stopped and its own Spark orders ended,
-its memory claim holds nothing on the Spark (whatever it left is in observed
-free memory): admission there must not count it, and the next reconcile
-releases its claims.
+its disk and memory claims hold nothing beyond observed usage. Admission must
+not count those envelopes, and the next reconcile releases their claims.
 """
 
 from __future__ import annotations
@@ -14,7 +13,14 @@ from __future__ import annotations
 import uuid
 
 from sqlalchemy import select
+from vonk_agent_protocol import AgentOperation as WireOperation
+from vonk_agent_protocol import ReservationState
 from vonk_control.attempt_residues import AttemptResidueReconciler
+from vonk_control.disk_reservations import outstanding_disk_reservation_bytes
+from vonk_control.inventory_repository import (
+    InventoryRepository,
+    InventorySnapshotInput,
+)
 from vonk_control.memory_reservations import memory_reservations
 from vonk_control.models import Job, ResourceReservation
 from vonk_control.owner_liveness import OwnerKind
@@ -28,6 +34,13 @@ def _counted(sessions, node_id):
     with sessions() as session:
         totals = memory_reservations(session, node_id, memory_pool="separate")
     return sum(totals.unmaterialized_bytes_by_kind.values())
+
+
+def _disk_counted(sessions, node_id, now):
+    with sessions() as session:
+        return outstanding_disk_reservation_bytes(
+            session, node_id, inventory_observed_at=now
+        )
 
 
 def _held_kinds(sessions, build_id):
@@ -49,11 +62,11 @@ def _reconcile(sessions, at):
     ).tick()
 
 
-def stopped_build_releases_its_memory(tmp_path, engine):
+def stopped_build_releases_its_resources(tmp_path, engine):
     """Cancel a build mid-run, fail its cleanup; return what a fresh build got.
 
-    The cancelled build's memory claim is widened to all the Spark's free
-    memory, so a fresh build there is admitted only if that claim is not
+    The cancelled build's claims are widened to all the Spark's free
+    disk and memory, so a fresh build there is admitted only if that claim is not
     counted.
     """
 
@@ -76,6 +89,15 @@ def stopped_build_releases_its_memory(tmp_path, engine):
         )
         assert claim is not None
         claim.amount_bytes = 80_000
+        disk = session.scalar(
+            select(ResourceReservation).where(
+                ResourceReservation.owner_id == plan.build_id,
+                ResourceReservation.kind == "disk",
+                ResourceReservation.state == ReservationState.ACTIVE,
+            )
+        )
+        assert disk is not None
+        disk.amount_bytes = 1024**4
     operations.cancel(
         cancelled.id,
         actor="operator",
@@ -84,6 +106,7 @@ def stopped_build_releases_its_memory(tmp_path, engine):
     )
     # The cleanup is still stopping the build: its memory still counts.
     assert _counted(sessions, node_id) == 80_000
+    assert _disk_counted(sessions, node_id, now) == 1024**4
     _reconcile(sessions, now + OWNER_SETTLE_GRACE)
     assert _held_kinds(sessions, plan.build_id) == {"disk", "host-memory"}
 
@@ -105,6 +128,28 @@ def stopped_build_releases_its_memory(tmp_path, engine):
     assert operations.reconcile_cancelled_builds() is False
 
     assert _counted(sessions, node_id) == 0
+    later = now + OWNER_SETTLE_GRACE
+    InventoryRepository(sessions, clock=lambda: later).record(
+        InventorySnapshotInput(
+            node_id,
+            later,
+            2 * 1024**4,
+            1024**4,
+            100_000,
+            80_000,
+            100_000,
+            80_000,
+            1,
+            False,
+            (
+                WireOperation.RECIPE_BUILD.value,
+                "recipe.image.pull.v1",
+                "runtime.vonk.v1",
+            ),
+            memory_pool="separate",
+        )
+    )
+    assert _disk_counted(sessions, node_id, later) == 0
     _sessions, _bundles, _later, _node, other = setup(
         tmp_path,
         engine=engine,
@@ -112,7 +157,7 @@ def stopped_build_releases_its_memory(tmp_path, engine):
         builder_node_id=node_id,
         recipe_slug="other-vllm",
     )
-    other_plan = builds.plan(other.id, node_id, now=now)
+    other_plan = builds.plan(other.id, node_id, now=later)
     fresh = operations.build(
         other_plan,
         build_input_sha256=other_plan.build_input_sha256,
@@ -133,7 +178,7 @@ def stopped_build_releases_its_memory(tmp_path, engine):
 def test_a_stopped_build_with_a_failed_cleanup_never_blocks_a_fresh_build(
     tmp_path, postgres_engine
 ):
-    fresh = stopped_build_releases_its_memory(tmp_path, postgres_engine)
+    fresh = stopped_build_releases_its_resources(tmp_path, postgres_engine)
 
     assert fresh.state in {"queued", "running"}
 

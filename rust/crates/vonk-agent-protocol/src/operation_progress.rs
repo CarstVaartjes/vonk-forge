@@ -54,14 +54,16 @@ impl OperationMemberProgress {
 }
 
 impl OperationProgress {
-    /// Whether this snapshot moved past `previous`: more bytes, more items or
-    /// a new phase. The one agent-side counterpart of the Controller's rule;
+    /// Whether this snapshot moved past `previous`: bytes, items, subprocess
+    /// observations or a new phase. The one agent-side counterpart of the Controller's rule;
     /// lease renewals and retries are liveness, never progress.
     pub fn advanced_from(&self, previous: Option<&Self>) -> bool {
         previous.is_none_or(|previous| {
             self.completed_bytes > previous.completed_bytes
                 || self.completed_items.clone().unwrap_or_default()
                     > previous.completed_items.clone().unwrap_or_default()
+                || self.activity_sequence.clone().unwrap_or_default()
+                    > previous.activity_sequence.clone().unwrap_or_default()
                 || self.phase != previous.phase
         })
     }

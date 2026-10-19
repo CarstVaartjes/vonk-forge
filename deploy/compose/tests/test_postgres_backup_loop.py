@@ -50,13 +50,15 @@ STUBS = {
         "esac\n"
         'exec "$REAL_MV" "$@"\n'
     ),
-    "sleep": 'echo "$1" >>"$SLEEPS"\nexec "$REAL_SLEEP" 0.05\n',
+    "sleep": 'echo "$1" >>"$SLEEPS"\nexec "$REAL_SLEEP" "${LOOP_TEST_SLEEP:-0.05}"\n',
 }
 
 
 def _backup_loop(root: Path) -> str:
     text = ENTRYPOINT.read_text(encoding="utf-8")
-    match = re.search(r"^backup_loop\(\) \(\n.*?^\)\n", text, re.MULTILINE | re.DOTALL)
+    match = re.search(
+        r"^backup_loop\(\) [({]\n.*?^[)}]\n", text, re.MULTILINE | re.DOTALL
+    )
     assert match, "backup_loop is not defined in the entrypoint"
     return re.sub(
         r"(?<![\w.])/(backups|state|offhost)\b",
@@ -65,7 +67,9 @@ def _backup_loop(root: Path) -> str:
     )
 
 
-def _start(tmp_path: Path, fault: str) -> tuple[subprocess.Popen[str], Path]:
+def _start(
+    tmp_path: Path, fault: str, *, sleep_seconds: str = "0.05"
+) -> tuple[subprocess.Popen[str], Path]:
     dash = shutil.which("dash")
     if dash is None:
         if os.environ.get("CI") == "true":
@@ -80,17 +84,22 @@ def _start(tmp_path: Path, fault: str) -> tuple[subprocess.Popen[str], Path]:
     script = tmp_path / "loop.sh"
     # The entrypoint runs under `set -eu`, which the loop inherits.
     script.write_text(
-        "set -eu\n" + _backup_loop(tmp_path) + "backup_loop\n", encoding="utf-8"
+        "set -eu\n"
+        + _backup_loop(tmp_path)
+        + 'backup_loop &\nworker=$!\necho "$worker" >"$WORKER_PID"\nwait "$worker"\n',
+        encoding="utf-8",
     )
     environment = {
         **os.environ,
         "FAULT": fault,
+        "WORKER_PID": str(tmp_path / "worker.pid"),
         "FAULTS": str(tmp_path / "faults"),
         "PATH": f"{tmp_path / 'bin'}:{os.environ['PATH']}",
         "POSTGRES_USER": "control",
         "REAL_MV": str(shutil.which("mv")),
         "REAL_SLEEP": str(shutil.which("sleep")),
         "SLEEPS": str(tmp_path / "sleeps"),
+        "LOOP_TEST_SLEEP": sleep_seconds,
         "VONK_BACKUP_OFFHOST_PATH": "/srv/offhost",
     }
     loop = subprocess.Popen(
@@ -161,3 +170,19 @@ def test_a_failed_restore_verification_never_marks_a_backup_successful(
     assert "failed at step restore-verification" in stderr
     assert not (state / "last-successful-backup.epoch").exists()
     assert not (state / "last-backup-restore-verification.epoch").exists()
+
+
+def test_signalling_the_background_pid_runs_the_backup_cleanup(tmp_path: Path) -> None:
+    # Catches dash's extra outer fork for a background subshell-body function:
+    # killing $! must reach the loop's trap, not abandon it and its temporary dump.
+    loop, state = _start(tmp_path, "none", sleep_seconds="30")
+    try:
+        _wait_for((state / "last-successful-backup.epoch").is_file, loop)
+        temporary = tmp_path / "backups/.postgres-backup.tmp"
+        temporary.write_text("interrupted dump", encoding="ascii")
+        worker = int((tmp_path / "worker.pid").read_text())
+        os.kill(worker, signal.SIGTERM)
+        loop.wait(timeout=10)
+        assert not temporary.exists(), "the loop's signal trap never ran"
+    finally:
+        _terminate(loop)
