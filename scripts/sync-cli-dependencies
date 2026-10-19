@@ -13,6 +13,9 @@
 set -euo pipefail
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 export UV_PROJECT_ENVIRONMENT=${VONK_CLI_DEPENDENCY_ENV:-"$root/.cli-dependencies/$(python3 "$root/tools/cli_dependencies.py" key)"}
+if [[ "$UV_PROJECT_ENVIRONMENT" != /* ]]; then
+    export UV_PROJECT_ENVIRONMENT="$root/$UV_PROJECT_ENVIRONMENT"
+fi
 
 env=$UV_PROJECT_ENVIRONMENT
 helper="$root/tools/cli_dependencies.py"

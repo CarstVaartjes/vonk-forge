@@ -125,8 +125,8 @@ def test_repair_refuses_symlinks_into_unowned_storage(tmp_path: Path, link: str)
     assert list(outside.iterdir()) == []
 
 
-@pytest.mark.parametrize("unsafe", [False, True])
-def test_test_local_checks_environment_before_uv_run(tmp_path: Path, unsafe: bool):
+@pytest.mark.parametrize("kind", ["absolute", "relative", "unsafe"])
+def test_test_local_checks_environment_before_uv_run(tmp_path: Path, kind: str):
     root = tmp_path / "repo"
     scripts = root / "scripts"
     scripts.mkdir(parents=True)
@@ -161,15 +161,17 @@ def test_test_local_checks_environment_before_uv_run(tmp_path: Path, unsafe: boo
         '#!/bin/sh\nif [ "$1" = venv ]; then\n'
         f'  exec "{real_uv}" "$@"\nfi\n'
         f'touch "{tmp_path}/ran-uv"\n'
-        'test -f "$UV_PROJECT_ENVIRONMENT/pyvenv.cfg" || exit 42\n'
-        '"$UV_PROJECT_ENVIRONMENT/bin/python" -I -c '
+        "environment=$UV_PROJECT_ENVIRONMENT\n"
+        'case "$environment" in /*) ;; *) environment="$PWD/control/$environment" ;; esac\n'
+        'test -f "$environment/pyvenv.cfg" || exit 42\n'
+        '"$environment/bin/python" -I -c '
         "'import sys; assert sys.prefix != sys.base_prefix'\n"
     )
     uv.chmod(0o755)
-    environment = tmp_path / "broken"
+    environment = root / "control/broken" if kind == "relative" else tmp_path / "broken"
     (environment / "bin").mkdir(parents=True)
     (environment / "bin/python").symlink_to(sys.executable)
-    if unsafe:
+    if kind == "unsafe":
         linked = tmp_path / "linked"
         linked.symlink_to(environment, target_is_directory=True)
         environment = linked
@@ -179,20 +181,79 @@ def test_test_local_checks_environment_before_uv_run(tmp_path: Path, unsafe: boo
         env={
             **os.environ,
             "PATH": f"{binaries}:{os.environ['PATH']}",
-            "UV_CONTROL_PROJECT_ENVIRONMENT": str(environment),
+            "UV_CONTROL_PROJECT_ENVIRONMENT": "broken"
+            if kind == "relative"
+            else str(environment),
         },
         capture_output=True,
         text=True,
         timeout=30,
         check=False,
     )
-    if unsafe:
+    if kind == "unsafe":
         assert result.returncode != 0
         assert "Refusing" in result.stderr
         assert not (tmp_path / "ran-uv").exists()
     else:
         assert result.returncode == 0, result.stdout + result.stderr
         assert (tmp_path / "ran-uv").exists()
+
+
+def test_shared_check_refuses_ambiguous_relative_paths(tmp_path: Path, monkeypatch):
+    called = tmp_path / "called"
+    uv = tmp_path / "uv"
+    uv.write_text(f'#!/bin/sh\ntouch "{called}"\nexit 1\n')
+    uv.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{tmp_path}:{os.environ['PATH']}")
+    result = run_helper(Path("relative"))
+    assert result.returncode != 0
+    assert "absolute path" in result.stderr
+    assert not called.exists()
+
+
+def test_cli_sync_resolves_relative_override_from_project_not_caller(tmp_path: Path):
+    root = tmp_path / "repo"
+    scripts = root / "scripts"
+    scripts.mkdir(parents=True)
+    for name in ("sync-cli-dependencies", "ensure-project-venv"):
+        shutil.copy(ROOT / "scripts" / name, scripts)
+    tools = root / "tools"
+    tools.mkdir()
+    shutil.copy(ROOT / "tools/cli_dependencies.py", tools)
+    retry = scripts / "retry-dependency-fetch"
+    retry.write_text('#!/bin/sh\nexec "$@"\n')
+    retry.chmod(0o755)
+    binaries = tmp_path / "bin"
+    binaries.mkdir()
+    real_uv = shutil.which("uv")
+    assert real_uv is not None
+    uv = binaries / "uv"
+    uv.write_text(
+        '#!/bin/sh\nif [ "$1" = venv ]; then\n'
+        f'  exec "{real_uv}" "$@"\nfi\n'
+        "environment=$UV_PROJECT_ENVIRONMENT\n"
+        f'case "$environment" in /*) ;; *) environment="{root}/$environment" ;; esac\n'
+        'test -f "$environment/pyvenv.cfg" || exit 42\n'
+        '"$environment/bin/python" -I -c '
+        "'import sys; assert sys.prefix != sys.base_prefix'\n"
+    )
+    uv.chmod(0o755)
+    result = subprocess.run(
+        ["bash", str(scripts / "sync-cli-dependencies")],
+        cwd=tmp_path,
+        env={
+            **os.environ,
+            "PATH": f"{binaries}:{os.environ['PATH']}",
+            "VONK_CLI_DEPENDENCY_ENV": "relative",
+        },
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert (root / "relative/.vonk-platform").is_file()
+    assert not (tmp_path / "relative").exists()
 
 
 def test_every_project_environment_setter_uses_shared_check():
