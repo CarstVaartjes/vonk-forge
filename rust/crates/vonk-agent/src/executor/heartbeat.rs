@@ -8,6 +8,7 @@ pub(super) fn phase_progress(phase: ProgressPhase) -> OperationProgress {
         completed_bytes: 0_u64.into(),
         total_bytes: None,
         total_bytes_known: false,
+        activity_sequence: None,
         completed_items: None,
         total_items: None,
         object_sha256: None,

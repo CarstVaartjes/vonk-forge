@@ -228,3 +228,35 @@ def test_the_aggregate_of_parallel_transfers_is_a_transfer_and_otherwise_prepare
         aggregate_progress([member("a", "download"), member("b", "building")]).phase
         == "preparing"
     )
+
+
+def test_successful_distribution_progress_no_longer_projects_pulling() -> None:
+    # A retained heartbeat describes the last active step, not the terminal phase.
+    from vonk_agent_protocol import LifecycleState, ProgressPhase
+    from vonk_control.operation_progress import project_progress_for_state
+
+    pulled = OperationProgress(
+        phase=ProgressPhase.PULLING.value, completed_bytes=5_381_019_286
+    )
+    completed = project_progress_for_state(pulled, LifecycleState.SUCCEEDED, NOW)
+    assert completed.phase == ProgressPhase.COMPLETED
+    assert completed.completed_bytes == pulled.completed_bytes
+    assert completed.activity is None
+    assert pulled.phase == ProgressPhase.PULLING
+
+
+def test_subprocess_observations_advance_without_becoming_completed_items() -> None:
+    from vonk_agent_protocol import ProgressPhase
+    from vonk_control.stall_window import progress_advanced
+
+    before = OperationProgress(phase=ProgressPhase.BUILDING.value, activity_sequence=1)
+    after = validate_progress_update(
+        before,
+        OperationProgress(phase=ProgressPhase.BUILDING.value, activity_sequence=4096),
+    )
+    assert progress_advanced(before, after)
+    assert after.completed_items is None
+    assert after.completed_bytes == 0
+    assert not progress_advanced(after, after)
+    with pytest.raises(ValueError, match="activity sequence"):
+        validate_progress_update(after, before)

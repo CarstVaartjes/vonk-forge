@@ -177,6 +177,7 @@ _CARRIED_PROGRESS_FIELDS = (
     "total_bytes",
     "total_bytes_known",
     "completed_items",
+    "activity_sequence",
     "total_items",
     "checkpoint",
     "members",
@@ -238,6 +239,8 @@ def validate_progress_update(
     # persists no count, which is zero for the monotonicity check.
     if (merged.completed_items or 0) < (previous.completed_items or 0):
         raise ValueError("operation progress items cannot move backwards")
+    if (merged.activity_sequence or 0) < (previous.activity_sequence or 0):
+        raise ValueError("operation activity sequence cannot move backwards")
     old_checkpoint = previous.checkpoint
     new_checkpoint = merged.checkpoint
     if old_checkpoint is not None and new_checkpoint is not None:

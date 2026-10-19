@@ -57,6 +57,7 @@ fn operation_progress(phase: &str) -> OperationProgress {
         bytes_per_second: None,
         checkpoint: None,
         completed_bytes: 0_u64.into(),
+        activity_sequence: None,
         completed_items: None,
         elapsed_seconds: None,
         eta_seconds: None,
