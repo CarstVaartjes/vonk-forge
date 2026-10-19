@@ -8,7 +8,7 @@ from typing import (
 )
 from typing import cast as typing_cast
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import String, and_, cast, func, literal, or_, select
 from vonk_agent_protocol import (
     LifecycleState,
     RunSwitchCode,
@@ -134,6 +134,17 @@ class ObservationMixin:
                     ),
                     or_(
                         Job.id.in_(select(RunSwitchJournalRepairPending.job_id)),
+                        # Broad, cast-safe triage only; the journal owner proves
+                        # the exact typed fault before any repair. An unrelated
+                        # child observation clock cannot conceal damaged evidence.
+                        and_(
+                            cast(Job.result["total_bytes_known"].as_string(), String)
+                            == cast(literal(True), String),
+                            cast(Job.result["total_bytes"].as_string(), String)
+                            == cast(literal(0), String),
+                            cast(Job.result["completed_bytes"].as_string(), String)
+                            != cast(literal(0), String),
+                        ),
                         due_at.is_(None),
                         due_at <= _now(service._clock),
                         deadline_at <= _now(service._clock).isoformat(),

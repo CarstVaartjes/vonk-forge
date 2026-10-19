@@ -370,7 +370,11 @@ def schedule_wait(
                 )
             ]
         ),
-        dependency_deadline=deadline,
+        dependency_deadline=deadline
+        if deadline is not None
+        else previous.dependency_deadline
+        if previous
+        else None,
         resume_condition=previous.resume_condition
         if previous
         else WaitResumeCondition.DEPENDENCY_CHANGED,

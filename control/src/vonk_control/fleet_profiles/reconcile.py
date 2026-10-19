@@ -6,7 +6,7 @@ import uuid
 from typing import TYPE_CHECKING
 from typing import cast as _typing_cast
 
-from sqlalchemy import case, func, or_, select
+from sqlalchemy import case, func, select
 from vonk_agent_protocol import (
     LifecycleState,
     ProfileReasonCode,
@@ -194,10 +194,6 @@ class FleetProfileService:
                     ),
                     cancellation_state.not_in(fleet_profile_states.CANCEL_IN_FLIGHT),
                     admission_pending.is_(False),
-                    or_(
-                        FleetProfileApplication.next_action_at.is_(None),
-                        FleetProfileApplication.next_action_at <= now,
-                    ),
                 )
                 .order_by(
                     case(

@@ -143,6 +143,22 @@ def test_wait_round_trip_reconstruction_projection_and_rollback(
         assert later.first_blocked_at == previous.first_blocked_at
         assert later.last_progress_at == previous.last_progress_at
         assert later.dependency_deadline == previous.dependency_deadline
+        # A newly observed cause must replace the lead blocker without losing
+        # this accepted owner's hard reconciliation bound.
+        schedule_wait(
+            loaded,
+            due + timedelta(seconds=40),
+            now=due,
+            reason=WaitReason.RECEIPT_MISSING,
+        )
+    with sessions() as session:
+        loaded = session.get(Job, job.id)
+        assert loaded is not None
+        changed = read_wait(loaded)
+        assert changed is not None
+        assert changed.reason is changed.blockers[0].code is WaitReason.RECEIPT_MISSING
+        assert changed.dependency_deadline == NOW + timedelta(minutes=5)
+        assert changed.last_progress_at is None
 
 
 def test_startup_adds_wait_columns_without_restarting_a_live_attempt(

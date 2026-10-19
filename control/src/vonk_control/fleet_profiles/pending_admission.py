@@ -60,7 +60,6 @@ from .projection_support import (
 )
 
 #: Every stored ISO time sorts below this; anything above it is not a time.
-_NO_TIME = "9999-12-31T23:59:59.999999+99:99"
 
 
 def _raw_pending(row: FleetProfileApplication) -> bool:
@@ -122,7 +121,6 @@ class FleetProfileService:
                     or_(
                         retry_at.is_(None),
                         retry_at <= _aware(now),
-                        retry_at > now,
                     ),
                 )
                 .order_by(
