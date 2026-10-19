@@ -64,7 +64,7 @@ signal.pause()
         assert process.stdout.readline().strip() == "wait committed"
     finally:
         process.kill()
-        process.wait(timeout=5)
+        process.wait(timeout=30)
     now = [NOW]
     calls = []
 
@@ -172,74 +172,3 @@ def test_cancellation_committed_after_selection_wins_before_retry(postgres_engin
     with sessions() as session:
         current = session.get(Job, job.id)
         assert current is not None and current.current_attempt == 0
-
-
-def test_terminal_retirement_is_redriven_without_reopening_its_result(
-    tmp_path, postgres_engine
-):
-    """Catches terminal filtering and a lost cleanup handoff after an outage."""
-    from vonk_control.agent_jobs import AgentJobService
-    from vonk_control.persisted_waits import read_wait
-    from vonk_control.recipe_operations import RecipeOperationService
-
-    from .test_retirement_recovery import _parked_start
-
-    sessions, lifecycle, _jobs, projection, started, _claim = _parked_start(
-        tmp_path, postgres_engine
-    )
-    assert projection.retire_job is not None
-    projection.retire_job(started.id)
-    with sessions() as session:
-        retired = session.get(Job, started.id)
-        assert retired is not None
-        result, state = retired.result, retired.state
-        assert state in (LifecycleState.FAILED, LifecycleState.CANCELLED)
-        wait = read_wait(retired)
-        assert wait is not None and wait.owner_kind is WaitOwnerKind.RECIPE_OPERATION
-    now = [wait.next_check]
-    dependency = [False]
-
-    def withdrawal(run_id):
-        if not dependency[0]:
-            raise OSError("route publisher unavailable")
-
-    def construct():
-        jobs = AgentJobService(sessions, clock=lambda: now[0])
-        owner = RecipeOperationService(
-            sessions,
-            install_admission=lifecycle._install_admission,
-            run_admission=lifecycle._run_admission,
-            agent_jobs=jobs,
-            clock=lambda: now[0],
-        )
-        owner._route_withdrawer = withdrawal
-        return DueWaitBackstop(
-            sessions,
-            [
-                WaitSource(
-                    Job,
-                    frozenset({WaitOwnerKind.RECIPE_OPERATION}),
-                    lambda key, evidence: owner.redrive(str(key[0])),
-                )
-            ],
-            clock=lambda: now[0],
-        )
-
-    construct().tick()
-    # Reconstruct after the fault clears. No claim, heartbeat, API read or
-    # operator re-submission makes the accepted Stop progress.
-    dependency[0] = True
-    now[0] += timedelta(seconds=6)
-    construct().tick()
-    from sqlalchemy import select
-    from vonk_agent_protocol import AgentOperation
-
-    with sessions() as session:
-        stops = list(
-            session.scalars(select(Job).where(Job.kind == AgentOperation.RECIPE_STOP))
-        )
-        assert stops and any(stop.payload.get("phases") for stop in stops)
-        retired = session.get(Job, started.id)
-        assert (
-            retired is not None and retired.state == state and retired.result == result
-        )

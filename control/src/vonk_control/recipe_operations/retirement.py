@@ -7,7 +7,7 @@ from datetime import timedelta
 from typing import TYPE_CHECKING
 from typing import cast as typing_cast
 
-from sqlalchemy import select, true
+from sqlalchemy import or_, select, true
 from vonk_agent_protocol import AgentOperation as WireAgentOperation
 from vonk_agent_protocol import (
     InstallationState,
@@ -97,7 +97,7 @@ class RetirementMixin:
                         _JsonFlagIsTrue(Job.result, LifecycleState.CANCELLED.value),
                         _JsonFlagIsTrue(Job.result, "cancel_requested"),
                         Job.result["recovery"].as_string().is_(None),
-                        Job.updated_at <= now - interval,
+                        or_(Job.next_action_at.is_(None), Job.next_action_at <= now),
                     )
                     .order_by(Job.updated_at, Job.id)
                     # At most one child admission/publication per worker tick,

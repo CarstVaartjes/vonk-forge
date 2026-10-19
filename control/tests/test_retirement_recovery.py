@@ -14,6 +14,7 @@ from vonk_agent_protocol import (
     InstallationState,
     LifecycleState,
     ReservationState,
+    WaitOwnerKind,
     canonical_message,
 )
 from vonk_control.agent_jobs import (
@@ -22,6 +23,7 @@ from vonk_control.agent_jobs import (
     StaleAgentAttempt,
 )
 from vonk_control.auth import TokenCodec
+from vonk_control.due_waits import DueWaitBackstop, WaitSource
 from vonk_control.models import (
     AgentNode,
     AgentOperation,
@@ -58,6 +60,25 @@ class QuietRoutes:
 
     def maintain(self):
         return False
+
+
+class DueRetirementWorker:
+    def __init__(self, sessions, lifecycle, clock):
+        self.progressed = False
+
+        def advance(key, wait):
+            self.progressed = lifecycle.redrive(str(key[0])) or self.progressed
+
+        self.backstop = DueWaitBackstop(
+            sessions,
+            [WaitSource(Job, frozenset({WaitOwnerKind.RECIPE_OPERATION}), advance)],
+            clock=clock,
+        )
+
+    def tick(self):
+        self.progressed = False
+        self.backstop.tick()
+        return self.progressed
 
 
 def _result(claim, evidence, *, state="succeeded"):
@@ -122,8 +143,9 @@ def _parked_start(tmp_path: Path, engine):
     return sessions, lifecycle, jobs, projection, started, claim
 
 
+@pytest.mark.parametrize("use_backstop", (False, True))
 def test_retirement_preserves_uncertain_capacity_until_exact_stop(
-    tmp_path: Path, postgres_engine
+    tmp_path: Path, postgres_engine, use_backstop
 ) -> None:
     sessions, lifecycle, jobs, projection, started, claim = _parked_start(
         tmp_path, postgres_engine
@@ -183,6 +205,8 @@ def test_retirement_preserves_uncertain_capacity_until_exact_stop(
         retirement_cleanup=restarted.reconcile_retired_operations,
         stop_admission_cleanup=restarted.reconcile_pending_service_stops,
     )
+    if use_backstop:
+        worker = DueRetirementWorker(sessions, restarted, lambda: now[0])
     assert worker.tick()
     with sessions() as session:
         accepted = session.scalar(select(Job).where(Job.kind == "recipe.stop"))
@@ -216,7 +240,14 @@ def test_retirement_preserves_uncertain_capacity_until_exact_stop(
     # accepted Stop continuation retains one original child and request.
     with ThreadPoolExecutor(max_workers=2) as workers:
         outcomes = tuple(
-            workers.map(lambda _: restarted.reconcile_pending_service_stops(), range(2))
+            workers.map(
+                lambda _: (
+                    DueRetirementWorker(sessions, restarted, lambda: now[0]).tick()
+                    if use_backstop
+                    else restarted.reconcile_pending_service_stops()
+                ),
+                range(2),
+            )
         )
     assert any(outcomes)
     with sessions() as session:

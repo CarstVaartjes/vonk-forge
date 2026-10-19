@@ -18,6 +18,7 @@ from vonk_agent_protocol import (
     LifecycleState,
     OperatorActionName,
     UnknownOutcomeError,
+    WaitReason,
     canonical_message,
 )
 
@@ -39,6 +40,7 @@ from ..models import (
     Job,
     RecipeRun,
 )
+from ..persisted_waits import schedule_wait
 from ..profile_stop_authority import (
     ProfileJobRunStopJob,
 )
@@ -286,6 +288,13 @@ class StopMixin:
             parent.status_reason = (
                 f"accepted exact Stop deferred: {redact_text(str(error))}; next reconciliation at {(now + timedelta(seconds=5)).isoformat()}"
             )[:1024]
+            schedule_wait(
+                parent,
+                now + timedelta(seconds=5),
+                now=now,
+                reason=WaitReason.CLEANUP_UNCONFIRMED,
+                detail=parent.status_reason,
+            )
             parent.updated_at = now
             session.flush()
             return service._view(parent, session=session)

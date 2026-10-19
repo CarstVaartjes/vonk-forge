@@ -14,12 +14,18 @@ from vonk_agent_protocol import (
 )
 
 from .. import agent_operation_states, job_states
+from ..admission_locking import (
+    AdmissionLockBusy,
+    AdmissionRowLock,
+    label_transaction,
+    lock_admission_rows,
+)
 from ..agent_jobs import (
     schedule_agent_upgrade_retry,
 )
 from ..lifecycle import CancelRequested, Outcome, Reported
 from ..lifecycle.agent_operation import AgentOperationAdapter
-from ..lifecycle.agent_upgrade import UNSUPPORTED_DISPATCH
+from ..lifecycle.agent_upgrade import KIND, UNSUPPORTED_DISPATCH
 from ..models import AgentNode, AgentOperation, AgentOperationAttempt, Job, JobAttempt
 
 if TYPE_CHECKING:
@@ -44,7 +50,7 @@ class RecoveryMixin:
         parent = session.scalar(
             select(Job).where(Job.id == operation.parent_job_id).with_for_update(of=Job)
         )
-        if parent is None or parent.kind != "agent-upgrade":
+        if parent is None or parent.kind != KIND:
             return
         package = _stored_package(parent)
         if package is None:
@@ -104,8 +110,8 @@ class RecoveryMixin:
         now = service._clock()
         with service._sessions() as session:
             candidates = list(
-                session.scalars(
-                    select(Job.id)
+                session.execute(
+                    select(Job.id, Job.targets)
                     .where(
                         Job.kind == "agent-upgrade",
                         Job.id == requested_id if requested_id is not None else true(),
@@ -114,6 +120,7 @@ class RecoveryMixin:
                                 job_states.words(
                                     LifecycleState.NEEDS_OPERATOR,
                                     LifecycleState.RUNNING,
+                                    LifecycleState.QUEUED,
                                 )
                             ),
                             and_(
@@ -127,25 +134,44 @@ class RecoveryMixin:
                 )
             )
         healed = False
-        for job_id in candidates:
-            with service._sessions.begin() as session:
-                parent = session.scalar(
-                    select(Job).where(Job.id == job_id).with_for_update(of=Job)
-                )
-                if parent is None or parent.kind != "agent-upgrade":
-                    continue
-                if parent.state == "failed":
-                    if parent.status_reason != UNSUPPORTED_DISPATCH:
+        for job_id, targets in candidates:
+            try:
+                with service._sessions.begin() as session:
+                    label_transaction(session, "upgrade-redrive")
+                    rows = lock_admission_rows(
+                        session,
+                        (
+                            AdmissionRowLock(
+                                "upgrade-targets",
+                                AgentNode,
+                                select(AgentNode).where(AgentNode.node_id.in_(targets)),
+                            ),
+                            AdmissionRowLock(
+                                "upgrade-owner",
+                                Job,
+                                select(Job).where(Job.id == job_id),
+                            ),
+                        ),
+                    )
+                    parent = next(iter(rows["upgrade-owner"]), None)
+                    if parent is None or parent.targets != targets:
                         continue
-                    service._rollouts.reopen(parent, now, reason=None)
-                elif (
-                    parent.state not in _ACTIVE_ROLLOUT_STATES
-                    or parent.state == "running"
-                    and service._dispatch_is_live(session, parent, now)
-                ):
-                    continue
-                service._advance(session, parent)
-                healed = True
+                    if parent.kind != KIND:
+                        continue
+                    if parent.state == LifecycleState.FAILED:
+                        if parent.status_reason != UNSUPPORTED_DISPATCH:
+                            continue
+                        service._rollouts.reopen(parent, now, reason=None)
+                    elif (
+                        parent.state not in _ACTIVE_ROLLOUT_STATES
+                        or parent.state == LifecycleState.RUNNING
+                        and service._dispatch_is_live(session, parent, now)
+                    ):
+                        continue
+                    service._advance(session, parent)
+                    healed = True
+            except AdmissionLockBusy:
+                continue
         if healed:
             service._operations.notify_available()
         return healed

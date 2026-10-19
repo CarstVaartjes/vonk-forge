@@ -67,7 +67,7 @@ class ExecutionMixin:
                     select(Job.id)
                     .where(
                         Job.kind == UPDATE_KIND,
-                        Job.state.in_(("queued", "running")),
+                        Job.state.in_((LifecycleState.QUEUED, LifecycleState.RUNNING)),
                         Job.id == requested_id if requested_id is not None else true(),
                     )
                     .order_by(Job.updated_at, Job.id)
@@ -77,7 +77,10 @@ class ExecutionMixin:
             with service.sessions.begin() as session:
                 job = session.scalar(
                     select(Job)
-                    .where(Job.id == operation_id, Job.state.in_(("queued", "running")))
+                    .where(
+                        Job.id == operation_id,
+                        Job.state.in_((LifecycleState.QUEUED, LifecycleState.RUNNING)),
+                    )
                     .with_for_update(skip_locked=True)
                 )
                 if job is None:

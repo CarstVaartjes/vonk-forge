@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 from typing import cast as typing_cast
 
-from sqlalchemy import select, true
+from sqlalchemy import or_, select, true
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import AgentOperation as WireAgentOperation
@@ -18,6 +18,7 @@ from vonk_agent_protocol import (
     RunState,
     SecurityRefusalError,
     UnknownOutcomeError,
+    WaitReason,
     canonical_message,
 )
 
@@ -40,6 +41,7 @@ from ..models import (
     RunNode,
 )
 from ..offline_stops import deferred_stop_nodes
+from ..persisted_waits import schedule_wait
 from ..profile_stop_authority import (
     ProfileJobRunStopJob,
 )
@@ -81,7 +83,7 @@ class OfflineStopMixin:
                         Job.payload["service_stop_review"]["stage"]
                         .as_string()
                         .in_(["accepted", "withdrawal-claimed"]),
-                        Job.updated_at <= now - timedelta(seconds=5),
+                        or_(Job.next_action_at.is_(None), Job.next_action_at <= now),
                     )
                     .order_by(Job.updated_at, Job.id)
                     .limit(1)
@@ -101,6 +103,12 @@ class OfflineStopMixin:
                     continue
                 # An accepted Stop is cleanup: a newer workload intent on its
                 # Sparks and the time it takes never end it (own_cleanup).
+                schedule_wait(
+                    claimed,
+                    now + timedelta(seconds=5),
+                    now=now,
+                    reason=WaitReason.CLEANUP_UNCONFIRMED,
+                )
                 claimed.updated_at = now
             try:
                 document = service._service_stop_document(candidate)
@@ -159,6 +167,13 @@ class OfflineStopMixin:
                         retained.status_reason = (
                             f"accepted exact Stop deferred: {redact_text(str(error))}; next reconciliation at {(now + timedelta(seconds=5)).isoformat()}"
                         )[:1024]
+                        schedule_wait(
+                            retained,
+                            now + timedelta(seconds=5),
+                            now=now,
+                            reason=WaitReason.CLEANUP_UNCONFIRMED,
+                            detail=retained.status_reason,
+                        )
                         retained.updated_at = now
         return progressed or offline_progressed
 
