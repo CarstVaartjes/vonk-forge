@@ -14,6 +14,8 @@ from __future__ import annotations
 import uuid
 
 from sqlalchemy import select
+from vonk_agent_protocol import ReservationState
+from vonk_control.disk_reservations import outstanding_disk_reservation_bytes
 from vonk_control.attempt_residues import AttemptResidueReconciler
 from vonk_control.memory_reservations import memory_reservations
 from vonk_control.models import Job, ResourceReservation
@@ -28,6 +30,13 @@ def _counted(sessions, node_id):
     with sessions() as session:
         totals = memory_reservations(session, node_id, memory_pool="separate")
     return sum(totals.unmaterialized_bytes_by_kind.values())
+
+
+def _disk_counted(sessions, node_id, now):
+    with sessions() as session:
+        return outstanding_disk_reservation_bytes(
+            session, node_id, inventory_observed_at=now
+        )
 
 
 def _held_kinds(sessions, build_id):
@@ -76,6 +85,15 @@ def stopped_build_releases_its_memory(tmp_path, engine):
         )
         assert claim is not None
         claim.amount_bytes = 80_000
+        disk = session.scalar(
+            select(ResourceReservation).where(
+                ResourceReservation.owner_id == plan.build_id,
+                ResourceReservation.kind == "disk",
+                ResourceReservation.state == ReservationState.ACTIVE,
+            )
+        )
+        assert disk is not None
+        disk.amount_bytes = 1024**4
     operations.cancel(
         cancelled.id,
         actor="operator",
@@ -84,6 +102,7 @@ def stopped_build_releases_its_memory(tmp_path, engine):
     )
     # The cleanup is still stopping the build: its memory still counts.
     assert _counted(sessions, node_id) == 80_000
+    assert _disk_counted(sessions, node_id, now) == 1024**4
     _reconcile(sessions, now + OWNER_SETTLE_GRACE)
     assert _held_kinds(sessions, plan.build_id) == {"disk", "host-memory"}
 
@@ -105,6 +124,7 @@ def stopped_build_releases_its_memory(tmp_path, engine):
     assert operations.reconcile_cancelled_builds() is False
 
     assert _counted(sessions, node_id) == 0
+    assert _disk_counted(sessions, node_id, now) == 0
     _sessions, _bundles, _later, _node, other = setup(
         tmp_path,
         engine=engine,
