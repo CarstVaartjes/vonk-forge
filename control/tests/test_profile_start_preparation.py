@@ -9,6 +9,7 @@ from uuid import uuid4
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+from vonk_agent_protocol import WaitReason
 from vonk_control.fleet_profile_contract import FleetProfileInput
 from vonk_control.fleet_profiles import build_production_fleet_profile_service
 from vonk_control.models import CatalogDocumentRevision
@@ -141,4 +142,15 @@ def test_starting_an_installed_recipe_waits_for_preparation_then_starts(
     loaded = service.application(application.id)
     assert loaded.state == "running", loaded.status_reason
     assert [effect.state for effect in loaded.progress.effects] == ["pending"]
-    assert not loaded.blockers, loaded.blockers
+    # Admission's preparation wait is gone. The parent now observes its exact
+    # running child; a successful observation is not an unavailable dependency.
+    assert loaded.wait is not None
+    assert loaded.wait.reason is WaitReason.RECEIPT_MISSING
+    assert loaded.wait.next_check > now[0]
+    assert loaded.blockers and all(
+        blocker.code is WaitReason.RECEIPT_MISSING
+        and blocker.severity == "info"
+        and blocker.operation is not None
+        and blocker.operation.id != application.id
+        for blocker in loaded.blockers
+    )

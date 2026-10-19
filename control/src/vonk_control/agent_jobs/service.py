@@ -117,6 +117,7 @@ from .supersession import (
     assess_superseded_agent_effects_in_session,
     request_superseded_workload_cancellation_in_session,
 )
+from .waits import refresh_queue_waits
 
 
 class AgentJobService:
@@ -153,6 +154,7 @@ class AgentJobService:
         self._started = False
         self._reconciler: Reconciler | None = None
         self._order_sweep_cursor: str | None = None
+        self._queue_wait_cursor: str | None = None
         # SQLite ignores row locks. This only prevents same-service test races;
         # PostgreSQL correctness is provided by the database locks below.
         self._claim_lock = threading.RLock()
@@ -697,6 +699,7 @@ class AgentJobService:
             if self._result_consumer is not None:
                 self._result_consumer(session, operation, attempt, message)
             self._aggregate_parent(session, operation.parent_job_id)
+            refresh_queue_waits(session, now, node_id=operation.node_id)
         # A result consumer can atomically make the next durable recipe phase
         # queueable; wake long-polling agents only after that transaction commits.
         self.notify_available()

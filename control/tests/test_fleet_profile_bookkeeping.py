@@ -451,7 +451,7 @@ def test_damaged_review_ends_without_holds_and_a_fresh_load_is_admitted(damage) 
 
         assert service.tick()
         waiting = service.application(receipt.id)
-        assert waiting.progress.retry_due_at is not None
+        assert waiting.next_attempt_at is not None
         later = NOW + timedelta(seconds=PROFILE_STALL_WINDOW_SECONDS + 1)
         service._clock = lambda: later
         assert service.tick()
@@ -647,7 +647,7 @@ def test_damaged_newest_pending_plan_does_not_starve_readable_admission():
     ended = service.application(damaged.id)
     assert ended.state == LifecycleState.CANCELLED
     assert not ended.progress.admission_pending
-    assert ended.progress.admission_retry_at is None
+    assert ended.next_attempt_at is None
     assert not service.application(healthy.id).progress.admission_pending
     assert {item["application_id"] for item in adapter.starts} <= {healthy.id}
     fresh = service.apply(profile.id, request_key=_uuid(1132), actor="admin")
@@ -685,7 +685,7 @@ def test_damaged_retry_projection_cannot_hide_a_waiting_admission():
         row = session.get(FleetProfileApplication, pending.id)
         assert row is not None
         progress = dict(row.progress)
-        progress["admission_retry_at"] = "zzz"
+        progress["admission_attempt"] = "zzz"
         row.progress = progress
     now[0] += timedelta(seconds=61)
     assert service._observe_pending_admissions(now[0])

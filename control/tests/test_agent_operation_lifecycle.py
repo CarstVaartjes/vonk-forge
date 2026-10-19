@@ -186,7 +186,9 @@ def test_startup_adoption_moves_the_legacy_schedule_onto_next_action_at(
     assert stored.next_action_at is not None
     assert stored.next_action_at.replace(tzinfo=UTC) == due
     assert stored.retry_disposition is None and stored.retry_due_at is None
-    assert _stored(sessions, other.id).next_action_at is None  # untouched
+    assert (
+        _stored(sessions, other.id).next_action_at is not None
+    )  # persisted queue observation
     with sessions.begin() as session:  # idempotent
         assert adopt_legacy_orders(session.connection()) == 0
     clock.now = due + timedelta(seconds=1)
@@ -376,7 +378,7 @@ def test_a_never_executed_order_parked_for_an_operator_is_queued_again(
     assert jobs.reconcile_orders() is True
 
     stored = _stored(sessions, operation.id)
-    assert stored.state == "queued" and stored.next_action_at is None
+    assert stored.state == "queued" and stored.next_action_at is not None
     claim = claim_agent(jobs, NODE_A, "serial-a")
     assert claim is not None and claim.operation.value == kind
 

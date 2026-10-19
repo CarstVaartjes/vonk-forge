@@ -9,7 +9,7 @@ from datetime import timedelta
 from typing import TYPE_CHECKING, cast
 
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import Disposition, ModelCacheCode
+from vonk_agent_protocol import Disposition, ModelCacheCode, WaitReason
 
 from ..agent_operation_facts import aware as _aware
 from ..failure_classification import disposition, is_definite
@@ -21,6 +21,7 @@ from ..model_cache_contract import (
 from ..model_cache_progress import cache_phase, progress_document
 from ..models import ModelCacheOperation, ModelCacheSet
 from ..operation_blockers import make_blocker
+from ..persisted_waits import schedule_wait, typed_wait_reason
 from .artifacts import ArtifactSetManifest
 from .catalog_helpers import _iso
 from .constants import (
@@ -310,6 +311,18 @@ class FailureMixin:
                             if access_wait
                             else [],
                         ),
+                    )
+                if bounded_retry and next_retry is not None:
+                    schedule_wait(
+                        operation,
+                        next_retry,
+                        now=now,
+                        reason=typed_wait_reason(
+                            failure_payload.code, WaitReason.OBSERVATION_UNAVAILABLE
+                        ),
+                        blockers=[
+                            make_blocker(failure_payload.code, failure_payload.detail)
+                        ],
                     )
                 operation.progress = progress_document(
                     cache_phase(

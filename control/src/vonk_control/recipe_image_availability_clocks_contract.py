@@ -69,7 +69,6 @@ class StoredAvailabilityClocks(BaseModel):
     model_config = ConfigDict(extra="ignore")
     claim_owner: Annotated[str | None, _TEXT] = None
     claim_until: Annotated[AwareDatetime | None, _TIME] = None
-    retry_after_at: Annotated[AwareDatetime | None, _TIME] = None
     retry: Annotated[
         StoredAvailabilityRetryClock | None,
         readable_or_none(TypeAdapter(StoredAvailabilityRetryClock)),

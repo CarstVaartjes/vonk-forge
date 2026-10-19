@@ -365,14 +365,14 @@ def _worker_process(config: dict, crash: str) -> None:
             # acceptance is introduced by a test clock advance.
             with sessions() as session:
                 due = [
-                    result.observation_due_at
+                    child.next_action_at
                     for child in session.scalars(select(Job))
                     if isinstance(
-                        (result := read_row_column(child, "result")),
+                        read_row_column(child, "result"),
                         RunSwitchOperationResult,
                     )
-                    and result.observation_due_at is not None
-                    and result.observation_due_at > now[0]
+                    and child.next_action_at is not None
+                    and child.next_action_at > now[0]
                 ]
             now[0] = min(due, default=now[0] + timedelta(seconds=1))
         with sessions() as session:

@@ -269,7 +269,7 @@ def test_postgres_paired_profile_has_one_owner_and_lane_attributed_receipts(
         if not pending:
             break
         for waiting in pending:
-            due = waiting.progress.admission_retry_at
+            due = waiting.next_attempt_at
             assert due is not None
             now[0] = max(now[0], due)
         assert profiles.tick()

@@ -262,9 +262,9 @@ def test_a_pair_run_that_lost_a_rank_is_stopped_by_the_newer_load(
         repository.record(InventorySnapshotInput(**{**values, "observed_at": clock[0]}))
     replacement = None
     for _ in range(10):
-        due = planner.get(accepted.operation_id).result
-        if due is not None and due.observation_due_at is not None:
-            clock[0] = max(clock[0], due.observation_due_at)
+        due = planner.get(accepted.operation_id).next_attempt_at
+        if due is not None:
+            clock[0] = max(clock[0], due)
         planner.tick()
         with sessions() as session:
             replacement = session.scalar(

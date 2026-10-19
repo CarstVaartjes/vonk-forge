@@ -32,6 +32,7 @@ from ..model_primitives import (
     _state_in,
     _uuid_shape,
 )
+from .waits import Residue, WaitEvidence, wait_due_column, wait_evidence_column
 
 
 class ModelCacheSet(Base):
@@ -139,6 +140,10 @@ class ModelCacheOperation(Base):
     """Restart-safe NAS operation with per-artifact byte checkpoints."""
 
     __tablename__ = "model_cache_operations"
+    wait_evidence: Mapped[WaitEvidence | Residue | None] = wait_evidence_column(
+        __tablename__
+    )
+    next_action_at: Mapped[datetime | None] = wait_due_column("next_action_at")
     __table_args__ = (
         CheckConstraint(
             "schema_version = 2", name="ck_model_cache_operations_schema_version"
@@ -197,9 +202,6 @@ class ModelCacheOperation(Base):
     #: queued or interrupted operation may be claimed again.  It replaces the
     #: payload's ``retry.next_retry_at``/``retry_after_seconds`` (read only by the
     #: lifecycle adapter's ``adopt`` for rows written before the core).
-    next_action_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), index=True
-    )
     #: How many times the core looked at a cancelled operation since it last ran
     #: (a stop and its confirmation); the stop budget of a cancel.
     observe_count: Mapped[int] = mapped_column(
@@ -234,6 +236,10 @@ class ArtifactLifecycleGate(Base):
     """
 
     __tablename__ = "artifact_lifecycle_gates"
+    wait_evidence: Mapped[WaitEvidence | Residue | None] = wait_evidence_column(
+        __tablename__
+    )
+    next_action_at: Mapped[datetime | None] = wait_due_column("next_action_at")
     __table_args__ = (
         CheckConstraint(
             "artifact_kind IN ('model-set','model-object','runtime-image')",
@@ -277,6 +283,10 @@ class RecipeLibrarySyncRun(Base):
     """Durable, idempotent evidence for one managed recipe-library refresh."""
 
     __tablename__ = "recipe_library_sync_runs"
+    wait_evidence: Mapped[WaitEvidence | Residue | None] = wait_evidence_column(
+        __tablename__
+    )
+    next_action_at: Mapped[datetime | None] = wait_due_column("next_action_at")
     __table_args__ = (
         CheckConstraint(
             "trigger IN ('manual','automatic')",

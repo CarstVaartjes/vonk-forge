@@ -270,15 +270,15 @@ def test_runnable_job_age_excludes_intentional_deferrals() -> None:
     # could issue now.
     now = datetime(2026, 9, 17, 12, tzinfo=UTC)
     rows = [
-        ("recipe.run-switch.v2", now - timedelta(minutes=20), {}),
-        ("recipe.run-switch.v2", now - timedelta(minutes=30), {}),
+        ("recipe.run-switch.v2", now - timedelta(minutes=20), None),
+        ("recipe.run-switch.v2", now - timedelta(minutes=30), None),
         # A deferred observation retry is an intentional wait.
         (
             "recipe.build.v1",
             now - timedelta(minutes=40),
-            {"observation_due_at": (now + timedelta(minutes=10)).isoformat()},
+            now + timedelta(minutes=10),
         ),
-        ("recipe.build.v1", now - timedelta(minutes=2), {}),
+        ("recipe.build.v1", now - timedelta(minutes=2), None),
     ]
 
     ages = runnable_job_ages(rows, now)

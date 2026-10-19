@@ -660,6 +660,13 @@ class RecipeImageAvailabilityService:
     ):
         return projection.get_operator_operation(self, operation_id)
 
+    def cancellation_by_request(
+        self, operation_id: str, request_id: str, *, actor: str
+    ) -> RecipeImageAvailabilityView | RecipeUpdateResponse:
+        return cancellation_ops.cancellation_by_request(
+            self, operation_id, request_id, actor=actor
+        )
+
     def get_operator_request(
         self, request_key: str, *, actor: str
     ) -> (
@@ -751,8 +758,8 @@ class RecipeImageAvailabilityService:
         return execution._eligible(self, operation_id)
 
     @staticmethod
-    def _retry_due(payload: AvailabilityJobPayload, now: datetime) -> bool:
-        return execution._retry_due(payload, now)
+    def _retry_due(operation: Job, now: datetime) -> bool:
+        return execution._retry_due(operation, now)
 
     def _claim_operation(
         self,

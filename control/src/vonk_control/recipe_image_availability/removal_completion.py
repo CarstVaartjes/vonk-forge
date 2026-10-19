@@ -88,7 +88,7 @@ def _finish_recipe_removal(
                 or checkpoint.image_index != len(owner.plan.image_archives)
                 or checkpoint.image_pending_bytes is not None
                 or checkpoint.model_index != len(owner.plan.model_children)
-                or not _removal_retry_is_due(checkpoint.failure, now)
+                or not _removal_retry_is_due(operation, now)
             ):
                 return False
             intent_archives = tuple(owner.plan.image_archives)

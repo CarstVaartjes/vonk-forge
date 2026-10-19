@@ -14,10 +14,13 @@ from pydantic import (
     model_validator,
 )
 from vonk_agent_protocol import (
+    ErrorCategory,
     LifecycleState,
     LifecycleSubject,
     ProgressPhase,
+    UnknownError,
     UnknownOutcomeError,
+    WaitReason,
     state_adopter,
 )
 
@@ -33,6 +36,11 @@ from .operation_contract import (
     AvailabilityOperationFailure,
     AvailabilityRecoveryAction,
     OperationProgress,
+)
+from .operator_acceptance import (
+    OperatorReceiptResolver,
+    ReceiptPolicy,
+    operator_acceptance,
 )
 from .recipe_availability_intent import RecipeAvailabilityIntent
 from .recipe_image_availability import (
@@ -223,6 +231,10 @@ RecipeOperationResponse = (
 
 
 RECIPE_IMAGE_AVAILABILITY_OPERATION_IDS = {
+    (
+        "get",
+        "/api/recipe/operations/{operation_id}/cancellations/{request_key}",
+    ): "getRecipeCancellation",
     ("get", "/api/recipe/operations/{operation_id}"): "getRecipeOperation",
     ("get", "/api/recipe/requests/{request_key}"): "getRecipeRequest",
     ("post", "/api/recipe/operations/{operation_id}/retry"): "retryRecipeOperation",
@@ -494,6 +506,41 @@ def install_recipe_operator_routes(
         except (RecipeImageAvailabilityError, KeyError) as error:
             raise _recipe_error(error) from None
 
+    @app.get(
+        "/api/recipe/operations/{operation_id}/cancellations/{request_key}",
+        response_model=RecipeOperationResponse | UnknownError,
+        responses=bounded_error_responses(401, 404, 409, 422, 503),
+        operation_id="getRecipeCancellation",
+    )
+    def cancellation_receipt(
+        operation_id: Annotated[str, Path(pattern=UUID_PATTERN)],
+        request_key: Annotated[str, Path(pattern=UUID_PATTERN)],
+        actor: Any = actor_dependency,
+    ) -> RecipeOperationResponse | UnknownError:
+        if service is None:
+            return UnknownError(
+                category=ErrorCategory.UNKNOWN,
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
+            )
+        try:
+            operation = service.cancellation_by_request(
+                operation_id, request_key, actor=actor.subject
+            )
+            return (
+                operation
+                if isinstance(operation, RecipeUpdateResponse)
+                else _view_document(operation)
+            )
+        except KeyError:
+            raise HTTPException(
+                status_code=404, detail="Cancellation receipt not found"
+            ) from None
+        except RecipeImageAvailabilityError:
+            return UnknownError(
+                category=ErrorCategory.UNKNOWN,
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
+            )
+
     @app.post(
         "/api/recipe/operations/{operation_id}/retry",
         status_code=status.HTTP_202_ACCEPTED,
@@ -501,6 +548,7 @@ def install_recipe_operator_routes(
         responses=bounded_error_responses(401, 403, 404, 409, 422, 503),
         operation_id="retryRecipeOperation",
     )
+    @operator_acceptance(ReceiptPolicy.RECIPE_REQUEST)
     def retry_operation(
         body: RecipeDownloadRequest,
         operation_id: Annotated[str, Path(pattern=UUID_PATTERN)],
@@ -523,6 +571,7 @@ def install_recipe_operator_routes(
         responses=bounded_error_responses(401, 403, 404, 409, 422, 503),
         operation_id="cancelRecipeOperation",
     )
+    @operator_acceptance(ReceiptPolicy.RECIPE_CANCEL)
     def cancel_operation(
         body: RecipeCancellationRequest,
         operation_id: Annotated[str, Path(min_length=1, max_length=128)],
@@ -551,6 +600,7 @@ def install_recipe_operator_routes(
         responses=bounded_error_responses(401, 403, 404, 409, 422, 503),
         operation_id="downloadRecipe",
     )
+    @operator_acceptance(ReceiptPolicy.RECIPE_REQUEST)
     def download(
         body: RecipeDownloadRequest,
         _request: Request,
@@ -582,6 +632,7 @@ def install_recipe_operator_routes(
         responses=bounded_error_responses(401, 403, 404, 409, 422, 503),
         operation_id="removeRecipe",
     )
+    @operator_acceptance(ReceiptPolicy.RECIPE_REQUEST)
     def remove(
         body: RecipeOperatorRequest,
         _request: Request,
@@ -637,6 +688,7 @@ def install_recipe_operator_routes(
         responses=bounded_error_responses(401, 403, 409, 422, 503),
         operation_id="updateRecipes",
     )
+    @operator_acceptance(ReceiptPolicy.RECIPE_REQUEST)
     def update(
         body: RecipeUpdateRequest,
         _request: Request,
@@ -658,6 +710,8 @@ def install_recipe_operator_routes(
             raise
         except (RecipeImageAvailabilityError, KeyError) as error:
             raise _recipe_error(error) from None
+
+    OperatorReceiptResolver(recipes=service).bind(app)
 
 
 __all__ = [

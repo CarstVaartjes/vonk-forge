@@ -112,3 +112,19 @@ class ModelCacheCode(WireEnum):
     UPSTREAM_CHECK_BUDGET_EXHAUSTED = "model_cache.upstream_check_budget_exhausted"
     UPSTREAM_CHECK_FAILED = "model_cache.upstream_check_failed"
     UPSTREAM_REVISION_INVALID = "model_cache.upstream_revision_invalid"
+
+
+class ModelAccessReason(WireEnum):
+    """Visible model access dependencies, shared by wait and recovery."""
+
+    ACCESS_REQUIRED = "access_required"
+    ACCESS_DENIED = "access_denied"
+    CREDENTIALS_INVALID = "credentials_invalid"
+
+
+class ModelCacheFailureCode(WireEnum):
+    """Public cache failure semantics preserved in availability projections."""
+
+    INTEGRITY_MISMATCH = "integrity_mismatch"
+    CAPACITY = "capacity"
+    INTERRUPTED = "interrupted"

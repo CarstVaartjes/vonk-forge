@@ -25,6 +25,7 @@ from cluster_profiles.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 from .integer_domains import MAX_DATABASE_INTEGER
 from .recipe_lifecycle_contract import RecipeOperationCancellationResult
 from .strict_json import StrictJSONModel
+from .wait_contract import QueueWait
 
 UPDATE_KIND = "recipe.cache.update.v2"
 Identifier = Annotated[str, Field(min_length=1, max_length=128)]
@@ -129,7 +130,6 @@ class RecipeUpdateDocument(StrictJSONModel):
     next_child: int = Field(default=0, ge=0)
     claim_owner: str | None = Field(default=None, max_length=128)
     claim_until: AwareDatetime | None = None
-    next_attempt_at: AwareDatetime | None = None
 
     @model_validator(mode="after")
     def bounded_acyclic_scope(self) -> RecipeUpdateDocument:
@@ -168,6 +168,7 @@ class RecipeUpdateResponse(StrictJSONModel):
     progress: OperationProgress
     waiting_on: str | None = Field(default=None, max_length=256)
     wait_owner: Literal["recipe-image-availability"] | None = None
+    wait: QueueWait | None = None
     next_attempt_at: datetime | None = None
     resume_condition: str | None = Field(default=None, max_length=256)
     created_at: datetime

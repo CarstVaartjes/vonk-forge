@@ -177,7 +177,7 @@ def _follow_saved_due(sessions, service, application_id, clock):
             for attempt in session.scalars(select(AgentOperationAttempt))
         }
         issued = set(session.scalars(select(AgentOperation.id)))
-        profile_due = progress.retry_due_at
+        profile_due = row.next_action_at
         dues = (
             [profile_due] if profile_due is not None and profile_due > clock[0] else []
         )
@@ -188,10 +188,10 @@ def _follow_saved_due(sessions, service, application_id, clock):
             assert not isinstance(result, Residue)
             if (
                 result is not None
-                and result.observation_due_at is not None
-                and result.observation_due_at > clock[0]
+                and job.next_action_at is not None
+                and job.next_action_at > clock[0]
             ):
-                dues.append(result.observation_due_at)
+                dues.append(job.next_action_at)
     if profile_due is not None and profile_due > clock[0]:
         service.tick()
         with sessions() as session:
@@ -205,7 +205,7 @@ def _follow_saved_due(sessions, service, application_id, clock):
             ) == identity
             progress = _persisted_profile_progress(row)
             journal = progress.switch_adapter
-            assert progress.retry_due_at == profile_due
+            assert row.next_action_at == profile_due
             assert (list(journal.pending_children) if journal else []) == pending
             assert (list(journal.children) if journal else []) == closed
             assert set(session.scalars(select(AgentOperation.id))) == issued
@@ -249,7 +249,7 @@ def _drive_install(sessions, service, planner, application_id, clock, count):
     raise AssertionError(
         f"Expected {count} exact native installs, found {identities}; "
         f"now={clock[0]}, state={observed.state}, "
-        f"reason={observed.status_reason}, due={observed.progress.retry_due_at}, "
+        f"reason={observed.status_reason}, due={observed.next_attempt_at}, "
         f"ordinal={observed.progress.workload_intent_ordinal}, "
         f"children={child_observations}"
     )

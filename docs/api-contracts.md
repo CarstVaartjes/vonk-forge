@@ -12,6 +12,37 @@ their current contracts; neither requires accepting an older document format.
 Declared optional fields and defaults are part of the current contract, not
 legacy compatibility.
 
+## Operator acceptance receipts
+
+A successful operator mutation carries `X-Vonk-Receipt`, the JSON-encoded
+`AcceptanceReceipt` from `vonk_control.operator_receipt_contract`, and a `Link` with
+`rel="receipt"`. Its owner, record identity, lookup URL and applicable request,
+revision and content identity resolve through the existing owner after commit.
+There is no separate receipt database. Job resume and retirement retain a typed
+history on the Job row, bounded by the control-document reader budget. Old keys
+remain replayable after newer decisions without authorizing another attempt.
+The history is canonical JSON text validated on reads and writes. Controller
+startup adds the nullable `operator_decisions` column without
+resetting existing rows. The reference proves acceptance, not physical
+completion. A save can refer to the committed resource revision.
+
+Replaying an accepted cancellation returns its existing receipt; another key,
+actor or request content cannot adopt it. Model and recipe cancellation lookup
+URLs resolve the cancellation key on the original operation. Key lookups expose
+only the existing managed mutation receipt's public status, never its secret.
+Their `/api/key/{name}/requests` URL carries `request_id` as a query parameter;
+opaque identities, including Unicode and slashes, round-trip without changing
+their meaning. Receipt headers encode JSON as ASCII. A fresh revoke of an
+already retired key is refused; the accepted revoke key replays its receipt.
+An unavailable owner returns a typed retryable response; an unchanged target
+without the requested acceptance cannot return success. Profile saves replay
+an identical committed definition without increasing its revision.
+
+Mounted operator mutations declare their semantic `ReceiptPolicy`. The guard
+also enumerates both browser-auth configurations and rejects new unclassified
+mutations. Previews declare observation semantics. Agent and authentication
+receipt coverage remains a separate implementation boundary.
+
 ## Ownership
 
 The complete inventory of data classes, their source models and their generated
@@ -559,6 +590,26 @@ changes no `except` clause; the optional keyword-only `reason=` names a closed
 reason and `typed_error()` returns the wire `SecurityRefusal` / `InvalidRequest` /
 `UnknownError` for it. A raise in a lifecycle or operation path must use one of
 these types; the guard is described in [testing and CI](testing-and-ci.md).
+
+### Persisted Controller waits
+
+`wait_contract.WaitEvidence` owns the typed reason, dependency and owner identities,
+nonempty blockers, first-blocked and real-progress clocks, optional dependency
+expiry, and resume condition. Each existing durable owner stores this evidence
+in the transaction that parks its work. `QueueWait.next_check` is projected from
+that owner's SQL due field; the evidence JSON never stores a second due clock.
+A retry, heartbeat, refreshed description or progress read does not establish
+real progress or extend a dependency's deadline. A check clock on an operator
+wait does not authorize another attempt; only the explicit resume/retry path
+changes its lifecycle authority. Parent polling preserves the exact child
+identity and cannot conceal an already completed receipt.
+
+The protocol enums own the reason and resume vocabulary. API wait projections
+use that same evidence rather than inferring codes from status prose. Older
+rows with no evidence retain their running attempts; retired progress clocks
+are adopted on the owner's next transition. Unreadable bookkeeping is reported
+and isolated from other owners. This contract does not introduce due-row redrive;
+the existing advancement functions continue to own execution and cancellation.
 
 ## Required launch checks
 

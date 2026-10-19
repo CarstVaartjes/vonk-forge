@@ -8,6 +8,8 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def test_root_tests_do_not_import_control_implementation() -> None:
     contract_boundary_tests = {
+        # Mounted-route receipt semantics consume the owning Controller contracts.
+        ROOT / "tests/test_operator_acceptance_guard.py",
         # Tooling consumer tests use the canonical source-site registry contract.
         ROOT / "tests/scripts/test_check_python_types.py",
         # OpenAPI generation verifies the owning Controller schema and generated client.

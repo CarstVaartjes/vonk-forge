@@ -317,10 +317,11 @@ def _claim_predicate(now: datetime) -> _ClaimPredicate:
                 (
                     _ClaimCondition(
                         "operator-retry-not-authorized",
-                        # A schedule is the authorisation: the lifecycle core
-                        # sets ``next_action_at`` for an automatic retry and for
-                        # an operator's resume, and the claim clears it.
+                        # A retry schedule permits another claim. An operator
+                        # wait also has a check clock, but requires explicit resume.
                         and_(
+                            StoredOperation.state
+                            != agent_operation_states.NEEDS_OPERATOR,
                             StoredOperation.next_action_at.is_not(None),
                             StoredOperation.observe_count == 0,
                         ),

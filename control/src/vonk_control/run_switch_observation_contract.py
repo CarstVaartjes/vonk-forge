@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Annotated
 
 from pydantic import (
@@ -169,9 +168,6 @@ class RunSwitchStoredLifecycle(RunSwitchStoredChildIdentity):
     cancellation: Annotated[
         RunSwitchCancellation | None,
         readable_or_none(TypeAdapter(RunSwitchCancellation)),
-    ] = None
-    observation_due_at: Annotated[
-        datetime | None, readable_or_none(TypeAdapter(datetime))
     ] = None
     retry_attempt: Annotated[
         int | None, readable_or_none(TypeAdapter(Annotated[int, Field(ge=2)]))

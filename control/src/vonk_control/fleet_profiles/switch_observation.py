@@ -6,7 +6,14 @@ from typing import TYPE_CHECKING
 from typing import cast as _typing_cast
 
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import InvalidRequestReason, LifecycleState, RunSwitchCode
+from vonk_agent_protocol import (
+    InvalidRequestReason,
+    LifecycleState,
+    RunSwitchCode,
+    WaitOwnerKind,
+    WaitReason,
+    WaitResumeCondition,
+)
 from vonk_agent_protocol.agent_words import (
     ProfileChildPhase,
     ProfileSwitchChildKind,
@@ -28,6 +35,8 @@ from ..fleet_profile_contract import (
 from ..lifecycle.evidence import BookkeepingReason, Residue, retire_as_unknown
 from ..lifecycle.fleet_profile import FleetProfileAdapter, cancellation_state, doc_state
 from ..models import STOPPABLE_RUN_STATES, FleetProfileApplication, RecipeRun
+from ..operation_blockers import BlockingOperation, make_blocker
+from ..persisted_waits import schedule_wait, write_wait
 from ..run_switch_contract import RunSwitchOperation
 from .assessment_support import (
     _stored_state,
@@ -480,11 +489,14 @@ class RunSwitchFleetProfileAdapter:
 
         self = _typing_cast("_RunSwitchFleetProfileAdapter", self)  # noqa: PLW0642 -- assembled mixin interface
         now = _aware(self._run_switch._clock())
+        progress = _persisted_profile_progress(application)
         if (
             not before_dispatch
+            and progress.cancellation is None
             and state.state == LifecycleState.RUNNING.value
-            and state.observation_due_at is not None
-            and now < _aware(state.observation_due_at)
+            and state.pending_operation_ids
+            and application.next_action_at is not None
+            and now < _aware(application.next_action_at)
         ):
             return self._view_from_state(application, state)
         progress = _persisted_profile_progress(application)
@@ -524,7 +536,7 @@ class RunSwitchFleetProfileAdapter:
             )
         if not effects:
             if not before_dispatch:
-                state.observation_due_at = None
+                schedule_wait(application, None)
                 state.observation_deadline_at = None
                 state.pending_operation_ids = []
                 state.status_reason = None
@@ -543,7 +555,32 @@ class RunSwitchFleetProfileAdapter:
             "Reissuing Stop and observing older issued workload cancellation: "
             + ", ".join(sorted(effect.operation_id for effect in effects))
         )[:512]
-        state.observation_due_at = due
+        write_wait(
+            application,
+            identity=BlockingOperation(
+                id=application.id, kind=WaitOwnerKind.FLEET_PROFILE.value
+            ),
+            kind=WaitOwnerKind.FLEET_PROFILE,
+            reason=WaitReason.STOP_UNCONFIRMED,
+            now=now,
+            next_check=due,
+            blockers=[
+                make_blocker(
+                    WaitReason.STOP_UNCONFIRMED,
+                    "Awaiting the exact superseded workload cancellation receipt",
+                    node_ids=[effect.node_id],
+                ).model_copy(
+                    update={
+                        "operation": BlockingOperation(
+                            id=effect.operation_id, kind=effect.kind
+                        )
+                    }
+                )
+                for effect in effects
+            ],
+            dependency_deadline=min(effect.observation_deadline for effect in effects),
+            resume_condition=WaitResumeCondition.EFFECT_OBSERVED,
+        )
         state.observation_deadline_at = min(
             effect.observation_deadline for effect in effects
         )

@@ -66,6 +66,7 @@ from vonk_agent_protocol import (
     LifecycleState,
     RecipeJobRunResult,
     RunDegradedReason,
+    WaitOwnerKind,
     WaitReason,
     legacy_preparation,
 )
@@ -87,6 +88,7 @@ from ..models import (
     RecipeRun,
 )
 from ..models import AgentOperation as StoredOperation
+from ..persisted_waits import lifecycle_wait
 from ..settings import DATABASE_WAIT_BUDGETS
 from ..stall_window import stall_deadline
 from ..stored_json import read_row_column
@@ -497,6 +499,18 @@ class ArtifactJobAdapter:
             return False
         if job.preparation is None and (stage := legacy_preparation(job.state)):
             job.preparation = stage.value  # a row written before the rename
+        lifecycle_wait(
+            job,
+            identity=job.id,
+            kind=WaitOwnerKind.ARTIFACT_JOB,
+            state=after.state,
+            now=now,
+            due=after.next_action_at,
+            detail=after.reason,
+            deadline=after.recovery_deadline,
+            cancelling=after.cancel_requested,
+            lease_deadline=after.lease_deadline,
+        )
         target = self._stored_state(job, after)
         changed_state = ajs.state_of(job) != target or job.state != target
         text = reason

@@ -66,6 +66,7 @@ from vonk_control.operation_contract import (
     AvailabilityOperationFailure,
     AvailabilityRecoveryAction,
 )
+from vonk_control.persisted_waits import schedule_wait
 from vonk_control.recipe_availability_intent import RecipeRevisionIntent
 from vonk_control.recipe_image_availability import (
     RecipeImageAvailabilityError,
@@ -2157,9 +2158,7 @@ def test_builder_dependency_wait_remains_durable_queue_after_automatic_limit(
     with sessions.begin() as session:
         operation = session.get(Job, queued.id)
         assert operation is not None
-        operation.payload = dict(operation.payload) | {
-            "retry_after_at": (datetime.now(UTC) - timedelta(seconds=1)).isoformat()
-        }
+        schedule_wait(operation, (datetime.now(UTC) - timedelta(seconds=1)))
 
     assert service.run_pending() == 1
     still_waiting = service.get(queued.id)
@@ -2257,16 +2256,12 @@ def test_claim_skips_backoff_and_renews_live_lease(tmp_path: Path) -> None:
     with sessions.begin() as session:
         operation = session.get(Job, queued.id)
         assert operation is not None
-        operation.payload = dict(operation.payload) | {
-            "retry_after_at": (now + timedelta(minutes=5)).isoformat(),
-        }
+        schedule_wait(operation, (now + timedelta(minutes=5)))
     assert service.claim_pending(owner_id="worker-a") == ()
     with sessions.begin() as session:
         operation = session.get(Job, queued.id)
         assert operation is not None
-        operation.payload = dict(operation.payload) | {
-            "retry_after_at": (now - timedelta(seconds=1)).isoformat(),
-        }
+        schedule_wait(operation, (now - timedelta(seconds=1)))
 
     claim = service.claim_pending(owner_id="worker-a")
     assert claim and claim[0].operation_id == queued.id
@@ -2498,9 +2493,9 @@ def test_postgres_model_child_lock_contention_resumes_same_preparation(
         assert isinstance(retry_state, Mapping)
         # Dependency observations have the same request-owned retry deadline.
         assert retry_state["automatic_attempts"] >= 1
-        retry_after_at = stored_waiting.payload["retry_after_at"]
-        assert isinstance(retry_after_at, str)
-        retry_at = datetime.fromisoformat(retry_after_at)
+        retry_after_at = stored_waiting.next_action_at
+        assert isinstance(retry_after_at, datetime)
+        retry_at = retry_after_at.replace(tzinfo=UTC)
         assert 0 < (retry_at - now[0]).total_seconds() <= 5
         assert stored_waiting.payload.get("model_child") is None
 
@@ -2508,9 +2503,9 @@ def test_postgres_model_child_lock_contention_resumes_same_preparation(
     with sessions() as session:
         still_waiting = session.get(Job, queued.id)
         assert still_waiting is not None
-        retry_after = still_waiting.payload["retry_after_at"]
-        assert isinstance(retry_after, str)
-        assert datetime.fromisoformat(retry_after) == retry_at
+        retry_after = still_waiting.next_action_at
+        assert isinstance(retry_after, datetime)
+        assert retry_after.replace(tzinfo=UTC) == retry_at
 
     # Let the original bounded retry deadline elapse. The retry must select the
     # existing completed model operation under the same parent request.
@@ -3045,9 +3040,7 @@ def test_model_and_image_children_advance_independently_and_reuse_image(
     with sessions.begin() as session:
         row = session.get(Job, queued.id)
         assert row is not None
-        row.payload = dict(row.payload) | {
-            "retry_after_at": "2000-01-01T00:00:00+00:00"
-        }
+        schedule_wait(row, datetime(2000, 1, 1, tzinfo=UTC))
     builds: list[bool] = []
     restarted = _service(
         sessions,
@@ -3306,9 +3299,7 @@ def test_automatic_reconciliation_repairs_model_child_and_reuses_image(
     with sessions.begin() as session:
         row = session.get(Job, parent.id)
         assert row is not None
-        row.payload = dict(row.payload) | {
-            "retry_after_at": "2000-01-01T00:00:00+00:00"
-        }
+        schedule_wait(row, datetime(2000, 1, 1, tzinfo=UTC))
     assert service.run_pending() == 1
     assert len(model_cache.repair_calls) == 1
     assert model_cache.repair_calls[0]["artifact_set_sha256"] == "c" * 64
@@ -4129,7 +4120,7 @@ def test_newer_revision_is_prepared_at_once_after_the_older_build_failed(
             select(Job).where(Job.authority_revision == "revision-older")
         )
         assert prior is not None
-        assert prior.payload.get("retry_after_at") is not None
+        assert prior.next_action_at is not None
         assert prior.payload.get("claim_owner") is None
 
     # The recipe syncs a newer revision; no waiting for the retry pause.

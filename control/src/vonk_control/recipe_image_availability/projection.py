@@ -249,7 +249,10 @@ def retry(
             )
         previous_payload = self._payload(previous)
         if isinstance(previous_payload, Residue):
-            return self._unknown_view(previous, previous_payload)
+            raise RecipeImageAvailabilityInvalid(
+                RecipeImageCode.NOT_RETRYABLE,
+                "cannot record retry for unreadable recipe operation",
+            )
         retry_count = previous_payload.retry.operator_retries
         previous_authority = previous.authority_revision
         previous_targets = list(previous.targets)
@@ -266,7 +269,6 @@ def retry(
                 )
             }
         )
-        payload = payload.model_copy(update={"retry_after_at": None})
         payload = payload.model_copy(update={"failure": None})
         payload = payload.model_copy(update={"build_dependency": None})
         now = self._clock()

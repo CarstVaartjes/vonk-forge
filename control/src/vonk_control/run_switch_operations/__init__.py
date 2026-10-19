@@ -144,8 +144,6 @@ from .publish import (
     _persist_run_switch_runtime_image_reference as _persist_run_switch_runtime_image_reference,
 )
 from .result_helpers import _PHASE_RESULT_ADAPTER as _PHASE_RESULT_ADAPTER
-from .result_helpers import _WAIT_CODE as _WAIT_CODE
-from .result_helpers import _WAIT_PHRASES as _WAIT_PHRASES
 from .result_helpers import _bound_workload_intent as _bound_workload_intent
 from .result_helpers import _child_failure_code as _child_failure_code
 from .result_helpers import _child_failure_kind as _child_failure_kind
@@ -163,7 +161,6 @@ from .result_helpers import _progress_state as _progress_state
 from .result_helpers import _progress_subphase as _progress_subphase
 from .result_helpers import _read_progress as _read_progress
 from .result_helpers import _wait_blockers as _wait_blockers
-from .result_helpers import _wait_code as _wait_code
 from .result_helpers import _without_observation_time as _without_observation_time
 from .results import _stored_result as _stored_result
 from .service import RunSwitchOperationService as RunSwitchOperationService

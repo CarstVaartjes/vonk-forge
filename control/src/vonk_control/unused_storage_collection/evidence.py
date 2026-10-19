@@ -6,6 +6,7 @@ from collections import Counter
 from collections.abc import Collection, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
+from enum import StrEnum
 
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
@@ -224,6 +225,15 @@ class _Pressure:
     why: str
     #: Work was refused for this space, so removing too little would not help it.
     demanded: bool
+
+
+class StorageItemKind(StrEnum):
+    """What an unused item is; it picks the row that carries the item's wait."""
+
+    INSTALLATION = "installation"
+    IMAGE = "image"
+    MODEL_SET = "model-set"
+    MODEL = "model"
 
 
 @dataclass(frozen=True, slots=True)

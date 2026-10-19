@@ -9,9 +9,12 @@ from typing import Annotated, Any
 from fastapi import FastAPI, HTTPException, Path, status
 from vonk_agent_protocol import (
     Disposition,
+    ErrorCategory,
     OperationProgress,
     SecurityRefusalError,
+    UnknownError,
     UnknownOutcomeError,
+    WaitReason,
 )
 
 from .api_availability import AVAILABILITY_ERRORS
@@ -50,11 +53,20 @@ from .operation_item_contract import (
     OperationOwnerReference,
     OperationResultFacts,
 )
+from .operator_acceptance import (
+    OperatorReceiptResolver,
+    ReceiptPolicy,
+    operator_acceptance,
+)
 from .strict_json import read_stored_model
 
 MODEL_CACHE_OPERATION_IDS = {
     ("get", "/api/model/operations/{operation_id}"): "getModelOperation",
     ("get", "/api/model/requests/{request_key}"): "getModelRequest",
+    (
+        "get",
+        "/api/model/operations/{operation_id}/cancellations/{request_key}",
+    ): "getModelCancellation",
     ("get", "/api/model/{selector}/remove-review"): "reviewModelRemoval",
     ("post", "/api/model/{selector}/download"): "downloadModel",
     ("post", "/api/model/{selector}/remove"): "removeModel",
@@ -105,6 +117,7 @@ def _model_operator_response(
             else None
         ),
         blockers=list(operation.blockers),
+        wait=operation.wait,
         next_attempt_at=operation.next_attempt_at,
     )
 
@@ -211,6 +224,37 @@ def install_model_operator_routes(
         except (ModelCacheError, *AVAILABILITY_ERRORS) as error:
             raise model_cache_http_error(error) from None
 
+    @app.get(
+        "/api/model/operations/{operation_id}/cancellations/{request_key}",
+        response_model=ModelCacheOperatorResponse | UnknownError,
+        responses=bounded_error_responses(401, 404, 409, 422, 503),
+        operation_id="getModelCancellation",
+    )
+    def cancellation_receipt(
+        operation_id: Annotated[str, Path(pattern=UUID_PATTERN)],
+        request_key: Annotated[str, Path(pattern=UUID_PATTERN)],
+        actor: Actor = actor_dependency,
+    ) -> ModelCacheOperatorResponse | UnknownError:
+        if service is None:
+            return UnknownError(
+                category=ErrorCategory.UNKNOWN,
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
+            )
+        try:
+            operation, action, selector = service.get_operator_cancellation(
+                operation_id, request_key, actor=actor.subject
+            )
+            return _model_operator_response(operation, action=action, selector=selector)
+        except ModelCacheNotFound:
+            raise HTTPException(
+                status_code=404, detail="Cancellation receipt not found"
+            ) from None
+        except (ModelCacheError, *AVAILABILITY_ERRORS):
+            return UnknownError(
+                category=ErrorCategory.UNKNOWN,
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
+            )
+
     @app.post(
         "/api/model/operations/{operation_id}/resume-access",
         response_model=ModelCacheOperatorResponse,
@@ -218,6 +262,7 @@ def install_model_operator_routes(
         responses=bounded_error_responses(401, 403, 404, 409, 422, 503),
         operation_id="resumeModelAccess",
     )
+    @operator_acceptance(ReceiptPolicy.MODEL_REQUEST)
     def resume_access(
         body: ModelCacheOperatorRequest,
         operation_id: Annotated[str, Path(pattern=UUID_PATTERN)],
@@ -274,6 +319,7 @@ def install_model_operator_routes(
         responses=bounded_error_responses(401, 403, 404, 409, 422, 503),
         operation_id="downloadModel",
     )
+    @operator_acceptance(ReceiptPolicy.MODEL_REQUEST)
     def download(
         body: ModelCacheOperatorRequest,
         selector: Annotated[str, Path(min_length=1, max_length=256)],
@@ -302,6 +348,7 @@ def install_model_operator_routes(
         responses=bounded_error_responses(401, 403, 404, 409, 422, 503),
         operation_id="removeModel",
     )
+    @operator_acceptance(ReceiptPolicy.MODEL_REQUEST)
     def remove(
         body: ModelCacheRemovalRequest,
         selector: Annotated[str, Path(min_length=1, max_length=256)],
@@ -336,6 +383,7 @@ def install_model_operator_routes(
         responses=bounded_error_responses(401, 403, 404, 409, 422, 503),
         operation_id="cancelModelOperation",
     )
+    @operator_acceptance(ReceiptPolicy.MODEL_CANCEL)
     def cancel_operation(
         body: ModelCacheCancellationRequest,
         operation_id: Annotated[str, Path(pattern=UUID_PATTERN)],
@@ -356,6 +404,8 @@ def install_model_operator_routes(
             raise
         except (ModelCacheError, *AVAILABILITY_ERRORS) as error:
             raise model_cache_http_error(error) from None
+
+    OperatorReceiptResolver(models=service).bind(app)
 
 
 class ModelCacheOperationProvider:
@@ -484,6 +534,7 @@ class ModelCacheOperationProvider:
             failure=operation.failure,
             model_cache_cancellation=operation.cancellation,
             blockers=list(operation.blockers),
+            wait=operation.wait,
             next_attempt_at=operation.next_attempt_at,
             owner=OperationOwnerReference(
                 kind="model-cache-operation",

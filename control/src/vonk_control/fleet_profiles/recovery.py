@@ -8,8 +8,8 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 from typing import cast as _typing_cast
 
-from pydantic import TypeAdapter, ValidationError
-from sqlalchemy import func, or_, select
+from pydantic import ValidationError
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
     FailureCode,
@@ -34,6 +34,7 @@ from ..lifecycle.evidence import BookkeepingReason, Residue, retire_as_unknown
 from ..lifecycle.fleet_profile import FleetProfileAdapter
 from ..models import AgentNode, FleetProfileApplication, FleetProfileSelection
 from ..operation_blockers import OperationBlocker, make_blocker
+from ..persisted_waits import wait_due
 from ..profile_error_summary import _normalized_failure_text
 from ..recovery_policy import RECOVERY
 from .assessment_support import (
@@ -150,7 +151,6 @@ class FleetProfileService:
                 *(item for item in ending if (item.code, item.detail) not in recorded),
                 *progress.blockers,
             ],
-            retry_due_at=None,
         ).model_dump(mode="json")
         return False
 
@@ -327,14 +327,12 @@ class FleetProfileService:
         state = _OPERATION_STATE_ADAPTER.validate_python(row.state, strict=True)
         if progress.cancellation is not None:
             return state, None
-        if state == LifecycleState.QUEUED and progress.admission_pending:
-            return state, progress.admission_retry_at
         if state in {
             LifecycleState.QUEUED,
             LifecycleState.RUNNING,
             LifecycleState.BACKOFF,
         }:
-            return state, progress.retry_due_at
+            return state, wait_due(row)
         return state, None
 
     def _automatic_profile_recovery(self, now: datetime) -> tuple[str, str] | None:
@@ -355,14 +353,8 @@ class FleetProfileService:
                 # Only due rows are scanned (the typed timestamp below remains the
                 # authority), and the bounded batch walks all due rows round-robin
                 # so a refused or ineligible row cannot starve an eligible one.
-                retry_at = func.replace(
-                    FleetProfileApplication.progress["retry_due_at"].as_string(),
-                    "Z",
-                    "+00:00",
-                )
-                retry_cutoff = TypeAdapter(datetime).dump_python(
-                    _aware(now), mode="json"
-                )
+                retry_at = FleetProfileApplication.next_action_at
+                retry_cutoff = _aware(now)
                 statement = (
                     select(FleetProfileApplication)
                     .where(
@@ -375,7 +367,7 @@ class FleetProfileService:
                         ),
                         or_(
                             retry_at.is_(None),
-                            retry_at <= str(retry_cutoff).replace("Z", "+00:00"),
+                            retry_at <= retry_cutoff,
                         ),
                     )
                     .order_by(FleetProfileApplication.id)
@@ -426,9 +418,8 @@ class FleetProfileService:
                         continue
                     if not self._recovery_possible(session, row, progress):
                         continue
-                    if progress.retry_due_at is not None and _aware(
-                        progress.retry_due_at
-                    ) > _aware(now):
+                    due = wait_due(row)
+                    if due is not None and due > _aware(now):
                         continue
                     if now < FleetProfileAdapter.next_retry(
                         row.id, progress.attempt, _aware(row.updated_at)

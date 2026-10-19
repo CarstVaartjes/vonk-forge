@@ -16,6 +16,7 @@ from .. import job_states
 from ..categorized_errors import InvalidValue, MissingRecord
 from ..logging import redact_text
 from ..models import Job
+from ..persisted_waits import schedule_wait
 from ..recipe_lifecycle_contract import RecipeOperationCancellationResult
 from ..recipe_update_contract import (
     UPDATE_KIND,
@@ -233,12 +234,13 @@ class CancellationMixin:
                             "children": children,
                             "claim_owner": None,
                             "claim_until": None,
-                            "next_attempt_at": (
-                                None
-                                if all(child.state in _SETTLED for child in children)
-                                else now + _OBSERVATION_INTERVAL
-                            ),
                         }
+                    )
+                    schedule_wait(
+                        parent,
+                        None
+                        if all(child.state in _SETTLED for child in children)
+                        else now + _OBSERVATION_INTERVAL,
                     )
                     parent.payload = serialize_json_value(
                         read_update_document(serialize_json_value(current))

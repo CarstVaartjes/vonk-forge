@@ -48,6 +48,8 @@ from ..logging import log_event
 from ..models import (
     Job,
 )
+from ..operation_blockers import make_blocker
+from ..persisted_waits import schedule_wait
 from ..preparation_contract import (
     RuntimeImageIdentity,
 )
@@ -193,10 +195,11 @@ class PhaseDispatchMixin:
                     ):
                         return False
                     current.preflight = checkpoint
-                    current.observation_due_at = (
+                    schedule_wait(
+                        job,
                         checkpoint.next_check_at
                         if checkpoint.next_check_at is not None
-                        else None
+                        else None,
                     )
                     if blocked:
                         # Runtime evidence that says "not now" (a full disk, a
@@ -430,8 +433,8 @@ class PhaseDispatchMixin:
             if not _checkpoint_matches(job, progress, phase_index, item_index, None):
                 return False
             previous_status_reason = job.status_reason
-            if progress.observation_due_at is not None:
-                progress.observation_due_at = None
+            if job.next_action_at is not None:
+                schedule_wait(job, None)
                 progress.observation_deadline_at = None
                 job.status_reason = None
             retry_reason = progress.retry_reason
@@ -558,7 +561,7 @@ class PhaseDispatchMixin:
                             else 5
                         )
                     )
-                    progress.observation_due_at = due
+                    schedule_wait(job, due)
                     if deadline_expired and start_deadline is not None:
                         owner_reason = execution.status_reason or (
                             "run and route owners have not produced exact final evidence"
@@ -636,22 +639,23 @@ class PhaseDispatchMixin:
                     progress.phase_results = results
                 elif phase.kind == "prepare" and phase.subphase == "runtime-image":
                     due = now + timedelta(seconds=5)
-                    progress.observation_due_at = due
+                    schedule_wait(job, due)
                     # The image preparation (or its slot queue) is the live
                     # owner of this wait: it restarts the recovery window.
                     progress.recovery_deadline_at = max(
                         _aware(progress.recovery_deadline_at or now),
                         stall_deadline(now, None, RECOVERY_STALL_WINDOW),
                     )
-                    job.status_reason = execution.status_reason or (
+                    background_detail = execution.status_reason or (
                         "Runtime image preparation is running in the background; "
                         f"next check at {due.isoformat()}"
                     )
                     if progress.retry_reason:
-                        job.status_reason = (
-                            f"{job.status_reason} Attempt {progress.retry_attempt} "
+                        background_detail = (
+                            f"{background_detail} Attempt {progress.retry_attempt} "
                             f"after {progress.retry_reason}."
                         )[:512]
+                    job.status_reason = background_detail
                     _ADAPTER.project(
                         job,
                         progress,
@@ -659,6 +663,13 @@ class PhaseDispatchMixin:
                         state=_LifecycleState.OBSERVING,
                         due=due,
                         visible=_OBSERVING,
+                        wait_blockers=[
+                            make_blocker(
+                                RunSwitchCode.RUNTIME_IMAGE_PREPARING,
+                                background_detail,
+                                node_ids=list(job.targets),
+                            )
+                        ],
                     )
             elif execution.operation_id is not None:
                 progress.child_operation_id = execution.operation_id
@@ -728,7 +739,13 @@ class PhaseDispatchMixin:
                 and phase.kind == "prepare"
                 and phase.subphase == "runtime-image"
             ):
-                _ADAPTER.project(job, progress, now, state=_LifecycleState.RUNNING)
+                _ADAPTER.project(
+                    job,
+                    progress,
+                    now,
+                    state=_LifecycleState.RUNNING,
+                    due=job.next_action_at if execution.waiting else None,
+                )
             job.result = _persisted_result(progress)
             job.updated_at = now
             if progress.cancellation and not progress.child_operation_id:

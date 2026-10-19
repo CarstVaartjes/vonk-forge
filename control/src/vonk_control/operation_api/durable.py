@@ -34,6 +34,11 @@ from ..fleet_profile_contract import (
     FleetProfileEndpointState,
     FleetProfileEndpointsView,
 )
+from ..job_operator_receipts import (
+    JobOperatorReceipt,
+    record_job_operator_receipt,
+    replay_job_operator_receipt,
+)
 from ..lifecycle.job import JobAdapter
 from ..models import (
     AgentCertificate,
@@ -60,6 +65,7 @@ from .contracts import (
     OperationProvider,
     OperationProviderProtocol,
     OperationQuery,
+    OperatorJobMutation,
 )
 from .diagnostics import _agent_upgrade_diagnostics, _aware
 from .lane_wait import QueueWait, apply_queue_wait, spark_busy_blockers
@@ -820,11 +826,15 @@ class _DurableOperationProjection:
             actions.append("resume")
         return list(dict.fromkeys(actions)) or None
 
-    def resume_job(self, job_id: str) -> None:
+    def resume_job(
+        self, job_id: str, *, receipt: JobOperatorReceipt | None = None
+    ) -> None:
         with self._sessions.begin() as session:
             job = session.get(Job, job_id)
             if job is None:
                 raise KeyError(job_id)
+            if replay_job_operator_receipt(job, receipt):
+                return
             if job.state not in job_states.words(LifecycleState.NEEDS_OPERATOR):
                 raise ValueError("job is not waiting for operator")
             scope = AgentJobService._target_scope(job.targets)
@@ -832,6 +842,8 @@ class _DurableOperationProjection:
                 session, {"resume": (job_id, scope)}, scope[0]
             ):
                 raise ValueError("job target scope changed")
+            if replay_job_operator_receipt(job, receipt):
+                return
             if job.state not in job_states.words(LifecycleState.NEEDS_OPERATOR):
                 raise ValueError("job is not waiting for operator")
             now = self._clock()
@@ -843,8 +855,11 @@ class _DurableOperationProjection:
             authorize_operator_resume_in_session(session, job_id, now)
             if not JobAdapter(session, clock=self._clock).resume(session, job, now):
                 raise ValueError("job is not waiting for operator")
+            record_job_operator_receipt(job, receipt)
 
-    def retire_job(self, job_id: str) -> None:
+    def retire_job(
+        self, job_id: str, *, receipt: JobOperatorReceipt | None = None
+    ) -> None:
         """Retire an exhausted order and retain its effects for exact cleanup.
 
         The refusal is raised inside this transaction and rolls it back, so a
@@ -852,8 +867,14 @@ class _DurableOperationProjection:
         """
 
         with self._sessions.begin() as session:
+            job = session.get(Job, job_id)
+            if job is None:
+                raise KeyError(job_id)
+            if replay_job_operator_receipt(job, receipt):
+                return
             now = self._clock()
             retire_exhausted_operations_in_session(session, job_id, now)
+            record_job_operator_receipt(job, receipt)
 
 
 def durable_operation_services(
@@ -863,7 +884,7 @@ def durable_operation_services(
     clock: Callable[[], datetime],
     cursors: CursorCodec,
     stale_after_seconds: int = 150,
-    resume_agent_upgrade: Callable[[str], None] | None = None,
+    resume_agent_upgrade: OperatorJobMutation | None = None,
     operation_providers: Sequence[OperationProviderProtocol] = (),
     profile_endpoint_intent: (
         Callable[[Session, int], FleetProfileEndpointIntent] | None
@@ -881,7 +902,7 @@ def durable_operation_services(
     )
     standalone_jobs = _StandaloneJobActivityProjection(sessions, operation_providers)
 
-    def resume_job(job_id: str) -> None:
+    def resume_job(job_id: str, *, receipt: JobOperatorReceipt | None = None) -> None:
         with sessions() as session:
             job = session.get(Job, job_id)
             if job is None:
@@ -890,12 +911,12 @@ def durable_operation_services(
         if kind == "agent-upgrade":
             if resume_agent_upgrade is None:
                 raise ValueError("agent upgrade resume is unavailable")
-            resume_agent_upgrade(job_id)
+            resume_agent_upgrade(job_id, receipt=receipt)
             return
-        projection.resume_job(job_id)
+        projection.resume_job(job_id, receipt=receipt)
 
-    def retire_job(job_id: str) -> None:
-        projection.retire_job(job_id)
+    def retire_job(job_id: str, *, receipt: JobOperatorReceipt | None = None) -> None:
+        projection.retire_job(job_id, receipt=receipt)
 
     return OperationApiServices(
         clock=clock,

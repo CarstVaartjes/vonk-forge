@@ -5,6 +5,15 @@ from __future__ import annotations
 from collections.abc import Mapping
 from functools import cache
 
+from ..http_failure import TransientReason
+from ..lifecycle_vocabulary import (
+    FailureCode,
+    InvalidRequestReason,
+    ResourceBlockerCode,
+    RunAdmissionCode,
+    SecurityRefusalReason,
+    WaitReason,
+)
 from ..wire_model import WireEnum, WireModel
 from .admission import (
     AdmissionCode,
@@ -30,7 +39,13 @@ from .evidence import (
 from .fleet import ClusterMappingCode, DistributionCode, TopologyCode
 from .helpers import HelperErrorCode, HelperOperationCode
 from .images import ImageStoreCode, PrebuiltImageCode
-from .model_cache import CacheReferenceReason, ModelCacheBlockerCode, ModelCacheCode
+from .model_cache import (
+    CacheReferenceReason,
+    ModelAccessReason,
+    ModelCacheBlockerCode,
+    ModelCacheCode,
+    ModelCacheFailureCode,
+)
 from .profiles import ProfileReasonCode, ProjectionCode
 from .recipes import (
     RecipeBuildCode,
@@ -46,7 +61,7 @@ from .resources import (
     ResourceTermProblem,
     StorageDemandCode,
 )
-from .runs import RunSwitchCode, StopPlanCode, SupersedeCode
+from .runs import JournalRepairCode, RunSwitchCode, StopPlanCode, SupersedeCode
 from .runtime import RuntimeImageCode, RuntimePreflightCode, RuntimePreflightFindingCode
 from .sources import SourceBundleCode, SourcePolicyCode
 
@@ -71,6 +86,8 @@ REASON_CODE_ENUMS: tuple[type[WireEnum], ...] = (
     LibraryProjectionCode,
     ModelCacheBlockerCode,
     ModelCacheCode,
+    ModelAccessReason,
+    ModelCacheFailureCode,
     NodeOfflineReason,
     OperationFailureCode,
     PrebuiltImageCode,
@@ -87,6 +104,7 @@ REASON_CODE_ENUMS: tuple[type[WireEnum], ...] = (
     ResourceTermProblem,
     RunDegradedReason,
     RunSwitchCode,
+    JournalRepairCode,
     RuntimeImageCode,
     RuntimePreflightCode,
     RuntimePreflightFindingCode,
@@ -97,6 +115,66 @@ REASON_CODE_ENUMS: tuple[type[WireEnum], ...] = (
     SupersedeCode,
     TopologyCode,
     UninstallPlanCode,
+)
+
+
+#: Controlled cause vocabulary, shared by persisted waits and their blockers.
+type OperationReason = (
+    WaitReason
+    | FailureCode
+    | SecurityRefusalReason
+    | InvalidRequestReason
+    | ResourceBlockerCode
+    | RunAdmissionCode
+    | TransientReason
+    | ModelAccessReason
+    | ModelCacheFailureCode
+    | AdmissionCode
+    | AgentEvidenceCode
+    | ArtifactLifecycleCode
+    | CacheReferenceReason
+    | CertificateCode
+    | CatalogCode
+    | CatalogSyncCode
+    | ClusterMappingCode
+    | ControllerErrorCode
+    | DistributionCode
+    | HelperErrorCode
+    | HelperOperationCode
+    | ImageStoreCode
+    | InstallAdmissionCode
+    | InstallDegradedReason
+    | LibraryAssessmentCode
+    | LibraryProjectionCode
+    | ModelCacheBlockerCode
+    | ModelCacheCode
+    | NodeOfflineReason
+    | OperationFailureCode
+    | PrebuiltImageCode
+    | ProfileReasonCode
+    | ProjectionCode
+    | RecipeBuildCode
+    | RecipeImageCode
+    | RecipeOperationCode
+    | RecipePackageCode
+    | RecipeUpdateCode
+    | ReconcileCode
+    | ResourcePlanningCode
+    | ResourceTerm
+    | ResourceTermProblem
+    | RunDegradedReason
+    | RunSwitchCode
+    | JournalRepairCode
+    | RuntimeImageCode
+    | RuntimePreflightCode
+    | RuntimePreflightFindingCode
+    | SourceBundleCode
+    | SourcePolicyCode
+    | StopPlanCode
+    | StorageDemandCode
+    | SupersedeCode
+    | TopologyCode
+    | UninstallPlanCode
 )
 
 
@@ -230,6 +308,8 @@ class ReasonCodeVocabulary(WireModel):
     from this one module.
     """
 
+    model_access_reason: ModelAccessReason
+    model_cache_failure_code: ModelCacheFailureCode
     admission_code: AdmissionCode
     agent_evidence_code: AgentEvidenceCode
     artifact_lifecycle_code: ArtifactLifecycleCode
@@ -264,6 +344,7 @@ class ReasonCodeVocabulary(WireModel):
     resource_term: ResourceTerm
     resource_term_problem: ResourceTermProblem
     run_degraded_reason: RunDegradedReason
+    journal_repair_code: JournalRepairCode
     run_switch_code: RunSwitchCode
     runtime_image_code: RuntimeImageCode
     runtime_preflight_code: RuntimePreflightCode
@@ -298,8 +379,10 @@ __all__ = [
     "InstallDegradedReason",
     "LibraryAssessmentCode",
     "LibraryProjectionCode",
+    "ModelAccessReason",
     "ModelCacheBlockerCode",
     "ModelCacheCode",
+    "ModelCacheFailureCode",
     "NodeOfflineReason",
     "OperationFailureCode",
     "PrebuiltImageCode",

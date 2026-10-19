@@ -8,7 +8,7 @@ from typing import (
 )
 from typing import cast as typing_cast
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import String, and_, cast, func, literal, or_, select
 from vonk_agent_protocol import (
     LifecycleState,
     RunSwitchCode,
@@ -106,9 +106,7 @@ class ObservationMixin:
 
         # Canonical JSON emits UTC as Z; the clock's isoformat uses +00:00.
         # Compare the same spelling so an exactly due operation is eligible.
-        due_at = func.replace(
-            Job.result["observation_due_at"].as_string(), "Z", "+00:00"
-        )
+        due_at = Job.next_action_at
         deadline_at = func.replace(
             Job.result["observation_deadline_at"].as_string(), "Z", "+00:00"
         )
@@ -136,8 +134,19 @@ class ObservationMixin:
                     ),
                     or_(
                         Job.id.in_(select(RunSwitchJournalRepairPending.job_id)),
+                        # Broad, cast-safe triage only; the journal owner proves
+                        # the exact typed fault before any repair. An unrelated
+                        # child observation clock cannot conceal damaged evidence.
+                        and_(
+                            cast(Job.result["total_bytes_known"].as_string(), String)
+                            == cast(literal(True), String),
+                            cast(Job.result["total_bytes"].as_string(), String)
+                            == cast(literal(0), String),
+                            cast(Job.result["completed_bytes"].as_string(), String)
+                            != cast(literal(0), String),
+                        ),
                         due_at.is_(None),
-                        due_at <= _now(service._clock).isoformat(),
+                        due_at <= _now(service._clock),
                         deadline_at <= _now(service._clock).isoformat(),
                         recovery_deadline_at <= _now(service._clock).isoformat(),
                         # A cancel in flight is looked at on every tick: it ends as

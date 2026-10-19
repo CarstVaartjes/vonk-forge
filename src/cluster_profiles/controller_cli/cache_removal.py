@@ -111,7 +111,7 @@ def _cache_removal_review(
     path = f"/api/{noun}/{_quoted(selector)}/remove-review"
     query = (
         {"with_model": with_model}
-        if noun == "recipe"
+        if noun != "model"
         else {"fleet": True}
         if fleet
         else None

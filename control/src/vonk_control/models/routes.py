@@ -17,6 +17,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from vonk_agent_protocol import RoutePublicationState, machine_check
 
 from ..model_primitives import Base
+from .waits import Residue, WaitEvidence, wait_due_column, wait_evidence_column
 
 
 class RecipeRouteAuthority(Base):
@@ -80,6 +81,10 @@ class RoutePublicationOwner(Base):
     """Singleton authority for the one global LiteLLM activation marker."""
 
     __tablename__ = "route_publication_owner"
+    wait_evidence: Mapped[WaitEvidence | Residue | None] = wait_evidence_column(
+        __tablename__
+    )
+    next_action_at: Mapped[datetime | None] = wait_due_column("reconciliation_next_at")
     __table_args__ = (
         CheckConstraint(
             "singleton_id = 1",
@@ -102,9 +107,6 @@ class RoutePublicationOwner(Base):
     )
     reconciliation_attempts: Mapped[int] = mapped_column(
         Integer, default=0, nullable=False
-    )
-    reconciliation_next_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True)
     )
     reconciliation_deadline_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True)

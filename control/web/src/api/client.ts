@@ -1,4 +1,5 @@
 import { ApiError } from "./errors";
+import { LifecycleState, OperatorActionName } from "./vocabulary.generated";
 import { FleetEventConnection } from "./fleet-event-connection";
 import { readObservationTransfer } from "./observation-transfer";
 import createClient, { createQuerySerializer } from "openapi-fetch";
@@ -1142,10 +1143,31 @@ export class ApiClient implements ControlApi {
   }
 
   async resumeJob(jobId: string): Promise<JobResumeResponse> {
-    return resultData(
-      await this.generated.POST("/api/jobs/{job_id}/resume", {
-        params: { path: { job_id: jobId } },
-      }),
-    );
+    const requestId = crypto.randomUUID();
+    try {
+      return resultData(
+        await this.generated.POST("/api/jobs/{job_id}/resume", {
+          params: { path: { job_id: jobId } },
+          headers: { "X-Request-ID": requestId },
+        }),
+      );
+    } catch (error) {
+      if (error instanceof ApiError && error.status >= 400 && error.status < 500) {
+        throw error;
+      }
+      const receipt = resultData(
+        await this.generated.GET("/api/jobs/{job_id}/requests/{request_id}", {
+          params: { path: { job_id: jobId, request_id: requestId } },
+        }),
+      );
+      if (
+        receipt.job_id !== jobId ||
+        receipt.request_id !== requestId ||
+        receipt.action !== OperatorActionName.RESUME
+      ) {
+        throw error;
+      }
+      return { id: jobId, state: LifecycleState.QUEUED };
+    }
   }
 }

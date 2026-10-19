@@ -33,10 +33,15 @@ from vonk_agent_protocol import (
 )
 
 from ..model_primitives import Base, _lower_hex, _nullable_lower_hex, _state_in
+from .waits import Residue, WaitEvidence, wait_due_column, wait_evidence_column
 
 
 class RecipeInstallation(Base):
     __tablename__ = "recipe_installations"
+    wait_evidence: Mapped[WaitEvidence | Residue | None] = wait_evidence_column(
+        __tablename__
+    )
+    next_action_at: Mapped[datetime | None] = wait_due_column("next_action_at")
     __table_args__ = (
         CheckConstraint(
             _lower_hex("plan_digest", 64), name="ck_recipe_installations_digest"
@@ -146,6 +151,10 @@ STOPPABLE_RUN_STATES = ACTIVE_RUN_STATES | {RunState.LOST}
 
 class RecipeRun(Base):
     __tablename__ = "recipe_runs"
+    wait_evidence: Mapped[WaitEvidence | Residue | None] = wait_evidence_column(
+        __tablename__
+    )
+    next_action_at: Mapped[datetime | None] = wait_due_column("route_next_attempt_at")
     __table_args__ = (
         CheckConstraint(_lower_hex("plan_digest", 64), name="ck_recipe_runs_digest"),
         CheckConstraint(
@@ -221,9 +230,6 @@ class RecipeRun(Base):
     #: this after the visible cooldown so transient faults resume automatically.
     recovery_attempts: Mapped[int] = mapped_column(
         Integer, nullable=False, default=0, server_default="0"
-    )
-    route_next_attempt_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True)
     )
     actor: Mapped[str] = mapped_column(String(200), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
@@ -314,6 +320,10 @@ class ArtifactJob(Base):
     """Persisted controller authority for one artifact-producing run invocation."""
 
     __tablename__ = "artifact_jobs"
+    wait_evidence: Mapped[WaitEvidence | Residue | None] = wait_evidence_column(
+        __tablename__
+    )
+    next_action_at: Mapped[datetime | None] = wait_due_column("next_action_at")
     __table_args__ = (
         CheckConstraint(
             "interface IN ('audio-job','video-job','image-job','mesh-job','artifact-job')",

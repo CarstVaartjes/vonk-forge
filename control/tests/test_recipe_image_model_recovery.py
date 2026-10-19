@@ -16,6 +16,7 @@ from vonk_control.auth import TokenCodec
 from vonk_control.catalog_service import CatalogService
 from vonk_control.model_cache import ModelCacheService
 from vonk_control.models import Base, Job
+from vonk_control.persisted_waits import schedule_wait
 from vonk_control.recipe_image_availability import RecipeImageAvailabilityService
 from vonk_control.runtime_image_preparation import (
     FilesystemRuntimeImageStorage,
@@ -246,9 +247,7 @@ def test_missing_managed_model_object_is_redownloaded_without_rebuilding_image(
         for operation_id in (resumed_parent.id, new_parent.id):
             operation = session.get(Job, operation_id)
             assert operation is not None
-            operation.payload = dict(operation.payload) | {
-                "retry_after_at": "2000-01-01T00:00:00+00:00"
-            }
+            schedule_wait(operation, datetime(2000, 1, 1, tzinfo=UTC))
     assert service.run_pending(limit=2) == 2
     assert service.get(resumed_parent.id).state == "succeeded"
     assert service.get(new_parent.id).state == "succeeded"

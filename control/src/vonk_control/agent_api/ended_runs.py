@@ -12,6 +12,7 @@ from vonk_agent_protocol import RecipeRunObservationWire, RouteState, RunState
 from ..logging import log_event
 from ..models import RecipeRun, RunNode
 from ..owner_liveness import run_has_live_operation
+from ..persisted_waits import schedule_wait
 from ..recipe_stop_payloads import durable_run_stop_payloads
 from .common import _LOGGER, _now
 
@@ -77,7 +78,7 @@ def reopen_ended_runs_still_running(
             f"Spark {node_id} reports the process still running after the run "
             f"was {ended.value}; exact Stop pending"
         )[:512]
-        run.route_next_attempt_at = None
+        schedule_wait(run, None)
         run.stopped_at = None
         run.updated_at = now
         node.state = RunState.RUNNING

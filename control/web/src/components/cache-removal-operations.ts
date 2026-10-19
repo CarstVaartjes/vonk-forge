@@ -10,10 +10,19 @@ import type {
 
 export type CacheRemovalIntent =
   | { kind: "model"; selector: string; requestKey: string; review: CacheRemovalReview }
-  | { kind: "recipe"; selector: string; requestKey: string; review: CacheRemovalReview };
+  | {
+      kind: Exclude<CacheRemovalReview["resource_kind"], "model">;
+      selector: string;
+      requestKey: string;
+      review: CacheRemovalReview;
+    };
 export type CacheRemovalReviewTarget =
   | { kind: "model"; selector: string; modelContentSha256: string }
-  | { kind: "recipe"; selector: string; withModel: boolean };
+  | {
+      kind: Exclude<CacheRemovalReview["resource_kind"], "model">;
+      selector: string;
+      withModel: boolean;
+    };
 
 export type CacheRemovalReceipt =
   | ModelCacheOperatorResponse
@@ -72,7 +81,7 @@ export function validateRemovalReceipt(
   if (expectedOperationId !== undefined && value.operation_id !== expectedOperationId) {
     throw new Error("Controller returned a different removal operation.");
   }
-  if (intent.kind === "recipe" && value.state === LifecycleEffect.UNKNOWN) {
+  if (intent.kind !== "model" && value.state === LifecycleEffect.UNKNOWN) {
     if (
       value.kind !== "recipe.cache.remove.v2" ||
       value.action !== CacheOperationKind.REMOVE ||

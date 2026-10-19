@@ -15,6 +15,7 @@ from .recipe_availability_intent import RecipeAvailabilityIntent
 from .recipe_lifecycle_contract import RecipeOperationCancellationResult
 from .stored_json import Residue
 from .strict_json import StrictJSONModel
+from .wait_contract import QueueWait
 
 
 class RecipeImageAvailabilityView(StrictJSONModel):
@@ -45,6 +46,7 @@ class RecipeImageAvailabilityView(StrictJSONModel):
     )
     cancellation: RecipeOperationCancellationResult | None = None
     blockers: tuple[OperationBlocker, ...] = ()
+    wait: QueueWait | None = None
     next_attempt_at: str | None = None
     residue: Residue | None = None
 

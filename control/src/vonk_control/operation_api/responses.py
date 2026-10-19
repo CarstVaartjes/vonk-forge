@@ -35,6 +35,7 @@ from ..operation_item_contract import (
     operation_item,
 )
 from ..operation_progress import project_progress_for_state
+from ..persisted_waits import read_wait
 from ..strict_json import (
     StrictModel,
     read_stored_model,
@@ -115,6 +116,7 @@ def _job_operation_response(
             uncertain=_result_uncertain(item),
         ),
         blockers=item.blockers or None,
+        wait=item.wait,
         wait_reason=item.wait_reason,
         next_attempt_at=item.next_attempt_at,
     )
@@ -307,6 +309,7 @@ def _operation_item(
         result = attempt.result
     receipt, unreadable = agent_receipt_for(operation.kind, operation.state, result)
     return OperationItem(
+        wait=read_wait(operation),
         attempt=operation.current_attempt,
         id=operation.id,
         kind=operation.kind,
@@ -365,6 +368,7 @@ def operation_detail_response(
         owner=item.owner,
         blockers=item.blockers or [],
         next_attempt_at=item.next_attempt_at,
+        wait=item.wait,
         wait_reason=item.wait_reason,
     )
 

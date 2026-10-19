@@ -368,7 +368,7 @@ def test_unknown_evidence_has_durable_backoff_and_recovers_without_a_new_request
     worker.tick()
     with service.sessions() as session:
         run = _recipe_run(session, run_id)
-        due = run.route_next_attempt_at
+        due = run.next_action_at
         assert due is not None
         assert run.route_attempts == 1
     assert worker.tick() is False
@@ -379,7 +379,7 @@ def test_unknown_evidence_has_durable_backoff_and_recovers_without_a_new_request
     with service.sessions() as session:
         run = _recipe_run(session, run_id)
         assert run.route_state == RouteState.PUBLISHED
-        assert run.route_next_attempt_at is None
+        assert run.next_action_at is None
 
 
 @pytest.mark.parametrize(
@@ -471,15 +471,15 @@ def test_publication_outage_exhausts_across_restart_without_stopping_workload(tm
         RecipeOperationWorker(base.sessions, base, clock=clock).tick()
         with base.sessions() as session:
             row = _recipe_run(session, run_id)
-            if row.route_next_attempt_at is not None:
-                clock.now = row.route_next_attempt_at.replace(tzinfo=UTC) + timedelta(
+            if row.next_action_at is not None:
+                clock.now = row.next_action_at.replace(tzinfo=UTC) + timedelta(
                     seconds=1
                 )
     with base.sessions() as session:
         row = _recipe_run(session, run_id)
         assert row.route_state != RouteState.PENDING
         assert row.state == RunState.RUNNING
-        assert row.route_next_attempt_at is None
+        assert row.next_action_at is None
         assert row.plan == {}
     # No manual old-row repair is required for another accepted request.
     clock.now = NOW
@@ -616,7 +616,7 @@ def test_target_change_during_activation_owes_cleanup_across_restart(tmp_path):
     observe_action(changing.maintain)
     with base.sessions() as session:
         owner = _publication_owner(session)
-        due = owner.reconciliation_next_at
+        due = owner.next_action_at
         assert due is not None
     # The failed observation ends; the durable desired cleanup survives it.
     from datetime import UTC, timedelta
@@ -814,15 +814,15 @@ def test_corrupt_owned_recovery_metadata_ends_only_its_attempt_and_allows_fresh(
         RecipeOperationWorker(base.sessions, service, clock=clock).tick()
         with base.sessions() as session:
             row = _recipe_run(session, first)
-            if row.route_next_attempt_at is None:
+            if row.next_action_at is None:
                 break
-            clock.now = row.route_next_attempt_at.replace(tzinfo=UTC)
+            clock.now = row.next_action_at.replace(tzinfo=UTC)
     with base.sessions() as session:
         ended = session.get(Job, identity)
         assert ended is not None
         assert ended.state != LifecycleState.RUNNING
         assert _recipe_run(session, first).state == RunState.RUNNING
-        assert _recipe_run(session, first).route_next_attempt_at is None
+        assert _recipe_run(session, first).next_action_at is None
     clock.now = NOW
     service.publish_run(fresh)
     # The failed, never-published owner has no accepted route to retain.

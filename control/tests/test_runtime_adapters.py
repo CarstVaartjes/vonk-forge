@@ -101,3 +101,40 @@ def test_adapter_derives_the_writable_paths_instead_of_hardcoding_them() -> None
     # A hardcoded adapter list would leak one engine's paths into another.
     assert "/outputs/cache/vllm" not in llama_cpp
     assert f"USER {ADAPTER_IMAGE_USER}" in vllm
+
+
+def test_runtime_user_has_a_passwd_identity_when_upstream_omits_it(tmp_path) -> None:
+    """Numeric USER alone breaks Python/PyTorch username discovery."""
+    import os
+    import shlex
+    import subprocess
+
+    passwd = tmp_path / "passwd"
+    passwd.write_text("root:x:0:0:root:/root:/bin/sh\n")
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    getent = bin_dir / "getent"
+    getent.write_text(
+        "#!/bin/sh\n"
+        f"awk -F: -v uid=\"$2\" '$3 == uid {{ found=1; print }} END {{ exit !found }}' {shlex.quote(str(passwd))}\n"
+    )
+    getent.chmod(0o755)
+    install = bin_dir / "install"
+    install.write_text("#!/bin/sh\nexit 0\n")
+    install.chmod(0o755)
+    stage = resolve_runtime_adapter("pytorch-pipeline").containerfile
+    command = stage.split("RUN ", 1)[1].split("\nUSER ", 1)[0]
+    command = command.replace("/etc/passwd", shlex.quote(str(passwd)))
+    command = command.replace("test -x /opt/vonk/bin/pytorch-pipeline", "true")
+    env = {**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}"}
+    subprocess.run(["sh", "-c", command], env=env, check=True)
+    rows = [row.split(":") for row in passwd.read_text().splitlines()]
+    runtime = [row for row in rows if row[2] == "10001"]
+    assert len(runtime) == 1
+    assert runtime[0][3] == "10001"
+    # Preserve an existing upstream identity, including its name and home.
+    passwd.write_text("upstream:x:10001:10001:upstream:/upstream:/bin/false\n")
+    subprocess.run(["sh", "-c", command], env=env, check=True)
+    assert (
+        passwd.read_text() == "upstream:x:10001:10001:upstream:/upstream:/bin/false\n"
+    )

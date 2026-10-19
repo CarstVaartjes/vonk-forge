@@ -114,7 +114,6 @@ class FleetProfileSwitchAdapterState(StrictModel):
     state: FleetProfileOperationState = LifecycleState.QUEUED
     child_progress: FleetProfileChildProgress | None = None
     status_reason: Annotated[str, StringConstraints(max_length=512)] | None = None
-    observation_due_at: datetime | None = None
     observation_deadline_at: datetime | None = None
     pending_operation_ids: list[UuidId] = Field(default_factory=list, max_length=128)
     stop_reissue_attempt: int = Field(default=0, ge=0, le=32)

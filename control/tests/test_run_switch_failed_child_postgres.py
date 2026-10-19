@@ -76,7 +76,7 @@ def test_terminal_transfer_child_ends_parent_with_evidence(
     assert ended.result.failure_code == DistributionCode.UNASSIGNED
     assert ended.result.retryable is uncertain
     assert ended.result.child_operation_id == child_id
-    assert ended.result.observation_due_at is None
+    assert ended.next_attempt_at is None
     assert (
         ended.status_reason is not None
         and WaitReason.OBSERVATION_UNAVAILABLE in ended.status_reason

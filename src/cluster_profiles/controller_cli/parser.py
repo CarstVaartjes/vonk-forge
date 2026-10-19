@@ -187,6 +187,7 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
     )
     resume.set_defaults(outcome_context="mutation")
     resume.add_argument("job_id")
+    resume.add_argument("--request-key", type=_uuid_argument)
     resume.add_argument("--yes", action="store_true", required=True)
     _add_output(resume)
 
@@ -564,6 +565,7 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
     _add_output(key_roll)
     key_revoke = key_actions.add_parser("revoke", help="Revoke a client key by name")
     key_revoke.add_argument("name")
+    key_revoke.add_argument("--request-key", type=_uuid_argument)
     key_revoke.add_argument("--yes", action="store_true", help="Confirm without asking")
     _add_output(key_revoke)
 

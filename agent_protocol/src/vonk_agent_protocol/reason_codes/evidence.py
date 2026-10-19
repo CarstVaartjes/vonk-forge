@@ -82,6 +82,7 @@ class OperationFailureCode(WireEnum):
     FLEET_PROFILE_APPLICATION_FAILED = "fleet_profile_application_failed"
     ARTIFACT_PROCESS_FAILED = "artifact_process_failed"
     STORED_RESULT_UNREADABLE = "stored_operation_result_unreadable"
+    OUTCOME_UNCERTAIN = "operation_outcome_uncertain"
 
 
 class RunDegradedReason(WireEnum):

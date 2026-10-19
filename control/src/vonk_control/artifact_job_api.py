@@ -30,6 +30,11 @@ from .auth import Actor, agent_identity_from_scope
 from .compiled_artifact_contract import ParameterScalar
 from .download_contract import download_responses, upload_request_body
 from .operation_api import bounded_error_responses
+from .operator_acceptance import (
+    OperatorReceiptResolver,
+    ReceiptPolicy,
+    operator_acceptance,
+)
 
 _UUID = r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
 _DIGEST = r"^[0-9a-f]{64}$"
@@ -120,6 +125,7 @@ def install_artifact_job_routes(
         status_code=status.HTTP_201_CREATED,
         operation_id="createArtifactJob",
     )
+    @operator_acceptance(ReceiptPolicy.ARTIFACT_CREATE)
     def create_job(
         body: ArtifactJobCreate,
         request_id: Annotated[str, Header(alias="X-Request-ID", pattern=_UUID)],
@@ -183,6 +189,7 @@ def install_artifact_job_routes(
             "x-vonk-streaming-transport": True,
         },
     )
+    @operator_acceptance(ReceiptPolicy.ARTIFACT_JOB)
     async def upload_input(
         request: Request,
         job_id: str = Path(pattern=_UUID),
@@ -225,6 +232,7 @@ def install_artifact_job_routes(
         responses=bounded_error_responses(401, 403, 404, 409, 422, 503),
         operation_id="finalizeArtifactJob",
     )
+    @operator_acceptance(ReceiptPolicy.ARTIFACT_JOB)
     def finalize_job(
         job_id: str = Path(pattern=_UUID), actor: Actor = actor_dependency
     ) -> ArtifactJobResponse:
@@ -248,6 +256,7 @@ def install_artifact_job_routes(
         operation_id="submitArtifactJob",
         openapi_extra={"x-vonk-request-body": "none"},
     )
+    @operator_acceptance(ReceiptPolicy.ARTIFACT_SUBMIT)
     def submit_job(
         request_id: Annotated[str, Header(alias="X-Request-ID", pattern=_UUID)],
         job_id: str = Path(pattern=_UUID),
@@ -293,6 +302,7 @@ def install_artifact_job_routes(
         responses=bounded_error_responses(401, 403, 404, 409, 422, 503),
         operation_id="cancelArtifactJob",
     )
+    @operator_acceptance(ReceiptPolicy.ARTIFACT_CANCEL)
     def cancel_job(
         body: CancelRequest,
         request_id: Annotated[str, Header(alias="X-Request-ID", pattern=_UUID)],
@@ -431,6 +441,8 @@ def install_artifact_job_routes(
         except (AgentProtocolError, ArtifactJobError) as error:
             raise HTTPException(status_code=409, detail=str(error)) from None
         return Response(status_code=204)
+
+    OperatorReceiptResolver(artifacts=service).bind(app)
 
 
 __all__ = ["install_artifact_job_routes"]

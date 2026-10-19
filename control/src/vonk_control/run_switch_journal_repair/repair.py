@@ -23,6 +23,7 @@ from ..models import (
     RunSwitchJournalRepair,
     RunSwitchJournalRepairPending,
 )
+from ..persisted_waits import clear_wait, read_wait
 from ..run_switch_journal_contract import (
     JournalRepairDisposition,
     JournalRepairPurpose,
@@ -131,7 +132,12 @@ def _try_repair_once(
                     or deadline_expired
                 ):
                     purpose = JournalRepairPurpose.OWNER_OBSERVATION
-            due = progress.observation_due_at
+            wait = read_wait(job)
+            due = (
+                wait.next_check
+                if wait is not None and wait.reason == REPAIR_WAIT
+                else None
+            )
             if (
                 purpose == JournalRepairPurpose.MEASUREMENT
                 and due is not None
@@ -196,6 +202,7 @@ def _try_repair_once(
                     )
                 session.delete(pending)
             job.result = corrected
+            clear_wait(job)
             job.updated_at = now
             if (job.status_reason or "").startswith(REPAIR_WAIT):
                 job.status_reason = None
