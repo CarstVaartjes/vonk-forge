@@ -504,3 +504,66 @@ def test_due_recipe_parent_uses_normal_phase_advancement_after_restart(
         else:
             assert current == expected
             assert current > {child.id for child in children}
+
+
+@pytest.mark.usefixtures("signed_recipe_releases")
+def test_catalog_retry_clock_survives_dependency_recovery_and_reconstruction(
+    tmp_path, postgres_engine, monkeypatch
+):
+    """Catches resampling a logged retry or a restarted catalog owner losing its wait."""
+    from vonk_agent_protocol import CatalogSyncCode, CatalogSyncState
+    from vonk_control.catalog_sync import ManagedRecipeCatalogSyncService
+    from vonk_control.models import RecipeLibrarySyncRun
+
+    from .test_catalog_sync import Reader, _fixture
+
+    sessions, catalog, reader, _item = _fixture(tmp_path, engine=postgres_engine)
+    available = [False]
+    now = [NOW]
+    jitter = []
+
+    class Library(Reader):
+        def list(self):
+            if not available[0]:
+                raise OSError("library transport unavailable")
+            return super().list()
+
+    def choose(low, high):
+        jitter.append((low, high))
+        return low if len(jitter) == 1 else high
+
+    monkeypatch.setattr("vonk_control.catalog_sync.random.randint", choose)
+
+    def construct():
+        return ManagedRecipeCatalogSyncService(
+            sessions,
+            catalog=catalog,
+            reader=Library(reader.snapshot),
+            clock=lambda: now[0],
+        )
+
+    step = construct().advance_automatic(90)
+    waiting = construct().latest()
+    assert waiting is not None and waiting.wait is not None
+    assert step.failures == 1 and len(jitter) == 1
+    assert waiting.wait.next_check == NOW + timedelta(seconds=step.delay_seconds)
+    now[0], available[0] = waiting.wait.next_check, True
+    reconstructed = construct()
+    backstop = DueWaitBackstop(
+        sessions,
+        [
+            WaitSource(
+                RecipeLibrarySyncRun,
+                frozenset({WaitOwnerKind.CATALOG_SYNC}),
+                lambda key, wait: reconstructed.redrive(str(key[0]), 90),
+            )
+        ],
+        clock=lambda: now[0],
+    )
+    backstop.tick()
+    recovered = reconstructed.latest()
+    assert recovered is not None and recovered.state is CatalogSyncState.CURRENT
+    assert recovered.wait is not None
+    assert recovered.wait.reason is CatalogSyncCode.REFRESH_SCHEDULED
+    assert recovered.wait.next_check == now[0] + timedelta(seconds=90)
+    assert len(jitter) == 1
