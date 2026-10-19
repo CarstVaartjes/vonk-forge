@@ -646,16 +646,16 @@ class PhaseDispatchMixin:
                         _aware(progress.recovery_deadline_at or now),
                         stall_deadline(now, None, RECOVERY_STALL_WINDOW),
                     )
-                    background_reason = execution.status_reason or (
+                    background_detail = execution.status_reason or (
                         "Runtime image preparation is running in the background; "
                         f"next check at {due.isoformat()}"
                     )
                     if progress.retry_reason:
-                        background_reason = (
-                            f"{background_reason} Attempt {progress.retry_attempt} "
+                        background_detail = (
+                            f"{background_detail} Attempt {progress.retry_attempt} "
                             f"after {progress.retry_reason}."
                         )[:512]
-                    job.status_reason = background_reason
+                    job.status_reason = background_detail
                     _ADAPTER.project(
                         job,
                         progress,
@@ -666,7 +666,7 @@ class PhaseDispatchMixin:
                         wait_blockers=[
                             make_blocker(
                                 RunSwitchCode.RUNTIME_IMAGE_PREPARING,
-                                background_reason,
+                                background_detail,
                                 node_ids=list(job.targets),
                             )
                         ],
