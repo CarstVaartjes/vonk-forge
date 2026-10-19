@@ -8,6 +8,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[3]
 COMPOSE_ROOT = ROOT / "deploy/compose"
 DEFAULT_SERVICES = {
+    "image-janitor",
     "caddy",
     "control-api",
     "control-worker",

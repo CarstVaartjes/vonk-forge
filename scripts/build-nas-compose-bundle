@@ -39,6 +39,7 @@ def _version_pinned(image: str) -> bool:
 
 PROJECT_NAME = "vonk-forge"
 SERVICES = {
+    "image-janitor",
     "tailscale-gateway",
     "tailscale-configurator",
     "hermes-agent",
@@ -169,6 +170,11 @@ def _validate_services(document: dict[str, Any]) -> dict[str, Any]:
                 "bind": {"create_host_path": True},
             }:
                 continue
+            if (
+                name == "image-janitor"
+                and volume == "/var/run/docker.sock:/var/run/docker.sock"
+            ):
+                continue
             source = _volume_source(volume)
             if source is not None and (
                 source.startswith((".", "/", "~")) or "/" in source
@@ -279,10 +285,14 @@ def _payload(document: dict[str, Any], channel: str) -> dict[str, object]:
             f"Compose control-api lacks the {renderer.COMPOSE_BUNDLE_DIGEST} "
             "that the renderer stamps"
         )
-    # Runtime configuration ships in the Controller image, so a pulled release
-    # updates it. The bundle carries only Compose, .env and secrets.
-    if "configs" in document:
-        raise BundleError("Compose must not carry runtime configs")
+    # Only the independent janitor ships code in Compose; application runtime
+    # assets still ship in the Controller image. Never admit host config files.
+    configs = _mapping(document.get("configs"), "configs")
+    if set(configs) != {"image-janitor-script"}:
+        raise BundleError("Compose must carry only the standalone janitor config")
+    janitor = _mapping(configs["image-janitor-script"], "janitor config")
+    if set(janitor) != {"content"} or not isinstance(janitor["content"], str):
+        raise BundleError("Compose janitor config must be embedded content")
     _validate_secret_paths(document)
     # The project name is fixed here, the single source of truth, so it never
     # depends on the install directory or a `.env` entry.

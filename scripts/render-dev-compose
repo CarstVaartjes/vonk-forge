@@ -118,6 +118,15 @@ def _compose_document(path: Path, seen: set[Path] | None = None) -> dict[str, ob
     if not isinstance(document, dict):
         raise TypeError(f"Compose document is not a mapping: {path}")
 
+    # Embed standalone sidecar source so the installer needs no host script.
+    # Compose interpolates config content too, so preserve literal dollars.
+    for config in document.get("configs", {}).values():
+        source_path = config.get("file")
+        if isinstance(source_path, str):
+            source = path.parent / source_path
+            del config["file"]
+            config["content"] = source.read_text(encoding="utf-8").replace("$", "$$")
+
     merged: dict[str, object] = {}
     includes = document.pop("include", [])
     if not isinstance(includes, list):
@@ -270,6 +279,8 @@ def render(
             TOKENS["litellm"]: litellm_image,
         },
     )
+    if not isinstance(document, dict):
+        raise TypeError("Rendered Compose document must be a mapping")
     _resolve_runtime_images(document, channel)
     if channel != "pinned":
         _resolve_extension_images(document, channel)

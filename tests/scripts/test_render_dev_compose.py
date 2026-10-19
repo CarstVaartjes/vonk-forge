@@ -101,7 +101,7 @@ def test_render_produces_a_single_self_contained_compose_file(
     assert document["services"]["litellm"]["image"] == LITELLM_IMAGE
     assert {path.name for path in tmp_path.iterdir()} == {"docker-compose.yaml"}
     # Runtime configuration ships in the Controller image instead.
-    assert "configs" not in document
+    assert "file" not in document["configs"]["image-janitor-script"]
     assert not any(
         isinstance(volume, str) and volume.startswith("./")
         for service in document["services"].values()

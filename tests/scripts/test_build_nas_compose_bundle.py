@@ -24,6 +24,7 @@ IMAGES = {
     "litellm_image": "ghcr.io/carstvaartjes/vonk-forge-litellm:v1.2.3",
 }
 SERVICES = {
+    "image-janitor",
     "tailscale-gateway",
     "tailscale-configurator",
     "hermes-agent",
@@ -124,7 +125,7 @@ def test_payload_is_complete_self_contained_and_fresh_install_only(
     }
     # Runtime configuration ships in the Controller image, not the bundle.
     assert "runtime_files" not in payload
-    assert "configs" not in original_compose
+    assert "file" not in original_compose["configs"]["image-janitor-script"]
 
     installer_secret_files = {item["file"] for item in payload["secrets"]}
     for group in ("random_text", "ed25519_pkcs8_pem", "postgres_urls"):
@@ -174,7 +175,7 @@ def test_payload_is_complete_self_contained_and_fresh_install_only(
         for secret in compose["secrets"].values()
     }
     assert compose_secret_files == installer_secret_files
-    assert "configs" not in compose
+    assert "file" not in compose["configs"]["image-janitor-script"]
     assert "control-secret-init" not in compose_text
     assert "/repository" not in compose_text
     assert "migrate" not in compose_text.lower()
