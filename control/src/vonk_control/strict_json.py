@@ -231,16 +231,20 @@ def _presence_policy_endpoint(
                 receipt_policy,
             )
 
-            if isinstance(result, Response):
-                return await run_in_threadpool(
-                    apply_receipt,
-                    receipt_policy(endpoint),
-                    getattr(current, "operator_receipts", None),
-                    result,
-                    result,
-                    acceptance_arguments(receipt_policy(endpoint), **values),
-                )
-            return result
+            response = result if isinstance(result, Response) else injected_response
+            if not isinstance(response, Response):
+                response = Response(status_code=current.status_code or 200)
+            if response.status_code is None:
+                response.status_code = current.status_code or 200
+            checked = await run_in_threadpool(
+                apply_receipt,
+                receipt_policy(endpoint),
+                getattr(current, "operator_receipts", None),
+                result,
+                response,
+                acceptance_arguments(receipt_policy(endpoint), **values),
+            )
+            return checked if isinstance(result, Response) else result
         value, errors = response_field.validate(result, {}, loc=("response",))
         if errors:
             return result
