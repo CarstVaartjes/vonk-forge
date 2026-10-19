@@ -47,22 +47,28 @@ class DueWaitBackstop:
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
         batch_limit: int = 16,
         pass_budget_seconds: float = 1,
-        monotonic: Callable[[], float] = time.monotonic,
+        monotonic: Callable[[], float] | None = None,
     ) -> None:
         if batch_limit < 1:
             raise ValueError("due wait batch must be positive")
         self._sessions = sessions
         self._sources = tuple(sources)
-        if len({source.table.name for source in sources}) != len(sources):
-            raise ValueError("a wait table must have one advancement binding")
+        self._table_kinds: dict[str, frozenset[WaitOwnerKind]] = {}
+        self._first_source: dict[str, int] = {}
+        for index, source in enumerate(sources):
+            known = self._table_kinds.get(source.table.name, frozenset())
+            if known.intersection(source.kinds):
+                raise ValueError("a wait kind must have one advancement binding")
+            self._table_kinds[source.table.name] = known | source.kinds
+            self._first_source.setdefault(source.table.name, index)
         self._clock = clock
         if pass_budget_seconds <= 0:
             raise ValueError("due wait observation budget must be positive")
         self._limit = batch_limit
         self._pass_budget = pass_budget_seconds
-        self._monotonic = monotonic
+        self._monotonic = monotonic or time.monotonic
         self._owner_cursor = 0
-        self._row_cursors: dict[str, RowKey] = {}
+        self._row_cursors: dict[int, RowKey] = {}
 
     def tick(self) -> int:
         """Return rows examined; this is never a measure of work completed.
@@ -72,18 +78,19 @@ class DueWaitBackstop:
         row cursors move before it runs, so a slow owner yields the next pass.
         """
         examined = 0
-        visited: dict[str, set[RowKey]] = {}
+        visited: dict[int, set[RowKey]] = {}
         now = self._clock()
         deadline = self._monotonic() + self._pass_budget
         # No row gets a second turn in this pass, even if its handler cannot
         # move its clock. Rotate owners as well when the batch is smaller than
         # the owner inventory. Cursor movement is never measured progress.
-        exhausted: set[str] = set()
+        exhausted: set[int] = set()
         while self._sources and examined < self._limit and self._monotonic() < deadline:
-            source = self._sources[self._owner_cursor]
+            index = self._owner_cursor
+            source = self._sources[index]
             self._owner_cursor = (self._owner_cursor + 1) % len(self._sources)
             table = source.table
-            if table.name in exhausted:
+            if index in exhausted:
                 if len(exhausted) == len(self._sources):
                     break
                 continue
@@ -94,7 +101,19 @@ class DueWaitBackstop:
                 or_(table.c.wait_evidence.is_not(None), due <= now),
                 or_(due <= now, due.is_(None)),
             )
-            cursor = self._row_cursors.get(table.name)
+            if source.kinds != self._table_kinds[table.name]:
+                kind = table.c.wait_evidence["owner_kind"].as_string()
+                belongs = kind.in_(source.kinds)
+                if index == self._first_source[table.name]:
+                    # One owner also observes malformed/unassigned evidence;
+                    # it cannot delay other kinds sharing this physical table.
+                    belongs = or_(
+                        belongs,
+                        kind.is_(None),
+                        kind.not_in(self._table_kinds[table.name]),
+                    )
+                statement = statement.where(belongs)
+            cursor = self._row_cursors.get(index)
             if cursor is not None:
                 statement = statement.order_by(
                     case((tuple_(*keys) > tuple_(*cursor), 0), else_=1)
@@ -107,15 +126,15 @@ class DueWaitBackstop:
                 with self._sessions() as session:
                     candidate = session.execute(statement).one_or_none()
                 if candidate is None:
-                    exhausted.add(table.name)
+                    exhausted.add(index)
                     continue
                 key = cast(RowKey, tuple(candidate[: len(keys)]))
-                seen = visited.setdefault(table.name, set())
+                seen = visited.setdefault(index, set())
                 if key in seen:
-                    exhausted.add(table.name)
+                    exhausted.add(index)
                     continue
                 seen.add(key)
-                self._row_cursors[table.name] = key
+                self._row_cursors[index] = key
                 examined += 1
                 selected = True
                 evidence, next_check = candidate[-2:]
@@ -138,12 +157,12 @@ class DueWaitBackstop:
                     "worker.due_wait_failed",
                     service="control-worker",
                     owner=table.name,
-                    row=repr(self._row_cursors.get(table.name)),
+                    row=repr(self._row_cursors.get(index)),
                     error=type(error).__name__,
                     message=redact_text(error),
                 )
                 # A failed selection has no trustworthy identity. Do not spin
                 # on the table; the next worker pass retries the observation.
                 if not selected:
-                    exhausted.add(table.name)
+                    exhausted.add(index)
         return examined

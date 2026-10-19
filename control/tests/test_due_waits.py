@@ -140,6 +140,62 @@ def test_corrupt_first_row_cannot_starve_later_due_work(postgres_engine, caplog)
     assert bad.id in caplog.text
 
 
+def test_logical_owners_sharing_a_table_get_independent_turns(postgres_engine):
+    """Catches one Job kind consuming another kind's bounded observation turns."""
+    from vonk_agent_protocol import WaitReason
+    from vonk_control.operation_blockers import BlockingOperation, make_blocker
+    from vonk_control.persisted_waits import write_wait
+
+    Base.metadata.create_all(postgres_engine)
+    sessions = sessionmaker(postgres_engine, expire_on_commit=False)
+    first, second, healthy = _job(), _job(), _job()
+    first.id, second.id, healthy.id = sorted((first.id, second.id, healthy.id))
+    with sessions.begin() as session:
+        for job in (first, second, healthy):
+            session.add(job)
+            write_wait(
+                job,
+                identity=BlockingOperation(id=job.id, kind=job.kind),
+                kind=WaitOwnerKind.JOB
+                if job is not healthy
+                else WaitOwnerKind.RUN_SWITCH,
+                reason=WaitReason.SPARK_BUSY,
+                now=NOW,
+                next_check=NOW,
+                blockers=[
+                    make_blocker(WaitReason.SPARK_BUSY, "accepted child is busy")
+                ],
+            )
+    seen = []
+    backstop = DueWaitBackstop(
+        sessions,
+        [
+            WaitSource(Job, frozenset({kind}), lambda key, wait: seen.append(key[0]))
+            for kind in (WaitOwnerKind.JOB, WaitOwnerKind.RUN_SWITCH)
+        ],
+        clock=lambda: NOW,
+        batch_limit=1,
+    )
+    backstop.tick()
+    backstop.tick()
+    assert seen == [first.id, healthy.id]
+
+
+def test_runtime_dispatch_covers_every_mapped_wait_owner():
+    """Inherited/mixin ORM wait columns cannot evade the static whole-tree guard."""
+    from vonk_control.wait_redrive import WAIT_MODELS, wait_sources
+
+    owners = {
+        mapper.class_
+        for mapper in Base.registry.mappers
+        if "wait_evidence" in mapper.columns
+    }
+    assert owners == set(WAIT_MODELS.values())
+    assert set(WaitOwnerKind) == WAIT_MODELS.keys()
+    sources = wait_sources(dict.fromkeys(WaitOwnerKind, lambda key, wait: None))
+    assert {kind for source in sources for kind in source.kinds} == set(WaitOwnerKind)
+
+
 def test_cancellation_committed_after_selection_wins_before_retry(postgres_engine):
     """Catches retry using a stale selection snapshot instead of the owner claim."""
     Base.metadata.create_all(postgres_engine)

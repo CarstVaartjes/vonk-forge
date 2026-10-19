@@ -20,6 +20,7 @@ import pytest
 # TTLs, lock waits, admission retries and transfer-stall deadlines are separate:
 # freezing those would prevent recovery or make a blocked wait infinite.
 PASS_BUDGET_MODULES = (
+    "vonk_control.due_waits",
     "vonk_control.terminal_history_collection",
     "vonk_control.catalog_revision_collection",
     "vonk_control.unused_storage_collection.service",

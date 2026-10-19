@@ -85,7 +85,7 @@ def test_recipe_worker_services_routes_while_coordinators_are_active(
     Base.metadata.create_all(engine)
 
     class Coordinator:
-        def tick(self) -> bool:
+        def tick(self, run_id: str | None = None) -> bool:
             calls.append(coordinator)
             return True
 
@@ -280,7 +280,7 @@ def test_recipe_coordinator_fault_is_local_rate_limited_and_recovers(tmp_path, o
     now = datetime(2026, 8, 6, tzinfo=UTC)
     broken = True
 
-    def faulty():
+    def faulty(run_id: str | None = None):
         calls.append(owner)
         if broken:
             raise AssertionError("isolated fault")

@@ -70,15 +70,7 @@ def wait_sources(
         raise ValueError(
             "every persisted wait kind requires its owner advancement function"
         )
-    models = dict.fromkeys(WAIT_MODELS.values())
-    sources = []
-    for model in models:
-        kinds = frozenset(kind for kind, owner in WAIT_MODELS.items() if owner is model)
-
-        def advance(key, evidence, *, kinds=kinds):
-            if evidence.owner_kind not in kinds:
-                raise ValueError("wait belongs to a different durable owner")
-            return advancers[evidence.owner_kind](key, evidence)
-
-        sources.append(WaitSource(model, kinds, advance))
-    return tuple(sources)
+    return tuple(
+        WaitSource(model, frozenset({kind}), advancers[kind])
+        for kind, model in WAIT_MODELS.items()
+    )

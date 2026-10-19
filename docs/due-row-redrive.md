@@ -30,8 +30,8 @@ not exclude a row whose wait still owns unresolved cleanup.
 | Certificate / revocation | Existing remote revocation confirmation |
 
 A scan examines at most sixteen rows and yields between handlers when its
-one-second observation budget is spent. It rotates across tables and primary
-keys, moving its cursor before invoking a handler. Busy or corrupt rows cannot
+one-second observation budget is spent. It rotates across logical owners and primary
+keys, including owners sharing the Job table, moving its cursor before invoking a handler. Busy or corrupt rows cannot
 hold the first batch indefinitely. Cursors and scan cadence are disposable;
 the owner's persisted clock remains the scheduling authority. The worker caps
 scan frequency at once per second, including under continuous ordinary work.

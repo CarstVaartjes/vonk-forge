@@ -57,13 +57,24 @@ class AgentUpgradeService(
                 reason=InvalidRequestReason.MALFORMED,
             )
         self._channel = channel
-        self._http = httpx2.Client(
-            base_url=release_api_url,
-            follow_redirects=False,
-            timeout=httpx2.Timeout(15.0, connect=5.0),
-            trust_env=False,
-            transport=transport,
-        )
+        self._release_api_url = release_api_url
+        self._transport = transport
+        self._client: httpx2.Client | None = None
+
+    @property
+    def _http(self) -> httpx2.Client:
+        # Release transport is irrelevant to persisted rollout reconciliation.
+        # Construct it only at the existing request edge, not worker startup.
+        if self._client is None:
+            self._client = httpx2.Client(
+                base_url=self._release_api_url,
+                follow_redirects=False,
+                timeout=httpx2.Timeout(15.0, connect=5.0),
+                trust_env=False,
+                transport=self._transport,
+            )
+        return self._client
 
     def close(self) -> None:
-        self._http.close()
+        if self._client is not None:
+            self._client.close()
