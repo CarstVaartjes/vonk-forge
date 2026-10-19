@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import TYPE_CHECKING, get_args
 
-from pydantic import TypeAdapter, ValidationError
+from pydantic import BaseModel, TypeAdapter, ValidationError
 from vonk_agent_protocol import (
     LifecycleState,
     OperationReason,
@@ -182,6 +183,18 @@ def lifecycle_wait(
     )
 
 
+if TYPE_CHECKING:
+    from .models import Job
+
+
+def _job_owns_contract(owner: Job, contract: type[BaseModel]) -> bool:
+    # Opaque engine content is never interpreted as Controller scheduling data.
+    from .stored_json import binding_for
+
+    schema = binding_for("jobs", "payload").contract_for(owner.kind)
+    return schema is contract or contract in get_args(schema)
+
+
 def _adopt_wait_instant(value: object) -> datetime | None:
     if isinstance(value, str):
         try:
@@ -209,16 +222,24 @@ def wait_due(owner: ScheduledWaitOwner) -> datetime | None:
     paths: tuple[tuple[str, ...], ...] = ()
     document: object = None
     if isinstance(owner, Job):
-        if isinstance(owner.result, dict) and "observation_due_at" in owner.result:
+        from .job_documents import AvailabilityJobPayload, RunSwitchJobPayload
+        from .recipe_image_removal_contract import RecipeCacheRemovalOwner
+        from .recipe_update_contract import RecipeUpdateDocument
+
+        if _job_owns_contract(owner, RunSwitchJobPayload):
             document = owner.result
             paths = (("observation_due_at",),)
-        else:
+        elif _job_owns_contract(owner, AvailabilityJobPayload):
             document = owner.payload
-            paths = (
-                ("retry_after_at",),
-                ("next_attempt_at",),
-                ("checkpoint", "failure", "retry_time"),
-            )
+            paths = (("retry_after_at",),)
+        elif _job_owns_contract(owner, RecipeUpdateDocument):
+            document = owner.payload
+            paths = (("next_attempt_at",),)
+        elif _job_owns_contract(owner, RecipeCacheRemovalOwner):
+            document = owner.payload
+            paths = (("checkpoint", "failure", "retry_time"),)
+        else:
+            return None
     elif isinstance(owner, FleetProfileApplication):
         document = owner.progress
         cancellation = owner.progress.get("cancellation")
@@ -238,6 +259,8 @@ def wait_due(owner: ScheduledWaitOwner) -> datetime | None:
         due = _adopt_wait_instant(value)
         if due is not None:
             return due
+        if isinstance(value, str):
+            warn_unreadable_once("wait-clock", getattr(owner, "id", None))
     return None
 
 
@@ -264,6 +287,20 @@ def owner_identity(
     if isinstance(owner, Job):
         previous = read_wait(owner)
         kind = previous.owner_kind if previous else WaitOwnerKind.JOB
+        if previous is None:
+            from .job_documents import AvailabilityJobPayload, RunSwitchJobPayload
+            from .recipe_image_removal_contract import RecipeCacheRemovalOwner
+            from .recipe_update_contract import RecipeUpdateDocument
+
+            for model, candidate in (
+                (RunSwitchJobPayload, WaitOwnerKind.RUN_SWITCH),
+                (AvailabilityJobPayload, WaitOwnerKind.IMAGE_AVAILABILITY),
+                (RecipeCacheRemovalOwner, WaitOwnerKind.IMAGE_AVAILABILITY),
+                (RecipeUpdateDocument, WaitOwnerKind.RECIPE_UPDATE_BATCH),
+            ):
+                if _job_owns_contract(owner, model):
+                    kind = candidate
+                    break
         return BlockingOperation(id=owner.id, kind=owner.kind), kind
     for model, kind in (
         (AgentOperation, WaitOwnerKind.AGENT_OPERATION),

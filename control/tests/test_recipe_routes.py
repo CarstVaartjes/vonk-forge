@@ -945,7 +945,7 @@ def test_temporary_publication_failure_stays_pending_and_converges(
         assert run.route_state == "pending"
         assert run.route_attempts == 1
         assert "supervisor socket unavailable" in (run.route_error or "")
-        recorded_due_at = run.route_next_attempt_at
+        recorded_due_at = run.next_action_at
     assert recorded_due_at is not None
     due_at = _aware(recorded_due_at)
 
@@ -960,7 +960,7 @@ def test_temporary_publication_failure_stays_pending_and_converges(
         run = _recipe_run(session, run_id)
         assert run.route_state == "published"
         assert run.route_attempts == 0
-        assert run.route_next_attempt_at is None
+        assert run.next_action_at is None
         assert run.route_error is None
 
 
@@ -986,14 +986,14 @@ def test_route_publication_ends_its_observation_without_claiming_workload_stoppe
     for _attempt in range(6):
         worker.tick()
         with service.sessions() as session:
-            due = _recipe_run(session, run_id).route_next_attempt_at
+            due = _recipe_run(session, run_id).next_action_at
         if due is not None:
             clock.now = _aware(due) + timedelta(seconds=1)
     with service.sessions() as session:
         run = _recipe_run(session, run_id)
         assert run.route_state != "pending"
         assert run.state == "running"
-        assert run.route_next_attempt_at is None
+        assert run.next_action_at is None
     clock.now = NOW
     service.publish_run(fresh)
     with service.sessions() as session:
@@ -1024,7 +1024,7 @@ def test_worker_publishes_pending_route_and_records_failure(tmp_path: Path) -> N
     with failed_service.sessions() as session:
         failed = _recipe_run(session, failed_run)
         assert failed.route_state == "pending"
-        assert failed.route_next_attempt_at is not None
+        assert failed.next_action_at is not None
         assert failed.route_error is not None
         assert "LiteLLM validation" in failed.route_error
 
@@ -1129,7 +1129,7 @@ def test_initial_observation_expiry_preserves_workload_and_allows_fresh_route(
         run = _recipe_run(session, run_id)
         run.route_state = route_state
         run.observation_deadline_at = deadline
-        run.route_next_attempt_at = deadline + timedelta(seconds=30)
+        run.next_action_at = deadline + timedelta(seconds=30)
         for node in session.query(RunNode).filter_by(run_id=run_id):
             node.observed_run_generation = None
             node.observation_observed_at = None
@@ -1149,7 +1149,7 @@ def test_initial_observation_expiry_preserves_workload_and_allows_fresh_route(
         nodes = tuple(session.query(RunNode).filter_by(run_id=run_id))
         assert run.route_state == RouteState.WITHDRAWN
         assert run.route_error == "initial exact observation deadline elapsed"
-        assert run.route_next_attempt_at is None
+        assert run.next_action_at is None
         assert run.observation_deadline_at is None
         assert run.state == RunState.RUNNING
         assert all(node.state == RunState.RUNNING for node in nodes)
@@ -1185,13 +1185,13 @@ def test_publication_exhaustion_cannot_erase_initial_observation_lifetime(
     while now[0] < deadline:
         worker.tick()
         with service.sessions() as session:
-            due = _recipe_run(session, run_id).route_next_attempt_at
+            due = _recipe_run(session, run_id).next_action_at
         if due is None:
             break
         now[0] = due.replace(tzinfo=UTC)
     with service.sessions() as session:
         run = _recipe_run(session, run_id)
-        assert run.route_next_attempt_at is None
+        assert run.next_action_at is None
         assert run.observation_deadline_at is not None
         assert run.observation_deadline_at.replace(tzinfo=UTC) == deadline
 
@@ -1857,7 +1857,7 @@ def test_a_busy_route_owner_ends_the_publication_pass_and_retries_after_release(
                 for run_id in runs:
                     run = _recipe_run(session, run_id)
                     assert run.route_state == RouteState.PENDING
-                    assert run.route_next_attempt_at is None
+                    assert run.next_action_at is None
 
             # The wait is paced: a pass before the retry tries nothing, the
             # maintenance pass included.
@@ -1961,8 +1961,8 @@ def test_postgres_publication_recovers_after_worker_restart_without_new_effect(
         run = _recipe_run(session, run_id)
         assert run.state == "running"
         assert run.route_state == "pending"
-        assert run.route_next_attempt_at is not None
-        due_at = _aware(run.route_next_attempt_at)
+        assert run.next_action_at is not None
+        due_at = _aware(run.next_action_at)
         if recovering:
             recovery_job = session.query(Job).filter_by(kind="recipe.start").one()
             assert recovery_job.result == {}

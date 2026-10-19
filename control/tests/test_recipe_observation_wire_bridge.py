@@ -1068,7 +1068,7 @@ def test_singleton_recovery_enters_cooldown_then_resumes_automatically(
         run = session.get(RecipeRun, run_id, with_for_update=True)
         assert run is not None
         run.recovery_attempts = 5
-        run.route_next_attempt_at = None
+        run.next_action_at = None
     recovery = DistributedRecoveryCoordinator(
         sessions,
         routes=routes,
@@ -1083,7 +1083,7 @@ def test_singleton_recovery_enters_cooldown_then_resumes_automatically(
         run = session.get(RecipeRun, run_id)
         assert run is not None
         assert run.recovery_attempts == 0
-        assert run.route_next_attempt_at == now[0] + timedelta(minutes=5)
+        assert run.next_action_at == now[0] + timedelta(minutes=5)
         assert "degraded" in (run.route_error or "")
     now[0] += timedelta(minutes=5)
 
@@ -1092,8 +1092,8 @@ def test_singleton_recovery_enters_cooldown_then_resumes_automatically(
         run = session.get(RecipeRun, run_id)
         # Waiting for fresh absence evidence spends no attempt.
         assert run is not None and run.recovery_attempts == 0
-        assert run.route_next_attempt_at is not None
-        assert now[0] < run.route_next_attempt_at <= now[0] + timedelta(seconds=15)
+        assert run.next_action_at is not None
+        assert now[0] < run.next_action_at <= now[0] + timedelta(seconds=15)
         assert "fresh exact absence" in (run.route_error or "")
         assert not session.scalar(
             select(Job.id).where(
@@ -1152,8 +1152,8 @@ def test_stale_singleton_absence_can_be_refreshed_read_only_and_recovered(
         assert run.route_state == "withdrawn"
         assert "fresh exact absence" in (run.route_error or "")
         # A wait is re-checked on the bounded wait cadence (it spends no attempt).
-        assert run.route_next_attempt_at is not None
-        assert now[0] < run.route_next_attempt_at <= now[0] + timedelta(seconds=15)
+        assert run.next_action_at is not None
+        assert now[0] < run.next_action_at <= now[0] + timedelta(seconds=15)
         assert node.state == "failed"
 
     now[0] = NOW + timedelta(seconds=125)
@@ -1237,8 +1237,8 @@ def test_stale_presence_waits_then_recovery_resumes_without_new_run(
         assert run.route_state == "withdrawn"
         assert "fresh Controller-observed Spark presence" in (run.route_error or "")
         # A wait is re-checked on the bounded wait cadence (it spends no attempt).
-        assert run.route_next_attempt_at is not None
-        assert now[0] < run.route_next_attempt_at <= now[0] + timedelta(seconds=15)
+        assert run.next_action_at is not None
+        assert now[0] < run.next_action_at <= now[0] + timedelta(seconds=15)
         assert not session.scalar(
             select(Job.id).where(
                 Job.kind == "recipe.stop",
@@ -1249,8 +1249,8 @@ def test_stale_presence_waits_then_recovery_resumes_without_new_run(
 
     with sessions() as session:
         run = session.get(RecipeRun, run_id)
-        assert run is not None and run.route_next_attempt_at is not None
-        now[0] = max(NOW + timedelta(seconds=10), run.route_next_attempt_at)
+        assert run is not None and run.next_action_at is not None
+        now[0] = max(NOW + timedelta(seconds=10), run.next_action_at)
     with sessions.begin() as session:
         presence = session.get(AgentPresence, node_id)
         assert presence is not None
@@ -1370,12 +1370,12 @@ def test_stale_singleton_wait_does_not_starve_later_recovery_or_hot_loop(
         assert stale is not None
         assert stale.route_error == wait_reason
         # A wait is re-checked on the bounded wait cadence (it spends no attempt).
-        assert stale.route_next_attempt_at is not None
-        assert now[0] < stale.route_next_attempt_at <= now[0] + timedelta(seconds=15)
+        assert stale.next_action_at is not None
+        assert now[0] < stale.next_action_at <= now[0] + timedelta(seconds=15)
         assert later is not None and later.state == "stopping"
         assert stop is not None and stop.state == "running"
         first_wait_updated_at = stale.updated_at
-        first_wait_due_at = stale.route_next_attempt_at
+        first_wait_due_at = stale.next_action_at
 
     assert recovery.tick() is False
 
@@ -1383,7 +1383,7 @@ def test_stale_singleton_wait_does_not_starve_later_recovery_or_hot_loop(
         stale = session.get(RecipeRun, stale_id)
         assert stale is not None
         assert stale.updated_at == first_wait_updated_at
-        assert stale.route_next_attempt_at == first_wait_due_at
+        assert stale.next_action_at == first_wait_due_at
 
 
 @pytest.mark.parametrize("authority_copy", ["installed", "accepted-start"])
