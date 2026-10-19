@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 from collections.abc import Mapping
 from datetime import timedelta
@@ -10,14 +11,22 @@ from typing import TYPE_CHECKING, cast
 from urllib.parse import urljoin, urlsplit
 
 import httpx2
-from sqlalchemy import func, select
-from vonk_agent_protocol import ModelCacheCode, SecurityRefusalReason
+from sqlalchemy import and_, func, or_, select
+from vonk_agent_protocol import (
+    InvalidRequestReason,
+    LifecycleState,
+    ModelCacheCode,
+    ProgressPhase,
+    SecurityRefusalReason,
+)
 
+from .. import model_cache_states
 from ..bounded_retry import bounded_attempts
 from ..cached_file_verification import verified_files
-from ..lifecycle import Tick
+from ..lifecycle import Effect, Outcome, Reported, Tick
 from ..model_cache_progress import cache_phase, progress_document
 from ..models import ModelCacheOperation
+from ..operation_contract import ModelAccessReason
 from ..runtime_init import RuntimeSecretError, read_runtime_secret
 from .artifacts import ArtifactSetManifest, ArtifactSpec, _unique_artifacts
 from .constants import (
@@ -32,7 +41,7 @@ from .errors import (
     _huggingface_access_url,
     _retry_after_seconds,
 )
-from .persistence import _operation_progress, _store_operation_payload
+from .persistence import _operation_progress, _store_operation_payload, _updated
 from .source_helpers import (
     _fsync_directory,
     _is_allowed_huggingface_redirect,
@@ -42,6 +51,10 @@ from .source_helpers import (
 
 if TYPE_CHECKING:
     from .service import ModelCacheService
+
+
+def _token_fingerprint(token: str | None) -> str:
+    return hashlib.sha256(token.encode()).hexdigest() if token else "absent"
 
 
 class HttpMixin:
@@ -157,15 +170,23 @@ class HttpMixin:
                 if authenticated:
                     raise ModelCacheStorageRefused(
                         SecurityRefusalReason.MODEL_CACHE_CREDENTIALS_DENIED.value,
-                        "Hugging Face denied the configured account or token scope for "
-                        f"{_huggingface_access_url(source)}; the download resumes automatically when the token changes",
-                        recovery="access_denied",
+                        "Gated or access-restricted model: the configured token lacks access. "
+                        f"Request or accept access on {_huggingface_access_url(source)} "
+                        "while signed in as the Hugging Face account of the configured token; "
+                        "ensure the token permits this model. Access is rechecked automatically "
+                        "within 1 hour and when token content changes; the download resumes once allowed.",
+                        recovery=ModelAccessReason.ACCESS_DENIED,
+                        credential_fingerprint=_token_fingerprint(token),
                     )
                 raise ModelCacheStorageRefused(
                     ModelCacheCode.CREDENTIALS_MISSING,
-                    "Hugging Face account access is required for "
-                    f"{_huggingface_access_url(source)}; HF_TOKEN_FILE credentials are missing; the download resumes automatically when the token changes",
-                    recovery="access_required",
+                    "Gated or access-restricted model: no token configured. "
+                    f"Request or accept access on {_huggingface_access_url(source)} "
+                    "while signed in as the Hugging Face account of the configured token, "
+                    "then configure its token in HF_TOKEN_FILE. Access is rechecked automatically "
+                    "within 1 hour and when token content changes; the download resumes once allowed.",
+                    recovery=ModelAccessReason.ACCESS_REQUIRED,
+                    credential_fingerprint=_token_fingerprint(token),
                 )
             if status_code in {301, 302, 303, 307, 308}:
                 location = response.headers.get("location")
@@ -209,27 +230,19 @@ class HttpMixin:
         )
 
     def _huggingface_credential_fingerprint(self) -> str:
-        """Identify the configured credential file without reading the secret."""
+        """Hash only the configured token, using the same protected reader as HTTP."""
         cache = cast("ModelCacheService", self)
-
-        path = cache._huggingface_token_path
-        if path is None:
-            return "unconfigured"
         try:
-            stat = path.lstat()
-        except FileNotFoundError:
-            return "absent"
-        except OSError:
-            return "unreadable"
-        return f"{stat.st_ino}:{stat.st_size}:{stat.st_mtime_ns}"
+            token = cache._load_huggingface_token()
+        except (ModelCacheStorageRefused, ModelCacheCredentialPathUnsafe):
+            return "invalid"
+        return _token_fingerprint(token)
 
     def _resume_after_credential_change(self) -> int:
         """Requeue authorization failures once the credential file changed."""
         cache = cast("ModelCacheService", self)
 
         current = cache._huggingface_credential_fingerprint()
-        if current == cache._observed_credential_fingerprint:
-            return 0
         now = cache._clock()
         resumed = 0
         with cache._lock, cache._session(write=True) as session:
@@ -237,8 +250,36 @@ class HttpMixin:
                 session.scalars(
                     select(ModelCacheOperation)
                     .where(ModelCacheOperation.kind.in_(["download", "repair"]))
-                    .where(ModelCacheOperation.state == "failed")
-                    .order_by(ModelCacheOperation.updated_at.desc())
+                    .where(
+                        ModelCacheOperation.state.in_(
+                            model_cache_states.WAITING_OR_FAILED
+                        )
+                    )
+                    .where(
+                        ModelCacheOperation.payload["failure"]["code"]
+                        .as_string()
+                        .in_(_CREDENTIAL_FAILURE_PUBLIC_CODES)
+                    )
+                    .where(
+                        or_(
+                            and_(
+                                ModelCacheOperation.state == LifecycleState.FAILED,
+                                ModelCacheOperation.payload["failure"]["code"]
+                                .as_string()
+                                .in_(
+                                    (
+                                        ModelAccessReason.ACCESS_DENIED,
+                                        ModelAccessReason.ACCESS_REQUIRED,
+                                    )
+                                ),
+                            ),
+                            ModelCacheOperation.payload["retry"][
+                                "credential_fingerprint"
+                            ].as_string()
+                            != current,
+                        )
+                    )
+                    .order_by(ModelCacheOperation.updated_at)
                     .limit(256)
                     .with_for_update(skip_locked=True)
                 )
@@ -253,8 +294,17 @@ class HttpMixin:
                 payload = cache._payload_or_none(operation)
                 if payload is None or payload.cancellation is not None:
                     continue
+                if (
+                    operation.state == LifecycleState.FAILED
+                    and failure.code == ModelAccessReason.CREDENTIALS_INVALID
+                    and payload.retry.credential_fingerprint == current
+                ):
+                    continue
                 retry = payload.retry
-                if retry.credential_fingerprint == current:
+                if operation.state != LifecycleState.FAILED and (
+                    retry.credential_fingerprint is None
+                    or retry.credential_fingerprint == current
+                ):
                     continue
                 newer = session.scalar(
                     select(func.count())
@@ -267,17 +317,32 @@ class HttpMixin:
                     )
                 )
                 if newer:
-                    # A later request owns this artifact set now.
+                    # Retire superseded waits so old history cannot starve the
+                    # bounded credential-change scan on later worker ticks.
+                    cache._lifecycle.reopen(operation, now)
+                    cache._lifecycle.settle(
+                        operation,
+                        Reported(
+                            Outcome.CANCELLED,
+                            effect=Effect.UNKNOWN,
+                            reason=InvalidRequestReason.SUPERSEDED.value,
+                        ),
+                        now,
+                    )
                     continue
                 _store_operation_payload(
                     operation,
                     operation.kind,
-                    payload.model_copy(
-                        update={
-                            "retry": retry.model_copy(
-                                update={"credential_fingerprint": None}
-                            )
-                        }
+                    _updated(
+                        payload,
+                        retry=retry.model_copy(update={"credential_fingerprint": None}),
+                        failure=failure.model_copy(
+                            update={
+                                "retry_time": now.isoformat(),
+                                "retry_after_seconds": 0,
+                                "retryable": True,
+                            }
+                        ),
                     ),
                 )
                 # The credential changed: withdraw the end and let the core decide
@@ -286,10 +351,11 @@ class HttpMixin:
                 cache._lifecycle.settle(operation, Tick(), now)
                 operation.attempt = int(operation.attempt) + 1
                 operation.progress = progress_document(
-                    cache_phase(_operation_progress(operation), "queued", now)
+                    cache_phase(
+                        _operation_progress(operation), ProgressPhase.QUEUED.value, now
+                    )
                 )
                 resumed += 1
-        cache._observed_credential_fingerprint = current
         return resumed
 
     def _load_huggingface_token(self) -> str | None:

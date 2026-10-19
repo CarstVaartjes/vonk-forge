@@ -62,6 +62,14 @@ class OperationFailureEvidence(BaseModel):
     uncertain: bool = False
 
 
+class ModelAccessReason(StrEnum):
+    """Visible Hugging Face access dependencies, shared by wait and recovery."""
+
+    ACCESS_REQUIRED = "access_required"
+    ACCESS_DENIED = "access_denied"
+    CREDENTIALS_INVALID = "credentials_invalid"
+
+
 class AvailabilityRecoveryAction(StrEnum):
     RETRY = "retry"
     RESUME = "resume"

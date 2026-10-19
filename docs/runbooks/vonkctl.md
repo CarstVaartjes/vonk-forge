@@ -265,6 +265,7 @@ vonkctl model download qwen-3.8-nvfp4
 vonkctl model download qwen-3.8-nvfp4 --detach
 vonkctl model progress OPERATION_ID --follow
 vonkctl model progress --request-key REQUEST_UUID --follow
+vonkctl model resume-access OPERATION_UUID --detach --request-key CHECK_UUID
 vonkctl model cancel OPERATION_UUID --yes --request-key CANCEL_UUID --reason "No longer needed"
 vonkctl model download qwen-3.8-nvfp4   # repeat to refresh a completed copy
 vonkctl model remove qwen-3.8-nvfp4 --review
@@ -279,6 +280,19 @@ downloading, cached, and running variants. Reusing the
 same download request key returns its original operation. A new request has
 its own identity; the cache owner reuses verified assets and compatible partial
 work and refreshes completed work when requested.
+
+Gated or access-restricted Hugging Face downloads retain their exact identity and
+partial files while waiting. Request or accept access on the model's Hugging Face
+page while signed in as the account of the Controller's configured token; ensure
+that token permits the model. If no token is configured, provide that account's
+token through the existing protected `HF_TOKEN_FILE`. The Controller rechecks on
+a low-frequency schedule (about five minutes initially, backing off with jitter
+to at most one hour) and on its next worker tick after token content changes.
+A denial remains visible with its typed reason and next check time. Access
+approval needs no token rotation or second manual step. To check earlier, use
+`vonkctl model resume-access OPERATION_UUID`; `--request-key` reconciles a lost
+reply, and `--detach` returns after acceptance instead of following the download.
+The command uses only the configured credential and cannot override a denial.
 
 Cancel an exact download with `model cancel`; use `--detach` to return after
 acceptance. The cancellation has its own request UUID and reason. Retain both

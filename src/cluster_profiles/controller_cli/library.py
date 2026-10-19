@@ -17,6 +17,7 @@ from ..control_client import (
 from .cache_removal import _remove_model, _remove_recipe
 from .cache_submission import (
     _submit_cache_request,
+    _submit_model_access_resume,
     _submit_model_cancellation,
     _submit_recipe_cancellation,
     _submit_recipe_retry,
@@ -65,6 +66,9 @@ def _model(
     action = getattr(args, "model_action", None)
     if action == "progress":
         return _cache_progress(client, "model", args, factory)
+    if action == "resume-access":
+        result = _submit_model_access_resume(client, args, factory)
+        return _follow_mutation(client, "model", result.to_dict(), args)
     if action == "cancel":
         result = _submit_model_cancellation(client, args, factory)
         return _follow_mutation(client, "model", result, args)

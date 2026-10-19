@@ -36,10 +36,12 @@ resumes its fenced checkpoint (``removal_fence`` plus ``object_index`` and
 ``set_index``; repeating a step is a no-op).  So rule 1 retries every uncertain
 outcome and the core never parks one of these for an operator: there is no
 ``waiting-for-operator`` here and no operator action to advertise.  A failure the
-cache itself calls terminal (a credential, an untrusted source) is a definite
-``failed``; only a changed credential or a new request revives it, through
-:meth:`ModelCacheAdapter.reopen`, which withdraws the end and lets the core
-decide again.
+cache itself calls terminal (an invalid credential or an untrusted source) is a
+definite ``failed``. Upstream account-access denials remain visible dependencies:
+the same exact source is checked again at a bounded low-frequency cadence, or
+immediately after configured token content changes. Invalid credentials require
+a content change or an explicit operator check through
+:meth:`ModelCacheAdapter.reopen`.
 
 A removal has no lease: its steps are short, fenced transactions the worker
 advances one per tick, so a stored ``running`` removal is a queued one between
@@ -72,6 +74,7 @@ from ..model_cache_contract import (
     StoredCacheClocks,
 )
 from ..models import ModelCacheOperation
+from ..operation_contract import ModelAccessReason
 from ..stall_window import stall_deadline
 from .adapter import Dispatch
 from .agent_operation import same_order
@@ -351,6 +354,18 @@ class ModelCacheAdapter:
             if operation is None or operation.kind == "remove":
                 return None
             payload = self._payload(operation)
+            if (
+                payload is not None
+                and payload.failure is not None
+                and payload.failure.code
+                in {
+                    ModelAccessReason.ACCESS_DENIED,
+                    ModelAccessReason.ACCESS_REQUIRED,
+                }
+            ):
+                # Upstream account approval owns this wait; each access check is
+                # bounded separately by the HTTP timeout and the visible clock.
+                return None
             cooldown = (
                 None if payload is None else self._effects.cooldown_until(payload)
             )

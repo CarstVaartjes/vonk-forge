@@ -7,6 +7,8 @@ import logging
 
 from vonk_agent_protocol import ModelCacheCode, SecurityRefusalReason
 
+from ..operation_contract import ModelAccessReason
+
 SCHEMA_VERSION = 2
 
 
@@ -103,6 +105,14 @@ _LOGGER = logging.getLogger(__name__)
 _WEIGHT_ROLES = frozenset({"model", "weight", "weights"})
 
 
+_ACCESS_WAIT_CODES = frozenset(
+    {
+        ModelCacheCode.CREDENTIALS_MISSING,
+        SecurityRefusalReason.MODEL_CACHE_CREDENTIALS_DENIED,
+    }
+)
+
+
 _CREDENTIAL_FAILURE_CODES = frozenset(
     {
         ModelCacheCode.CREDENTIALS_MISSING,
@@ -112,9 +122,7 @@ _CREDENTIAL_FAILURE_CODES = frozenset(
 )
 
 
-_CREDENTIAL_FAILURE_PUBLIC_CODES = frozenset(
-    {"access_required", "access_denied", "credentials_invalid"}
-)
+_CREDENTIAL_FAILURE_PUBLIC_CODES = frozenset(set(ModelAccessReason))
 
 
 _TERMINAL_FAILURE_CODES = _CREDENTIAL_FAILURE_CODES | frozenset(
