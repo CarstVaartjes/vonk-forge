@@ -12,6 +12,7 @@ from vonk_agent_protocol import (
     AgentResult,
     AgentResultState,
     FailureStage,
+    InvalidRequestReason,
     LifecycleState,
     OutcomeKind,
     RecipeJobFile,
@@ -25,7 +26,7 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol.outcome import OutcomeEvidence, OutcomeUnknown
 from vonk_control import artifact_job_states as ajs
 from vonk_control.agent_jobs import AgentJobService
-from vonk_control.artifact_jobs import ArtifactJobUnavailableError
+from vonk_control.artifact_jobs import ArtifactJobInvalid, ArtifactJobUnavailableError
 from vonk_control.bounded_retry import REQUEST_PAUSES
 from vonk_control.failure_evidence import FailureEvidenceService
 from vonk_control.inventory_repository import (
@@ -137,15 +138,14 @@ def test_draft_limit_damage_ends_replay_and_admits_fresh_intent(tmp_path):
     ended = create_artifact_job(service, **request)
     assert ended.id == original.id and ended.state in ajs.ENDED
     assert ended.operation_id is None
-    assert (
+    with pytest.raises(ArtifactJobInvalid) as refused:
         service.cancel(
             original.id,
             actor="operator",
             request_id="00000000-0000-4000-8000-000000001007",
             reason="stop",
-        ).id
-        == original.id
-    )
+        )
+    assert refused.value.typed_reason == InvalidRequestReason.CONFLICT
     fresh_draft = create_artifact_job(
         service,
         **artifact_create_request(run_id, "00000000-0000-4000-8000-000000001008"),
