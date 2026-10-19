@@ -308,3 +308,44 @@ def test_corrupt_wait_does_not_erase_intent_or_hide_another_owner(
         )
         projected = read_wait(good)
         assert projected is not None and projected.next_check == due
+
+
+def test_catalog_wait_survives_reconstruction_and_reuses_exact_observation(
+    tmp_path, postgres_engine
+) -> None:
+    """Catches a restarted loop losing its delay or attaching it to unrelated history."""
+    from vonk_agent_protocol import CatalogSyncCode
+    from vonk_control.catalog_sync import ManagedRecipeCatalogSyncService
+    from vonk_control.models import RecipeLibrarySyncRun
+    from vonk_control.persisted_waits import read_wait
+
+    from .test_catalog_sync import _fixture
+
+    sessions, catalog, reader, _item = _fixture(tmp_path, engine=postgres_engine)
+    now = [NOW]
+
+    def service():
+        return ManagedRecipeCatalogSyncService(
+            sessions, catalog=catalog, reader=reader, clock=lambda: now[0]
+        )
+
+    first = service().automatic()
+    service().record_automatic_wait(30, failed=False, observed_id=first.id)
+    assert service().automatic_wait_delay() == 30
+    with sessions() as session:
+        stored = session.get(RecipeLibrarySyncRun, first.id)
+        assert stored is not None
+        before = read_wait(stored)
+        assert before is not None
+        assert before.reason is CatalogSyncCode.REFRESH_SCHEDULED
+        assert before.owner.id == first.id
+    now[0] += timedelta(seconds=30)
+    # Unchanged content reuses the original completed observation, not a new run.
+    second = service().automatic()
+    assert second.id == first.id
+    service().record_automatic_wait(30, failed=False, observed_id=second.id)
+    latest = service().latest()
+    assert latest is not None and latest.wait is not None
+    assert latest.wait.next_check == now[0] + timedelta(seconds=30)
+    assert latest.wait.first_blocked_at == before.first_blocked_at
+    assert latest.wait.last_progress_at is None

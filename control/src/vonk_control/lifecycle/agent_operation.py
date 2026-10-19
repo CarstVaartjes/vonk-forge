@@ -577,7 +577,7 @@ class AgentOperationAdapter:
             kind=WaitOwnerKind.AGENT_OPERATION,
             state=after.state,
             now=now,
-            due=after.next_action_at,
+            due=next_action,
             detail=after.reason,
             deadline=after.recovery_deadline,
             cancelling=after.cancel_requested,

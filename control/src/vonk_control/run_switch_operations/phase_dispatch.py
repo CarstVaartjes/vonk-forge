@@ -730,7 +730,13 @@ class PhaseDispatchMixin:
                 and phase.kind == "prepare"
                 and phase.subphase == "runtime-image"
             ):
-                _ADAPTER.project(job, progress, now, state=_LifecycleState.RUNNING)
+                _ADAPTER.project(
+                    job,
+                    progress,
+                    now,
+                    state=_LifecycleState.RUNNING,
+                    due=job.next_action_at if execution.waiting else None,
+                )
             job.result = _persisted_result(progress)
             job.updated_at = now
             if progress.cancellation and not progress.child_operation_id:

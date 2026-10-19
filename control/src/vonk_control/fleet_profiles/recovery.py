@@ -372,7 +372,7 @@ class FleetProfileService:
                         ),
                         or_(
                             retry_at.is_(None),
-                            retry_at <= str(retry_cutoff).replace("Z", "+00:00"),
+                            retry_at <= retry_cutoff,
                         ),
                     )
                     .order_by(FleetProfileApplication.id)

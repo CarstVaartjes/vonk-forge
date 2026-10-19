@@ -5,7 +5,15 @@ from __future__ import annotations
 from collections.abc import Mapping
 from functools import cache
 
-from ..lifecycle_vocabulary import FailureCode, WaitReason
+from ..http_failure import TransientReason
+from ..lifecycle_vocabulary import (
+    FailureCode,
+    InvalidRequestReason,
+    ResourceBlockerCode,
+    RunAdmissionCode,
+    SecurityRefusalReason,
+    WaitReason,
+)
 from ..wire_model import WireEnum, WireModel
 from .admission import (
     AdmissionCode,
@@ -31,7 +39,13 @@ from .evidence import (
 from .fleet import ClusterMappingCode, DistributionCode, TopologyCode
 from .helpers import HelperErrorCode, HelperOperationCode
 from .images import ImageStoreCode, PrebuiltImageCode
-from .model_cache import CacheReferenceReason, ModelCacheBlockerCode, ModelCacheCode
+from .model_cache import (
+    CacheReferenceReason,
+    ModelAccessReason,
+    ModelCacheBlockerCode,
+    ModelCacheCode,
+    ModelCacheFailureCode,
+)
 from .profiles import ProfileReasonCode, ProjectionCode
 from .recipes import (
     RecipeBuildCode,
@@ -72,6 +86,8 @@ REASON_CODE_ENUMS: tuple[type[WireEnum], ...] = (
     LibraryProjectionCode,
     ModelCacheBlockerCode,
     ModelCacheCode,
+    ModelAccessReason,
+    ModelCacheFailureCode,
     NodeOfflineReason,
     OperationFailureCode,
     PrebuiltImageCode,
@@ -106,6 +122,13 @@ REASON_CODE_ENUMS: tuple[type[WireEnum], ...] = (
 type OperationReason = (
     WaitReason
     | FailureCode
+    | SecurityRefusalReason
+    | InvalidRequestReason
+    | ResourceBlockerCode
+    | RunAdmissionCode
+    | TransientReason
+    | ModelAccessReason
+    | ModelCacheFailureCode
     | AdmissionCode
     | AgentEvidenceCode
     | ArtifactLifecycleCode
@@ -278,6 +301,8 @@ def resource_term_code(
 
 
 class ReasonCodeVocabulary(WireModel):
+    model_access_reason: ModelAccessReason
+    model_cache_failure_code: ModelCacheFailureCode
     """Carrier that publishes every reason-code enum into the wire schema.
 
     The model is never sent: it exists so the schema exporter, the Rust

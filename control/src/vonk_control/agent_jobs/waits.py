@@ -151,3 +151,34 @@ def record_queue_waits(
         if wait is not None:
             waits[operation.id] = wait
     return waits
+
+
+def refresh_queue_waits(
+    session: Session,
+    now: datetime,
+    *,
+    node_id: str | None = None,
+    limit: int = 100,
+    after_id: str | None = None,
+) -> str | None:
+    """Refresh dependency evidence from owner events, never from progress reads.
+
+    Nonblocking locks leave rows another writer owns to its next normal pass.
+    The existing reconciler walks the queue round-robin without issuing work.
+    """
+    query = select(AgentOperation).where(
+        AgentOperation.state == agent_operation_states.QUEUED,
+    )
+    if node_id is not None:
+        query = query.where(AgentOperation.node_id == node_id)
+    if after_id is not None:
+        query = query.where(AgentOperation.id > after_id)
+    operations = tuple(
+        session.scalars(
+            query.order_by(AgentOperation.id)
+            .limit(limit)
+            .with_for_update(skip_locked=True)
+        )
+    )
+    record_queue_waits(session, operations, now)
+    return operations[-1].id if operations else None

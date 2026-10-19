@@ -64,7 +64,7 @@ from typing import Any, Protocol
 from sqlalchemy import select, update
 from sqlalchemy.engine import Connection
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import Disposition, WaitOwnerKind
+from vonk_agent_protocol import Disposition, ModelAccessReason, WaitOwnerKind
 
 from .. import model_cache_states
 from ..agent_operation_facts import aware
@@ -74,7 +74,6 @@ from ..model_cache_contract import (
     StoredCacheClocks,
 )
 from ..models import ModelCacheOperation
-from ..operation_contract import ModelAccessReason
 from ..persisted_waits import initialize_wait, lifecycle_wait, schedule_wait
 from ..stall_window import stall_deadline
 from .adapter import Dispatch

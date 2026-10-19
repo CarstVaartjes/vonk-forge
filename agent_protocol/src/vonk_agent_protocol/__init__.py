@@ -561,3 +561,6 @@ from .lifecycle_vocabulary import WaitResumeCondition as WaitResumeCondition
 from .reason_codes.vocabulary import OperationReason as OperationReason
 
 from .reason_codes.runs import JournalRepairCode as JournalRepairCode
+
+from .reason_codes.model_cache import ModelAccessReason as ModelAccessReason
+from .reason_codes.model_cache import ModelCacheFailureCode as ModelCacheFailureCode
