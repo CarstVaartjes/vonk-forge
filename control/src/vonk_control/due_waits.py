@@ -123,6 +123,10 @@ class DueWaitBackstop:
                     raise ValueError(
                         "persisted wait requires typed evidence and a due clock"
                     )
+                if evidence.owner.id != str(key[-1]):
+                    raise ValueError(
+                        "persisted wait identity does not match its storage owner"
+                    )
                 if evidence.owner_kind not in source.kinds:
                     raise ValueError(
                         "persisted wait kind does not belong to its storage owner"

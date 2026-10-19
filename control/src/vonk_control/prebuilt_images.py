@@ -38,6 +38,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
     AgentFailureKind,
     AgentFailureResult,
+    LifecycleState,
     PrebuiltImageCode,
     UnknownOutcomeError,
     canonical_message,
@@ -599,6 +600,8 @@ class PrebuiltImageImporter:
         )
 
     def _claim(self, job_id: str | None = None) -> str | None:
+        from .recipe_build_cancellation import build_cancellation
+
         now = self._clock()
         with self._sessions.begin() as session:
             candidates = session.scalars(
@@ -614,7 +617,10 @@ class PrebuiltImageImporter:
                 .with_for_update(skip_locked=True)
             )
             for job in candidates:
-                if prebuilt_reference(job) is None:
+                if (
+                    prebuilt_reference(job) is None
+                    or build_cancellation(job) is not None
+                ):
                     continue
                 payload = dict(job.payload)
                 claim_until = payload.get("prebuilt_claim_until")
@@ -645,9 +651,16 @@ class PrebuiltImageImporter:
                 }
 
     def run(self, job_id: str) -> None:
+        from .recipe_build_cancellation import build_cancellation
+
         with self._sessions() as session:
             job = session.get(Job, job_id)
-            if job is None:
+            if (
+                job is None
+                or job.state != LifecycleState.RUNNING
+                or job.payload.get("prebuilt_claim_owner") != self._owner
+                or build_cancellation(job) is not None
+            ):
                 return
             reference = prebuilt_reference(job)
             build_id = job.payload.get("owner_id")

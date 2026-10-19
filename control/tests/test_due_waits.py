@@ -178,13 +178,13 @@ def test_owner_rotation_recovers_a_terminal_revocation_after_ca_outage(postgres_
     """Catches an always-corrupt owner starving another owner's aliased due clock."""
     from uuid import uuid4
 
-    from vonk_agent_protocol import CertificateRecordState
+    from vonk_agent_protocol.state_machines import CertificateRecordState
     from vonk_control.enrollment import EnrollmentService
     from vonk_control.models import AgentIssuedCertificateRevocation
     from vonk_control.persisted_waits import read_wait
     from vonk_control.step_ca import StepCAUnavailable
 
-    from .ca_test_authority import FixtureCertificateAuthority
+    from .test_agent_jobs_postgres import RevokingAuthority
 
     Base.metadata.create_all(postgres_engine)
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)
@@ -211,7 +211,7 @@ def test_owner_rotation_recovers_a_terminal_revocation_after_ca_outage(postgres_
     now = [NOW]
     revoked = []
 
-    class Authority(FixtureCertificateAuthority):
+    class Authority(RevokingAuthority):
         def revoke_node(self, serial, observed_at):
             if not available[0]:
                 raise StepCAUnavailable("CA transport unavailable")

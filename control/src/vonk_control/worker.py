@@ -732,7 +732,16 @@ def assemble_production_worker(
     def prebuilt(key: RowKey, wait: WaitEvidence) -> object:
         if prebuilt_importer is None:
             return unavailable(wait.owner_kind)
-        return prebuilt_importer.tick(str(key[0]))
+        progressed = lifecycle.reconcile_cancelled_builds(str(key[0]))
+        return prebuilt_importer.tick(str(key[0])) or progressed
+
+    def recipe(key: RowKey, wait: WaitEvidence) -> object:
+        progressed = lifecycle.redrive(str(key[0]))
+        # A persisted recipe build may itself own a Controller prebuilt pull.
+        # Its normal importer decides from the current typed build identity.
+        if prebuilt_importer is not None:
+            return prebuilt_importer.tick(str(key[0])) or progressed
+        return progressed
 
     def cache(key: RowKey, wait: WaitEvidence) -> object:
         if model_cache is None:
