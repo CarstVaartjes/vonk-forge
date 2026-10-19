@@ -18,6 +18,7 @@ def test_python_progress_crosses_rust_parser_without_losing_measurements():
         total_bytes=24,
         total_bytes_known=True,
         completed_items=1,
+        activity_sequence=4096,
         total_items=2,
         bytes_per_second=3.0,
         smoothed_bytes_per_second=2.5,

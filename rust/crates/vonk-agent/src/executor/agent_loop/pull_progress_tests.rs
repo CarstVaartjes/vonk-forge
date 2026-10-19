@@ -145,11 +145,11 @@ async fn image_pull_bytes_reach_the_order_heartbeat() {
     let pulled = heartbeats
         .iter()
         .filter_map(|heartbeat| heartbeat.progress.as_ref())
-        .find(|progress| progress.completed_items == Some(4096_u64.into()))
+        .find(|progress| progress.completed_bytes == 4096_u64)
         .expect("a renewal carried the pull's progress to the Controller");
     assert_eq!(pulled.phase, ProgressPhase::Pulling.as_str());
-    // Pull activity never inflates the order's artifact bytes.
-    assert_eq!(pulled.completed_bytes, 0);
+    // Bytes must never masquerade as countable items.
+    assert_eq!(pulled.completed_items, None);
 }
 
 /// The Controller's image store refusing every read with `status`.

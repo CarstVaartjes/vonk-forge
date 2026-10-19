@@ -197,6 +197,10 @@ def project_progress_for_state(
 ) -> OperationProgress:
     """One advisory freshness policy for every retained attempt consumer."""
     projected = project_progress(value, now)
+    if state == LifecycleState.SUCCEEDED:
+        projected = projected.model_copy(
+            update={"phase": ProgressPhase.COMPLETED.value}
+        )
     if state in {
         LifecycleState.SUCCEEDED,
         "accepted",

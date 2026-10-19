@@ -7,7 +7,7 @@ from collections.abc import Iterator, Mapping
 from copy import deepcopy
 from datetime import datetime
 from enum import StrEnum
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, cast
 
 from pydantic import (
     BaseModel,
@@ -45,10 +45,12 @@ def _wrap_numeric_literals(schema: CoreSchema) -> CoreSchema:
         return schema
     for key, nested in tuple(schema.items()):
         if isinstance(nested, dict):
-            schema[key] = _wrap_numeric_literals(nested)
+            schema[key] = _wrap_numeric_literals(cast(CoreSchema, nested))
         elif isinstance(nested, list):
             schema[key] = [
-                _wrap_numeric_literals(item) if isinstance(item, dict) else item
+                _wrap_numeric_literals(cast(CoreSchema, item))
+                if isinstance(item, dict)
+                else item
                 for item in nested
             ]
     return schema
@@ -74,7 +76,7 @@ def _bind_string_enum_values(schema: CoreSchema) -> CoreSchema:
     if not isinstance(schema, dict):
         return schema
     if schema.get("type") == "enum" and schema.get("sub_type") == "str":
-        enum_type = schema["cls"]
+        enum_type = cast(type[StrEnum], schema.get("cls"))
         members = frozenset(schema.get("members", ()))
 
         def bind_member(value: object) -> object:
@@ -85,10 +87,12 @@ def _bind_string_enum_values(schema: CoreSchema) -> CoreSchema:
         return core_schema.no_info_before_validator_function(bind_member, schema)
     for key, nested in tuple(schema.items()):
         if isinstance(nested, dict):
-            schema[key] = _bind_string_enum_values(nested)
+            schema[key] = _bind_string_enum_values(cast(CoreSchema, nested))
         elif isinstance(nested, list):
             schema[key] = [
-                _bind_string_enum_values(item) if isinstance(item, dict) else item
+                _bind_string_enum_values(cast(CoreSchema, item))
+                if isinstance(item, dict)
+                else item
                 for item in nested
             ]
     return schema
@@ -147,7 +151,7 @@ class StrictJSONModel(BaseModel):
         # (A class still being built holds a placeholder that is not a dict.)
         built = cls.__dict__.get("__pydantic_core_schema__")
         if source_type is cls and isinstance(built, dict):
-            return built
+            return cast(CoreSchema, built)
         return _bind_string_enum_values(
             _wrap_numeric_literals(deepcopy(handler(source_type)))
         )
@@ -164,7 +168,7 @@ class WireModel(StrictJSONModel, Mapping[str, Any]):
         if key in self.__class__.model_fields:
             return getattr(self, key)
         try:
-            return self.model_extra[key]
+            return (self.model_extra or {})[key]
         except (KeyError, TypeError):
             raise KeyError(key) from None
 
@@ -258,7 +262,12 @@ class OperationMemberProgress(WireModel):
 
 
 class OperationProgress(WireModel):
-    """Canonical durable progress payload shared by Controller and agents."""
+    """Canonical durable progress payload shared by Controller and agents.
+
+    completed_bytes measures transferred bytes across phases (including Docker
+    pulls); it is not an artifact-availability receipt. completed_items counts
+    completed objects only. Subprocess observations use activity_sequence.
+    """
 
     phase: str = Field(min_length=1, max_length=80)
     kind: str | None = Field(default=None, min_length=1, max_length=80)
@@ -277,6 +286,8 @@ class OperationProgress(WireModel):
     observed_at: str | None = Field(default=None, max_length=64)
     last_progress_at: str | None = Field(default=None, max_length=64)
     activity: Literal["active", "waiting", "possibly_stalled"] | None = None
+    # An opaque monotonic observation sequence, not transferred bytes or items.
+    activity_sequence: int | None = Field(default=None, strict=True, ge=0)
     checkpoint: OperationCheckpoint | None = None
     members: list[OperationMemberProgress] = Field(
         default_factory=list, max_length=1024

@@ -58,12 +58,13 @@ def _aware(value: datetime) -> datetime:
 def progress_advanced(
     previous: OperationProgress | None, current: OperationProgress
 ) -> bool:
-    """Whether ``current`` moved past ``previous``: more bytes, items or a new phase."""
+    """Whether bytes, items, subprocess observations or the phase advanced."""
 
     return (
         previous is None
         or current.completed_bytes > previous.completed_bytes
         or (current.completed_items or 0) > (previous.completed_items or 0)
+        or (current.activity_sequence or 0) > (previous.activity_sequence or 0)
         or current.phase != previous.phase
     )
 

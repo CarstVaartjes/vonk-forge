@@ -22,13 +22,12 @@ impl LoopClient for AgentHttpClient {
     }
 
     fn progress_observation(&self, fence: uuid::Uuid) -> Option<OperationProgress> {
-        // Subprocess activity counts as items so it never mixes with bytes.
         let counters = self.progress_snapshot(fence)?;
         Some(OperationProgress {
             completed_bytes: counters.bytes.into(),
             total_bytes: counters.total_bytes.map(Into::into),
             total_bytes_known: counters.total_bytes.is_some(),
-            completed_items: Some(counters.activity.into()),
+            activity_sequence: Some(counters.activity.into()),
             ..phase_progress(counters.phase)
         })
     }
