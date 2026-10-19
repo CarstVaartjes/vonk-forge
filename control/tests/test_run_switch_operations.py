@@ -923,7 +923,8 @@ def test_stale_inventory_intent_waits_and_replans_when_inventory_returns(
         job = session.get(Job, operation.operation_id)
         assert job is not None
         progress = dict(job.result or {})
-        first_due = datetime.fromisoformat(str(progress["observation_due_at"]))
+        assert job.next_action_at is not None
+        first_due = job.next_action_at.replace(tzinfo=UTC)
         # Work attributed to the old plan must never be adopted by the new one.
         progress.update(
             {
@@ -948,7 +949,8 @@ def test_stale_inventory_intent_waits_and_replans_when_inventory_returns(
     with sessions() as session:
         job = session.get(Job, operation.operation_id)
         assert job is not None and isinstance(job.result, dict)
-        second_due = datetime.fromisoformat(str(job.result["observation_due_at"]))
+        assert job.next_action_at is not None
+        second_due = job.next_action_at.replace(tzinfo=UTC)
         assert job.result["retry_attempt"] == 3
     assert second_due - now[0] > first_due - NOW
     # Nothing is re-planned before the next due time.
@@ -1102,8 +1104,8 @@ def test_inactive_target_waits_then_resumes_when_the_spark_returns(
     assert service._advance(operation.operation_id) is True
     waiting = service.get(operation.operation_id)
     assert waiting.state == LifecycleState.OBSERVING
-    assert waiting.result is not None and waiting.result.observation_due_at
-    due = waiting.result.observation_due_at
+    assert waiting.result is not None and waiting.next_attempt_at
+    due = waiting.next_attempt_at
     # Nothing happens before the backoff is due.
     assert service._advance(operation.operation_id) is False
     if not repair:
@@ -1255,13 +1257,8 @@ def test_due_scheduler_reaches_work_past_a_full_parked_batch(
                     targets=[f"spk_{index:032x}"],
                     payload_digest="a" * 64,
                     payload={},
-                    result={
-                        "observation_due_at": (
-                            NOW if index == 16 else NOW + timedelta(minutes=1)
-                        )
-                        .isoformat()
-                        .replace("+00:00", "Z")
-                    },
+                    result={},
+                    next_action_at=NOW if index == 16 else NOW + timedelta(minutes=1),
                     created_at=NOW,
                     updated_at=NOW,
                 )
@@ -2163,7 +2160,7 @@ def _cold_compile_switch(
         """Advance one due phase, answering any ordinary preflight probe."""
         operation_id = operation_id or operation.operation_id
         before = service.get(operation_id)
-        due = before.result.observation_due_at if before.result is not None else None
+        due = before.next_attempt_at if before.result is not None else None
         if due is not None and due > clock.now:
             clock.now = due
         service.tick()
@@ -2297,7 +2294,7 @@ def test_runtime_install_capacity_busy_parks_and_retries_the_switch(
     assert view.state == "running"
     assert view.progress.subphase == "runtime-install"
     assert view.result is not None
-    assert view.result.observation_due_at is not None
+    assert view.next_attempt_at is not None
 
     for _ in range(20):
         switch.drive()
@@ -2327,7 +2324,7 @@ def test_run_switch_retry_reports_its_wait_and_is_not_failed(
     assert view.state != "failed"
     # Recovery is asserted through effects and ownership below.
     assert view.blockers[0].node_ids
-    assert view.next_attempt_at == view.result.observation_due_at
+    assert view.next_attempt_at == view.next_attempt_at
     item = RunSwitchOperationProvider(switch.service).get_operation(
         switch.operation.operation_id
     )
@@ -2370,8 +2367,8 @@ def test_runtime_install_capacity_wait_backs_off_and_resets_after_progress(
         )
         view = switch.service.get(switch.operation.operation_id)
         assert view.state == "running"
-        assert view.result is not None and view.result.observation_due_at is not None
-        due = view.result.observation_due_at
+        assert view.result is not None and view.next_attempt_at is not None
+        due = view.next_attempt_at
         observed_delays.append(int((due - switch.clock.now).total_seconds()))
         assert max(1, cap * 3 // 4) <= observed_delays[-1] <= min(60, cap * 5 // 4)
         assert view.result.retry_attempt == len(observed_delays) + 1
@@ -2540,7 +2537,7 @@ def test_preflight_receipt_disagreement_backs_off_then_recovers(
 
     view = switch.service.get(switch.operation.operation_id)
     assert view.state == "running"
-    assert view.result.observation_due_at > switch.clock.now
+    assert view.next_attempt_at > switch.clock.now
     assert switch.service.tick() is False
     # Count committed failed cycles, not compiler calls: refreshing an exact
     # build receipt may compile more than once inside one phase attempt.
@@ -3447,9 +3444,9 @@ def test_a_refusal_that_survives_a_replan_retries_in_place_and_keeps_counting(
     first = refuse()
     assert first["force_replan"] is True
     assert first["retry_attempt"] == 2
-    now[0] = datetime.fromisoformat(str(first["observation_due_at"])) + timedelta(
-        seconds=1
-    )
+    first_due = service.get(parent.operation_id).next_attempt_at
+    assert first_due is not None
+    now[0] = first_due + timedelta(seconds=1)
     assert service._refresh_blocked_plan(parent.operation_id, now[0]) is True
 
     # The same refusal on the fresh plan is retried in place, and counted.
@@ -4020,9 +4017,9 @@ def test_typed_transient_child_failure_is_retried_automatically(
     assert retrying.result.retry_attempt is not None
     assert retrying.result.retry_attempt > 1
     assert retrying.status_reason is not None
-    assert retrying.result.observation_due_at is not None
-    assert retrying.result.observation_due_at > now[0]
-    now[0] = retrying.result.observation_due_at
+    assert retrying.next_attempt_at is not None
+    assert retrying.next_attempt_at > now[0]
+    now[0] = retrying.next_attempt_at
     assert service._advance(operation.operation_id) is True
     resumed = service.get(operation.operation_id)
     assert resumed.state == "running"
@@ -5076,13 +5073,13 @@ def test_parked_start_after_observation_deadline_keeps_exact_effect_pending(
     view = service.get(operation.operation_id)
     assert view.state == LifecycleState.OBSERVING
     assert view.progress.state == LifecycleState.OBSERVING
-    assert view.result is not None and view.result.observation_due_at is not None
+    assert view.result is not None and view.next_attempt_at is not None
     # One retry clock: the lifecycle core's bounded backoff, never past a minute.
-    assert now[0] < view.result.observation_due_at <= now[0] + timedelta(seconds=60)
+    assert now[0] < view.next_attempt_at <= now[0] + timedelta(seconds=60)
     assert service.tick() is False
     assert isinstance(service._lifecycle, _ObservingLifecycle)
     service._lifecycle._healthy = True
-    now[0] = view.result.observation_due_at
+    now[0] = view.next_attempt_at
     for _ in range(4):
         service.tick()
     assert service.get(operation.operation_id).state == "succeeded"
@@ -5114,8 +5111,8 @@ def test_legacy_operator_wait_without_a_clock_is_healed_not_left_waiting(
     assert service.tick() is True  # healed: it is observed again, not parked
     healed = service.get(operation.operation_id)
     assert healed.state != LifecycleState.NEEDS_OPERATOR
-    assert healed.result is not None and healed.result.observation_due_at is not None
-    assert healed.result.observation_due_at > now[0]
+    assert healed.result is not None and healed.next_attempt_at is not None
+    assert healed.next_attempt_at > now[0]
 
 
 def test_parked_start_still_progressing_is_observed_before_final_success(
@@ -5132,7 +5129,7 @@ def test_parked_start_still_progressing_is_observed_before_final_success(
     assert held.state == "running"
     assert held.result is not None
     assert held.result.child_operation_id is not None
-    assert held.result.observation_due_at is not None
+    assert held.next_attempt_at is not None
 
     assert service.tick() is False
     assert isinstance(service._lifecycle, _ObservingLifecycle)
@@ -5196,7 +5193,7 @@ def test_restart_retry_due_is_projected_without_replacing_the_child(
     assert view.state == "running"
     assert view.result is not None
     assert view.result.child_operation_id == child_id
-    assert view.result.observation_due_at == due
+    assert view.next_attempt_at == due
 
 
 def test_scoped_cleanup_is_allowed_without_launch_readiness(tmp_path: Path) -> None:
@@ -5832,9 +5829,9 @@ def test_capacity_backoff_and_checkpoint_retry_share_one_attempt_counter(
         return view, view.result
 
     def advance_to_due() -> None:
-        _view, current = result()
-        assert current.observation_due_at is not None
-        now[0] = current.observation_due_at + timedelta(seconds=1)
+        view, _current = result()
+        assert view.next_attempt_at is not None
+        now[0] = view.next_attempt_at + timedelta(seconds=1)
 
     lifecycle.uninstall = busy  # type: ignore[method-assign]
     try:
@@ -5858,10 +5855,8 @@ def test_capacity_backoff_and_checkpoint_retry_share_one_attempt_counter(
         view, current = result()
         assert view.state == "running"
         assert current.retry_attempt == 4
-        assert current.observation_due_at is not None
-        assert (
-            timedelta(0) < current.observation_due_at - now[0] <= timedelta(seconds=75)
-        )
+        assert view.next_attempt_at is not None
+        assert timedelta(0) < view.next_attempt_at - now[0] <= timedelta(seconds=75)
 
         # A capacity wait after a different reason starts its own backoff.
         advance_to_due()
@@ -6081,10 +6076,8 @@ def test_temporary_phase_failure_preserves_exact_intent_across_restart(
         assert service.tick()
         waiting = service.get(operation.operation_id)
         assert waiting.state == "running", waiting.status_reason
-        assert (
-            waiting.result is not None and waiting.result.observation_due_at is not None
-        )
-        due = waiting.result.observation_due_at
+        assert waiting.result is not None and waiting.next_attempt_at is not None
+        due = waiting.next_attempt_at
         assert now[0] < due <= now[0] + timedelta(seconds=60)
         service = restarted()
         assert service.tick() is False
@@ -6166,12 +6159,12 @@ def test_late_dependency_receipt_resumes_original_checkpoint_after_deadline(
     held = service.get(operation.operation_id)
     assert held.state == "running", held.status_reason
     assert held.result is not None
-    assert held.result.observation_due_at is not None
-    assert held.result.observation_due_at == now[0] + timedelta(seconds=60)
+    assert held.next_attempt_at is not None
+    assert held.next_attempt_at == now[0] + timedelta(seconds=60)
     assert held.status_reason is not None and dependency in held.status_reason
     assert service.tick() is False
     executor.pending = False
-    now[0] = held.result.observation_due_at
+    now[0] = held.next_attempt_at
     restarted = _service(
         sessions,
         now[0],

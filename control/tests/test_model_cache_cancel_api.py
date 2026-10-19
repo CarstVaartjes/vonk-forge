@@ -1,11 +1,12 @@
 """Current singular model cache operator routes cancel before eviction."""
 
+from dataclasses import replace
 from datetime import UTC, datetime
 from unittest.mock import Mock
 
 from fastapi import Depends, FastAPI, Request
 from fastapi.testclient import TestClient
-from vonk_agent_protocol import LifecycleState
+from vonk_agent_protocol import LifecycleState, canonical_message
 from vonk_control.auth import Actor
 from vonk_control.cache_removal_review import (
     CacheRemovalReviewContent,
@@ -44,39 +45,61 @@ def _client(service, role="administrator"):
     return TestClient(app)
 
 
+def _operation() -> CacheOperationView:
+    """The producer's actual view supplies defaults for optional observations."""
+    now = datetime(2026, 9, 10, tzinfo=UTC).isoformat()
+    return CacheOperationView(
+        id=OPERATION_ID,
+        request_key=REQUEST_KEY,
+        kind="remove",
+        state=LifecycleState.SUCCEEDED.value,
+        attempt=1,
+        model_content_sha256=None,
+        artifact_set_sha256=None,
+        plan_digest=None,
+        review_digest=None,
+        progress={},
+        result=None,
+        last_error=None,
+        created_at=now,
+        updated_at=now,
+        completed_at=now,
+    )
+
+
 def test_remove_is_the_current_model_eviction_boundary():
-    operation = Mock(spec=CacheOperationView)
-    operation.id = OPERATION_ID
-    operation.request_key = REQUEST_KEY
-    operation.model_content_sha256 = MODEL_CONTENT_SHA256
-    operation.review_digest = REVIEW_DIGEST
-    operation.state = "succeeded"
-    operation.progress = progress_document(
-        cache_progress(
-            ModelCacheCounters.model_validate(
-                {
-                    "phase": "completed",
-                    "completed_artifacts": 1,
-                    "total_artifacts": 1,
-                    "downloaded_bytes": 10,
-                    "expected_bytes": 10,
-                }
-            ),
-            previous=None,
-            now=datetime(2026, 9, 10, tzinfo=UTC),
-        )
+    operation = replace(
+        _operation(),
+        model_content_sha256=MODEL_CONTENT_SHA256,
+        review_digest=REVIEW_DIGEST,
+        state=LifecycleState.SUCCEEDED.value,
+        progress=progress_document(
+            cache_progress(
+                ModelCacheCounters.model_validate(
+                    {
+                        "phase": "completed",
+                        "completed_artifacts": 1,
+                        "total_artifacts": 1,
+                        "downloaded_bytes": 10,
+                        "expected_bytes": 10,
+                    }
+                ),
+                previous=None,
+                now=datetime(2026, 9, 10, tzinfo=UTC),
+            )
+        ),
+        result=ModelCacheRemovalResult(
+            schema_version=2,
+            removed_entries=[],
+            reclaimed_bytes=10,
+            cancelled_operations=[],
+        ),
+        failure=None,
+        retryable=False,
+        blockers=(),
+        next_attempt_at=None,
+        cancellation=None,
     )
-    operation.result = ModelCacheRemovalResult(
-        schema_version=2,
-        removed_entries=[],
-        reclaimed_bytes=10,
-        cancelled_operations=[],
-    )
-    operation.failure = None
-    operation.retryable = False
-    operation.blockers = ()
-    operation.next_attempt_at = None
-    operation.cancellation = None
     service = Mock()
     service.remove_model_selector.return_value = operation
     response = _client(service).post(
@@ -134,38 +157,38 @@ def test_remove_review_is_read_only_and_requires_operator_role():
 
 
 def test_model_operation_observation_is_readable_by_any_authenticated_actor():
-    operation = Mock(spec=CacheOperationView)
-    operation.id = OPERATION_ID
-    operation.request_key = REQUEST_KEY
-    operation.model_content_sha256 = None
-    operation.review_digest = None
-    operation.state = "succeeded"
-    operation.progress = progress_document(
-        cache_progress(
-            ModelCacheCounters.model_validate(
-                {
-                    "phase": "completed",
-                    "completed_artifacts": 1,
-                    "total_artifacts": 1,
-                    "downloaded_bytes": 10,
-                    "expected_bytes": 10,
-                }
-            ),
-            previous=None,
-            now=datetime(2026, 9, 10, tzinfo=UTC),
-        )
+    operation = replace(
+        _operation(),
+        model_content_sha256=None,
+        review_digest=None,
+        state=LifecycleState.SUCCEEDED.value,
+        progress=progress_document(
+            cache_progress(
+                ModelCacheCounters.model_validate(
+                    {
+                        "phase": "completed",
+                        "completed_artifacts": 1,
+                        "total_artifacts": 1,
+                        "downloaded_bytes": 10,
+                        "expected_bytes": 10,
+                    }
+                ),
+                previous=None,
+                now=datetime(2026, 9, 10, tzinfo=UTC),
+            )
+        ),
+        result=ModelCacheRemovalResult(
+            schema_version=2,
+            removed_entries=[],
+            reclaimed_bytes=10,
+            cancelled_operations=[],
+        ),
+        failure=None,
+        retryable=False,
+        blockers=(),
+        next_attempt_at=None,
+        cancellation=None,
     )
-    operation.result = ModelCacheRemovalResult(
-        schema_version=2,
-        removed_entries=[],
-        reclaimed_bytes=10,
-        cancelled_operations=[],
-    )
-    operation.failure = None
-    operation.retryable = False
-    operation.blockers = ()
-    operation.next_attempt_at = None
-    operation.cancellation = None
     service = Mock()
     service.get_operator_operation.return_value = (operation, "remove", "model")
     response = _client(service, role="viewer").get(
@@ -179,37 +202,37 @@ def test_model_operation_observation_is_readable_by_any_authenticated_actor():
 
 
 def test_cancel_route_requires_operator_and_returns_durable_intent():
-    operation = Mock(spec=CacheOperationView)
-    operation.id = OPERATION_ID
-    operation.request_key = REQUEST_KEY
-    operation.model_content_sha256 = None
-    operation.review_digest = None
-    operation.state = LifecycleState.OBSERVING
-    operation.progress = progress_document(
-        cache_progress(
-            ModelCacheCounters.model_validate(
-                {
-                    "phase": "cancelling",
-                    "completed_artifacts": 0,
-                    "total_artifacts": 1,
-                    "downloaded_bytes": 12,
-                    "expected_bytes": 20,
-                }
-            ),
-            previous=None,
-            now=datetime(2026, 9, 10, tzinfo=UTC),
-        )
-    )
-    operation.result = None
-    operation.failure = None
-    operation.retryable = False
-    operation.blockers = ()
-    operation.next_attempt_at = None
-    operation.cancellation = ModelCacheCancellation(
-        request_key=CANCEL_KEY,
-        actor="test",
-        reason="operator stopped this download",
-        requested_at="2026-09-10T00:00:00+00:00",
+    operation = replace(
+        _operation(),
+        model_content_sha256=None,
+        review_digest=None,
+        state=LifecycleState.OBSERVING,
+        progress=progress_document(
+            cache_progress(
+                ModelCacheCounters.model_validate(
+                    {
+                        "phase": "cancelling",
+                        "completed_artifacts": 0,
+                        "total_artifacts": 1,
+                        "downloaded_bytes": 12,
+                        "expected_bytes": 20,
+                    }
+                ),
+                previous=None,
+                now=datetime(2026, 9, 10, tzinfo=UTC),
+            )
+        ),
+        result=None,
+        failure=None,
+        retryable=False,
+        blockers=(),
+        next_attempt_at=None,
+        cancellation=ModelCacheCancellation(
+            request_key=CANCEL_KEY,
+            actor="test",
+            reason="operator stopped this download",
+            requested_at="2026-09-10T00:00:00+00:00",
+        ).model_dump(mode="json"),
     )
     service = Mock()
     service.cancel_operation.return_value = operation
@@ -231,7 +254,9 @@ def test_cancel_route_requires_operator_and_returns_durable_intent():
     assert response.status_code == 202, response.text
     parsed = ModelCacheOperatorResponse.model_validate_json(response.content)
     assert parsed.state == LifecycleState.OBSERVING
-    assert parsed.cancellation == operation.cancellation
+    assert parsed.cancellation == ModelCacheCancellation.model_validate_json(
+        canonical_message(operation.cancellation)
+    )
     service.cancel_operation.assert_called_once_with(
         OPERATION_ID,
         actor="test",

@@ -31,6 +31,7 @@ from .endings import end_unobserved_order
 from .ownership import observation_ownership
 from .persistence import _OrderStore
 from .retirement import operator_resume_candidates_in_session
+from .waits import refresh_queue_waits
 
 if TYPE_CHECKING:
     from .service import AgentJobService
@@ -60,6 +61,13 @@ def reconcile_orders(self: AgentJobService, limit: int = 100) -> bool:
         if self._reconcile_rollouts is not None
         else False
     )
+    with self._sessions.begin() as session:
+        self._queue_wait_cursor = refresh_queue_waits(
+            session,
+            self._clock(),
+            limit=limit,
+            after_id=self._queue_wait_cursor,
+        )
     return gone or progressed or report.changed > 0 or healed > 0 or rollouts
 
 

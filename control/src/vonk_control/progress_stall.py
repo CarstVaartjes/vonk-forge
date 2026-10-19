@@ -207,6 +207,26 @@ def observe_application_progress(
     progress = _read_progress(current)
     if progress is None:
         return
+    # Progress producers may replace their typed blockers after the lifecycle
+    # transition. Publish those exact causes with the same SQL update and clock.
+    if target.next_action_at is not None and progress.blockers:
+        from vonk_agent_protocol import WaitReason
+
+        from .persisted_waits import schedule_wait, typed_wait_reason
+
+        causes = [
+            b for b in progress.blockers if b.code is not ProgressAlarmCode.STALLED
+        ]
+        if causes:
+            schedule_wait(
+                target,
+                target.next_action_at,
+                now=target.updated_at or target.created_at,
+                reason=typed_wait_reason(
+                    causes[0].code, WaitReason.OBSERVATION_UNAVAILABLE
+                ),
+                blockers=causes,
+            )
     old = history.deleted[0] if history.deleted else current
     previous = read_stall(old.get("stall")) if isinstance(old, dict) else None
     observed_at = target.updated_at or target.created_at

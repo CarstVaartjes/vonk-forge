@@ -34,6 +34,7 @@ from ..lifecycle.evidence import BookkeepingReason, Residue, retire_as_unknown
 from ..lifecycle.fleet_profile import FleetProfileAdapter
 from ..models import FleetProfileApplication
 from ..operation_blockers import OperationBlocker, bound_blockers, make_blocker
+from ..persisted_waits import schedule_wait
 from .assessment_support import (
     _preview_blockers,
     _progress_with_blockers,
@@ -92,12 +93,12 @@ class FleetProfileService:
             return
         now = _aware(self._clock())
         due = FleetProfileAdapter.next_retry(row.id, progress.attempt, now)
+        schedule_wait(row, due, now=now, blockers=list(blockers) or None)
         blockers = bound_blockers(blockers)
         row.progress = _progress_with_blockers(
             progress,
             blockers,
             attempt=progress.attempt + 1,
-            retry_due_at=due.isoformat(),
         ).model_dump(mode="json")
         row.updated_at = now
         previous = {(item.code, tuple(item.node_ids)) for item in progress.blockers}

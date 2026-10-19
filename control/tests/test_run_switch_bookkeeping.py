@@ -187,7 +187,7 @@ def test_fresh_retry_keeps_verified_progress_but_has_independent_clocks(
         progress.retryable = True
         progress.recovery_deadline_at = NOW - timedelta(seconds=1)
         progress.observation_deadline_at = NOW - timedelta(seconds=1)
-        progress.observation_due_at = NOW - timedelta(seconds=1)
+        job.next_action_at = NOW - timedelta(seconds=1)
         job.state = LifecycleState.FAILED
         job.result = serialize_json_value(progress)
     fresh = accepted.service.retry(
@@ -197,5 +197,5 @@ def test_fresh_retry_keeps_verified_progress_but_has_independent_clocks(
     assert fresh.result is not None
     assert fresh.result.recovery_deadline_at is None
     assert fresh.result.observation_deadline_at is None
-    assert fresh.result.observation_due_at is None
+    assert fresh.next_attempt_at is None
     assert fresh.result.phase_results == progress.phase_results

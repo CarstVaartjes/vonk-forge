@@ -5,9 +5,7 @@ from __future__ import annotations
 import hashlib
 import logging
 
-from vonk_agent_protocol import ModelCacheCode, SecurityRefusalReason
-
-from ..operation_contract import ModelAccessReason
+from vonk_agent_protocol import ModelAccessReason, ModelCacheCode, SecurityRefusalReason
 
 SCHEMA_VERSION = 2
 

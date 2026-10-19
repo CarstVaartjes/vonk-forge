@@ -646,7 +646,7 @@ def test_an_unexpected_advance_failure_is_shown_and_backed_off(
     view = load.planner.get(switch.id)
     assert view.state == "running"
     assert view.result is not None
-    assert view.result.observation_due_at is not None
+    assert view.next_attempt_at is not None
     # Backed off: the next tick does not retry it straight away.
     calls: list[str] = []
     monkeypatch.setattr(load.planner, "_advance", lambda job_id: calls.append(job_id))

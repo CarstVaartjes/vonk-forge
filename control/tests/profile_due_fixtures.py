@@ -13,7 +13,7 @@ def next_profile_due(
 ) -> datetime | None:
     observed = profiles.application(application_id)
     now = profiles._clock()
-    due = [observed.progress.retry_due_at]
+    due = [observed.next_attempt_at]
     adapter = observed.progress.switch_adapter
     if adapter is not None:
         due.extend(
@@ -23,10 +23,7 @@ def next_profile_due(
     future = [instant for instant in due if instant is not None and instant > now]
     if not future:
         return None
-    if (
-        observed.progress.retry_due_at is not None
-        and observed.progress.retry_due_at > now
-    ):
+    if observed.next_attempt_at is not None and observed.next_attempt_at > now:
         profiles.tick()
         held = profiles.application(application_id)
         assert held.current_operation_id == observed.current_operation_id

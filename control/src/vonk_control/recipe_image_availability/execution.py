@@ -41,10 +41,10 @@ from ..operation_contract import (
     AvailabilityOperationFailure,
     AvailabilityRecoveryAction,
 )
+from ..persisted_waits import schedule_wait, wait_due
 from ..recipe_availability_intent import (
     RecipeRetryIntent,
 )
-from ..recipe_image_availability_clocks_contract import StoredAvailabilityClocks
 from ..recipe_image_availability_reader_contract import (
     AvailabilityDownloadPreview,
     StoredAvailabilityIdentity,
@@ -105,14 +105,15 @@ def _eligible(self: RecipeImageAvailabilityService, operation_id: str) -> bool:
         operation = session.get(Job, operation_id)
         if operation is None:
             return False
-        clocks = StoredAvailabilityClocks.read(operation.payload)
         now = self._clock()
         now = now if now.tzinfo is not None else now.replace(tzinfo=UTC)
-        return clocks.retry_after_at is None or now >= clocks.retry_after_at
+        due = wait_due(operation)
+        return due is None or now >= due
 
 
-def _retry_due(payload: AvailabilityJobPayload, now: datetime) -> bool:
-    return payload.retry_after_at is None or now >= payload.retry_after_at
+def _retry_due(operation: Job, now: datetime) -> bool:
+    due = wait_due(operation)
+    return due is None or now >= due
 
 
 def _claim_operation(
@@ -316,9 +317,7 @@ def _run(
             if isinstance(completed_payload, Residue):
                 return
             completed_payload = completed_payload.model_copy(update={"failure": None})
-            completed_payload = completed_payload.model_copy(
-                update={"retry_after_at": None}
-            )
+            schedule_wait(operation, None)
             completed_payload = completed_payload.model_copy(update={"blockers": None})
             operation.payload = serialize_json_value(
                 completed_payload.model_copy(

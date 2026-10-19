@@ -70,6 +70,7 @@ from ..models import (
     AgentIssuedCertificateRevocation,
     AgentNode,
 )
+from ..persisted_waits import schedule_wait
 from ..pki import CertificateAuthority, IssuedCertificate
 from ..security.enrollment import (
     require_admitted_request,
@@ -712,6 +713,7 @@ class EnrollmentCore:
                     evidence.state = CertificateRecordState.REVOKED
                     evidence.updated_at = now
                     evidence.ca_revoked_at = evidence.ca_revoked_at or now
+                    schedule_wait(evidence, None)
                 return
             certificate = session.scalar(
                 select(AgentCertificate)
@@ -736,10 +738,12 @@ class EnrollmentCore:
             )
             if certificate is not None:
                 certificate.ca_revoked_at = certificate.ca_revoked_at or now
+                schedule_wait(certificate, None)
             if evidence is not None:
                 evidence.state = CertificateRecordState.REVOKED
                 evidence.updated_at = now
                 evidence.ca_revoked_at = evidence.ca_revoked_at or now
+                schedule_wait(evidence, None)
             if (
                 certificate is not None
                 and intent is not None

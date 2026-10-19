@@ -11,13 +11,14 @@ import re
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from importlib import metadata
 from typing import Protocol
 
 from fastapi import HTTPException
 from pydantic import TypeAdapter
 from sqlalchemy import and_, select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
     CatalogSyncCode,
@@ -50,12 +51,14 @@ from .catalog_sync_contract import (
 )
 from .models import CatalogDocument, CatalogDocumentRevision, RecipeLibrarySyncRun
 from .owner_liveness import OwnerKind, OwnerRef, owner
+from .persisted_waits import read_wait, schedule_wait, typed_wait_reason
 from .recipe_library_types import (
     RecipeLibraryError,
     RecipeLibraryItem,
     RecipeLibrarySnapshot,
 )
 from .source_bundles import SourceBundleUnknown
+from .wait_contract import QueueWait
 
 _LOGGER = logging.getLogger(__name__)
 _MAX_RESULT_ITEMS = 256
@@ -126,6 +129,7 @@ class CatalogSyncView:
     # The newest failure since the last completed sync, so a Controller that
     # keeps failing to read the library is visible instead of silently stale.
     last_error: CatalogSyncFailure | None = None
+    wait: QueueWait | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -333,6 +337,14 @@ class ManagedRecipeCatalogSyncService:
                 .limit(1)
             )
             view = _view(row)
+            waiting = session.scalar(
+                newest.where(
+                    RecipeLibrarySyncRun.repository == self._repository,
+                    RecipeLibrarySyncRun.wait_evidence.is_not(None),
+                )
+            )
+            if waiting is not None:
+                view = replace(view, wait=read_wait(waiting))
             if (
                 failure is None
                 or failure.completed_at is None
@@ -354,6 +366,67 @@ class ManagedRecipeCatalogSyncService:
             if row is None:
                 raise KeyError(sync_id)
             return _view(row)
+
+    def automatic_wait_delay(self) -> float:
+        with self._sessions() as session:
+            run = session.scalar(
+                select(RecipeLibrarySyncRun)
+                .where(
+                    RecipeLibrarySyncRun.repository == self._repository,
+                    RecipeLibrarySyncRun.wait_evidence.is_not(None),
+                )
+                .order_by(
+                    RecipeLibrarySyncRun.created_at.desc(), RecipeLibrarySyncRun.id
+                )
+                .limit(1)
+            )
+            wait = read_wait(run) if run is not None else None
+            return (
+                max(0.0, (wait.next_check - self._clock()).total_seconds())
+                if wait is not None
+                else 0.0
+            )
+
+    def record_automatic_wait(
+        self, delay_seconds: int, *, failed: bool, observed_id: str | None = None
+    ) -> None:
+        with self._sessions.begin() as session:
+            run = (
+                session.get(RecipeLibrarySyncRun, observed_id)
+                if observed_id is not None
+                else session.scalar(
+                    select(RecipeLibrarySyncRun)
+                    .where(RecipeLibrarySyncRun.repository == self._repository)
+                    .order_by(
+                        RecipeLibrarySyncRun.created_at.desc(), RecipeLibrarySyncRun.id
+                    )
+                    .limit(1)
+                )
+            )
+            if run is not None:
+                now = self._clock()
+                previous = tuple(
+                    session.scalars(
+                        select(RecipeLibrarySyncRun).where(
+                            RecipeLibrarySyncRun.repository == self._repository,
+                            RecipeLibrarySyncRun.id != run.id,
+                            RecipeLibrarySyncRun.wait_evidence.is_not(None),
+                        )
+                    )
+                )
+                for superseded in previous:
+                    schedule_wait(superseded, None)
+                schedule_wait(
+                    run,
+                    now + timedelta(seconds=delay_seconds),
+                    now=now,
+                    reason=typed_wait_reason(
+                        run.error_code, WaitReason.OBSERVATION_UNAVAILABLE
+                    )
+                    if failed
+                    else CatalogSyncCode.REFRESH_SCHEDULED,
+                    detail=run.error_detail if failed else None,
+                )
 
     def automatic(self) -> CatalogSyncView:
         try:
@@ -874,6 +947,17 @@ async def run_automatic_sync(
         pass
     failures = 0
     while not stop.is_set():
+        try:
+            retained_delay = await asyncio.to_thread(service.automatic_wait_delay)
+        except SQLAlchemyError as error:
+            _log_automatic_failure(error, CATALOG_SYNC_FIRST_RETRY_SECONDS)
+            retained_delay = CATALOG_SYNC_FIRST_RETRY_SECONDS
+        if retained_delay > 0:
+            try:
+                await asyncio.wait_for(stop.wait(), timeout=retained_delay)
+            except TimeoutError:
+                pass
+            continue
         # Each tick reconciles standing key intent independently of discovery.
         # A failed observation must not suppress the other recovery path.
         errors: list[Exception] = []
@@ -889,9 +973,13 @@ async def run_automatic_sync(
                     )
             except Exception as error:  # noqa: BLE001 - independent recovery path
                 errors.append(error)
+        observed_id = None
+        catalog_failed = False
         try:
             observation = await asyncio.to_thread(lambda: service.automatic())
+            observed_id = observation.id
             if observation.state != CatalogSyncState.CURRENT:
+                catalog_failed = True
                 errors.append(
                     CatalogSyncUnsettled(
                         observation.problems[0].code
@@ -903,14 +991,25 @@ async def run_automatic_sync(
                     )
                 )
         except (CatalogSyncError, RecipeLibraryError, OSError) as error:
+            catalog_failed = True
             errors.append(error)
         except Exception as error:  # noqa: BLE001 - the loop must never die
+            catalog_failed = True
             errors.append(error)
         if errors:
             failures += 1
         else:
             failures = 0
         delay = catalog_sync_retry_delay(failures, interval_seconds)
+        try:
+            await asyncio.to_thread(
+                service.record_automatic_wait,
+                delay,
+                failed=catalog_failed,
+                observed_id=observed_id,
+            )
+        except SQLAlchemyError as error:
+            _log_automatic_failure(error, delay)
         for error in errors:
             _log_automatic_failure(error, delay)
         try:
@@ -975,6 +1074,7 @@ def _view(row: RecipeLibrarySyncRun | None) -> CatalogSyncView:
         raise KeyError("sync run")
     result = _result(row.result)
     return CatalogSyncView(
+        wait=read_wait(row),
         id=row.id,
         request_key=row.request_key,
         trigger=_TRIGGER.validate_python(row.trigger),

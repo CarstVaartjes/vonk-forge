@@ -272,7 +272,7 @@ class RetryHoldsMixin:
                         )
                     ),
                 )
-                progress.observation_deadline_at = progress.observation_due_at
+                progress.observation_deadline_at = job.next_action_at
                 job.result = _persisted_result(progress)
                 job.updated_at = now
         return True

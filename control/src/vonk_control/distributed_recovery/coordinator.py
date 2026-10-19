@@ -16,6 +16,7 @@ from ..job_documents import DistributedRecoveryMarker
 from ..lifecycle.evidence import BookkeepingReason, Residue
 from ..logging import log_event
 from ..models import STOPPABLE_RUN_STATES, Job, RecipeRun, RunNode
+from ..persisted_waits import schedule_wait
 from ..recipe_execution_contract import (
     RecipeExecutionContractError,
     parse_stored_run_plan,
@@ -107,8 +108,8 @@ class DistributedRecoveryCoordinator:
                     .where(
                         RecipeRun.state == RunState.RUNNING,
                         or_(
-                            RecipeRun.route_next_attempt_at.is_(None),
-                            RecipeRun.route_next_attempt_at <= now,
+                            RecipeRun.next_action_at.is_(None),
+                            RecipeRun.next_action_at <= now,
                         ),
                     )
                     .order_by(RecipeRun.created_at, RecipeRun.id)
@@ -179,8 +180,8 @@ class DistributedRecoveryCoordinator:
                         f"{run.recovery_attempts} attempts; automatic "
                         "recovery will resume after a five minute cooldown"
                     )
-                    run.route_next_attempt_at = now + timedelta(
-                        seconds=_RECOVERY_COOLDOWN_SECONDS
+                    schedule_wait(
+                        run, now + timedelta(seconds=_RECOVERY_COOLDOWN_SECONDS)
                     )
                     run.updated_at = now
                     run.recovery_attempts = 0
@@ -390,8 +391,8 @@ class DistributedRecoveryCoordinator:
                     .where(
                         RecipeRun.state == RunState.RUNNING,
                         or_(
-                            RecipeRun.route_next_attempt_at.is_(None),
-                            RecipeRun.route_next_attempt_at <= now,
+                            RecipeRun.next_action_at.is_(None),
+                            RecipeRun.next_action_at <= now,
                         ),
                         select(RunNode.run_id)
                         .where(

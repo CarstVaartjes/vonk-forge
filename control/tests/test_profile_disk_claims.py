@@ -147,8 +147,8 @@ def test_busy_disk_handoff_releases_transaction_and_resumes_original_claim(
         assert operation.state == LifecycleState.RUNNING
         assert operation.result is not None
         assert operation.result.retry_reason == "install.capacity_busy"
-        assert operation.result.observation_due_at is not None
-        due = operation.result.observation_due_at
+        assert operation.next_attempt_at is not None
+        due = operation.next_attempt_at
         assert not planner.tick(), (
             "busy capacity was retried before its recorded due time"
         )

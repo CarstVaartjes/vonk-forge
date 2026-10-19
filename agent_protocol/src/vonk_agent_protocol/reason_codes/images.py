@@ -26,5 +26,7 @@ class PrebuiltImageCode(WireEnum):
 
     BUILD_KEY_MISMATCH = "prebuilt.build_key_mismatch"
     NOT_PINNED = "prebuilt.not_pinned"
+    PULL_FAILED = "prebuilt_image_pull_failed"
+    EVIDENCE_INVALID = "prebuilt_image_evidence_invalid"
     PULL_FAILED_RECENTLY = "prebuilt.pull_failed_recently"
     USED = "prebuilt.used"

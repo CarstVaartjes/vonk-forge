@@ -64,7 +64,6 @@ class RecoveredAvailabilityPayload(AvailabilityJobPayload):
 
     @field_validator(
         "claim_until",
-        "retry_after_at",
         "image_result",
         "model_child",
         "failure",

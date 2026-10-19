@@ -13,6 +13,7 @@ from vonk_agent_protocol import (
 from .. import job_states
 from ..categorized_errors import MissingRecord
 from ..models import Job
+from ..persisted_waits import read_wait, wait_due
 from ..recipe_update_contract import (
     UPDATE_KIND,
     RecipeUpdateDocument,
@@ -41,6 +42,7 @@ class ProjectionMixin:
             child.state == LifecycleState.SUCCEEDED for child in document.children
         )
         return RecipeUpdateResponse(
+            wait=read_wait(job),
             id=job.id,
             request_id=job.request_id,
             request=document.request,
@@ -58,7 +60,7 @@ class ProjectionMixin:
             ),
             waiting_on="recipe operations" if waiting else None,
             wait_owner="recipe-image-availability" if waiting else None,
-            next_attempt_at=document.claim_until or document.next_attempt_at,
+            next_attempt_at=document.claim_until or wait_due(job),
             resume_condition="a child changes state or its next observation is due"
             if waiting
             else None,

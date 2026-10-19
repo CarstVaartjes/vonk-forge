@@ -25,6 +25,7 @@ from sqlalchemy.orm import (
 from sqlalchemy.orm import (
     sessionmaker as sessionmaker,
 )
+from vonk_agent_protocol import JournalRepairCode as JournalRepairCode
 from vonk_agent_protocol import (
     LifecycleState as LifecycleState,
 )
@@ -112,9 +113,6 @@ from ..run_switch_contract import (
 )
 from ..run_switch_contract import (
     RunSwitchVerifyResult as RunSwitchVerifyResult,
-)
-from ..run_switch_journal_contract import (
-    JournalRepairCode as JournalRepairCode,
 )
 from ..run_switch_journal_contract import (
     JournalRepairDisposition as JournalRepairDisposition,

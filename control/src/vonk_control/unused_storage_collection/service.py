@@ -131,7 +131,6 @@ class UnusedStorageCollector:
         self._due_at: datetime | None = None
         self._rounds: dict[str, _Round] = {}
         self._paused_until: dict[str, datetime] = {}
-        self._retry_at: dict[tuple[str, str], datetime] = {}
         self._last_outcome: dict[str, str] = {}
         #: Items this pass tried and could not remove, and why: relief does not
         #: promise their space to a waiting load until a pass removes them.
@@ -166,7 +165,6 @@ class UnusedStorageCollector:
         """One pass: relieve disk pressure and expire unused non-model assets."""
 
         now = self._clock()
-        self._retry_at = {key: due for key, due in self._retry_at.items() if now < due}
         self._stopping.clear()
         self._refused.clear()
         pressures = self._pressures(now)

@@ -319,6 +319,8 @@ def test_operation_read_surfaces_a_recorded_claim_refusal_reason() -> None:
 
     operation = SimpleNamespace(
         current_attempt=0,
+        wait_evidence=None,
+        next_action_at=None,
         id=item["id"],
         kind=item["kind"],
         node_id=NODE_ID,

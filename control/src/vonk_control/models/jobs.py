@@ -19,10 +19,15 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ..model_primitives import Base, _lower_hex
+from .waits import Residue, WaitEvidence, wait_due_column, wait_evidence_column
 
 
 class Job(Base):
     __tablename__ = "jobs"
+    wait_evidence: Mapped[WaitEvidence | Residue | None] = wait_evidence_column(
+        __tablename__
+    )
+    next_action_at: Mapped[datetime | None] = wait_due_column("next_action_at")
     id: Mapped[str] = mapped_column(
         String(36), primary_key=True, default=lambda: str(uuid.uuid4())
     )

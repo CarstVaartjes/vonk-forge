@@ -492,6 +492,42 @@ def scan_source(
     if mode in candidates and not re.search(candidates[mode], source):
         return []
     tree = ast.parse(source) if tree is None else tree
+    # asyncio.Event.wait returns an awaitable; wait_for bounds its execution.
+    # A synchronous wait passed to wait_for executes before the wrapper and
+    # remains a violation. Only the explicitly annotated async event qualifies.
+    bounded_async_waits: set[int] = set()
+    if mode == "waits":
+        for function in ast.walk(tree):
+            if not isinstance(function, ast.AsyncFunctionDef):
+                continue
+            events = {
+                argument.arg
+                for argument in function.args.args
+                if argument.annotation is not None
+                and ast.unparse(argument.annotation) == "asyncio.Event"
+            }
+            for call in ast.walk(function):
+                if (
+                    isinstance(call, ast.Call)
+                    and ast.unparse(call.func) == "asyncio.wait_for"
+                    and call.args
+                    and any(
+                        k.arg == "timeout"
+                        and not (
+                            isinstance(k.value, ast.Constant) and k.value.value is None
+                        )
+                        for k in call.keywords
+                    )
+                ):
+                    awaited = call.args[0]
+                    if (
+                        isinstance(awaited, ast.Call)
+                        and isinstance(awaited.func, ast.Attribute)
+                        and awaited.func.attr == "wait"
+                        and isinstance(awaited.func.value, ast.Name)
+                        and awaited.func.value.id in events
+                    ):
+                        bounded_async_waits.add(id(awaited))
     # Docstrings describe behaviour to maintainers; they are not user-facing remedies.
     docstrings = {
         id(holder.body[0].value)
@@ -745,6 +781,7 @@ def scan_source(
                 } or name(node.func) in {"wait", "communicate", "join", "poll"}
                 if (
                     blocking
+                    and id(node) not in bounded_async_waits
                     and not any(
                         k.arg in {"timeout", "deadline"}
                         and not (

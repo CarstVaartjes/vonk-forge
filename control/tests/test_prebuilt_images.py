@@ -497,7 +497,7 @@ def test_image_preparation_pulls_the_prebuilt_image_without_a_spark_build(
     waiting = production.service.get(operation.id)
     assert waiting.state != "succeeded"
     # The wait says the Controller pulls the image, not that a Spark builds it.
-    blockers = {blocker.code: blocker.detail for blocker in waiting.blockers}
+    blockers = {str(blocker.code): blocker.detail for blocker in waiting.blockers}
     assert REFERENCE in blockers["prebuilt.used"]
     assert "Controller to pull prebuilt image" in blockers["recipe_image.build_wait"]
 

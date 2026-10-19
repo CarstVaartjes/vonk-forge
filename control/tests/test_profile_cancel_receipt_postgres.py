@@ -36,7 +36,7 @@ def test_cancel_failed_child_during_retry_records_receipt_and_finishes(
         child.status_reason = "Member failed during transfer"
         row = session.get_one(FleetProfileApplication, application.id)
         progress = _persisted_profile_progress(row)
-        progress.retry_due_at = profiles._clock() + timedelta(seconds=60)
+        row.next_action_at = profiles._clock() + timedelta(seconds=60)
         row.progress = progress.model_dump(mode="json")
         assert row.state == LifecycleState.RUNNING.value
     api, tokens = _client(sessions, profiles=profiles)
@@ -101,7 +101,7 @@ def test_cancel_adopted_executor_refuses_without_acknowledging_acceptance(
             child = session.get_one(Job, adapter.pending_children[0].operation_id)
             child.state = LifecycleState.FAILED.value
             child.status_reason = "Member failed during transfer"
-            progress.retry_due_at = world.clock() + timedelta(seconds=60)
+            row.next_action_at = world.clock() + timedelta(seconds=60)
             row.progress = progress.model_dump(mode="json")
         api, tokens = _client(world.sessions, profiles=profiles)
         key = str(uuid4())

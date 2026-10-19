@@ -357,7 +357,7 @@ def production_app(settings: Settings | None = None) -> FastAPI:
             ]
             metrics.replace_job_counts(job_counts)
             # Oldest queued work the worker queue could actually run now.  A job
-            # deferred by a future ``observation_due_at``, or one whose work is an
+            # deferred by a future ``next_action_at``, or one whose work is an
             # agent operation on a Spark, is a wait, not starvation.
             metrics.replace_runnable_job_ages(
                 read_runnable_job_ages(session, now).items()

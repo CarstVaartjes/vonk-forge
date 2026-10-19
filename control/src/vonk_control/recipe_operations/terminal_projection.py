@@ -48,6 +48,7 @@ from ..models import (
     RecipeRun,
     RunNode,
 )
+from ..persisted_waits import schedule_wait
 from ..profile_stop_authority import (
     ProfileJobRunStopJob,
 )
@@ -633,6 +634,7 @@ class TerminalProjectionMixin:
             )
             installation.updated_at = now
             if not failed:
+                schedule_wait(installation, None)
                 service._release(session, "installation", owner_id, now)
         elif job.kind == WireAgentOperation.RECIPE_RECONCILE.value:
             installation = session.get(RecipeInstallation, owner_id)
@@ -644,6 +646,7 @@ class TerminalProjectionMixin:
             )
             installation.updated_at = now
             if reconciliation_complete:
+                schedule_wait(installation, None)
                 service._release(session, "installation", owner_id, now)
 
         return cleanup_queued

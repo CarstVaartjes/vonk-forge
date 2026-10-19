@@ -11,6 +11,7 @@ from __future__ import annotations
 from datetime import timedelta
 from pathlib import Path
 
+import pytest
 from sqlalchemy import select
 from vonk_control.lifecycle.core import RECOVERY
 from vonk_control.models import FleetProfileApplication, Job
@@ -144,6 +145,7 @@ def test_a_newer_load_supersedes_a_backing_off_load(tmp_path: Path) -> None:
     assert not service.retry_eligible(first.id)
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_a_failure_an_older_controller_kept_retrying_is_adopted_as_backoff(
     tmp_path: Path,
 ) -> None:

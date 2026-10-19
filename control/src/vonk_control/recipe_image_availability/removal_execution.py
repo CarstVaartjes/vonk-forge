@@ -259,7 +259,7 @@ def _advance_recipe_removal(
         owner = self._read_removal_owner(operation)
     # No clock ends a removal: only real failures consume its retries, and a
     # wait on a live owner (its model-removal child) never does.
-    if not _removal_retry_is_due(owner.checkpoint.failure, now):
+    if not _removal_retry_is_due(operation, now):
         return False
 
     if owner.checkpoint.scope_pending:

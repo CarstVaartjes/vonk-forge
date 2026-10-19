@@ -181,6 +181,9 @@ def enqueue_in_session(
         updated_at=now,
     )
     session.add(stored)
+    from .waits import record_queue_waits
+
+    record_queue_waits(session, [stored], now)
     session.flush()
     return stored
 

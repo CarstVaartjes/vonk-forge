@@ -417,7 +417,7 @@ def test_admission_change_preserves_consent_and_supersedes_a_newer_save(
             waiting = owner.application(accepted.id)
             if not waiting.progress.admission_pending:
                 break
-            due = waiting.progress.admission_retry_at
+            due = waiting.next_attempt_at
             assert due is not None
             owner._clock = lambda due=due: due
             assert owner.tick()

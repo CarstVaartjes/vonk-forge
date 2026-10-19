@@ -18,7 +18,7 @@ core state                stored order
 ``running``               ``running``
 ``backoff``               ``backoff`` + ``next_action_at`` (the retry clock)
 ``observing``             ``observing`` + ``next_action_at``, ``observe_count`` > 0
-``needs-operator``        ``needs-operator``, ``next_action_at`` NULL
+``needs-operator``        ``needs-operator`` + check-only ``next_action_at``
 ``succeeded``/``failed``  ``succeeded``/``failed``
 ``cancelled``             ``cancelled``
 ========================  ==========================================
@@ -31,10 +31,9 @@ on its first pass.  An attempt ends ``succeeded``, ``failed``, ``cancelled`` or
 ``lease-lapsed``); the agent wire keeps its own four result words and is mapped at
 ingress (``agent_operation_states.record_wire_state``).
 
-A parked order with ``next_action_at`` set is an automatic retry (an operator is not
-involved); without it the order waits, and the
-reconciler re-evaluates it on every pass (rules 1 to 3), so a wait never outlives
-its cause and an observation needs no persisted counter.
+A backoff schedule permits an automatic retry. An operator wait's check clock
+only describes observation; explicit resume must authorize another attempt.
+An older row without a clock is re-evaluated through its existing adoption path.
 
 What ``effect`` means for an order: ``issued`` while an attempt holds a live lease;
 ``none`` before any attempt is issued; ``unknown`` after an issued attempt ends
@@ -69,6 +68,7 @@ from vonk_agent_protocol import (
     LifecycleSubject,
     OperationProgress,
     RecipeJobRunResult,
+    WaitOwnerKind,
     adopt_state,
     canonical_message,
 )
@@ -96,6 +96,7 @@ from ..models import AgentOperation as StoredOperation
 from ..models import AgentOperationAttempt, Job
 from ..offline_stops import is_deferred_stop
 from ..operation_progress import progress_document
+from ..persisted_waits import initialize_wait, lifecycle_wait, schedule_wait
 from ..stall_window import stall_deadline
 from ..stored_json import read_row_column
 from .adapter import Dispatch
@@ -203,7 +204,10 @@ def receipt_effect(attempt: AgentOperationAttempt | None) -> Effect | None:
 def retry_scheduled(operation: StoredOperation) -> datetime | None:
     """When a waiting order's automatic retry becomes claimable, if it has one."""
 
-    if not aos.order_is_parked(operation.state):
+    if (
+        not aos.order_is_parked(operation.state)
+        or operation.state == aos.NEEDS_OPERATOR
+    ):
         return None
     if operation.next_action_at is not None:
         # Above zero the order is being observed, which is not a retry.
@@ -322,6 +326,8 @@ class AgentOperationAdapter:
                     assert deadline is not None
                     lease = max(lease, aware(deadline))
             next_action = lease
+        elif stored == aos.NEEDS_OPERATOR:
+            state = State.NEEDS_OPERATOR
         elif stored in aos.PARKED:
             scheduled = retry_scheduled(operation)
             if scheduled is not None:
@@ -539,7 +545,7 @@ class AgentOperationAdapter:
             or (reason is not None and operation.status_reason != reason)
         ):
             operation.state = state
-            operation.next_action_at = next_action
+            schedule_wait(operation, next_action)
             operation.observe_count = observed
             if reason is not None:
                 operation.status_reason = reason
@@ -569,6 +575,18 @@ class AgentOperationAdapter:
 
             assert self._session is not None
             note_success(self._session, operation.kind, operation.node_id)
+        changed |= lifecycle_wait(
+            operation,
+            identity=operation.id,
+            kind=WaitOwnerKind.AGENT_OPERATION,
+            state=after.state,
+            now=now,
+            due=next_action,
+            detail=after.reason,
+            deadline=after.recovery_deadline,
+            cancelling=after.cancel_requested,
+            lease_deadline=after.lease_deadline,
+        )
         return changed
 
     @staticmethod
@@ -767,7 +785,7 @@ class AgentOperationAdapter:
             return None
         operation.current_attempt += 1
         operation.state = "running"
-        operation.next_action_at = None
+        schedule_wait(operation, None)
         operation.observe_count = 0
         operation.retry_disposition = None
         operation.retry_disposition_attempt = None
@@ -812,7 +830,7 @@ class AgentOperationAdapter:
         now = aware(now)
         operation.current_attempt += 1
         operation.state = "failed"
-        operation.next_action_at = None
+        schedule_wait(operation, None)
         operation.retry_disposition = None
         operation.retry_disposition_attempt = None
         operation.updated_at = now
@@ -834,7 +852,10 @@ class AgentOperationAdapter:
     def new_order(**fields: Any) -> StoredOperation:
         """Create an order: it is born ``queued`` with no attempt."""
 
-        return StoredOperation(state="queued", **fields)
+        return initialize_wait(
+            StoredOperation(state=State.QUEUED.value, **fields),
+            WaitOwnerKind.AGENT_OPERATION,
+        )
 
     def record_outcome(
         self,
@@ -883,7 +904,7 @@ class AgentOperationAdapter:
         """
 
         operation.state = aos.OBSERVING
-        operation.next_action_at = None
+        schedule_wait(operation, None)
         operation.observe_count = 0
         operation.retry_disposition = None
         operation.retry_disposition_attempt = None
@@ -905,7 +926,7 @@ class AgentOperationAdapter:
         operation.retry_due_at = None
         if operation.observe_count:
             return
-        operation.next_action_at = None
+        schedule_wait(operation, None)
         operation.observe_count = 0
 
     @staticmethod

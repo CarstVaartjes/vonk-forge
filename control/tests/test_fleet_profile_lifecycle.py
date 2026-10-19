@@ -210,11 +210,11 @@ def test_a_legacy_wait_still_being_admitted_retries_its_admission(tmp_path) -> N
     def pending(progress) -> None:
         progress["admission_pending"] = True
         progress["admission_attempt"] = 1
-        progress["admission_retry_at"] = (world.now[0] + timedelta(hours=1)).isoformat()
         progress["workload_intent_ordinal"] = None
         progress["switch_adapter"] = None
 
     world.edit_progress(pending)
+    world.edit(next_action_at=world.now[0] + timedelta(hours=1))
     assert world.service.tick() is True
     healed = world.service.application(world.id)
     assert healed.state == "queued"

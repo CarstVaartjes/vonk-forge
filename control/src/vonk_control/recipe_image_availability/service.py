@@ -751,8 +751,8 @@ class RecipeImageAvailabilityService:
         return execution._eligible(self, operation_id)
 
     @staticmethod
-    def _retry_due(payload: AvailabilityJobPayload, now: datetime) -> bool:
-        return execution._retry_due(payload, now)
+    def _retry_due(operation: Job, now: datetime) -> bool:
+        return execution._retry_due(operation, now)
 
     def _claim_operation(
         self,

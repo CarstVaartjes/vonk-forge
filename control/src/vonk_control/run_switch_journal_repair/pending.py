@@ -14,6 +14,7 @@ from ..models import (
     Job,
     RunSwitchJournalRepairPending,
 )
+from ..persisted_waits import schedule_wait
 from ..run_switch_contract import (
     RunSwitchCancellation,
     RunSwitchOperationResult,
@@ -22,7 +23,7 @@ from ..run_switch_journal_contract import (
     RunSwitchJournalRepairPendingState,
 )
 from ..stall_window import stall_deadline
-from .discovery import _candidate
+from .discovery import REPAIR_WAIT, _candidate
 
 # A damaged observation gets a stall window that survives restarts: neither a
 # changed sample nor a new caller resets it; only a child install whose agent
@@ -37,11 +38,11 @@ def _pending(
     if row is None:
         state = RunSwitchJournalRepairPendingState(
             deadline_at=stall_deadline(now, None, REPAIR_BUDGET),
-            next_attempt_at=now,
         )
         row = RunSwitchJournalRepairPending(
             job_id=job.id, deadline_at=state.deadline_at, progress=state
         )
+        schedule_wait(job, now, reason=REPAIR_WAIT)
         session.add(row)
     else:
         try:
@@ -54,7 +55,6 @@ def _pending(
             progress = _candidate(job)
             state = RunSwitchJournalRepairPendingState(
                 deadline_at=row.deadline_at,
-                next_attempt_at=now,
                 cancellation=progress.cancellation if progress is not None else None,
             )
             row.progress = state
@@ -96,5 +96,5 @@ def record_repair_cancellation(
             row.cancellation = cancellation
         if isinstance(row.cancellation, RunSwitchCancellation):
             state.cancellation = row.cancellation
-        state.next_attempt_at = cancellation.requested_at
+        schedule_wait(job, cancellation.requested_at)
         row.progress = state

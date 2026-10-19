@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import threading
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import cast
 from uuid import uuid4
 
@@ -971,9 +971,9 @@ def test_profile_admission_recovers_after_agent_heartbeat_row_lock(
                 tuple(row.id for row in session.scalars(select(Job).order_by(Job.id)))
                 == before_jobs
             )
-            due_at = pending.progress["admission_retry_at"]
-            assert isinstance(due_at, str)
-            due = datetime.fromisoformat(due_at)
+            due_at = pending.next_action_at
+            assert isinstance(due_at, datetime)
+            due = due_at.replace(tzinfo=UTC)
 
         profiles._clock = lambda: due
         assert profiles.tick()
@@ -983,9 +983,9 @@ def test_profile_admission_recovers_after_agent_heartbeat_row_lock(
             assert deferred.progress["admission_pending"] is True
             assert deferred.current_operation_id is None
             assert deferred.status_reason is not None
-            next_retry_raw = deferred.progress["admission_retry_at"]
-            assert isinstance(next_retry_raw, str)
-            next_retry = datetime.fromisoformat(next_retry_raw)
+            next_retry_raw = deferred.next_action_at
+            assert isinstance(next_retry_raw, datetime)
+            next_retry = next_retry_raw.replace(tzinfo=UTC)
             assert next_retry > due
             assert (
                 tuple(row.id for row in session.scalars(select(Job).order_by(Job.id)))
@@ -1040,7 +1040,7 @@ def test_queued_admission_survives_submitter_death_before_first_attempt(
         actor="admin",
         operation_kind="fleet-profile.apply",
     )
-    retry = pending.progress.admission_retry_at
+    retry = pending.next_attempt_at
     assert retry is not None
     # Reconstruct the service with no submitter memory, as after worker restart.
     assert planner._lifecycle is not None
@@ -1074,7 +1074,7 @@ def test_pending_admission_continues_under_platform_authority_after_actor_revoca
         actor="admin",
         operation_kind="fleet-profile.apply",
     )
-    retry_at = pending.progress.admission_retry_at
+    retry_at = pending.next_attempt_at
     assert retry_at is not None
 
     with sessions() as session:
