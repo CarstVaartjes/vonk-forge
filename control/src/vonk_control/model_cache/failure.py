@@ -15,12 +15,16 @@ from ..agent_operation_facts import aware as _aware
 from ..failure_classification import disposition, is_definite
 from ..lifecycle import Reported, State
 from ..logging import redact_text
-from ..model_cache_contract import ModelCacheMissingSourceObservation
+from ..model_cache_contract import (
+    ModelCacheMissingSourceObservation,
+)
 from ..model_cache_progress import cache_phase, progress_document
 from ..models import ModelCacheOperation, ModelCacheSet
+from ..operation_blockers import make_blocker
 from .artifacts import ArtifactSetManifest
 from .catalog_helpers import _iso
 from .constants import (
+    _ACCESS_WAIT_CODES,
     _CREDENTIAL_FAILURE_CODES,
     _RETRY_BASE_SECONDS,
     _SOURCE_GONE_ATTEMPTS,
@@ -32,6 +36,7 @@ from .persistence import (
     _operation_cancellation,
     _operation_progress,
     _store_operation_payload,
+    _updated,
 )
 
 if TYPE_CHECKING:
@@ -185,6 +190,19 @@ class FailureMixin:
                     # end, and let the core decide again (retry, with backoff).
                     cache._lifecycle.reopen(operation, now)
                 provider_hint = getattr(error, "retry_after_seconds", None)
+                access_wait = failure_code in _ACCESS_WAIT_CODES
+                access_checks = (
+                    0 if retained_retry is None else retained_retry.access_checks
+                )
+                if access_wait:
+                    # Refuse every denied HTTP request. Only schedule another check
+                    # of the same exact source with the configured credential.
+                    verdict = Disposition.WAIT
+                    retryable = True
+                    access_checks += 1
+                    provider_hint = cache._access_retry_delay(
+                        operation.id, access_checks
+                    )
                 operation.last_error = detail[:512]
                 # The core owns the schedule (bounded backoff, never earlier than
                 # the provider's own hint) and the end of a terminal failure.
@@ -222,6 +240,7 @@ class FailureMixin:
                         update={
                             "operator_retries": operator_retries,
                             "missing_source": missing_source,
+                            "access_checks": access_checks,
                         }
                     )
                 )
@@ -231,7 +250,12 @@ class FailureMixin:
                     retry = retry.model_copy(
                         update={
                             "credential_fingerprint": (
-                                cache._huggingface_credential_fingerprint()
+                                (
+                                    error.credential_fingerprint
+                                    if isinstance(error, ModelCacheError)
+                                    else None
+                                )
+                                or cache._huggingface_credential_fingerprint()
                             )
                         }
                     )
@@ -263,8 +287,28 @@ class FailureMixin:
                     _store_operation_payload(
                         operation,
                         operation.kind,
-                        payload_after.model_copy(
-                            update={"failure": failure_payload, "retry": retry}
+                        _updated(
+                            payload_after,
+                            failure=failure_payload,
+                            retry=retry,
+                            access_recheck=(
+                                payload_after.access_recheck.model_copy(
+                                    update={
+                                        "checked_at": now.isoformat(),
+                                        "authorized": False,
+                                    }
+                                )
+                                if access_wait
+                                and payload_after.access_recheck is not None
+                                else payload_after.access_recheck
+                            ),
+                            blockers=[
+                                make_blocker(
+                                    failure_payload.code, failure_payload.detail
+                                )
+                            ]
+                            if access_wait
+                            else [],
                         ),
                     )
                 operation.progress = progress_document(

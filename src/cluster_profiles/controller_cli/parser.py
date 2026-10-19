@@ -228,6 +228,12 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
         action="store_true",
         help="Show the Controller-owned removal impact without submitting it",
     )
+    model_resume = model_actions.add_parser(
+        "resume-access",
+        help="Check Hugging Face access now and resume the retained model operation",
+    )
+    model_resume.add_argument("operation_id", type=_uuid_selector)
+    _action_flags(model_resume, followable=True)
     model_cancel = model_actions.add_parser(
         "cancel", help="Cancel one model download while preserving resumable files"
     )

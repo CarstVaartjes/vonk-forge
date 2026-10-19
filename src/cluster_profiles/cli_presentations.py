@@ -51,6 +51,8 @@ COMMAND_ACTIONS = {
     "key": (None, "create", "list", "roll", "revoke"),
     "run": (None,),
 }
+COMMAND_ACTIONS["model"] += ("resume-access",)
+
 #: ``remove --review`` rewrites the action after parsing; it renders the review.
 REVIEW_NOUNS = ("model", "recipe")
 PRESENTATIONS = {

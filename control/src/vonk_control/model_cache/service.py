@@ -169,7 +169,6 @@ class ModelCacheService(
         self._background_operations: dict[str, _BackgroundTransfer] = {}
         self._active_digests: set[str] = set()
         self._hf_cooldown_until: datetime | None = None
-        self._observed_credential_fingerprint: str | None = None
         self._progress_checkpoint_at: dict[str, datetime] = {}
         self._cancel_events: dict[str, threading.Event] = {}
         self._range_reserved_bytes = 0

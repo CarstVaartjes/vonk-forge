@@ -7,19 +7,25 @@ from datetime import timedelta
 from typing import TYPE_CHECKING, cast
 
 from sqlalchemy import func, select
-from vonk_agent_protocol import ArtifactLifecycleCode, Disposition, UnknownOutcomeError
+from vonk_agent_protocol import (
+    ArtifactLifecycleCode,
+    Disposition,
+    InvalidRequestReason,
+    UnknownOutcomeError,
+)
 
 from .. import model_cache_states
 from ..agent_operation_facts import aware as _aware
 from ..artifact_lifecycle import ArtifactIdentity, has_pending_removal
 from ..bounded_json import require_integer
 from ..categorized_errors import InvalidValue
-from ..lifecycle import Reported, State, Tick
+from ..lifecycle import Effect, Outcome, Reported, State, Tick
 from ..model_cache_contract import ModelCacheDownloadPayload, ModelCacheDownloadResult
 from ..models import ModelCacheOperation, ModelCacheSet
 from .artifacts import ArtifactSetManifest, _unique_artifacts
 from .catalog_helpers import _iso
 from .constants import (
+    _CREDENTIAL_FAILURE_PUBLIC_CODES,
     _MAX_PARALLEL_DOWNLOADS,
     _RETRY_BASE_SECONDS,
     _TRANSFER_CLAIM_SECONDS,
@@ -454,6 +460,30 @@ class SchedulerMixin:
                 payload = cache._transfer_or_retire(operation, now=now)
                 if payload is None or payload.cancellation is not None:
                     continue
+                if (
+                    payload.failure is not None
+                    and payload.failure.code in _CREDENTIAL_FAILURE_PUBLIC_CODES
+                ):
+                    newer = session.scalar(
+                        select(ModelCacheOperation.id)
+                        .where(
+                            ModelCacheOperation.artifact_set_sha256
+                            == operation.artifact_set_sha256,
+                            ModelCacheOperation.created_at > operation.created_at,
+                        )
+                        .limit(1)
+                    )
+                    if newer is not None:
+                        cache._lifecycle.settle(
+                            operation,
+                            Reported(
+                                Outcome.CANCELLED,
+                                effect=Effect.UNKNOWN,
+                                reason=InvalidRequestReason.SUPERSEDED.value,
+                            ),
+                            now,
+                        )
+                        continue
                 if row.state is State.RUNNING:
                     # The attempt can no longer report: the core decides (rule 1:
                     # nothing here is irreversible, so it is retried with backoff)

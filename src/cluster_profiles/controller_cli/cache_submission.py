@@ -18,6 +18,9 @@ from ..control_client import (
 )
 
 if TYPE_CHECKING:
+    from ..generated_control.models.model_cache_operator_response import (
+        ModelCacheOperatorResponse,
+    )
     from ..generated_control.models.recipe_image_availability_response import (
         RecipeImageAvailabilityResponse,
     )
@@ -95,6 +98,57 @@ def _submit_cache_request(
         reconnect=shlex.join(
             ["vonkctl", noun, "progress", "--request-key", key, "--follow"]
         ),
+    )
+
+
+def _submit_model_access_resume(
+    client: ControllerClient,
+    args: argparse.Namespace,
+    factory: Callable[[], str],
+) -> ModelCacheOperatorResponse:
+    """Recheck through the Controller, reconciling a lost response by request key."""
+    from ..generated_control.models.model_cache_operator_response import (
+        ModelCacheOperatorResponse,
+    )
+
+    operation_id = str(uuid.UUID(args.operation_id))
+    key = _request_key(args, factory)
+
+    def decode(document: object) -> ModelCacheOperatorResponse:
+        if not isinstance(document, Mapping):
+            raise ControlMalformedResponse("access recheck receipt is not an object")
+        try:
+            return ModelCacheOperatorResponse.from_dict(
+                validate_control_document("ModelCacheOperatorResponse", document)
+            )
+        except (ControlClientError, KeyError, TypeError, ValueError) as error:
+            raise ControlMalformedResponse(
+                "access recheck receipt is malformed"
+            ) from error
+
+    def validate(document: object) -> str:
+        result = decode(document)
+        if result.request_key != key:
+            raise ControlMalformedResponse(
+                "access recheck receipt identifies another request"
+            )
+        return _cache_operation_id("model", result.to_dict())
+
+    return decode(
+        _submit_idempotent_request(
+            client,
+            args,
+            key=key,
+            path=f"/api/model/operations/{_quoted(operation_id)}/resume-access",
+            lookup=f"/api/model/requests/{key}",
+            body={"request_key": key},
+            noun="model",
+            action="resume-access",
+            validate=validate,
+            reconnect=shlex.join(
+                ["vonkctl", "model", "progress", "--request-key", key, "--follow"]
+            ),
+        )
     )
 
 
