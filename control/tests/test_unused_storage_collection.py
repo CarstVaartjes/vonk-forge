@@ -2903,6 +2903,20 @@ def test_receipt_unlink_is_outside_sql_with_committed_fence_and_fresh_admission(
     if path.exists():
         # Ended sweep owns no gate; a fresh sweep observes bytes and completes.
         fresh = _collector(world, image_cache_root=tmp_path)
+        from vonk_control.persisted_waits import read_wait
+
+        with world.sessions() as session:
+            gate = session.get(
+                ArtifactLifecycleGate,
+                {
+                    "artifact_kind": "runtime-image",
+                    "artifact_sha256": AN_IMAGE,
+                },
+            )
+            wait = read_wait(gate) if gate is not None else None
+        if wait is not None:
+            assert fresh.collect().images == 0  # restart retains the bounded retry
+            world.now = wait.next_check
         assert fresh.collect().images == 1
     assert not path.exists()
     assert attempts == [AN_IMAGE]

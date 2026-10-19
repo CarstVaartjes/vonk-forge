@@ -6,7 +6,7 @@ import copy
 import hashlib
 import json
 import subprocess
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 import pytest
 from sqlalchemy import select
@@ -557,7 +557,10 @@ def test_held_required_row_defers_without_clock_reset_and_disjoint_work_advances
         native_ids,
     ) = faulty_install
     original_clock = clock[0]
-    due = raw.get("observation_due_at")
+    with sessions() as session:
+        original = session.get(Job, switch_id)
+        assert original is not None
+        due = original.next_action_at
     deadline = raw.get("observation_deadline_at")
     sibling = _job(clock[0] - timedelta(days=2))
     with sessions.begin() as session:
@@ -593,7 +596,16 @@ def test_held_required_row_defers_without_clock_reset_and_disjoint_work_advances
             row = session.get(Job, switch_id)
             assert row is not None and row.result == raw
             assert (row.id, row.request_id, row.payload_digest, row.payload) == identity
-            assert row.result.get("observation_due_at") == due
+            from vonk_control.persisted_waits import read_wait
+
+            pending = session.get(RunSwitchJournalRepairPending, switch_id)
+            if pending is None:
+                assert row.next_action_at == due
+            else:
+                wait = read_wait(row)
+                assert wait is not None
+                assert wait.reason == JournalRepairCode.EVIDENCE_UNAVAILABLE
+                assert wait.dependency_deadline == pending.deadline_at
             assert row.result.get("observation_deadline_at") == deadline
             assert session.get(Job, sibling.id) is None
             assert set(session.scalars(select(AgentOperation.id))) == native_ids
@@ -628,7 +640,7 @@ def test_held_required_row_defers_without_clock_reset_and_disjoint_work_advances
         repaired = owner._stored_result(row.result)
         assert repaired is not None and not isinstance(repaired, Residue)
         assert repaired.child_operation_id == install_id
-        assert row.next_action_at == datetime.fromisoformat(due)
+        assert row.next_action_at is None  # confirmed repair settled its wait
         assert row.result.get("observation_deadline_at") == deadline
         assert len(list(session.scalars(select(RunSwitchJournalRepair)))) == 1
 
