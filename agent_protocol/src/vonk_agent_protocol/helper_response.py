@@ -2,7 +2,7 @@
 
 from typing import Annotated, Literal
 
-from pydantic import Field
+from pydantic import AwareDatetime, Field
 
 from .agent_words import HostHelperResponseStatus
 from .failure_evidence import FailureLogTail
@@ -35,6 +35,8 @@ class HostHelperResponse(WireModel):
     installation_intent_nonce: Digest | None = None
     # Set only in the reply to a RecipeRunInspectionRequest.
     process_running: bool | None = None
+    # Docker start/log timestamp of the exact running job; observation is not progress.
+    job_progress_at: AwareDatetime | None = None
     # One-line exit account of a container (exit code, OOM flag, cause token).
     # Carried by a rejected run inspection and by an executed one-shot job that
     # exited unsuccessfully or timed out.

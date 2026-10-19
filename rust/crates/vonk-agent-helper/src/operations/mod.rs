@@ -258,6 +258,7 @@ pub struct JobEvidence {
 #[derive(Debug, Default)]
 pub struct RunInspection {
     pub running: bool,
+    pub job_progress_at: Option<chrono::DateTime<chrono::FixedOffset>>,
     /// A re-observed job's recorded exit, when its process ended.
     pub exit_code: Option<i32>,
     /// The running container's bounded tail, when the caller asked for it.
@@ -425,6 +426,7 @@ mod packages;
 mod reconciliation;
 mod reobserve;
 use reobserve::*;
+mod job_progress;
 mod start;
 use access::*;
 mod exited_serving;

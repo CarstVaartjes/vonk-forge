@@ -199,10 +199,19 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         cancellation: tokio::sync::watch::Receiver<bool>,
         request: vonk_agent_protocol::RecipeJobRunRequest,
     ) -> ExecutionResult {
-        bounded_job_result(
-            self.run_job(claim, lease_deadline, cancellation, request)
-                .await,
-        )
+        let work = self.run_job(
+            claim,
+            lease_deadline.clone(),
+            cancellation.clone(),
+            request.clone(),
+        );
+        tokio::pin!(work);
+        let result = tokio::select! {
+            biased;
+            result = &mut work => result,
+            () = self.observe_job_progress(claim, &request, lease_deadline, cancellation) => work.await,
+        };
+        bounded_job_result(result)
     }
 
     async fn run_job(

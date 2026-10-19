@@ -409,6 +409,7 @@ fn reject(stream: &mut UnixStream, error: &HelperRejection) {
         exit_code,
         error_code: Some(error.error_code),
         process_running: None,
+        job_progress_at: None,
         installation_intent_nonce: error.installation_intent_nonce.clone(),
     };
     if let Ok(body) = vonk_agent_protocol::canonical_generated_json(&response) {
@@ -473,6 +474,7 @@ fn handle(
                     .and_then(|code| u32::try_from(code).ok()),
                 error_code: None,
                 process_running: Some(inspected.running),
+                job_progress_at: inspected.job_progress_at,
             },
         );
     }
@@ -523,6 +525,7 @@ fn handle(
             })?,
         error_code: None,
         process_running: None,
+        job_progress_at: None,
     };
     respond(stream, &request_id, response)
 }
@@ -895,6 +898,7 @@ mod tests {
             exit_code: None,
             error_code: Some(HelperErrorCode::OperationFailed),
             process_running: None,
+            job_progress_at: None,
         };
         let body = vonk_agent_protocol::canonical_generated_json(&response).unwrap();
         let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
@@ -915,6 +919,7 @@ mod tests {
             exit_code: None,
             error_code: None,
             process_running: None,
+            job_progress_at: None,
         };
         let body = vonk_agent_protocol::canonical_generated_json(&response).unwrap();
         let value: serde_json::Value = serde_json::from_slice(&body).unwrap();

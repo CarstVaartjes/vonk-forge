@@ -172,6 +172,7 @@ async fn cancelled_observation_pages_keep_native_slots_and_leave_foreground_work
                     request_id: Some(request.request_id),
                     status: super::super::HostHelperResponseStatus::ContainerRuntimeRequestExecuted,
                     process_running: Some(true),
+                    job_progress_at: None,
                     exit_code: None,
                     error_code: None,
                     diagnostic: None,

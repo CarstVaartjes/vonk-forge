@@ -672,6 +672,14 @@ The fixed documents previously exposed as dictionaries now use concrete models:
   contain a bounded `detail` and typed `issues`; request inputs and exception
   context are not copied into error responses.
 
+A compiled job's `timeout_seconds` is its inactivity window. The helper
+bounds a silent job from Docker's start timestamp and advances the window only
+when timestamped container output advances. The same timestamp feeds the
+agent's order progress and lost-reply re-observation; polling and restarts do
+not themselves renew it. The platform maximum is 3,600 seconds of inactivity,
+rather than a maximum inference duration. Unread progress remains bounded by
+the last observation, and cancellation and the host-memory guard still apply.
+
 The graph regression checks actual serialization schemas, including browser
 and agent routes. It allows open objects only for engine-defined parameters,
 engine measurements and path-selected authority documents. A separate schema

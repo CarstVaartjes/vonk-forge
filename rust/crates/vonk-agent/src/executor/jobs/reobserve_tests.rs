@@ -20,6 +20,7 @@ use vonk_agent_protocol::generated::{
 #[derive(Clone, Copy)]
 pub(super) enum Answer {
     Running,
+    Progressing,
     Exited(u32),
     Absent,
     /// A helper that predates job re-observation refuses the request.
@@ -120,6 +121,7 @@ pub(super) fn peers(job_id: Uuid, script: Vec<Answer>) -> Peers {
                 request_id: Some(request.request_id),
                 status: HostHelperResponseStatus::ContainerRuntimeRequestExecuted,
                 process_running: Some(true),
+                job_progress_at: None,
                 exit_code: None,
                 error_code: None,
                 diagnostic: None,
@@ -127,6 +129,10 @@ pub(super) fn peers(job_id: Uuid, script: Vec<Answer>) -> Peers {
             };
             let event = match last {
                 Answer::Running => "running",
+                Answer::Progressing => {
+                    response.job_progress_at = Some(Utc::now().fixed_offset());
+                    "progressing"
+                }
                 Answer::Exited(code) => {
                     response.process_running = Some(false);
                     response.exit_code = Some(code);
@@ -387,8 +393,10 @@ async fn a_job_without_its_record_reports_its_kept_exit_and_never_runs_again() {
         Some(3),
         "{result:?}"
     );
-    // Read, read again by the wait, then the exited container's removal.
-    assert_eq!(log, ["exited", "exited", "grant"]);
+    // Progress sampling may also read the same exit. Only cleanup asks for
+    // authority; no inspection or lost receipt may relaunch the process.
+    assert_eq!(log.last(), Some(&"grant"));
+    assert!(log[..log.len() - 1].iter().all(|event| *event == "exited"));
 }
 
 /// A job proven never seen is dispatched afresh, and so is one whose helper
@@ -435,4 +443,18 @@ async fn a_job_whose_reobservation_was_unread_runs_nothing() {
         Some(AgentFailureKind::TemporaryDependency)
     );
     assert_eq!(failure.stage, Some(FailureStage::RunStorage));
+}
+
+#[tokio::test]
+async fn a_progressing_job_survives_a_lost_helper_reply_past_its_original_deadline() {
+    let (settled, log) = settle_broken_call(
+        vec![Answer::Progressing, Answer::Exited(7)],
+        Duration::from_secs(7200),
+    )
+    .await;
+    let outcome =
+        settled.unwrap_or_else(|result| panic!("progressing job was stopped: {result:?}"));
+    assert_eq!(outcome.exit_code, Some(7));
+    assert_eq!(log[..2], ["progressing", "exited"]);
+    assert!(log[2..].iter().all(|event| *event == "grant"));
 }

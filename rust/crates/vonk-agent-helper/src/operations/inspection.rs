@@ -77,6 +77,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
             // cannot be proven to be this run's, so its output is never read.
             [run_id] if unbound => Ok(RunInspection {
                 running: self.runtime_run_container_running(run_id)?,
+                job_progress_at: None,
                 exit_code: None,
                 logs: None,
                 log_error: include_logs.then(|| {
@@ -131,6 +132,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
         };
         match self.reobserve_by_identity(identity, run_id, plan_digest) {
             Reobserved::Running => Ok(RunInspection {
+                job_progress_at: self.job_progress_at(runtime_id),
                 running: true,
                 ..RunInspection::default()
             }),
@@ -148,6 +150,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
                 };
                 Ok(RunInspection {
                     running: false,
+                    job_progress_at: None,
                     exit_code: Some(code),
                     logs,
                     log_error,
@@ -234,6 +237,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
     ) -> Result<RunInspection, OperationError> {
         let not_running = RunInspection {
             running: false,
+            job_progress_at: None,
             exit_code: None,
             logs: None,
             log_error: None,
@@ -343,6 +347,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
             if !include_logs {
                 return Ok(RunInspection {
                     running: true,
+                    job_progress_at: None,
                     exit_code: None,
                     logs: None,
                     log_error: None,
@@ -373,6 +378,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
             };
             return Ok(RunInspection {
                 running: true,
+                job_progress_at: None,
                 exit_code: None,
                 logs,
                 log_error,
@@ -385,6 +391,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
         {
             return Ok(RunInspection {
                 running: false,
+                job_progress_at: None,
                 exit_code: None,
                 logs: None,
                 log_error: Some(crate::host_memory_guard::summary(&evidence)),

@@ -50,6 +50,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
             request_id: None,
             status: HostHelperResponseStatus::ContainerRuntimeRequestExecuted,
             process_running: Some(false),
+            job_progress_at: None,
             exit_code: Some(code),
             error_code: None,
             diagnostic: evidence
@@ -137,6 +138,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
         let failed = include_logs && code != 0;
         Some(RunInspection {
             running: false,
+            job_progress_at: None,
             exit_code: Some(i32::try_from(code).ok()?),
             logs: record.process_logs.filter(|_| failed).map(Box::new),
             log_error: record.diagnostic.filter(|_| failed),
