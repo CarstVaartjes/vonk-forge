@@ -455,7 +455,7 @@ class OperatorReceiptResolver:
                     owner=ReceiptOwner.KEY,
                     id=result.name,
                     request_id=identity,
-                    href=f"/api/key/{quote(result.name, safe='')}/requests/{quote(identity, safe='')}",
+                    href=f"/api/key/{quote(result.name, safe='')}/requests?request_id={quote(identity, safe='')}",
                 )
             if policy == ReceiptPolicy.INSTALLATION and isinstance(
                 result, RunSwitchOperation
@@ -511,6 +511,8 @@ def apply_receipt(
     if arguments is None:
         raise _refused("The mutation has no accepted request context", unavailable=True)
     receipt = resolver.resolve(policy, result, arguments)
-    response.headers[RECEIPT_HEADER] = receipt.model_dump_json(exclude_none=True)
+    response.headers[RECEIPT_HEADER] = receipt.model_dump_json(
+        exclude_none=True, ensure_ascii=True
+    )
     response.headers["Link"] = f'<{receipt.href}>; rel="receipt"'
     return response

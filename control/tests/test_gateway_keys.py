@@ -234,7 +234,7 @@ def test_create_list_and_revoke_client_keys():
 
     assert client.post("/api/key/ci/revoke").json()["name"] == "ci"
     assert set(litellm.keys) == {"laptop"}
-    client.post("/api/key/ci/revoke")
+    assert client.post("/api/key/ci/revoke").status_code == 409
     assert set(litellm.keys) == {"laptop"}
     assert client.post("/api/key", json={"name": "ci"}).status_code == 201
 

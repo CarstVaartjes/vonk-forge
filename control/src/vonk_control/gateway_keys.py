@@ -29,7 +29,7 @@ from typing import Annotated, Any
 from uuid import uuid4
 
 import httpx2
-from fastapi import FastAPI, HTTPException, status
+from fastapi import FastAPI, HTTPException, Query, status
 from fastapi import Path as PathParameter
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, field_validator
 from vonk_agent_protocol import (
@@ -70,6 +70,7 @@ _KEY_ROUTES = ["openai_routes"]
 _KEY_PATH = "/api/key"
 _REVOKE_PATH = "/api/key/{name}/revoke"
 _ROLL_PATH = "/api/key/{name}/roll"
+_RECEIPT_PATH = "/api/key/{name}/requests"
 
 
 class GatewayKeyError(UnknownOutcomeError, RuntimeError):
@@ -404,6 +405,7 @@ class GatewayKeyService:
         self, name: str, *, request_id: str | None = None, actor: str | None = None
     ) -> GatewayKeyRevoked | UnknownError:
         identity = request_id or str(uuid4())
+        aliases = (name, _rolling_alias(name))
 
         def revoke_once() -> GatewayKeyRevoked | UnknownError:
             with self._mutation_claim(name) as acquired:
@@ -421,6 +423,16 @@ class GatewayKeyService:
                     if retained.completed:
                         return GatewayKeyRevoked(name=name, request_id=identity)
                 else:
+                    owners = [
+                        self._read_receipt(self._intent_path(alias))
+                        for alias in aliases
+                    ]
+                    if not any(
+                        owner is not None and not owner.superseded for owner in owners
+                    ) and not any(self._gateway_exists(alias) for alias in aliases):
+                        raise HTTPException(
+                            status_code=409, detail=InvalidRequestReason.NOT_READY
+                        )
                     retained = GatewayMutationReceipt(
                         request_id=identity,
                         actor=actor,
@@ -438,9 +450,9 @@ class GatewayKeyService:
                     )
                 # Newest revoke includes the exact temporary alias of an
                 # interrupted rotation. Keep its secret until both are absent.
-                for alias in (name, _rolling_alias(name)):
+                for alias in aliases:
                     self._gateway_delete_alias(alias)
-                for alias in (name, _rolling_alias(name)):
+                for alias in aliases:
                     receipt = self._read_receipt(self._intent_path(alias))
                     if receipt is not None and receipt.body.key is not None:
                         secret = receipt.body.key
@@ -1160,19 +1172,17 @@ def install_gateway_key_routes(
         if actor.role not in MUTATION_ROLES[("POST", path)]:
             raise HTTPException(status_code=403, detail=SecurityRefusalReason.FORBIDDEN)
 
-    _ADMIN_OPERATION_IDS[("get", "/api/key/{name}/requests/{request_id}")] = (
-        "getGatewayKeyReceipt"
-    )
+    _ADMIN_OPERATION_IDS[("get", _RECEIPT_PATH)] = "getGatewayKeyReceipt"
 
     @app.get(
-        "/api/key/{name}/requests/{request_id}",
+        _RECEIPT_PATH,
         response_model=GatewayMutationStatus,
-        responses=bounded_error_responses(401, 403, 404, 503),
+        responses=bounded_error_responses(401, 403, 404, 422, 503),
         operation_id="getGatewayKeyReceipt",
     )
     def key_receipt(
         name: str = PathParameter(pattern=_NAME_PATTERN, max_length=63),
-        request_id: str = PathParameter(min_length=1, max_length=128),
+        request_id: str = Query(min_length=1, max_length=128),
         actor: Actor = actor_dependency,
     ) -> GatewayMutationStatus:
         authorize(actor, _KEY_PATH)
@@ -1199,7 +1209,7 @@ def install_gateway_key_routes(
     @app.post(
         _KEY_PATH,
         response_model=GatewayKeyCreated,
-        responses=bounded_error_responses(401, 403, 422, 502, 503),
+        responses=bounded_error_responses(401, 403, 409, 422, 502, 503),
         status_code=status.HTTP_201_CREATED,
         operation_id="createGatewayKey",
     )
@@ -1226,12 +1236,12 @@ def install_gateway_key_routes(
     @app.post(
         _REVOKE_PATH,
         response_model=GatewayKeyRevoked,
-        responses=bounded_error_responses(401, 403, 502, 503),
+        responses=bounded_error_responses(401, 403, 409, 422, 502, 503),
         operation_id="revokeGatewayKey",
     )
     @operator_acceptance(ReceiptPolicy.KEY)
     def revoke_gateway_key(
-        request_id: str | None = None,
+        request_id: Annotated[str | None, Query(min_length=1, max_length=128)] = None,
         name: str = PathParameter(pattern=_NAME_PATTERN, max_length=63),
         actor: Actor = actor_dependency,
     ) -> GatewayKeyRevoked:
@@ -1250,13 +1260,13 @@ def install_gateway_key_routes(
     @app.post(
         _ROLL_PATH,
         response_model=GatewayKeyCreated,
-        responses=bounded_error_responses(401, 403, 502, 503),
+        responses=bounded_error_responses(401, 403, 409, 422, 502, 503),
         operation_id="rollGatewayKey",
     )
     @operator_acceptance(ReceiptPolicy.KEY)
     def roll_gateway_key(
         name: str = PathParameter(pattern=_NAME_PATTERN, max_length=63),
-        request_id: str | None = None,
+        request_id: Annotated[str | None, Query(min_length=1, max_length=128)] = None,
         actor: Actor = actor_dependency,
     ) -> GatewayKeyCreated:
         authorize(actor, _ROLL_PATH)

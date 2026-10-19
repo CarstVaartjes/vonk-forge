@@ -30,6 +30,10 @@ Replaying an accepted cancellation returns its existing receipt; another key,
 actor or request content cannot adopt it. Model and recipe cancellation lookup
 URLs resolve the cancellation key on the original operation. Key lookups expose
 only the existing managed mutation receipt's public status, never its secret.
+Their `/api/key/{name}/requests` URL carries `request_id` as a query parameter;
+opaque identities, including Unicode and slashes, round-trip without changing
+their meaning. Receipt headers encode JSON as ASCII. A fresh revoke of an
+already retired key is refused; the accepted revoke key replays its receipt.
 An unavailable owner returns a typed retryable response; an unchanged target
 without the requested acceptance cannot return success. Profile saves replay
 an identical committed definition without increasing its revision.

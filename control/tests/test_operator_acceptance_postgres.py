@@ -345,7 +345,7 @@ def test_key_receipts_replay_without_repeating_external_effects(
         )
 
     first = api(owner)
-    key = str(uuid4())
+    key = f"{uuid4()}/α"
     body = {"name": "receipt", "request_id": key}
     with pytest.raises(httpx.ReadError):
         TestClient(DropFirstResponse(first.app, "/api/key")).post(
@@ -359,7 +359,14 @@ def test_key_receipts_replay_without_repeating_external_effects(
     assert (
         replay.json()["key"] not in restarted.get(receipt["href"], headers=headers).text
     )
-    revoke_key = str(uuid4())
+    invalid = restarted.post(
+        "/api/key/receipt/revoke",
+        params={"request_id": "x" * 129},
+        headers=headers,
+    )
+    assert invalid.status_code == 422, invalid.text
+    assert "receipt" in peer.keys
+    revoke_key = f"{uuid4()}/α"
     revoke = f"/api/key/receipt/revoke?request_id={revoke_key}"
     accepted = restarted.post(revoke, headers=headers)
     assert _receipt(restarted, accepted, headers)["request_id"] == revoke_key
@@ -370,6 +377,19 @@ def test_key_receipts_replay_without_repeating_external_effects(
         == revoke_key
     )
     assert not peer.keys
+    fresh_revoke = str(uuid4())
+    refused = restarted.post(
+        f"/api/key/receipt/revoke?request_id={fresh_revoke}", headers=headers
+    )
+    assert refused.status_code == 409, refused.text
+    assert (
+        restarted.get(
+            "/api/key/receipt/requests",
+            params={"request_id": fresh_revoke},
+            headers=headers,
+        ).status_code
+        == 404
+    )
 
 
 def test_unknown_key_mutation_is_retryable_without_success(postgres_engine):
