@@ -172,3 +172,129 @@ def test_cancellation_committed_after_selection_wins_before_retry(postgres_engin
     with sessions() as session:
         current = session.get(Job, job.id)
         assert current is not None and current.current_attempt == 0
+
+
+def test_owner_rotation_recovers_a_terminal_revocation_after_ca_outage(postgres_engine):
+    """Catches an always-corrupt owner starving another owner's aliased due clock."""
+    from uuid import uuid4
+
+    from vonk_agent_protocol import CertificateRecordState
+    from vonk_control.enrollment import EnrollmentService
+    from vonk_control.models import AgentIssuedCertificateRevocation
+    from vonk_control.persisted_waits import read_wait
+    from vonk_control.step_ca import StepCAUnavailable
+
+    from .ca_test_authority import FixtureCertificateAuthority
+
+    Base.metadata.create_all(postgres_engine)
+    sessions = sessionmaker(postgres_engine, expire_on_commit=False)
+    damaged = _job()
+    row = AgentIssuedCertificateRevocation(
+        serial="due-revocation",
+        node_id="spk_" + "a" * 32,
+        provider_request_id=str(uuid4()),
+        generation=1,
+        state=CertificateRecordState.REVOKED,
+        created_at=NOW,
+        updated_at=NOW,
+    )
+    with sessions.begin() as session:
+        session.add_all((damaged, row))
+        schedule_wait(damaged, NOW, now=NOW)
+        schedule_wait(row, NOW, now=NOW)
+    with postgres_engine.begin() as connection:
+        connection.execute(
+            text("UPDATE jobs SET wait_evidence = '{}' WHERE id = :id"),
+            {"id": damaged.id},
+        )
+    available = [False]
+    now = [NOW]
+    revoked = []
+
+    class Authority(FixtureCertificateAuthority):
+        def revoke_node(self, serial, observed_at):
+            if not available[0]:
+                raise StepCAUnavailable("CA transport unavailable")
+            revoked.append(serial)
+
+    def construct():
+        service = EnrollmentService(sessions, Authority(), clock=lambda: now[0])
+        return DueWaitBackstop(
+            sessions,
+            [
+                WaitSource(
+                    Job, frozenset({WaitOwnerKind.JOB}), lambda key, evidence: None
+                ),
+                WaitSource(
+                    AgentIssuedCertificateRevocation,
+                    frozenset({WaitOwnerKind.CERTIFICATE_REVOCATION}),
+                    lambda key, evidence: service.reconcile_revocations(str(key[0])),
+                ),
+            ],
+            clock=lambda: now[0],
+            batch_limit=1,
+        )
+
+    first = construct()
+    first.tick()
+    first.tick()
+    assert not revoked
+    with sessions() as session:
+        pending = session.get(AgentIssuedCertificateRevocation, row.serial)
+        assert pending is not None
+        wait = read_wait(pending)
+        assert wait is not None and wait.next_check > NOW
+    available[0] = True
+    now[0] = wait.next_check
+    restarted = construct()
+    restarted.tick()
+    restarted.tick()
+    assert revoked == [row.serial]
+    with sessions() as session:
+        settled = session.get(AgentIssuedCertificateRevocation, row.serial)
+        assert settled is not None and settled.ca_revoked_at == now[0]
+        assert settled.state == CertificateRecordState.REVOKED
+        assert read_wait(settled) is None
+
+
+def test_owner_handler_runs_after_the_selection_connection_is_released(postgres_engine):
+    """A one-connection pool catches selection holding SQL across owner I/O."""
+    from sqlalchemy import create_engine
+
+    engine = create_engine(
+        postgres_engine.url, pool_size=1, max_overflow=0, pool_timeout=30
+    )
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    job = _job()
+    with sessions.begin() as session:
+        session.add(job)
+        schedule_wait(job, NOW, now=NOW)
+    calls = []
+
+    def handler(request):
+        with sessions() as session:
+            current = session.get(Job, request.job_id)
+            assert current is not None and current.state == LifecycleState.RUNNING
+        calls.append(request.job_id)
+        return {}
+
+    worker = Worker(
+        JobService(sessions, clock=lambda: NOW), "connection-probe", {job.kind: handler}
+    )
+    backstop = DueWaitBackstop(
+        sessions,
+        [
+            WaitSource(
+                Job,
+                frozenset({WaitOwnerKind.JOB}),
+                lambda key, evidence: worker._run_generic(str(key[0])),
+            )
+        ],
+        clock=lambda: NOW,
+    )
+    try:
+        backstop.tick()
+        assert calls == [job.id]
+    finally:
+        engine.dispose()
