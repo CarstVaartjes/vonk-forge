@@ -221,7 +221,7 @@ def test_busy_identity_releases_claim_then_reuses_exact_verified_content(tmp_pat
         payload = service._payload(row)
         assert isinstance(payload, AvailabilityJobPayload)
         assert payload.claim_owner is None and payload.claim_until is None
-        assert payload.retry_after_at is not None
+        assert row.next_action_at is not None
     # Another request can prepare the content during the contender's backoff.
     unrelated = service.start(
         "unrelated-revision", actor="operator", request_id=str(uuid.uuid4())

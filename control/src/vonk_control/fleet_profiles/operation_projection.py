@@ -44,6 +44,7 @@ from ..operation_item_contract import (
     OperationOwnerReference,
     OperationResultFacts,
 )
+from ..persisted_waits import read_wait
 from ..strict_json import warn_unreadable_once
 from .activity import (
     _profile_activity_state,
@@ -242,9 +243,9 @@ class FleetProfileService:
         next_attempt = None
         if state == LifecycleState.BACKOFF.value:
             # The Controller retries this by itself: it is waiting, not failed.
-            next_attempt = typed_progress.retry_due_at
+            next_attempt = row.next_action_at
         elif state == LifecycleState.QUEUED.value and typed_progress.admission_pending:
-            next_attempt = typed_progress.admission_retry_at
+            next_attempt = row.next_action_at
         failure = None
         if state in job_states.words(
             LifecycleState.FAILED, LifecycleState.NEEDS_OPERATOR
@@ -266,6 +267,7 @@ class FleetProfileService:
                 retryable=retry_available,
                 uncertain=state in fleet_profile_states.NEEDS_OPERATOR,
             )
+        wait = read_wait(row)
         return OperationItem(
             id=row.id,
             parent_id=typed_progress.retry_of_application_id,
@@ -322,6 +324,7 @@ class FleetProfileService:
                 )
                 else []
             ),
+            wait=wait,
             next_attempt_at=next_attempt.isoformat()
             if next_attempt is not None
             else None,

@@ -290,22 +290,12 @@ def test_observation_budget_is_owned_by_request_across_restart_for_all_unknowns(
     service.run_pending()
     assert service.get(pending.id).result is None
     if fault == "future_retry":
-        import json
-
-        from vonk_control.job_documents import AvailabilityJobPayload
-        from vonk_control.strict_json import serialize_json_value
+        from vonk_control.persisted_waits import schedule_wait
 
         with sessions.begin() as session:
             row = session.get(Job, pending.id)
             assert row is not None
-            payload = AvailabilityJobPayload.model_validate_json(
-                json.dumps(row.payload)
-            )
-            row.payload = serialize_json_value(
-                payload.model_copy(
-                    update={"retry_after_at": now[0] + timedelta(days=1)}
-                )
-            )
+            schedule_wait(row, now[0] + timedelta(days=1))
     now[0] += timedelta(minutes=16)
     service = owner()
     service.run_pending()

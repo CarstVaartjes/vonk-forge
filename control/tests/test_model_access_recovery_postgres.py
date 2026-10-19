@@ -13,13 +13,12 @@ import httpx2
 import pytest
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import LifecycleState
+from vonk_agent_protocol import LifecycleState, ModelAccessReason
 from vonk_control.model_cache import ModelCacheService
 from vonk_control.models import Base, ModelCacheOperation
 from vonk_control.operation_contract import (
     AvailabilityOperationFailure,
     AvailabilityRecoveryAction,
-    ModelAccessReason,
 )
 from vonk_control.strict_json import read_stored_model
 

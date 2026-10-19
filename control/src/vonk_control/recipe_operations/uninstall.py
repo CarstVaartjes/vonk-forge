@@ -39,6 +39,7 @@ from ..models import (
     InstallationNode,
     RecipeInstallation,
 )
+from ..persisted_waits import schedule_wait
 from ..run_switch_contract import (
     RunSwitchReconciliationAuthority,
 )
@@ -389,6 +390,7 @@ class UninstallMixin:
                 node.state = InstallationNodeState.UNINSTALLED
                 node.updated_at = now
             installation.state = InstallationState.UNINSTALLED
+            schedule_wait(installation, None)
             installation.updated_at = now
             service._release(session, "installation", installation_id, now)
         return RecipeInstallationAbandonResult(

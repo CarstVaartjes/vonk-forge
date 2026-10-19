@@ -613,6 +613,43 @@ class WaitReason(WireEnum):
     LEGACY_UNCLASSIFIED = "legacy-unclassified"
 
 
+class WaitResumeCondition(WireEnum):
+    """What the owner must establish before resuming accepted work."""
+
+    DEPENDENCY_CHANGED = "dependency-changed"
+    EFFECT_OBSERVED = "effect-observed"
+    RETRY_DUE = "retry-due"
+    OPERATOR_ACTION = "operator-action"
+
+
+class WaitOwnerKind(WireEnum):
+    """Existing durable owners of Controller waits; no independent wait queue."""
+
+    AGENT_OPERATION = "agent-operation"
+    AGENT_UPGRADE = "agent-upgrade"
+    ARTIFACT_JOB = "artifact-job"
+    FLEET_PROFILE = "fleet-profile"
+    IMAGE_AVAILABILITY = "image-availability"
+    PREBUILT_IMAGE = "prebuilt-image"
+    JOB = "job"
+    MODEL_CACHE = "model-cache"
+    RECIPE_OPERATION = "recipe-operation"
+    RECIPE_UPDATE_BATCH = "recipe-update-batch"
+    RUN_SWITCH = "run-switch"
+    STORAGE_RELIEF = "storage-relief"
+    CLEANUP = "cleanup"
+    SELECTED_PROFILE = "selected-profile"
+    ROUTE_PUBLICATION = "route-publication"
+    ROUTE_RECOVERY = "route-recovery"
+    CATALOG_SYNC = "catalog-sync"
+    CERTIFICATE = "certificate"
+    CERTIFICATE_REVOCATION = "certificate-revocation"
+
+
+class ProgressAlarmCode(WireEnum):
+    STALLED = "progress.stalled"
+
+
 class InvalidRequestReason(WireEnum):
     """Closed reason codes of an invalid request (submit-time input validation)."""
 
@@ -840,6 +877,9 @@ class LifecycleVocabulary(WireModel):
     state_write_kind: StateWriteKind
     migration_step: MigrationStep
     error_category: ErrorCategory
+    wait_owner_kind: WaitOwnerKind
+    wait_resume_condition: WaitResumeCondition
+    progress_alarm_code: ProgressAlarmCode
     wait_reason: WaitReason
     invalid_request_reason: InvalidRequestReason
     security_refusal_reason: SecurityRefusalReason

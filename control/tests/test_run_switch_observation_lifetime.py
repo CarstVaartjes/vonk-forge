@@ -210,7 +210,7 @@ def test_artifact_observation_repairs_or_ends_and_admits_fresh(tmp_path, fault, 
             break
     assert held.state in {LifecycleState.RUNNING, LifecycleState.OBSERVING}
     assert held.result is not None
-    due = held.result.observation_due_at
+    due = held.next_attempt_at
     assert due is not None and due > now[0]
     with sessions() as session:
         assert not list(session.scalars(select(RecipeRun)))
@@ -229,8 +229,8 @@ def test_artifact_observation_repairs_or_ends_and_admits_fresh(tmp_path, fault, 
         now[0] = due
         assert service.tick()
         held = service.get(operation.operation_id)
-        assert held.result is not None and held.result.observation_due_at is not None
-        due = held.result.observation_due_at
+        assert held.result is not None and held.next_attempt_at is not None
+        due = held.next_attempt_at
         assert len(executor.cleanup_requests) >= 2
         assert len(set(executor.cleanup_requests)) == 1
         calls = len(executor.calls)
@@ -336,7 +336,7 @@ def test_accepted_readiness_observation_has_a_restart_safe_end(tmp_path, repair)
 
     operation = fresh()
     assert operation.result is not None
-    due = operation.result.observation_due_at
+    due = operation.next_attempt_at
     deadline = operation.result.observation_deadline_at
     assert deadline is not None and deadline > NOW
     assert due is not None and due < deadline

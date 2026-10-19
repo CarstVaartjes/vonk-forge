@@ -48,6 +48,7 @@ from ..models import (
     AgentNode,
 )
 from ..owner_liveness import OwnerKind, OwnerRef, owner
+from ..persisted_waits import schedule_wait
 from ..pki import IssuedCertificate
 from ..security.enrollment import (
     require_certificate,
@@ -411,6 +412,7 @@ class RotationService(EnrollmentCore):
                     "obsolete staged certificate recovery state changed"
                 )
             certificate.ca_revoked_at = certificate.ca_revoked_at or now
+            schedule_wait(certificate, None)
             intent.state = CertificateRotationState.ISSUING
             intent.updated_at = now
             return True

@@ -471,7 +471,7 @@ def test_busy_runtime_handoff_retries_the_original_claim_after_releasing_sql(
             operation.result is not None
             and operation.result.retry_reason == "run.capacity_busy"
         )
-        due = operation.result.observation_due_at
+        due = operation.next_attempt_at
         assert due is not None
         assert not planner.tick()
         with sessions() as observer:

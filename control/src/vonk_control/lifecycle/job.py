@@ -54,12 +54,18 @@ from typing import Any
 from sqlalchemy import update
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import Disposition, LifecycleState
+from vonk_agent_protocol import (
+    Disposition,
+    LifecycleState,
+    OperatorActionName,
+    WaitOwnerKind,
+)
 
 from .. import job_states
 from ..agent_operation_facts import aware
 from ..logging import redact_text
 from ..models import Job, JobAttempt
+from ..persisted_waits import initialize_wait, lifecycle_wait, wait_due
 from .adapter import Dispatch
 from .core import transition
 from .reconciler import Settled
@@ -117,7 +123,7 @@ class JobAdapter:
     def new_job(*, state: str = "queued", **fields: Any) -> Job:
         """A new job; the only constructor of a generic ``Job``."""
 
-        return Job(state=state, **fields)
+        return initialize_wait(Job(state=state, **fields), WaitOwnerKind.JOB)
 
     # ---------------------------------------------------------------- adopt
 
@@ -156,6 +162,7 @@ class JobAdapter:
             ),
             intent_ordinal=ordinal if type(ordinal) is int else None,
             effect=effect,
+            next_action_at=wait_due(job),
             reason=job.status_reason,
         )
 
@@ -181,7 +188,7 @@ class JobAdapter:
     def actions(self, row: Lifecycle) -> tuple[str, ...]:
         """``resume`` (``POST /api/jobs/{id}/resume``) exists for a parked job."""
 
-        return ("resume",) if row.state is State.NEEDS_OPERATOR else ()
+        return (OperatorActionName.RESUME,) if row.state is State.NEEDS_OPERATOR else ()
 
     def children(self, row: Lifecycle) -> tuple[Lifecycle, ...]:
         return ()
@@ -210,6 +217,19 @@ class JobAdapter:
         """The only writer of ``Job.state`` and ``JobAttempt.state`` of a generic job."""
 
         stored = _STORED[after.state]
+        lifecycle_wait(
+            job,
+            identity=job.id,
+            kind=WaitOwnerKind.JOB,
+            state=after.state,
+            now=now,
+            due=after.next_action_at,
+            detail=after.reason,
+            deadline=after.recovery_deadline,
+            cancelling=after.cancel_requested,
+            lease_deadline=after.lease_deadline,
+            operator_action=OperatorActionName.RESUME if self.actions(after) else None,
+        )
         job.state = stored
         job.updated_at = now
         if after.terminal and attempt is not None:
@@ -292,6 +312,7 @@ class JobAdapter:
         if previous is not None:
             job_states.lapse(previous)
         job.current_attempt = claimed.attempt
+        self.apply(job, claimed, now)
         job.state = _STORED[State.RUNNING]
         job.updated_at = now
         fresh = JobAttempt(

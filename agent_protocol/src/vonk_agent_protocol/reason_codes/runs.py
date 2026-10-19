@@ -290,3 +290,8 @@ class SupersedeCode(WireEnum):
     SUPERSEDED_BY_INTENT = "superseded-by-intent"
     SUPERSEDED_BY_RETRY = "superseded-by-retry"
     EFFECTS_CHANGED_DURING_ADMISSION = "effects-changed-during-admission"
+
+
+class JournalRepairCode(WireEnum):
+    EXHAUSTED = "run-switch.journal-repair-exhausted"
+    EVIDENCE_UNAVAILABLE = "run-switch.journal-repair-evidence-unavailable"

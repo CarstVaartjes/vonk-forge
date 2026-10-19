@@ -6,7 +6,6 @@ import logging
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
-from typing import cast
 
 import pytest
 from sqlalchemy import create_engine
@@ -15,7 +14,6 @@ from vonk_agent_protocol import Disposition, LifecycleState, OperationProgress
 from vonk_control.job_documents import AvailabilityJobPayload
 from vonk_control.model_cache_contract import ModelCacheCancellation
 from vonk_control.models import Base, Job, ModelCacheOperation, User
-from vonk_control.operation_contract import AvailabilityOperationFailure
 from vonk_control.recipe_image_availability import (
     RecipeImageAvailabilityService,
     _removal_retry_is_due,
@@ -79,31 +77,23 @@ def test_public_availability_service_reuses_published_content_after_restart(
 def test_a_malformed_stored_retry_time_makes_the_removal_due_instead_of_failing(
     caplog,
 ) -> None:
-    # The stored model validates RFC 3339, so the reader is exercised with the
-    # shape a hand-edited row could still produce past that check.
-    damaged = cast(
-        AvailabilityOperationFailure,
-        SimpleNamespace(
-            code="artifact.deletion_in_progress",
-            retryable=True,
-            retry_time="tomorrow-ish",
-        ),
+    from vonk_control.recipe_image_removal_contract import RECIPE_CACHE_REMOVE_KIND
+
+    # A pre-contract row can retain a malformed progress clock. It is due for
+    # owner reconciliation, while a valid scheduling column remains a bound.
+    damaged = Job(
+        id="damaged-clock",
+        kind=RECIPE_CACHE_REMOVE_KIND,
+        payload={"checkpoint": {"failure": {"retry_time": "tomorrow-ish"}}},
     )
     now = datetime.now(UTC)
     with caplog.at_level(logging.DEBUG):
         assert _removal_retry_is_due(damaged, now) is True
-    assert any(
-        getattr(record, "residue_kind", "") == "recipe-image.removal-retry-time"
-        for record in caplog.records
-    )
-    # A well-formed future retry time still waits: the shortcut is only for damage.
-    future = cast(
-        AvailabilityOperationFailure,
-        SimpleNamespace(
-            code="artifact.deletion_in_progress",
-            retryable=True,
-            retry_time=(now + timedelta(minutes=5)).isoformat(),
-        ),
+    assert any("wait-clock" in record.getMessage() for record in caplog.records)
+    future = Job(
+        id="future-clock",
+        kind=RECIPE_CACHE_REMOVE_KIND,
+        next_action_at=now + timedelta(minutes=5),
     )
     assert _removal_retry_is_due(future, now) is False
 

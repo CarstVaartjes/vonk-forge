@@ -239,8 +239,9 @@ def test_held_and_not_due_first_removals_do_not_starve_unrelated_due_owner(
         waiting_payload = parse_model_cache_payload("remove", waiting_row.payload)
         assert isinstance(waiting_payload, ModelCacheRemovalPayload)
         waiting_document = waiting_payload.model_dump(mode="json")
-        waiting_document["retry"]["next_retry_at"] = delayed_until.isoformat()
-        waiting_document["retry"]["retry_after_seconds"] = 3600
+        from vonk_control.persisted_waits import schedule_wait
+
+        schedule_wait(waiting_row, delayed_until)
         waiting_row.payload = waiting_document
 
     held_before = _removal_payload(sessions, held.id)
@@ -277,7 +278,10 @@ def test_held_and_not_due_first_removals_do_not_starve_unrelated_due_owner(
             assert held_after.removal_fence == held_before.removal_fence
             assert held_after.object_index == held_before.object_index == 0
             assert waiting_after.removal_fence == waiting_before.removal_fence
-            assert waiting_after.retry.next_retry_at == delayed_until.isoformat()
+            assert (
+                service.get_operation(waiting.id).next_attempt_at
+                == delayed_until.isoformat()
+            )
         finally:
             holder.rollback()
 

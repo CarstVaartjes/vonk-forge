@@ -34,12 +34,13 @@ from dataclasses import replace
 from datetime import datetime
 from typing import Any
 
-from vonk_agent_protocol import Disposition, InvalidRequestReason
+from vonk_agent_protocol import Disposition, InvalidRequestReason, WaitOwnerKind
 
 from .. import job_states
 from ..agent_operation_facts import aware
 from ..categorized_errors import InvalidValue
 from ..models import Job
+from ..persisted_waits import initialize_wait, lifecycle_wait, wait_due
 from .adapter import Dispatch
 from .core import transition
 from .evidence import keep_recorded_outcome
@@ -129,6 +130,7 @@ class RecipeOperationAdapter:
             cancel_requested_at=requested,
             cancel_request_key=key,
             effect=effect,
+            next_action_at=wait_due(job),
             reason=job.status_reason,
         )
 
@@ -169,7 +171,7 @@ class RecipeOperationAdapter:
                 f"a recipe operation cannot be created {state}",
                 reason=InvalidRequestReason.UNSUPPORTED,
             )
-        return Job(**fields)
+        return initialize_wait(Job(**fields), WaitOwnerKind.RECIPE_OPERATION)
 
     @staticmethod
     def _write(
@@ -183,6 +185,18 @@ class RecipeOperationAdapter:
             ):
                 keep_recorded_outcome(KIND, job.id, job.state, reason)
             return
+        lifecycle_wait(
+            job,
+            identity=job.id,
+            kind=WaitOwnerKind.RECIPE_OPERATION,
+            state=after.state,
+            now=now,
+            due=after.next_action_at,
+            detail=after.reason,
+            deadline=after.recovery_deadline,
+            cancelling=after.cancel_requested,
+            lease_deadline=after.lease_deadline,
+        )
         job.state = _STORED[after.state]
         if not keep:
             job.status_reason = None if reason is None else reason[:_MAX_REASON]

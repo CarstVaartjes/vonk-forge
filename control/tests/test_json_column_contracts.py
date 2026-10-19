@@ -183,7 +183,7 @@ def _journal_documents():
     identity = "00000000-0000-4000-8000-000000000001"
     digest = hashlib.sha256(b"{}").hexdigest()
     return (
-        RunSwitchJournalRepairPendingState(deadline_at=now, next_attempt_at=now),
+        RunSwitchJournalRepairPendingState(deadline_at=now),
         RunSwitchJournalRepairEndEvidence(
             code="run-switch.journal-repair-exhausted",
             operation_id=identity,

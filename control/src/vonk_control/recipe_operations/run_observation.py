@@ -308,8 +308,8 @@ class RunObservationMixin:
                 ),
                 route_error=run.route_error,
                 route_next_attempt_at=(
-                    _aware(run.route_next_attempt_at)
-                    if run.route_next_attempt_at is not None
+                    _aware(run.next_action_at)
+                    if run.next_action_at is not None
                     else None
                 ),
                 route_recovery_pending=route_health_recovery_pending(run.route_error),

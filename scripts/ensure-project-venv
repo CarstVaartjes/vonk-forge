@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+# Validate before uv run/sync: an interpreter symlink alone is not a venv.
+set -euo pipefail
+environment=${1:?usage: scripts/ensure-project-venv ENVIRONMENT}
+if [[ "$environment" != /* ]]; then
+    echo "Refusing ambiguous project environment: use an absolute path: $environment" >&2
+    exit 1
+fi
+
+is_venv() {
+    [[ -f "$environment/pyvenv.cfg" ]] &&
+        "$environment/bin/python" -I -c '
+import sys
+from pathlib import Path
+sys.exit(not (
+    sys.prefix != sys.base_prefix
+    and Path(sys.prefix).resolve() == Path(sys.argv[1]).resolve()
+))
+' "$environment"
+}
+
+if is_venv; then
+    exit 0
+fi
+
+if [[ -x "$environment/bin/python" ]] &&
+    "$environment/bin/python" -I -c '
+import sys
+from pathlib import Path
+sys.exit(Path(sys.base_prefix).resolve() != Path(sys.argv[1]).resolve())
+' "$environment"; then
+    echo "Refusing to recreate shared base Python as a project environment: $environment" >&2
+    exit 1
+fi
+
+# Only repair a directory owned by this user, without following directory or
+# config symlinks into shared storage. Preserve existing files; never clear it.
+for path in "$environment" "$environment/bin" "$environment/pyvenv.cfg"; do
+    if [[ -L "$path" || ( -e "$path" && ! -O "$path" ) ]]; then
+        echo "Refusing to repair unsafe project environment path: $path" >&2
+        exit 1
+    fi
+done
+echo "Creating virtual environment at $environment (missing or invalid venv; shared Python must not be used)" >&2
+uv venv --allow-existing "$environment"
+if ! is_venv; then
+    echo "Refusing uv run/sync: $environment is still not an isolated virtual environment" >&2
+    exit 1
+fi

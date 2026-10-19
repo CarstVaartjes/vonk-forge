@@ -40,6 +40,7 @@ from .contracts import (
 from .endings import end_unobserved_order
 from .retry import _renew_distribution_grant, superseded_cancellation_deadline
 from .stored import column_field, column_is_document, column_value
+from .waits import refresh_queue_waits
 
 if TYPE_CHECKING:
     from .service import AgentJobService
@@ -198,6 +199,7 @@ def heartbeat(
             # renew its exact node/plan, before that grant expires. Keep
             # renewals sparse and never resurrect revoked/expired access.
             _renew_distribution_grant(session, operation, now, live_only=True)
+        refresh_queue_waits(session, now, node_id=operation.node_id)
         return AgentDirective(
             fence=message.fence,
             deadline=deadline,

@@ -20,6 +20,7 @@ from ..models import (
     Job,
     RunSwitchJournalRepairPending,
 )
+from ..persisted_waits import schedule_wait
 from ..run_switch_contract import (
     RunSwitchOperationResult,
 )
@@ -99,7 +100,8 @@ def _observe_zero_transfer_journal(
         ):
             return JournalRepairDisposition.NOT_APPLICABLE
         row, state = _pending(session, job, now)
-        if now < aware(state.next_attempt_at) and now < aware(state.deadline_at):
+        due = job.next_action_at
+        if due is not None and now < aware(due) and now < aware(state.deadline_at):
             return JournalRepairDisposition.DEFERRED
         cancellation = state.cancellation
         if cancellation is not None:
@@ -171,12 +173,15 @@ def _observe_zero_transfer_journal(
             session.delete(row)
         elif result == JournalRepairDisposition.DEFERRED:
             state.attempts += 1
-            state.next_attempt_at = min(
+            due = min(
                 state.deadline_at,
                 now + timedelta(seconds=min(2 ** min(state.attempts, 5), 30)),
             )
+            schedule_wait(
+                job, due, now=now, reason=REPAIR_WAIT, deadline=state.deadline_at
+            )
             row.progress = state
-            job.status_reason = f"{REPAIR_WAIT}: exact child evidence unavailable; next attempt {state.next_attempt_at.isoformat()}; deadline {state.deadline_at.isoformat()}"
+            job.status_reason = REPAIR_WAIT
     return result
 
 

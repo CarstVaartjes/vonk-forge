@@ -535,7 +535,7 @@ def test_busy_build_claim_retries_without_releasing_the_parent_promise(
             parent.result is not None
             and parent.result.retry_reason == "build.capacity_busy"
         )
-        due = parent.result.observation_due_at
+        due = parent.next_attempt_at
         assert due is not None
         assert not planner.tick()
         with sessions() as observer:

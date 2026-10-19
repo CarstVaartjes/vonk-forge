@@ -25,6 +25,11 @@ from ..categorized_errors import (
     InvalidValue,
     MissingRecord,
 )
+from ..job_operator_receipts import (
+    JobOperatorReceipt,
+    record_job_operator_receipt,
+    replay_job_operator_receipt,
+)
 from ..lifecycle.agent_upgrade import UNSUPPORTED_DISPATCH
 from ..lifecycle.evidence import BookkeepingReason, retire_as_unknown
 from ..models import AgentOperation, AgentOperationAttempt, Job, JobAttempt
@@ -56,7 +61,7 @@ class ResumeMixin:
         )
         service._rollouts.fail(parent, now, reason)
 
-    def resume(self, job_id: str) -> None:
+    def resume(self, job_id: str, *, receipt: JobOperatorReceipt | None = None) -> None:
         """Resume only the durable agent-operation side of an upgrade rollout."""
         service = cast("AgentUpgradeService", self)
 
@@ -67,6 +72,8 @@ class ResumeMixin:
             )
             if parent is None:
                 raise MissingRecord(job_id, reason=InvalidRequestReason.NOT_FOUND)
+            if replay_job_operator_receipt(parent, receipt):
+                return
             if parent.kind != "agent-upgrade":
                 raise InvalidValue(
                     "job is not a resumable agent upgrade",
@@ -288,4 +295,5 @@ class ResumeMixin:
                     schedule_agent_upgrade_retry(operation, attempt, now)
             else:
                 service._advance(session, parent)
+            record_job_operator_receipt(parent, receipt)
         service._operations.notify_available()

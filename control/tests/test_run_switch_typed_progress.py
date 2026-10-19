@@ -33,14 +33,14 @@ def test_canonical_retry_recovers_after_persisted_restart() -> None:
     adapter = RunSwitchAdapter(clock=lambda: now)
     pending = adapter.retry(job, progress, "receipt unavailable", now)
     assert pending.state is State.BACKOFF
-    assert progress.observation_due_at is not None
+    assert job.next_action_at is not None
     persisted = _persisted_result(progress)
     job.result = persisted
-    assert isinstance(persisted["observation_due_at"], str)
+    assert "observation_due_at" not in persisted
 
     restarted = RunSwitchAdapter(clock=lambda: now + timedelta(seconds=60))
     restored = _read_progress(job.result)
-    assert restored.observation_due_at == progress.observation_due_at
+    assert restarted.adopt(job).next_action_at == pending.next_action_at
     assert restarted.adopt(job).intent_ordinal == 7
     recovered = restarted.succeed(job, restored, now + timedelta(seconds=60))
     assert recovered.state is State.SUCCEEDED

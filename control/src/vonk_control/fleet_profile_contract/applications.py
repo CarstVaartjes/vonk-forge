@@ -68,7 +68,6 @@ class FleetProfileApplicationCancellationIntent(StrictModel):
         le=MAX_DATABASE_INTEGER, default=None, ge=1
     )
     pending_operation_ids: list[UuidId] = Field(default_factory=list, max_length=128)
-    observation_due_at: datetime | None = None
     observation_deadline_at: datetime | None = None
 
 
@@ -135,11 +134,9 @@ class FleetProfileApplicationProgress(StrictModel):
 
     effects: list[FleetProfileEffectProgress] = Field(default_factory=list)
     attempt: int = Field(default=1, ge=1)
-    retry_due_at: datetime | None = None
     retry_of_application_id: UuidId | None = None
     admission_pending: bool = False
     admission_attempt: int = Field(default=0, ge=0)
-    admission_retry_at: datetime | None = None
     #: When the admission began waiting for disk it asked the collector to free;
     #: the wait is bounded, then the load ends with a typed refusal.
     storage_wait_since: datetime | None = None

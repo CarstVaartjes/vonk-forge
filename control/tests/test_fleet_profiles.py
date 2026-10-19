@@ -67,6 +67,7 @@ from vonk_control.models import (
 )
 from vonk_control.operation_api import OperationQuery
 from vonk_control.operation_item_contract import operation_item
+from vonk_control.persisted_waits import wait_due
 from vonk_control.platform_ports import HOST_ENDPOINT_PORT
 from vonk_control.preparation_contract import (
     ControllerAssetState,
@@ -1083,10 +1084,7 @@ def _follow_profile_retry(
     with service._sessions() as session:
         row = session.get(FleetProfileApplication, application_id)
         assert row is not None
-        progress = FleetProfileApplicationProgress.model_validate_json(
-            canonical_message(row.progress)
-        )
-        due = progress.retry_due_at
+        due = wait_due(row)
         child_id = row.current_operation_id
     if due is not None and due > now[0]:
         worked = service.tick()
@@ -1231,7 +1229,7 @@ def test_parked_profile_load_fences_workload_before_admission_retry(
     )
     # Admission retries itself; the accepted intent stays queued with a due time.
     assert parked.state == "queued"
-    assert parked.progress.admission_retry_at is not None
+    assert parked.next_attempt_at is not None
     assert parked.progress.workload_intent_ordinal is None
 
     monkeypatch.setattr(FleetProfileService, "_queue_application", original_queue)
@@ -1266,7 +1264,7 @@ def test_parked_profile_load_rechecks_fencing_after_ordinal_is_bound(
     )
     # Admission retries itself; the accepted intent stays queued with a due time.
     assert parked.state == "queued"
-    assert parked.progress.admission_retry_at is not None
+    assert parked.next_attempt_at is not None
     assert parked.progress.workload_intent_ordinal is None
 
     assert service.tick() is True

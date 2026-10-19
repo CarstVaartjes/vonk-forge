@@ -46,6 +46,7 @@ from ..models import (
     ResourceReservation,
     RunNode,
 )
+from ..persisted_waits import schedule_wait
 from ..recipe_execution_contract import (
     RecipeExecutionContractError,
     RouteWithdrawalFollowUp,
@@ -377,7 +378,7 @@ def _settle_unrecoverable(
     run.state = ended_run_state(run, run_nodes, now)
     run.route_state = RouteState.WITHDRAWN
     run.route_error = reason[:512]
-    run.route_next_attempt_at = None
+    schedule_wait(run, None)
     run.updated_at = now
 
 
@@ -469,7 +470,7 @@ def settle_absent_run_in_session(
     run.state = RunState.STOPPED
     run.route_state = RouteState.WITHDRAWN
     run.route_error = None
-    run.route_next_attempt_at = None
+    schedule_wait(run, None)
     run.stopped_at = now
     run.updated_at = now
     release_owned_reservations_in_session(session, "run", run.id, now)
@@ -486,7 +487,7 @@ def _advance_recovery_check(
 
     step = schedule(DISTRIBUTED_RECOVERY, run.id, run.recovery_attempts, verdict, now)
     run.recovery_attempts = step.failures
-    run.route_next_attempt_at = step.next_at or now
+    schedule_wait(run, step.next_at or now, now=now, detail=run.route_error)
 
 
 def _schedule_recovery_wait(run: RecipeRun, reason: str, now: datetime) -> bool:
@@ -496,7 +497,7 @@ def _schedule_recovery_wait(run: RecipeRun, reason: str, now: datetime) -> bool:
     if run.route_error != reason:
         run.route_error = reason[:512]
         changed = True
-    next_attempt = run.route_next_attempt_at
+    next_attempt = run.next_action_at
     due = (
         next_attempt
         if next_attempt is None or next_attempt.tzinfo is not None

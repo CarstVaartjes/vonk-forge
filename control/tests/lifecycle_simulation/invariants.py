@@ -112,9 +112,10 @@ def _snapshot(world: World) -> _Snapshot:
             )
         ):
             progress = row.progress if isinstance(row.progress, dict) else {}
-            attempt = tuple(
-                progress.get(key)
-                for key in ("attempt", "admission_attempt", "retry_due_at")
+            attempt = (
+                progress.get("attempt"),
+                progress.get("admission_attempt"),
+                row.next_action_at,
             )
             requests[row.id] = _Request(
                 row.state,

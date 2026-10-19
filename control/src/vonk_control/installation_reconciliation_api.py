@@ -9,6 +9,11 @@ from fastapi import FastAPI, HTTPException, Path, status
 from .auth import MUTATION_ROLES, Actor
 from .logging import redact_text
 from .operation_api import _ADMIN_OPERATION_IDS, bounded_error_responses
+from .operator_acceptance import (
+    OperatorReceiptResolver,
+    ReceiptPolicy,
+    operator_acceptance,
+)
 from .run_switch_contract import (
     InstallationReconcileRequest,
     RunSwitchCleanupApplyRequest,
@@ -110,6 +115,7 @@ def install_installation_reconciliation_routes(
         responses=bounded_error_responses(401, 403, 404, 409, 422, 503),
         operation_id="previewRecipeInstallationReconciliation",
     )
+    @operator_acceptance(ReceiptPolicy.OBSERVATION)
     def preview_installation_reconciliation(
         installation_id: Annotated[str, Path(pattern=_UUID)],
         actor: Actor = authenticated,
@@ -139,6 +145,7 @@ def install_installation_reconciliation_routes(
         status_code=status.HTTP_202_ACCEPTED,
         operation_id="applyRecipeInstallationReconciliation",
     )
+    @operator_acceptance(ReceiptPolicy.INSTALLATION)
     def apply_installation_reconciliation(
         installation_id: Annotated[str, Path(pattern=_UUID)],
         body: InstallationReconcileRequest,
@@ -194,3 +201,5 @@ def install_installation_reconciliation_routes(
             raise HTTPException(
                 status_code=404, detail="Run/Switch operation not found"
             ) from None
+
+    OperatorReceiptResolver(installations=operations).bind(app)

@@ -439,7 +439,7 @@ def test_composed_controller_exposes_exact_download_on_operation_projection(serv
     operations = OperationApiServices(
         agents=list,
         job_operations=job_operations,
-        resume_job=lambda _: None,
+        resume_job=lambda _, *, receipt=None: None,
         get_operation=lambda _: value,
         list_operations=lambda *_: OperationListPage([value], None, 1),
     )

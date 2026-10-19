@@ -36,6 +36,7 @@ from vonk_control.models import (
     RecipeSourceBundle,
     User,
 )
+from vonk_control.persisted_waits import schedule_wait
 from vonk_control.recipe_builds import RecipeBuildPlan
 from vonk_control.recipe_operations import RecipeOperationService
 from vonk_control.run_switch_contract import RunSwitchApplyRequest
@@ -87,10 +88,7 @@ def _make_due(application: FleetProfileApplication) -> None:
     """The backoff's next attempt has come."""
 
     application.updated_at = datetime(2020, 1, 1, tzinfo=UTC)
-    application.progress = {
-        **application.progress,
-        "retry_due_at": datetime(2020, 1, 1, tzinfo=UTC).isoformat(),
-    }
+    schedule_wait(application, datetime(2020, 1, 1, tzinfo=UTC))
 
 
 @pytest.mark.parametrize("remove_author", [False, True])
@@ -502,13 +500,13 @@ def test_run_switch_cache_miss_retries_after_storage_recovers(tmp_path: Path) ->
     for _ in range(12):
         service._advance(operation.operation_id)
         waiting = service.get(operation.operation_id)
-        if waiting.result is not None and waiting.result.observation_due_at is not None:
+        if waiting.result is not None and waiting.next_attempt_at is not None:
             break
     else:
         pytest.fail("Run/Switch did not schedule cache recovery")
     assert waiting.state == LifecycleState.RUNNING
     assert waiting.result is not None
-    due_at = waiting.result.observation_due_at
+    due_at = waiting.next_attempt_at
     assert due_at is not None
     executor.missing = False
     service._clock = lambda: due_at

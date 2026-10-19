@@ -64,6 +64,7 @@ def _submit_idempotent_request(
     reconnect: str,
     lookup_fetch: Callable[[float], object] | None = None,
     deadline: float | None = None,
+    extra_headers: Mapping[str, str] | None = None,
 ) -> dict[str, object]:
     """Bounded submission, exact-request reconciliation, and one identical replay."""
     normal_timeout = client.request_timeout_seconds
@@ -126,6 +127,11 @@ def _submit_idempotent_request(
                     body if method == "POST" else None,
                     timeout_seconds=min(normal_timeout, remaining),
                     retry=False,
+                    **(
+                        {"extra_headers": extra_headers}
+                        if extra_headers is not None and method == "POST"
+                        else {}
+                    ),
                 )
             )
             if not isinstance(result, dict):

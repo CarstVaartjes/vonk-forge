@@ -109,7 +109,9 @@ def _aware(value: datetime | None) -> datetime | None:
 # ------------------------------------------------------------ adopt and heal
 
 
-def test_a_legacy_retry_clock_is_adopted_honoured_and_healed(cache, tmp_path):
+def test_a_legacy_retry_clock_is_adopted_honoured_and_healed(
+    cache, tmp_path, damaged_json_rows
+):
     service, sessions = cache
     operation, _artifact_document = _queue(
         service, tmp_path, "00000000-0000-4000-8000-00000000a001"
@@ -123,6 +125,7 @@ def test_a_legacy_retry_clock_is_adopted_honoured_and_healed(cache, tmp_path):
         operation.id,
         retry={"next_retry_at": due.isoformat(), "retry_after_seconds": 600},
     )
+    _edit(sessions, operation.id, next_action_at=None, wait_evidence=None)
     stored = _row(sessions, operation.id)
     assert stored.next_action_at is None
     assert legacy_retry_due(stored.payload) == due
@@ -150,7 +153,9 @@ def test_a_legacy_retry_clock_is_adopted_honoured_and_healed(cache, tmp_path):
     assert legacy_retry_due(claimed.payload) is None
 
 
-def test_a_legacy_live_claim_is_untouched_and_a_dead_one_is_retried(cache, tmp_path):
+def test_a_legacy_live_claim_is_untouched_and_a_dead_one_is_retried(
+    cache, tmp_path, damaged_json_rows
+):
     service, sessions = cache
     operation, _artifact_document = _queue(
         service, tmp_path, "00000000-0000-4000-8000-00000000a002"
@@ -158,7 +163,9 @@ def test_a_legacy_live_claim_is_untouched_and_a_dead_one_is_retried(cache, tmp_p
     now = _clock_at(service)
     # A transfer another (older) Controller process is running: its claim lives in
     # the payload, and the row says running.
-    _edit(sessions, operation.id, state="running")
+    _edit(
+        sessions, operation.id, state="running", next_action_at=None, wait_evidence=None
+    )
     _edit_payload(
         sessions,
         operation.id,

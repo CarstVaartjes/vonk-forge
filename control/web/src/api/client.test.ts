@@ -2,6 +2,7 @@ import {
   EnrollmentGrantState,
   ErrorCategory,
   LifecycleState,
+  OperatorActionName,
   WaitReason,
 } from "./vocabulary.generated";
 import { afterEach, expect, test, vi } from "vitest";
@@ -223,11 +224,16 @@ test("binds artifact result URLs to a canonical output name and digest", () => {
   );
   const fetch = vi.fn();
   vi.stubGlobal("fetch", fetch);
-  for (const [name, identity] of [["../frame.png", digest], ["frame.png", "A".repeat(64)]]) {
+  for (const [name, identity] of [
+    ["../frame.png", digest],
+    ["frame.png", "A".repeat(64)],
+  ]) {
     let adopted: string | undefined;
     try {
       adopted = client.artifactJobResultUrl("job/one", name!, identity!);
-    } catch { /* Invalid input must not produce a usable URL. */ }
+    } catch {
+      /* Invalid input must not produce a usable URL. */
+    }
     expect(adopted).toBeUndefined();
   }
   expect(fetch).not.toHaveBeenCalled();
@@ -290,8 +296,13 @@ test("refuses to send a mutating request when the CSRF token is missing", async 
       ),
     ),
   );
-  expect(outcomes.every(adopted => !adopted)).toBe(true);
-  expect(requests.every(request => request.method === "GET" && new URL(request.url).pathname === "/api/auth/session")).toBe(true);
+  expect(outcomes.every((adopted) => !adopted)).toBe(true);
+  expect(
+    requests.every(
+      (request) =>
+        request.method === "GET" && new URL(request.url).pathname === "/api/auth/session",
+    ),
+  ).toBe(true);
 });
 
 test.each(["generated", "request", "logout", "token", "upload"])(
@@ -327,17 +338,31 @@ test.each(["generated", "request", "logout", "token", "upload"])(
             : transport === "token"
               ? client.downloadCliToken()
               : client.uploadArtifactJobInput(JOB_ID, artifactInput, new Blob(["payload"]));
-    expect(await attempt.then(() => true, () => false)).toBe(false);
+    expect(
+      await attempt.then(
+        () => true,
+        () => false,
+      ),
+    ).toBe(false);
     expect(required).toHaveBeenCalledTimes(1);
-    expect(requests.every(request => request.method === "GET" && new URL(request.url).pathname === "/api/auth/session")).toBe(true);
+    expect(
+      requests.every(
+        (request) =>
+          request.method === "GET" && new URL(request.url).pathname === "/api/auth/session",
+      ),
+    ).toBe(true);
   },
 );
 
 test("a request body without an explicit method has no network effect and a fresh read succeeds", async () => {
   const urls = stubFetch(modelLibrary);
   let adopted = false;
-  await new ApiClient().request("/api/model/library", {body: JSON.stringify({})})
-    .then(() => {adopted = true;}, () => undefined);
+  await new ApiClient().request("/api/model/library", { body: JSON.stringify({}) }).then(
+    () => {
+      adopted = true;
+    },
+    () => undefined,
+  );
   expect(adopted).toBe(false);
   expect(urls).toHaveLength(0);
   await expect(new ApiClient().modelLibrary()).resolves.toEqual(modelLibrary);
@@ -388,31 +413,33 @@ test.each(["bespoke", "generated"])(
   async (path) => {
     const cancel = vi.fn();
     let oversized = true;
-    vi.stubGlobal(
-      "fetch",
-      async () => {
-        if (!oversized) {
-          return new Response(JSON.stringify(modelLibrary), {
-            headers: { "content-type": "application/json" },
-          });
-        }
-        return new Response(
-          new ReadableStream<Uint8Array>(
-            {
-              pull(controller) {
-                controller.enqueue(new Uint8Array(1048577));
-              },
-              cancel,
+    vi.stubGlobal("fetch", async () => {
+      if (!oversized) {
+        return new Response(JSON.stringify(modelLibrary), {
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return new Response(
+        new ReadableStream<Uint8Array>(
+          {
+            pull(controller) {
+              controller.enqueue(new Uint8Array(1048577));
             },
-            { highWaterMark: 0 },
-          ),
-          { headers: { "content-type": "application/json" } },
-        );
-      },
-    );
+            cancel,
+          },
+          { highWaterMark: 0 },
+        ),
+        { headers: { "content-type": "application/json" } },
+      );
+    });
     const client = new ApiClient();
     const request = path === "bespoke" ? client.request("/api/operations") : client.operations();
-    expect(await request.then(() => true, () => false)).toBe(false);
+    expect(
+      await request.then(
+        () => true,
+        () => false,
+      ),
+    ).toBe(false);
     expect(cancel).toHaveBeenCalledOnce();
     // The generated transport captures fetch at construction. Recover the
     // same transport so this proves a failed read does not poison the client.
@@ -437,7 +464,12 @@ test("gateway uncertainty preserves its reason and a fresh observation succeeds"
       ),
   );
   const client = new ApiClient();
-  expect(await client.gatewayKeys().then(() => true, () => false)).toBe(false);
+  expect(
+    await client.gatewayKeys().then(
+      () => true,
+      () => false,
+    ),
+  ).toBe(false);
   unavailable = false;
   await expect(client.gatewayKeys()).resolves.toEqual({ keys: [] });
 });
@@ -514,6 +546,57 @@ test("an unknown enrollment revocation preserves observation and admits a fresh 
       }),
   );
   const client = new ApiClient();
-  expect(await client.revokeEnrollment(grantId).then(() => true, () => false)).toBe(false);
+  expect(
+    await client.revokeEnrollment(grantId).then(
+      () => true,
+      () => false,
+    ),
+  ).toBe(false);
   expect((await client.revokeEnrollment(grantId)).state).toBe(EnrollmentGrantState.REVOKED);
+});
+
+test("resume reconciles a lost response against its own durable request", async () => {
+  // Break caught: a current job row is mistaken for proof this resume was accepted.
+  setCsrfCookie();
+  const requests: Request[] = [];
+  vi.stubGlobal("fetch", async (raw: RequestInfo | URL, init?: RequestInit) => {
+    const request =
+      raw instanceof Request ? raw : new Request(new URL(String(raw), location.origin), init);
+    requests.push(request);
+    if (request.method === "POST") throw new TypeError("response lost");
+    const requestId = requests[0].headers.get("X-Request-ID");
+    expect(new URL(request.url).pathname).toBe(`/api/jobs/${JOB_ID}/requests/${requestId}`);
+    return new Response(
+      JSON.stringify({
+        job_id: JOB_ID,
+        request_id: requestId,
+        actor: "operator",
+        action: OperatorActionName.RESUME,
+        content_digest: "a".repeat(64),
+      }),
+      { headers: { "Content-Type": "application/json" } },
+    );
+  });
+  await expect(new ApiClient().resumeJob(JOB_ID)).resolves.toEqual({
+    id: JOB_ID,
+    state: LifecycleState.QUEUED,
+  });
+  expect(requests.map((request) => request.method)).toEqual(["POST", "GET"]);
+});
+
+test("resume refusal never becomes acceptance through another request", async () => {
+  // Break caught: an explicit refusal falls through to a successful old receipt.
+  setCsrfCookie();
+  const requests: Request[] = [];
+  vi.stubGlobal("fetch", async (raw: RequestInfo | URL, init?: RequestInit) => {
+    const request =
+      raw instanceof Request ? raw : new Request(new URL(String(raw), location.origin), init);
+    requests.push(request);
+    return new Response(JSON.stringify({ detail: "job no longer owns this request" }), {
+      status: 409,
+      headers: { "Content-Type": "application/json" },
+    });
+  });
+  await expect(new ApiClient().resumeJob(JOB_ID)).rejects.toMatchObject({ status: 409 });
+  expect(requests).toHaveLength(1);
 });

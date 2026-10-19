@@ -105,7 +105,7 @@ def _follow_due(sessions, worker, application_id, clock):
         row = session.get(FleetProfileApplication, application_id)
         assert row is not None
         progress = _persisted_profile_progress(row)
-        due = progress.retry_due_at
+        due = row.next_action_at
         if due is None or due <= clock[0]:
             return None
         identity = (row.id, row.request_key, row.plan_digest, row.current_operation_id)
@@ -125,7 +125,7 @@ def _follow_due(sessions, worker, application_id, clock):
             row.current_operation_id,
         ) == identity
         progress = _persisted_profile_progress(row)
-        assert progress.retry_due_at == due
+        assert row.next_action_at == due
         journal = progress.switch_adapter
         assert journal is not None
         assert journal.pending_children == pending and journal.children == closed

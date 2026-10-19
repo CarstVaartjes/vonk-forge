@@ -40,6 +40,7 @@ from ..operation_contract import (
     AvailabilityOperationFailure,
     AvailabilityRecoveryAction,
 )
+from ..persisted_waits import schedule_wait
 from ..stall_window import Verdict, Wait, progress_verdict
 from ..stored_json import Residue
 from ..strict_json import serialize_json_value
@@ -215,7 +216,7 @@ def claim_pending(
                 and now < payload.claim_until
             ):
                 continue
-            if not self._retry_due(payload, now):
+            if not self._retry_due(operation, now):
                 continue
             if removal_pending:
                 updated = self._record_blockers(
@@ -328,7 +329,6 @@ def _park_for_model(
         return False
     updated = payload.model_copy(
         update={
-            "retry_after_at": now + timedelta(seconds=_MODEL_WAIT_POLL_SECONDS),
             # The active download works for this preparation under its own
             # stall window, so the preparation waits rather than stalls.
             "progress_advanced_at": now,
@@ -349,6 +349,13 @@ def _park_for_model(
                 )
             ],
         )
+    schedule_wait(
+        operation,
+        now + timedelta(seconds=_MODEL_WAIT_POLL_SECONDS),
+        now=now,
+        reason=RecipeImageCode.WAITING_FOR_MODEL,
+        blockers=list(updated.blockers or []),
+    )
     operation.payload = serialize_json_value(updated)
     operation.updated_at = now
     return True
@@ -387,7 +394,6 @@ def _cancel_superseded_operation(
     )
     updated = payload.model_copy(
         update={
-            "retry_after_at": None,
             "failure": failure,
             "supersession": AvailabilitySupersession(
                 code=SUPERSEDED_PREPARATION_CODE,

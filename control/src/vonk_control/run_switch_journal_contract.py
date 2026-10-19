@@ -17,11 +17,6 @@ from .strict_json import StrictModel
 Digest = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
 
 
-class JournalRepairCode(StrEnum):
-    EXHAUSTED = "run-switch.journal-repair-exhausted"
-    EVIDENCE_UNAVAILABLE = "run-switch.journal-repair-evidence-unavailable"
-
-
 class JournalRepairDisposition(StrEnum):
     NOT_APPLICABLE = "not_applicable"
     REPAIRED = "repaired"
@@ -102,7 +97,6 @@ class RunSwitchJournalRepairPendingState(StrictModel):
     """Durable observation and cancellation while Job.result remains untouched."""
 
     deadline_at: datetime
-    next_attempt_at: datetime
     attempts: int = Field(default=0, ge=0)
     cancellation: RunSwitchCancellation | None = None
 

@@ -64,7 +64,7 @@ from typing import Any, Protocol
 from sqlalchemy import select, update
 from sqlalchemy.engine import Connection
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import Disposition
+from vonk_agent_protocol import Disposition, ModelAccessReason, WaitOwnerKind
 
 from .. import model_cache_states
 from ..agent_operation_facts import aware
@@ -74,7 +74,7 @@ from ..model_cache_contract import (
     StoredCacheClocks,
 )
 from ..models import ModelCacheOperation
-from ..operation_contract import ModelAccessReason
+from ..persisted_waits import initialize_wait, lifecycle_wait, schedule_wait
 from ..stall_window import stall_deadline
 from .adapter import Dispatch
 from .agent_operation import same_order
@@ -525,7 +525,7 @@ class ModelCacheAdapter:
             put("attempt", max(int(operation.attempt), after.retry_count + 1))
         put("state", state)
         put("last_error", after.reason)
-        put("next_action_at", next_action)
+        changed |= schedule_wait(operation, next_action)
         put("lease_deadline", lease)
         put(
             "observe_count",
@@ -576,6 +576,18 @@ class ModelCacheAdapter:
             operation.updated_at = now
         if ended and before.state not in TERMINAL_STATES and self._on_end is not None:
             self._on_end(operation, before, after)
+        changed |= lifecycle_wait(
+            operation,
+            identity=operation.id,
+            kind=WaitOwnerKind.MODEL_CACHE,
+            state=after.state,
+            now=now,
+            due=next_action,
+            detail=after.reason,
+            deadline=after.recovery_deadline,
+            cancelling=after.cancel_requested,
+            lease_deadline=after.lease_deadline,
+        )
         return changed
 
     def _tidy_payload(
@@ -586,9 +598,7 @@ class ModelCacheAdapter:
         payload = self._payload(operation)
         if payload is None:
             return False  # a corrupt envelope is left for inspection
-        retry = payload.retry.model_copy(
-            update={"next_retry_at": None, "retry_after_seconds": None}
-        )
+        retry = payload.retry
         if after.state is State.BACKOFF and spent:
             retry = retry.model_copy(
                 update={"automatic_attempts": after.retry_count + 1}
@@ -604,7 +614,7 @@ class ModelCacheAdapter:
             )
         updated = payload.model_copy(update={"retry": retry, "claim": None})
         updated = updated.model_copy(update={"failure": failure})
-        if updated == payload:
+        if updated.model_dump(mode="json") == operation.payload:
             return False
         self._store_payload(operation, updated)
         return True
@@ -729,7 +739,7 @@ class ModelCacheAdapter:
                 operation.state = "running"
                 changed = True
             if operation.next_action_at is not None:
-                operation.next_action_at = None
+                schedule_wait(operation, None)
                 changed = True
             if operation.last_error is not None:
                 operation.last_error = None
@@ -776,7 +786,7 @@ class ModelCacheAdapter:
         """
 
         operation.state = model_cache_states.BACKOFF
-        operation.next_action_at = None
+        schedule_wait(operation, None)
         operation.lease_deadline = None
         operation.observe_count = 0
         operation.completed_at = None
@@ -790,7 +800,10 @@ class ModelCacheAdapter:
         download that cannot fit yet): the claim loop leaves it until it is due.
         """
 
-        return ModelCacheOperation(state="queued", **fields)
+        return initialize_wait(
+            ModelCacheOperation(state=State.QUEUED.value, **fields),
+            WaitOwnerKind.MODEL_CACHE,
+        )
 
     def fail_corrupt(
         self, operation: ModelCacheOperation, reason: str, now: datetime

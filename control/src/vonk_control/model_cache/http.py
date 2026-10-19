@@ -15,6 +15,7 @@ from sqlalchemy import and_, func, or_, select
 from vonk_agent_protocol import (
     InvalidRequestReason,
     LifecycleState,
+    ModelAccessReason,
     ModelCacheCode,
     ProgressPhase,
     SecurityRefusalReason,
@@ -26,7 +27,6 @@ from ..cached_file_verification import verified_files
 from ..lifecycle import Effect, Outcome, Reported, Tick
 from ..model_cache_progress import cache_phase, progress_document
 from ..models import ModelCacheOperation
-from ..operation_contract import ModelAccessReason
 from ..runtime_init import RuntimeSecretError, read_runtime_secret
 from .artifacts import ArtifactSetManifest, ArtifactSpec, _unique_artifacts
 from .constants import (

@@ -48,7 +48,7 @@ from .observation import (
 )
 from .profile_load import _submit_fleet_upgrade
 from .selection import _resolve_spark_selectors, _selection_remaining
-from .submission import _known_http_refusal_status
+from .submission import _known_http_refusal_status, _submit_idempotent_request
 
 
 def _overview(
@@ -385,37 +385,57 @@ def _fleet(
         deadline = time.monotonic() + _bounded_timeout(args)
         _confirm_action(args, f"Resume Controller-owned job {job_id}?")
 
-        def resume_identity(observed: object) -> None:
+        request_body = JobResumeRequest()
+        key = _request_key(args, factory)
+        lookup = f"{path}/requests/{_quoted(key)}"
+
+        def resume_identity(observed: object) -> str:
             if not isinstance(observed, Mapping) or observed.get("id") != job_id:
                 raise ControlMalformedResponse(
                     "resume observation identifies another job"
                 )
+            return job_id
 
-        try:
-            accepted = client.request(
-                "POST",
-                f"{path}/resume",
-                JobResumeRequest().to_dict(),
-                timeout_seconds=_selection_remaining(deadline),
-            )
-            resume_identity(accepted)
-        except (ControlForbidden, ControlUnauthorized):
-            raise
-        except (ControlClientError, OSError) as error:
-            if isinstance(error, ControlClientError) and _known_http_refusal_status(
-                error
-            ) in {401, 403}:
-                raise
+        def resume_observation(observed: object) -> None:
+            resume_identity(observed)
+
+        def receipt_identity(observed: object) -> str:
+            document = validate_control_document("JobOperatorReceipt", observed)
+            if (
+                document.get("job_id") != job_id
+                or document.get("request_id") != key
+                or document.get("action") != request_body.disposition
+            ):
+                raise ControlMalformedResponse(
+                    "resume receipt identifies another request"
+                )
+            return job_id
+
+        accepted = _submit_idempotent_request(
+            client,
+            args,
+            key=key,
+            path=f"{path}/resume",
+            lookup=lookup,
+            body=request_body.to_dict(),
+            noun="fleet",
+            action=action,
+            validate=resume_identity,
+            lookup_validate=receipt_identity,
+            reconnect=f"vonkctl fleet resume {job_id} --yes --request-key {key}",
+            deadline=deadline,
+            extra_headers={"X-Request-ID": key},
+        )
+        if not accepted:
+            return accepted
+        if "id" not in accepted:
             accepted = {}
-            # Reading the durable job does not prove that this resume was accepted.
-            args.fleet_action = "progress"
-            args.outcome_context = "read"
         return _poll_path(
             client,
             path,
             accepted,
             args,
-            validate=resume_identity,
+            validate=resume_observation,
             fetch_initial=not accepted,
             terminal=lambda _: True,
             deadline=deadline,

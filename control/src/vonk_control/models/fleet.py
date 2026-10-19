@@ -27,6 +27,7 @@ from ..model_primitives import (
     _nullable_lower_hex,
     _state_in,
 )
+from .waits import Residue, WaitEvidence, wait_due_column, wait_evidence_column
 
 
 class User(Base):
@@ -185,6 +186,10 @@ class FleetProfileApplication(Base):
     """Restart-safe application of one digest-bound Fleet profile preview."""
 
     __tablename__ = "fleet_profile_applications"
+    wait_evidence: Mapped[WaitEvidence | Residue | None] = wait_evidence_column(
+        __tablename__
+    )
+    next_action_at: Mapped[datetime | None] = wait_due_column("next_action_at")
     __table_args__ = (
         CheckConstraint(
             _state_in(
@@ -253,6 +258,10 @@ class FleetProfileSelection(Base):
     """The one profile application currently selected for the whole fleet."""
 
     __tablename__ = "fleet_profile_selection"
+    wait_evidence: Mapped[WaitEvidence | Residue | None] = wait_evidence_column(
+        __tablename__
+    )
+    next_action_at: Mapped[datetime | None] = wait_due_column("next_action_at")
     __table_args__ = (
         CheckConstraint(
             "singleton_id = 1",
@@ -289,6 +298,10 @@ class FleetProfileSelection(Base):
 
 class AgentCertificate(Base):
     __tablename__ = "agent_certificates"
+    wait_evidence: Mapped[WaitEvidence | Residue | None] = wait_evidence_column(
+        __tablename__
+    )
+    next_action_at: Mapped[datetime | None] = wait_due_column("ca_next_attempt_at")
     __table_args__ = (UniqueConstraint("node_id", "generation"),)
     serial: Mapped[str] = mapped_column(String(128), primary_key=True)
     node_id: Mapped[str] = mapped_column(
@@ -310,7 +323,6 @@ class AgentCertificate(Base):
     csr_pem: Mapped[str | None] = mapped_column(Text)
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     ca_revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    ca_next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class AgentPresence(Base):
@@ -364,6 +376,10 @@ class AgentIssuedCertificateRevocation(Base):
     """Node-independent recovery evidence for a post-issuance CA revocation."""
 
     __tablename__ = "agent_issued_certificate_revocations"
+    wait_evidence: Mapped[WaitEvidence | Residue | None] = wait_evidence_column(
+        __tablename__
+    )
+    next_action_at: Mapped[datetime | None] = wait_due_column("next_attempt_at")
     serial: Mapped[str] = mapped_column(String(128), primary_key=True)
     node_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
     provider_request_id: Mapped[str] = mapped_column(
@@ -382,7 +398,6 @@ class AgentIssuedCertificateRevocation(Base):
     )
     provider_request: Mapped[JsonValue | None] = mapped_column(JSON)
     csr_pem: Mapped[str | None] = mapped_column(Text)
-    next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     ca_revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 

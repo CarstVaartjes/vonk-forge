@@ -275,6 +275,11 @@ class FleetProfileService:
             row = session.get(FleetProfile, profile_id, with_for_update=True)
             if row is None:
                 raise MissingRecord(profile_id, reason=InvalidRequestReason.NOT_FOUND)
+            requested = FleetProfileDefinition.model_validate(
+                value.model_dump(exclude={"expected_revision"})
+            )
+            if self._definition(row) == requested:
+                return self._view(session, row)
             if row.revision != value.expected_revision:
                 raise FleetProfileInvalid(
                     f"profile revision conflict: expected {value.expected_revision}, current {row.revision}",

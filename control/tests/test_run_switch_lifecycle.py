@@ -149,7 +149,7 @@ class _Harness:
             job.result = result
 
     def advance_to_due(self) -> None:
-        due = _result(self.view()).observation_due_at
+        due = self.view().next_attempt_at
         if due is not None:
             self.now[0] = max(self.now[0], due)
 
@@ -339,7 +339,7 @@ def test_a_cancel_completes_when_the_stop_stays_unconfirmed(tmp_path: Path) -> N
         harness.service.tick()
         if harness.view().state == "cancelled":
             break
-        due = _result(harness.view()).observation_due_at
+        due = harness.view().next_attempt_at
         if due is not None:
             harness.now[0] = max(harness.now[0], due)
     final = harness.view()
@@ -362,7 +362,7 @@ def test_a_cancel_survives_a_restart_in_the_middle(tmp_path: Path) -> None:
         harness.restart().tick()  # a new process every pass
         if harness.view().state == "cancelled":
             break
-        due = _result(harness.view()).observation_due_at
+        due = harness.view().next_attempt_at
         if due is not None:
             harness.now[0] = max(harness.now[0], due)
     assert harness.view().state == "cancelled"
@@ -415,7 +415,7 @@ def _retrying(view) -> bool:
     return (
         view.state in {"running", LifecycleState.OBSERVING}
         and result.retry_reason is not None
-        and result.observation_due_at is not None
+        and view.next_attempt_at is not None
         and result.failure_code is None
     )
 
@@ -453,7 +453,7 @@ def test_final_verification_that_cannot_be_observed_is_retried_not_failed(
             view = service.get(operation.operation_id)
             if view.state in {"succeeded", "failed"}:
                 return
-            due = _result(view).observation_due_at
+            due = view.next_attempt_at
             if due is not None and due > now[0]:
                 now[0] = due
 
@@ -596,7 +596,7 @@ def test_the_retry_clock_is_the_cores_and_resets_on_a_new_cause(tmp_path: Path) 
     for _ in range(6):
         harness.service.tick()
         view = harness.view()
-        due = _result(view).observation_due_at
+        due = view.next_attempt_at
         if due is None:
             break
         delays.append((due - harness.now[0]).total_seconds())
@@ -668,7 +668,7 @@ def test_a_retry_never_lands_before_the_evidence_it_waits_for_can_exist() -> Non
             NOW,
             retry_after=threshold,
         )
-        due = progress.observation_due_at
+        due = job.next_action_at
         assert due is not None
         assert due >= threshold, (due, job.id)
 

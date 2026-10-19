@@ -54,7 +54,11 @@ POSTGRES_IMAGE = json.loads(
 )["images"]["postgres"]
 _POSTGRES_PASSWORD = "postgres"
 _POSTGRES_OWNER_LABEL = "dev.vonk-forge.control-tests.owner"
-_POSTGRES_NAME_PREFIX = "vonk-control-tests-"
+# A VM lane names only its own fixture containers, so stale cleanup cannot
+# prune another track's retained PostgreSQL evidence.
+_POSTGRES_NAME_PREFIX = "vonk-control-tests-" + os.environ.get(
+    "VONK_TEST_CONTAINER_SCOPE", ""
+)
 _POSTGRES_STALE_AFTER = timedelta(hours=1)
 _POSTGRES_PORT_TEMPLATE = (
     '{{(index (index .NetworkSettings.Ports "5432/tcp") 0).HostPort}}'

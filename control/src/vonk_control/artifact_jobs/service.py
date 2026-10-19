@@ -742,11 +742,27 @@ class ArtifactJobService(OutputService):
             )
             state = ajs.state_of(job)
             evidence = read_result_evidence(job.result_evidence)
+        if evidence is not None and evidence.cancel_request_id is not None:
+            if (
+                evidence.cancel_request_id,
+                evidence.cancel_actor,
+                evidence.cancel_reason,
+            ) == (request_id, actor, cancellation_reason):
+                return self.get(job_id)
+            raise ArtifactJobInvalid(
+                "cancellation request key was already used differently",
+                reason=InvalidRequestReason.CONFLICT,
+            )
         if state in {ajs.SUCCEEDED, ajs.FAILED}:
-            return self.get(job_id)
+            raise ArtifactJobInvalid(
+                "artifact job has already ended", reason=InvalidRequestReason.CONFLICT
+            )
         if state == ajs.CANCELLED and operation_id is None:
             if evidence is None or evidence.cancel_request_id is None:
-                return self.get(job_id)
+                raise ArtifactJobInvalid(
+                    "artifact job has no accepted cancellation receipt",
+                    reason=InvalidRequestReason.CONFLICT,
+                )
             if (
                 evidence is not None
                 and evidence.cancel_request_id == request_id
@@ -771,6 +787,18 @@ class ArtifactJobService(OutputService):
         with self._sessions.begin() as session:
             job = session.get(ArtifactJob, job_id, with_for_update=True)
             assert job is not None
+            if ajs.is_ended(job):
+                retained = read_result_evidence(job.result_evidence)
+                if retained is None or (
+                    retained.cancel_request_id,
+                    retained.cancel_actor,
+                    retained.cancel_reason,
+                ) != (request_id, actor, cancellation_reason):
+                    raise ArtifactJobInvalid(
+                        "artifact job ended before cancellation was accepted",
+                        reason=InvalidRequestReason.CONFLICT,
+                    )
+                return self._view_in_session(session, job)
             if not ajs.is_ended(job):
                 adapter = ArtifactJobAdapter(session, clock=self._clock)
                 evidence = ArtifactJobResultEvidence(

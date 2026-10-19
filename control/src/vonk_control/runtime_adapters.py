@@ -177,6 +177,11 @@ def render_adaptation_stage(engine: str, *, launcher: str | None) -> str:
         f"FROM ${{{_RECIPE_IMAGE_ARGUMENT}}}",
         "USER 0",
         "RUN set -eu \\",
+        (
+            f" && if ! getent passwd {uid} >/dev/null; then "
+            f"printf 'vonk-runtime:x:{uid}:{gid or uid}:Vonk runtime:/outputs/cache/home:/bin/false\\n' "
+            ">> /etc/passwd; fi \\"
+        ),
         f" && install --directory --mode=0755 {PurePosixPath(wrapper).parent} \\",
         " && install --directory "
         f"--owner={uid} --group={gid or uid} " + " ".join(directories) + " \\",

@@ -12,12 +12,22 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import func, select
 from sqlalchemy.exc import SQLAlchemyError
-from vonk_agent_protocol import UnknownOutcomeError
+from vonk_agent_protocol import InstallationState, UnknownOutcomeError, WaitReason
 
-from ..artifact_lifecycle import ArtifactLifecycleError
+from ..artifact_lifecycle import (
+    ArtifactIdentity,
+    ArtifactLifecycleError,
+    lock_reference_gates,
+)
 from ..exact_integer_storage import DecimalIntegerOrderKey
 from ..logging import log_event
-from ..models import InstallationNode, ModelCacheSet
+from ..models import (
+    ArtifactLifecycleGate,
+    InstallationNode,
+    ModelCacheSet,
+    RecipeInstallation,
+)
+from ..persisted_waits import schedule_wait, wait_due
 from ..runtime_image_preparation import RuntimeImagePreparationError
 from ..storage_demands import NAS_IMAGES, NAS_MODELS, StorageDemand, spark_scope
 from .common import (
@@ -28,7 +38,14 @@ from .common import (
     _Kept,
     _Stopping,
 )
-from .evidence import _Evidence, _Item, _Outcome, _Pressure, _Round
+from .evidence import (
+    StorageItemKind,
+    _Evidence,
+    _Item,
+    _Outcome,
+    _Pressure,
+    _Round,
+)
 from .references import (
     _code,
     _latest_snapshots,
@@ -277,11 +294,22 @@ def _remove(
     for member in item.members:
         key = (item.kind, member)
         attempted[key] = False
-        retry_at = self._retry_at.get(key)
+        with self._sessions() as session:
+            if item.kind == StorageItemKind.INSTALLATION:
+                wait_owner = session.get(RecipeInstallation, member)
+            else:
+                artifact_kind = (
+                    "runtime-image"
+                    if item.kind == "image"
+                    else "model-set"
+                    if item.kind == "model-set"
+                    else "model-object"
+                )
+                wait_owner = session.get(ArtifactLifecycleGate, (artifact_kind, member))
+            retry_at = wait_due(wait_owner) if wait_owner is not None else None
         if retry_at is not None and self._clock() < retry_at:
             kept[f"{label}: deferred until {retry_at.isoformat()}"] += 1
             break
-        self._retry_at.pop(key, None)
         try:
             if item.kind == "installation":
                 self._uninstall(member, item.members)
@@ -305,7 +333,22 @@ def _remove(
             # The failed member is retained and discovered again by the
             # next sweep. Other eligible items continue in this pass.
             retry_at = self._clock() + self._scan_interval
-            self._retry_at[key] = retry_at
+            with self._sessions.begin() as session:
+                if item.kind == StorageItemKind.INSTALLATION:
+                    wait_owner = session.get(RecipeInstallation, member)
+                else:
+                    (wait_owner,) = lock_reference_gates(
+                        session,
+                        [ArtifactIdentity(artifact_kind, member)],
+                        now=self._clock(),
+                    )
+                if wait_owner is not None:
+                    schedule_wait(
+                        wait_owner,
+                        retry_at,
+                        now=self._clock(),
+                        reason=WaitReason.CLEANUP_UNCONFIRMED,
+                    )
             kept[f"{label}: deferred {_code(error)}"] += 1
             log_event(
                 _LOGGER,
@@ -340,6 +383,26 @@ def _remove(
                 detail=str(error)[:256],
             )
             break
+        # The removal returned, but an installation can still be uninstalling.
+        # Clear its retry only after the normal owner confirms settlement.
+        with self._sessions.begin() as session:
+            if item.kind == StorageItemKind.INSTALLATION:
+                completed_owner = session.get(RecipeInstallation, member)
+                settled = (
+                    completed_owner is not None
+                    and completed_owner.state == InstallationState.UNINSTALLED
+                )
+            else:
+                completed_owner = session.get(
+                    ArtifactLifecycleGate, (artifact_kind, member)
+                )
+                settled = True
+            if (
+                completed_owner is not None
+                and settled
+                and wait_due(completed_owner) == retry_at
+            ):
+                schedule_wait(completed_owner, None)
         attempted[key] = True
         done += 1
         outcome.removed["model" if item.kind == "model-set" else item.kind] += 1

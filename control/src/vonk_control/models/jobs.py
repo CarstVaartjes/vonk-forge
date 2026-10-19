@@ -19,14 +19,21 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ..model_primitives import Base, _lower_hex
+from .waits import Residue, WaitEvidence, wait_due_column, wait_evidence_column
 
 
 class Job(Base):
     __tablename__ = "jobs"
+    wait_evidence: Mapped[WaitEvidence | Residue | None] = wait_evidence_column(
+        __tablename__
+    )
+    next_action_at: Mapped[datetime | None] = wait_due_column("next_action_at")
     id: Mapped[str] = mapped_column(
         String(36), primary_key=True, default=lambda: str(uuid.uuid4())
     )
     request_id: Mapped[str] = mapped_column(String(36), unique=True, nullable=False)
+    # Explicit operator decisions belong to this Job, including old replay keys.
+    operator_decisions: Mapped[str | None] = mapped_column(Text)
     kind: Mapped[str] = mapped_column(String(80), nullable=False)
     state: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
     actor: Mapped[str] = mapped_column(String(200), nullable=False)

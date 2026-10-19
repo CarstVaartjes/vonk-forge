@@ -27,6 +27,7 @@ from ..auth import MUTATION_ROLES, Actor
 from ..fleet_profile_contract import FleetProfileApplicationProgress
 from ..lifecycle.evidence import Damaged, Residue, read_or_rebuild
 from ..models import FleetProfileApplication, FleetProfileSelection, User
+from ..persisted_waits import read_wait
 from ..profile_capacity import release_unassigned_profile_claims
 from ..settings import DATABASE_WAIT_BUDGETS
 from ..user_authority import serialize_user_authority
@@ -98,6 +99,7 @@ class FleetProfileService:
             ):
                 return Damaged("selected profile snapshot is inconsistent")
             return _SelectedProfileSnapshot(
+                wait=read_wait(selection),
                 generation=selection.generation,
                 profile_id=selection.profile_id,
                 profile_revision=selection.profile_revision,

@@ -476,6 +476,7 @@ def container_command(docker: str, root: Path, library: Path, cache: Path) -> li
         "-c",
         (
             "set -euo pipefail; "
+            'scripts/ensure-project-venv "$UV_PROJECT_ENVIRONMENT"; '
             "scripts/retry-dependency-fetch uv sync --project control --frozen; "
             f"{TIER_COMMAND}"
         ),

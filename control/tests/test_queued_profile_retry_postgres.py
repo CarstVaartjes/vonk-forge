@@ -52,7 +52,7 @@ def test_due_queued_load_is_attempted_after_worker_restart(
         actor="admin",
         operation_kind=ProfileOperationKind.APPLY.value,
     )
-    due = pending.progress.admission_retry_at
+    due = pending.next_attempt_at
     assert due is not None
 
     def restart(now, *, conflict=False):
@@ -133,7 +133,7 @@ def test_roster_repair_cannot_starve_due_admission(
         actor="admin",
         operation_kind=ProfileOperationKind.APPLY.value,
     )
-    due = pending.progress.admission_retry_at
+    due = pending.next_attempt_at
     assert due is not None
     recovered, _ = _profile_service(sessions, planner._lifecycle)
     recovered._clock = lambda: due - timedelta(seconds=1)
@@ -163,7 +163,7 @@ def test_roster_repair_cannot_starve_due_admission(
             assert (
                 session.get_one(FleetProfileSelection, 1).application_id == selected.id
             )
-    next_due = attempted.progress.admission_retry_at
+    next_due = attempted.next_attempt_at
     assert next_due is not None
     recovered._clock = lambda: next_due + timedelta(seconds=1)
     worker.tick()
@@ -214,7 +214,7 @@ def test_load_accepted_during_roster_preview_keeps_precedence(
     with sessions() as session:
         assert session.get_one(FleetProfileSelection, 1).application_id == selected.id
     assert profiles.application(pending.id) == pending
-    due = pending.progress.admission_retry_at
+    due = pending.next_attempt_at
     assert due is not None
     profiles._clock = lambda: due + timedelta(seconds=1)
     profiles.tick()

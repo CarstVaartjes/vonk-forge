@@ -2347,8 +2347,8 @@ def test_singleton_start_grants_time_for_first_exact_observation(
         ) == started_at + timedelta(seconds=120)
         assert run.route_state == RouteState.PENDING
         assert run.route_attempts == 1
-        assert run.route_next_attempt_at is not None
-        assert run.route_next_attempt_at.replace(tzinfo=UTC) > started_at
+        assert run.next_action_at is not None
+        assert run.next_action_at.replace(tzinfo=UTC) > started_at
         assert node.state == LifecycleState.RUNNING
         assert node.observed_run_generation is None
     # Its Spark is present and reporting, but not for this run: the run's own
@@ -2436,10 +2436,8 @@ def test_collective_readiness_starts_distinct_observation_grace(
         run = _required(session.get(RecipeRun, start.owner_id))
         assert run.route_state == RouteState.PENDING
         assert run.route_attempts == 1
-        assert run.route_next_attempt_at is not None
-        assert run.route_next_attempt_at.replace(tzinfo=UTC) > NOW + timedelta(
-            seconds=60
-        )
+        assert run.next_action_at is not None
+        assert run.next_action_at.replace(tzinfo=UTC) > NOW + timedelta(seconds=60)
         assert all(
             node.state == LifecycleState.RUNNING
             for node in session.scalars(

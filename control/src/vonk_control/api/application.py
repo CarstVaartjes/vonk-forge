@@ -31,7 +31,13 @@ from fastapi.exception_handlers import (
 from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import StreamingResponse
-from vonk_agent_protocol import CatalogCode, ControllerErrorCode, canonical_message
+from vonk_agent_protocol import (
+    CatalogCode,
+    ControllerErrorCode,
+    InvalidRequestError,
+    OperatorActionName,
+    canonical_message,
+)
 from vonk_agent_protocol.agent_words import AgentClientDecision
 
 from cluster_profiles.control_limits import MAX_CONTROL_DOCUMENT_BYTES
@@ -75,9 +81,14 @@ from ..fleet_stream_contract import FLEET_SSE_EVENTS, FleetStreamEvent
 from ..gateway_keys import GatewayKeyService, install_gateway_key_routes
 from ..http_errors import RetryAfterMiddleware, TemporaryHTTPError
 from ..installation_reconciliation_api import install_installation_reconciliation_routes
+from ..job_operator_receipts import (
+    JobOperatorReceipt,
+    read_job_operator_receipt,
+)
 from ..logging import current_request_id
 from ..metrics import MetricsRegistry
 from ..model_cache_api import install_model_operator_routes
+from ..model_cache_contract import UUID_PATTERN
 from ..observation_transfer import (
     ObservationTransferRecord,
     ObservationTransferResponse,
@@ -108,10 +119,16 @@ from ..operation_api import (
 )
 from ..operation_contract import OperationRecoveryAction
 from ..operation_item_contract import OperationRow, operation_item
+from ..operator_acceptance import (
+    OperatorReceiptResolver,
+    ReceiptPolicy,
+    operator_acceptance,
+)
 from ..operator_projection_api import (
     FleetOperatorServices,
     install_operator_projection_routes,
 )
+from ..operator_receipt_contract import ReceiptCode
 from ..platform_observation import (
     PlatformObserver,
     api_only_capture,
@@ -943,6 +960,29 @@ def create_app(
                 cursors=cursor_codec,
             )
 
+    @app.get(
+        "/api/jobs/{job_id}/requests/{request_id}",
+        response_model=JobOperatorReceipt,
+        responses=bounded_error_responses(401, 404, 422, 503),
+        operation_id="getJobOperatorReceipt",
+    )
+    def job_operator_receipt(
+        job_id: str, request_id: str, authenticated: Actor = authenticated_actor
+    ) -> JobOperatorReceipt:
+        try:
+            receipt = read_job_operator_receipt(jobs.get(job_id), request_id)
+        except KeyError:
+            raise HTTPException(
+                status_code=404, detail="job receipt not found"
+            ) from None
+        if (
+            receipt is None
+            or receipt.request_id != request_id
+            or receipt.actor != authenticated.subject
+        ):
+            raise HTTPException(status_code=404, detail="job receipt not found")
+        return receipt
+
     @app.post(
         "/api/jobs/{job_id}/resume",
         response_model=JobResumeResponse,
@@ -950,40 +990,90 @@ def create_app(
         status_code=status.HTTP_202_ACCEPTED,
         operation_id="resumeJob",
     )
+    @operator_acceptance(ReceiptPolicy.JOB)
     def resume_job(
+        request: Request,
         job_id: str,
         body: Annotated[JobResumeRequest | None, Body()] = None,
         authenticated: Actor = authenticated_actor,
+        request_id: Annotated[
+            str | None, Header(alias="X-Request-ID", pattern=UUID_PATTERN)
+        ] = None,
     ) -> JobResumeResponse:
         route = "/api/jobs/{job_id}/resume"
         require_mutation_role(authenticated, route)
         if operations is None:
             raise HTTPException(status_code=503, detail="job resume unavailable")
-        disposition = "resume" if body is None else body.disposition
-        if disposition == "retire":
+        disposition = (
+            OperatorActionName.RETIRE
+            if body is not None and body.disposition == OperatorActionName.RETIRE
+            else OperatorActionName.RESUME
+        )
+        try:
+            current_job = jobs.get(job_id)
+        except KeyError:
+            raise HTTPException(status_code=404, detail="job not found") from None
+        receipt = JobOperatorReceipt(
+            job_id=job_id,
+            request_id=request_id or request.state.request_id,
+            actor=authenticated.subject,
+            action=disposition,
+            content_digest=current_job.payload_digest,
+        )
+        if disposition == OperatorActionName.RETIRE:
             if operations.retire_job is None:
                 raise HTTPException(
                     status_code=503, detail="job retirement unavailable"
                 )
             try:
-                operations.retire_job(job_id)
+                operations.retire_job(job_id, receipt=receipt)
             except KeyError:
                 raise HTTPException(status_code=404, detail="job not found") from None
             except OperatorRetirementRefused as error:
                 raise HTTPException(status_code=409, detail=str(error)) from None
+            except InvalidRequestError as error:
+                raise HTTPException(
+                    status_code=409,
+                    detail=str(error),
+                    headers={
+                        "x-vonk-error-code": error.typed_reason or ReceiptCode.MISMATCH
+                    },
+                ) from None
             except ValueError:
                 raise HTTPException(
                     status_code=409, detail="job is not waiting for operator"
                 ) from None
             return JobResumeResponse(id=job_id, state="failed")
         try:
-            operations.resume_job(job_id)
+            operations.resume_job(job_id, receipt=receipt)
         except KeyError:
             raise HTTPException(status_code=404, detail="job not found") from None
+        except InvalidRequestError as error:
+            raise HTTPException(
+                status_code=409,
+                detail=str(error),
+                headers={
+                    "x-vonk-error-code": error.typed_reason or ReceiptCode.MISMATCH
+                },
+            ) from None
         except ValueError:
             raise HTTPException(
                 status_code=409, detail="job is not waiting for operator"
             ) from None
         return JobResumeResponse(id=job_id, state="queued")
 
+    receipts = OperatorReceiptResolver(
+        jobs=jobs,
+        profiles=fleet_profiles,
+        models=model_cache,
+        recipes=recipe_image_availability,
+        artifacts=artifact_jobs,
+        fleet=fleet_projection,
+        fleet_services=fleet_services,
+        keys=gateway_keys,
+        installations=run_switch_operations,
+    )
+    for route in app.routes:
+        if isinstance(route, ControllerAPIRoute):
+            route.operator_receipts = receipts
     return app

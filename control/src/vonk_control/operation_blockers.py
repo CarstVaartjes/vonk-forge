@@ -8,19 +8,25 @@ is a current snapshot, replaced at each check; it never accumulates history.
 
 from __future__ import annotations
 
+import json
 import re
 from collections.abc import Iterable, Mapping, Sequence
 from datetime import datetime
-from enum import StrEnum
 from typing import Annotated, Literal
 
-from pydantic import Field, StringConstraints, ValidationError
-from vonk_agent_protocol import RunSwitchCode, adopt_reason_code
+from pydantic import Field, StringConstraints, TypeAdapter, ValidationError
+from vonk_agent_protocol import (
+    OperationReason,
+    ProgressAlarmCode,
+    RunSwitchCode,
+    adopt_reason_code,
+)
 from vonk_agent_protocol.contracts import DigestText
 
 from .strict_json import StrictJSONModel
 
 MAX_BLOCKERS = 16
+_BLOCKER_REASON = TypeAdapter(OperationReason | ProgressAlarmCode)
 
 #: An operation is repeating a phase that failed (it is not merely waiting).
 PHASE_RETRY_CODE = RunSwitchCode.PHASE_RETRY
@@ -61,7 +67,7 @@ class StorageReliefEvidence(StrictJSONModel):
 class OperationBlocker(StrictJSONModel):
     """One reason an operation is waiting or blocked, with the Sparks it concerns."""
 
-    code: Annotated[str, StringConstraints(min_length=1, max_length=96)]
+    code: OperationReason | ProgressAlarmCode
     detail: Annotated[str, StringConstraints(min_length=1, max_length=512)]
     severity: Literal["info", "warning", "error"]
     node_ids: list[_NODE_ID] = Field(default_factory=list, max_length=32)
@@ -73,13 +79,6 @@ class OperationBlocker(StrictJSONModel):
     run_id: Annotated[str, StringConstraints(min_length=1, max_length=128)] | None = (
         None
     )
-
-
-class ProgressAlarmCode(StrEnum):
-    """Alarms shown next to a wait; they inform and never end or pause work."""
-
-    #: The same wait keeps repeating with no progress anywhere.
-    STALLED = "progress.stalled"
 
 
 class ProgressStall(StrictJSONModel):
@@ -104,7 +103,7 @@ def make_blocker(
 
     nodes = sorted({node for node in node_ids if _NODE_PATTERN.fullmatch(node)})
     return OperationBlocker(
-        code=(code or "waiting")[:96],
+        code=_BLOCKER_REASON.validate_json(json.dumps(code)),
         detail=(detail or code or "waiting")[:512],
         severity=severity,
         node_ids=nodes[:32],

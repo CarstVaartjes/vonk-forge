@@ -23,6 +23,7 @@ from .catalog_sync_contract import (
 from .library_contract import UuidId
 from .machine_states import CatalogSyncStateField
 from .strict_json import StrictModel
+from .wait_contract import QueueWait
 
 CATALOG_OPERATION_IDS = {
     (
@@ -49,6 +50,7 @@ class ManagedCatalogSyncFailure(StrictModel):
 
 
 class ManagedCatalogSyncResponse(StrictModel):
+    wait: QueueWait | None = None
     sync_id: UuidId
     request_key: UuidId
     trigger: Literal["manual", "automatic"]
@@ -89,6 +91,7 @@ def _catalog_problem(
 
 def _managed_sync(value: CatalogSyncView) -> ManagedCatalogSyncResponse:
     return ManagedCatalogSyncResponse(
+        wait=value.wait,
         sync_id=value.id,
         request_key=value.request_key,
         trigger=CatalogSyncTrigger(value.trigger).value,

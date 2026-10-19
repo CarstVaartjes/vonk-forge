@@ -61,7 +61,7 @@ def _service(
 def _tick_selected_when_due(service: FleetProfileService, application_id: str) -> None:
     """Observe the selected accepted child only at its durable retry time."""
     before = service.application(application_id)
-    due = before.progress.retry_due_at
+    due = before.next_attempt_at
     if due is not None and due > service._clock():
         service.tick()
         held = service.application(application_id)

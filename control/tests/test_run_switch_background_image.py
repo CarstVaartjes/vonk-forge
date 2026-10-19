@@ -324,7 +324,7 @@ def _background_image_switch(
     def drive() -> None:
         """One worker loop: tick when due, answer probes, let the pool run."""
         current = view()
-        due = current.result.observation_due_at if current.result else None
+        due = current.next_attempt_at if current.result else None
         if due is not None and due > clock.now:
             clock.now = due
         for node_id in nodes if clock.now > reported["at"] else ():
@@ -484,7 +484,7 @@ def test_background_image_failure_is_logged_and_shown_as_the_retry_reason(
         with caplog.at_level(logging.WARNING):
             _drive_until(switch, lambda view: view.result.retry_reason is not None)
         held = switch.view()
-        assert held.result.observation_due_at is not None
+        assert held.next_attempt_at is not None
         _drive_until(switch, _past_image)
     finally:
         switch.worker.composite.close()
@@ -566,7 +566,7 @@ def test_an_unexpected_preparation_error_is_a_visible_retry_that_heals(
     held = [v for v in views if v.result.retry_reason is not None]
     assert held
     assert any("OperationalError" in (v.status_reason or "") for v in held)
-    assert held[0].result.observation_due_at is not None
+    assert held[0].next_attempt_at is not None
     final = switch.view()
     assert final.state != LifecycleState.FAILED, final.status_reason
     assert _past_image(final)

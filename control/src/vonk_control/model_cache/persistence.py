@@ -9,7 +9,13 @@ from typing import cast
 
 from pydantic import ValidationError
 from sqlalchemy.orm import object_session
-from vonk_agent_protocol import ModelCacheCode, SecurityRefusalReason
+from vonk_agent_protocol import (
+    ModelAccessReason,
+    ModelCacheCode,
+    ModelCacheFailureCode,
+    SecurityRefusalReason,
+)
+from vonk_agent_protocol.http_failure import TransientReason
 
 from ..lifecycle import State
 from ..lifecycle.evidence import (
@@ -408,14 +414,14 @@ def _cache_failure(
 ) -> AvailabilityOperationFailure:
     """Translate an exception once, then persist the canonical public contract."""
     semantic_codes = {
-        ModelCacheCode.CREDENTIALS_MISSING: "access_required",
-        SecurityRefusalReason.MODEL_CACHE_CREDENTIALS_DENIED.value: "access_denied",
-        SecurityRefusalReason.MODEL_CACHE_CREDENTIALS_INVALID.value: "credentials_invalid",
-        ModelCacheCode.RATE_LIMITED: "rate_limited",
-        ModelCacheCode.DIGEST_MISMATCH: "integrity_mismatch",
-        ModelCacheCode.SOURCE_SIZE_MISMATCH: "integrity_mismatch",
-        ModelCacheCode.CAPACITY: "capacity",
-        ModelCacheCode.INTERRUPTED: "interrupted",
+        ModelCacheCode.CREDENTIALS_MISSING: ModelAccessReason.ACCESS_REQUIRED,
+        SecurityRefusalReason.MODEL_CACHE_CREDENTIALS_DENIED.value: ModelAccessReason.ACCESS_DENIED,
+        SecurityRefusalReason.MODEL_CACHE_CREDENTIALS_INVALID.value: ModelAccessReason.CREDENTIALS_INVALID,
+        ModelCacheCode.RATE_LIMITED: TransientReason.RATE_LIMITED,
+        ModelCacheCode.DIGEST_MISMATCH: ModelCacheFailureCode.INTEGRITY_MISMATCH,
+        ModelCacheCode.SOURCE_SIZE_MISMATCH: ModelCacheFailureCode.INTEGRITY_MISMATCH,
+        ModelCacheCode.CAPACITY: ModelCacheFailureCode.CAPACITY,
+        ModelCacheCode.INTERRUPTED: ModelCacheFailureCode.INTERRUPTED,
     }
     recovery_actions = {
         "access_required": [
