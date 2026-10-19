@@ -29,10 +29,15 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import delete, or_, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
+from vonk_agent_protocol import AgentOperation as OperationKind
+from vonk_agent_protocol import OutcomeUnknown, WaitReason
+from vonk_agent_protocol.contracts import AgentFailureResult, AgentUpgradePayload
 
-from .models import EvidenceRepeat
+from . import agent_operation_states
+from .models import AgentOperation, AgentOperationAttempt, EvidenceRepeat
 from .recovery_policy import RECOVERY
 from .settings import PROFILE_STALL_WINDOW_SECONDS
+from .stored_json import read_row_column
 
 _LOGGER = logging.getLogger(__name__)
 _SHOWN_FOR = timedelta(seconds=PROFILE_STALL_WINDOW_SECONDS)
@@ -137,9 +142,14 @@ def repeating_evidence(
         ).all()
     except SQLAlchemyError:
         return {}
-    shown: dict[str, list[str]] = {}
+    shown = _upgrade_identity_waits(session, node_ids)
     for row in rows:
         if not RECOVERY.exhausted(row.repeats):
+            continue
+        if (
+            row.subject == OperationKind.AGENT_UPGRADE
+            and row.code == WaitReason.UPGRADE_AWAITING_IDENTITY
+        ):
             continue
         detail = (
             f"{row.code} x{row.repeats} on {row.subject} since "
@@ -148,3 +158,52 @@ def repeating_evidence(
         )
         shown.setdefault(row.node_id, []).append(detail[:256])
     return {node_id: tuple(details) for node_id, details in shown.items()}
+
+
+def _upgrade_identity_waits(
+    session: Session, node_ids: Sequence[str]
+) -> dict[str, list[str]]:
+    """Show each current, bounded upgrade handoff, even before it repeats.
+
+    Historical attempt evidence stays available on the operation; it cannot
+    keep a resolved wait alive on the node after identity reconciliation.
+    """
+    shown: dict[str, list[str]] = {}
+    statement = (
+        select(AgentOperation, AgentOperationAttempt)
+        .join(
+            AgentOperationAttempt,
+            (AgentOperationAttempt.operation_id == AgentOperation.id)
+            & (AgentOperationAttempt.attempt == AgentOperation.current_attempt),
+        )
+        .where(
+            AgentOperation.node_id.in_(node_ids),
+            AgentOperation.kind == OperationKind.AGENT_UPGRADE,
+            AgentOperation.state.in_(agent_operation_states.LIVE),
+        )
+        .order_by(AgentOperation.created_at, AgentOperation.id)
+    )
+    try:
+        rows = session.execute(statement).all()
+    except SQLAlchemyError:
+        return {}
+    for operation, attempt in rows:
+        result = read_row_column(attempt, "result")
+        if (
+            not isinstance(result, AgentFailureResult | OutcomeUnknown)
+            or result.wait_reason != WaitReason.UPGRADE_AWAITING_IDENTITY
+        ):
+            continue
+        payload = read_row_column(operation, "payload")
+        if not isinstance(payload, AgentUpgradePayload):
+            continue
+        deadline = (
+            _utc(operation.recovery_deadline or attempt.lease_deadline)
+            .isoformat()
+            .replace("+00:00", "Z")
+        )
+        shown.setdefault(operation.node_id, []).append(
+            f"{WaitReason.UPGRADE_AWAITING_IDENTITY} op={operation.id} "
+            f"target={payload.target_build_digest}/{payload.target_binary_digest} deadline={deadline}"
+        )
+    return shown
