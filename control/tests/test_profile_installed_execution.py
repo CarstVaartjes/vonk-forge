@@ -534,6 +534,57 @@ def test_a_load_waiting_for_disk_names_it_and_resumes_when_space_appears(
     assert service.application(waiting.id).state == "running"
 
 
+def test_disk_only_review_submits_a_wait_that_reaches_spark_retention(
+    tmp_path: Path, postgres_engine
+) -> None:
+    """Catches review refusing before an accepted owner can demand native eviction."""
+    from vonk_control.spark_store_retention import store_retention_request
+
+    sessions, lifecycle, _, _, _, nodes = setup_services(
+        tmp_path, engine=postgres_engine
+    )
+    with sessions.begin() as session:
+        snapshot = session.scalar(select(NodeInventorySnapshot))
+        assert snapshot is not None
+        snapshot.disk_free_bytes = 0
+    service, planner = _profile_service(sessions, lifecycle)
+    collector = UnusedStorageCollector(
+        sessions,
+        clock=lifecycle._clock,
+        lifecycle=lifecycle,
+        demands=StorageDemands(lifecycle._clock),
+    )
+    service.bind_storage_relief(collector.relief_for_spark)
+    profile = _installed_profile(service, sessions, nodes)
+    review = service.preview(profile.id)
+    assert not review.allowed
+    assert review.waits_for_preparation
+    assert any(
+        reason.code == RunSwitchCode.INSUFFICIENT_DISK
+        for assessment in review.assessments
+        for reason in assessment.assessment.blockers
+    )
+    # Review is read-only: only accepted intent can authorize collection.
+    with sessions() as session:
+        before = store_retention_request(session, nodes[0], lifecycle._clock())
+    assert before is not None and before.required_free_bytes == 0
+    waiting = service.apply(profile.id, request_key=str(uuid4()), actor="admin")
+    assert waiting.state == LifecycleState.QUEUED
+    assert waiting.next_attempt_at is not None
+    with sessions() as session:
+        demand = store_retention_request(session, nodes[0], lifecycle._clock())
+    assert demand is not None and demand.required_free_bytes > 0
+    with sessions.begin() as session:
+        snapshot = session.scalar(select(NodeInventorySnapshot))
+        assert snapshot is not None
+        snapshot.disk_free_bytes = snapshot.disk_total_bytes
+    later = lifecycle._clock() + timedelta(seconds=STORAGE_ADMISSION_RETRY_SECONDS + 1)
+    for clocked in (service, planner, lifecycle):
+        clocked._clock = lambda: later
+    _drive_to_job(service, planner, sessions, "recipe.install")
+    assert service.application(waiting.id).current_operation_id is not None
+
+
 def _disk_starved_load(tmp_path: Path, relief=None):
     sessions, lifecycle, _, _, _, nodes = setup_services(tmp_path)
     with sessions.begin() as session:
