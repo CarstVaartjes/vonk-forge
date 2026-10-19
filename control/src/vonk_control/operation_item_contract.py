@@ -53,6 +53,7 @@ from .operation_contract import (
     sanitize_failure_evidence,
 )
 from .strict_json import StrictModel, read_stored_model
+from .wait_contract import QueueWait
 
 #: The wire word for an agent operation kind.
 AGENT_OPERATION_KINDS = frozenset(operation.value for operation in AgentOperation)
@@ -223,6 +224,7 @@ class OperationItem(BaseModel):
     detail: str | None = None
     blockers: list[OperationBlocker] | None = None
     next_attempt_at: str | None = None
+    wait: QueueWait | None = None
     wait_reason: WaitReason | None = None
     #: The failure the family itself recorded, by its own contract.
     failure: AvailabilityOperationFailure | OperationFailureEvidence | None = None

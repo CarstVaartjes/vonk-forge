@@ -20,6 +20,7 @@ from ..lifecycle.fleet_profile import cancellation_state, doc_state
 from ..lifecycle.types import Effect as _LifecycleEffect
 from ..lifecycle.types import State as _LifecycleState
 from ..models import FleetProfileApplication
+from ..persisted_waits import schedule_wait
 from ..strict_json import read_stored_model
 from .contracts import (
     FleetProfileChildPlanBlocked,
@@ -57,7 +58,7 @@ class FleetProfileService:
         due = _aware(due_at) if due_at is not None else None
         if due is None or due <= now:
             due = now + timedelta(seconds=_CANCELLATION_OBSERVATION_SECONDS)
-        progress.cancellation.observation_due_at = due
+        schedule_wait(row, due)
         row.progress = progress.model_dump(mode="json")
 
     def _advance_cancellation_in_session(
@@ -135,14 +136,12 @@ class FleetProfileService:
                 cancellation_data.update(
                     {
                         "pending_operation_ids": operation_ids,
-                        "observation_due_at": min(
-                            effect.observe_due_at for effect in effects
-                        ).isoformat(),
                         "observation_deadline_at": min(
                             effect.observation_deadline for effect in effects
                         ).isoformat(),
                     }
                 )
+                schedule_wait(row, min(effect.observe_due_at for effect in effects))
                 progress_data["cancellation"] = cancellation_data
                 row.progress = read_stored_model(
                     FleetProfileApplicationProgress,
@@ -195,9 +194,7 @@ class FleetProfileService:
                 progress,
                 now,
                 due_at=(
-                    progress.switch_adapter.observation_due_at
-                    if progress.switch_adapter is not None
-                    else None
+                    row.next_action_at if progress.switch_adapter is not None else None
                 ),
             )
             if child.state in _CHILD_PENDING_STATES or child.state in job_states.words(
@@ -241,17 +238,16 @@ class FleetProfileService:
                 return False
             if effects:
                 deadline = min(effect.observation_deadline for effect in effects)
-                due = min(effect.observe_due_at for effect in effects)
                 operation_ids = sorted(effect.operation_id for effect in effects)
                 progress_data = progress.model_dump(mode="json")
                 cancellation_data = dict(progress_data["cancellation"])
                 cancellation_data.update(
                     {
                         "pending_operation_ids": operation_ids,
-                        "observation_due_at": due.isoformat(),
                         "observation_deadline_at": deadline.isoformat(),
                     }
                 )
+                schedule_wait(row, min(effect.observe_due_at for effect in effects))
                 progress_data["cancellation"] = cancellation_data
                 row.progress = read_stored_model(
                     FleetProfileApplicationProgress,
@@ -328,7 +324,7 @@ class FleetProfileService:
         progress = _persisted_profile_progress(row)
         cancellation = progress.cancellation
         if cancellation is not None:
-            cancellation.observation_due_at = None
+            schedule_wait(row, None)
             cancellation.observation_deadline_at = None
             if not residue:
                 cancellation.pending_operation_ids = []

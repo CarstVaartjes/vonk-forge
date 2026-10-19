@@ -1325,12 +1325,21 @@ def test_unknown_removal_is_deferred_and_retried_without_blocking_other_items(
     result = collector.collect()
     assert lifecycle.removed == [second]
     assert _kept(result, "deferred") == 1
+    from vonk_control.persisted_waits import read_wait
+
+    with world.sessions() as session:
+        retained = session.get(RecipeInstallation, first)
+        assert retained is not None and read_wait(retained) is not None
+    collector = _collector(world, lifecycle, now=world.now)
     _report_disk(world.sessions, GIB + 2, at=world.now)
     collector.collect()
     assert calls.count(first) == 1, "unknown outcome retried without backoff"
     world.now += collector._scan_interval
     collector.collect()
     assert calls.count(first) == 2 and first in lifecycle.removed
+    with world.sessions() as session:
+        settled = session.get(RecipeInstallation, first)
+        assert settled is not None and read_wait(settled) is None
 
 
 def test_a_sweep_that_runs_out_of_budget_continues_on_the_next_pass(
@@ -2894,6 +2903,20 @@ def test_receipt_unlink_is_outside_sql_with_committed_fence_and_fresh_admission(
     if path.exists():
         # Ended sweep owns no gate; a fresh sweep observes bytes and completes.
         fresh = _collector(world, image_cache_root=tmp_path)
+        from vonk_control.persisted_waits import read_wait
+
+        with world.sessions() as session:
+            gate = session.get(
+                ArtifactLifecycleGate,
+                {
+                    "artifact_kind": "runtime-image",
+                    "artifact_sha256": AN_IMAGE,
+                },
+            )
+            wait = read_wait(gate) if gate is not None else None
+        if wait is not None:
+            assert fresh.collect().images == 0  # restart retains the bounded retry
+            world.now = wait.next_check
         assert fresh.collect().images == 1
     assert not path.exists()
     assert attempts == [AN_IMAGE]

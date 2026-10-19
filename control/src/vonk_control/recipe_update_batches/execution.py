@@ -21,6 +21,7 @@ from ..lifecycle import State
 from ..lifecycle.recipe_update_batch import CANCEL_BUDGET
 from ..logging import redact_text
 from ..models import CatalogDocumentRevision, Job
+from ..persisted_waits import schedule_wait, wait_due
 from ..recipe_availability_intent import RecipeRevisionIntent
 from ..recipe_image_availability import (
     RecipeImageAvailabilityRefused,
@@ -91,10 +92,7 @@ class ExecutionMixin:
                     continue
                 if document.claim_until is not None and document.claim_until > now:
                     continue
-                if (
-                    document.next_attempt_at is not None
-                    and document.next_attempt_at > now
-                ):
+                if (due := wait_due(job)) is not None and due > now:
                     continue
                 claim_owner = f"{owner}:{uuid.uuid4().hex}"
                 claim_until = now + timedelta(
@@ -343,16 +341,21 @@ class ExecutionMixin:
             # The claim ends with this pass; the batch then follows its children.
             document.claim_owner = document.claim_until = None
             if all(child.state in _SETTLED for child in document.children):
-                document.next_attempt_at = None
+                schedule_wait(job, None)
                 service._lifecycle.conclude(job, document, run_now)
             else:
-                document.next_attempt_at = min(
-                    child.retry_at
-                    or (
-                        now if child.state == "pending" else now + _OBSERVATION_INTERVAL
-                    )
-                    for child in document.children
-                    if child.state not in _SETTLED
+                schedule_wait(
+                    job,
+                    min(
+                        child.retry_at
+                        or (
+                            now
+                            if child.state == "pending"
+                            else now + _OBSERVATION_INTERVAL
+                        )
+                        for child in document.children
+                        if child.state not in _SETTLED
+                    ),
                 )
                 service._lifecycle.project(
                     job,

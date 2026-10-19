@@ -279,6 +279,9 @@ class FleetProfileService:
             else None
         )
         return FleetProfileView(
+            maintenance_wait=selection.wait
+            if selection is not None and selection.profile_id == row.id
+            else None,
             id=row.id,
             number=row.number,
             revision=row.revision,

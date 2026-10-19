@@ -45,6 +45,21 @@ def _pending(sessions, request_key: str) -> FleetProfileApplicationProgress:
         return _persisted_profile_progress(row)
 
 
+def _pending_due(sessions, request_key: str):
+    from vonk_control.persisted_waits import wait_due
+
+    with sessions() as session:
+        row = session.scalar(
+            select(FleetProfileApplication).where(
+                FleetProfileApplication.request_key == request_key
+            )
+        )
+        assert row is not None
+        due = wait_due(row)
+        assert due is not None
+        return due
+
+
 def test_parked_load_names_its_lock_holder_then_queues_for_the_lock(
     tmp_path, postgres_engine
 ) -> None:
@@ -73,7 +88,7 @@ def test_parked_load_names_its_lock_holder_then_queues_for_the_lock(
             and "review again" not in blocker.detail.lower()
             for blocker in waiting.blockers
         ), waiting.blockers
-        retry_at = waiting.progress.admission_retry_at
+        retry_at = waiting.next_attempt_at
         assert retry_at is not None
         assert retry_at.isoformat() in (waiting.status_reason or "")
 
@@ -82,8 +97,9 @@ def test_parked_load_names_its_lock_holder_then_queues_for_the_lock(
         while (parked := _pending(sessions, request_key)).admission_attempt < (
             PATIENT_AFTER_RETRIES
         ):
-            assert parked.admission_retry_at is not None
-            profiles._clock = lambda due=parked.admission_retry_at: due
+            assert _pending_due(sessions, request_key) is not None
+            next_check = _pending_due(sessions, request_key)
+            profiles._clock = lambda due=next_check: due
             assert profiles.tick()
             refused = _pending(sessions, request_key)
             assert refused.admission_pending is True
@@ -97,7 +113,7 @@ def test_parked_load_names_its_lock_holder_then_queues_for_the_lock(
                 and "retry automatically" in blocker.detail
                 for blocker in refused.blockers
             ), refused.blockers
-            retry_at = refused.admission_retry_at
+            retry_at = _pending_due(sessions, request_key)
             assert retry_at is not None
             with sessions() as session:
                 row = session.scalar(
@@ -110,7 +126,7 @@ def test_parked_load_names_its_lock_holder_then_queues_for_the_lock(
 
         # After repeated refusals the retry queues for the lock: the writer
         # lets go while it waits, and the load is admitted on that same retry.
-        due = _pending(sessions, request_key).admission_retry_at
+        due = _pending_due(sessions, request_key)
         assert due is not None
         profiles._clock = lambda: due
         letting_go = threading.Timer(0.5, release.set)

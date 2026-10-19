@@ -6,7 +6,12 @@ import hashlib
 from typing import TYPE_CHECKING, cast
 
 from sqlalchemy import select
-from vonk_agent_protocol import InvalidRequestReason, LifecycleState, ModelCacheCode
+from vonk_agent_protocol import (
+    InvalidRequestReason,
+    LifecycleState,
+    ModelAccessReason,
+    ModelCacheCode,
+)
 
 from .. import model_cache_states
 from ..lifecycle import Effect, Outcome, Reported
@@ -19,7 +24,6 @@ from ..model_cache_contract import (
 )
 from ..model_cache_progress import cache_phase, progress_document
 from ..models import ModelCacheOperation
-from ..operation_contract import ModelAccessReason
 from ..strict_json import serialize_json_value
 from .artifacts import (
     ArtifactSetManifest,
@@ -208,7 +212,10 @@ class RetryMixin:
                 )
             previous_payload = cache._transfer_or_retire(previous)
             if previous_payload is None:
-                return cache._operation_view(previous)
+                raise ModelCacheConflictInvalid(
+                    ModelCacheCode.DOCUMENT_UNREADABLE,
+                    "cannot record access recheck in unreadable operation",
+                )
             failure = cache._canonical_failure(previous)
             if (
                 previous.kind not in {"download", "repair"}

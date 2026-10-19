@@ -184,7 +184,7 @@ def test_a_silent_spark_is_looked_at_again_once_its_inventory_is_too_old(
 
     harness, executor = _held(tmp_path, stopped_at=NOW)
     calls = len(executor.calls)
-    due = _result(harness.view()).observation_due_at
+    due = harness.view().next_attempt_at
     assert due is not None
     assert due >= NOW + timedelta(seconds=harness.service._inventory_max_age)
     harness.advance_to_due()

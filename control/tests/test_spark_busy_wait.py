@@ -26,6 +26,7 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol.recipe_operations import RecipeStopResult
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.agent_jobs.contracts import CLAIM_LEASE_SECONDS
+from vonk_control.agent_jobs.waits import refresh_queue_waits
 from vonk_control.auth import TokenCodec
 from vonk_control.models import (
     AgentCertificate,
@@ -248,6 +249,8 @@ def test_any_queued_order_on_a_busy_spark_waits_visibly_and_only_there(
 
     # Lease loss must not hide the unconfirmed effect or imply capacity is free.
     clock.now += timedelta(seconds=CLAIM_LEASE_SECONDS + 1)
+    with sessions.begin() as session:
+        refresh_queue_waits(session, clock.now)
     for document in _waits(services, behind.id, job_id):
         assert document["wait_reason"] == WaitReason.JOB_STATE_UNCERTAIN
         assert document["blockers"][0]["operation"]["id"] == stop.id
@@ -262,6 +265,7 @@ def test_any_queued_order_on_a_busy_spark_waits_visibly_and_only_there(
             session.query(AgentOperationAttempt).filter_by(operation_id=stop.id).one()
         )
         attempt.state = AgentResultState.FAILED.value
+        refresh_queue_waits(session, clock.now)
     for document in _waits(services, behind.id, job_id):
         assert document["wait_reason"] == WaitReason.OBSERVATION_UNAVAILABLE
         assert not document["blockers"][0].get("operation")
@@ -282,6 +286,8 @@ def test_unconfirmed_blocker_stalls_visibly_then_clears_without_changing_intent(
         holder.state = LifecycleState.OBSERVING.value
         holder.next_action_at = recheck_at
     clock.now += timedelta(seconds=PROFILE_STALL_WINDOW_SECONDS + 1)
+    with sessions.begin() as session:
+        refresh_queue_waits(session, clock.now)
     for document in _waits(services, upgrade.id, job_id):
         assert document["wait_reason"] == WaitReason.JOB_STATE_UNCERTAIN
         assert document["blockers"][0]["operation"]["id"] == stop.id
@@ -292,7 +298,7 @@ def test_unconfirmed_blocker_stalls_visibly_then_clears_without_changing_intent(
     with sessions() as session:
         queued = session.get(AgentOperation, upgrade.id)
         assert queued is not None
-        assert queued.current_attempt == 0 and queued.next_action_at is None
+        assert queued.current_attempt == 0 and queued.next_action_at == recheck_at
         assert queued.state == LifecycleState.QUEUED.value
     # Reconciliation of the exact old effect permits the original upgrade.
     with sessions.begin() as session:
@@ -318,6 +324,7 @@ def test_live_blocker_progress_clears_alarm_but_renewal_does_not(fleet):
             session.query(AgentOperationAttempt).filter_by(operation_id=stop.id).one()
         )
         attempt.lease_deadline = clock.now + timedelta(seconds=CLAIM_LEASE_SECONDS)
+        refresh_queue_waits(session, clock.now)
     for document in _waits(services, queued.id, job_id):
         assert document["wait_reason"] == WaitReason.SPARK_BUSY
         assert document["blockers"][1]["code"] == ProgressAlarmCode.STALLED
@@ -328,6 +335,7 @@ def test_live_blocker_progress_clears_alarm_but_renewal_does_not(fleet):
         attempt.progress = OperationProgress(
             phase=ProgressPhase.STARTING, last_progress_at=clock.now.isoformat()
         ).model_dump(mode="json")
+        refresh_queue_waits(session, clock.now)
     for document in _waits(services, queued.id, job_id):
         assert len(document["blockers"]) == 1
         assert document["blockers"][0]["operation"]["id"] == stop.id

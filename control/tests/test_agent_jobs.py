@@ -3957,7 +3957,14 @@ def _scenario_running_lease_live(sessions, clock, parent_job, operation) -> None
 def _scenario_operator_retry_not_authorized(
     sessions, clock, parent_job, operation
 ) -> None:
-    _set_operation(sessions, operation, state="waiting-for-operator", current_attempt=1)
+    _set_operation(
+        sessions,
+        operation,
+        state="waiting-for-operator",
+        current_attempt=1,
+        next_action_at=None,
+        wait_evidence=None,
+    )
 
 
 def _scenario_upgrade_safety_not_elapsed(

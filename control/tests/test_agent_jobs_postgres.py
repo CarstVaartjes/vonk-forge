@@ -5,6 +5,7 @@ import threading
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -19,6 +20,11 @@ from vonk_control.agent_jobs import AgentJobService, StaleAgentAttempt
 from vonk_control.auth import TokenCodec
 from vonk_control.ca_issuance_contract import CertificateIssuanceBinding
 from vonk_control.enrollment import EnrollmentService
+from vonk_control.lifecycle import State
+from vonk_control.lifecycle.agent_operation import (
+    AgentOperationAdapter,
+    retry_scheduled,
+)
 from vonk_control.models import (
     AgentCertificate,
     AgentNode,
@@ -1308,3 +1314,43 @@ def test_unlaunched_job_keeps_its_offline_owner_recovery_window(service):
         resumed = order_recovery_deadline(row, clock.now)
         assert resumed is not None and resumed > clock.now
         assert row.recovery_deadline == deadline  # a read never advances the work
+
+
+def test_operator_wait_check_clock_does_not_authorize_another_attempt(service):
+    """A persisted observation clock must not turn operator consent into a retry."""
+    sessions, clock = service
+    jobs = AgentJobService(sessions, clock=clock)
+    from vonk_agent_protocol import AgentOperation as ProtocolAgentOperation
+
+    aos_agent_stop = ProtocolAgentOperation.RECIPE_STOP.value
+    queued = jobs.enqueue(
+        parent(sessions, clock).id, NODE_A, aos_agent_stop, COMMIT, STOP_PAYLOAD
+    )
+    assert claim_agent(jobs, NODE_A, "serial-a") is not None
+    with sessions.begin() as session:
+        row = session.get(AgentOperation, queued.id)
+        assert row is not None
+        attempt = session.scalar(
+            select(AgentOperationAttempt).where(
+                AgentOperationAttempt.operation_id == row.id,
+                AgentOperationAttempt.attempt == row.current_attempt,
+            )
+        )
+        assert attempt is not None
+        adapter = AgentOperationAdapter(session=session, clock=lambda: clock.now)
+        before = adapter.lifecycle(row, attempt, None, clock.now)
+        adapter.apply(
+            row,
+            attempt,
+            before,
+            replace(before, state=State.NEEDS_OPERATOR, next_action_at=None),
+            clock.now,
+        )
+        assert row.wait_evidence is not None and row.next_action_at is not None
+        assert retry_scheduled(row) is None
+        assert adapter.adopt(row).next_action_at is None
+    clock.advance(seconds=60)
+    assert claim_agent(jobs, NODE_A, "serial-a") is None
+    with sessions() as session:
+        row = session.get(AgentOperation, queued.id)
+        assert row is not None and row.current_attempt == 1

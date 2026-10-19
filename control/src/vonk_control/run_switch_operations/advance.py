@@ -10,6 +10,7 @@ from typing import cast as typing_cast
 
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
+    AgentOperation,
     Disposition,
     LifecycleState,
     RunSwitchCode,
@@ -38,6 +39,8 @@ from ..lifecycle.types import (
 from ..models import (
     Job,
 )
+from ..operation_blockers import BlockingOperation, make_blocker
+from ..persisted_waits import schedule_wait, wait_due
 from ..profile_capacity import (
     accepted_profile_runtime_image,
 )
@@ -248,7 +251,7 @@ class AdvanceMixin:
                 session.commit()
                 return True
             if intent_status == "waiting":
-                pending_due = progress.observation_due_at
+                pending_due = job.next_action_at
                 if (
                     job.state in job_states.words(LifecycleState.OBSERVING)
                     and pending_due is not None
@@ -290,7 +293,7 @@ class AdvanceMixin:
                 job.updated_at = now
                 session.commit()
                 return True
-            if progress.observation_due_at is None and (
+            if job.next_action_at is None and (
                 job.state in job_states.words(LifecycleState.NEEDS_OPERATOR)
                 or (
                     job.state in job_states.words(LifecycleState.OBSERVING)
@@ -305,7 +308,7 @@ class AdvanceMixin:
                 job.result = _persisted_result(progress)
                 session.commit()
                 return True
-            observation_due = progress.observation_due_at
+            observation_due = wait_due(job)
             if (
                 observation_due is not None
                 and now < _aware(observation_due)
@@ -521,13 +524,17 @@ class AdvanceMixin:
                         else None
                     )
                     if isinstance(retry_due_at, datetime):
-                        progress.observation_due_at = _aware(retry_due_at)
+                        schedule_wait(job, _aware(retry_due_at))
                     else:
-                        progress.observation_due_at = None
-                    if progress.observation_due_at is not None:
-                        progress.observation_due_at = min(
-                            progress.observation_due_at,
-                            progress.observation_deadline_at,
+                        schedule_wait(job, None)
+                    due = job.next_action_at
+                    if due is not None:
+                        schedule_wait(
+                            job,
+                            min(
+                                due,
+                                progress.observation_deadline_at,
+                            ),
                         )
                     if (
                         isinstance(child, _ChildView)
@@ -566,7 +573,24 @@ class AdvanceMixin:
                         progress,
                         now,
                         state=_LifecycleState.RUNNING,
+                        due=job.next_action_at,
                         reason=status_reason,
+                        wait_blockers=[
+                            make_blocker(
+                                RunSwitchCode.EFFECT_UNCERTAIN,
+                                status_reason or "Awaiting the exact child effect",
+                                node_ids=job.targets,
+                            ).model_copy(
+                                update={
+                                    "operation": BlockingOperation(
+                                        id=child_id,
+                                        kind=AgentOperation.ARTIFACT_DISTRIBUTION.value,
+                                    )
+                                }
+                            )
+                        ]
+                        if progress.retry_reason == RunSwitchCode.EFFECT_UNCERTAIN
+                        else None,
                     )
                     job.result = _persisted_result(progress)
                     job.updated_at = now
@@ -746,7 +770,7 @@ class AdvanceMixin:
                     job, progress, phase_index, item_index, child_id
                 ):
                     return False
-                progress.observation_due_at = None
+                schedule_wait(job, None)
                 progress.observation_deadline_at = None
                 if progress.retry_reason == RunSwitchCode.EFFECT_UNCERTAIN:
                     progress.retry_reason = None

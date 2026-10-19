@@ -10,7 +10,10 @@ from fastapi import FastAPI, HTTPException, Path, Query, status
 from sqlalchemy.exc import SQLAlchemyError
 from starlette.responses import Response
 from vonk_agent_protocol import (
+    ErrorCategory,
     ModelCacheOperatorStatus,
+    UnknownError,
+    WaitReason,
 )
 
 from ..agent_upgrade_contract import AgentUpgradeRequestIntent
@@ -20,6 +23,7 @@ from ..enrollment_contract import (
     ENROLLMENT_ID_PATTERN,
     EnrollmentGrantStatus,
     EnrollmentObservationOutcome,
+    EnrollmentRevocationStatus,
 )
 from ..fleet_projection import (
     FleetNode,
@@ -33,6 +37,7 @@ from ..observation_transfer import (
     observation_response,
 )
 from ..operation_api import bounded_error_responses
+from ..operator_acceptance import ReceiptPolicy, operator_acceptance
 from ..platform_observation_errors import (
     ObservationCaptureUnavailable,
     observation_capture_unavailable_response,
@@ -208,12 +213,31 @@ def install_operator_projection_routes(
     ) -> FleetNode:
         return selected(selector)
 
+    @app.get(
+        "/api/fleet/{selector}/revocation",
+        response_model=EnrollmentRevocationStatus | UnknownError,
+        responses=bounded_error_responses(401, 403, 404, 503),
+        operation_id="getFleetNodeRevocation",
+    )
+    def fleet_revocation(
+        selector: Annotated[str, Path(pattern=r"^spk_[0-9a-f]{32}$")],
+        actor: Actor = authenticated,
+    ) -> EnrollmentRevocationStatus | UnknownError:
+        _require_mutation(actor, "POST", "/api/fleet/{selector}/remove")
+        if fleet_services is None or fleet_services.enrollment is None:
+            return UnknownError(
+                category=ErrorCategory.UNKNOWN,
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
+            )
+        return fleet_services.enrollment.revocation_status(selector)
+
     @app.post(
         "/api/fleet/{selector}/rename",
         response_model=FleetNodeIdentity,
         responses=bounded_error_responses(401, 403, 404, 422, 503),
         operation_id="renameFleetNode",
     )
+    @operator_acceptance(ReceiptPolicy.FLEET_NODE)
     def fleet_rename(
         selector: Annotated[str, Path(pattern=_SELECTOR_PATTERN)],
         body: FleetRenameRequest,
@@ -234,6 +258,7 @@ def install_operator_projection_routes(
         responses=bounded_error_responses(401, 403, 409, 422, 503),
         operation_id="enrollFleetNode",
     )
+    @operator_acceptance(ReceiptPolicy.FLEET_ACTION)
     def fleet_enroll(
         body: FleetEnrollRequest,
         actor: Actor = authenticated,
@@ -257,6 +282,7 @@ def install_operator_projection_routes(
         responses=bounded_error_responses(401, 403, 404, 409, 422, 503),
         operation_id="reenrollFleetNode",
     )
+    @operator_acceptance(ReceiptPolicy.FLEET_ACTION)
     def fleet_reenroll(
         selector: Annotated[str, Path(pattern=_SELECTOR_PATTERN)],
         body: FleetReenrollRequest,
@@ -306,6 +332,7 @@ def install_operator_projection_routes(
         responses=bounded_error_responses(401, 403, 404, 409, 422, 503),
         operation_id="revokeFleetEnrollment",
     )
+    @operator_acceptance(ReceiptPolicy.ENROLLMENT_REVOKE)
     def revoke_enrollment(
         grant_id: Annotated[str, Path(pattern=ENROLLMENT_ID_PATTERN)],
         actor: Actor = authenticated,
@@ -335,6 +362,7 @@ def install_operator_projection_routes(
         responses=bounded_error_responses(401, 403, 404, 409, 503),
         operation_id="removeFleetNode",
     )
+    @operator_acceptance(ReceiptPolicy.FLEET_ACTION)
     def fleet_remove(
         selector: Annotated[str, Path(pattern=_SELECTOR_PATTERN)],
         actor: Actor = authenticated,
@@ -362,6 +390,7 @@ def install_operator_projection_routes(
         responses=bounded_error_responses(401, 403, 404, 409, 422, 503),
         operation_id="upgradeFleet",
     )
+    @operator_acceptance(ReceiptPolicy.FLEET_ACTION)
     def fleet_upgrade(
         body: FleetUpgradeRequest,
         actor: Actor = authenticated,

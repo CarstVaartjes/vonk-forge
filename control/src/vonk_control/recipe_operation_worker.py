@@ -23,6 +23,7 @@ from .failure_classification import error_detail
 from .lifecycle.recipe_operation import RecipeOperationAdapter
 from .logging import log_event
 from .models import Job, RecipeRun, RunNode
+from .persisted_waits import schedule_wait
 from .recipe_execution_contract import (
     RecipeExecutionContractError,
     parse_stored_run_plan,
@@ -191,8 +192,8 @@ class RecipeOperationWorker:
                         # next-attempt time arrives; an untouched run has no
                         # recorded attempt at all.
                         or_(
-                            RecipeRun.route_next_attempt_at.is_(None),
-                            RecipeRun.route_next_attempt_at <= now,
+                            RecipeRun.next_action_at.is_(None),
+                            RecipeRun.next_action_at <= now,
                         ),
                     )
                     .order_by(RecipeRun.created_at, RecipeRun.id)
@@ -258,8 +259,8 @@ class RecipeOperationWorker:
             )
             run.route_attempts = step.failures
             run.route_error = error_detail(error, limit=512)
-            run.route_next_attempt_at = step.next_at
-            if run.route_next_attempt_at is None:
+            schedule_wait(run, step.next_at, now=now, detail=run.route_error)
+            if run.next_action_at is None:
                 # End publication observation, never invent a remote stop.
                 run.route_state = RouteState.FAILED
                 # Initial observation has its own persisted lifetime. Publication
@@ -294,7 +295,7 @@ class RecipeOperationWorker:
             run = session.get(RecipeRun, run_id, with_for_update=True)
             if run is not None and run.route_state == RouteState.PENDING:
                 run.route_state = RouteState.WITHDRAWN
-                run.route_next_attempt_at = None
+                schedule_wait(run, None)
                 run.route_error = str(error)[:512]
                 run.updated_at = self._clock()
 
@@ -372,7 +373,7 @@ class RecipeOperationWorker:
                 # episode; it proves neither rank failure nor a stopped process
                 # or free capacity.
                 run.route_state = RouteState.WITHDRAWN
-                run.route_next_attempt_at = None
+                schedule_wait(run, None)
                 run.observation_deadline_at = None
                 run.route_error = "initial exact observation deadline elapsed"
                 run.updated_at = now

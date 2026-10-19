@@ -160,7 +160,7 @@ def test_postgres_invalid_terminal_child_fails_without_nested_row_lock(
 
     def cause(receipt):
         assert "run-switch phase receipt is invalid" in (receipt.status_reason or "")
-        assert receipt.result.observation_due_at is None
+        assert receipt.next_attempt_at is None
 
     def fresh(_world):
         return service.apply(
@@ -230,9 +230,7 @@ def _awaiting_final_verification(
     for _ in range(20):
         if queued_distribution:
             before = service.get(operation.operation_id)
-            due = (
-                before.result.observation_due_at if before.result is not None else None
-            )
+            due = before.next_attempt_at if before.result is not None else None
             if due is not None and due > now[0]:
                 now[0] = due
         service.tick()
@@ -393,7 +391,7 @@ def test_postgres_final_verification_backs_off_after_durable_deadline(
     assert waiting.state == LifecycleState.RUNNING
     assert waiting.result is not None
     assert waiting.result.final_verify_started_at == before.final_verify_started_at
-    assert waiting.result.observation_due_at == NOW + timedelta(seconds=360)
+    assert waiting.next_attempt_at == NOW + timedelta(seconds=360)
     assert restarted.tick() is False
 
 
@@ -431,7 +429,7 @@ def test_postgres_final_verification_waits_after_accepted_start_deadline(
     assert "next observation at" in expired.status_reason
     assert expired.result is not None
     assert expired.result.start_deadline == accepted_deadline
-    next_observation_at = expired.result.observation_due_at
+    next_observation_at = expired.next_attempt_at
     assert next_observation_at is not None
     expired_observation = expired.result.final_observation
     assert isinstance(expired_observation, RunSwitchFinalVerifyResult)
@@ -549,7 +547,7 @@ def test_postgres_newer_intent_supersedes_parked_final_verification(
     expired = service.get(operation.operation_id)
     assert expired.state == LifecycleState.OBSERVING
     assert expired.result is not None
-    next_observation_at = expired.result.observation_due_at
+    next_observation_at = expired.next_attempt_at
     assert next_observation_at is not None
 
     with sessions.begin() as session:

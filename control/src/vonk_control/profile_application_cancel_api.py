@@ -15,6 +15,11 @@ from .fleet_profile_contract import (
 )
 from .fleet_profiles import FleetProfileConflict, FleetProfilePermissionDenied
 from .operation_api import bounded_error_responses
+from .operator_acceptance import (
+    OperatorReceiptResolver,
+    ReceiptPolicy,
+    operator_acceptance,
+)
 
 _CANCEL_PATH = "/api/profile/applications/{application_id}/cancel"
 _CANCEL_RECEIPT_PATH = (
@@ -77,6 +82,7 @@ def install_profile_application_cancel_route(
         status_code=status.HTTP_202_ACCEPTED,
         operation_id="cancelProfileApplication",
     )
+    @operator_acceptance(ReceiptPolicy.PROFILE_CANCEL)
     def cancel_profile_application(
         body: FleetProfileApplicationCancelRequest,
         application_id: str = Path(pattern=_UUID),
@@ -106,3 +112,5 @@ def install_profile_application_cancel_route(
                 status_code=503, detail="Profile cancellation unavailable"
             ) from None
         return result
+
+    OperatorReceiptResolver(profiles=profiles).bind(app)

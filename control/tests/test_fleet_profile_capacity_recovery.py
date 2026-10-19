@@ -175,14 +175,14 @@ def test_child_unknown_reobserves_same_effect_then_continues(
     assert world.service.tick()
     observed = world.service.application(world.id)
     assert observed.cancellation is None
-    assert observed.progress.retry_due_at is not None
+    assert observed.next_attempt_at is not None
     assert (
         observed.progress.workload_intent_ordinal
         == receipt.progress.workload_intent_ordinal
     )
     assert world.child_id() == child_id
     # Restart retains the observation schedule and the accepted effect.
-    due = observed.progress.retry_due_at
+    due = observed.next_attempt_at
     world.restart()
     world.now[0] = due + timedelta(seconds=1)
     assert world.service.tick()

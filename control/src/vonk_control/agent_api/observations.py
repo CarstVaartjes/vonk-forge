@@ -43,6 +43,7 @@ from ..models import (
     RunNode,
 )
 from ..owner_liveness import builds_in_flight, run_has_live_operation
+from ..persisted_waits import schedule_wait
 from ..presence import PresenceError
 from ..recipe_operations import prepare_exact_recipe_run_observation_nodes
 from ..source_bundles import SourceBundleError
@@ -432,9 +433,9 @@ def install_observations_routes(
                     node.updated_at = observed_at
                     if (
                         run.route_state == RouteState.WITHDRAWN
-                        and run.route_next_attempt_at is not None
+                        and run.next_action_at is not None
                     ):
-                        run.route_next_attempt_at = None
+                        schedule_wait(run, None)
                         run.updated_at = max(_now(run.updated_at).astimezone(UTC), now)
                 if (
                     rejected

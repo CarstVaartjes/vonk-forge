@@ -8,6 +8,7 @@ from datetime import datetime
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
+    JournalRepairCode,
     LifecycleState,
     ReservationState,
 )
@@ -26,7 +27,6 @@ from ..run_switch_contract import (
     RunSwitchRuntimePlanResult,
 )
 from ..run_switch_journal_contract import (
-    JournalRepairCode,
     JournalRepairDisposition,
     RunSwitchJournalRepairEndEvidence,
 )

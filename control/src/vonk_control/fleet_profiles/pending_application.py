@@ -28,6 +28,7 @@ from ..lifecycle.fleet_profile import FleetProfileAdapter
 from ..lifecycle.types import State as _LifecycleState
 from ..models import FleetProfile, FleetProfileApplication
 from ..operation_blockers import OperationBlocker, make_blocker
+from ..persisted_waits import schedule_wait
 from ..settings import STORAGE_ADMISSION_RETRY_SECONDS
 from ..storage_demands import (
     STORAGE_INSUFFICIENT,
@@ -235,11 +236,11 @@ class FleetProfileService:
                 ),
                 current_step=0,
                 current_operation_id=None,
+                next_action_at=next_retry,
                 progress=FleetProfileApplicationProgress(
                     operation_kind=operation_kind,
                     admission_pending=True,
                     admission_attempt=0,
-                    admission_retry_at=next_retry,
                     intended_profile=intended,
                     completed_steps=0,
                     total_steps=len(preview.steps),
@@ -368,12 +369,12 @@ class FleetProfileService:
             current_blockers = (
                 list(blockers) if blockers is not None else [make_blocker(code, reason)]
             )
+            schedule_wait(row, next_retry)
             row.progress = _progress_with_blockers(
                 progress,
                 current_blockers,
                 admission_pending=True,
                 admission_attempt=attempt,
-                admission_retry_at=next_retry.isoformat(),
                 storage_wait_since=storage_wait_since,
             ).model_dump(mode="json")
             if {(item.code, tuple(item.node_ids)) for item in current_blockers} != {
@@ -394,7 +395,7 @@ class FleetProfileService:
                     ),
                     next_retry.isoformat(),
                 )
-            # Admission retries itself at ``admission_retry_at``; no operator
+            # Admission retries itself at ``next_action_at``; no operator
             # action is required, so the row stays queued with its next due time.
             self._lifecycle.project(
                 row,

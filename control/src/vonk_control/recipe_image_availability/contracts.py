@@ -53,19 +53,20 @@ from ..failure_classification import disposition, error_code, is_security_failur
 from ..job_documents import (
     AvailabilityRuntime,
 )
-from ..lifecycle.evidence import BookkeepingReason, retire_as_unknown
 from ..model_cache import (
     ModelCacheRemovalScope,
 )
 from ..model_cache_contract import (
     ModelCacheOperationProgress,
 )
+from ..models import Job
 from ..operation_blockers import (
     OperationBlocker,
 )
 from ..operation_contract import (
     AvailabilityOperationFailure,
 )
+from ..persisted_waits import wait_due
 from ..recipe_image_removal_contract import (
     RECIPE_CACHE_REMOVE_KIND,
 )
@@ -92,30 +93,9 @@ _CANCELLATION_UUID = re.compile(
 )
 
 
-def _removal_retry_is_due(
-    failure: AvailabilityOperationFailure | None, now: datetime
-) -> bool:
-    if failure is None:
-        return True
-    if not failure.retryable or failure.retry_time is None:
-        return False
-    try:
-        retry_time = datetime.fromisoformat(failure.retry_time)
-    except ValueError as error:
-        # A damaged stored retry time is no schedule: the removal is due now (it
-        # re-derives its next attempt from the core's clock) and the damage is
-        # recorded instead of wedging the removal.
-        retire_as_unknown(
-            "recipe-image.removal-retry-time",
-            failure.code,
-            BookkeepingReason.PERSISTED_STATE_DAMAGED,
-            f"{type(error).__name__}: {error}",
-        )
-        return True
-    retry_time = (
-        retry_time if retry_time.tzinfo is not None else retry_time.replace(tzinfo=UTC)
-    )
-    return now >= retry_time
+def _removal_retry_is_due(operation: Job, now: datetime) -> bool:
+    due = wait_due(operation)
+    return due is None or now >= due
 
 
 _CAPACITY_FAILURE_CODES = frozenset(

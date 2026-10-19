@@ -22,6 +22,7 @@ from ..run_switch_contract import (
     SparkGroupNode,
 )
 from ..strict_json import StrictModel
+from ..wait_contract import QueueWait
 from .vocabulary import (
     MAX_PROFILE_WARNINGS,
     Alias,
@@ -272,6 +273,7 @@ class FleetProfileDefinitionView(StrictModel):
 
 
 class FleetProfileView(StrictModel):
+    maintenance_wait: QueueWait | None = None
     id: UuidId
     number: int = Field(le=MAX_DATABASE_INTEGER, ge=1)
     # Zero until the first save, matching the definition view and PUT's

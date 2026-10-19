@@ -30,11 +30,12 @@ from dataclasses import replace
 from datetime import datetime
 from typing import Any
 
-from vonk_agent_protocol import Disposition
+from vonk_agent_protocol import Disposition, WaitOwnerKind
 
 from .. import job_states
 from ..agent_operation_facts import aware
 from ..models import Job, JobAttempt
+from ..persisted_waits import lifecycle_wait, wait_due
 from .adapter import Dispatch
 from .core import transition
 from .reconciler import Settled
@@ -119,6 +120,7 @@ class AgentUpgradeAdapter:
             ),
             cancel_request_key=superseded if isinstance(superseded, str) else None,
             effect=effect,
+            next_action_at=wait_due(stored),
             reason=stored.status_reason,
         )
 
@@ -164,6 +166,18 @@ class AgentUpgradeAdapter:
     ) -> None:
         """Project a core decision onto the stored rollout; the only such writer."""
 
+        lifecycle_wait(
+            job,
+            identity=job.id,
+            kind=WaitOwnerKind.AGENT_UPGRADE,
+            state=after.state,
+            now=now,
+            due=after.next_action_at,
+            detail=after.reason,
+            deadline=after.recovery_deadline,
+            cancelling=after.cancel_requested,
+            lease_deadline=after.lease_deadline,
+        )
         job.state = _STORED[after.state]
         if reason is not KEEP:
             job.status_reason = None if reason is None else reason[:_MAX_REASON]

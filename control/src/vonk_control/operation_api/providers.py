@@ -26,6 +26,7 @@ from ..operation_item_contract import (
     OperationOwnerReference,
     operation_item,
 )
+from ..persisted_waits import read_wait
 from ..state_filters import state_filter
 from ..strict_json import warn_unreadable_once
 from .constants import NODE_PATTERN
@@ -478,15 +479,18 @@ class _StandaloneJobActivityProjection:
             created_at=_aware(job.created_at).isoformat(),
             updated_at=_aware(job.updated_at).isoformat(),
             supported_actions=[],
+            wait=read_wait(job),
             status_reason=status_reason,
             blockers=(
-                read_blockers(job.payload.get("blockers"))
+                wait.blockers
+                if (wait := read_wait(job)) is not None
+                else read_blockers(job.payload.get("blockers"))
                 if isinstance(job.payload, Mapping)
                 else None
             ),
             next_attempt_at=(
-                _text_or_none(job.payload.get("retry_after_at"))
-                if isinstance(job.payload, Mapping) and job.state == "queued"
+                job.next_action_at.isoformat()
+                if job.next_action_at is not None
                 else None
             ),
         )

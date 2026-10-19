@@ -7,7 +7,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 from typing import cast as _typing_cast
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from vonk_agent_protocol import (
     DesiredAssignmentState,
     InvalidRequestReason,
@@ -36,7 +36,9 @@ from ..models import (
     AgentNode,
     FleetProfile,
     FleetProfileApplication,
+    FleetProfileSelection,
 )
+from ..persisted_waits import read_wait, schedule_wait
 from ..strict_json import read_stored_model
 from .assessment_support import (
     _deferral_code,
@@ -297,7 +299,7 @@ class FleetProfileService:
         progress = FleetProfileApplication.progress
         cancellation = progress["cancellation"]
         cancellation_state = cancellation["state"].as_string()
-        observation_due = cancellation["observation_due_at"].as_string()
+        observation_due = FleetProfileApplication.next_action_at
         eligible = (
             FleetProfileApplication.state.in_(
                 job_states.words(
@@ -307,7 +309,7 @@ class FleetProfileService:
                 )
             )
             & cancellation_state.in_(fleet_profile_states.CANCEL_IN_FLIGHT)
-            & (func.coalesce(observation_due, "") <= now.isoformat())
+            & (observation_due.is_(None) | (observation_due <= now))
         )
         with self._sessions() as session:
             candidate = session.scalar(
@@ -362,10 +364,7 @@ class FleetProfileService:
             intent = current.cancellation
             if intent is None or intent.state != LifecycleState.OBSERVING:
                 return False
-            if (
-                intent.observation_due_at is not None
-                and _aware(intent.observation_due_at) > now
-            ):
+            if row.next_action_at is not None and _aware(row.next_action_at) > now:
                 return False
             return self._advance_cancellation_in_session(
                 session, row, plan, current, now
@@ -377,7 +376,7 @@ class FleetProfileService:
         followed: tuple[FleetProfileIntendedConfiguration, str] | None = None
         previous_request_id: str | None = None
         previous_reviewed_digest: str | None = None
-        with self._sessions() as session:
+        with self._sessions.begin() as session:
             selected = self._selected_profile_snapshot(session)
             if selected is None or isinstance(selected, Residue):
                 # A damaged selected receipt is recorded; the ordinary
@@ -392,6 +391,20 @@ class FleetProfileService:
             )
             roster_changed = roster != selected.roster_node_ids
             application = session.get(FleetProfileApplication, selected.application_id)
+            selection = session.get(FleetProfileSelection, 1)
+            if selection is not None and application is not None:
+                dependency = read_wait(application)
+                if dependency is not None:
+                    schedule_wait(
+                        selection,
+                        dependency.next_check,
+                        now=now,
+                        reason=dependency.reason,
+                        blockers=dependency.blockers,
+                        deadline=dependency.dependency_deadline,
+                    )
+                elif selection.wait_evidence is not None:
+                    schedule_wait(selection, None)
             if (
                 application is not None
                 and application.state == LifecycleState.SUCCEEDED.value

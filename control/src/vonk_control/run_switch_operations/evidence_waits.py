@@ -21,6 +21,7 @@ from vonk_agent_protocol import LifecycleState
 
 from .. import job_states
 from ..models import Job, NodeInventorySnapshot
+from ..persisted_waits import schedule_wait
 from ..stored_json import read_row_column
 from .constants import _OPERATION_KINDS
 from .errors import RunSwitchPostStopEvidencePending
@@ -76,7 +77,7 @@ def wake_evidence_waits(sessions: sessionmaker[Session], now: datetime) -> bool:
             if progress is None:
                 continue
             awaited = progress.awaited_inventory
-            due = progress.observation_due_at
+            due = job.next_action_at
             if (
                 awaited is None
                 or progress.retry_reason != RunSwitchPostStopEvidencePending.code
@@ -94,7 +95,7 @@ def wake_evidence_waits(sessions: sessionmaker[Session], now: datetime) -> bool:
             )
             if landed is None:
                 continue
-            progress.observation_due_at = now
+            schedule_wait(job, now)
             job.result = _persisted_result(progress)
             woke = True
     return woke

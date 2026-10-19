@@ -35,6 +35,7 @@ from vonk_control.models import (
     Job,
     RecipeBuild,
 )
+from vonk_control.persisted_waits import schedule_wait
 from vonk_control.recipe_builds import (
     RecipeBuildPlan,
     RecipeBuildResolution,
@@ -2158,9 +2159,7 @@ def test_postgres_connected_source_build_queues_model_child_until_builder_eligib
         session.commit()
         row = session.get(Job, parent.id)
         assert row is not None
-        row.payload = dict(row.payload) | {
-            "retry_after_at": (now - timedelta(seconds=1)).isoformat()
-        }
+        schedule_wait(row, (now - timedelta(seconds=1)))
         session.commit()
 
     assert production.service.run_pending() == 1

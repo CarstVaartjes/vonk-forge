@@ -691,7 +691,7 @@ class PrebuiltImageImporter:
         reference: str,
         error: OciImageStoreError | StoreUnknown | OSError,
     ) -> None:
-        code = PREBUILT_PULL_FAILED
+        code = PrebuiltImageCode.PULL_FAILED
         detail = str(getattr(error, "detail", error)) or type(error).__name__
         _LOGGER.warning(
             "prebuilt runtime image %s is unavailable (%s); the next plan "
@@ -749,7 +749,7 @@ class PrebuiltImageImporter:
                 # like a failed pull (it is retried), it is never raised.
                 evidence = None
                 failure = (
-                    PREBUILT_EVIDENCE_INVALID,
+                    PrebuiltImageCode.EVIDENCE_INVALID,
                     "the pulled image evidence does not match the build",
                 )
             if evidence is not None:
@@ -785,15 +785,10 @@ class PrebuiltImageImporter:
             job.updated_at = now
 
 
-PREBUILT_PULL_FAILED = "prebuilt_image_pull_failed"
-PREBUILT_EVIDENCE_INVALID = "prebuilt_image_evidence_invalid"
-
-
 __all__ = [
     "PREBUILT_KEY_MISMATCH",
     "PREBUILT_KEY_SCHEMA_VERSION",
     "PREBUILT_NOT_PINNED",
-    "PREBUILT_PULL_FAILED",
     "PREBUILT_USED",
     "PrebuiltDecision",
     "PrebuiltImage",

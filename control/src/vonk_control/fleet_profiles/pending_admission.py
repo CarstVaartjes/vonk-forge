@@ -60,7 +60,6 @@ from .projection_support import (
 )
 
 #: Every stored ISO time sorts below this; anything above it is not a time.
-_NO_TIME = "9999-12-31T23:59:59.999999+99:99"
 
 
 def _raw_pending(row: FleetProfileApplication) -> bool:
@@ -104,11 +103,7 @@ class FleetProfileService:
             if self._follow_newest_recipe_revisions(waiting_id, waiting_actor):
                 return True
         with self._sessions() as session:
-            retry_at = func.replace(
-                FleetProfileApplication.progress["admission_retry_at"].as_string(),
-                "Z",
-                "+00:00",
-            )
+            retry_at = FleetProfileApplication.next_action_at
             rows = session.scalars(
                 select(FleetProfileApplication)
                 .where(
@@ -125,8 +120,7 @@ class FleetProfileService:
                     # to hide the load.
                     or_(
                         retry_at.is_(None),
-                        retry_at <= _aware(now).isoformat(),
-                        retry_at > _NO_TIME,
+                        retry_at <= _aware(now),
                     ),
                 )
                 .order_by(
@@ -156,8 +150,8 @@ class FleetProfileService:
                     continue
                 # Retry projections cannot hide expired accepted ownership.
                 # Only the validated projection controls a live backoff.
-                if progress.admission_retry_at is not None and _aware(
-                    progress.admission_retry_at
+                if row.next_action_at is not None and _aware(
+                    row.next_action_at
                 ) > _aware(now):
                     continue
                 if candidate is None:
@@ -381,7 +375,6 @@ class FleetProfileService:
                     progress,
                     progress.blockers if evidence is None else [evidence],
                     admission_pending=False,
-                    admission_retry_at=None,
                 ).model_dump(mode="json")
             if state == ProfileCancellationCause.SUPERSEDED.value:
                 assert code is not None

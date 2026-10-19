@@ -135,7 +135,7 @@ def _tick_profile_when_due(
     """Follow this accepted owner and child's durable schedules, not guessed time."""
     observed = service.application(application_id)
     now = service._clock()
-    due = [observed.progress.retry_due_at]
+    due = [observed.next_attempt_at]
     adapter = observed.progress.switch_adapter
     if adapter is not None:
         due.extend(
@@ -144,10 +144,7 @@ def _tick_profile_when_due(
         )
     future = [instant for instant in due if instant is not None and instant > now]
     if future:
-        if (
-            observed.progress.retry_due_at is not None
-            and observed.progress.retry_due_at > now
-        ):
+        if observed.next_attempt_at is not None and observed.next_attempt_at > now:
             # A completed native receipt cannot bypass the parent's persisted
             # observation schedule. The same step/child stays bound until due.
             service.tick()
@@ -346,7 +343,7 @@ def test_child_retry_preserves_plan_and_per_node_relief_through_progress_api(
     assert response.status_code == 200, response.text
     waiting = FleetProfileApplicationView.model_validate_json(response.content)
     actual = {
-        (item.code, tuple(item.node_ids)): item.detail for item in waiting.blockers
+        (str(item.code), tuple(item.node_ids)): item.detail for item in waiting.blockers
     }
     for identity, detail in expected.items():
         assert actual[identity] == detail
@@ -362,7 +359,7 @@ def test_child_retry_preserves_plan_and_per_node_relief_through_progress_api(
         assert blocker.storage.available_bytes == available
         assert blocker.storage.reclaimable_bytes == found.freeable_bytes
     assert owner in actual[(unknown_code, (nodes[0],))]
-    assert waiting.progress.retry_due_at is not None
+    assert waiting.next_attempt_at is not None
     with sessions() as session:
         assert not tuple(
             session.scalars(
@@ -375,8 +372,8 @@ def test_child_retry_preserves_plan_and_per_node_relief_through_progress_api(
     # Restart the consumer: progress and request identity are durable, and fresh
     # planning no longer sees either fault.
     restarted, restarted_planner = _profile_service(sessions, lifecycle)
-    assert waiting.progress.retry_due_at is not None
-    due_at = waiting.progress.retry_due_at
+    assert waiting.next_attempt_at is not None
+    due_at = waiting.next_attempt_at
     for clocked in (restarted, restarted_planner, lifecycle):
         clocked._clock = lambda: due_at
     install_id = _drive_to_job(
@@ -1365,9 +1362,8 @@ def test_live_copy_on_other_spark_does_not_prevent_eviction_and_load(
             state=LifecycleState.RUNNING,
             actor="admin",
             current_operation_id=copying_id,
-            progress=FleetProfileApplicationProgress(
-                retry_due_at=lifecycle._clock() + timedelta(hours=2)
-            ).model_dump(mode="json"),
+            next_action_at=lifecycle._clock() + timedelta(hours=2),
+            progress=FleetProfileApplicationProgress().model_dump(mode="json"),
             created_at=lifecycle._clock(),
             updated_at=lifecycle._clock(),
         )

@@ -12,6 +12,7 @@ import pytest
 from sqlalchemy import select
 from vonk_agent_protocol import (
     AgentResult,
+    JournalRepairCode,
     LifecycleState,
     OperationProgress,
     canonical_message,
@@ -557,7 +558,10 @@ def test_held_required_row_defers_without_clock_reset_and_disjoint_work_advances
         native_ids,
     ) = faulty_install
     original_clock = clock[0]
-    due = raw.get("observation_due_at")
+    with sessions() as session:
+        original = session.get(Job, switch_id)
+        assert original is not None
+        due = original.next_action_at
     deadline = raw.get("observation_deadline_at")
     sibling = _job(clock[0] - timedelta(days=2))
     with sessions.begin() as session:
@@ -593,7 +597,16 @@ def test_held_required_row_defers_without_clock_reset_and_disjoint_work_advances
             row = session.get(Job, switch_id)
             assert row is not None and row.result == raw
             assert (row.id, row.request_id, row.payload_digest, row.payload) == identity
-            assert row.result.get("observation_due_at") == due
+            from vonk_control.persisted_waits import read_wait
+
+            pending = session.get(RunSwitchJournalRepairPending, switch_id)
+            if pending is None:
+                assert row.next_action_at == due
+            else:
+                wait = read_wait(row)
+                assert wait is not None
+                assert wait.reason == JournalRepairCode.EVIDENCE_UNAVAILABLE
+                assert wait.dependency_deadline == pending.deadline_at
             assert row.result.get("observation_deadline_at") == deadline
             assert session.get(Job, sibling.id) is None
             assert set(session.scalars(select(AgentOperation.id))) == native_ids
@@ -613,10 +626,14 @@ def test_held_required_row_defers_without_clock_reset_and_disjoint_work_advances
                 RunSwitchJournalRepairPendingState,
             )
 
-            state = RunSwitchJournalRepairPendingState.model_validate_json(
+            RunSwitchJournalRepairPendingState.model_validate_json(
                 canonical_message(pending.progress), strict=True
             )
-            clock[0] = state.next_attempt_at
+            live = session.get(Job, switch_id)
+            assert live is not None
+            due_at = live.next_action_at
+            assert due_at is not None
+            clock[0] = due_at
     assert planner.tick()
     with sessions() as session:
         row = session.get(Job, switch_id)
@@ -624,7 +641,7 @@ def test_held_required_row_defers_without_clock_reset_and_disjoint_work_advances
         repaired = owner._stored_result(row.result)
         assert repaired is not None and not isinstance(repaired, Residue)
         assert repaired.child_operation_id == install_id
-        assert row.result["observation_due_at"] == due
+        assert row.next_action_at is None  # confirmed repair settled its wait
         assert row.result.get("observation_deadline_at") == deadline
         assert len(list(session.scalars(select(RunSwitchJournalRepair)))) == 1
 
@@ -1073,8 +1090,9 @@ def test_unproven_repair_ends_without_blocking_fresh_same_spark(
         first = RunSwitchJournalRepairPendingState.model_validate_json(
             canonical_message(pending.progress), strict=True
         )
-    assert first.attempts == 1 and first.next_attempt_at > clock[0]
-    assert planner.get(switch_id).next_attempt_at == first.next_attempt_at
+    first_due = planner.get(switch_id).next_attempt_at
+    assert first.attempts == 1 and first_due is not None and first_due > clock[0]
+    assert planner.get(switch_id).next_attempt_at == first_due
     activity = planner.activity_provider().get_operation(switch_id)
     assert activity is not None
     assert activity.supported_actions == [OperationRecoveryAction.CANCEL]
@@ -1100,7 +1118,7 @@ def test_unproven_repair_ends_without_blocking_fresh_same_spark(
             )
     # Recreate the consumer to prove retry deadlines are PostgreSQL-owned.
     _profiles, planner = _measured_profile_service(sessions, _lifecycle)
-    clock[0] = first.next_attempt_at
+    clock[0] = first_due
     assert not planner.tick()
     with sessions() as session:
         pending = session.get(RunSwitchJournalRepairPending, switch_id)

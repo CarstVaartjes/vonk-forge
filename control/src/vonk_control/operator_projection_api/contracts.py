@@ -30,6 +30,7 @@ LogLevel = Literal["debug", "info", "warning", "error"]
 _SELECTOR_PATTERN = r"^[^\x00-\x1f\x7f]{1,256}$"
 
 FLEET_OPERATION_IDS = {
+    ("get", "/api/fleet/{selector}/revocation"): "getFleetNodeRevocation",
     ("get", "/api/fleet"): "getFleetStatus",
     ("get", "/api/fleet/locks"): "getFleetAdmissionLocks",
     ("get", "/api/fleet/{selector}"): "getFleetNode",

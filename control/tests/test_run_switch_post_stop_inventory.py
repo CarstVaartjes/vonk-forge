@@ -123,13 +123,13 @@ def test_switch_waits_for_new_physical_inventory_after_stop(
     # the threshold itself does not wake it, before or after a restart.
     waiting_result = planner.get(accepted.operation_id).result
     assert waiting_result is not None
-    first_due = waiting_result.observation_due_at
+    first_due = planner.get(accepted.operation_id).next_attempt_at
     assert first_due is not None and first_due > now[0]
     restarted = _service(sessions, now[0], lifecycle, RecordingArtifactExecutor())
     restarted.tick()
     waiting = restarted.get(accepted.operation_id)
     assert waiting.state == LifecycleState.RUNNING and waiting.result is not None
-    assert waiting.result.observation_due_at == first_due
+    assert waiting.next_attempt_at == first_due
     assert waiting.result.retry_attempt == waiting_result.retry_attempt
     now[0] += timedelta(seconds=6)
     samples[0]["observed_at"] = now[0]

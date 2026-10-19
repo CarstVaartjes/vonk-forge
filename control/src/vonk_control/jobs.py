@@ -377,6 +377,7 @@ class JobService:
                     # Claim only work this executor handles. Coordinators may
                     # be queued between turns without an AgentOperation yet.
                     Job.kind.in_(kinds),
+                    or_(Job.next_action_at.is_(None), Job.next_action_at <= now),
                     without_agent_operation(),
                     or_(
                         Job.state == "queued",

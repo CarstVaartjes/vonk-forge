@@ -13,13 +13,15 @@ from ..categorized_errors import InvalidValue
 from ..lifecycle import State
 from ..logging import redact_text
 from ..model_cache_contract import (
+    ModelCacheCancellation,
     ModelCacheOperationResponse,
     ModelCacheOperatorAction,
     ModelCacheRemovalPayload,
 )
 from ..models import CatalogDocumentRevision, ModelCacheOperation, ModelCacheSet
 from ..operation_contract import AvailabilityOperationFailure
-from ..strict_json import serialize_json_value
+from ..persisted_waits import read_wait
+from ..strict_json import read_stored_model, serialize_json_value
 from .catalog_helpers import _datetime, _iso, _parse_iso
 from .constants import SCHEMA_VERSION
 from .errors import ModelCacheConflictInvalid, ModelCacheNotFoundInvalid
@@ -132,6 +134,26 @@ class OperationsMixin:
             operation_id = operation.id
         return cache.get_operator_operation(operation_id)
 
+    def get_operator_cancellation(
+        self, operation_id: str, request_key: str, *, actor: str
+    ) -> tuple[CacheOperationView, ModelCacheOperatorAction, str]:
+        """Resolve only the accepted cancellation, including after restart."""
+        cache = cast("ModelCacheService", self)
+        operation, action, selector = cache.get_operator_operation(operation_id)
+        cancellation = (
+            None
+            if operation.cancellation is None
+            else read_stored_model(ModelCacheCancellation, operation.cancellation)
+        )
+        if cancellation is None or (cancellation.request_key, cancellation.actor) != (
+            request_key,
+            actor,
+        ):
+            raise ModelCacheNotFoundInvalid(
+                ModelCacheCode.OPERATION_MISSING, "cancellation receipt was not found"
+            )
+        return operation, action, selector
+
     def list_operations(self, *, limit: int = 100) -> tuple[CacheOperationView, ...]:
         cache = cast("ModelCacheService", self)
         if not 1 <= limit <= 100:
@@ -216,7 +238,14 @@ class OperationsMixin:
                 )
         removal = stored if isinstance(stored, ModelCacheRemovalPayload) else None
         waiting = operation.state in model_cache_states.WAITING_OR_FAILED
-        blockers = tuple(stored.blockers) if stored is not None and waiting else ()
+        wait = read_wait(operation)
+        blockers = (
+            tuple(wait.blockers)
+            if wait
+            else tuple(stored.blockers)
+            if stored is not None and waiting
+            else ()
+        )
         # The one retry clock is the column; a row written before the core still
         # carries it in the payload until its next transition.
         next_attempt = (
@@ -225,6 +254,7 @@ class OperationsMixin:
             else None
         )
         view = CacheOperationView(
+            wait=read_wait(operation),
             id=operation.id,
             request_key=operation.request_key,
             kind=operation.kind,

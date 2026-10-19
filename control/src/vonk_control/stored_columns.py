@@ -327,3 +327,23 @@ bind(
 
 
 bind("local_certificate_issuance", "binding", CertificateIssuanceBinding)
+
+# Every wait uses one contract; next_check is projected from the owner's SQL clock.
+from .wait_contract import WaitEvidence
+
+for _table in (
+    "recipe_installations",
+    "artifact_lifecycle_gates",
+    "agent_operations",
+    "jobs",
+    "artifact_jobs",
+    "model_cache_operations",
+    "fleet_profile_applications",
+    "fleet_profile_selection",
+    "recipe_runs",
+    "route_publication_owner",
+    "recipe_library_sync_runs",
+    "agent_certificates",
+    "agent_issued_certificate_revocations",
+):
+    bind(_table, "wait_evidence", WaitEvidence, nullable=True)

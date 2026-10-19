@@ -77,7 +77,7 @@ def test_direct_load_replans_after_installation_finishes_during_admission(
         waiting = recovered.application(accepted.id)
         if not waiting.progress.admission_pending:
             break
-        due = waiting.progress.admission_retry_at
+        due = waiting.next_attempt_at
         assert due is not None
         recovered._clock = lambda due=due: due
         assert recovered.tick()
@@ -114,7 +114,7 @@ def test_direct_stale_refusal_that_replanning_cannot_change_ends_with_evidence(
 
     monkeypatch.setattr(FleetProfileService, "_queue_application", refuse)
     accepted = profiles.apply(profile.id, request_key=str(uuid4()), actor="admin")
-    due = accepted.progress.admission_retry_at
+    due = accepted.next_attempt_at
     assert due is not None
     profiles._clock = lambda: due
     assert profiles.tick()
@@ -153,7 +153,7 @@ def test_pending_replan_cannot_acquire_an_unreviewed_stop_target(
         waiting = profiles.application(accepted.id)
         if not waiting.progress.admission_pending:
             break
-        due = waiting.progress.admission_retry_at
+        due = waiting.next_attempt_at
         assert due is not None
         profiles._clock = lambda due=due: due
         assert profiles.tick()

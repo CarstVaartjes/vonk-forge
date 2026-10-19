@@ -54,7 +54,7 @@ def test_activity_reads_reobserve_duplicate_owners_before_exposing_actions(
         job_operations=lambda *_args: OperationPage(
             (), None, JobProgress(completed=0, failed=0, running=0, total=0)
         ),
-        resume_job=lambda _job_id: None,
+        resume_job=lambda _job_id, *, receipt=None: None,
         operation_providers=(
             OperationProvider("run", list_rows, observe_left),
             OperationProvider("run", list_right, observe_right),
@@ -109,7 +109,7 @@ def test_activity_detail_retains_known_state_while_an_independent_peer_is_unread
         job_operations=lambda *_args: OperationPage(
             (), None, JobProgress(completed=0, failed=0, running=0, total=0)
         ),
-        resume_job=lambda _job_id: None,
+        resume_job=lambda _job_id, *, receipt=None: None,
         operation_providers=(
             OperationProvider(
                 "run",

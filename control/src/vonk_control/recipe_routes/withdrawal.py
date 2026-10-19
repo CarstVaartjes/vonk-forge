@@ -30,6 +30,7 @@ from ..models import (
     RoutePublication,
     RoutePublicationOwner,
 )
+from ..persisted_waits import schedule_wait
 from ..recipe_execution_contract import RouteWithdrawalFollowUp
 from ..route_runtime import (
     RECIPE_ROUTE_AUTHORITY_ID,
@@ -290,7 +291,7 @@ def _record_withdrawal_in_session(
             included.route_digest = generation.route_digest
             included.route_error = None
             included.route_attempts = 0
-            included.route_next_attempt_at = None
+            schedule_wait(included, None)
             included.updated_at = self._clock()
     for run_id in sorted(withdrawal.excluded):
         run = session.get(RecipeRun, run_id, with_for_update=True)
@@ -377,7 +378,7 @@ def _restore_abandoned_stop_withdrawals(
         run.route_state = RunRouteState.PENDING
         run.route_error = None
         run.route_attempts = 0
-        run.route_next_attempt_at = None
+        schedule_wait(run, None)
         run.updated_at = now
         log_event(
             _LOGGER,
@@ -432,7 +433,7 @@ def _maintenance_step_in_session(
         # this maintenance transaction while publishing or retrying a rank.
         run.route_state = RunRouteState.PENDING
         run.route_attempts = 0
-        run.route_next_attempt_at = self._clock()
+        schedule_wait(run, self._clock())
     if recovering:
         return True
     if not published:

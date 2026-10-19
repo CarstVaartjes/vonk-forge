@@ -193,9 +193,19 @@ class CancellationMixin:
             .execution_options(populate_existing=True)
         )
         if operation is None:
+            if not preserve_existing_owner:
+                raise ModelCacheConflictInvalid(
+                    ModelCacheCode.OPERATION_MISSING,
+                    "cancellation target was not found",
+                )
             return False  # gone: a parent waits for nothing
         payload = cache._payload_or_retire(operation)
         if payload is None:
+            if not preserve_existing_owner:
+                raise ModelCacheConflictInvalid(
+                    ModelCacheCode.DOCUMENT_UNREADABLE,
+                    "cannot record cancellation in unreadable operation",
+                )
             return False  # unreadable: retired (ended), nothing left to cancel
         existing = _operation_cancellation(operation)
         if existing is not None:

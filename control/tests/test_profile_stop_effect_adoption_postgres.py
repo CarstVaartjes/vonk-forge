@@ -415,7 +415,7 @@ def test_postgres_original_stop_is_adopted_across_replacements_and_fresh_receipt
         assert stop is not None
         progress = _read_progress(read_row_column(stop, "result"))
         progress.retry_reason = RunSwitchCode.RECEIPT_INVALID
-        progress.observation_due_at = clock[0]
+        stop.next_action_at = clock[0]
         stop.result = _persisted_result(progress)
     overdue_core = _service(sessions, clock[0], lifecycle, RecordingArtifactExecutor())
     overdue_core.tick()

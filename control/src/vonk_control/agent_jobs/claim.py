@@ -37,6 +37,7 @@ from ..models import AgentNode, AgentOperationAttempt, Job
 from ..models import AgentOperation as StoredOperation
 from ..operation_progress import stored_progress
 from ..own_cleanup import CLEANUP_KINDS
+from ..persisted_waits import schedule_wait
 from ..recovery_policy import WAIT_STEP
 from .claim_authority import recipe_build_disk_wait
 from .contracts import _MUTATING_OPERATIONS, CLAIM_LEASE_SECONDS
@@ -551,7 +552,7 @@ def _claim_once(
                 next_check = now + timedelta(seconds=WAIT_STEP)
                 if operation.recovery_deadline is not None:
                     next_check = min(next_check, _aware(operation.recovery_deadline))
-                operation.next_action_at = next_check
+                schedule_wait(operation, next_check)
                 operation.status_reason = _claim_refusal_reason(
                     disk_wait.value,
                     kind=operation.kind,

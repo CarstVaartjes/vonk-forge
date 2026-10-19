@@ -153,7 +153,14 @@ def test_a_load_admitted_without_an_image_decision_recovers_by_itself(
     assert successor.progress.retry_of_application_id == accepted.id
     assert successor.state == "running", successor.status_reason
     assert [effect.state for effect in successor.progress.effects] == ["pending"]
-    assert not successor.blockers, successor.blockers
+    assert successor.wait is not None
+    assert successor.wait.reason is WaitReason.RECEIPT_MISSING
+    assert successor.blockers and all(
+        item.code is WaitReason.RECEIPT_MISSING
+        and item.operation is not None
+        and item.operation.id != successor.id
+        for item in successor.blockers
+    )
 
 
 @pytest.mark.parametrize("looping_before_upgrade", [False, True])
