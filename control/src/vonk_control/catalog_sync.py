@@ -1009,8 +1009,10 @@ async def run_automatic_sync(
     settle_seconds: float = 10.0,
     reconcile: Callable[[], object] | None = None,
 ) -> None:
-    """Run the automatic library sync until ``stop`` is set; it never dies.
+    """Retry recoverable library observations until ``stop`` is set.
 
+    The shared owner contains observation failures. Programming faults escape
+    the cadence rather than repeating an unchanged error.
     A sync that cannot finish (the library unreachable, another sync running, a
     document unreadable) is unknown, not failed for good: the previously imported
     catalog stays active and the sync is asked again with jittered backoff whose
