@@ -16,6 +16,7 @@ export UV_PROJECT_ENVIRONMENT=${VONK_CLI_DEPENDENCY_ENV:-"$root/.cli-dependencie
 
 env=$UV_PROJECT_ENVIRONMENT
 helper="$root/tools/cli_dependencies.py"
+"$root/scripts/ensure-project-venv" "$env"
 
 # Never reuse an environment built for another platform or interpreter.
 if [[ -e "$env" || -L "$env" ]]; then
@@ -28,6 +29,7 @@ if [[ -e "$env" || -L "$env" ]]; then
     fi
 fi
 
+"$root/scripts/ensure-project-venv" "$env"
 "$root/scripts/retry-dependency-fetch" \
     uv sync --project "$root" --frozen --no-dev --no-install-project --quiet
 "$env/bin/python" "$helper" stamp >"$env/.vonk-platform"
