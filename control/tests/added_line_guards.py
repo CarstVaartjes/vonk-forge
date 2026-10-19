@@ -57,6 +57,8 @@ AGENT_REQUEST_BUILDERS = frozenset({"HostRuntimeRequest", "stop_payload_from_job
 SECURITY_EDGES = frozenset(
     {
         "control/src/vonk_control/auth.py",
+        # Canonical provider HTTP authentication and model-byte ingress verification.
+        "control/src/vonk_control/model_cache/http.py",
         "control/src/vonk_control/browser_auth.py",
         "control/src/vonk_control/auth_api.py",
         "control/src/vonk_control/agent_api/authority.py",

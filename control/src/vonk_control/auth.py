@@ -51,6 +51,9 @@ MUTATION_ROLES = {
     ("POST", "/api/model/{selector:path}/remove"): frozenset(
         {"administrator", "operator"}
     ),
+    ("POST", "/api/model/operations/{operation_id}/resume-access"): frozenset(
+        {"administrator", "operator"}
+    ),
     ("POST", "/api/model/operations/{operation_id}/cancel"): frozenset(
         {"administrator", "operator"}
     ),

@@ -659,3 +659,49 @@ def test_an_unknown_id_stays_a_plain_not_found() -> None:
     assert status != 0
     assert result["code"] == "controller.not_found"
     assert result["recovery_actions"] == []
+
+
+@pytest.mark.parametrize("lost_reply", [False, True])
+def test_model_resume_access_reconciles_same_request_without_second_post(lost_reply):
+    """Catches absent CLI access recovery and duplicate checks after a lost reply."""
+    operation_id = "22222222-2222-4222-8222-222222222222"
+    path = f"/api/model/operations/{operation_id}/resume-access"
+    result = receipt("model") | {
+        "operation_id": operation_id,
+        "phase": "queued",
+        "progress": {"phase": "queued"},
+        "transferred_bytes": 0,
+    }
+    client = SubmissionClient(
+        {
+            ("POST", path): ControlTransportError() if lost_reply else result,
+            ("GET", f"/api/model/requests/{KEY}"): result,
+        }
+    )
+    status, observed = run(
+        ("model", "resume-access", operation_id, "--detach", "--json"), client
+    )
+    assert status == 0 and observed == result
+    assert client.calls[0][:3] == ("POST", path, {"request_key": KEY})
+    assert [call[0] for call in client.calls] == (
+        ["POST", "GET"] if lost_reply else ["POST"]
+    )
+
+
+def test_model_resume_access_rejects_other_request_receipt():
+    """Catches treating an unrelated operation as an accepted access check."""
+    operation_id = "22222222-2222-4222-8222-222222222222"
+    path = f"/api/model/operations/{operation_id}/resume-access"
+    client = SubmissionClient(
+        {
+            ("POST", path): receipt("model")
+            | {"request_key": "33333333-3333-4333-8333-333333333333"},
+            ("GET", f"/api/model/requests/{KEY}"): receipt("model")
+            | {"request_key": "33333333-3333-4333-8333-333333333333"},
+        }
+    )
+    status, result = run(
+        ("model", "resume-access", operation_id, "--detach", "--json"), client
+    )
+    assert status == 2
+    assert acceptance(result) == "unknown"
