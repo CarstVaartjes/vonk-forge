@@ -18,6 +18,7 @@ from vonk_agent_protocol import (
     LifecycleState,
     OutcomeDone,
     OutcomeKind,
+    ProfileReasonCode,
     RecipeStopResult,
     ReservationState,
     RunState,
@@ -1055,8 +1056,8 @@ def test_profile_cancel_api_is_exact_authorized_and_stops_before_dispatch(
         json={"profile_number": profile.number, "request_key": _uuid(982)},
         headers=_headers(tokens, "administrator"),
     )
-    assert conflict.status_code == 202
-    assert conflict.json()["cancellation"]["request_key"] == key
+    assert conflict.status_code == 409
+    assert conflict.headers["x-vonk-error-code"] == ProfileReasonCode.REQUEST_INVALID
 
     # Request identity includes the current actor. Another administrator
     # cannot replay the accepted key on this application.

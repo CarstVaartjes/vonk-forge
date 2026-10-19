@@ -277,6 +277,7 @@ class EndingsMixin:
         checkpoint_guard: Callable[[Session], Job | None] | None = None,
         clear_child: bool = False,
         definite: bool = False,
+        retryable: bool = False,
         cause: BaseException | None = None,
     ) -> None:
         """Observe uncertain children under their original identity and budget.
@@ -355,6 +356,7 @@ class EndingsMixin:
                 now=now,
                 failure_code=failure_code,
                 progress=progress,
+                retryable=retryable,
             )
 
     @staticmethod

@@ -23,6 +23,10 @@ from ..lifecycle.types import State as _LifecycleState
 from ..models import AgentNode, AgentOperationAttempt, Job
 from ..models import AgentOperation as StoredOperation
 from ..own_cleanup import CLEANUP_KINDS
+from .distribution_receipts import (
+    adopt_distribution_receipt,
+    retained_distribution_receipt,
+)
 from .endings import end_unobserved_order
 from .ownership import observation_ownership
 from .persistence import _OrderStore
@@ -78,7 +82,7 @@ def _order_reconciler(self: AgentJobService) -> Reconciler:
 
 
 def _sweep_lapsed_attempts(self: AgentJobService, limit: int) -> bool:
-    """Decide every ``running`` order whose attempt can no longer report.
+    """Re-observe retained transfer receipts and decide lapsed running orders.
 
     This is the periodic form of what the claim path did only when a Spark
     polled.  The order is decided exactly as there (``_reconcile_dead_running_
@@ -90,27 +94,58 @@ def _sweep_lapsed_attempts(self: AgentJobService, limit: int) -> bool:
 
     now = self._clock()
     with self._sessions() as session:
-        candidates = tuple(
-            session.execute(
-                select(
-                    StoredOperation.id,
-                    StoredOperation.node_id,
-                    StoredOperation.parent_job_id,
-                )
-                .where(
-                    or_(
-                        lapsed_running_orders(now),
-                        # Only a running order is decided here; a lost one
-                        # observes past its deadline and is the reconciler's.
-                        (StoredOperation.recovery_deadline <= now)
-                        & (StoredOperation.state == aos.RUNNING),
-                    ),
-                    StoredOperation.current_attempt > 0,
-                )
-                .order_by(StoredOperation.created_at, StoredOperation.id)
-                .limit(limit)
+        candidate_query = (
+            select(
+                StoredOperation.id,
+                StoredOperation.node_id,
+                StoredOperation.parent_job_id,
             )
+            .where(
+                or_(
+                    lapsed_running_orders(now),
+                    # Re-read an authenticated terminal transfer receipt
+                    # even during backoff: its effect already happened.
+                    (StoredOperation.kind == AgentOperation.ARTIFACT_DISTRIBUTION)
+                    & StoredOperation.state.in_(aos.PARKED)
+                    & select(AgentOperationAttempt.id)
+                    .where(
+                        AgentOperationAttempt.operation_id == StoredOperation.id,
+                        AgentOperationAttempt.attempt
+                        == StoredOperation.current_attempt,
+                        aos.sql_attempt_lapsed(AgentOperationAttempt),
+                        AgentOperationAttempt.result["downloaded_bytes"]
+                        .as_string()
+                        .is_not(None),
+                    )
+                    .exists(),
+                    # Only a running order is decided here; a lost one
+                    # observes past its deadline and is the reconciler's.
+                    (StoredOperation.recovery_deadline <= now)
+                    & (StoredOperation.state == aos.RUNNING),
+                ),
+                StoredOperation.current_attempt > 0,
+            )
+            .order_by(StoredOperation.id)
+            .limit(limit)
         )
+        cursor = self._order_sweep_cursor
+        if cursor is None:
+            candidates = tuple(session.execute(candidate_query))
+        else:
+            following = tuple(
+                session.execute(candidate_query.where(StoredOperation.id > cursor))
+            )
+            candidates = following + tuple(
+                session.execute(
+                    candidate_query.where(StoredOperation.id <= cursor).limit(
+                        limit - len(following)
+                    )
+                )
+            )
+    if candidates:
+        # A busy or unusable receipt cannot monopolize this bounded pass.
+        # The cursor is observation fairness only, never dispatch authority.
+        self._order_sweep_cursor = str(candidates[-1][0])
     progressed = False
     for operation_id, node_id, parent_job_id in candidates:
         # Decide without a lock whether there is anything to do: an order
@@ -168,6 +203,18 @@ def _sweep_lapsed_attempts(self: AgentJobService, limit: int) -> bool:
                     None,
                 )
                 now = self._clock()
+                receipt = retained_distribution_receipt(operation, attempt)
+                parent = session.get(Job, parent_job_id)
+                if (
+                    receipt is not None
+                    and attempt is not None
+                    and parent is not None
+                    and adopt_distribution_receipt(
+                        self, session, operation, attempt, parent, node, receipt, now
+                    )
+                ):
+                    progressed = True
+                    continue
                 if operation.state != aos.RUNNING:
                     continue
                 superseded_by = _superseding_intent(operation, node)
@@ -205,6 +252,8 @@ def _sweep_would_act(self: AgentJobService, operation_id: str, node_id: str) -> 
                 AgentOperationAttempt.attempt == operation.current_attempt,
             )
         )
+        if retained_distribution_receipt(operation, attempt) is not None:
+            return True
         if operation.state in aos.PARKED:
             return operation.recovery_deadline is not None and _aware(
                 operation.recovery_deadline

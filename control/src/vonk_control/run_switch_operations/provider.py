@@ -14,6 +14,8 @@ from sqlalchemy.sql.elements import ColumnElement
 from vonk_agent_protocol import (
     InvalidRequestReason,
     LifecycleState,
+    RunSwitchCode,
+    WaitReason,
 )
 
 from .. import job_states
@@ -239,6 +241,15 @@ class RunSwitchOperationProvider:
                 "blockers": [
                     item.model_dump(mode="json") for item in operation.blockers
                 ],
+                "wait_reason": (
+                    WaitReason.OBSERVATION_UNAVAILABLE
+                    if any(
+                        item.code == RunSwitchCode.EFFECT_UNCERTAIN
+                        and item.operation is not None
+                        for item in operation.blockers
+                    )
+                    else None
+                ),
                 "next_attempt_at": (
                     operation.next_attempt_at.isoformat()
                     if operation.next_attempt_at is not None

@@ -16,6 +16,7 @@ from types import SimpleNamespace
 import httpx2
 import pytest
 from sqlalchemy.exc import OperationalError
+from vonk_agent_protocol import AgentFailureKind, FailureCode, LifecycleState
 from vonk_control.failure_evidence import FailureEvidenceService
 from vonk_control.models import Job
 from vonk_control.run_switch_contract import (
@@ -270,21 +271,36 @@ def test_a_workload_that_exits_at_start_ends_the_switch_with_its_cause(
     assert executor.calls.count("transfer") == 1
 
 
-def test_an_uncertain_child_failure_stays_attached_to_its_child(
+def test_an_uncertain_failed_transfer_ends_retryable_with_its_child_evidence(
     tmp_path: Path,
 ) -> None:
-    """Only a deterministic failure ends: an effect nobody could confirm is
-    observed again under the same child, not declared failed."""
-
-    _, service, _, _, operation, child_id = _switch_with_failed_child(
+    """Catches retaining a failed preparation child as an active observer forever."""
+    sessions, service, _, request, operation, child_id = _switch_with_failed_child(
         tmp_path,
         {
-            "error_code": "recipe_start_failed",
+            "error_code": FailureCode.RECIPE_START_FAILED.value,
             "reason": _PROCESS_EXIT,
-            "failure_kind": "uncertain-effect",
+            "failure_kind": AgentFailureKind.UNCERTAIN_EFFECT.value,
         },
     )
-    view = service.get(operation.operation_id)
-    assert view.state == "running", (view.state, view.status_reason)
-    assert view.result is not None
-    assert view.result.child_operation_id == child_id
+
+    def cause(ended) -> None:
+        assert ended.result is not None
+        assert ended.result.failure_code == FailureCode.RECIPE_START_FAILED
+        assert ended.result.retryable
+        assert ended.result.child_operation_id == child_id
+
+    ended, _fresh = assert_ended_without_blocking(
+        SimpleNamespace(sessions=sessions),
+        operation,
+        end=lambda receipt: service.get(receipt.operation_id),
+        fresh=lambda _world: service.apply(
+            RunSwitchApplyRequest(
+                **request.model_dump(), request_key=str(uuid.uuid4())
+            ),
+            actor="admin",
+        ),
+        assert_reason=cause,
+        request_key=lambda receipt: receipt.operation_id,
+    )
+    assert ended.state == LifecycleState.FAILED

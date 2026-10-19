@@ -2,7 +2,9 @@
 
 from datetime import timedelta
 
+import pytest
 from sqlalchemy import select
+from vonk_agent_protocol import InvalidRequestError, InvalidRequestReason
 from vonk_control.fleet_profile_contract import FleetProfileInput
 from vonk_control.fleet_profiles import FleetProfileService
 from vonk_control.models import (
@@ -128,15 +130,17 @@ def test_selected_cancel_fences_both_original_and_new_node_ordinals():
     second = service.apply(second_profile.id, request_key=_uuid(18002), actor="admin")
     # The executor's old receipt does not revoke a newer accepted policy. Its
     # original child identity continues, but cancellation belongs to selection.
-    earlier = service.cancel(
-        first.id,
-        profile_number=service.get_number(1).number,
-        request_key=_uuid(18005),
-        actor="admin",
-    )
+    with pytest.raises(InvalidRequestError) as refused:
+        service.cancel(
+            first.id,
+            profile_number=service.get_number(1).number,
+            request_key=_uuid(18005),
+            actor="admin",
+        )
+    assert refused.value.typed_reason == InvalidRequestReason.CONFLICT
     assert (
-        earlier.current_operation_id
-        == service.application(first.id).current_operation_id
+        service.application(first.id).current_operation_id
+        == _original.current_operation_id
     )
     assert service.application(first.id).cancellation is None
     service.cancel(

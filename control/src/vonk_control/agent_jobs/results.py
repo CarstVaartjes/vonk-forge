@@ -9,6 +9,7 @@ from vonk_agent_protocol import (
     AgentOperation,
     AgentResult,
     AgentResultState,
+    ArtifactDistributionResult,
     FailureCode,
     InvalidRequestReason,
     SecurityRefusalReason,
@@ -39,6 +40,7 @@ from .contracts import (
     StaleAgentFence,
     StaleAgentRequest,
 )
+from .distribution_receipts import adopt_distribution_receipt
 from .evidence import (
     _failure_result,
     _lease_expiry_reason,
@@ -115,8 +117,9 @@ def record_late_result(
 
     Only the authenticated node may submit the exact historical fence.
     Certificate rotation may change its current TLS credential while the
-    durable receipt still names the original certificate. Old success and
-    failure stay diagnostic. A typed cancellation acknowledgement may
+    durable receipt still names the original certificate. An exact current
+    transfer receipt settles its effect; other historical success and failure
+    stay diagnostic. A typed cancellation acknowledgement may
     retire only the exact superseded order after the agent confirms its
     host action has ceased; it never applies that order's desired effect.
     """
@@ -204,6 +207,14 @@ def record_late_result(
             and operation.workload_intent_ordinal is not None
             and operation.workload_intent_ordinal != node.workload_intent_ordinal
         )
+        if (
+            message.state == AgentResultState.SUCCEEDED
+            and isinstance(message.result, ArtifactDistributionResult)
+            and adopt_distribution_receipt(
+                self, session, operation, attempt, parent, node, message.result, now
+            )
+        ):
+            return True
         if (
             operation.kind == AgentOperation.RECIPE_JOB_RUN.value
             and isinstance(message.result, RecipeJobRunResult)

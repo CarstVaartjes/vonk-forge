@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 
 from pydantic import TypeAdapter
 from vonk_agent_protocol.agent_words import ProfileChildPhase
@@ -33,6 +34,7 @@ class _ChildView:
 
     state: str
     result: RunSwitchDistributionChildResult | RunSwitchPhaseResult
+    retry_due_at: datetime | None = None
 
     @property
     def progress(self) -> RunSwitchChildProgress | None:
