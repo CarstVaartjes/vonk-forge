@@ -403,3 +403,37 @@ def test_stall_alarm_is_not_a_new_dependency_or_progress() -> None:
     wait = read_wait(job)
     assert wait is not None
     assert wait.first_blocked_at == NOW and wait.last_progress_at is None
+
+
+def test_operator_wait_retains_the_owners_real_action_after_store_load(
+    postgres_engine,
+) -> None:
+    """Catches publishing an operator wait without the resume action its owner accepts."""
+    from vonk_agent_protocol import OperatorActionName, WaitResumeCondition
+    from vonk_control.persisted_waits import read_wait, schedule_wait
+
+    Base.metadata.create_all(postgres_engine)
+    sessions = sessionmaker(postgres_engine, expire_on_commit=False)
+    adapter, job = JobAdapter(), _job()
+    after = replace(
+        adapter.adopt(job),
+        state=LifecycleState.NEEDS_OPERATOR,
+        reason=WaitReason.JOB_STATE_UNCERTAIN,
+    )
+    with sessions.begin() as session:
+        session.add(job)
+        adapter.apply(job, after, NOW)
+    with sessions.begin() as session:
+        loaded = session.get(Job, job.id)
+        assert loaded is not None
+        wait = read_wait(loaded)
+        assert wait is not None
+        assert wait.resume_condition is WaitResumeCondition.OPERATOR_ACTION
+        assert wait.operator_action is OperatorActionName.RESUME
+        assert wait.operator_action in adapter.actions(adapter.adopt(loaded))
+        schedule_wait(loaded, NOW + timedelta(seconds=30))
+    with sessions() as session:
+        loaded = session.get(Job, job.id)
+        assert loaded is not None
+        wait = read_wait(loaded)
+        assert wait is not None and wait.operator_action is OperatorActionName.RESUME

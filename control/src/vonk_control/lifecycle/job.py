@@ -54,7 +54,12 @@ from typing import Any
 from sqlalchemy import update
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import Disposition, LifecycleState, WaitOwnerKind
+from vonk_agent_protocol import (
+    Disposition,
+    LifecycleState,
+    OperatorActionName,
+    WaitOwnerKind,
+)
 
 from .. import job_states
 from ..agent_operation_facts import aware
@@ -183,7 +188,7 @@ class JobAdapter:
     def actions(self, row: Lifecycle) -> tuple[str, ...]:
         """``resume`` (``POST /api/jobs/{id}/resume``) exists for a parked job."""
 
-        return ("resume",) if row.state is State.NEEDS_OPERATOR else ()
+        return (OperatorActionName.RESUME,) if row.state is State.NEEDS_OPERATOR else ()
 
     def children(self, row: Lifecycle) -> tuple[Lifecycle, ...]:
         return ()
@@ -223,6 +228,7 @@ class JobAdapter:
             deadline=after.recovery_deadline,
             cancelling=after.cancel_requested,
             lease_deadline=after.lease_deadline,
+            operator_action=OperatorActionName.RESUME if self.actions(after) else None,
         )
         job.state = stored
         job.updated_at = now

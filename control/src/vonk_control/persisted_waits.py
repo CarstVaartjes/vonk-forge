@@ -9,6 +9,7 @@ from pydantic import BaseModel, TypeAdapter, ValidationError
 from vonk_agent_protocol import (
     LifecycleState,
     OperationReason,
+    OperatorActionName,
     ProgressAlarmCode,
     WaitOwnerKind,
     WaitReason,
@@ -73,6 +74,7 @@ def write_wait(
     resume_condition: WaitResumeCondition = WaitResumeCondition.DEPENDENCY_CHANGED,
     dependency_deadline: datetime | None = None,
     last_progress_at: datetime | None = None,
+    operator_action: OperatorActionName | None = None,
 ) -> bool:
     """Write validated evidence and its due field in the caller's transaction.
 
@@ -117,6 +119,7 @@ def write_wait(
             default=None,
         ),
         resume_condition=resume_condition,
+        operator_action=operator_action,
     )
     due = aware(next_check)
     changed = owner.wait_evidence != evidence or owner.next_action_at != due
@@ -139,6 +142,7 @@ def lifecycle_wait(
     deadline: datetime | None = None,
     cancelling: bool = False,
     lease_deadline: datetime | None = None,
+    operator_action: OperatorActionName | None = None,
 ) -> bool:
     """The shared adapter write, without duplicating lifecycle decisions."""
     waiting = (
@@ -184,6 +188,7 @@ def lifecycle_wait(
             )
         ],
         dependency_deadline=deadline,
+        operator_action=operator_action,
         resume_condition=(
             WaitResumeCondition.EFFECT_OBSERVED
             if cancelling or state is LifecycleState.OBSERVING
@@ -383,6 +388,7 @@ def schedule_wait(
         else previous.dependency_deadline
         if previous
         else None,
+        operator_action=previous.operator_action if previous else None,
         resume_condition=previous.resume_condition
         if previous
         else WaitResumeCondition.DEPENDENCY_CHANGED,
