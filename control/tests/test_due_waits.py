@@ -301,9 +301,11 @@ def test_owner_handler_runs_after_the_selection_connection_is_released(postgres_
         engine.dispose()
 
 
-@pytest.mark.parametrize("superseded", (False, True))
+@pytest.mark.parametrize(
+    "superseded, missing_receipt", ((False, False), (True, False), (False, True))
+)
 def test_due_recipe_parent_uses_normal_phase_advancement_after_restart(
-    tmp_path, postgres_engine, monkeypatch, superseded
+    tmp_path, postgres_engine, monkeypatch, superseded, missing_receipt
 ):
     """Catches registering a parent callback that only polls its cleanup paths."""
     from sqlalchemy import select
@@ -360,6 +362,25 @@ def test_due_recipe_parent_uses_normal_phase_advancement_after_restart(
             succeeded=True,
             evidence=start_evidence(child.payload),
         )
+    saved_result = None
+    if missing_receipt:
+        from vonk_control.recipe_lifecycle_contract import (
+            RecipeOperationProgressResult,
+            RecipeOperationResult,
+        )
+        from vonk_control.stored_json import read_row_column
+
+        with sessions.begin() as session:
+            parent = session.get(Job, started.id)
+            assert parent is not None
+            saved_result = parent.result
+            recorded = read_row_column(parent, "result")
+            assert isinstance(
+                recorded, (RecipeOperationProgressResult, RecipeOperationResult)
+            )
+            parent.result = recorded.model_copy(
+                update={"node_evidence": None, "launch_evidence": None}
+            ).model_dump(mode="json", exclude_none=True)
     now = RECIPE_NOW + timedelta(seconds=5)
     if superseded:
         from vonk_agent_protocol import AgentOperation as WireAgentOperation
@@ -392,6 +413,25 @@ def test_due_recipe_parent_uses_normal_phase_advancement_after_restart(
         clock=lambda: now,
     )
     backstop.tick()
+    if missing_receipt:
+        from vonk_agent_protocol import WaitReason
+        from vonk_control.persisted_waits import read_wait
+
+        with sessions.begin() as session:
+            parent = session.get(Job, started.id)
+            assert parent is not None
+            wait = read_wait(parent)
+            assert wait is not None and wait.reason is WaitReason.RECEIPT_MISSING
+            assert set(
+                session.scalars(
+                    select(AgentOperation.id).where(
+                        AgentOperation.parent_job_id == started.id
+                    )
+                )
+            ) == {child.id for child in children}
+            parent.result = saved_result
+            now = wait.next_check
+        backstop.tick()
     with sessions() as session:
         current = set(
             session.scalars(

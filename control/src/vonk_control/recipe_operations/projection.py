@@ -626,15 +626,21 @@ class ProjectionMixin:
                     return False
                 recorded = _recorded_result(job.kind, stored_result, subject=job.id)
                 before = (job.state, job.result, tuple(child.id for child in children))
-                if all(
-                    child.state in _TERMINAL_JOB_STATES for child in children
-                ) and not isinstance(
-                    recorded,
-                    (
-                        RecipeOperationResult,
-                        RecipeOperationProgressResult,
-                        RecipeOperationCancellationResult,
-                    ),
+                receipts = (
+                    recorded.node_evidence or recorded.launch_evidence
+                    if isinstance(
+                        recorded,
+                        (
+                            RecipeOperationResult,
+                            RecipeOperationProgressResult,
+                            RecipeOperationCancellationResult,
+                        ),
+                    )
+                    else None
+                )
+                if (
+                    all(child.state in _TERMINAL_JOB_STATES for child in children)
+                    and not receipts
                 ):
                     schedule_wait(
                         job,
