@@ -12,7 +12,6 @@ from vonk_agent_protocol import (
     ArtifactDistributionResult,
     FailureCode,
     InvalidRequestReason,
-    LifecycleState,
     SecurityRefusalReason,
     UnknownOutcomeError,
     canonical_message,
@@ -41,6 +40,7 @@ from .contracts import (
     StaleAgentFence,
     StaleAgentRequest,
 )
+from .distribution_receipts import adopt_distribution_receipt
 from .evidence import (
     _failure_result,
     _lease_expiry_reason,
@@ -117,13 +117,12 @@ def record_late_result(
 
     Only the authenticated node may submit the exact historical fence.
     Certificate rotation may change its current TLS credential while the
-    durable receipt still names the original certificate. Old success and
-    failure stay diagnostic. A typed cancellation acknowledgement may
+    durable receipt still names the original certificate. An exact current
+    transfer receipt settles its effect; other historical success and failure
+    stay diagnostic. A typed cancellation acknowledgement may
     retire only the exact superseded order after the agent confirms its
     host action has ceased; it never applies that order's desired effect.
     """
-    from ..job_documents import DistributionJobPayload
-
     self._mark_started()
     with self._sessions.begin() as session:
         hint = session.execute(
@@ -208,50 +207,13 @@ def record_late_result(
             and operation.workload_intent_ordinal is not None
             and operation.workload_intent_ordinal != node.workload_intent_ordinal
         )
-        distribution = column_value(parent, "payload")
-        assignment = (
-            distribution.assignments.get(node_id)
-            if isinstance(distribution, DistributionJobPayload)
-            else None
-        )
         if (
-            operation.kind == AgentOperation.ARTIFACT_DISTRIBUTION
-            and message.state == AgentResultState.SUCCEEDED
+            message.state == AgentResultState.SUCCEEDED
             and isinstance(message.result, ArtifactDistributionResult)
-            and assignment is not None
-            and assignment.node_id == node_id
-            and assignment.plan_digest == operation.authority_revision
-            and message.result.downloaded_bytes
-            == sum({item.sha256: item.bytes for item in assignment.objects}.values())
-            and operation.current_attempt == attempt.attempt
-            and operation.state in agent_operation_states.RUNNING_OR_PARKED
-            and parent.state not in _ENDED_PARENT_STATES
-            and column_field(parent, "result", "cancel_requested") is not True
-            and not superseded_intent
-            and operation.workload_intent_ordinal
-            == column_field(parent, "payload", "workload_intent_ordinal")
-            and (
-                attempt.state == LifecycleState.RUNNING
-                or agent_operation_states.attempt_lapsed(attempt)
+            and adopt_distribution_receipt(
+                self, session, operation, attempt, parent, node, message.result, now
             )
-            and column_value(attempt, "result") is None
         ):
-            # A lease fences new effects, not the exact transfer's durable
-            # receipt. The agent replays it after restart on every loop pass.
-            # Adopt only this still-current fence: a newer attempt, cancellation
-            # or newer intent must never be revived by historical success.
-            adapter = AgentOperationAdapter(session)
-            adapter.record_report(attempt, message.state, message.result)
-            adapter.settle(
-                operation,
-                attempt,
-                parent,
-                Reported(Outcome.DONE, fence=attempt.fence),
-                now,
-            )
-            if self._result_consumer is not None:
-                self._result_consumer(session, operation, attempt, message)
-            self._aggregate_parent(session, operation.parent_job_id)
             return True
         if (
             operation.kind == AgentOperation.RECIPE_JOB_RUN.value

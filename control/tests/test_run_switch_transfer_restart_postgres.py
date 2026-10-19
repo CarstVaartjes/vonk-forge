@@ -386,3 +386,125 @@ def test_fresh_controller_contract_registration_starts_without_import_cycle():
         text=True,
         timeout=30,
     )
+
+
+def test_worker_reobserves_retained_success_after_controller_restart(
+    transfer, tmp_path, monkeypatch
+):
+    """Catches a successful receipt stranded in SQL without a new agent report."""
+    from vonk_control.agent_jobs import results as ingress
+
+    sessions, lifecycle, jobs, executor, _service, parent_id, claim, now = transfer
+    peer = AgentPeer(jobs, tmp_path / "receipt.json")
+    receipt = peer.finish_without_reporting(claim)
+    current = _lapse(transfer)
+    assert current.result is not None and current.result.child_operation_id is not None
+    child_id = current.result.child_operation_id
+    # The historical producer authenticated and stored the receipt but never
+    # projected its success. Exercise that real producer/store boundary.
+    with monkeypatch.context() as fault:
+        fault.setattr(ingress, "adopt_distribution_receipt", lambda *_args: False)
+        jobs.record_late_result(receipt)
+    with sessions() as session:
+        order = session.scalar(
+            select(AgentOperation).where(AgentOperation.parent_job_id == child_id)
+        )
+        assert order is not None and order.next_action_at is not None
+        assert now[0] < order.next_action_at
+    with sessions() as session:
+        node = session.get(AgentNode, current.node_ids[0])
+        assert node is not None
+        last_contact = node.last_seen_at
+    restarted_jobs = AgentJobService(sessions, clock=lambda: now[0])
+    # No agent connects or resends. The first worker tick reads durable SQL.
+    restarted_jobs.reconcile_orders()
+    child = executor.get(child_id)
+    assert child is not None and child.state == LifecycleState.SUCCEEDED
+    restarted_jobs.reconcile_orders()
+    with sessions() as session:
+        node = session.get(AgentNode, current.node_ids[0])
+        order = session.scalar(
+            select(AgentOperation).where(AgentOperation.parent_job_id == child_id)
+        )
+        assert node is not None and node.last_seen_at == last_contact
+        assert order is not None and order.current_attempt == 1
+    world = (
+        sessions,
+        lifecycle,
+        restarted_jobs,
+        executor,
+        _service,
+        parent_id,
+        claim,
+        now,
+    )
+    _observe_transfer(world)
+    _complete_parent(world)
+
+
+def test_an_invalid_retained_receipt_cannot_starve_another_exact_transfer(
+    transfer, monkeypatch
+):
+    """Catches a bounded sweep stuck examining the same unusable history row."""
+    from vonk_control.agent_jobs import results as ingress
+    from vonk_control.job_documents import DistributionJobPayload
+    from vonk_control.run_switch_operations import _stored_job_plan
+    from vonk_control.strict_json import read_stored_model
+
+    sessions, _lifecycle, jobs, executor, _service, parent_id, claim, now = transfer
+    current = _lapse(transfer)
+    assert current.result is not None and current.result.child_operation_id is not None
+    old_id = current.result.child_operation_id
+    with monkeypatch.context() as fault:
+        fault.setattr(ingress, "adopt_distribution_receipt", lambda *_args: False)
+        jobs.record_late_result(
+            AgentResult(
+                fence=claim.fence,
+                state=AgentResultState.SUCCEEDED,
+                result=ArtifactDistributionResult(downloaded_bytes=512),
+            )
+        )
+    with sessions() as session:
+        owner = session.get(Job, parent_id)
+        child = session.get(Job, old_id)
+        assert owner is not None and child is not None
+        plan = _stored_job_plan(owner)
+        assert plan is not None
+        payload = read_stored_model(
+            DistributionJobPayload, child.payload, from_json=True
+        )
+    phase = next(
+        item for item in plan.phases if item.kind == ProfileChildPhase.TRANSFER
+    )
+    # Another exact preparation can use the same authorized content and node.
+    fresh_id = executor.durable._ensure_child(
+        plan,
+        phase,
+        actor="admin",
+        request_key=str(uuid4()),
+        cached=(),
+        assignments=payload.assignments,
+        target_order=tuple(payload.target_order),
+        workload_intent_ordinal=payload.workload_intent_ordinal,
+        target_bytes=1024,
+    )
+    fresh = claim_agent(
+        jobs, current.node_ids[0], "serial-0", 60, preflight_fingerprint="a" * 64
+    )
+    assert fresh is not None and fresh.fence != claim.fence
+    now[0] = fresh.deadline + timedelta(seconds=1)
+    with monkeypatch.context() as fault:
+        fault.setattr(ingress, "adopt_distribution_receipt", lambda *_args: False)
+        jobs.record_late_result(
+            AgentResult(
+                fence=fresh.fence,
+                state=AgentResultState.SUCCEEDED,
+                result=ArtifactDistributionResult(downloaded_bytes=1024),
+            )
+        )
+    for _ in range(2):
+        jobs.reconcile_orders(limit=1)
+    adopted = executor.get(fresh_id)
+    assert adopted is not None and adopted.state == LifecycleState.SUCCEEDED
+    old = executor.get(old_id)
+    assert old is not None and old.state != LifecycleState.SUCCEEDED

@@ -152,6 +152,7 @@ class AgentJobService:
         self._configuration_lock = threading.Lock()
         self._started = False
         self._reconciler: Reconciler | None = None
+        self._order_sweep_cursor: str | None = None
         # SQLite ignores row locks. This only prevents same-service test races;
         # PostgreSQL correctness is provided by the database locks below.
         self._claim_lock = threading.RLock()
