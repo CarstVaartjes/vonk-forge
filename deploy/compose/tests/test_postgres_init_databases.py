@@ -463,8 +463,14 @@ def test_deployed_postgres_writes_a_restore_verified_backup(
         )
         # Catches PID 1 exiting from an interrupted wait while postgres is still
         # shutting down: Docker must see the clean server exit within its grace.
-        assert "database system is shut down" in logs
-        assert "PostgreSQL shutdown complete" in logs
+        assert (
+            logs.rfind("database system is shut down")
+            > logs.rfind("database system is ready to accept connections")
+            >= 0
+        )
+        assert logs.rfind("PostgreSQL shutdown complete") > logs.rfind(
+            "database system is shut down"
+        )
         assert "waiting for database readiness" in logs
         assert (
             subprocess.check_output(
