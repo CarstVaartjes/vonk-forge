@@ -2283,7 +2283,7 @@ class SparkLifecycle:
             "--wait-timeout",
             "360",
             "--remove-orphans",
-            *sorted(LOCAL_CONTROLLER_SERVICES),
+            *sorted(self._expected_controller_services()),
         )
 
     def _local_browser_port(self) -> int:

@@ -179,6 +179,10 @@ def test_signed_source_renderer_preserves_its_complete_image_graph(
         for service, definition in configured_services.items()
     }
 
+    (tmp_path / "docker-compose.yaml").write_text(
+        yaml.safe_dump({"services": base_services})
+    )
+
     def compose_config(command, **_kwargs):
         services = configured_services if "-f" in command else base_services
         return SimpleNamespace(stdout=json.dumps({"services": services}))
@@ -518,3 +522,37 @@ def test_controller_health_failure_keeps_service_and_signer_logs_in_carry_report
     job_log = capsys.readouterr().err
     assert "signer failure 0" in job_log and "private key decode failed" in job_log
     assert "diagnostic-test-secret" not in job_log + output.read_text()
+
+
+def test_carry_does_not_start_candidate_only_services_on_the_published_baseline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Catches a newly added NAS service making the next release's carry impossible."""
+    lifecycle_module = sys.modules[SparkLifecycle.__module__]
+    baseline_services = set(lifecycle_module.LOCAL_CONTROLLER_SERVICES)
+    candidate_services = baseline_services | {"candidate-only-service"}
+    monkeypatch.setattr(
+        lifecycle_module, "LOCAL_CONTROLLER_SERVICES", candidate_services
+    )
+    lane = object.__new__(carry.UpgradeCarryLifecycle)
+    lane.project = "carry-added-service"
+    lane.bundle = tmp_path
+    baseline = SimpleNamespace(
+        generation="b" * 64, compose_image_roles=COMPOSE_IMAGE_ROLES
+    )
+    candidate = SimpleNamespace(
+        generation="c" * 64, compose_image_roles=COMPOSE_IMAGE_ROLES
+    )
+    monkeypatch.setattr(lane, "baseline", baseline, raising=False)
+    monkeypatch.setattr(lane, "candidate", candidate, raising=False)
+    (tmp_path / "docker-compose.yaml").write_text(
+        yaml.safe_dump({"services": {name: {} for name in baseline_services}})
+    )
+    lane.controller_generation = baseline.generation
+    assert lane._expected_controller_services() == baseline_services
+    assert "candidate-only-service" not in lane._local_controller_up_command()
+    lane.controller_generation = candidate.generation
+    # The candidate remains exact: absence from an old file must not hide a
+    # service the new installer was required to deliver.
+    assert lane._expected_controller_services() == candidate_services
+    assert "candidate-only-service" in lane._local_controller_up_command()
