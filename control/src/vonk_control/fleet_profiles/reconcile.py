@@ -400,7 +400,7 @@ class FleetProfileService:
                         FleetProfileAdapter.next_retry(row.id, 1, now),
                         now=now,
                         reason=WaitReason.RECEIPT_MISSING
-                        if not progress.blockers
+                        if dependencies and not progress.blockers
                         else None,
                         blockers=list(progress.blockers) or dependencies or None,
                     )

@@ -9,7 +9,12 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import select
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import AgentResult, LifecycleState
+from vonk_agent_protocol import (
+    AgentResult,
+    LifecycleState,
+    WaitReason,
+    WaitResumeCondition,
+)
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.fleet_profile_contract import (
     FleetProfileInput,
@@ -33,6 +38,7 @@ from vonk_control.models import (
     Job,
     ResourceReservation,
 )
+from vonk_control.persisted_waits import read_wait
 from vonk_control.platform_ports import HOST_ENDPOINT_PORT
 from vonk_control.run_switch_operations import RunSwitchOperationService
 
@@ -298,6 +304,11 @@ def test_postgres_partial_adoption_preserves_promises_and_waits_exact_issued_cle
         stored = _persisted_profile_progress(row).switch_adapter
         assert stored is not None
         assert stored.pending_operation_ids == [issued.id]
+        wait = read_wait(row)
+        assert wait is not None and wait.reason is WaitReason.STOP_UNCONFIRMED
+        assert wait.resume_condition is WaitResumeCondition.EFFECT_OBSERVED
+        assert wait.dependency_deadline == stored.observation_deadline_at
+        assert [b.operation.id for b in wait.blockers if b.operation] == [issued.id]
     # A late exact cancellation receipt closes the original attempt. Advancing
     # the normal persisted backoff then releases C without another profile load.
     clock[0] += timedelta(seconds=700)
