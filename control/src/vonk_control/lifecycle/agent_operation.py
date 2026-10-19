@@ -18,7 +18,7 @@ core state                stored order
 ``running``               ``running``
 ``backoff``               ``backoff`` + ``next_action_at`` (the retry clock)
 ``observing``             ``observing`` + ``next_action_at``, ``observe_count`` > 0
-``needs-operator``        ``needs-operator``, ``next_action_at`` NULL
+``needs-operator``        ``needs-operator`` + check-only ``next_action_at``
 ``succeeded``/``failed``  ``succeeded``/``failed``
 ``cancelled``             ``cancelled``
 ========================  ==========================================
@@ -31,10 +31,9 @@ on its first pass.  An attempt ends ``succeeded``, ``failed``, ``cancelled`` or
 ``lease-lapsed``); the agent wire keeps its own four result words and is mapped at
 ingress (``agent_operation_states.record_wire_state``).
 
-A parked order with ``next_action_at`` set is an automatic retry (an operator is not
-involved); without it the order waits, and the
-reconciler re-evaluates it on every pass (rules 1 to 3), so a wait never outlives
-its cause and an observation needs no persisted counter.
+A backoff schedule permits an automatic retry. An operator wait's check clock
+only describes observation; explicit resume must authorize another attempt.
+An older row without a clock is re-evaluated through its existing adoption path.
 
 What ``effect`` means for an order: ``issued`` while an attempt holds a live lease;
 ``none`` before any attempt is issued; ``unknown`` after an issued attempt ends
