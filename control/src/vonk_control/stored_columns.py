@@ -20,7 +20,12 @@ from vonk_agent_protocol.contracts import (
 )
 from vonk_agent_protocol.distribution import DistributionObject
 from vonk_agent_protocol.failure_evidence import FailureDiagnostics
-from vonk_agent_protocol.inventory import Capability, HostSettings, NetworkInterface
+from vonk_agent_protocol.inventory import (
+    Capability,
+    HostSettings,
+    ModelStoreObject,
+    NetworkInterface,
+)
 from vonk_agent_protocol.job_inputs import RecipeJobInputManifest
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunResult
 from vonk_agent_protocol.route_activation import ActivationMarker
@@ -140,6 +145,7 @@ bind(
     list[NetworkInterface],
     nullable=True,
 )
+bind("node_inventory_snapshots", "model_objects", list[ModelStoreObject], nullable=True)
 bind("node_inventory_snapshots", "host_settings", HostSettings, nullable=True)
 bind("model_cache_sets", "protected_reasons", list[CacheReferenceReason])
 bind("run_nodes", "endpoint", StoredRunEndpoint, nullable=True)

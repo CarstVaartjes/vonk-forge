@@ -657,3 +657,62 @@ def test_unreadable_existing_removal_cannot_gate_owner_acceptance(monkeypatch):
     fresh_result = controller_cli.run_controller(fresh, client, lambda: fresh_key)
     assert fresh_result["request_key"] == fresh_key
     assert sum(method == "POST" for method, *_ in client.calls) == 2
+
+
+def test_fleet_review_is_read_only_and_submission_binds_its_scope(
+    monkeypatch, capsys
+) -> None:
+    """Catches a scope flag dropped by CLI review or model-removal submission."""
+    from datetime import UTC, datetime
+
+    from vonk_control.fleet_model_removal_contract import (
+        FleetModelRemovalCheckpoint,
+        FleetModelRemovalEffects,
+        FleetRemovalReason,
+    )
+
+    effects = FleetModelRemovalEffects(
+        nas_remove=True,
+        nas_reason=FleetRemovalReason.UNUSED,
+        nas_detail="Unused model",
+        targets=[],
+    )
+    review = _unblocked_review(_review("model", "publisher/model"))
+    review["fleet"] = effects.model_dump(mode="json")
+
+    class FleetController(_FakeController):
+        def request(self, method, path, payload=None, **kwargs):
+            result = super().request(method, path, payload, **kwargs)
+            if method == "POST":
+                result["review_digest"] = _REVIEW_DIGEST
+                result["fleet"] = FleetModelRemovalCheckpoint(
+                    effects=effects, deadline_at=datetime.now(UTC)
+                ).model_dump(mode="json")
+            return result
+
+    client = FleetController(review)
+    _accept_response_contracts(monkeypatch)
+    status = cli.main(
+        ("--json", "model", "remove", "publisher/model", "--fleet", "--review"),
+        control_client=client,
+    )
+    assert status == 0
+    assert json.loads(capsys.readouterr().out)["fleet"] == effects.model_dump(
+        mode="json"
+    )
+    assert len(client.calls) == 1 and client.calls[0][3] == {"fleet": True}
+    args = _parse(
+        "--json", "model", "remove", "publisher/model", "--fleet", "--yes", "--detach"
+    )
+    result = controller_cli.run_controller(args, client, lambda: _REQUEST_KEY)
+    assert result["operation_id"] == "model-operation-9"
+    assert client.calls[-1][2] == {
+        "request_key": _REQUEST_KEY,
+        "fleet": True,
+        "review_digest": _REVIEW_DIGEST,
+    }
+    # A subsequent observation reconnects by request identity rather than
+    # re-planning against a different catalog head.
+    replay = controller_cli.run_controller(args, client, lambda: _REQUEST_KEY)
+    assert replay["operation_id"] == result["operation_id"]
+    assert sum(method == "POST" for method, *_ in client.calls) == 1

@@ -16,6 +16,7 @@ from vonk_agent_protocol.inventory import (
     HostSettings,
     InventoryRequest,
     MemoryPool,
+    ModelStoreObject,
     NetworkInterface,
 )
 
@@ -48,6 +49,7 @@ class InventorySnapshotInput:
     nas_route_interface: str | None = None
     host_settings: HostSettings | None = None
     unused_model_bytes: int | None = None
+    model_objects: list[ModelStoreObject] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,6 +80,7 @@ class InventorySnapshotView:
     nas_route_interface: str | None = field(kw_only=True, default=None)
     host_settings: HostSettings | None = field(kw_only=True, default=None)
     unused_model_bytes: int | None = field(kw_only=True, default=None)
+    model_objects: list[ModelStoreObject] | None = field(kw_only=True, default=None)
 
 
 def _validated_inventory(
@@ -106,6 +109,12 @@ def _validated_inventory(
         ]
     if isinstance(document["host_settings"], HostSettings):
         document["host_settings"] = document["host_settings"].model_dump(mode="json")
+    objects = document["model_objects"]
+    if objects is not None:
+        document["model_objects"] = [
+            item.model_dump(mode="json") if isinstance(item, ModelStoreObject) else item
+            for item in objects
+        ]
     document.update(schema_version=1, observed_at=observed_at.isoformat())
     return InventoryRequest.model_validate_json(canonical_message(document))
 
@@ -159,6 +168,12 @@ class InventoryRepository:
                 if validated.host_settings is None
                 else validated.host_settings.model_dump(mode="json")
             ),
+            model_objects=None
+            if validated.model_objects is None
+            else [
+                {"sha256": item.sha256, "bytes": item.bytes}
+                for item in validated.model_objects
+            ],
             unused_model_bytes=validated.unused_model_bytes,
             evidence_digest=digest,
         )
@@ -221,6 +236,7 @@ class InventoryRepository:
                 ),
                 nas_route_interface=validated.nas_route_interface,
                 host_settings=validated.host_settings,
+                model_objects=validated.model_objects,
                 unused_model_bytes=validated.unused_model_bytes,
             )
 

@@ -257,6 +257,7 @@ def production_app(settings: Settings | None = None) -> FastAPI:
         mappings=ClusterMappingService(sessions),
         distributed_start_timeout_seconds=DISTRIBUTED_START_TIMEOUT_SECONDS,
     )
+    model_cache._fleet_lifecycle = recipe_operations
     run_switch_operations = RunSwitchOperationService(
         sessions,
         memory_floor_bytes=PLATFORM_MEMORY_FLOOR_BYTES,

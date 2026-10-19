@@ -16,6 +16,7 @@ from ..categorized_errors import InvalidValue
 from ..lifecycle import Reconciler
 from ..lifecycle.model_cache import ModelCacheAdapter, ModelCacheStore
 from ..model_cache_streams import StreamGovernor
+from ..recipe_operations.service import RecipeOperationService
 from ..storage_demands import StorageDemands
 from .availability import AvailabilityMixin
 from .cancellation import CancellationMixin
@@ -31,6 +32,7 @@ from .core import CoreMixin
 from .download import DownloadMixin
 from .download_admission import DownloadAdmissionMixin
 from .failure import FailureMixin
+from .fleet_removal import FleetRemovalMixin
 from .github import GithubMixin
 from .http import HttpMixin
 from .inventory import InventoryMixin
@@ -58,6 +60,7 @@ class ModelCacheService(
     RemovalReviewMixin,
     RemovalScopeMixin,
     RemovalAcceptanceMixin,
+    FleetRemovalMixin,
     RemovalReconcileMixin,
     RemovalExecutionMixin,
     CatalogMixin,
@@ -132,6 +135,7 @@ class ModelCacheService(
                     "model cache storage directory must not be a symlink"
                 )
             directory.mkdir(mode=0o750, exist_ok=True)
+        self._fleet_lifecycle: RecipeOperationService | None = None
         self._sessions = sessions
         self._root = root
         self._reserve_bytes = reserve_bytes

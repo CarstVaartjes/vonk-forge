@@ -174,6 +174,10 @@
       "reason": "API or persisted-record models colocated with their owner; named contract modules do not exist for this owner yet"
     },
     {
+      "module": "control/src/vonk_control/capability_contract.py",
+      "kind": "controller-contract"
+    },
+    {
       "module": "control/src/vonk_control/catalog_api.py",
       "kind": "declared",
       "reason": "API or persisted-record models colocated with their owner; named contract modules do not exist for this owner yet"
@@ -228,27 +232,11 @@
       "kind": "controller-contract"
     },
     {
+      "module": "control/src/vonk_control/fleet_model_removal_contract.py",
+      "kind": "controller-contract"
+    },
+    {
       "module": "control/src/vonk_control/fleet_profile_adapter_conversion_contract.py",
-      "kind": "controller-contract"
-    },
-    {
-      "module": "control/src/vonk_control/fleet_profile_contract/endpoints.py",
-      "kind": "controller-contract"
-    },
-    {
-      "module": "control/src/vonk_control/fleet_profile_contract/definitions.py",
-      "kind": "controller-contract"
-    },
-    {
-      "module": "control/src/vonk_control/fleet_profile_contract/assessment.py",
-      "kind": "controller-contract"
-    },
-    {
-      "module": "control/src/vonk_control/fleet_profile_contract/effects.py",
-      "kind": "controller-contract"
-    },
-    {
-      "module": "control/src/vonk_control/fleet_profile_contract/switch_state.py",
       "kind": "controller-contract"
     },
     {
@@ -256,7 +244,27 @@
       "kind": "controller-contract"
     },
     {
+      "module": "control/src/vonk_control/fleet_profile_contract/assessment.py",
+      "kind": "controller-contract"
+    },
+    {
+      "module": "control/src/vonk_control/fleet_profile_contract/definitions.py",
+      "kind": "controller-contract"
+    },
+    {
+      "module": "control/src/vonk_control/fleet_profile_contract/effects.py",
+      "kind": "controller-contract"
+    },
+    {
+      "module": "control/src/vonk_control/fleet_profile_contract/endpoints.py",
+      "kind": "controller-contract"
+    },
+    {
       "module": "control/src/vonk_control/fleet_profile_contract/review.py",
+      "kind": "controller-contract"
+    },
+    {
+      "module": "control/src/vonk_control/fleet_profile_contract/switch_state.py",
       "kind": "controller-contract"
     },
     {
@@ -439,11 +447,15 @@
       "kind": "controller-contract"
     },
     {
-      "module": "control/src/vonk_control/run_switch_contract/requests.py",
+      "module": "control/src/vonk_control/run_switch_contract/evidence.py",
       "kind": "controller-contract"
     },
     {
-      "module": "control/src/vonk_control/run_switch_contract/evidence.py",
+      "module": "control/src/vonk_control/run_switch_contract/operations.py",
+      "kind": "controller-contract"
+    },
+    {
+      "module": "control/src/vonk_control/run_switch_contract/phase_results.py",
       "kind": "controller-contract"
     },
     {
@@ -455,11 +467,7 @@
       "kind": "controller-contract"
     },
     {
-      "module": "control/src/vonk_control/run_switch_contract/phase_results.py",
-      "kind": "controller-contract"
-    },
-    {
-      "module": "control/src/vonk_control/run_switch_contract/operations.py",
+      "module": "control/src/vonk_control/run_switch_contract/requests.py",
       "kind": "controller-contract"
     },
     {
@@ -477,6 +485,10 @@
     },
     {
       "module": "control/src/vonk_control/run_switch_operations/contracts.py",
+      "kind": "controller-contract"
+    },
+    {
+      "module": "control/src/vonk_control/runtime_asset_contract.py",
       "kind": "controller-contract"
     },
     {
@@ -503,19 +515,11 @@
       "reason": "base class of the Controller contract models, shared by every *_contract module"
     },
     {
-      "module": "control/src/vonk_control/worker_memory_contract.py",
-      "kind": "controller-contract"
-    },
-    {
-      "module": "control/src/vonk_control/capability_contract.py",
-      "kind": "controller-contract"
-    },
-    {
-      "module": "control/src/vonk_control/runtime_asset_contract.py",
-      "kind": "controller-contract"
-    },
-    {
       "module": "control/src/vonk_control/typecheck_contract.py",
+      "kind": "controller-contract"
+    },
+    {
+      "module": "control/src/vonk_control/worker_memory_contract.py",
       "kind": "controller-contract"
     }
   ],

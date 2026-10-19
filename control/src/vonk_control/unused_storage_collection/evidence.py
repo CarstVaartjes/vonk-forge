@@ -150,11 +150,12 @@ class _Evidence:
             now=now,
             application_references_readable=application_references_readable,
             cutoff=cutoff,
-            live=live_tokens(session, now),
+            live=live_tokens(session, now, include_removals=False),
             operations=operation_tokens(
                 session,
                 now,
                 recent=False,
+                include_removals=False,
                 superseded_applications=superseded_applications,
             ),
             pinned=pinned,

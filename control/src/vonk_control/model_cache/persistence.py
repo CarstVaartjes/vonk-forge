@@ -63,6 +63,15 @@ def _model_removal_intent_digest(
             "scope_from_content": payload.scope_from_content,
             "selected_objects": payload.selected_objects,
             "delete_objects": payload.delete_objects,
+            **(
+                {
+                    "fleet_effects": payload.fleet.effects.model_dump(mode="json"),
+                    "fleet_deadline_at": payload.fleet.deadline_at.isoformat(),
+                    "fleet_review_digest": payload.review_digest,
+                }
+                if payload.fleet is not None
+                else {}
+            ),
         }
     )
 

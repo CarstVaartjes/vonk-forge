@@ -64,6 +64,29 @@ class FleetProfileService:
                     f"{value.recipe_selector}: revision {revision.id} is unreadable"
                 )
                 continue
+            # Saved profiles are references too. Use the same object gates as
+            # fleet removal, even when the NAS has no artifact set for a model.
+            # This short reference transaction never spans remote work.
+            digests = {
+                selection.model.content_sha256 for selection in definition.models
+            }
+            from ..model_cache.fleet_removal import _model_objects
+
+            objects: set[str] = set()
+            for digest in sorted(digests):
+                named, _shared = _model_objects(session, digest)
+                objects.update(named)
+            try:
+                require_reference_open(
+                    session,
+                    (
+                        ArtifactIdentity("model-object", digest)
+                        for digest in sorted(objects)
+                    ),
+                    now=self._clock(),
+                )
+            except ArtifactLifecycleError as error:
+                raise FleetProfileAdmissionEffectBusy(error.detail) from error
             # Every option is saved with an explicit value: the operator's
             # choice, or the recipe default where none was made or offered.
             choices, replaced = _effective_option_choices(

@@ -394,6 +394,19 @@ pub fn sweep(
     }
     if let Some(retention) = read_retention(data_root) {
         let keep = retention.protected_model_objects.into_iter().collect();
+        let requested: BTreeSet<_> = retention.remove_model_objects.into_iter().collect();
+        // This is the same collector and the same local ownership predicate as
+        // pressure eviction. A request selects identities, never another deleter.
+        if let Some(unused) = unused_model_objects(data_root, pass.owner, &keep) {
+            for (_, path, metadata) in unused {
+                if path
+                    .file_name()
+                    .is_some_and(|name| requested.contains(&name.to_string_lossy().into_owned()))
+                {
+                    pass.remove(&path, &metadata);
+                }
+            }
+        }
         let unused_models = unused_model_objects(data_root, pass.owner, &keep);
         pass.relieve(
             unused_models.unwrap_or_default(),
@@ -430,6 +443,56 @@ fn unused_model_objects(
         .collect();
     unused.sort_by_key(|(used, _, _)| *used);
     Some(unused)
+}
+
+/// A complete object scan. A failed entry read is unknown, never absence.
+pub fn model_objects(
+    data_root: &Path,
+) -> Option<Vec<vonk_agent_protocol::generated::ModelStoreObject>> {
+    let owner = rustix::process::geteuid().as_raw();
+    if !owned_directory(data_root, owner) {
+        return None;
+    }
+    let root = data_root.join("distribution/models");
+    let entries = match fs::read_dir(&root) {
+        Ok(entries) if owned_directory(&root, owner) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Some(Vec::new()),
+        _ => return None,
+    };
+    // Reserve half of the one-MiB inventory document for other observations.
+    // Bound memory while scanning, rather than after constructing a huge list.
+    const EVIDENCE_BYTES: usize = 1024 * 1024 / 2;
+    let mut evidence_bytes = 2_usize;
+    let mut objects = Vec::new();
+    for entry in entries {
+        let entry = entry.ok()?;
+        let name = entry.file_name().into_string().ok()?;
+        let metadata = fs::symlink_metadata(entry.path()).ok()?;
+        if name.len() == 64
+            && name
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        {
+            if !metadata.is_file() {
+                return None;
+            }
+            if metadata.uid() != owner {
+                return None;
+            }
+            let object = vonk_agent_protocol::generated::ModelStoreObject {
+                sha256: name,
+                bytes: metadata.len(),
+            };
+            evidence_bytes =
+                evidence_bytes.checked_add(serde_json::to_vec(&object).ok()?.len() + 1)?;
+            if evidence_bytes > EVIDENCE_BYTES {
+                return None;
+            }
+            objects.push(object);
+        }
+    }
+    objects.sort_by(|a, b| a.sha256.cmp(&b.sha256));
+    Some(objects)
 }
 
 /// The bytes of the model objects no installation links or names, which the

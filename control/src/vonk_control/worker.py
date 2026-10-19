@@ -513,6 +513,8 @@ def assemble_production_worker(
         mappings=ClusterMappingService(sessions),
         distributed_start_timeout_seconds=distributed_start_timeout_seconds,
     )
+    if model_cache is not None:
+        model_cache._fleet_lifecycle = lifecycle
     run_switch_operations = RunSwitchOperationService(
         sessions,
         memory_floor_bytes=PLATFORM_MEMORY_FLOOR_BYTES,

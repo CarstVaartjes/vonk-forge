@@ -27,6 +27,9 @@ from ..artifact_lifecycle import (
     reserve_removal,
 )
 from ..categorized_errors import InvalidValue
+from ..fleet_model_removal_contract import (
+    FleetModelRemovalCheckpoint,
+)
 from ..lifecycle.model_cache import ModelCacheAdapter
 from ..model_cache_contract import (
     ModelCacheCounters,
@@ -60,7 +63,13 @@ class RemovalAcceptanceMixin:
     """Removal acceptance behavior of the cache service."""
 
     def _model_removal_by_request(
-        self, request_key: str, *, actor: str, selector: str
+        self,
+        request_key: str,
+        *,
+        actor: str,
+        selector: str,
+        fleet: bool = False,
+        review_digest: str | None = None,
     ) -> CacheOperationView | None:
         cache = cast("ModelCacheService", self)
         with cache._session() as session:
@@ -72,11 +81,21 @@ class RemovalAcceptanceMixin:
             if operation is None:
                 return None
             return cache._replay_model_removal(
-                operation, actor=actor, selector=selector
+                operation,
+                actor=actor,
+                selector=selector,
+                fleet=fleet,
+                review_digest=review_digest,
             )
 
     def _replay_model_removal(
-        self, operation: ModelCacheOperation, *, actor: str, selector: str
+        self,
+        operation: ModelCacheOperation,
+        *,
+        actor: str,
+        selector: str,
+        fleet: bool = False,
+        review_digest: str | None = None,
     ) -> CacheOperationView:
         cache = cast("ModelCacheService", self)
         if operation.kind != "remove" or operation.actor != actor:
@@ -87,7 +106,11 @@ class RemovalAcceptanceMixin:
         # A replay names its operation by the request key; an unreadable payload
         # cannot contradict it, so the stored operation is what the caller gets.
         payload = cache._payload_or_none(operation)
-        if payload is not None and payload.selector != selector:
+        if isinstance(payload, ModelCacheRemovalPayload) and (
+            (payload.fleet is not None) != fleet
+            or payload.selector != selector
+            or (fleet and payload.review_digest != review_digest)
+        ):
             raise ModelCacheConflictInvalid(
                 ModelCacheCode.REQUEST_KEY_REUSED,
                 "request key was already used for another model removal intent",
@@ -110,6 +133,7 @@ class RemovalAcceptanceMixin:
         expected_scope: ModelCacheRemovalScope | None = None,
         verify: Callable[[Session, tuple[str, ...]], None] | None = None,
         defer_scope: bool | None = None,
+        fleet: FleetModelRemovalCheckpoint | None = None,
     ) -> ModelCacheOperation:
         cache = cast("ModelCacheService", self)
         existing = session.scalar(
@@ -118,7 +142,13 @@ class RemovalAcceptanceMixin:
             )
         )
         if existing is not None:
-            cache._replay_model_removal(existing, actor=actor, selector=selector)
+            cache._replay_model_removal(
+                existing,
+                actor=actor,
+                selector=selector,
+                fleet=fleet is not None,
+                review_digest=review_digest,
+            )
             return existing
 
         if defer_scope is None:
@@ -139,6 +169,10 @@ class RemovalAcceptanceMixin:
         operation_id = operation_id or str(uuid.uuid4())
         fence = removal_fence or str(uuid.uuid4())
         now = cache._clock()
+        fleet_objects = frozenset() if fleet is None else fleet.removal_objects
+        shared: set[str] = set()
+        if fleet is not None and defer_scope:
+            raise InvalidValue("fleet removal requires a resolved reviewed scope")
         if defer_scope:
             scope = ModelCacheRemovalScope(
                 selected_sets=selected,
@@ -160,6 +194,10 @@ class RemovalAcceptanceMixin:
             operation_id = operation_id or str(uuid.uuid4())
             fence = removal_fence or str(uuid.uuid4())
             now = cache._clock()
+            if fleet is not None:
+                from .fleet_removal import _model_objects
+
+                _, shared = _model_objects(session, model_content_sha256 or "")
             identities = (
                 *(
                     ArtifactIdentity("model-set", digest)
@@ -167,7 +205,9 @@ class RemovalAcceptanceMixin:
                 ),
                 *(
                     ArtifactIdentity("model-object", digest)
-                    for digest in scope.delete_objects
+                    for digest in sorted(
+                        (set(scope.delete_objects) - shared) | fleet_objects
+                    )
                 ),
             )
             assignments: tuple[
@@ -240,10 +280,15 @@ class RemovalAcceptanceMixin:
                     ArtifactLifecycleCode.REFERENCE_IDENTITY_MISMATCH,
                     "model object sharing changed while removal ownership was reserved",
                 )
+        if fleet is not None:
+            delete_objects = tuple(
+                digest for digest in delete_objects if digest not in shared
+            )
         plan = ModelCacheRemovalPayload(
             schema_version=SCHEMA_VERSION,
             source_policy=SOURCE_POLICY,
             selector=selector,
+            fleet=fleet,
             model_content_sha256=model_content_sha256,
             operator_action="remove-model",
             review_digest=review_digest,
@@ -291,7 +336,7 @@ class RemovalAcceptanceMixin:
         )
         session.add(operation)
         session.flush()
-        if not selected and not defer_scope:
+        if not selected and not defer_scope and fleet is None:
             cache._finish_model_removal_in_session(session, operation, now=now)
         return operation
 

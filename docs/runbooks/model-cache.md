@@ -237,3 +237,37 @@ states, and multi-Spark fabric acceptance still requires the designated
 hardware lane.
 
 See [the CLI runbook](vonkctl.md) for output, selectors, profiles, and automation.
+
+## Remove a model from the fleet
+
+`vonkctl model remove <model> --fleet --review` reviews NAS cache objects,
+unused installations and exact model-store objects on every enrolled Spark.
+The model page offers **Remove model from fleet** with the same review.
+
+`vonkctl model remove <model> --fleet --yes` submits those reviewed effects.
+The Controller returns its durable model-operation ID and request key; the
+existing model-operation and request status endpoints observe that owner after
+a disconnect or restart. Reconnect with the same selector, `--fleet` and
+`--request-key`. A stale review is refreshed once; repeated conflicts are
+reported instead of retried in a loop.
+
+Profiles (saved and loaded), running workloads, live operations and pins retain
+their files. The review names retained parts and shared content separately.
+Finished recipe history alone does not keep an unused installation. Uninstall
+owns installation cleanup, NAS model removal owns NAS bytes, and the Spark's
+store-retention collector owns exact object eviction. Shared file digests and
+local installation links or plans retain their objects.
+
+A complete fresh Spark inventory is required for acceptance. Remote removal is
+confirmed only by a subsequent complete model-store observation; an unavailable
+Spark is never reported as cleaned. The durable operation shows its dependency
+and next retry. Its 24-hour deadline survives restart; expiration keeps its
+unfinished effects in the receipt and ends the request. After failure or
+supersession, object fences remain for at most the ten-minute lifetime of the
+last possible Spark verdict. A fresh request reviews
+current evidence. No SSH or sweep-state changes are involved.
+
+Profile saves take the same object reference gates as removal. A save that
+conflicts with an accepted deletion waits for that owner rather than acquiring
+a reference to bytes being removed. The nullable model-object inventory column
+is reconciled by Controller startup; missing observations remain unknown.

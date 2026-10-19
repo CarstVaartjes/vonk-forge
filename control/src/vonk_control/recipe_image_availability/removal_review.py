@@ -31,6 +31,7 @@ from ..artifact_reference_scan import (
 from ..cache_removal_review import (
     ArtifactKind,
     AssetDisposition,
+    CacheAssetDisposition,
     CacheRemovalAsset,
     CacheRemovalBlocker,
     CacheRemovalFinding,
@@ -414,7 +415,7 @@ def _runtime_image_removal_assets(
                 expected_bytes=expected_bytes,
                 availability=availability,
                 available_bytes=available_bytes,
-                disposition="remove",
+                disposition=CacheAssetDisposition.REMOVE,
             )
         )
     return tuple(assets), tuple(blockers)
@@ -426,12 +427,15 @@ def _model_removal_assets(
     if scope is None:
         return ()
     expected: dict[tuple[str, str], str] = {
-        ("model-set", digest): "remove" for digest in scope.selected_sets
+        ("model-set", digest): CacheAssetDisposition.REMOVE
+        for digest in scope.selected_sets
     }
     expected.update(
         {
             ("model-object", digest): (
-                "remove" if digest in scope.delete_objects else "retain-shared"
+                CacheAssetDisposition.REMOVE
+                if digest in scope.delete_objects
+                else CacheAssetDisposition.RETAIN_SHARED
             )
             for digest in scope.selected_objects
         }
@@ -482,13 +486,13 @@ def _review_assets_for_selection(
 ) -> tuple[CacheRemovalAsset, ...]:
     by_identity = {(asset.kind, asset.sha256): asset for asset in observed_assets}
     expected: dict[tuple[ArtifactKind, str], tuple[int | None, AssetDisposition]] = {
-        ("runtime-image", digest): (size, "remove")
+        ("runtime-image", digest): (size, CacheAssetDisposition.REMOVE)
         for digest, size in selection.image_expected_bytes
     }
     if selection.model_scope is not None:
         expected.update(
             {
-                ("model-set", digest): (None, "remove")
+                ("model-set", digest): (None, CacheAssetDisposition.REMOVE)
                 for digest in selection.model_scope.selected_sets
             }
         )
@@ -496,9 +500,9 @@ def _review_assets_for_selection(
             {
                 ("model-object", digest): (
                     None,
-                    "remove"
+                    CacheAssetDisposition.REMOVE
                     if digest in selection.model_scope.delete_objects
-                    else "retain-shared",
+                    else CacheAssetDisposition.RETAIN_SHARED,
                 )
                 for digest in selection.model_scope.selected_objects
             }

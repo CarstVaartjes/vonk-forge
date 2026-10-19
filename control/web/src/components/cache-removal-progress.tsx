@@ -1,5 +1,6 @@
-import {useEffect, useRef, useState} from "react";
-import type {ControlApi} from "../api/types";
+import { LifecycleState, LifecycleEffect } from "../api/vocabulary.generated";
+import { useEffect, useRef, useState } from "react";
+import type { ControlApi } from "../api/types";
 import {
   findRemovalRequest,
   isDefiniteRemovalRefusal,
@@ -8,12 +9,20 @@ import {
   type CacheRemovalIntent,
   type CacheRemovalReceipt,
 } from "./cache-removal-operations";
-import {failureNotice} from "../lib/error-display";
-import {useToast} from "./toast";
-import {CacheRemovalReviewDetails} from "./cache-removal-review";
+import { failureNotice } from "../lib/error-display";
+import { useToast } from "./toast";
+import { CacheRemovalReviewDetails } from "./cache-removal-review";
 
 /** An accepted removal remains an observable operation until its owner settles. */
-export function CacheRemovalProgress({api, intent, initial, initialError, onComplete, onDismiss, onRejected}: {
+export function CacheRemovalProgress({
+  api,
+  intent,
+  initial,
+  initialError,
+  onComplete,
+  onDismiss,
+  onRejected,
+}: {
   api: ControlApi;
   intent: CacheRemovalIntent;
   initial: CacheRemovalReceipt | null;
@@ -34,8 +43,22 @@ export function CacheRemovalProgress({api, intent, initial, initialError, onComp
     setReceipt(current);
     setRequestMissing(false);
     setError("");
-    if (current.state === "succeeded") { toast.success(`${intent.kind === "model" ? "Model" : "Recipe"} removed from the cache.`); onComplete(); }
-    else if (current.state === "failed") toast.error(failureNotice(current.failure ? `${current.failure.code}: ${current.failure.detail}` : "Cache removal failed", intent.requestKey));
+    if (current.state === LifecycleState.SUCCEEDED) {
+      toast.success(
+        intent.review.fleet
+          ? "Fleet cleanup completed. Protected and shared content is retained."
+          : `${intent.kind === "model" ? "Model" : "Recipe"} removed from the cache.`,
+      );
+      onComplete();
+    } else if (current.state === LifecycleState.FAILED)
+      toast.error(
+        failureNotice(
+          current.failure
+            ? `${current.failure.code}: ${current.failure.detail}`
+            : "Cache removal failed",
+          intent.requestKey,
+        ),
+      );
   }
 
   async function refresh() {
@@ -58,13 +81,15 @@ export function CacheRemovalProgress({api, intent, initial, initialError, onComp
       }
       const operationId = receipt.operation_id;
       if (!operationId) throw new Error("Removal receipt has no operation identity.");
-      const current = intent.kind === "model"
-        ? await api.modelCacheOperation(operationId, controller.signal)
-        : await api.recipeCacheOperation(operationId, controller.signal);
+      const current =
+        intent.kind === "model"
+          ? await api.modelCacheOperation(operationId, controller.signal)
+          : await api.recipeCacheOperation(operationId, controller.signal);
       if (controller.signal.aborted) return;
       accept(validateRemovalReceipt(intent, current, operationId));
     } catch (value) {
-      if (!controller.signal.aborted) setError(value instanceof Error ? value.message : "Removal status unavailable");
+      if (!controller.signal.aborted)
+        setError(value instanceof Error ? value.message : "Removal status unavailable");
     } finally {
       if (!controller.signal.aborted) setBusy(false);
     }
@@ -83,9 +108,15 @@ export function CacheRemovalProgress({api, intent, initial, initialError, onComp
     } catch (value) {
       if (controller.signal.aborted) return;
       if (isDefiniteRemovalRefusal(value)) {
-        onRejected(value instanceof Error ? value.message : "Controller refused the reviewed removal.");
+        onRejected(
+          value instanceof Error ? value.message : "Controller refused the reviewed removal.",
+        );
       } else {
-        setError(value instanceof Error ? value.message : "Removal outcome remains unknown; check the request again.");
+        setError(
+          value instanceof Error
+            ? value.message
+            : "Removal outcome remains unknown; check the request again.",
+        );
         setRequestMissing(false);
       }
     } finally {
@@ -93,17 +124,57 @@ export function CacheRemovalProgress({api, intent, initial, initialError, onComp
     }
   }
 
-  return <div className="library-cache-action" aria-label="Cache removal progress">
-    <CacheRemovalReviewDetails review={intent.review}/>
-    {receipt
-      ? <p role="status">Removal {receipt.state}: {receipt.operation_id}</p>
-      : <p role="status">Removal receipt not yet confirmed: {intent.requestKey}</p>}
-    {receipt?.state === "unknown" && <p role="status">{receipt.projection_issue.detail} {receipt.projection_issue.next_action}</p>}
-    {receipt?.progress?.phase && <p>{receipt.progress.phase}</p>}
-    {receipt?.failure && <p role="alert">{receipt.failure.code}: {receipt.failure.detail}</p>}
-    <button type="button" className="button secondary" disabled={busy} onClick={() => void refresh()}>{receipt ? "Refresh removal status" : "Check request status"}</button>
-    {!receipt && requestMissing && <button type="button" className="button secondary" disabled={busy} onClick={() => void retrySameRequest()}>Retry same reviewed request</button>}
-    {receipt && (receipt.state === "failed" || receipt.state === "cancelled") && <button type="button" className="button secondary" disabled={busy} onClick={onDismiss}>Dismiss result</button>}
-    {error && <p role="alert">{error}</p>}
-  </div>;
+  return (
+    <div className="library-cache-action" aria-label="Cache removal progress">
+      <CacheRemovalReviewDetails review={intent.review} />
+      {receipt ? (
+        <p role="status">
+          Removal {receipt.state}: {receipt.operation_id}
+        </p>
+      ) : (
+        <p role="status">Removal receipt not yet confirmed: {intent.requestKey}</p>
+      )}
+      {receipt?.state === LifecycleEffect.UNKNOWN && (
+        <p role="status">
+          {receipt.projection_issue.detail} {receipt.projection_issue.next_action}
+        </p>
+      )}
+      {receipt && "fleet" in receipt && receipt.fleet && (
+        <p>Fleet removal deadline: {receipt.fleet.deadline_at}</p>
+      )}
+      {receipt?.progress?.phase && <p>{receipt.progress.phase}</p>}
+      {receipt?.failure && (
+        <p role="alert">
+          {receipt.failure.code}: {receipt.failure.detail}
+        </p>
+      )}
+      <button
+        type="button"
+        className="button secondary"
+        disabled={busy}
+        onClick={() => void refresh()}
+      >
+        {receipt ? "Refresh removal status" : "Check request status"}
+      </button>
+      {!receipt && requestMissing && (
+        <button
+          type="button"
+          className="button secondary"
+          disabled={busy}
+          onClick={() => void retrySameRequest()}
+        >
+          Retry same reviewed request
+        </button>
+      )}
+      {receipt &&
+        (receipt.state === LifecycleState.FAILED ||
+          receipt.state === LifecycleState.CANCELLED ||
+          (intent.review.fleet && receipt.state === LifecycleState.SUCCEEDED)) && (
+          <button type="button" className="button secondary" disabled={busy} onClick={onDismiss}>
+            Dismiss result
+          </button>
+        )}
+      {error && <p role="alert">{error}</p>}
+    </div>
+  );
 }

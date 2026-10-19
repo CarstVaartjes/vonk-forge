@@ -663,6 +663,22 @@ def release_dead_removal_nowait(
         )
         if owner.state not in terminal:
             return False
+        if (
+            isinstance(owner, ModelCacheOperation)
+            and owner.state != LifecycleState.SUCCEEDED
+        ):
+            from .fleet_model_removal_contract import STORE_RETENTION_MAX_AGE
+            from .model_cache_contract import ModelCacheRemovalPayload
+            from .strict_json import read_stored_model
+
+            payload = read_stored_model(
+                ModelCacheRemovalPayload, owner.payload, from_json=True
+            )
+            if payload.fleet is not None:
+                ended_at = owner.completed_at or owner.updated_at
+                ended_at = ended_at if ended_at.tzinfo else ended_at.replace(tzinfo=UTC)
+                if now < ended_at + STORE_RETENTION_MAX_AGE:
+                    return False
     row.removal_owner_kind = None
     row.removal_owner_id = None
     row.removal_fence = None
