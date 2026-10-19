@@ -125,6 +125,30 @@ def evaluate_http_response(
         if "endpoint.healthy" not in assertions:
             raise ServingObservationUnknown("health check projection is unavailable")
         return {"response_shape": "health", "status": observation.status}
+    if kind == "openai.systemone":
+        from pydantic import ValidationError
+        from vonk_forge_contracts.systemone import (
+            SystemOneRequest,
+            SystemOneResponse,
+            validate_decision_result,
+        )
+
+        if "decision.probabilities" not in assertions:
+            raise ServingObservationUnknown("decision assertion is unavailable")
+        try:
+            declared = SystemOneRequest.model_validate_json(
+                json.dumps(_request_body(check))
+            )
+            observed = SystemOneResponse.model_validate_json(observation.body)
+            validate_decision_result(declared, observed)
+        except (ValueError, ValidationError) as error:
+            raise ServingExecutionError(
+                f"invalid decision response: {error}"
+            ) from error
+        return {
+            "response_shape": "structured_decision",
+            "questions": len(observed.answers),
+        }
     if kind == "openai.embedding":
         data = response.get("data")
         if "embedding.nonempty" in assertions and (

@@ -191,3 +191,56 @@ def test_job_evaluator_distinguishes_failure_from_unknown_and_accepts_fresh_resu
         {"state": SUCCEEDED, "outputs": [{"slot": "result", "bytes": 1}]}, check
     )
     assert observed["output_count"] == 1
+
+
+def test_native_decision_check_rejects_changed_option_probabilities() -> None:
+    from vonk_forge_contracts.systemone import SystemOneRequest, SystemOneResponse
+
+    request = SystemOneRequest.model_validate_json(
+        json.dumps(
+            {
+                "model": "d3-edge",
+                "state": "code",
+                "questions": {
+                    "kind": {
+                        "type": "choice",
+                        "criteria": {"code": "Code", "chat": "Chat"},
+                    },
+                },
+            }
+        )
+    )
+    response = SystemOneResponse.model_validate_json(
+        json.dumps(
+            {
+                "id": "decision-smoke",
+                "object": "structured_decision",
+                "created": 1,
+                "model": "d3-edge",
+                "answers": {
+                    "kind": {
+                        "type": "choice",
+                        "choice": "code",
+                        "probabilities": {"code": 0.8, "chat": 0.2},
+                        "confidence": 0.8,
+                    }
+                },
+                "usage": {"input_tokens": 10, "output_tokens": 0},
+                "diagnostics": {"kind": {"label_mass": 1.0, "argmax_is_label": True}},
+            }
+        )
+    )
+    check = {
+        "kind": "openai.systemone",
+        "assertions": ["decision.probabilities"],
+        "request": {"body": request.model_dump(exclude_unset=True)},
+    }
+    observed = evaluate_http_response(
+        HttpObservation(200, {}, response.model_dump_json().encode()), check
+    )
+    assert observed["questions"] == 1
+    response.answers["kind"].probabilities = {"wrong": 0.8, "chat": 0.2}
+    with pytest.raises(ServingExecutionError, match="option probabilities"):
+        evaluate_http_response(
+            HttpObservation(200, {}, response.model_dump_json().encode()), check
+        )

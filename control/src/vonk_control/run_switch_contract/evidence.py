@@ -84,7 +84,7 @@ class EffectiveParallelism(StrictModel):
 class EffectiveSettingsSelection(StrictModel):
     """Canonical effective settings bound into the Run/Switch plan digest."""
 
-    kind: Literal["generation", "embedding", "job"]
+    kind: Literal["generation", "decision", "embedding", "job"]
     context_tokens: int | None = Field(default=None, ge=1)
     concurrency: int | None = Field(default=None, ge=1)
     max_batch_tokens: int | None = Field(default=None, ge=1)

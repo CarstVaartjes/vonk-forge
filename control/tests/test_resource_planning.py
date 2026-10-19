@@ -742,3 +742,16 @@ def test_invalid_engine_knob_and_boolean_context_remain_contract_blockers() -> N
     settings["context_tokens"] = {"value": True, "change_effect": "restart"}
     result = resolve_effective_settings(_recipe_document(settings))
     assert not result.allowed
+
+
+def test_decision_context_participates_in_resource_settings_identity() -> None:
+    settings = _recipe_settings(context=4096)
+    settings["kind"] = "decision"
+    first = resolve_effective_settings(_recipe_document(settings))
+    assert first.allowed and first.settings is not None
+    assert first.settings.context_tokens == 4096
+    assert first.settings.change_effects["context_tokens"] == "reprepare"
+    settings["context_tokens"] = {"value": 8192, "change_effect": "reprepare"}
+    second = resolve_effective_settings(_recipe_document(settings))
+    assert second.allowed and second.settings is not None
+    assert first.settings.identity_digest != second.settings.identity_digest

@@ -188,3 +188,15 @@ def test_controller_key_relay_forwards_only_litellm_key_routes() -> None:
     assert relay["routes"][1]["handle"] == [
         {"handler": "static_response", "status_code": 404}
     ]
+
+
+def test_native_decision_path_rewrites_before_the_authenticated_gateway() -> None:
+    adapted = _adapted_development_caddy()
+    for port in (8080, 8081):
+        inference = _route_for_path(adapted, port=port, path="/v1/*")
+        routes = _routes_with_handlers([inference])
+        decision = next(
+            route for route in routes if "/v1/systemone" in _path_patterns(route)
+        )
+        assert decision["handle"] == [{"handler": "rewrite", "uri": "/vllm/systemone"}]
+        _assert_litellm_route_proxies_directly(inference)

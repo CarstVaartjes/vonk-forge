@@ -80,7 +80,7 @@ class ParallelismSettings:
 
 @dataclass(frozen=True, slots=True)
 class EffectiveResourceSettings:
-    kind: Literal["generation", "embedding", "job"]
+    kind: Literal["generation", "decision", "embedding", "job"]
     context_tokens: int | None
     concurrency: int | None
     batch_tokens: int | None

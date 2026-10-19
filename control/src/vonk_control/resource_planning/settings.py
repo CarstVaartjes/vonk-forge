@@ -123,7 +123,11 @@ def resolve_effective_settings(value: object) -> SettingsResolution:
                 ),
             ),
         )
-    context = settings.context_tokens.value if settings.kind == "generation" else None
+    context = (
+        settings.context_tokens.value
+        if (settings.kind == "generation" or settings.kind == "decision")
+        else None
+    )
     concurrency = (
         settings.concurrency.value if settings.concurrency is not None else None
     )
@@ -136,7 +140,7 @@ def resolve_effective_settings(value: object) -> SettingsResolution:
     effects: dict[str, RunSwitchChangeEffect] = {
         name: setting.change_effect for name, setting in settings.knobs.items()
     }
-    if settings.kind == "generation":
+    if settings.kind == "generation" or settings.kind == "decision":
         effects["context_tokens"] = settings.context_tokens.change_effect
     if settings.concurrency is not None:
         effects["concurrency"] = settings.concurrency.change_effect

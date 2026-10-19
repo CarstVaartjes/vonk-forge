@@ -61,6 +61,7 @@ class RouteRunIdentity(StrictModel):
     plan_digest: str = Field(min_length=1, max_length=128)
     run_generation: int = Field(le=MAX_DATABASE_BIGINT, ge=0)
     upstream_model: str = Field(min_length=1, max_length=256)
+    upstream_provider: Literal["openai", "hosted_vllm"] = "openai"
     ranks: list[RouteRankIdentity]
 
 
@@ -68,6 +69,7 @@ class RouteAcceptedModelPolicy(StrictModel):
     requests_per_minute: int = Field(ge=1, le=100_000)
     tokens_per_minute: int = Field(ge=1, le=100_000_000)
     upstream_model: str = Field(min_length=1, max_length=256)
+    upstream_provider: Literal["openai", "hosted_vllm"] = "openai"
 
 
 class RouteAcceptedRunIdentity(StrictModel):
