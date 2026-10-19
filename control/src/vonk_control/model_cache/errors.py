@@ -40,7 +40,9 @@ class ModelCacheError(RuntimeError):
         retry_after_seconds: int | None = None,
         recovery: str | None = None,
         source_status: int | None = None,
+        credential_fingerprint: str | None = None,
     ) -> None:
+        self.credential_fingerprint = credential_fingerprint
         self.code = code
         #: The provider's HTTP status when the failure is an answer from it.
         self.source_status = source_status
@@ -105,6 +107,7 @@ class _CacheRefusal(SecurityRefusalError, ModelCacheError):
         reason: SecurityRefusalReason | None = None,
         retry_after_seconds: int | None = None,
         recovery: str | None = None,
+        credential_fingerprint: str | None = None,
     ) -> None:
         ModelCacheError.__init__(
             self,
@@ -112,6 +115,7 @@ class _CacheRefusal(SecurityRefusalError, ModelCacheError):
             detail,
             retry_after_seconds=retry_after_seconds,
             recovery=recovery,
+            credential_fingerprint=credential_fingerprint,
         )
         self.typed_reason = reason if reason is not None else _refusal_reason(code)
 

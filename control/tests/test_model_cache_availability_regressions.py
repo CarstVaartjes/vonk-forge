@@ -25,10 +25,8 @@ from vonk_control.bounded_json import (
 )
 from vonk_control.model_cache import ModelCacheService, ModelCacheStorageError
 from vonk_control.model_cache_contract import (
-    ModelCacheDownloadPayload,
     ModelCacheOperationProgress,
     ModelCacheUpstreamRevision,
-    parse_model_cache_payload,
 )
 from vonk_control.models import (
     Base,
@@ -112,13 +110,23 @@ def _start(service: ModelCacheService, artifacts: list[dict[str, object]], key: 
 
 
 def _drain(
-    service: ModelCacheService, operation_id: str, *, timeout_seconds: float = 10
+    service: ModelCacheService,
+    operation_id: str,
+    *,
+    timeout_seconds: float = 10,
+    return_on_wait: bool = False,
 ) -> None:
     deadline = time.monotonic() + timeout_seconds
     while time.monotonic() < deadline:
         service.tick()
         observed = service.get_operation(operation_id)
-        if observed.state in {"succeeded", "failed"}:
+        if observed.state in {LifecycleState.SUCCEEDED, LifecycleState.FAILED}:
+            return
+        if (
+            return_on_wait
+            and observed.next_attempt_at is not None
+            and not service._background_operations
+        ):
             return
         # Let the transfer thread commit without a CPU-speed-dependent poll cap.
         time.sleep(0.01)
@@ -744,159 +752,53 @@ def test_hf_access_recheck_resumes_the_exact_retained_transfer(
         "00000000-0000-4000-8000-000000000401",
     )
     service.tick()
-    _drain(service, first.id)
+    _drain(service, first.id, return_on_wait=True)
     failed = service.get_operation(first.id)
-    assert failed.state == "failed"
+    assert failed.state in {LifecycleState.QUEUED, LifecycleState.BACKOFF}
     assert failed.failure is not None
     downloaded_bytes = require_integer(
-        failed.progress["downloaded_bytes"], "cache progress downloaded_bytes"
+        failed.progress["downloaded_bytes"], "downloaded bytes"
     )
     assert downloaded_bytes >= len(public_data)
     assert len(requests) == 2
-    with sessions() as session:
-        persisted = session.get(ModelCacheOperation, first.id)
-        assert persisted is not None
-        assert persisted.state == failed.state
-        payload = parse_model_cache_payload(persisted.kind, persisted.payload)
-        assert isinstance(payload, ModelCacheDownloadPayload)
-        failure = payload.failure
-        assert failure is not None
-        assert failure.artifact_key is not None
-        assert failure.artifact_key.endswith("z-hf")
-        assert payload.retry.next_retry_at is None
-        assert payload.retry.retry_after_seconds is None
-    assert service._hf_cooldown_until is None
-
-    # Terminal auth failures do not re-enter the automatic scheduler.
     service.tick()
     assert len(requests) == 2
 
-    denied = service.check_access_and_resume(
-        first.id,
-        actor="operator",
-        request_key="00000000-0000-4000-8000-000000000402",
-        artifact_set_sha256=str(first.artifact_set_sha256),
-        plan_digest=str(first.plan_digest),
-    )
-    assert denied.id == first.id
-    assert denied.state == "failed"
-    assert denied.failure is not None
-    with sessions() as session:
-        persisted = session.get(ModelCacheOperation, first.id)
-        assert persisted is not None
-        assert persisted.state == denied.state
-        payload = parse_model_cache_payload(persisted.kind, persisted.payload)
-        assert isinstance(payload, ModelCacheDownloadPayload)
-        failure = payload.failure
-        assert failure is not None
-        assert payload.retry.next_retry_at is None
-        assert payload.retry.retry_after_seconds is None
-    assert service._hf_cooldown_until is None
+    key = "00000000-0000-4000-8000-000000000402"
+    for _ in range(2):
+        accepted = service.check_access_and_resume(
+            first.id,
+            actor="operator",
+            request_key=key,
+            artifact_set_sha256=str(first.artifact_set_sha256),
+            plan_digest=str(first.plan_digest),
+        )
+        assert accepted.artifact_set_sha256 == first.artifact_set_sha256
+        assert len(requests) == 2  # durable acceptance precedes worker HTTP effects
+    current_id = accepted.id
+    assert service.get_operation(first.id).state == LifecycleState.CANCELLED
+    service.tick()
+    _drain(service, current_id, return_on_wait=True)
     assert len(requests) == 3
-    denied_repeat = service.check_access_and_resume(
-        first.id,
-        actor="operator",
-        request_key="00000000-0000-4000-8000-000000000402",
-        artifact_set_sha256=str(first.artifact_set_sha256),
-        plan_digest=str(first.plan_digest),
-    )
-    assert denied_repeat.id == first.id
-    assert len(requests) == 3
+    assert service.get_operation(current_id).failure is not None
 
     token_path.write_text("good-token\n")
-    resumed = service.check_access_and_resume(
-        first.id,
-        actor="operator",
-        request_key="00000000-0000-4000-8000-000000000403",
-        artifact_set_sha256=str(first.artifact_set_sha256),
-        plan_digest=str(first.plan_digest),
-    )
-    assert resumed.id == first.id
-    assert resumed.state == "queued"
-    assert resumed.failure is not None
-    assert resumed.failure["retryable"] is True
-    assert resumed.failure["retry_after_seconds"] == 30
-    assert resumed.failure["recovery_actions"] == ["resume"]
-    assert resumed.artifact_set_sha256 == first.artifact_set_sha256
-    assert resumed.plan_digest == first.plan_digest
-    resumed_downloaded_bytes = require_integer(
-        resumed.progress["downloaded_bytes"], "cache progress downloaded_bytes"
-    )
-    assert resumed_downloaded_bytes >= len(public_data)
-    with sessions() as session:
-        persisted = session.get(ModelCacheOperation, first.id)
-        assert persisted is not None
-        assert persisted.state == "queued"
-        payload = parse_model_cache_payload(persisted.kind, persisted.payload)
-        assert isinstance(payload, ModelCacheDownloadPayload)
-        failure = payload.failure
-        assert failure is not None
-        assert failure.retry_time == NOW.replace(second=30).isoformat()
-        # One retry clock: the column.  The payload no longer carries one.
-        assert persisted.next_action_at is not None
-        assert (
-            persisted.next_action_at.replace(tzinfo=UTC).isoformat()
-            == failure.retry_time
-        )
-        assert payload.retry.next_retry_at is None
-        assert payload.retry.retry_after_seconds is None
+    service.tick()
+    _drain(service, current_id, return_on_wait=True)
+    limited = service.get_operation(current_id)
+    assert limited.failure is not None
+    assert limited.failure["retry_after_seconds"] == 30
     assert service._hf_cooldown_until == NOW.replace(second=30)
+    assert len(requests) == 4
     now[0] = NOW + timedelta(seconds=31)
-    _drain(service, resumed.id)
-    completed = service.get_operation(resumed.id)
-    with sessions() as session:
-        persisted = session.get(ModelCacheOperation, first.id)
-        assert persisted is not None
-        diagnostic = {
-            "state": persisted.state,
-            "failure": persisted.payload.get("failure"),
-            "retry": persisted.payload.get("retry"),
-        }
-        assert completed.state == "succeeded", diagnostic
-        assert completed.failure is None
-        assert persisted.state == completed.state
-        assert "failure" not in persisted.payload
-        assert "claim" not in persisted.payload
-    assert len(requests) == 5
+    _drain(service, current_id)
+    completed = service.get_operation(current_id)
+    assert completed.state == LifecycleState.SUCCEEDED
+    assert completed.failure is None
+    assert completed.plan_digest == first.plan_digest
+    assert completed.artifact_set_sha256 == first.artifact_set_sha256
+    assert len(requests) == 5  # the verified public dependency was reused
     service.close()
-    client.close()
-
-
-def test_access_recheck_groups_hf_files_by_repository_without_failed_key(
-    tmp_path: Path,
-) -> None:
-    sessions = _database(tmp_path)
-    requests: list[httpx2.Request] = []
-
-    def handler(request: httpx2.Request) -> httpx2.Response:
-        requests.append(request)
-        return httpx2.Response(200, request=request, content=b"ok")
-
-    service, client = _service(tmp_path, sessions, handler=handler)
-    artifacts = []
-    for index in range(3):
-        repo = "public" if index < 2 else "dependency"
-        artifact = _artifact(
-            f"file-{index}", f"ok-{index}".encode(), host="huggingface.co"
-        )
-        artifact["source"] = (
-            f"https://huggingface.co/acme/{repo}/resolve/"
-            + "a" * 40
-            + f"/weights-{index}"
-        )
-        artifacts.append(artifact)
-    manifest = service.resolve_artifact_set(
-        model_content_sha256="e" * 64,
-        artifacts=artifacts,
-    )
-    service._check_huggingface_access(manifest, failed_artifact_key=None)
-    assert len(requests) == 2
-    assert {request.url.path.split("/")[2] for request in requests} == {
-        "public",
-        "dependency",
-    }
-    service.close()
-    assert client is not None
     client.close()
 
 
@@ -1176,21 +1078,20 @@ def test_hf_access_failure_resumes_automatically_after_token_change(
         + "/weights-gated"
     }
     operation = _start(service, [artifact], "00000000-0000-4000-8000-000000000451")
-    failed = _drain_until(service, operation.id, now, {"failed", "succeeded"})
-    assert failed.state == "failed"
-    assert failed.failure is not None
+    _drain(service, operation.id, return_on_wait=True)
+    waiting = service.get_operation(operation.id)
+    assert waiting.state in {LifecycleState.QUEUED, LifecycleState.BACKOFF}
+    assert waiting.failure is not None
     attempts = len(requests)
-
-    # An unchanged credential is not retried, however long the worker runs.
+    assert waiting.next_attempt_at is not None
+    now[0] = datetime.fromisoformat(waiting.next_attempt_at) - timedelta(seconds=1)
     for _ in range(3):
-        now[0] += timedelta(hours=1)
         service.tick()
     assert len(requests) == attempts
-    assert service.get_operation(operation.id).state == "failed"
 
     token_path.write_text("replacement-token\n")
-    resumed = _drain_until(service, operation.id, now, {"succeeded"})
-    assert resumed.id == operation.id
+    _drain(service, operation.id)
+    assert service.get_operation(operation.id).state == LifecycleState.SUCCEEDED
     service.close()
     client.close()
 

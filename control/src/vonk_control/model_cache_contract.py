@@ -47,22 +47,24 @@ Digest = Annotated[str, Field(pattern=DIGEST_PATTERN)]
 # produces or consumes the value share the alias, so the vocabulary cannot
 # drift apart.
 ModelCacheOperationKind = Literal["download", "repair", "remove"]
+ModelCacheOperationStateValues = Literal[
+    LifecycleState.QUEUED,
+    LifecycleState.RUNNING,
+    LifecycleState.BACKOFF,
+    LifecycleState.OBSERVING,
+    LifecycleState.SUCCEEDED,
+    LifecycleState.FAILED,
+    LifecycleState.CANCELLED,
+]
 ModelCacheOperationState = Annotated[
-    Literal[
-        LifecycleState.QUEUED,
-        LifecycleState.RUNNING,
-        LifecycleState.BACKOFF,
-        LifecycleState.OBSERVING,
-        LifecycleState.SUCCEEDED,
-        LifecycleState.FAILED,
-        LifecycleState.CANCELLED,
-    ],
+    ModelCacheOperationStateValues,
     # A row written before the rename may still say ``partial`` or ``cancelling``.
     BeforeValidator(state_adopter(LifecycleSubject.MODEL_CACHE_OPERATION)),
 ]
-ModelCacheOperatorState = (
-    Literal[ModelCacheOperatorStatus.ACCEPTED] | ModelCacheOperationState
-)
+ModelCacheOperatorState = Annotated[
+    Literal[ModelCacheOperatorStatus.ACCEPTED, ModelCacheOperationStateValues],
+    BeforeValidator(state_adopter(LifecycleSubject.MODEL_CACHE_OPERATION)),
+]
 ModelCacheOperatorAction = Literal["download", "remove"]
 ModelCacheOperationPhase = Literal[
     "queued",
@@ -193,7 +195,8 @@ class ModelCacheRetry(StrippedStrictModel):
     missing_source: ModelCacheMissingSourceObservation | None = None
     next_retry_at: str | None = None
     retry_after_seconds: int | None = Field(default=None, ge=0)
-    # Stat identity of the credential file observed at an authorization
+    access_checks: int = Field(default=0, ge=0)
+    # Content identity of the credential file observed at an authorization
     # failure; a different value lets the worker resume automatically.
     credential_fingerprint: str | None = Field(default=None, max_length=128)
 
@@ -205,8 +208,8 @@ class ModelCacheClaim(StrippedStrictModel):
 
 class ModelCacheAccessRecheck(StrippedStrictModel):
     request_key: str = Field(pattern=UUID_PATTERN)
-    checked_at: str
-    authorized: bool
+    checked_at: str | None = None
+    authorized: bool | None = None
 
 
 class ModelCacheDownloadResult(StrippedStrictModel):

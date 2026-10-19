@@ -57,6 +57,7 @@ MODEL_CACHE_OPERATION_IDS = {
     ("get", "/api/model/{selector}/remove-review"): "reviewModelRemoval",
     ("post", "/api/model/{selector}/download"): "downloadModel",
     ("post", "/api/model/{selector}/remove"): "removeModel",
+    ("post", "/api/model/operations/{operation_id}/resume-access"): "resumeModelAccess",
     ("post", "/api/model/operations/{operation_id}/cancel"): "cancelModelOperation",
 }
 
@@ -202,6 +203,39 @@ def install_model_operator_routes(
         try:
             operation, action, selector = cache().get_operator_operation(operation_id)
             return _model_operator_response(operation, action=action, selector=selector)
+        except HTTPException:
+            raise
+        except (ModelCacheError, *AVAILABILITY_ERRORS) as error:
+            raise model_cache_http_error(error) from None
+
+    @app.post(
+        "/api/model/operations/{operation_id}/resume-access",
+        response_model=ModelCacheOperatorResponse,
+        status_code=status.HTTP_202_ACCEPTED,
+        responses=bounded_error_responses(401, 403, 404, 409, 422, 503),
+        operation_id="resumeModelAccess",
+    )
+    def resume_access(
+        body: ModelCacheOperatorRequest,
+        operation_id: Annotated[str, Path(pattern=UUID_PATTERN)],
+        actor: Actor = actor_dependency,
+    ) -> ModelCacheOperatorResponse:
+        require_operator(actor, "/api/model/operations/{operation_id}/resume-access")
+        try:
+            operation, action, selector = cache().get_operator_operation(operation_id)
+            if operation.artifact_set_sha256 is None or operation.plan_digest is None:
+                raise HTTPException(
+                    status_code=409,
+                    detail="operation has no retained transfer identity",
+                )
+            resumed = cache().check_access_and_resume(
+                operation_id,
+                actor=actor.subject,
+                request_key=body.request_key,
+                artifact_set_sha256=operation.artifact_set_sha256,
+                plan_digest=operation.plan_digest,
+            )
+            return _model_operator_response(resumed, action=action, selector=selector)
         except HTTPException:
             raise
         except (ModelCacheError, *AVAILABILITY_ERRORS) as error:

@@ -125,7 +125,8 @@ class FakeClient:
             r"/api/(model|recipe)/[^/]+(?:/(download|remove|remove-review))?", path
         )
         operation_path = re.fullmatch(
-            r"/api/(model|recipe)/(operations|requests)/[^/]+(?:/cancel)?", path
+            r"/api/(model|recipe)/(operations|requests)/[^/]+(?:/(?:cancel|resume-access))?",
+            path,
         )
         model_cancel_path = re.fullmatch(
             r"/api/model/operations/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-"
@@ -291,6 +292,8 @@ class FakeClient:
             uuid.UUID(payload["request_key"])
             assert isinstance(payload["selectors"], list)
             assert isinstance(payload["all"], bool)
+        elif path.endswith("/resume-access"):
+            validate_control_document("ModelCacheOperatorRequest", payload)
         elif model_cancel_path is not None:
             validate_control_document("ModelCacheCancellationRequest", payload)
         elif re.fullmatch(r"/api/recipe/operations/[^/]+/cancel", path):

@@ -289,3 +289,57 @@ def test_huggingface_range_resume_preserves_requested_offset(tmp_path: Path) -> 
         client.close()
 
     assert requests[0].headers["range"] == "bytes=7-"
+
+
+@pytest.mark.parametrize("status", [401, 403])
+@pytest.mark.parametrize("token", [None, "hf_rejected_secret"])
+def test_access_denial_names_gated_access_steps_and_truthful_recovery(
+    tmp_path: Path, token: str | None, status: int
+) -> None:
+    """Catches vague denials and promises that licence acceptance requires a new token."""
+    from vonk_control.model_cache.errors import ModelCacheStorageRefused
+
+    service, client = _service(tmp_path, lambda _: httpx2.Response(status), token=token)
+    try:
+        with pytest.raises(ModelCacheStorageRefused) as caught:
+            service._open_http_response(client, SOURCE, {})
+        cause = "the configured token lacks access" if token else "no token configured"
+        step = (
+            "; ensure the token permits this model"
+            if token
+            else ", then configure its token in HF_TOKEN_FILE"
+        )
+        assert caught.value.detail == (
+            f"Gated or access-restricted model: {cause}. "
+            "Request or accept access on https://huggingface.co/acme/private "
+            "while signed in as the Hugging Face account of the configured token"
+            f"{step}. Access is rechecked automatically within 1 hour and when token "
+            "content changes; the download resumes once allowed."
+        )
+    finally:
+        service.close()
+        client.close()
+
+
+def test_denial_records_the_token_used_even_when_file_changes_during_http(
+    tmp_path: Path,
+) -> None:
+    """Catches a lost token-change wakeup when a denial is committed after rotation."""
+    from vonk_control.model_cache.errors import ModelCacheStorageRefused
+
+    def handler(_: httpx2.Request) -> httpx2.Response:
+        (tmp_path / "hf-token").write_text("hf_rotated_token\n")
+        return httpx2.Response(403)
+
+    service, client = _service(tmp_path, handler, token="hf_original_token")
+    try:
+        with pytest.raises(ModelCacheStorageRefused) as caught:
+            service._open_http_response(client, SOURCE, {})
+        assert caught.value.credential_fingerprint is not None
+        assert (
+            caught.value.credential_fingerprint
+            != service._huggingface_credential_fingerprint()
+        )
+    finally:
+        service.close()
+        client.close()

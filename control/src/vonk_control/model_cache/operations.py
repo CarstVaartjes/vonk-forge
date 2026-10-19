@@ -221,7 +221,7 @@ class OperationsMixin:
         # carries it in the payload until its next transition.
         next_attempt = (
             _iso(operation.next_action_at)
-            if blockers and operation.state in model_cache_states.WAITING
+            if operation.state in model_cache_states.WAITING
             else None
         )
         view = CacheOperationView(
