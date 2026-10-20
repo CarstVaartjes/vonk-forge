@@ -3,7 +3,7 @@ import threading
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import LifecycleState
@@ -671,7 +671,7 @@ def test_coordinator_fault_has_durable_api_custody_and_restart_resume(
     )
     assert not worker.run_once()
     with sessions() as session:
-        stored = session.get(CoordinatorFailure, "background-0")
+        stored = session.scalar(select(CoordinatorFailure))
         assert stored is not None and isinstance(
             stored.failure, CoordinatorFailureEvidence
         )
@@ -718,7 +718,7 @@ def test_coordinator_fault_has_durable_api_custody_and_restart_resume(
     if isinstance(fault, AssertionError):
         assert len(calls) == 1
         with sessions() as session:
-            stored = session.get(CoordinatorFailure, "background-0")
+            stored = session.scalar(select(CoordinatorFailure))
             assert stored is not None
             current_wait = read_wait(stored)
             assert (
@@ -736,4 +736,26 @@ def test_coordinator_fault_has_durable_api_custody_and_restart_resume(
         replacement.run_once()
     assert len(calls) == 2
     with sessions() as session:
-        assert session.get(CoordinatorFailure, "background-0") is None
+        assert session.scalar(select(CoordinatorFailure)) is None
+
+
+def test_durable_fault_stays_with_its_source_when_optional_services_reorder(tmp_path):
+    """Catches an index-named fault blocking a different coordinator after restart."""
+    jobs = _service(tmp_path)
+    calls = []
+
+    def broken():
+        calls.append("broken")
+        raise AssertionError("same deterministic input")
+
+    def healthy():
+        calls.append("healthy")
+        return False
+
+    assert not Worker(
+        jobs, "first", {}, background_services=(broken, healthy)
+    ).run_once()
+    assert not Worker(
+        jobs, "restarted", {}, background_services=(healthy, broken)
+    ).run_once()
+    assert calls == ["broken", "healthy", "healthy"]

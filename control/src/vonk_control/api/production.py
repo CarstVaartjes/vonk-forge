@@ -450,9 +450,8 @@ def production_app(settings: Settings | None = None) -> FastAPI:
     )
 
     def reconcile_library_observations():
-        gateway = gateway_keys.ensure_default()
         visual_library.refresh_catalog()
-        return gateway
+        return gateway_keys.ensure_default()
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:

@@ -59,6 +59,19 @@ def _coordinator_source_content() -> str:
     return digest.hexdigest()
 
 
+def _background_source_name(service: Callable[[], object]) -> str:
+    """Stable custody across optional-service changes and worker reconstruction."""
+    module = getattr(service, "__module__", type(service).__module__)
+    name = getattr(service, "__qualname__", type(service).__qualname__)
+    code = getattr(service, "__code__", None)
+    identity = f"background:{module}.{name}:{getattr(code, 'co_firstlineno', 0)}"
+    return (
+        identity
+        if len(identity) <= 128
+        else f"background:{hashlib.sha256(identity.encode()).hexdigest()}"
+    )
+
+
 class WorkerWatchdog:
     """Track completed scheduler loops and detect a stalled main thread."""
 
@@ -303,10 +316,10 @@ class Worker:
             sources.append(("recipes", self._recipes.tick))
         if self._model_cache is not None:
             sources.append(("model-cache", self._run_model_cache))
-        for index, service in enumerate(self._background_services):
+        for service in self._background_services:
             sources.append(
                 (
-                    f"background-{index}",
+                    _background_source_name(service),
                     lambda service=service: bool(service()),
                 )
             )
@@ -397,8 +410,10 @@ class Worker:
             sources[WaitOwnerKind.MODEL_CACHE] = self._run_model_cache
         sources.update(
             {
-                f"background-{index}": lambda service=service: bool(service())
-                for index, service in enumerate(self._background_services)
+                _background_source_name(service): lambda service=service: bool(
+                    service()
+                )
+                for service in self._background_services
             }
         )
         task = sources.get(source)
