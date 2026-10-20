@@ -25,7 +25,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let root = Path::new(&args[1]);
     let capacity: u64 = args[3].parse()?;
     let verdict = LatestVerdict::default();
-    verdict.record(Some(serde_json::from_slice(&fs::read(&args[2])?)?));
+    verdict.record(
+        Some(serde_json::from_slice(&fs::read(&args[2])?)?),
+        &vonk_agent::store_retention::installation_names(root).unwrap_or_default(),
+        &vonk_agent::store_retention::run_scope_names(root).unwrap_or_default(),
+    );
     sweep(
         root,
         SystemTime::now(),

@@ -143,3 +143,37 @@ def test_installed_cli_profile_read_respects_terminal_and_redirected_contexts(
         ("GET", "/api/profile"),
         ("GET", "/api/profile"),
     ]
+
+
+@pytest.mark.lane
+def test_installed_cli_profile_list_follows_pages(
+    installed_vonkctl: Path, postgres_engine, tmp_path: Path
+) -> None:
+    # The installed transport must discover saved identities beyond page 128.
+    _sessions, api, _codec, headers, _preview = _profile_api(postgres_engine)
+    for number in range(2, 130):
+        saved = api.put(
+            f"/api/profile/{number}",
+            headers=headers,
+            json={"name": f"Profile {number}", "expected_revision": 0},
+        )
+        assert saved.status_code == 200, saved.text
+    with _https_api_peer(tmp_path, api, headers) as (url, certificate, state):
+        result = subprocess.run(
+            [str(installed_vonkctl), "profile", "list", "--json"],
+            env=_process_environment(tmp_path, url, certificate, headers),
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr
+        assert [
+            item["number"] for item in json.loads(result.stdout)["profiles"]
+        ] == list(range(1, 130))
+        assert any(
+            path == "/api/profile?after=128"
+            for method, path, _ in state.calls
+            if method == "GET"
+        )

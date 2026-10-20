@@ -11,6 +11,7 @@ from functools import cache
 from pathlib import Path
 
 from . import claim_registry as claims
+from . import collection_continuation as collections
 from . import content_identity_boundaries as identity
 from . import coordination_boundaries as coordination
 from . import deterministic_retries as retries
@@ -47,6 +48,7 @@ MODES = (
     "boundaries",
     "locks",
     "clocks",
+    "collections",
 )
 # The agent's messages a Controller test may send only as the stand-in pinned
 # to the agent's shared vector; built by hand they are the Controller's idea of
@@ -632,6 +634,10 @@ def check_source(
         else:
             sites = []
         hits.extend((site.line, site.kind) for site in sites)
+    if not is_test and "collections" in modes:
+        hits.extend(
+            (line, collections.KIND) for line in collections.scan_source(path, source)
+        )
     if python and is_test and "clocks" in modes:
         hits.extend(
             (line, wall_clocks.KIND) for line in wall_clocks.scan_source(source)

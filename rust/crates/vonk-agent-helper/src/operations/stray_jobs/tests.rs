@@ -177,7 +177,7 @@ fn an_unreadable_container_listing_is_never_taken_as_no_strays() {
             .is_err()
     );
     // The deferral carries Docker's answer, not a bare command failure.
-    let failure = executor.list_job_containers(None).unwrap_err();
+    let failure = executor.list_job_containers(None, None).unwrap_err();
     assert!(matches!(
         failure,
         CommandFailure::Exit { code: Some(1), .. }
@@ -211,17 +211,59 @@ fn a_returning_helper_clears_strays_however_many_managed_containers_the_host_hol
 }
 
 #[test]
-fn strays_beyond_one_pass_are_reached_by_the_next_start() {
+fn one_sweep_continues_until_all_pages_are_reached() {
     let mut containers = vec![job(SERVING, SERVING, "running")];
     containers.extend(leaked_jobs(100));
     let host = Host::with(&containers);
     let (_temp, executor) = executor(&host);
 
     executor.sweep_stray_jobs();
-    let after_one = host.containers.lock().unwrap().len();
-    assert!(after_one < 101, "a full host blocked the sweep");
-    executor.sweep_stray_jobs();
-
     assert_eq!(host.containers.lock().unwrap().len(), 1);
     assert!(host.present(SERVING));
+}
+
+#[test]
+fn protected_front_page_does_not_starve_cleanup_of_the_tail() {
+    let mut containers = leaked_jobs(1);
+    let tail = containers[0].target.clone();
+    containers.extend((0..MAX_LISTED).map(|n| {
+        job(
+            &format!("f{n:07x}-0000-4000-8000-{n:012x}"),
+            &format!("f{n:07x}-0000-4000-8000-{n:012x}"),
+            "running",
+        )
+    }));
+    let host = Host::with(&containers);
+    let (_temp, executor) = executor(&host);
+    executor.sweep_stray_jobs();
+    assert!(!host.present(&tail));
+    assert_eq!(host.containers.lock().unwrap().len(), MAX_LISTED);
+}
+
+#[test]
+fn owned_front_page_refuses_start_but_does_not_starve_removable_tail() {
+    let mut containers: Vec<_> = leaked_jobs(MAX_LISTED as u32 + 1)
+        .into_iter()
+        .map(|mut job| {
+            job.run = RUN_A.to_owned();
+            job
+        })
+        .collect();
+    let protected = containers.last_mut().unwrap();
+    let target = protected.target.clone();
+    let host = Host::with(&containers);
+    let (_temp, executor) = executor(&host);
+    let owner = executor.job_cancellation.begin(identity(&target)).unwrap();
+    assert!(
+        executor
+            .clear_stray_jobs_for_run(identity(JOB_B), RUN_A.parse().unwrap())
+            .is_err()
+    );
+    assert_eq!(host.containers.lock().unwrap().len(), 1);
+    assert!(host.present(&target));
+    drop(owner);
+    executor
+        .clear_stray_jobs_for_run(identity(JOB_B), RUN_A.parse().unwrap())
+        .unwrap();
+    assert!(host.containers.lock().unwrap().is_empty());
 }

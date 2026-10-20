@@ -641,3 +641,96 @@ fn numeric_identity_resolves_in_read_only_container() {
         String::from_utf8_lossy(&repaired.stderr)
     );
 }
+
+#[derive(Clone)]
+struct StartWithStrays {
+    host: Host,
+    config: String,
+}
+
+impl CommandRunner for StartWithStrays {
+    fn run(&self, executable: &Path, args: &[String]) -> Result<CommandOutput, String> {
+        if executable == Path::new("/usr/bin/docker") {
+            match args.first().map(String::as_str) {
+                Some("container" | "logs" | "inspect" | "stop" | "rm") => {
+                    return self.host.run(executable, args);
+                }
+                Some("image") => {
+                    return Ok(docker_output(
+                        true,
+                        &format!("{}\tlinux\tarm64\tv1\t10001:10001\n", self.config),
+                        0,
+                    ));
+                }
+                Some("run") => {
+                    self.host.calls.lock().unwrap().push(args.to_vec());
+                    return Ok(docker_output(true, &"f".repeat(64), 0));
+                }
+                _ => {}
+            }
+        }
+        Ok(docker_output(true, "", 0))
+    }
+}
+
+#[test]
+fn a_start_cleans_full_pages_before_launch_without_a_helper_restart() {
+    for count in [62, 63, 64, 127] {
+        let mut plan = job_plan(recipe_start_plan_for_authority(2));
+        plan.installation_id = INSTALLATION.parse().unwrap();
+        let (_temp, roots) = start_fixture(&mut plan);
+        let containers: Vec<_> = (0..count)
+            .map(|n| {
+                job(
+                    &plan.run_id.to_string(),
+                    &format!("e{n:07x}-0000-4000-8000-{n:012x}"),
+                    "exited",
+                )
+            })
+            .collect();
+        let host = Host::with(&containers);
+        let runner = StartWithStrays {
+            host: host.clone(),
+            config: plan
+                .compiled_execution_plan
+                .runtime_image
+                .local_image_config_id
+                .clone(),
+        };
+        let executor = OperationExecutor::new(roots, &[0; 32], runner, None).unwrap();
+        let arguments = executor
+            .projected_runtime_arguments(
+                &plan.compiled_execution_plan,
+                plan.installation_id,
+                plan.run_id,
+            )
+            .unwrap();
+        executor
+            .runtime_start_locked(
+                &arguments,
+                RuntimeEffectIdentity {
+                    installation_id: plan.installation_id,
+                    runtime_id: plan.run_id,
+                    run_generation: plan.run_generation,
+                },
+                plan.run_id,
+                &plan.plan_digest,
+                &plan
+                    .compiled_execution_plan
+                    .runtime_image
+                    .local_image_config_id,
+            )
+            .unwrap();
+        assert!(
+            host.containers.lock().unwrap().is_empty(),
+            "strays survived Start at {count}"
+        );
+        assert!(
+            host.calls
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|call| call.first().map(String::as_str) == Some("run"))
+        );
+    }
+}

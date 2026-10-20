@@ -13,8 +13,8 @@ use super::*;
 /// One listing names at most this many managed containers, newest first. It
 /// lists full ids only (64 hex digits and a newline), so it fits the helper's
 /// captured-output bound however many containers the host holds; each id's
-/// labels are then read on their own. Older containers come into view as these
-/// are removed, at the next helper start or before their run's next job.
+/// labels are then read on their own. A before cursor continues to older
+/// containers, even when the first page is protected.
 const MAX_LISTED: usize = (MAX_COMMAND_OUTPUT_BYTES / 65) as usize;
 
 const JOB_CONTAINER_FORMAT: &str = "{{.Names}}\t{{.State}}\t{{.Label \"ai.vonkforge.run-id\"}}\t{{.Label \"ai.vonkforge.target-id\"}}\t{{.Label \"ai.vonkforge.installation-id\"}}\t{{.Label \"ai.vonkforge.run-generation\"}}\t{{.Label \"ai.vonkforge.plan-digest\"}}";
@@ -71,7 +71,8 @@ impl<R: CommandRunner> OperationExecutor<R> {
     fn list_job_containers(
         &self,
         run_id: Option<uuid::Uuid>,
-    ) -> Result<(Vec<Option<JobContainer>>, bool), CommandFailure> {
+        before: Option<&str>,
+    ) -> Result<(Vec<Option<JobContainer>>, Option<String>), CommandFailure> {
         let mut arguments = vec![
             "container".to_owned(),
             "ls".to_owned(),
@@ -83,6 +84,9 @@ impl<R: CommandRunner> OperationExecutor<R> {
             "--filter".to_owned(),
             "label=ai.vonkforge.managed=true".to_owned(),
         ];
+        if let Some(before) = before {
+            arguments.extend(["--filter".to_owned(), format!("before={before}")]);
+        }
         if let Some(run_id) = run_id {
             arguments.extend([
                 "--filter".to_owned(),
@@ -107,12 +111,37 @@ impl<R: CommandRunner> OperationExecutor<R> {
             .map(str::trim)
             .filter(|line| !line.is_empty())
             .collect();
-        let full = ids.len() >= MAX_LISTED;
+        let next_cursor = (ids.len() >= MAX_LISTED)
+            .then(|| ids.last().map(|id| (*id).to_owned()))
+            .flatten();
         let jobs = ids
             .into_iter()
             .filter_map(|id| self.read_job_container(id))
             .collect();
-        Ok((jobs, full))
+        Ok((jobs, next_cursor))
+    }
+
+    /// Fetch the next page while its before cursor still exists, then clean
+    /// this page. Removal cannot invalidate the cursor and protected entries
+    /// cannot starve older containers. Each command retains its byte bound.
+    fn visit_job_containers(
+        &self,
+        run_id: Option<uuid::Uuid>,
+        mut visit: impl FnMut(Vec<Option<JobContainer>>),
+    ) -> Result<(), CommandFailure> {
+        let mut page = self.list_job_containers(run_id, None)?;
+        loop {
+            let next_page = page
+                .1
+                .as_deref()
+                .map(|cursor| self.list_job_containers(run_id, Some(cursor)))
+                .transpose();
+            visit(page.0);
+            match next_page? {
+                Some(next) => page = next,
+                None => return Ok(()),
+            }
+        }
     }
 
     /// The labels of one listed container: serving is `None`; one that is
@@ -194,49 +223,40 @@ impl<R: CommandRunner> OperationExecutor<R> {
 
     /// At helper start no Start owns any job container. A running one is a
     /// workload that survives the restart and is left for its owner; one whose
-    /// process ended is a stray. One bounded pass; what it cannot remove is
-    /// journaled and is removed before its run's next job starts.
+    /// process ended is a stray. Byte-bounded pages continue to exhaustion;
+    /// removals that fail are journaled and retried before the run's next job.
     pub fn sweep_stray_jobs(&self) {
-        let (jobs, truncated) = match self.list_job_containers(None) {
-            Ok(listing) => listing,
-            Err(error) => {
-                eprintln!(
-                    "vonk-agent-helper: stray job sweep deferred: container listing failed: {error}"
-                );
-                return;
-            }
-        };
-        if truncated {
-            eprintln!(
-                "vonk-agent-helper: stray job sweep saw the newest {MAX_LISTED} managed containers; older ones are reached as these are removed"
-            );
-        }
-        for job in jobs.into_iter().flatten() {
-            match self.reobserve_by_identity(job.identity, job.run_id, &job.plan_digest) {
-                Reobserved::Exited { code } => eprintln!(
-                    "vonk-agent-helper: job {} of run {} exited {code} with no owner left; removing it",
-                    job.identity.runtime_id, job.run_id
-                ),
-                Reobserved::Absent => continue,
-                Reobserved::Running => {
-                    eprintln!(
-                        "vonk-agent-helper: job {} of run {} is running; left for its owner",
+        let outcome = self.visit_job_containers(None, |jobs| {
+            for job in jobs.into_iter().flatten() {
+                match self.reobserve_by_identity(job.identity, job.run_id, &job.plan_digest) {
+                    Reobserved::Exited { code } => eprintln!(
+                        "vonk-agent-helper: job {} of run {} exited {code} with no owner left; removing it",
                         job.identity.runtime_id, job.run_id
-                    );
-                    continue;
+                    ),
+                    Reobserved::Absent => continue,
+                    Reobserved::Running => {
+                        eprintln!(
+                            "vonk-agent-helper: job {} of run {} is running; left for its owner",
+                            job.identity.runtime_id, job.run_id
+                        );
+                        continue;
+                    }
+                    Reobserved::Unknown(cause) => {
+                        eprintln!(
+                            "vonk-agent-helper: job {} of run {} left for its owner: its state is unobserved: {cause}",
+                            job.identity.runtime_id, job.run_id
+                        );
+                        continue;
+                    }
                 }
-                Reobserved::Unknown(cause) => {
-                    eprintln!(
-                        "vonk-agent-helper: job {} of run {} left for its owner: its state is unobserved: {cause}",
-                        job.identity.runtime_id, job.run_id
-                    );
-                    continue;
-                }
+                let outcome = self
+                    .lock_installation_runtime(&job.identity.installation_id.to_string())
+                    .and_then(|_lock| self.remove_stray_job(&job));
+                journal_stray(&job, &outcome);
             }
-            let outcome = self
-                .lock_installation_runtime(&job.identity.installation_id.to_string())
-                .and_then(|_lock| self.remove_stray_job(&job));
-            journal_stray(&job, &outcome);
+        });
+        if let Err(error) = outcome {
+            eprintln!("vonk-agent-helper: stray job sweep deferred: {error}");
         }
     }
 
@@ -249,23 +269,25 @@ impl<R: CommandRunner> OperationExecutor<R> {
         identity: RuntimeEffectIdentity,
         run_id: uuid::Uuid,
     ) -> Result<(), OperationError> {
-        let (jobs, truncated) = self.list_job_containers(Some(run_id))?;
-        if truncated {
-            return Err(OperationError::StopUncertain);
-        }
-        for job in jobs {
-            let job = job.ok_or(OperationError::StopUncertain)?;
-            if job.identity.runtime_id == identity.runtime_id {
-                continue;
+        let mut failure = None;
+        self.visit_job_containers(Some(run_id), |jobs| {
+            for job in jobs {
+                let outcome = match job {
+                    Some(job) if job.identity.runtime_id == identity.runtime_id => continue,
+                    Some(job) if job.identity.installation_id == identity.installation_id => {
+                        let outcome = self.remove_stray_job(&job);
+                        journal_stray(&job, &outcome);
+                        outcome
+                    }
+                    _ => Err(OperationError::StopUncertain),
+                };
+                if failure.is_none() {
+                    failure = outcome.err();
+                }
             }
-            // Only the held installation lock may guard a removal.
-            let outcome = if job.identity.installation_id == identity.installation_id {
-                self.remove_stray_job(&job)
-            } else {
-                Err(OperationError::StopUncertain)
-            };
-            journal_stray(&job, &outcome);
-            outcome?;
+        })?;
+        if let Some(error) = failure {
+            return Err(error);
         }
         Ok(())
     }

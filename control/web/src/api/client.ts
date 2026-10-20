@@ -572,7 +572,23 @@ export class ApiClient implements ControlApi {
   }
 
   async profiles(signal?: AbortSignal): Promise<FleetProfileList> {
-    return resultData(await this.generated.GET("/api/profile", { signal }));
+    const first = resultData(await this.generated.GET("/api/profile", { signal }));
+    const profiles = [...first.profiles];
+    let after = first.next_after;
+    let previous = 0;
+    while (after != null) {
+      if (after <= previous) throw new Error("Profile listing cursor did not advance");
+      previous = after;
+      const page = resultData(
+        await this.generated.GET("/api/profile", {
+          params: { query: { after } },
+          signal,
+        }),
+      );
+      profiles.push(...page.profiles);
+      after = page.next_after;
+    }
+    return { ...first, profiles, next_after: null };
   }
 
   async profile(number: FleetProfileNumber, signal?: AbortSignal): Promise<FleetProfileRead> {
