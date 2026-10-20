@@ -383,7 +383,9 @@ def test_profile_save_reports_exact_model_damage_and_recovers(
     request = FleetProfileInput(
         name="Sweep pins",
         assignments=[
-            FleetProfileAssignmentInput(recipe_selector=selector, spark_ids=nodes[:1])
+            FleetProfileAssignmentInput(
+                recipe_selector=selector, spark_ids=list(nodes[:1])
+            )
         ],
     )
     refused = api.put(
