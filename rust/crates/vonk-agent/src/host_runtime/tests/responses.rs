@@ -346,3 +346,30 @@ fn malformed_executed_outcome_names_the_outcome_contract() {
     .unwrap();
     assert!(require_executed_outcome(&stop_uncertain, true).is_ok());
 }
+
+#[test]
+fn helper_command_evidence_keeps_status_and_redacts_stderr_at_agent_intake() {
+    let mut response = valid_executed_response();
+    response.status = vonk_agent_protocol::generated::HostHelperResponseStatus::Rejected;
+    response.exit_code = None;
+    response.error_code = Some(HelperErrorCode::OperationCommandFailed);
+    let mut logs = vonk_agent_helper::runtime_logs::retain_container(
+        b"",
+        b"opaque runtime failure\nHF_TOKEN=never-persist",
+    );
+    logs.exit_code = Some(125);
+    response.process_logs = Some(logs);
+    let error = super::super::runtime_rejection(&response, HostRuntimeAction::Start);
+    let retained = error.process_logs().unwrap();
+    assert_eq!(retained.exit_code, Some(125));
+    assert!(retained.stderr.text.contains("opaque runtime failure"));
+    assert!(!retained.stderr.text.contains("never-persist"));
+    let failure =
+        crate::outcome::Failure::new("runtime command failed").process_logs(Some(retained.clone()));
+    let evidence = crate::failure_evidence::from_failure(
+        &vonk_agent_protocol::generated::AgentOperation::RecipeStart,
+        &failure,
+    );
+    assert_eq!(evidence.process_exit_code, Some(125));
+    assert!(!evidence.stderr.text.contains("never-persist"));
+}

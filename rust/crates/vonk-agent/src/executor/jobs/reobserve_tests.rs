@@ -138,6 +138,7 @@ pub(super) fn peers(job_id: Uuid, script: Vec<Answer>) -> Peers {
                     response.exit_code = Some(code);
                     response.diagnostic = Some(format!("exit_code={code}"));
                     response.process_logs = Some(HostHelperProcessLogs {
+                        exit_code: None,
                         stdout: crate::failure_evidence::log_tail(b"job output\n"),
                         stderr: crate::failure_evidence::log_tail(b"job error\n"),
                     });

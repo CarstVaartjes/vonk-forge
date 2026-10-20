@@ -36,6 +36,7 @@ impl ProcessRunner for Units {
             self.broken_observation
                 .set(self.broken_observation.get() - 1);
             return Ok(ProcessOutput {
+                exit_code: None,
                 success: true,
                 stdout: b"unreadable peer observation".to_vec(),
                 stderr: vec![],
@@ -51,6 +52,7 @@ impl ProcessRunner for Units {
             String::new()
         };
         Ok(ProcessOutput {
+            exit_code: None,
             success: true,
             stdout: stdout.into_bytes(),
             stderr: vec![],
@@ -101,6 +103,7 @@ impl ProcessRunner for StorageCleanup {
     ) -> Result<ProcessOutput, ProcessError> {
         if program == Program::SystemdRun {
             return Ok(ProcessOutput {
+                exit_code: None,
                 success: true,
                 stdout: vec![],
                 stderr: vec![],

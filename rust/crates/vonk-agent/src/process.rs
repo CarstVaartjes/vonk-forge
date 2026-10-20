@@ -52,6 +52,8 @@ impl Program {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProcessOutput {
+    /// Actual child exit status; None means no numeric status was observed.
+    pub exit_code: Option<i32>,
     pub success: bool,
     pub stdout: Vec<u8>,
     pub stderr: Vec<u8>,
@@ -278,6 +280,7 @@ pub trait ProcessRunner {
         sink.write_all(&output.stdout)?;
         sink.flush()?;
         Ok(ProcessOutput {
+            exit_code: output.exit_code,
             success: output.success,
             stdout: Vec::new(),
             stderr: output.stderr,
@@ -824,6 +827,7 @@ fn run_process(
         return Err(ProcessError::Cancelled);
     }
     Ok(ProcessOutput {
+        exit_code: status.code(),
         success: status.success(),
         stdout,
         stderr,
@@ -1130,6 +1134,7 @@ fn run_process_to_file(
         return Err(ProcessError::StorageLimit);
     }
     Ok(ProcessOutput {
+        exit_code: status.code(),
         success: status.success(),
         stdout: Vec::new(),
         stderr,
@@ -1278,6 +1283,21 @@ mod tests {
         time::{Duration, Instant},
     };
     use tempfile::{tempdir, tempfile};
+
+    #[test]
+    fn failed_child_keeps_its_numeric_status_and_own_stderr() {
+        // Curl rejects this option before attempting any network access.
+        let output = SystemProcessRunner
+            .run(
+                Program::Curl,
+                &["--vonk-unknown-option".into()],
+                Duration::from_secs(1),
+            )
+            .unwrap();
+        assert!(!output.success);
+        assert_eq!(output.exit_code, Some(2));
+        assert!(String::from_utf8_lossy(&output.stderr).contains("--vonk-unknown-option"));
+    }
 
     #[test]
     fn podman_and_its_user_service_wrapper_use_the_effective_users_systemd_bus() {

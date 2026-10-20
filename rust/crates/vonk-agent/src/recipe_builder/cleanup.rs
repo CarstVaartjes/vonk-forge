@@ -185,16 +185,7 @@ pub fn cleanup_build_storage<R: ProcessRunner + ?Sized>(
         let metadata = fs::symlink_metadata(entry.path()).map_err(at("stat", &entry.path()))?;
         if metadata.is_dir() && !metadata.file_type().is_symlink() {
             fs::create_dir_all(runtime_root).map_err(at("create", runtime_root))?;
-            let runroot = Builder::new()
-                .prefix("b-")
-                .tempdir_in(runtime_root)
-                .map_err(at("create a Podman runroot in", runtime_root))?;
-            if runroot.path().as_os_str().as_bytes().len() > 50 {
-                return Err(RecipeBuildError::CleanupBlocked(format!(
-                    "the Podman runroot \"{}\" is longer than 50 bytes",
-                    runroot.path().display()
-                )));
-            }
+            let runroot = super::builder::build_runroot(runtime_root, request.build_id)?;
             let staging = entry.path();
             let tmp = staging.join("podman-image-tmp");
             let storage = staging.join("podman-storage");
@@ -230,17 +221,27 @@ pub fn cleanup_build_storage<R: ProcessRunner + ?Sized>(
                 let timeout = phase_time(deadline, Duration::from_secs(5))?;
                 let mut arguments = podman_user_service_arguments(
                     &format!("vonk-recipe-build-{}-e", request.build_id),
-                    runroot.path(),
+                    runroot.as_path(),
                     &staging,
                     timeout,
                     true,
                 );
                 arguments.push("/usr/bin/podman".into());
-                arguments.extend(podman_storage_arguments(&storage, runroot.path()));
+                arguments.extend(podman_storage_arguments(&storage, runroot.as_path()));
                 arguments.extend(extra);
                 // A missing container/network is an idempotent miss. The exact
                 // cgroup must still settle before its private storage is removed.
-                let _ = runner.run(Program::SystemdRun, &arguments, timeout);
+                if let Ok(output) = runner.run(Program::SystemdRun, &arguments, timeout)
+                    && super::import::podman_database_conflict(&output)
+                {
+                    // Exact operation services are already settled. Reconcile
+                    // an incompatible private execution cache once, retaining
+                    // verified base images and unrelated builds.
+                    remove_private_tree(&storage, deadline)?;
+                    fs::create_dir_all(&storage)
+                        .map_err(at("recreate private storage", &storage))?;
+                    break;
+                }
             }
             let mut present = Vec::new();
             for attempt in 0..3 {
@@ -268,13 +269,13 @@ pub fn cleanup_build_storage<R: ProcessRunner + ?Sized>(
                     let timeout = phase_time(deadline, Duration::from_secs(5))?;
                     let mut arguments = podman_user_service_arguments(
                         &format!("vonk-recipe-build-{}-e", request.build_id),
-                        runroot.path(),
+                        runroot.as_path(),
                         &staging,
                         timeout,
                         true,
                     );
                     arguments.push("/usr/bin/podman".into());
-                    arguments.extend(podman_storage_arguments(&storage, runroot.path()));
+                    arguments.extend(podman_storage_arguments(&storage, runroot.as_path()));
                     arguments.extend(extra);
                     match runner.run(Program::SystemdRun, &arguments, timeout) {
                         Ok(output) if output.success => present.extend(
@@ -282,7 +283,12 @@ pub fn cleanup_build_storage<R: ProcessRunner + ?Sized>(
                                 .split_whitespace()
                                 .map(|name| format!("{what} \"{name}\" is still present")),
                         ),
-                        Ok(_) => present.push(format!("the Podman {what} query failed")),
+                        Ok(output) => {
+                            return Err(super::diagnostics::command_failure(
+                                FailureStage::BoundedBuildProcess,
+                                &output,
+                            ));
+                        }
                         Err(error) => present.push(format!(
                             "the Podman {what} query did not run ({})",
                             process_error_diagnostic(&error)
@@ -307,6 +313,7 @@ pub fn cleanup_build_storage<R: ProcessRunner + ?Sized>(
             }
             cleanup_build_until(runner, request, deadline)?;
             remove_private_tree(&staging, deadline)?;
+            remove_private_tree(&runroot, deadline)?;
         } else {
             // Isolate the generated entry without touching its uncertain target.
             fs::rename(

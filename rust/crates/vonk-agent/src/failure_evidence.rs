@@ -393,6 +393,7 @@ pub fn diagnostic_logs(
 /// process output: the detail is the stderr tail, stdout is empty.
 pub fn detail_logs(detail: &str) -> FailureProcessLogs {
     FailureProcessLogs {
+        exit_code: None,
         stdout: log_tail(&[]),
         stderr: log_tail(detail.as_bytes()),
     }
@@ -533,6 +534,7 @@ pub fn collect(phase: &str, code: &str, stdout: &[u8], stderr: &[u8]) -> Failure
     let start = Instant::now();
     let mut evidence = FailureDiagnostics {
         model_store_layout: None,
+        process_exit_code: None,
         schema_version: 1,
         collected_at: Utc::now().to_rfc3339(),
         phase: sanitize_text(phase).chars().take(80).collect(),
@@ -636,6 +638,7 @@ pub fn from_failure(operation: &AgentOperation, failure: &Failure) -> FailureDia
     let mut value = collect(&phase, &code, &[], &[]);
     value.model_store_layout = failure.model_store_layout.clone();
     if let Some(logs) = &failure.process_logs {
+        value.process_exit_code = logs.exit_code;
         value.stdout = logs.stdout.clone();
         value.stderr = logs.stderr.clone();
     }
@@ -723,6 +726,7 @@ mod tests {
     #[test]
     fn a_failed_image_build_names_its_step_and_exit_status() {
         let failure = Failure::new("build failed").process_logs(Some(FailureProcessLogs {
+            exit_code: None,
             stdout: log_tail(b""),
             stderr: log_tail(
                 b"ray is not on PATH in the base image\nError: building at STEP \"RUN python3 /opt/vonk/verify-runtime.py\": while running runtime: exit status 1\n",

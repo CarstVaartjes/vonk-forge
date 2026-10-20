@@ -42,6 +42,8 @@ class ModelStoreLayoutFault(WireModel):
 
 
 class FailureDiagnostics(WireModel):
+    # Numeric subprocess status; absent when the process never started or was signalled.
+    process_exit_code: int | None = Field(default=None, strict=True, ge=0, le=255)
     model_store_layout: ModelStoreLayoutFault | None = None
     schema_version: Literal[1] = 1
     collected_at: str = Field(min_length=1, max_length=64)
