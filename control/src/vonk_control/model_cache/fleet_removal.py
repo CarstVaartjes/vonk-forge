@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import uuid
 from datetime import datetime, timedelta
+from functools import partial
 from typing import TYPE_CHECKING, cast
 
 from pydantic import TypeAdapter
@@ -28,8 +29,10 @@ from ..admission_locking import (
     lock_admission_rows,
 )
 from ..agent_operation_facts import aware
+from ..artifact_lifecycle import ArtifactReferenceUnverified
 from ..cache_removal_review import (
     CacheAssetDisposition,
+    CacheRemovalBlocker,
     CacheRemovalReview,
     CacheRemovalReviewContent,
     seal_cache_removal_review,
@@ -40,6 +43,7 @@ from ..fleet_model_removal_contract import (
     FleetModelRemovalEffects,
     FleetRemovalInstallation,
     FleetRemovalObject,
+    FleetRemovalObservationIssue,
     FleetRemovalTarget,
 )
 from ..fleet_model_removal_contract import (
@@ -49,7 +53,12 @@ from ..fleet_model_removal_contract import (
     FleetRemovalReason as R,
 )
 from ..inventory_repository import MAX_INVENTORY_FUTURE_SKEW
-from ..lifecycle.evidence import Residue
+from ..lifecycle.evidence import (
+    BookkeepingReason,
+    Residue,
+    read_or_rebuild,
+    retire_as_unknown,
+)
 from ..model_cache_contract import CacheManifest, CacheOperationKind
 from ..models import (
     AgentNode,
@@ -81,20 +90,42 @@ if TYPE_CHECKING:
 INVENTORY_MAX_AGE = timedelta(minutes=5)
 
 
-def _model_objects(session: Session, digest: str) -> tuple[set[str], set[str]]:
+def _model_objects(
+    session: Session,
+    digest: str,
+    *,
+    observation_issues: list[FleetRemovalObservationIssue] | None = None,
+) -> tuple[set[str], set[str]]:
     target_objects: set[str] = set()
     shared: set[str] = set()
+    issues: list[FleetRemovalObservationIssue] = []
     for revision in session.scalars(
         select(CatalogDocumentRevision).where(CatalogDocumentRevision.kind == "model")
     ):
-        model = read_model(revision.document)
+        model = read_or_rebuild(
+            kind=CatalogDocumentRevision.__tablename__,
+            subject=revision.id,
+            read=partial(read_model, revision.document),
+        )
+        if isinstance(model, Residue):
+            issues.append(_observation_issue(model))
+            continue
         objects = {file.sha256 for file in model.files}
         if revision.content_digest == digest:
             target_objects.update(objects)
         else:
             shared.update(objects)
     for row in session.scalars(select(ModelCacheSet)):
-        manifest = read_stored_model(CacheManifest, row.manifest, from_json=True)
+        manifest = read_or_rebuild(
+            kind=ModelCacheSet.__tablename__,
+            subject=row.artifact_set_sha256,
+            read=partial(
+                read_stored_model, CacheManifest, row.manifest, from_json=True
+            ),
+        )
+        if isinstance(manifest, Residue):
+            issues.append(_observation_issue(manifest))
+            continue
         for artifact in manifest.artifacts:
             if artifact.model_content_sha256 == digest or (
                 artifact.model_content_sha256 is None
@@ -103,17 +134,43 @@ def _model_objects(session: Session, digest: str) -> tuple[set[str], set[str]]:
                 target_objects.add(artifact.sha256)
             else:
                 shared.add(artifact.sha256)
+    if observation_issues is not None:
+        observation_issues.extend(issues)
+    elif issues:
+        # Mutating consumers require complete references; review collects the
+        # same typed unknowns without granting authority from missing evidence.
+        raise ArtifactReferenceUnverified(
+            ArtifactLifecycleCode.REFERENCE_SCAN_FAILED,
+            issues[0].detail,
+            retryable=True,
+        )
     return target_objects, shared
 
 
+def _observation_issue(residue: Residue) -> FleetRemovalObservationIssue:
+    return FleetRemovalObservationIssue(
+        kind=residue.kind,
+        subject=residue.subject,
+        reason=residue.reason,
+        detail=f"{residue.kind} {residue.subject}: {residue.reason}. Refresh owner evidence and review again.",
+    )
+
+
 class FleetRemovalMixin:
-    def _fleet_effects(self, session: Session, digest: str) -> FleetModelRemovalEffects:
+    def _fleet_effects(
+        self, session: Session, digest: str, *, shared_objects: set[str] | None = None
+    ) -> FleetModelRemovalEffects:
         cache = cast("ModelCacheService", self)
         evidence = _Evidence.read(session, cache._clock())
         readable = (
             evidence.pointers is not None and evidence.application_references_readable
         )
-        target_objects, shared = _model_objects(session, digest)
+        issues: list[FleetRemovalObservationIssue] = []
+        target_objects, shared = _model_objects(
+            session, digest, observation_issues=issues
+        )
+        if shared_objects is not None:
+            shared_objects.update(shared)
         # Provenance is not identity. Include every cached set of this model,
         # including variants whose executable plan uses a subset of its files.
         sets = tuple(
@@ -130,9 +187,9 @@ class FleetRemovalMixin:
         keep_detail = (
             "A saved or loaded profile, live operation or pin names this model."
         )
-        if not readable:
+        if not readable or issues:
             protected = True
-            keep_detail = "Profile or live operation references are unavailable."
+            keep_detail = "Model content references are unavailable; review will recheck owner evidence."
         installations: dict[str, list[FleetRemovalInstallation]] = {}
         lifecycle = cache._fleet_lifecycle
         for installation in session.scalars(
@@ -140,7 +197,20 @@ class FleetRemovalMixin:
             .where(RecipeInstallation.state != InstallationState.UNINSTALLED)
             .order_by(RecipeInstallation.id)
         ):
-            plan = parse_stored_installation_plan(installation.plan, for_uninstall=True)
+            plan = read_or_rebuild(
+                kind=RecipeInstallation.__tablename__,
+                subject=installation.id,
+                read=partial(
+                    parse_stored_installation_plan,
+                    installation.plan,
+                    for_uninstall=True,
+                ),
+            )
+            if isinstance(plan, Residue):
+                issues.append(_observation_issue(plan))
+                protected = True
+                keep_detail = "Installation model references are unavailable; refresh owner evidence."
+                continue
             models = {installation.model_content_sha256}
             models.update(
                 artifact.model.content_sha256
@@ -158,10 +228,21 @@ class FleetRemovalMixin:
             uninstall = (
                 None
                 if lifecycle is None
-                else lifecycle._uninstall_plan_in_session(
-                    session, installation.id, lock=False, preserve_model_files=True
+                else read_or_rebuild(
+                    kind=RecipeInstallation.__tablename__,
+                    subject=installation.id,
+                    read=partial(
+                        lifecycle._uninstall_plan_in_session,
+                        session,
+                        installation.id,
+                        lock=False,
+                        preserve_model_files=True,
+                    ),
                 )
             )
+            if isinstance(uninstall, Residue):
+                issues.append(_observation_issue(uninstall))
+                uninstall = None
             if uninstall is None:
                 detail = "Installation removal owner unavailable."
             elif not uninstall.allowed:
@@ -198,14 +279,40 @@ class FleetRemovalMixin:
             available = (
                 snapshot is not None
                 and snapshot.model_objects is not None
-                and aware(snapshot.observed_at) >= cache._clock() - INVENTORY_MAX_AGE
+                and cache._clock() - INVENTORY_MAX_AGE
+                <= aware(snapshot.observed_at)
+                <= cache._clock() + MAX_INVENTORY_FUTURE_SKEW
             )
+            snapshot_objects = None if snapshot is None else snapshot.model_objects
             objects = (
                 []
                 if not available or snapshot is None
-                else TypeAdapter(list[ModelStoreObject]).validate_json(
-                    json.dumps(snapshot.model_objects), strict=True
+                else read_or_rebuild(
+                    kind=NodeInventorySnapshot.__tablename__,
+                    subject=node_id,
+                    read=partial(
+                        TypeAdapter(list[ModelStoreObject]).validate_json,
+                        json.dumps(snapshot_objects),
+                        strict=True,
+                    ),
                 )
+            )
+            if isinstance(objects, Residue):
+                issues.append(_observation_issue(objects))
+                available, objects = False, []
+            elif not available:
+                issues.append(
+                    _observation_issue(
+                        retire_as_unknown(
+                            NodeInventorySnapshot.__tablename__,
+                            node_id,
+                            BookkeepingReason.EVIDENCE_UNAVAILABLE,
+                            "A fresh model-object inventory is required.",
+                        )
+                    )
+                )
+            references_unknown = any(
+                issue.kind != NodeInventorySnapshot.__tablename__ for issue in issues
             )
             effects = [
                 FleetRemovalObject(
@@ -213,7 +320,9 @@ class FleetRemovalMixin:
                     disposition=D.RETAIN
                     if protected or obj.sha256 in shared
                     else D.REMOVE,
-                    reason=R.REFERENCED
+                    reason=R.OBSERVATION_UNAVAILABLE
+                    if references_unknown
+                    else R.REFERENCED
                     if protected
                     else R.SHARED
                     if obj.sha256 in shared
@@ -244,20 +353,28 @@ class FleetRemovalMixin:
             )
         return FleetModelRemovalEffects(
             nas_remove=not protected,
-            nas_reason=R.REFERENCED if protected else R.UNUSED,
+            nas_reason=R.OBSERVATION_UNAVAILABLE
+            if any(
+                issue.kind != NodeInventorySnapshot.__tablename__ for issue in issues
+            )
+            else R.REFERENCED
+            if protected
+            else R.UNUSED,
             nas_detail=keep_detail
             if protected
             else "Remove unshared NAS objects through model cache removal.",
             targets=targets,
+            observation_issues=issues,
         )
 
     def review_fleet_model_removal(self, selector: str) -> CacheRemovalReview:
         cache = cast("ModelCacheService", self)
         review = cache.review_model_removal(selector)
+        shared: set[str] = set()
         with cache._session() as session:
-            effects = cache._fleet_effects(session, review.target_identity)
-        with cache._session() as session:
-            _, shared = _model_objects(session, review.target_identity)
+            effects = cache._fleet_effects(
+                session, review.target_identity, shared_objects=shared
+            )
         assets = [
             asset.model_copy(
                 update={
@@ -290,9 +407,21 @@ class FleetRemovalMixin:
                             "fleet",
                             "assets",
                             "nas_reclaimable_bytes",
+                            "blockers",
                         }
                     ),
                     "fleet": effects,
+                    "blockers": [
+                        *review.blockers,
+                        *(
+                            CacheRemovalBlocker(
+                                code=ArtifactLifecycleCode.REFERENCE_SCAN_FAILED,
+                                detail=issue.detail,
+                                retryable=True,
+                            )
+                            for issue in effects.observation_issues
+                        ),
+                    ],
                     "assets": assets,
                     "nas_reclaimable_bytes": reclaimable,
                 }
@@ -339,10 +468,12 @@ class FleetRemovalMixin:
         assert effects is not None
         # Missing evidence is retained in the review, not permission to infer
         # an empty remote cache. Acceptance requires an exact complete scope.
-        if any(not target.observation_available for target in effects.targets):
+        if effects.observation_issues or any(
+            not target.observation_available for target in effects.targets
+        ):
             raise ModelCacheConflictInvalid(
                 ArtifactLifecycleCode.REFERENCE_SCAN_FAILED,
-                "Spark inventory is unavailable; fleet removal waits for a complete review.",
+                "Fleet evidence is unavailable; refresh owner evidence and review again.",
             )
         selected = tuple(
             sorted(
