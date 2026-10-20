@@ -151,3 +151,47 @@ def test_a_nested_comparison_is_reported_once_by_its_function() -> None:
         path="control/src/vonk_control/sample.py",
     )
     assert [site.function for site in sites] == ["Service.check.inner"]
+
+
+@pytest.mark.parametrize("operator", ["!=", "=="])
+def test_rust_provenance_annotation_cannot_refuse_stored_content(operator: str) -> None:
+    source = f"""
+        fn verify_archive() {{
+            if descriptor.digest != image.manifest_digest
+                || descriptor.annotations
+                    .get("org.opencontainers.image.ref.name")
+                    .map(String::as_str) {operator} Some(reference_name)
+            {{
+                return Err(BaseImageError::Invalid);
+            }}
+        }}
+    """
+    path = "rust/crates/vonk-agent/src/base_images.rs"
+    sites = scan_source(dedent(source), path=path)
+    assert [site.kind for site in sites] == [PROVENANCE_COMPARISON]
+    assert sites[0].function == "verify_archive"
+    # The added-line gate must consume the Rust detector, not just its fixture.
+    from .added_line_guards import check_source
+
+    assert check_source(path, dedent(source), {sites[0].line}, modes=("identity",))
+    assert not check_source(path, dedent(source), {1}, modes=("identity",))
+
+
+def test_rust_identity_checks_and_provenance_retagging_are_allowed() -> None:
+    source = """
+        fn verify_archive() {
+            if descriptor.digest != image.manifest_digest {
+                return Err(BaseImageError::Invalid);
+            }
+            if descriptor.annotations.get("org.opencontainers.image.ref.name")
+                != Some(reference_name) {
+                retag(reference_name);
+            }
+            // if descriptor.annotations.get("org.opencontainers.image.ref.name")
+            //     != Some(reference_name) { return Err(BaseImageError::Invalid); }
+        }
+    """
+    assert (
+        scan_source(dedent(source), path="rust/crates/vonk-agent/src/base_images.rs")
+        == []
+    )

@@ -699,6 +699,28 @@ impl<R: ProcessRunner + ?Sized> RecipeBuilder<'_, R> {
                     logs: Some(Box::new(sanitized_process_logs(&loaded))),
                 });
             }
+            // A cached archive may have been imported under another reference.
+            // Tag the exact loaded config identity without rewriting layer bytes.
+            let reference_name = image
+                .reference
+                .rsplit_once('@')
+                .map(|(name, _)| name)
+                .ok_or(RecipeBuildError::Evidence)?;
+            let mut tag_arguments = podman_storage_arguments(storage, runroot);
+            tag_arguments.extend([
+                "tag".to_owned(),
+                archive.config_digest,
+                reference_name.to_owned(),
+            ]);
+            let tagged = self.runner.run_cancellable(
+                Program::Podman,
+                &tag_arguments,
+                phase_time(deadline, Duration::from_secs(60))?,
+                cancelled,
+            )?;
+            if !tagged.success {
+                return Err(RecipeBuildError::BaseImageInspect);
+            }
             let mut inspect_arguments = podman_storage_arguments(storage, runroot);
             inspect_arguments.extend([
                 "image".to_owned(),
