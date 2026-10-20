@@ -118,11 +118,12 @@ def _model_objects(
             read=partial(read_catalog_document, revision),
         )
         if isinstance(model, Residue):
-            # Superseded documents are history, not live reference authority.
-            # Cache manifests and installed plans independently protect their
-            # bytes. A damaged current head stays visible until the ordinary
-            # catalog sync re-ingests its exact source; a read never writes.
-            if current_head:
+            # Catalog heads for other content are not live byte references.
+            # Old source identities can retain heads indefinitely, even after
+            # replacement by a different slug. Cache manifests, installed plans
+            # and profile references independently protect their live bytes.
+            # Only damage to the requested head makes its objects unknown.
+            if current_head and revision.content_digest == digest:
                 issues.append(_observation_issue(model, note=model.note))
             continue
         assert isinstance(model, ModelDefinition)

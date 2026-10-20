@@ -19,7 +19,7 @@ from vonk_control.model_cache import ModelCacheService
 from vonk_control.model_cache.fleet_removal import _model_objects
 from vonk_control.models import Base, CatalogDocumentRevision
 from vonk_control.recipe_library_types import RecipeLibraryItem, RecipeLibrarySnapshot
-from vonk_forge_contracts import ModelDefinition
+from vonk_forge_contracts import ModelDefinition, document_sha256
 
 from .test_model_removal_reference_lifecycle import _one_model
 
@@ -285,3 +285,45 @@ def test_sync_replaces_a_damaged_head_when_source_revision_is_already_local(
         assert failures[0].revision_id == candidate.id
         assert len(session.scalars(select(CatalogDocumentRevision)).all()) == 2
     assert sync.automatic().id == healed.id
+
+
+@pytest.mark.usefixtures("damaged_json_rows")
+def test_unrelated_damaged_head_does_not_gate_removal_before_sync(
+    catalog: CatalogService, tmp_path: Path
+) -> None:
+    """Catches treating an old source slug's retained head as live byte authority."""
+    target = _one_model(tmp_path, "current-source")
+    old_source = _one_model(tmp_path, "older-source")
+    for model in (target, old_source):
+        catalog.import_catalog_models("test", [model.model_dump(mode="json")])
+    with catalog._sessions.begin() as session:
+        old = session.scalar(
+            select(CatalogDocumentRevision).where(
+                CatalogDocumentRevision.slug == old_source.identity.slug
+            )
+        )
+        assert old is not None
+        # Match the production damage: a retained source identity is still a
+        # head, but its document predates a required canonical field.
+        document = old.document.copy()
+        del document["requires_token"]
+        session.execute(
+            update(CatalogDocumentRevision)
+            .where(CatalogDocumentRevision.id == old.id)
+            .values(document=document)
+            .execution_options(synchronize_session=False)
+        )
+    cache = ModelCacheService(catalog._sessions, tmp_path / "nas", clock=lambda: NOW)
+    try:
+        digest = document_sha256(target.model_dump(mode="json"))
+        review = cache.review_fleet_model_removal(digest)
+        assert review.fleet is not None
+        assert not review.fleet.observation_issues and not review.blockers
+        with catalog._sessions() as session:
+            session.connection().exec_driver_sql("SET TRANSACTION READ ONLY")
+            failures = audit_catalog_documents(session)
+            assert len(failures) == 1 and failures[0].current_head
+            assert failures[0].revision_id == old.id
+            assert _model_objects(session, digest) == ({target.files[0].sha256}, set())
+    finally:
+        cache.close()
