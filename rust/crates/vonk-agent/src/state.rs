@@ -427,8 +427,9 @@ impl StateStore {
                     {
                         return Err(StateError::Identity);
                     }
-                    if stored.result.is_none()
-                        && crate::executor::content_observation::ContentKind::of(
+                    if stored.operation == accepted.operation.as_str()
+                        && stored.result.is_none()
+                        && crate::executor::operation_observation::ObservationKind::of(
                             &accepted.operation,
                         )
                         .is_some()
@@ -987,7 +988,9 @@ impl StateStore {
             return Err(StateError::Identity);
         }
         Ok(
-            if crate::executor::content_observation::ContentKind::of(&claim.operation).is_some() {
+            if crate::executor::operation_observation::ObservationKind::of(&claim.operation)
+                .is_some()
+            {
                 vec![claim]
             } else {
                 Vec::new()
@@ -1018,7 +1021,8 @@ impl StateStore {
             let Ok(operation) = operation.parse::<AgentOperation>() else {
                 continue;
             };
-            if claim && crate::executor::content_observation::ContentKind::of(&operation).is_some()
+            if claim
+                && crate::executor::operation_observation::ObservationKind::of(&operation).is_some()
             {
                 continue;
             }

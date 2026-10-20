@@ -43,3 +43,8 @@ updates:
       timezone: "Europe/Amsterdam"
     labels: ["dependencies", "rust"]
     open-pull-requests-limit: 5
+    ignore:
+      # typify (all releases through 0.10.0-alpha.3) consumes schemars 0.8 schema
+      # objects in vonk-wire-codegen; schemars 1.x needs a typify release first.
+      - dependency-name: "schemars"
+        update-types: ["version-update:semver-major"]

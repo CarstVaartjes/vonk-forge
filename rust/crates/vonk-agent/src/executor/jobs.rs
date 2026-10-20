@@ -280,6 +280,16 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                 // Unread: this attempt runs nothing, and the Controller
                 // issues the job again.
                 Err(error) => {
+                    if matches!(
+                        &error,
+                        crate::host_runtime::HostRuntimeError::HelperRejected {
+                            code: HelperErrorCode::OperationInvalid
+                                | HelperErrorCode::OperationInvalidArtifact,
+                            ..
+                        }
+                    ) {
+                        return runtime_failure("job observation refused before dispatch", &error);
+                    }
                     return temporary_preparation_failure(
                         FailureStage::RunStorage,
                         "job reobserve",
@@ -863,3 +873,87 @@ mod output_collection_tests;
 mod reobserve_tests;
 #[cfg(test)]
 mod tests;
+
+impl<R: ProcessRunner> RecipeExecutor<'_, R> {
+    /// Reopen measured exit/output custody, never the execution path. Each
+    /// probe does one bounded collection; uploads require a fresh delivery-only
+    /// order from the Controller, even if the old lease has expired.
+    pub(super) fn observe_job_outputs(
+        &self,
+        claim: &AgentClaim,
+        request: &vonk_agent_protocol::RecipeJobRunRequest,
+        mut receipt: RecipeJobRunResult,
+    ) -> super::operation_observation::OperationObservation {
+        use super::operation_observation::{OperationObservation, PendingObservation};
+        let unknown = |stage, cause: String, receipt: RecipeJobRunResult| {
+            OperationObservation::confirmed(ExecutionResult::Unknown(crate::outcome::Unconfirmed {
+                wait_reason: WaitReason::ReceiptMissing,
+                reason: "measured job exit retained; output custody awaits recovery".to_owned(),
+                evidence: UnknownEvidence::at(stage).because(cause),
+                receipt: Some(receipt),
+            }))
+        };
+        let root = match self.runtime.job_output_root(&request.job_id.to_string()) {
+            Ok(root) => root,
+            Err(error) => return unknown(FailureStage::OutputStorage, error.to_string(), receipt),
+        };
+        if receipt.output_manifest.files.is_empty() {
+            receipt.output_manifest = match outputs::collect_job_outputs(
+                Some(&root),
+                &request.output_limits,
+                &request.output_mappings,
+            ) {
+                Ok(manifest) => manifest,
+                Err(outputs::OutputRefusal::Breach(breach)) => {
+                    return OperationObservation::confirmed(breach.failure(&receipt));
+                }
+                Err(outputs::OutputRefusal::Unreadable { cause, .. }) => {
+                    return OperationObservation::Unknown(PendingObservation::new(
+                        claim,
+                        WaitReason::ObservationUnavailable,
+                        cause,
+                    ));
+                }
+            };
+        }
+        if let Err(error) = self.runtime.persist_job_completion(&receipt) {
+            return unknown(FailureStage::JobState, error.to_string(), receipt);
+        }
+        if !receipt.output_manifest.files.is_empty() {
+            return unknown(
+                FailureStage::JobOutputDelivery,
+                "retained outputs require delivery-only authority".to_owned(),
+                receipt,
+            );
+        }
+        OperationObservation::confirmed(if receipt.exit_code == 0 {
+            ExecutionResult::done(receipt)
+        } else {
+            job_failure(receipt, None)
+        })
+    }
+
+    pub(super) fn observe_job_exit(
+        &self,
+        claim: &AgentClaim,
+        request: &vonk_agent_protocol::RecipeJobRunRequest,
+        outcome: HostRuntimeOutcome,
+    ) -> super::operation_observation::OperationObservation {
+        use super::operation_observation::OperationObservation;
+        let Some(stop_plan) = job_run_stop_plan(claim, request) else {
+            return OperationObservation::confirmed(failed("job observation identity is invalid"));
+        };
+        let scope = request.job_id.to_string();
+        let job = DispatchedJob {
+            claim,
+            request,
+            stop_plan: &stop_plan,
+            job_scope: &scope,
+            started: Instant::now(),
+        };
+        match self.job_exit_receipt(&job, outcome) {
+            Ok(receipt) => self.observe_job_outputs(claim, request, receipt),
+            Err(result) => OperationObservation::confirmed(*result),
+        }
+    }
+}

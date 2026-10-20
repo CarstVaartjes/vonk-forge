@@ -86,7 +86,7 @@ pub struct RunInspectionReport {
 
 /// What one re-observation of a job container by its identity found. An
 /// unreadable answer is the error, never one of these.
-pub enum JobReobservation {
+pub enum RuntimeReobservation {
     /// Its process is live.
     Running {
         progressed_at: Option<DateTime<FixedOffset>>,
@@ -274,7 +274,7 @@ impl HostRuntimeBoundary<'_> {
     pub async fn reobserve_job(
         &self,
         job: &RecipeJobRunRequest,
-    ) -> Result<JobReobservation, HostRuntimeError> {
+    ) -> Result<RuntimeReobservation, HostRuntimeError> {
         let arguments = vec![
             vonk_agent_protocol::JOB_REOBSERVATION_ARGUMENT.to_owned(),
             job.job_id.to_string(),
@@ -283,22 +283,68 @@ impl HostRuntimeBoundary<'_> {
             job.run_generation.to_string(),
             job.plan_digest.clone(),
         ];
+        self.reobserve_identity(arguments).await
+    }
+
+    /// Inspect one whole Start identity without consulting a job exit ledger.
+    pub async fn reobserve_runtime(
+        &self,
+        stop: &RecipeStopRequest,
+    ) -> Result<RuntimeReobservation, HostRuntimeError> {
+        self.reobserve_runtime_identity(stop, vonk_agent_protocol::RUNTIME_REOBSERVATION_ARGUMENT)
+            .await
+    }
+
+    /// Stop also observes its durable generation fence. A cancel-Stop must
+    /// have fenced pending Starts and observed their quiescence. No grant is renewed.
+    pub async fn reobserve_stop(
+        &self,
+        stop: &RecipeStopRequest,
+    ) -> Result<RuntimeReobservation, HostRuntimeError> {
+        let marker = if stop.cancel_pending_start {
+            vonk_agent_protocol::CANCEL_STOP_REOBSERVATION_ARGUMENT
+        } else {
+            vonk_agent_protocol::STOP_REOBSERVATION_ARGUMENT
+        };
+        self.reobserve_runtime_identity(stop, marker).await
+    }
+
+    async fn reobserve_runtime_identity(
+        &self,
+        stop: &RecipeStopRequest,
+        marker: &str,
+    ) -> Result<RuntimeReobservation, HostRuntimeError> {
+        self.reobserve_identity(vec![
+            marker.to_owned(),
+            stop.target_runtime_id.to_string(),
+            stop.run_id.to_string(),
+            stop.installation_id.to_string(),
+            stop.run_generation.to_string(),
+            stop.plan_digest.clone(),
+        ])
+        .await
+    }
+
+    async fn reobserve_identity(
+        &self,
+        arguments: Vec<String>,
+    ) -> Result<RuntimeReobservation, HostRuntimeError> {
         let response = match self.inspection_response(arguments, true, None, None).await {
             Err(HostRuntimeError::HelperRejected {
                 code: HelperErrorCode::RuntimeRunMissing,
                 ..
-            }) => return Ok(JobReobservation::Absent),
+            }) => return Ok(RuntimeReobservation::Absent),
             other => other?,
         };
         let evidence = response.diagnostic.is_some() || response.process_logs.is_some();
         match (response.process_running, response.exit_code) {
-            (Some(true), None) if !evidence => Ok(JobReobservation::Running {
+            (Some(true), None) if !evidence => Ok(RuntimeReobservation::Running {
                 progressed_at: response
                     .job_progress_at
                     .filter(|stamp| *stamp <= Utc::now()),
             }),
             (Some(false), Some(code)) if code <= 255 && (code != 0 || !evidence) => {
-                Ok(JobReobservation::Exited(HostRuntimeOutcome {
+                Ok(RuntimeReobservation::Exited(HostRuntimeOutcome {
                     exit_code: Some(code as i32),
                     stop_uncertain: false,
                     diagnostic: response

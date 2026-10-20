@@ -1,9 +1,9 @@
-//! One read-only observation path for content/preparation custody on startup
-//! and every idle tick. Runtime and package children remain separate tracks.
+//! One observation dispatcher for preparation and runtime custody on startup
+//! and every idle tick. Package handoff joins in the next track.
 use super::*;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ContentKind {
+pub enum ObservationKind {
     Preflight,
     Distribution,
     Build,
@@ -11,8 +11,11 @@ pub enum ContentKind {
     Install,
     Reconcile,
     Uninstall,
+    Start,
+    Stop,
+    JobRun,
 }
-impl ContentKind {
+impl ObservationKind {
     pub fn of(operation: &AgentOperation) -> Option<Self> {
         match operation {
             AgentOperation::RuntimePreflightV1 => Some(Self::Preflight),
@@ -22,10 +25,10 @@ impl ContentKind {
             AgentOperation::RecipeInstall => Some(Self::Install),
             AgentOperation::RecipeReconcile => Some(Self::Reconcile),
             AgentOperation::RecipeUninstall => Some(Self::Uninstall),
-            AgentOperation::RecipeStart
-            | AgentOperation::RecipeStop
-            | AgentOperation::RecipeJobRunV1
-            | AgentOperation::AgentUpgradeV1 => None,
+            AgentOperation::RecipeStart => Some(Self::Start),
+            AgentOperation::RecipeStop => Some(Self::Stop),
+            AgentOperation::RecipeJobRunV1 => Some(Self::JobRun),
+            AgentOperation::AgentUpgradeV1 => None,
         }
     }
 }
@@ -38,19 +41,19 @@ pub struct PendingObservation {
     pub next_check: DateTime<Utc>,
     pub deadline: DateTime<FixedOffset>,
 }
-pub enum ContentObservation {
+pub enum OperationObservation {
     Confirmed(Box<ExecutionResult>),
     Progressing(PendingObservation),
     Blocked(PendingObservation),
     Unknown(PendingObservation),
 }
-impl ContentObservation {
-    fn confirmed(result: ExecutionResult) -> Self {
+impl OperationObservation {
+    pub(super) fn confirmed(result: ExecutionResult) -> Self {
         Self::Confirmed(Box::new(result))
     }
 }
 impl PendingObservation {
-    fn new(claim: &AgentClaim, cause: WaitReason, reason: impl Into<String>) -> Self {
+    pub(super) fn new(claim: &AgentClaim, cause: WaitReason, reason: impl Into<String>) -> Self {
         Self {
             cause,
             reason: reason.into(),
@@ -78,44 +81,50 @@ impl From<&str> for ProbeError {
 }
 
 impl<R: ProcessRunner> RecipeExecutor<'_, R> {
-    pub(super) async fn observe_content(&self, claim: &AgentClaim) -> Option<ContentObservation> {
-        let kind = ContentKind::of(&claim.operation)?;
+    pub(super) async fn observe_operation(
+        &self,
+        claim: &AgentClaim,
+    ) -> Option<OperationObservation> {
+        let kind = ObservationKind::of(&claim.operation)?;
         let pending = |cause, reason| {
-            ContentObservation::Unknown(PendingObservation::new(claim, cause, reason))
+            OperationObservation::Unknown(PendingObservation::new(claim, cause, reason))
         };
         let observed = self.probe_content(claim, kind).await;
         Some(match observed {
             Ok(result) => result,
             Err(ProbeError::Uncertain(cause)) => pending(WaitReason::ObservationUnavailable, cause),
-            Err(ProbeError::Definite(result)) => ContentObservation::confirmed(*result),
+            Err(ProbeError::Definite(result)) => OperationObservation::confirmed(*result),
         })
     }
 
     async fn probe_content(
         &self,
         claim: &AgentClaim,
-        kind: ContentKind,
-    ) -> Result<ContentObservation, ProbeError> {
+        kind: ObservationKind,
+    ) -> Result<OperationObservation, ProbeError> {
         use vonk_agent_protocol::generated::AgentClaimPayload as Payload;
         let unknown = |reason| {
-            ContentObservation::Unknown(PendingObservation::new(
+            OperationObservation::Unknown(PendingObservation::new(
                 claim,
                 WaitReason::RuntimeEffectUnconfirmed,
                 reason,
             ))
         };
         let blocked = |cause, reason| {
-            ContentObservation::Blocked(PendingObservation::new(claim, cause, reason))
+            OperationObservation::Blocked(PendingObservation::new(claim, cause, reason))
         };
         match kind {
-            ContentKind::Install => {
+            ObservationKind::Start | ObservationKind::Stop | ObservationKind::JobRun => {
+                Ok(self.observe_runtime(claim).await)
+            }
+            ObservationKind::Install => {
                 let Payload::RecipeInstallPayload(request) = &claim.payload else {
                     return Err("claim payload does not match its content observer".into());
                 };
                 let id = request.installation_id.to_string();
                 let installed = self.runtime.load_spec(&id).map_err(|e| e.to_string())?;
                 if !same_installed_workload(&installed, &request.compiled_execution_plan) {
-                    return Ok(ContentObservation::confirmed(ExecutionResult::Failed(
+                    return Ok(OperationObservation::confirmed(ExecutionResult::Failed(
                         Failure::new("installed content differs from the accepted plan")
                             .stage(FailureStage::InstallationValidation),
                     )));
@@ -127,16 +136,18 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                     .runtime
                     .installed_bytes(&id)
                     .map_err(|e| e.to_string())?;
-                Ok(ContentObservation::confirmed(recipe_install_success(bytes)))
+                Ok(OperationObservation::confirmed(recipe_install_success(
+                    bytes,
+                )))
             }
-            ContentKind::Reconcile => {
+            ObservationKind::Reconcile => {
                 let Payload::RecipeReconcilePayload(request) = &claim.payload else {
                     return Err("claim payload does not match its content observer".into());
                 };
                 let identity = RecipeReconciliationIdentity::from(request);
                 self.observe_removal(claim, &identity).await.map(|done| {
                     if done {
-                        ContentObservation::confirmed(ExecutionResult::done(
+                        OperationObservation::confirmed(ExecutionResult::done(
                             RecipeReconcileResult::default(),
                         ))
                     } else {
@@ -144,7 +155,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                     }
                 })
             }
-            ContentKind::Uninstall => {
+            ObservationKind::Uninstall => {
                 let Payload::RecipeUninstallPayload(request) = &claim.payload else {
                     return Err("claim payload does not match its content observer".into());
                 };
@@ -154,7 +165,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                 };
                 self.observe_removal(claim, &identity).await.map(|done| {
                     if done {
-                        ContentObservation::confirmed(ExecutionResult::done(
+                        OperationObservation::confirmed(ExecutionResult::done(
                             RecipeUninstallResult::default(),
                         ))
                     } else {
@@ -162,7 +173,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                     }
                 })
             }
-            ContentKind::BuildCleanup => {
+            ObservationKind::BuildCleanup => {
                 let Payload::RecipeBuildCleanupRequest(request) = &claim.payload else {
                     return Err("claim payload does not match its content observer".into());
                 };
@@ -174,7 +185,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                 )
                 .map_err(|e| e.to_string())?;
                 Ok(if done {
-                    ContentObservation::confirmed(ExecutionResult::done(
+                    OperationObservation::confirmed(ExecutionResult::done(
                         vonk_agent_protocol::RecipeBuildCleanupEvidence {},
                     ))
                 } else {
@@ -187,7 +198,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                     )
                 })
             }
-            ContentKind::Build => {
+            ObservationKind::Build => {
                 let Payload::RecipeBuildRequest(request) = &claim.payload else {
                     return Err("claim payload does not match its content observer".into());
                 };
@@ -214,7 +225,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                     )
                     .map_err(|e| e.to_string())?;
                     return Ok(if running {
-                        ContentObservation::Progressing(PendingObservation::new(
+                        OperationObservation::Progressing(PendingObservation::new(
                             claim,
                             WaitReason::RuntimeEffectUnconfirmed,
                             format!("build {} still has a live owned unit", request.build_id),
@@ -232,7 +243,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                     .await
                     .map_err(|e| e.to_string())?;
                 Ok(if complete {
-                    ContentObservation::confirmed(ExecutionResult::done(evidence))
+                    OperationObservation::confirmed(ExecutionResult::done(evidence))
                 } else {
                     blocked(
                         WaitReason::ReceiptMissing,
@@ -243,7 +254,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                     )
                 })
             }
-            ContentKind::Preflight => {
+            ObservationKind::Preflight => {
                 let Payload::RuntimePreflightRequest(_request) = &claim.payload else {
                     return Err("claim payload does not match its content observer".into());
                 };
@@ -261,13 +272,13 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                 )
                 .map_err(|e| e.to_string())?;
                 Ok(match result {
-                    Some(result) => ContentObservation::confirmed(ExecutionResult::done(result)),
+                    Some(result) => OperationObservation::confirmed(ExecutionResult::done(result)),
                     None => unknown(
                         "current host fingerprint has no retained preflight result".to_owned(),
                     ),
                 })
             }
-            ContentKind::Distribution => {
+            ObservationKind::Distribution => {
                 let Payload::ArtifactDistributionPayload(request) = &claim.payload else {
                     return Err("claim payload does not match its content observer".into());
                 };
@@ -326,7 +337,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                         ),
                     ));
                 }
-                Ok(ContentObservation::confirmed(distribution_success(
+                Ok(OperationObservation::confirmed(distribution_success(
                     DistributionDownloadEvidence {
                         model_digests: digests,
                         model_paths: paths,
@@ -365,7 +376,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                 }
             ) {
                 ProbeError::Definite(Box::new(runtime_failure(
-                    "preparation observation refused the exact identity",
+                    "operation observation refused the exact identity",
                     &error,
                 )))
             } else {
@@ -399,7 +410,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
 
 /// Runs before receipt delivery and claims, including an entirely idle fleet.
 /// Startup reaches this same pass through run_once; it never dispatches effects.
-pub async fn reobserve_content<E: Executor>(
+pub async fn reobserve_operations<E: Executor>(
     state: &mut StateStore,
     executor: &E,
     executing: Option<uuid::Uuid>,
@@ -413,12 +424,12 @@ pub async fn reobserve_content<E: Executor>(
             continue;
         };
         match observation {
-            ContentObservation::Confirmed(result) => {
+            OperationObservation::Confirmed(result) => {
                 state.finish(&claim, *result)?;
             }
-            ContentObservation::Progressing(pending)
-            | ContentObservation::Blocked(pending)
-            | ContentObservation::Unknown(pending) => {
+            OperationObservation::Progressing(pending)
+            | OperationObservation::Blocked(pending)
+            | OperationObservation::Unknown(pending) => {
                 eprintln!(
                     "vonk-agent: observing fence={} owner={} dependency={} cause={} next_check={} deadline={}: {}",
                     claim.fence,
@@ -457,8 +468,9 @@ pub(super) async fn observing_during<F: Future, C: LoopClient, E: Executor>(
     let observations = stream::unfold(state, |state| async move {
         let mut state = state?;
         tokio::time::sleep(HEARTBEAT_INTERVAL).await;
-        if let Err(error) = reobserve_content(&mut state, executor, executing, Utc::now()).await {
-            eprintln!("vonk-agent: periodic preparation observation deferred: {error}");
+        if let Err(error) = reobserve_operations(&mut state, executor, executing, Utc::now()).await
+        {
+            eprintln!("vonk-agent: periodic operation observation deferred: {error}");
         }
         if let Err(error) = super::agent_loop::deliver_retained(client, &mut state).await {
             eprintln!("vonk-agent: periodic receipt delivery deferred: {error}");

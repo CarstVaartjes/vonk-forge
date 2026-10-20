@@ -12,7 +12,9 @@ from sqlalchemy import and_, select
 from vonk_agent_protocol import (
     AgentClaim,
     AgentOperation,
+    AgentProgress,
     Disposition,
+    InvalidRequestReason,
     LifecycleState,
     RecipeBuildRequest,
     WaitReason,
@@ -30,6 +32,7 @@ from ..agent_operation_facts import (
 from ..agent_operation_facts import attempt_holds_order as _attempt_holds_order
 from ..agent_operation_facts import aware as _aware
 from ..auth import AgentSource
+from ..categorized_errors import InvalidValue
 from ..lifecycle import CancelRequested, Outcome, Reported
 from ..lifecycle.agent_operation import AgentOperationAdapter
 from ..lifecycle.evidence import Residue
@@ -68,9 +71,45 @@ def _claim_once(
     preflight_fingerprint: str | None,
     hostname: str | None,
     source: AgentSource | None,
+    claim_fence: str | None = None,
 ) -> AgentClaim | None:
     with self._claim_lock, self._sessions.begin() as session:
         now = self._clock()
+        if (
+            claim_fence is not None
+            and session.scalar(
+                select(AgentOperationAttempt.id).where(
+                    AgentOperationAttempt.fence == claim_fence
+                )
+            )
+            is not None
+        ):
+            operation, attempt = self._active(
+                session, AgentProgress(fence=claim_fence), source=source
+            )
+            node = session.get(AgentNode, node_id)
+            if (
+                node is None
+                or operation.node_id != node_id
+                or attempt.agent_certificate_serial != certificate_serial
+                or node.binary_digest != runtime_identity.binary_digest
+                or node.build_digest != runtime_identity.build_digest
+                or node.architecture != runtime_identity.architecture
+                or node.semantic_version != runtime_identity.semantic_version
+                or node.preflight_fingerprint != preflight_fingerprint
+            ):
+                raise InvalidValue(
+                    "claim request identity changed",
+                    reason=InvalidRequestReason.CONFLICT,
+                )
+            return AgentClaim.model_validate(
+                {
+                    "fence": attempt.fence,
+                    "operation": AgentOperation(operation.kind),
+                    "payload": column_value(operation, "payload"),
+                    "deadline": _aware(attempt.lease_deadline),
+                }
+            )
         self._fail_spent_start_budgets(session, node_id, now)
         candidate_id = session.scalar(
             self._claimable_operations(node_id, now).with_only_columns(
@@ -619,7 +658,7 @@ def _claim_once(
             and operation.current_attempt == 0
         ):
             _anchor_start_budget(session, operation, now)
-        fence = str(uuid.uuid4())
+        fence = claim_fence or str(uuid.uuid4())
         deadline = now + timedelta(seconds=CLAIM_LEASE_SECONDS)
         # The claim consumes the schedule the previous attempt carried
         # (leaving it would make the attempt that follows look like it still

@@ -273,6 +273,25 @@ to renew its lease. A terminal heartbeat
 failure, panic, or task cancellation stops the executing process even when its
 executor is blocked in synchronous process polling.
 
+Preparation, Start, Stop and JobRun reopen the accepted `claim_json` through
+one startup and tick dispatcher. A probe never renews a lease or grants runtime
+authority. Exact runtime labels bind run, target, installation, generation and
+plan; Stop completion requires physical absence rather than an exit receipt.
+Every Stop observes its durable generation high-water mark. A cancel-Stop
+additionally observes its cancelled-generation fence and Start quiescence; an
+empty name before that fence is not completion.
+Measured JobRun exits reopen output custody and authorize only delivery recovery,
+never another inference. Retained authenticated receipts use the same Controller
+adoption decision at ingress and on idle worker ticks; cancellation, revocation,
+a newer attempt or a newer owner rejects adoption.
+
+A terminal uncertain artifact cancellation retains its accepted result while
+an independent, idempotent Stop removes only that job's exact runtime target.
+The child inherits the original current intent; it cannot adopt a newer owner,
+stop the job member's run, or release its standing capacity reservation. Exact
+Stop evidence settles the residue without changing the terminal cancellation.
+Package handoff observation remains the next structural track.
+
 Every agent claim carries `observation_budget_seconds`, the stall window for
 that attempt's observation and effects: it restarts only when the order's
 measured progress advances, and lease renewal cannot reset it. A start holds to
@@ -849,3 +868,50 @@ response parser and exact-byte download. Artifact transport tests additionally
 consume actual JSON with the generated client and verify declared optional
 null/omission equivalence. Other consumer and storage edges still require their
 own connected evidence; raw engine extensions are not exhaustively enumerated.
+
+### Mounted mutation receipts and security edges
+
+Every mounted POST, PUT, PATCH and DELETE declares a typed `ReceiptPolicy`.
+The whole-tree gate discovers the effective app in both browser-auth modes,
+including included agent routers and dynamically registered result/upload routes.
+An unclassified route or a receipt policy on a router that cannot enforce it
+fails the gate. Preview POSTs are observational: they accept no execution intent.
+
+`SecurityEdge` is the closed, endpoint-bound exemption list:
+
+| Edge | Endpoint | Lost response |
+| --- | --- | --- |
+| `LOGIN` | `POST /api/auth/login` | Authenticate again to create a fresh session. |
+| `LOGOUT` | `POST /api/auth/logout` | The session stays revoked; authenticate again. |
+| `CLI_TOKEN` | `POST /api/auth/cli-token` | Authenticate again and request a fresh token. |
+
+These credential/session edges fail closed under their existing authentication,
+origin and CSRF rules. They never persist or replay credential issuance. Adding
+another auth route requires a deliberate typed classification; the namespace
+itself grants no exemption.
+
+Agent successes, including 204 responses, resolve their committed existing owner
+before egress: exact operation attempt/fence for claims, results and heartbeats;
+node contact for an empty claim; snapshot identity/digest for inventory; exact
+boot/time samples for telemetry; the judged rank observations; the verified image
+publication and committed build binding; or the artifact job's attached output.
+Enrollment and rotation use the existing public certificate/CSR transaction,
+including activation generation. No new receipt store or database schema is added.
+References contain no credentials. SQL receipt reads select the exact owner;
+ordinary ingress never validates a catalogue or historical inventory corpus.
+
+An explicit `X-Request-ID` on a claim binds its attempt fence to that authenticated
+node and certificate. Repeating it reconnects to the same current attempt without
+renewing its lease or dispatching another effect. A changed runtime/preflight
+identity or a stale attempt is refused. Inventory reuses `(node, observed_at)`:
+identical evidence reuses its snapshot and conflicting content is refused.
+Installation-size updates commit with that snapshot; older/replayed observations
+cannot overwrite newer measurements. Run reports retain the existing monotonic,
+per-rank rules: stale/unassigned entries are ignored while eligible entries commit.
+
+Helper-grant POSTs read an already accepted, exact execution authority and issue
+short-lived signed capabilities. They create no new execution intent. They are
+classified separately from observational previews and credential login, and their
+receipt references the accepted attempt (or exact package-activation nonce).
+Diagnostic repeat counters are not receipt owners. Commit/storage failure cannot
+be acknowledged as acceptance; retry retains the existing effect owner.

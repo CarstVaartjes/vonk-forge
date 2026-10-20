@@ -6,8 +6,9 @@ import logging
 import time
 import uuid
 from datetime import UTC, timedelta
+from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Request, Response, status
+from fastapi import APIRouter, Header, HTTPException, Request, Response, status
 from sqlalchemy import select
 from vonk_agent_protocol import (
     AgentClaim,
@@ -25,14 +26,16 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol.claims import ClaimRequest
 from vonk_agent_protocol.telemetry import TelemetryRequest
 
+from ..agent_acceptance import InventoryAcceptance, ObservationAcceptance
+from ..agent_jobs import StaleAgentAttempt
 from ..auth import AgentIdentity
 from ..download_contract import download_responses
-from ..installed_bytes import refresh_installed_bytes
 from ..inventory_repository import (
     MAX_INVENTORY_FUTURE_SKEW,
     InventoryRepository,
     InventorySnapshotInput,
 )
+from ..library_contract import UuidId
 from ..logging import log_event
 from ..models import (
     STOPPABLE_NOT_RUNNING_RUN_STATES,
@@ -42,6 +45,7 @@ from ..models import (
     RecipeRun,
     RunNode,
 )
+from ..operator_acceptance import ReceiptPolicy, operator_acceptance
 from ..owner_liveness import builds_in_flight, run_has_live_operation
 from ..persisted_waits import schedule_wait
 from ..presence import PresenceError
@@ -84,7 +88,12 @@ def install_observations_routes(
         response_model=AgentClaim,
         responses={204: {"description": "No work available"}},
     )
-    def claim(request: Request, body: ClaimRequest) -> Response:
+    @operator_acceptance(ReceiptPolicy.AGENT_CLAIM)
+    def claim(
+        request: Request,
+        body: ClaimRequest,
+        request_id: Annotated[UuidId | None, Header(alias="X-Request-ID")] = None,
+    ) -> Response:
         _scope_identity(request)
         required = _require_services(services)
         identity = _authenticated_identity(request, required)
@@ -99,7 +108,17 @@ def install_observations_routes(
                 preflight_fingerprint=body.preflight_fingerprint,
                 hostname=body.hostname,
                 source=source,
+                claim_fence=None
+                if request_id is None
+                else str(
+                    uuid.uuid5(
+                        uuid.NAMESPACE_URL,
+                        f"claim:{identity.node_id}:{identity.certificate_serial}:{request_id}",
+                    )
+                ),
             )
+        except StaleAgentAttempt as error:
+            raise HTTPException(status_code=409, detail=str(error)) from None
         except ValueError as error:
             raise HTTPException(status_code=422, detail=str(error)) from None
         if result is None:
@@ -114,6 +133,7 @@ def install_observations_routes(
             204: {"description": "The inventory named no installations or runs"}
         },
     )
+    @operator_acceptance(ReceiptPolicy.AGENT_INVENTORY)
     def inventory(body: InventoryRequest, request: Request) -> Response:
         _scope_identity(request)
         required = _require_services(services)
@@ -153,7 +173,9 @@ def install_observations_routes(
                 )
         _log_evidence_warnings(body, endpoint="inventory", node_id=identity.node_id)
         try:
-            InventoryRepository(required.sessions, clock=required.clock).record(
+            snapshot = InventoryRepository(
+                required.sessions, clock=required.clock
+            ).record(
                 InventorySnapshotInput(
                     node_id=identity.node_id,
                     observed_at=observed_at,
@@ -180,15 +202,14 @@ def install_observations_routes(
                     host_settings=body.host_settings,
                     unused_model_bytes=body.unused_model_bytes,
                     model_objects=body.model_objects,
-                )
+                ),
+                report=body,
             )
         except ValueError as error:
             raise HTTPException(status_code=422, detail=str(error)) from None
-        if body.installation_bytes is not None:
-            with required.sessions.begin() as session:
-                refresh_installed_bytes(
-                    session, identity.node_id, body.installation_bytes
-                )
+        request.state.inventory_acceptance = InventoryAcceptance(
+            snapshot.id, snapshot.evidence_digest
+        )
         if body.installations is None and body.runs is None:
             # An older agent, or one that could not list them: no verdict.
             return Response(status_code=status.HTTP_204_NO_CONTENT)
@@ -209,6 +230,7 @@ def install_observations_routes(
         )
 
     @agent.post("/telemetry", status_code=status.HTTP_204_NO_CONTENT)
+    @operator_acceptance(ReceiptPolicy.AGENT_TELEMETRY)
     def telemetry(body: TelemetryRequest, request: Request) -> Response:
         _scope_identity(request)
         required = _require_services(services)
@@ -233,6 +255,7 @@ def install_observations_routes(
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     @agent.post("/recipe-runs/observations", status_code=status.HTTP_204_NO_CONTENT)
+    @operator_acceptance(ReceiptPolicy.AGENT_OBSERVATIONS)
     def recipe_run_observations(
         body: RecipeRunObservationsWire, request: Request
     ) -> Response:
@@ -252,6 +275,7 @@ def install_observations_routes(
         # for every other run in the report: each run is judged on its own.
         rejected: list[str] = []
         accepted = 0
+        observed_nodes: list[str] = []
         by_run = {run.run_id: run for run in body.runs}
         try:
             with required.sessions.begin() as session:
@@ -277,6 +301,15 @@ def install_observations_routes(
                         {run_id: by_run[run_id] for run_id in included - current},
                     )
                     accepted += len(reopened)
+                    if reopened:
+                        observed_nodes.extend(
+                            session.scalars(
+                                select(RunNode.id).where(
+                                    RunNode.node_id == identity.node_id,
+                                    RunNode.run_id.in_(reopened),
+                                )
+                            )
+                        )
                     rejected.extend(
                         f"recipe run {run_id} observation is not assigned"
                         for run_id in sorted(included - current - reopened)
@@ -311,6 +344,7 @@ def install_observations_routes(
                         ):
                             continue
                         accepted += 1
+                        observed_nodes.append(node.id)
                         node.observed_run_generation = run.run_generation
                         node.observation_process_running = evidence.process_running
                         node.observation_observed_at = observed_at
@@ -335,6 +369,7 @@ def install_observations_routes(
                         rejected.append("recipe run observation is stale")
                         continue
                     accepted += 1
+                    observed_nodes.append(node.id)
                     # The grace period bounds the first observation of a
                     # generation, not every later one.
                     initial_observation_late = (
@@ -451,6 +486,9 @@ def install_observations_routes(
                     raise ValueError("; ".join(rejected[:4]))
         except ValueError as error:
             raise HTTPException(status_code=422, detail=str(error)) from None
+        request.state.observation_acceptance = ObservationAcceptance(
+            tuple(observed_nodes)
+        )
         if rejected:
             # A report that crossed the Controller's own change (a stop, a
             # restart) is expected and dropped; it is not the agent's error.

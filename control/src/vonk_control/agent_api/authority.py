@@ -11,7 +11,6 @@ from contextlib import suppress
 from fastapi import APIRouter, HTTPException, Request, Response, status
 from fastapi.concurrency import run_in_threadpool
 from fastapi.exceptions import RequestValidationError
-from fastapi.routing import APIRoute
 from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
@@ -56,6 +55,8 @@ from ..host_helper_authority import (
 )
 from ..logging import redact_text
 from ..models import AgentOperation, AgentOperationAttempt, Job
+from ..operator_acceptance import ReceiptPolicy, operator_acceptance
+from ..strict_json import ControllerAPIRoute
 from .common import (
     AgentApiServices,
     AgentUpgradeGrantRequest,
@@ -140,7 +141,7 @@ def install_authority_routes(
                     detail=refused,
                 )
 
-    class NotedResultRoute(APIRoute):
+    class NotedResultRoute(ControllerAPIRoute):
         """A result body refused before the route runs is still counted."""
 
         def get_route_handler(self) -> Callable[[Request], Awaitable[Response]]:
@@ -265,6 +266,7 @@ def install_authority_routes(
         return required
 
     @agent.post("/host-runtime/grant", response_model=HostHelperGrantResponse)
+    @operator_acceptance(ReceiptPolicy.AGENT_GRANT)
     def host_runtime_grant(body: HostRuntimeGrantRequest, request: Request) -> Response:
         identity = helper_identity(request)
         required = host_runtime_service()
@@ -284,6 +286,7 @@ def install_authority_routes(
     @agent.post(
         "/agent-upgrade/activation-grant", response_model=HostHelperGrantResponse
     )
+    @operator_acceptance(ReceiptPolicy.AGENT_GRANT)
     def package_activation_grant(
         body: PackageActivationGrantRequest, request: Request
     ) -> Response:
@@ -302,6 +305,7 @@ def install_authority_routes(
         return _json_response(_host_grant_response(grant))
 
     @agent.post("/agent-upgrade/grant", response_model=HostHelperGrantResponse)
+    @operator_acceptance(ReceiptPolicy.AGENT_GRANT)
     def agent_upgrade_grant(
         body: AgentUpgradeGrantRequest, request: Request
     ) -> Response:
@@ -323,6 +327,7 @@ def install_authority_routes(
         return _json_response(_host_grant_response(grant))
 
     @agent.post("/heartbeat", response_model=AgentDirective)
+    @operator_acceptance(ReceiptPolicy.AGENT_HEARTBEAT)
     def heartbeat(body: AgentProgress, request: Request) -> Response:
         _scope_identity(request)
         required = _require_services(services)
@@ -367,6 +372,7 @@ def install_authority_routes(
             raise HTTPException(status_code=409, detail=str(error)) from None
         return _json_response(AgentDirective.model_validate(response))
 
+    @operator_acceptance(ReceiptPolicy.AGENT_RESULT)
     def result(body: AgentResult, request: Request) -> Response:
         _scope_identity(request)
         required = _require_services(services)
@@ -434,6 +440,7 @@ def install_authority_routes(
         responses={503: {"model": EnrollmentObservationReply}},
     )
     @raw_json_body(ExpiredRenewRequest)
+    @operator_acceptance(ReceiptPolicy.ENROLLMENT_ISSUE)
     async def renew_expired(request: Request) -> Response:
         required = _require_services(services)
         if not limiter.admit():
@@ -476,6 +483,7 @@ def install_authority_routes(
         response_model=IssuedCertificateResponse,
         responses={503: {"model": EnrollmentObservationReply}},
     )
+    @operator_acceptance(ReceiptPolicy.ENROLLMENT_ISSUE)
     def renew(body: RenewRequest, request: Request) -> Response:
         _scope_identity(request)
         required = _require_services(services)
@@ -502,6 +510,7 @@ def install_authority_routes(
         response_model=IssuedCertificateResponse,
         responses={503: {"model": EnrollmentObservationReply}},
     )
+    @operator_acceptance(ReceiptPolicy.ENROLLMENT_ISSUE)
     def recover_renewal(body: RenewRequest, request: Request) -> Response:
         """Recover a staged certificate that was created for another CSR.
 
@@ -534,6 +543,7 @@ def install_authority_routes(
         status_code=status.HTTP_204_NO_CONTENT,
         responses={503: {"model": EnrollmentObservationReply}},
     )
+    @operator_acceptance(ReceiptPolicy.ENROLLMENT_ACTIVATE)
     def activate(body: ActivateRequest, request: Request) -> Response:
         _scope_identity(request)
         required = _require_services(services)

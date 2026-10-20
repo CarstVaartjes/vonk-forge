@@ -41,6 +41,7 @@ from ..models import (
     RunNode,
 )
 from ..offline_stops import deferred_stop_nodes
+from ..owner_liveness import OwnerKind
 from ..persisted_waits import schedule_wait
 from ..profile_stop_authority import (
     ProfileJobRunStopJob,
@@ -71,7 +72,14 @@ class OfflineStopMixin:
         """Give one due Stop the external publication turn for this worker pass."""
         service = typing_cast("RecipeOperationService", self)
         now = service._clock()
-        offline_progressed = service.reconcile_offline_stops(job_id)
+        from ..cancelled_runtime import reconcile_cancelled_runtime
+
+        cancelled_progressed = (
+            reconcile_cancelled_runtime(service) if job_id is None else False
+        )
+        offline_progressed = (
+            service.reconcile_offline_stops(job_id) or cancelled_progressed
+        )
         with service._sessions() as session:
             candidates = tuple(
                 session.scalars(
@@ -195,6 +203,7 @@ class OfflineStopMixin:
                     .where(Job.id == job_id if job_id is not None else true())
                     .where(
                         Job.kind == WireAgentOperation.RECIPE_STOP.value,
+                        Job.payload["owner_kind"].as_string() == OwnerKind.RUN,
                         Job.state.in_(
                             [
                                 LifecycleState.QUEUED,

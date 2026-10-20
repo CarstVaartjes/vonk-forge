@@ -6,11 +6,17 @@ from dataclasses import replace
 
 import pytest
 from sqlalchemy import select
+from vonk_agent_protocol import (
+    EnrollmentGrantState,
+    ErrorCategory,
+    SecurityRefusalReason,
+)
 from vonk_agent_protocol.state_machines import (
     CertificateRecordState,
     CertificateRotationState,
     EnrollmentRecordState,
 )
+from vonk_control.enrollment import EnrollmentDenied
 from vonk_control.enrollment_contract import EnrollmentGrant
 from vonk_control.models import (
     AgentCertificate,
@@ -225,16 +231,28 @@ def test_committed_content_replays_after_observation_changes(service, field):
     assert len(authority.calls) == 1
 
 
-def test_consumed_grant_revocation_returns_status_without_revoking_node(service):
+def test_consumed_grant_revocation_refuses_without_revoking_node(service):
+    """Catches a consumed receipt being presented as successful revocation."""
     enrollment, sessions, _, authority = service
     request = csr()
     grant = enrollment.create(NODE_ID, "admin", 600)
     assert isinstance(grant, EnrollmentGrant)
     issued = enrollment.submit(grant.token, request, evidence(request))
-    first = enrollment.revoke_grant(grant.id, actor="admin")
-    assert enrollment.revoke_grant(grant.id, actor="admin") == first
+    for _ in range(2):
+        with pytest.raises(EnrollmentDenied, match="already consumed") as refused:
+            enrollment.revoke_grant(grant.id, actor="admin")
+        assert refused.value.category == ErrorCategory.SECURITY_REFUSAL
+        assert (
+            refused.value.typed_reason
+            == SecurityRefusalReason.CONTROLLER_FLEET_ENROLLMENT_DENIED
+        )
+    status = enrollment.grant_status(grant.id, actor="admin")
+    assert status.state == EnrollmentGrantState.CONSUMED
+    assert status.revoked_at is None
     with sessions() as session:
-        assert session.get(AgentCertificate, issued.serial).revoked_at is None
+        certificate = session.get(AgentCertificate, issued.serial)
+        assert certificate is not None
+        assert certificate.revoked_at is None
     assert authority.revocations == []
 
 

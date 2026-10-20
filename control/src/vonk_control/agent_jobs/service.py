@@ -309,6 +309,7 @@ class AgentJobService:
         preflight_fingerprint: str | None = None,
         hostname: str | None = None,
         source: AgentSource | None = None,
+        claim_fence: str | None = None,
     ) -> AgentClaim | None:
         return claim(
             self,
@@ -319,6 +320,7 @@ class AgentJobService:
             preflight_fingerprint=preflight_fingerprint,
             hostname=hostname,
             source=source,
+            claim_fence=claim_fence,
         )
 
     def _record_claim_refusal(
@@ -447,6 +449,7 @@ class AgentJobService:
         preflight_fingerprint: str | None,
         hostname: str | None,
         source: AgentSource | None,
+        claim_fence: str | None = None,
     ) -> AgentClaim | None:
         return _claim_once(
             self,
@@ -456,6 +459,7 @@ class AgentJobService:
             preflight_fingerprint,
             hostname,
             source,
+            claim_fence,
         )
 
     def _reconcile_agent_upgrade(

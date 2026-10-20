@@ -5,7 +5,7 @@ use serde_json::Value;
 use tempfile::tempdir;
 use uuid::Uuid;
 use vonk_agent::outcome::ExecutionResult;
-use vonk_agent::state::{BeginDecision, StateStore};
+use vonk_agent::state::{BeginDecision, StateError, StateStore};
 use vonk_agent::workloads::CompiledExecutionPlan;
 use vonk_agent_protocol::generated::{
     AgentClaimPayload, AgentOperation, OperationProgress, RecipeInstallPayload, RecipeStopPayload,
@@ -75,7 +75,7 @@ fn operation_progress(phase: &str) -> OperationProgress {
 }
 
 #[test]
-fn claims_fail_closed_on_deadline_and_replay_by_fence() {
+fn claims_fail_closed_on_deadline_and_preserve_custody_until_receipt() {
     let directory = tempdir().unwrap();
     let mut state = StateStore::open(&directory.path().join("state.sqlite"), NODE_ID).unwrap();
     let now = Utc::now();
@@ -84,13 +84,9 @@ fn claims_fail_closed_on_deadline_and_replay_by_fence() {
 
     let live = claim(2, "2099-01-01T00:00:00+00:00");
     assert_eq!(state.begin(&live, now).unwrap(), BeginDecision::Execute);
-    let BeginDecision::Replay(retained) = state.begin(&live, now).unwrap() else {
-        panic!("uncertain running custody replayed an effect");
-    };
-    assert!(matches!(
-        retained.result,
-        vonk_agent_protocol::generated::AgentResultResult::OutcomeUnknown(_)
-    ));
+    assert!(matches!(state.begin(&live, now), Err(StateError::Busy)));
+    assert_eq!(state.observation_claims().unwrap(), vec![live.clone()]);
+    assert!(state.pending_results().unwrap().is_empty());
     let result = state
         .finish(&live, ExecutionResult::done(RecipeStopResult::default()))
         .unwrap();

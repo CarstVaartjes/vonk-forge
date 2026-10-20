@@ -21,6 +21,8 @@ from vonk_agent_protocol import (
     AgentFailureKind,
     AgentProgress,
     AgentResult,
+    AgentResultState,
+    FailureCode,
     LifecycleState,
     OutcomeKind,
     RecipeOperationRequest,
@@ -2644,12 +2646,16 @@ def test_distribution_retry_preserves_durable_progress_and_accepts_object_replay
         assert current.progress["phase"] == "verifying"
 
 
-def test_late_result_is_retained_under_expired_fence_without_completing_operation(
+def test_exact_late_stop_success_settles_without_another_attempt(
     service,
 ) -> None:
     jobs, sessions, clock = service
     operation = jobs.enqueue(
-        parent(sessions, clock).id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD
+        parent(sessions, clock).id,
+        NODE_A,
+        ProtocolAgentOperation.RECIPE_STOP,
+        COMMIT,
+        STOP_PAYLOAD,
     )
     claim = claim_agent(jobs, NODE_A, "serial-a")
     assert claim is not None
@@ -2660,7 +2666,7 @@ def test_late_result_is_retained_under_expired_fence_without_completing_operatio
     late = AgentResult.model_validate(
         {
             **{key: claim.model_dump(mode="json")[key] for key in ("fence",)},
-            "state": "succeeded",
+            "state": AgentResultState.SUCCEEDED,
             "result": STOP_RESULT,
         }
     )
@@ -2672,10 +2678,11 @@ def test_late_result_is_retained_under_expired_fence_without_completing_operatio
                 AgentOperationAttempt.fence == claim.fence
             )
         )
-        assert stored.state in aos.PARKED
-        assert aos.attempt_lapsed(attempt)
+        assert stored is not None and stored.state == LifecycleState.SUCCEEDED
+        assert attempt is not None and attempt.state == LifecycleState.SUCCEEDED
+        assert stored.current_attempt == 1
         assert attempt.result == STOP_RESULT.model_dump(mode="json")
-    assert jobs.record_late_result(late) is True
+    assert jobs.record_late_result(late) is False
 
 
 def test_late_result_under_expired_fence_does_not_park_exact_resume_forever(
@@ -2693,7 +2700,11 @@ def test_late_result_under_expired_fence_does_not_park_exact_resume_forever(
 
     jobs, sessions, clock = service
     operation = jobs.enqueue(
-        parent(sessions, clock).id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD
+        parent(sessions, clock).id,
+        NODE_A,
+        ProtocolAgentOperation.RECIPE_STOP,
+        COMMIT,
+        STOP_PAYLOAD,
     )
     claim = claim_agent(jobs, NODE_A, "serial-a")
     assert claim is not None
@@ -2701,11 +2712,13 @@ def test_late_result_under_expired_fence_does_not_park_exact_resume_forever(
     late = AgentResult.model_validate(
         {
             **{key: claim.model_dump(mode="json")[key] for key in ("fence",)},
-            "state": "failed",
+            "state": AgentResultState.FAILED,
             "result": {
-                "status": "failed",
-                "error_code": "recipe_stop_failed",
-                "reason": "runtime process exited",
+                "status": LifecycleState.FAILED,
+                "error_code": FailureCode.RECIPE_STOP_FAILED,
+                "failure_kind": AgentFailureKind.UNCERTAIN_EFFECT,
+                "uncertain": True,
+                "reason": "exact runtime stop could not be observed",
             },
         }
     )
@@ -2738,7 +2751,9 @@ def test_late_result_under_expired_fence_does_not_park_exact_resume_forever(
         assert previous is not None and aos.attempt_lapsed(previous)
         assert previous.result is not None
     jobs.succeed(resumed, STOP_RESULT)
-    assert job_state(sessions, operation.parent_job_id).state == "succeeded"
+    assert (
+        job_state(sessions, operation.parent_job_id).state == LifecycleState.SUCCEEDED
+    )
 
 
 _RESTART_INTERRUPTED = {

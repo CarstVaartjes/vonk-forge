@@ -19,7 +19,13 @@ from sqlalchemy import create_engine, delete, event, func, select
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import AgentResult, canonical_message
+from vonk_agent_protocol import (
+    AgentResult,
+    EnrollmentGrantState,
+    ErrorCategory,
+    SecurityRefusalReason,
+    canonical_message,
+)
 from vonk_agent_protocol.state_machines import (
     CertificateRecordState,
     CertificateRotationState,
@@ -34,7 +40,10 @@ from vonk_control.enrollment import (
     EnrollmentGrant,
     EnrollmentService,
 )
-from vonk_control.enrollment_contract import EnrollmentObservationOutcome
+from vonk_control.enrollment_contract import (
+    EnrollmentGrantStatus,
+    EnrollmentObservationOutcome,
+)
 from vonk_control.models import (
     AgentCertificate,
     AgentCertificateRotation,
@@ -1831,20 +1840,36 @@ def test_expired_and_consumed_grants_have_distinct_recovery_outcomes(service):
     except Exception:  # noqa: BLE001, S110 -- expired credentials cannot authorize effects
         pass
     assert authority.calls == []
-    assert enrollment.grant_status(expired.id, actor="admin").state == "expired"
-    assert enrollment.revoke_grant(expired.id, actor="admin").state == "expired"
+    assert (
+        enrollment.grant_status(expired.id, actor="admin").state
+        == EnrollmentGrantState.EXPIRED
+    )
+    expired_status = enrollment.revoke_grant(expired.id, actor="admin")
+    assert isinstance(expired_status, EnrollmentGrantStatus)
+    assert expired_status.state == EnrollmentGrantState.EXPIRED
     consumed = enrollment.create_named(
         "Current", "admin", 600, request_key=str(uuid.uuid4())
     )
     enrollment.submit(consumed.token, request, evidence(request))
-    assert enrollment.grant_status(consumed.id, actor="admin").state == "consumed"
-    assert enrollment.revoke_grant(
-        consumed.id, actor="admin"
-    ) == enrollment.grant_status(consumed.id, actor="admin")
+    assert (
+        enrollment.grant_status(consumed.id, actor="admin").state
+        == EnrollmentGrantState.CONSUMED
+    )
+    with pytest.raises(EnrollmentDenied, match="already consumed") as refused:
+        enrollment.revoke_grant(consumed.id, actor="admin")
+    assert refused.value.category == ErrorCategory.SECURITY_REFUSAL
+    assert (
+        refused.value.typed_reason
+        == SecurityRefusalReason.CONTROLLER_FLEET_ENROLLMENT_DENIED
+    )
     assert authority.revocations == []
 
 
-def test_grant_revocation_and_consumption_serialize_on_postgres(postgres_engine):
+@pytest.mark.parametrize(
+    "first", [EnrollmentGrantState.CONSUMED, EnrollmentGrantState.REVOKED, None]
+)
+def test_grant_revocation_and_consumption_serialize_on_postgres(postgres_engine, first):
+    """Catches a losing revoke reporting consumption as a successful receipt."""
     Base.metadata.create_all(postgres_engine)
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)
     authority = RecordingAuthority()
@@ -1857,29 +1882,53 @@ def test_grant_revocation_and_consumption_serialize_on_postgres(postgres_engine)
     assert isinstance(grant, EnrollmentGrant)
     request = csr()
     ready = threading.Barrier(2)
+    consumption_done = threading.Event()
+    revocation_done = threading.Event()
 
-    def submit():
+    def submit() -> EnrollmentGrantState | SecurityRefusalReason:
         ready.wait(timeout=10)
+        if first == EnrollmentGrantState.REVOKED:
+            assert revocation_done.wait(timeout=10)
         try:
             submitter.submit(grant.token, request, evidence(request))
-            return "consumed"
-        except EnrollmentDenied:
-            return "refused"
+            return EnrollmentGrantState.CONSUMED
+        except EnrollmentDenied as error:
+            assert error.category == ErrorCategory.SECURITY_REFUSAL
+            assert error.typed_reason is not None
+            return error.typed_reason
+        finally:
+            consumption_done.set()
 
-    def revoke():
+    def revoke() -> EnrollmentGrantState | SecurityRefusalReason:
         ready.wait(timeout=10)
+        if first == EnrollmentGrantState.CONSUMED:
+            assert consumption_done.wait(timeout=10)
         try:
-            return revoker.revoke_grant(grant.id, actor="admin").state
-        except EnrollmentDenied:
-            return "refused"
+            result = revoker.revoke_grant(grant.id, actor="admin")
+            assert isinstance(result, EnrollmentGrantStatus)
+            return result.state
+        except EnrollmentDenied as error:
+            assert error.category == ErrorCategory.SECURITY_REFUSAL
+            assert error.typed_reason is not None
+            return error.typed_reason
+        finally:
+            revocation_done.set()
 
     with ThreadPoolExecutor(max_workers=2) as pool:
         submitted = pool.submit(submit)
         revoked = pool.submit(revoke)
         outcomes = (submitted.result(timeout=15), revoked.result(timeout=15))
-    assert outcomes in (("consumed", "refused"), ("refused", "revoked"))
+    refusal = SecurityRefusalReason.CONTROLLER_FLEET_ENROLLMENT_DENIED
+    assert outcomes in (
+        (EnrollmentGrantState.CONSUMED, refusal),
+        (refusal, EnrollmentGrantState.REVOKED),
+    )
     final = submitter.grant_status(grant.id, actor="admin")
-    assert final.state == ("consumed" if authority.calls else "revoked")
+    assert final.state == (
+        EnrollmentGrantState.CONSUMED
+        if authority.calls
+        else EnrollmentGrantState.REVOKED
+    )
 
 
 def test_rotation_reader_miss_ends_and_preserves_active_certificate(

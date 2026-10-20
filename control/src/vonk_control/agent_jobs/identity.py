@@ -56,6 +56,8 @@ def _active(
     allow_superseded_cancellation: bool = False,
     allow_lapsed_renewal: bool = False,
 ) -> tuple[StoredOperation, AgentOperationAttempt]:
+    from ..cancelled_runtime import cancellation_stop_current
+
     token = self._fence_token(fence)
     identity_hint = session.execute(
         select(
@@ -146,6 +148,7 @@ def _active(
         )
         or node.state != "active"
         or node.revoked_at is not None
+        or not cancellation_stop_current(session, parent, operation)
     ):
         raise StaleAgentFence(
             "agent operation lease, certificate, or fence is stale",

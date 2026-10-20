@@ -12,6 +12,7 @@ from vonk_agent_protocol import (
     AgentOperation,
     AgentResult,
     FailureCode,
+    InvalidRequestReason,
     LifecycleState,
     RecipeBuildCode,
     RecipeBuildRequest,
@@ -359,6 +360,27 @@ def _claim_has_authority(
             job_id=job.id,
             check="parent-cancel-requested",
             kind=current_operation.kind,
+        )
+        return False
+    from ..cancelled_runtime import cancellation_stop_current
+
+    if not cancellation_stop_current(session, job, current_operation):
+        self._record_claim_refusal(
+            session,
+            operation=current_operation,
+            job_id=job.id,
+            check=InvalidRequestReason.SUPERSEDED,
+            kind=current_operation.kind,
+        )
+        end_unobserved_order(
+            self,
+            session,
+            current_operation,
+            AgentOperationAdapter.attempt_of(session, current_operation),
+            job,
+            now,
+            reason=WaitReason.SCOPE_CHANGED,
+            note="inherited cancellation Stop owner changed",
         )
         return False
     if node.state != "active" or node.revoked_at is not None:

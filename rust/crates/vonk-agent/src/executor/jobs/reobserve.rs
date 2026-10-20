@@ -10,7 +10,7 @@
 //! for the job's stop grace; then the job ends failed with what was seen.
 
 use super::*;
-use crate::host_runtime::{HostRuntimeError, JobReobservation};
+use crate::host_runtime::{HostRuntimeError, RuntimeReobservation};
 
 /// The first pause between two re-observations; it doubles up to the cap.
 pub(super) const FIRST_PAUSE: Duration = Duration::from_millis(100);
@@ -60,7 +60,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
             if remaining_lease(*lease.borrow()).is_zero() {
                 return;
             }
-            if let Ok(JobReobservation::Running {
+            if let Ok(RuntimeReobservation::Running {
                 progressed_at: Some(stamp),
             }) = boundary.reobserve_job(request).await
                 && last.is_none_or(|previous| stamp > previous)
@@ -112,7 +112,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                 };
             }
             let seen = match boundary.reobserve_job(job.request).await {
-                Ok(JobReobservation::Exited(outcome)) => {
+                Ok(RuntimeReobservation::Exited(outcome)) => {
                     // Its exit is read; the exited container is removed.
                     if let Some(stop) = self.remove_job_container(job).await {
                         eprintln!(
@@ -123,13 +123,13 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                     return Ok(outcome);
                 }
                 // Proven absence: no exit will ever be read.
-                Ok(JobReobservation::Absent) => {
+                Ok(RuntimeReobservation::Absent) => {
                     return ended(stopped.map_or(
                         "its container is absent; no exit was read".to_owned(),
                         |stop| format!("its container is absent after the deadline's stop; {stop}"),
                     ));
                 }
-                Ok(JobReobservation::Running { progressed_at }) => {
+                Ok(RuntimeReobservation::Running { progressed_at }) => {
                     if let Some(stamp) = progressed_at {
                         let window = job_deadline(Instant::now(), job.request)
                             .saturating_duration_since(Instant::now());
@@ -182,8 +182,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
     }
 
     /// Whether a job with no record of its own ran before, read once by its
-    /// identity: `None` when its container is proven absent, and when the
-    /// helper predates job re-observation (it keeps no exit to read);
+    /// identity: `None` only when its container and retained exit are proven absent;
     /// otherwise the stage and cause its exit is read for.
     pub(super) async fn job_seen_before_dispatch(
         &self,
@@ -196,13 +195,9 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
             helper_socket: self.helper_socket,
         };
         let seen = match boundary.reobserve_job(request).await {
-            Ok(JobReobservation::Absent)
-            | Err(HostRuntimeError::HelperRejected {
-                code: HelperErrorCode::OperationInvalid,
-                ..
-            }) => return Ok(None),
-            Ok(JobReobservation::Running { .. }) => "it was running",
-            Ok(JobReobservation::Exited(_)) => "it had exited",
+            Ok(RuntimeReobservation::Absent) => return Ok(None),
+            Ok(RuntimeReobservation::Running { .. }) => "it was running",
+            Ok(RuntimeReobservation::Exited(_)) => "it had exited",
             Err(error) => return Err(error),
         };
         Ok(Some((

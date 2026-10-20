@@ -8,6 +8,7 @@ from fastapi import APIRouter
 from vonk_agent_protocol.enrollment import EnrollmentSubmitRequest, ExpiredRenewRequest
 
 from ..openapi_numbers import install_canonical_openapi
+from ..operator_acceptance import OperatorReceiptResolver
 from ..strict_json import ControllerAPIRoute
 from .artifacts import install_artifacts_routes
 from .authority import install_authority_routes
@@ -35,6 +36,7 @@ def install_agent_routes(
     install_artifacts_routes(agent, services)
 
     app.include_router(agent)
+    OperatorReceiptResolver(agent=services).bind(app)
 
     # Enrollment reads a bounded raw body before validation so an invalid
     # submission still consumes its identifiable one-use grant. Document that

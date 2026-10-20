@@ -22,7 +22,6 @@ from vonk_agent_protocol.recipe_jobs import RecipeJobRunResult
 from .. import agent_operation_states
 from ..admission_locking import admission_attempts
 from ..agent_operation_facts import aware as _aware
-from ..agent_operation_facts import job_output_retention_expiry
 from ..agent_outcome import stored_report
 from ..auth import AgentSource
 from ..lifecycle import CancelRequested, LeaseLapsed, Outcome, Reported
@@ -44,8 +43,8 @@ from .evidence import (
     _lease_expiry_reason,
     sanitized_failure_report,
 )
+from .observation_receipts import adopt_observation_receipt
 from .predicates import _document
-from .preparation_receipts import adopt_preparation_receipt
 from .retirement import operator_resume_candidates_in_session
 from .retry import superseded_cancellation_deadline
 from .stored import column_field, column_is_document, column_message, column_value
@@ -206,37 +205,17 @@ def record_late_result(
             and operation.workload_intent_ordinal is not None
             and operation.workload_intent_ordinal != node.workload_intent_ordinal
         )
-        if message.state == AgentResultState.SUCCEEDED and adopt_preparation_receipt(
-            self, session, operation, attempt, parent, node, message.result, now
+        if adopt_observation_receipt(
+            self,
+            session,
+            operation,
+            attempt,
+            parent,
+            node,
+            message.result,
+            now,
+            state=message.state,
         ):
-            return True
-        if (
-            operation.kind == AgentOperation.RECIPE_JOB_RUN.value
-            and isinstance(message.result, RecipeJobRunResult)
-            and message.result.output_delivery_pending
-            and operation.current_attempt == attempt.attempt
-            and operation.state in agent_operation_states.RUNNING_OR_PARKED
-            and parent.state not in _ENDED_PARENT_STATES
-            and column_field(parent, "result", "cancel_requested") is not True
-            and not superseded_intent
-            and operation.workload_intent_ordinal
-            == column_field(parent, "payload", "workload_intent_ordinal")
-            and column_value(attempt, "result") is None
-            and _aware(now) < job_output_retention_expiry(attempt.lease_deadline)
-        ):
-            # A lapsed lease fences effects, not the exact owner's completed
-            # receipt. Re-plan only delivery under a fresh fence; never repeat
-            # inference or revive cancellation/newer intent. Bound acceptance
-            # from the old lease so repeated stale reports cannot extend it.
-            adapter = AgentOperationAdapter(session)
-            adapter.record_report(attempt, message.state, message.result)
-            event = self._report_event(
-                operation, attempt, parent, _outcome, message.result, now
-            )
-            adapter.settle(operation, attempt, parent, event, now)
-            if self._result_consumer is not None:
-                self._result_consumer(session, operation, attempt, message)
-            self._aggregate_parent(session, operation.parent_job_id)
             return True
         if (
             message.state == "cancelled"

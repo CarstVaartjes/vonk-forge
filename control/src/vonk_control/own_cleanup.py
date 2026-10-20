@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from vonk_agent_protocol import AgentOperation, ContainerRuntimeAction
+from vonk_agent_protocol import AgentOperation, ContainerRuntimeAction, WaitOwnerKind
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest
 from vonk_agent_protocol.recipe_operations import RecipeStartPayload, RecipeStopPayload
 
@@ -74,6 +74,8 @@ def own_runtime_target(
         owner, target = (OwnerKind.RUN.value, order.run_id), order.run_id
     elif isinstance(order, RecipeStopPayload):
         owner, target = (OwnerKind.RUN.value, order.run_id), order.target_runtime_id
+        if parent.payload.get("owner_kind") == WaitOwnerKind.ARTIFACT_JOB:
+            owner = (WaitOwnerKind.ARTIFACT_JOB, order.target_runtime_id)
     else:
         owner, target = (ARTIFACT_JOB_OWNER, order.job_id), order.job_id
     if (parent.payload.get("owner_kind"), parent.payload.get("owner_id")) != owner:

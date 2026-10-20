@@ -1123,6 +1123,22 @@ def test_helper_json_routes_use_strict_wire_models_and_canonical_signed_outputs(
     request_id = "00000000-0000-4000-8000-000000000005"
     fence = "00000000-0000-4000-8000-000000000004"
 
+    operation = services.operations.enqueue(
+        parent(services.sessions, clock).id,
+        NODE_A,
+        OperationKind.RECIPE_STOP,
+        "a" * 64,
+        STOP_PAYLOAD,
+    )
+    claim = services.operations.claim(
+        NODE_A,
+        "serial-a",
+        runtime_identity=PACKAGED_RUNTIME_IDENTITY,
+        claim_fence=fence,
+    )
+    assert claim is not None
+    assert fenced_operation(services.sessions, claim).id == operation.id
+
     host_issuer = HostHelperGrantIssuer(
         ed25519.Ed25519PrivateKey.generate(),
         clock=clock,

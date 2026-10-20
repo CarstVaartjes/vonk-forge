@@ -109,13 +109,13 @@ where
 {
     state.restore_custody();
     if let Err(error) =
-        content_observation::reobserve_content(state, executor, None, Utc::now()).await
+        operation_observation::reobserve_operations(state, executor, None, Utc::now()).await
     {
         eprintln!("vonk-agent: preparation observation deferred: {error}");
     }
     let now = Utc::now();
     deliver_retained(client, state).await?;
-    let claim = content_observation::observing_during(
+    let claim = operation_observation::observing_during(
         client.claim(
             policy.preflight_fingerprint,
             policy.wait_seconds,
@@ -166,7 +166,7 @@ where
                 let _cancel_on_exit = cancel_on_exit;
                 heartbeats.await
             });
-            let work = content_observation::observing_during(
+            let work = operation_observation::observing_during(
                 executor.execute(&claim, lease_deadline, cancellation),
                 client,
                 state.reopen().ok(),

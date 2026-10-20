@@ -28,6 +28,7 @@ from ..enrollment_body import (
 )
 from ..enrollment_contract import EnrollmentObservationReply
 from ..operation_api import bounded_error_responses
+from ..operator_acceptance import ReceiptPolicy, operator_acceptance
 from .common import (
     AgentApiServices,
     EnrollmentRateLimiter,
@@ -87,6 +88,7 @@ def install_enrollment_routes(
         responses={503: {"model": EnrollmentObservationReply}},
     )
     @raw_json_body(EnrollmentSubmitRequest)
+    @operator_acceptance(ReceiptPolicy.ENROLLMENT_ISSUE)
     async def enroll(request: Request) -> Response:
         required = _require_services(services)
         if not limiter.admit():

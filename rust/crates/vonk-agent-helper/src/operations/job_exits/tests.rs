@@ -22,19 +22,24 @@ fn reobserve(
     executor: &OperationExecutor<Host>,
     generation: &str,
 ) -> Result<RunInspection, OperationError> {
+    reobserve_mode(
+        executor,
+        generation,
+        vonk_agent_protocol::JOB_REOBSERVATION_ARGUMENT,
+    )
+}
+
+fn reobserve_mode(
+    executor: &OperationExecutor<Host>,
+    generation: &str,
+    marker: &str,
+) -> Result<RunInspection, OperationError> {
     let request = HostRuntimeRequest {
         action: HostRuntimeAction::RunInspect,
         fence: uuid::Uuid::new_v4(),
-        arguments: [
-            vonk_agent_protocol::JOB_REOBSERVATION_ARGUMENT,
-            JOB,
-            RUN,
-            INSTALLATION,
-            generation,
-            PLAN_DIGEST,
-        ]
-        .map(str::to_owned)
-        .to_vec(),
+        arguments: [marker, JOB, RUN, INSTALLATION, generation, PLAN_DIGEST]
+            .map(str::to_owned)
+            .to_vec(),
         job_plan: None,
         installation_id: None,
         reconciliation_identity: None,
@@ -141,6 +146,128 @@ fn a_stopped_running_job_retains_no_invented_exit() {
 
     assert!(matches!(
         reobserve(&executor, "1"),
+        Err(OperationError::RuntimeRunMissing)
+    ));
+}
+
+/// Stop observes physical absence even when a JobRun's retained exit exists.
+#[test]
+fn runtime_absence_probe_never_substitutes_a_retained_exit_or_removes_a_container() {
+    let host = exited_job(3);
+    let (_temp, executor) = host_executor(&host);
+    let observed = reobserve_mode(
+        &executor,
+        "1",
+        vonk_agent_protocol::RUNTIME_REOBSERVATION_ARGUMENT,
+    )
+    .unwrap();
+    assert_eq!(observed.exit_code, Some(3));
+    assert!(host.present(JOB), "observation cannot stop or remove");
+    executor.sweep_stray_jobs();
+    assert!(
+        reobserve(&executor, "1").is_ok(),
+        "job retains its real exit"
+    );
+    assert!(matches!(
+        reobserve_mode(
+            &executor,
+            "1",
+            vonk_agent_protocol::RUNTIME_REOBSERVATION_ARGUMENT
+        ),
+        Err(OperationError::RuntimeRunMissing)
+    ));
+    assert!(matches!(
+        reobserve_mode(
+            &executor,
+            "2",
+            vonk_agent_protocol::RUNTIME_REOBSERVATION_ARGUMENT
+        ),
+        Err(OperationError::RuntimeRunMissing)
+    ));
+}
+
+/// An idle container name is already absent before Stop starts. That alone
+/// cannot acknowledge cancellation while a delayed launch can still appear.
+#[test]
+fn cancel_stop_observation_requires_durable_fence_and_start_quiescence() {
+    let host = Host::with(&[]);
+    let (_temp, executor) = host_executor(&host);
+    let marker = vonk_agent_protocol::CANCEL_STOP_REOBSERVATION_ARGUMENT;
+    assert!(matches!(
+        reobserve_mode(&executor, "1", marker),
+        Err(OperationError::StopUncertain)
+    ));
+    let active = executor.job_cancellation.begin(identity(JOB)).unwrap();
+    executor
+        .update_runtime_generation_fence(
+            &identity(JOB),
+            RuntimeGenerationFenceUse::Stop {
+                cancel_pending_start: true,
+            },
+        )
+        .unwrap();
+    assert!(matches!(
+        reobserve_mode(&executor, "1", marker),
+        Err(OperationError::StopUncertain)
+    ));
+    drop(active);
+    assert!(matches!(
+        reobserve_mode(&executor, "1", marker),
+        Err(OperationError::RuntimeRunMissing)
+    ));
+    // A restarted helper reads the same durable proof; a newer generation
+    // cannot supply the older Stop's missing fence.
+    let restarted = OperationExecutor::new(executor.roots.clone(), &[0; 32], host, None).unwrap();
+    assert!(matches!(
+        reobserve_mode(&restarted, "1", marker),
+        Err(OperationError::RuntimeRunMissing)
+    ));
+    assert!(matches!(
+        reobserve_mode(&restarted, "2", marker),
+        Err(OperationError::StopUncertain)
+    ));
+    restarted
+        .update_runtime_generation_fence(
+            &RuntimeEffectIdentity {
+                run_generation: 2,
+                ..identity(JOB)
+            },
+            RuntimeGenerationFenceUse::Start,
+        )
+        .unwrap();
+    assert!(matches!(
+        reobserve_mode(&restarted, "1", marker),
+        Err(OperationError::StopUncertain)
+    ));
+}
+
+/// An ordinary Stop fences older launches while permitting an intentional
+/// same-generation restart. Its passive observer must retain that distinction.
+#[test]
+fn ordinary_stop_observation_requires_its_generation_high_water_mark() {
+    let host = Host::with(&[]);
+    let (_temp, executor) = host_executor(&host);
+    let marker = vonk_agent_protocol::STOP_REOBSERVATION_ARGUMENT;
+    assert!(matches!(
+        reobserve_mode(&executor, "1", marker),
+        Err(OperationError::StopUncertain)
+    ));
+    executor
+        .runtime_stop_authorized(identity(JOB), RUN.parse().unwrap(), 1, false)
+        .unwrap();
+    assert!(matches!(
+        reobserve_mode(&executor, "1", marker),
+        Err(OperationError::RuntimeRunMissing)
+    ));
+    assert!(matches!(
+        reobserve_mode(&executor, "2", marker),
+        Err(OperationError::StopUncertain)
+    ));
+    executor
+        .update_runtime_generation_fence(&identity(JOB), RuntimeGenerationFenceUse::Start)
+        .unwrap();
+    assert!(matches!(
+        reobserve_mode(&executor, "1", marker),
         Err(OperationError::RuntimeRunMissing)
     ));
 }

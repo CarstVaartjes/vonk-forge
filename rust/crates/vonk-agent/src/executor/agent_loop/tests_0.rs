@@ -1029,7 +1029,7 @@ impl Executor for DamagedDeadlineExecutor {
     async fn observe(
         &self,
         _claim: &AgentClaim,
-    ) -> Option<crate::executor::content_observation::ContentObservation> {
+    ) -> Option<crate::executor::operation_observation::OperationObservation> {
         None
     }
 
