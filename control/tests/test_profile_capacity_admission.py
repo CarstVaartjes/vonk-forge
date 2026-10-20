@@ -1286,6 +1286,7 @@ class _Relief:
         self.code = code
         self.paused = paused
         self.asked: list[tuple[str, int, str]] = []
+        self.inventory_observed_at: datetime | None = None
 
     def __call__(self, node_id, required_free_bytes, *, source, subject, reason):
         from vonk_control.storage_demands import StorageRelief
@@ -1298,16 +1299,31 @@ class _Relief:
             f"Needs {required_free_bytes} more free bytes; the loaded profile "
             "holds the rest.",
             paused=self.paused,
+            inventory_observed_at=self.inventory_observed_at,
         )
 
 
-def _load_short_of_disk(tmp_path, monkeypatch, relief: _Relief):
+def _load_short_of_disk(tmp_path, monkeypatch, relief: _Relief | None, engine=None):
     """A load whose Spark loses its free disk after the review accepted it."""
 
-    sessions, profiles, _, profile, api, headers, _review, nodes = _capacity_profile(
-        tmp_path, None
+    sessions, profiles, planner, profile, api, headers, _review, nodes = (
+        _capacity_profile(tmp_path, engine)
     )
-    profiles.bind_storage_relief(relief)
+    if relief is None:
+        from vonk_control.unused_storage_collection import UnusedStorageCollector
+
+        lifecycle = planner._lifecycle
+        assert lifecycle is not None
+        planner._clock = lambda: profiles._clock()
+        lifecycle._clock = lambda: profiles._clock()
+        collector = UnusedStorageCollector(
+            sessions,
+            clock=lambda: profiles._clock(),
+            lifecycle=lifecycle,
+        )
+        profiles.bind_storage_relief(collector.relief_for_spark)
+    else:
+        profiles.bind_storage_relief(relief)
     original_queue = FleetProfileService._queue_application
 
     def lose_disk(service, reviewed, **kwargs):
@@ -1389,62 +1405,87 @@ def _admitted_after(sessions, profiles, seconds: int) -> FleetProfileApplication
     return _only_application(sessions)
 
 
-def test_a_spark_eviction_cannot_free_keeps_the_load_waiting_until_space_frees(
-    tmp_path, monkeypatch
+def test_fresh_settled_insufficient_inventory_ends_admission_and_fresh_request_heals(
+    tmp_path,
+    monkeypatch,
+    postgres_engine,
 ) -> None:
-    """A Spark short of disk is a wait, not a failure: when removing everything
-    unused is not enough, the load keeps waiting on the bounded backoff with
-    that typed reason (a stop or removal can still free space), and is admitted
-    once the space is there."""
+    """Catches endless storage admission despite a post-demand capacity report."""
+    sessions, profiles, nodes = _load_short_of_disk(
+        tmp_path, monkeypatch, None, postgres_engine
+    )
+    pending = _only_application(sessions)
+    assert pending.state == LifecycleState.QUEUED
+    since = profiles.application(pending.id).progress.storage_wait_since
+    assert since is not None
+    # A repeated pre-demand report cannot certify that demand-driven collection ran.
+    _later(profiles, 90)
+    profiles.tick()
+    assert profiles.application(pending.id).state == LifecycleState.QUEUED
+    # The next settled report is fresh, but the shortfall remains: keep the exact
+    # terminal receipt instead of resetting a wait on every admission attempt.
+    with sessions.begin() as session:
+        snapshot = session.scalar(select(NodeInventorySnapshot))
+        assert snapshot is not None
+        snapshot.observed_at = profiles._clock()
+    _later(profiles, 90)
+    profiles.tick()
+    ended = profiles.application(pending.id)
+    assert ended.state == LifecycleState.FAILED
+    assert not ended.progress.admission_pending
+    assert ended.current_operation_id is None
+    assert any(
+        b.code == STORAGE_INSUFFICIENT and b.node_ids == [nodes[0]]
+        for b in ended.blockers
+    )
+    _free_disk(sessions)
+    with sessions() as session:
+        profile = session.get(FleetProfileApplication, pending.id)
+        assert profile is not None
+        profile_id = profile.profile_id
+    # The old receipt remains evidence. A newly reviewed, authorized intent can fit.
+    review = profiles.preview(profile_id)
+    resumed = profiles.apply(
+        profile_id,
+        actor="admin",
+        request_key=str(uuid4()),
+        reviewed_effects_digest=review.effects_digest,
+    )
+    assert resumed.state != LifecycleState.FAILED
+
+
+def test_storage_observation_without_fresh_inventory_has_a_durable_deadline(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    from vonk_control.settings import STORAGE_DEMAND_TTL_SECONDS
+    from vonk_control.storage_demands import STORAGE_EVICTION_TIMED_OUT
 
     relief = _Relief(STORAGE_INSUFFICIENT)
-    sessions, profiles, nodes = _load_short_of_disk(tmp_path, monkeypatch, relief)
-
-    for _ in range(3):
-        _later(profiles, 1800)
-        profiles.tick()
-    waiting = profiles.application(_only_application(sessions).id)
-    assert waiting.state == LifecycleState.QUEUED, waiting.status_reason
-    assert waiting.progress.admission_pending
-    assert waiting.next_attempt_at is not None
-    assert any(
-        item.code == STORAGE_INSUFFICIENT and item.node_ids == [nodes[0]]
-        for item in waiting.progress.blockers
-    )
-
-    _free_disk(sessions)
-    admitted = _admitted_after(sessions, profiles, 3600)
-    assert admitted.current_operation_id is not None, admitted.status_reason
-    assert admitted.progress["blockers"] == []
-    assert admitted.progress["storage_wait_since"] is None
+    sessions, profiles, _nodes = _load_short_of_disk(tmp_path, monkeypatch, relief)
+    pending = _only_application(sessions)
+    _later(profiles, STORAGE_DEMAND_TTL_SECONDS + 1)
+    profiles.tick()
+    ended = profiles.application(pending.id)
+    assert ended.state == LifecycleState.FAILED
+    assert any(b.code == STORAGE_EVICTION_TIMED_OUT for b in ended.blockers)
 
 
-def test_admission_keeps_waiting_while_eviction_is_paused_and_after_it_is_insufficient(
-    tmp_path, monkeypatch
+def test_active_storage_relief_waits_then_settled_shortfall_ends(
+    tmp_path,
+    monkeypatch,
 ) -> None:
-    """Catches a load cancelled by a clock, or failed, while it waits for disk.
-
-    A paused eviction is a wait that ends by itself; an eviction that cannot
-    free enough is still a wait. The load keeps waiting through both and is
-    admitted once the Spark has room.
-    """
+    """An active collector owns its wait; its final capacity verdict resolves it."""
+    from vonk_control.settings import STORAGE_DEMAND_TTL_SECONDS
 
     relief = _Relief(STORAGE_INSUFFICIENT, paused=True)
     sessions, profiles, _nodes = _load_short_of_disk(tmp_path, monkeypatch, relief)
-    assert _only_application(sessions).state == "queued"
-
-    for _ in range(4):
-        _later(profiles, 1800)
-        profiles.tick()
-    still = _only_application(sessions)
-    assert still.state == "queued", still.status_reason
-    assert cast(int, still.progress["admission_attempt"]) >= 2
-
-    relief.paused = False
-    _later(profiles, 120)
+    pending = _only_application(sessions)
+    _later(profiles, STORAGE_DEMAND_TTL_SECONDS * 2)
     profiles.tick()
-    assert _only_application(sessions).state == "queued"
-
-    _free_disk(sessions)
-    admitted = _admitted_after(sessions, profiles, 3600)
-    assert admitted.current_operation_id is not None, admitted.status_reason
+    assert profiles.application(pending.id).state == LifecycleState.QUEUED
+    relief.paused = False
+    relief.inventory_observed_at = profiles._clock()
+    _later(profiles, 90)
+    profiles.tick()
+    assert profiles.application(pending.id).state == LifecycleState.FAILED

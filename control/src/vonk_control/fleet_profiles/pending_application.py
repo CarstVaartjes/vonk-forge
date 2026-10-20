@@ -29,8 +29,11 @@ from ..lifecycle.types import State as _LifecycleState
 from ..models import FleetProfile, FleetProfileApplication
 from ..operation_blockers import OperationBlocker, make_blocker
 from ..persisted_waits import schedule_wait
-from ..settings import STORAGE_ADMISSION_RETRY_SECONDS
+from ..settings import STORAGE_ADMISSION_RETRY_SECONDS, STORAGE_DEMAND_TTL_SECONDS
+from ..stall_window import Verdict, Wait, progress_verdict
 from ..storage_demands import (
+    STORAGE_EVICTING,
+    STORAGE_EVICTION_TIMED_OUT,
     STORAGE_INSUFFICIENT,
     StorageRelief,
 )
@@ -296,13 +299,9 @@ class FleetProfileService:
     ) -> FleetProfileApplicationView:
         """Record bounded retry state after a nonblocking admission refusal.
 
-        A refusal for disk (``storage``) asks the storage collector to free it
-        and records what that can do as the load's typed blockers.  A Spark
-        short of disk is a wait, not a failure: the load keeps waiting while
-        eviction works, and on the bounded backoff once nothing more can be
-        freed (``storage.insufficient_after_eviction``), since a stop or a
-        removal can still free space.  ``wait_for_space`` is the load whose plan
-        is still blocked anyway: its other blockers stay next to the disk ones.
+        Disk relief waits for a settled inventory measured after the demand.
+        Insufficient capacity ends with typed evidence so the caller can re-plan.
+        An unavailable or unsettled inventory has a durable observation deadline.
         """
         self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
 
@@ -341,23 +340,65 @@ class FleetProfileService:
             progress = _persisted_profile_progress(row)
             if not _owns_pending_admission(row, progress):
                 return self._application_view(row)
-            # A load waiting to be admitted waits in the admission queue, a
-            # live owner: the wait never expires. Only a refusal ends it.
+            # Deterministic refusals end with their original typed evidence.
+            # Storage separately resolves its demand against settled inventory.
             if self._end_definite_wait(row, blockers or (), session):
                 return self._application_view(row)
             if storage is not None:
-                # Disk is a wait, never a refusal: eviction, a stop or a removal
-                # frees space, and the load is admitted once it fits.  While
-                # eviction works the load looks again soon; once removing
-                # everything unused is not enough, on the bounded backoff.
+                since = _aware(progress.storage_wait_since or now)
+                storage_wait_since = since.isoformat()
+                # A report measured after the demand, with no removal still
+                # settling, is the collector's final capacity evidence. Keep
+                # that receipt; a fresh placement/request can re-plan elsewhere.
+                exhausted = [
+                    _relief_blocker(node_id, item, needed)
+                    for node_id, item, needed in relieved
+                    if item.code == STORAGE_INSUFFICIENT
+                    and not item.paused
+                    and item.inventory_observed_at is not None
+                    and since < _aware(item.inventory_observed_at) <= now
+                ]
+                if (
+                    not exhausted
+                    and progress_verdict(
+                        started_at=since,
+                        progressed_at=None,
+                        window=timedelta(seconds=STORAGE_DEMAND_TTL_SECONDS),
+                        now=now,
+                        waiting_on=Wait(
+                            any(
+                                item.code == STORAGE_EVICTING or item.paused
+                                for _, item, _needed in relieved
+                            )
+                        ),
+                    )
+                    is Verdict.STALLED
+                ):
+                    exhausted = [
+                        make_blocker(
+                            STORAGE_EVICTION_TIMED_OUT,
+                            "Storage admission did not obtain sufficient settled inventory "
+                            f"within {STORAGE_DEMAND_TTL_SECONDS} seconds; review a new placement.",
+                            node_ids=[
+                                node_id for node_id, _needed in storage.shortfalls
+                            ],
+                        )
+                    ]
+                if exhausted:
+                    row.progress = _progress_with_blockers(
+                        progress,
+                        [*exhausted, *(blockers or ())],
+                        admission_pending=False,
+                        storage_wait_since=storage_wait_since,
+                    ).model_dump(mode="json")
+                    self._lifecycle.fail(row, exhausted[0].detail, now, session=session)
+                    return self._application_view(row)
                 evicting = not relieved or any(
                     item.code != STORAGE_INSUFFICIENT or item.paused
                     for _, item, _needed in relieved
                 )
                 if not evicting:
                     retry_delay = None
-                since = now if evicting else _aware(progress.storage_wait_since or now)
-                storage_wait_since = since.isoformat()
             else:
                 storage_wait_since = None
             attempt = progress.admission_attempt + 1

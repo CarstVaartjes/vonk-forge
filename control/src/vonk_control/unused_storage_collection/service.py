@@ -379,10 +379,16 @@ class UnusedStorageCollector:
                 + ". "
                 + _kept_sentence(kept_bytes)
                 + "The agent will check unused model objects and runtime images "
-                "against this demand; waiting for fresh inventory."
+                "against this demand. A settled post-demand inventory resolves "
+                "admission; if capacity is still insufficient, review another placement."
             )
         return StorageRelief(
-            code, shortfall, freeable, detail, paused=paused is not None
+            code,
+            shortfall,
+            freeable,
+            detail,
+            paused=paused is not None,
+            inventory_observed_at=None if settling else snapshot[2],
         )
 
     @staticmethod
