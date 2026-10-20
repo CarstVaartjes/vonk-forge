@@ -125,7 +125,12 @@ fn runtime_death_child() {
 async fn runtime_process_death_at_every_custody_seam_recovers_without_new_claims() {
     for accepted in runtime_claims() {
         accepted.validate().unwrap();
-        for point in 0..4 {
+        let seams = (0..4).map(|point| (point, false));
+        // An exit during stability is the same measured exit, not an unread
+        // probe that loses its cause until another idle tick.
+        let stability_exit =
+            (accepted.operation == AgentOperation::RecipeStart).then_some((1, true));
+        for (point, exits_during_stability) in seams.chain(stability_exit) {
             let dir = tempdir().unwrap();
             let root = dir.path();
             fs::write(root.join("claim.json"), canonical_json(&accepted).unwrap()).unwrap();
@@ -174,6 +179,7 @@ async fn runtime_process_death_at_every_custody_seam_recovers_without_new_claims
             let done = stop.clone();
             let peer = thread::spawn(move || {
                 let deadline = Instant::now() + Duration::from_secs(20);
+                let mut inspections = 0;
                 while !done.load(Ordering::SeqCst) {
                     assert!(Instant::now() < deadline);
                     let (mut stream, _) = match listener.accept() {
@@ -212,6 +218,8 @@ async fn runtime_process_death_at_every_custody_seam_recovers_without_new_claims
                     } else {
                         !effect
                     };
+                    inspections += 1;
+                    let rank_exited = exits_during_stability && inspections > 1;
                     let response = HostHelperResponse {
                         schema_version: 1,
                         request_id: Some(frame.request_id),
@@ -222,9 +230,12 @@ async fn runtime_process_death_at_every_custody_seam_recovers_without_new_claims
                         },
                         error_code: absent.then_some(HelperErrorCode::RuntimeRunMissing),
                         process_running: (!absent)
-                            .then_some(operation != AgentOperation::RecipeJobRunV1),
-                        exit_code: (!absent && operation == AgentOperation::RecipeJobRunV1)
-                            .then_some(0),
+                            .then_some(operation != AgentOperation::RecipeJobRunV1 && !rank_exited),
+                        exit_code: if rank_exited {
+                            Some(7)
+                        } else {
+                            (!absent && operation == AgentOperation::RecipeJobRunV1).then_some(0)
+                        },
                         installation_intent_nonce: None,
                         job_progress_at: None,
                         diagnostic: None,
@@ -281,7 +292,14 @@ async fn runtime_process_death_at_every_custody_seam_recovers_without_new_claims
                 assert_eq!(state.observation_claims().unwrap().len(), 1);
             } else {
                 assert_eq!(results.len(), 1);
-                assert_eq!(results[0].state, AgentResultState::Succeeded);
+                assert_eq!(
+                    results[0].state,
+                    if exits_during_stability {
+                        AgentResultState::Failed
+                    } else {
+                        AgentResultState::Succeeded
+                    }
+                );
                 assert_eq!(results[0].fence, accepted.fence);
                 if point == 3 {
                     let sent: AgentResult = vonk_agent_protocol::parse_strict(

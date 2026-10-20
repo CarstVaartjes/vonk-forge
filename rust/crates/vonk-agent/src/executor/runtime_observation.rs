@@ -35,7 +35,15 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                         "start observation identity is invalid",
                     ));
                 };
-                boundary.reobserve_runtime(&stop).await
+                let seen = boundary.reobserve_runtime(&stop).await;
+                if start.phase == Some(RecipeStartPhase::RankLaunch)
+                    && matches!(&seen, Ok(RuntimeReobservation::Running { .. }))
+                {
+                    tokio::time::sleep(RANK_STABILITY_WINDOW).await;
+                    boundary.reobserve_runtime(&stop).await
+                } else {
+                    seen
+                }
             }
             RecipeOperationRequest::Stop(stop) => boundary.reobserve_runtime(stop).await,
             RecipeOperationRequest::JobRun(job) => {
@@ -70,26 +78,6 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                     .observe_installation(&start.installation_id.to_string())
                 {
                     return pending(WaitReason::ModelCustodyUnconfirmed, error.to_string());
-                }
-                if start.phase == Some(RecipeStartPhase::RankLaunch) {
-                    tokio::time::sleep(RANK_STABILITY_WINDOW).await;
-                    let Some(stop) =
-                        exact_stop_plan_from_claim(claim, &start.run_id.to_string(), false)
-                    else {
-                        return OperationObservation::confirmed(failed(
-                            "start observation identity is invalid",
-                        ));
-                    };
-                    if !matches!(
-                        boundary.reobserve_runtime(&stop).await,
-                        Ok(RuntimeReobservation::Running { .. })
-                    ) {
-                        return pending(
-                            WaitReason::ObservationUnavailable,
-                            "rank stability remains unconfirmed after exact reinspection"
-                                .to_owned(),
-                        );
-                    }
                 }
                 if start.phase == Some(RecipeStartPhase::RankLaunch)
                     || match (
