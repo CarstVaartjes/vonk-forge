@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from datetime import datetime
-from hashlib import sha256
 from typing import TYPE_CHECKING, cast
 
 from pydantic import BaseModel
@@ -15,7 +14,6 @@ from vonk_agent_protocol import (
     ArtifactDistributionResult,
     FailureStage,
     LifecycleState,
-    canonical_message,
     validate_result_for_operation,
 )
 from vonk_agent_protocol.contracts import AgentResultPayload
@@ -102,8 +100,6 @@ def adopt_preparation_receipt(
         in (service._target_scope(column_value(parent, "targets")) or ())
         and operation.authority_revision == parent.authority_revision
         and isinstance(column_value(operation, "payload"), BaseModel)
-        and sha256(canonical_message(column_value(operation, "payload"))).hexdigest()
-        == operation.payload_digest
         and (
             operation.kind != AgentOperation.ARTIFACT_DISTRIBUTION
             or (
@@ -126,9 +122,12 @@ def adopt_preparation_receipt(
         and operation.workload_intent_ordinal == node.workload_intent_ordinal
         and operation.workload_intent_ordinal
         == column_field(parent, "payload", "workload_intent_ordinal")
-        and (attempt.state == LifecycleState.RUNNING or aos.attempt_lapsed(attempt))
+        and (
+            attempt.state == LifecycleState.RUNNING or aos.attempt_is_observing(attempt)
+        )
         and (
             attempt.result is None
+            or aos.attempt_reported_unknown(attempt)
             or retained_preparation_receipt(operation, attempt) == receipt
         )
     ):

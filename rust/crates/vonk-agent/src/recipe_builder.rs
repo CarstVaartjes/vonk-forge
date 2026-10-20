@@ -61,6 +61,7 @@ use budget::{ensure_build_disk_available, phase_time, remaining_build_time};
 pub use builder::RecipeBuilder;
 pub use cleanup::{
     cleanup_build, cleanup_build_storage, cleanup_build_until, observe_build_cleanup,
+    observe_build_running,
 };
 use diagnostics::sanitized_process_logs;
 pub use diagnostics::{PodmanBuildDiagnostic, PodmanImportDiagnostic, RecipeBuildError};

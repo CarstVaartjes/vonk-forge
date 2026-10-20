@@ -15,11 +15,7 @@ pub fn cleanup_build_until<R: ProcessRunner + ?Sized>(
     request: &RecipeBuildCleanupRequest,
     deadline: Instant,
 ) -> Result<RecipeBuildCleanupEvidence, RecipeBuildError> {
-    let units = [
-        format!("vonk-recipe-build-{}.service", request.build_id),
-        format!("vonk-runtime-adapter-{}.service", request.build_id),
-        format!("vonk-recipe-build-{}-e.service", request.build_id),
-    ];
+    let units = build_units(request);
     let mut pending = Vec::new();
     for attempt in 0..3 {
         pending.clear();
@@ -415,11 +411,7 @@ pub fn observe_build_cleanup<R: ProcessRunner + ?Sized>(
     request: &RecipeBuildCleanupRequest,
     deadline: Instant,
 ) -> Result<bool, RecipeBuildError> {
-    for unit in [
-        format!("vonk-recipe-build-{}.service", request.build_id),
-        format!("vonk-runtime-adapter-{}.service", request.build_id),
-        format!("vonk-recipe-build-{}-e.service", request.build_id),
-    ] {
+    for unit in build_units(request) {
         match observe_unit(runner, &unit, deadline) {
             Ok(None) => {}
             Ok(Some(_)) => return Ok(false),
@@ -448,4 +440,32 @@ pub fn observe_build_cleanup<R: ProcessRunner + ?Sized>(
         }
     }
     Ok(true)
+}
+
+fn build_units(request: &RecipeBuildCleanupRequest) -> [String; 3] {
+    [
+        format!("vonk-recipe-build-{}.service", request.build_id),
+        format!("vonk-runtime-adapter-{}.service", request.build_id),
+        format!("vonk-recipe-build-{}-e.service", request.build_id),
+    ]
+}
+
+pub fn observe_build_running<R: ProcessRunner + ?Sized>(
+    runner: &R,
+    request: &RecipeBuildCleanupRequest,
+    deadline: Instant,
+) -> Result<bool, RecipeBuildError> {
+    for unit in build_units(request) {
+        match observe_unit(runner, &unit, deadline) {
+            Ok(Some(_)) => return Ok(true),
+            Ok(None) => {}
+            Err(cause) => {
+                return Err(RecipeBuildError::CleanupPending {
+                    subject: unit,
+                    observed: cause,
+                });
+            }
+        }
+    }
+    Ok(false)
 }

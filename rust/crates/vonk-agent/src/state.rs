@@ -9,7 +9,9 @@ use std::{
 use chrono::{DateTime, Utc};
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 use thiserror::Error;
-use vonk_agent_protocol::generated::{AgentOperation, FailureStage, ProgressPhase, WaitReason};
+use vonk_agent_protocol::generated::{
+    AgentOperation, AgentResultState, FailureStage, LifecycleState, ProgressPhase, WaitReason,
+};
 use vonk_agent_protocol::{
     AgentClaim, AgentDirective, AgentProgress, AgentResult, canonical_json, parse_strict,
 };
@@ -404,11 +406,12 @@ impl StateStore {
             None => {
                 transaction.execute(
                     "INSERT INTO operations(fence,operation,deadline,state,claim_json)
-                     VALUES (?1,?2,?3,'running',?4)",
+                     VALUES (?1,?2,?3,?4,?5)",
                     params![
                         claim.fence.to_string(),
                         claim.operation.to_string(),
                         claim.deadline.to_rfc3339(),
+                        LifecycleState::Running.as_str(),
                         canonical_json(claim)?,
                     ],
                 )?;
@@ -464,17 +467,30 @@ impl StateStore {
         let transaction = self
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let operation: String = transaction
+        let (operation, retained): (String, Option<Vec<u8>>) = transaction
             .query_row(
-                "SELECT operation FROM operations
-                 WHERE fence=?1 AND state='running'",
+                "SELECT operation,result_json FROM operations WHERE fence=?1",
                 [claim.fence.to_string()],
-                |row| row.get(0),
+                |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .optional()?
             .ok_or(StateError::Stale)?;
         if operation != claim.operation.as_str() {
             return Err(StateError::Identity);
+        }
+        if let Some(body) = retained {
+            let previous: AgentResult = parse_strict(&body)?;
+            previous.validate_for_operation(&claim.operation)?;
+            if previous.fence != claim.fence {
+                return Err(StateError::Identity);
+            }
+            if previous.state != AgentResultState::Observing {
+                return Err(StateError::Stale);
+            }
+            // Repeated uncertainty is observation, not a new receipt or lease.
+            if finished.state == AgentResultState::Observing {
+                return Ok(previous);
+            }
         }
         let result = AgentResult {
             fence: claim.fence,
@@ -490,12 +506,20 @@ impl StateStore {
         let body = canonical_json(&result)?;
         let changed = transaction.execute(
             "UPDATE operations SET state='completed',result_json=?2,result_acknowledged=0
-             WHERE fence=?1 AND state='running'",
+             WHERE fence=?1",
             params![claim.fence.to_string(), body],
         )?;
         if changed != 1 {
             return Err(StateError::Stale);
         }
+        transaction.execute(
+            "DELETE FROM result_rejections WHERE fence=?1",
+            [claim.fence.to_string()],
+        )?;
+        transaction.execute(
+            "DELETE FROM result_reconciliation WHERE fence=?1",
+            [claim.fence.to_string()],
+        )?;
         transaction.commit()?;
         Ok(result)
     }
@@ -918,16 +942,22 @@ impl StateStore {
         let row = self
             .connection
             .query_row(
-                "SELECT rowid,fence,operation,claim_json,deadline FROM operations
-             WHERE state='running' AND claim_json IS NOT NULL
+                "SELECT rowid,fence,operation,CASE WHEN length(claim_json)<=?4 THEN claim_json END,deadline FROM operations
+             WHERE claim_json IS NOT NULL AND (state=?3 OR
+                (json_valid(CAST(result_json AS TEXT)) AND json_extract(CAST(result_json AS TEXT),'$.state')=?2))
              ORDER BY (rowid <= ?1),rowid LIMIT 1",
-                [self.observation_cursor],
+                params![
+                    self.observation_cursor,
+                    AgentResultState::Observing.as_str(),
+                    LifecycleState::Running.as_str(),
+                    vonk_agent_protocol::MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES as i64
+                ],
                 |row| {
                     Ok((
                         row.get::<_, i64>(0)?,
                         row.get::<_, String>(1)?,
                         row.get::<_, String>(2)?,
-                        row.get::<_, Vec<u8>>(3)?,
+                        row.get::<_, Option<Vec<u8>>>(3)?,
                         row.get::<_, String>(4)?,
                     ))
                 },
@@ -937,6 +967,7 @@ impl StateStore {
             return Ok(Vec::new());
         };
         self.observation_cursor = cursor;
+        let body = body.ok_or(StateError::ResultState)?;
         let mut claim: AgentClaim = parse_strict(&body)?;
         claim.validate()?;
         claim.deadline =
@@ -956,14 +987,14 @@ impl StateStore {
     pub fn recover_interrupted(&mut self) -> Result<(), StateError> {
         let claims = {
             let mut statement = self.connection.prepare(
-                "SELECT fence,operation,claim_json FROM operations WHERE state='running'",
+                "SELECT fence,operation,claim_json IS NOT NULL FROM operations WHERE state=?1",
             )?;
             statement
-                .query_map([], |row| {
+                .query_map([LifecycleState::Running.as_str()], |row| {
                     Ok((
                         row.get::<_, String>(0)?,
                         row.get::<_, String>(1)?,
-                        row.get::<_, Option<Vec<u8>>>(2)?,
+                        row.get::<_, bool>(2)?,
                     ))
                 })?
                 .filter_map(Result::ok)
@@ -976,8 +1007,7 @@ impl StateStore {
             let Ok(operation) = operation.parse::<AgentOperation>() else {
                 continue;
             };
-            if claim.is_some()
-                && crate::executor::content_observation::ContentKind::of(&operation).is_some()
+            if claim && crate::executor::content_observation::ContentKind::of(&operation).is_some()
             {
                 continue;
             }

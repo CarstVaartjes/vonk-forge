@@ -1189,3 +1189,12 @@ fn authenticated_time_window_refusals_match_the_shared_response() {
         ));
     }
 }
+
+#[test]
+fn content_observation_shared_frame_is_canonical_and_grant_free() {
+    let raw = fs::read(fixtures().join("content-preparation-inspection.json")).unwrap();
+    let raw = raw.strip_suffix(b"\n").unwrap_or(&raw);
+    let frame = parse_inspection_request(raw).unwrap();
+    assert_eq!(frame.content_observation, Some(true));
+    assert_eq!(canonical_json(&frame).unwrap(), raw);
+}

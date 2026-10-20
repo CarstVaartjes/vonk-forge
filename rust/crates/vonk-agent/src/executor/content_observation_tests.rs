@@ -1,3 +1,4 @@
+#![cfg(test)]
 //! Wrong implementation: restart converts a completed effect to interrupted,
 //! or an idle tick reexecutes it because the receipt/ack was lost.
 use super::content_observation::*;
@@ -104,19 +105,22 @@ async fn process_death_at_four_boundaries_recovers_on_an_idle_tick_without_execu
             .stderr(Stdio::inherit())
             .spawn()
             .unwrap();
-        let mut reader = BufReader::new(child.stdout.take().unwrap());
-        loop {
-            let mut line = String::new();
-            assert!(
-                reader.read_line(&mut line).unwrap() > 0,
-                "child must reach fault boundary"
-            );
-            if line.contains("content-ready") {
-                break;
-            }
+        let deadline = Instant::now() + Duration::from_secs(20);
+        let stdout = child.stdout.take().unwrap();
+        let (ready, observed) = std::sync::mpsc::channel();
+        let _reader = thread::spawn(move || {
+            let found = BufReader::new(stdout)
+                .lines()
+                .any(|line| line.is_ok_and(|text| text.contains("content-ready")));
+            let _ = ready.send(found);
+        });
+        let reached = observed.recv_timeout(deadline.saturating_duration_since(Instant::now()));
+        let _ = child.kill();
+        while child.try_wait().unwrap().is_none() {
+            assert!(Instant::now() < deadline, "child must exit after kill");
+            thread::sleep(Duration::from_millis(1));
         }
-        child.kill().unwrap();
-        child.wait().unwrap();
+        assert_eq!(reached.unwrap(), true, "child must reach fault boundary");
         let http = AgentHttpClient::for_http_test("http://127.0.0.1/", NODE_ID);
         let executor = RecipeExecutor {
             client: &http,

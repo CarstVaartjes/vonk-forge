@@ -806,7 +806,11 @@ pub fn retain_completed(
     result: &RuntimePreflightResult,
 ) -> Result<(), ProcessError> {
     use std::io::Write;
-    let root = crate::recipe_builder::owned_directory(data_root, "runtime-preflight")?;
+    let root = crate::recipe_builder::owned_directory(
+        data_root,
+        vonk_agent_protocol::generated::AgentOperation::RuntimePreflightV1.as_str(),
+    )
+    .map_err(|error| std::io::Error::other(format!("preflight cache directory: {error}")))?;
     let mut file = tempfile::NamedTempFile::new_in(&root)?;
     file.write_all(
         &canonical_json(result).map_err(|_| std::io::Error::other("invalid preflight result"))?,
@@ -824,14 +828,18 @@ pub fn observe_completed(
     fingerprint: &str,
 ) -> Result<Option<RuntimePreflightResult>, ProcessError> {
     let path = data_root
-        .join("runtime-preflight")
+        .join(vonk_agent_protocol::generated::AgentOperation::RuntimePreflightV1.as_str())
         .join(format!("{fence}.json"));
     let raw = match crate::oci::read_regular_file(&path, 64 * 1024) {
         Ok(raw) => raw,
         Err(crate::oci::OciError::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => {
             return Ok(None);
         }
-        Err(_) => return Err(std::io::Error::other("preflight receipt unreadable").into()),
+        Err(error) => {
+            return Err(
+                std::io::Error::other(format!("preflight receipt unreadable: {error}")).into(),
+            );
+        }
     };
     let result: RuntimePreflightResult = vonk_agent_protocol::parse_strict(&raw)
         .map_err(|_| std::io::Error::other("preflight receipt invalid"))?;

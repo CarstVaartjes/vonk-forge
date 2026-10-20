@@ -34,6 +34,7 @@ pub struct PendingObservation {
     pub cause: WaitReason,
     pub reason: String,
     pub owner: AgentOperation,
+    pub dependency: uuid::Uuid,
     pub next_check: DateTime<Utc>,
     pub deadline: DateTime<FixedOffset>,
 }
@@ -49,6 +50,7 @@ impl PendingObservation {
             cause,
             reason: reason.into(),
             owner: claim.operation,
+            dependency: claim.fence,
             next_check: Utc::now() + chrono::Duration::seconds(15),
             deadline: claim.deadline,
         }
@@ -63,11 +65,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         };
         let observed = self.probe_content(claim, kind).await;
         Some(match observed {
-            Ok(Some(result)) => ContentObservation::Confirmed(result),
-            Ok(None) => pending(
-                WaitReason::RuntimeEffectUnconfirmed,
-                "exact preparation completion is not yet established".to_owned(),
-            ),
+            Ok(result) => result,
             Err(error) => pending(WaitReason::ObservationUnavailable, error),
         })
     }
@@ -76,10 +74,27 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         &self,
         claim: &AgentClaim,
         kind: ContentKind,
-    ) -> Result<Option<ExecutionResult>, String> {
+    ) -> Result<ContentObservation, String> {
         use vonk_agent_protocol::generated::AgentClaimPayload as Payload;
-        match (kind, &claim.payload) {
-            (ContentKind::Install, Payload::RecipeInstallPayload(request)) => {
+        let unknown = |reason| {
+            ContentObservation::Unknown(PendingObservation::new(
+                claim,
+                WaitReason::RuntimeEffectUnconfirmed,
+                reason,
+            ))
+        };
+        let blocked = |reason| {
+            ContentObservation::Blocked(PendingObservation::new(
+                claim,
+                WaitReason::CleanupUnconfirmed,
+                reason,
+            ))
+        };
+        match kind {
+            ContentKind::Install => {
+                let Payload::RecipeInstallPayload(request) = &claim.payload else {
+                    return Err("claim payload does not match its content observer".into());
+                };
                 let id = request.installation_id.to_string();
                 let installed = self.runtime.load_spec(&id).map_err(|e| e.to_string())?;
                 if !same_installed_workload(&installed, &request.compiled_execution_plan) {
@@ -92,24 +107,45 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                     .runtime
                     .installed_bytes(&id)
                     .map_err(|e| e.to_string())?;
-                Ok(Some(recipe_install_success(bytes)))
+                Ok(ContentObservation::Confirmed(recipe_install_success(bytes)))
             }
-            (ContentKind::Reconcile, Payload::RecipeReconcilePayload(request)) => {
+            ContentKind::Reconcile => {
+                let Payload::RecipeReconcilePayload(request) = &claim.payload else {
+                    return Err("claim payload does not match its content observer".into());
+                };
                 let identity = RecipeReconciliationIdentity::from(request);
                 self.observe_removal(claim, &identity).await.map(|done| {
-                    done.then(|| ExecutionResult::done(RecipeReconcileResult::default()))
+                    if done {
+                        ContentObservation::Confirmed(ExecutionResult::done(
+                            RecipeReconcileResult::default(),
+                        ))
+                    } else {
+                        unknown("exact installation removal checkpoint is incomplete".to_owned())
+                    }
                 })
             }
-            (ContentKind::Uninstall, Payload::RecipeUninstallPayload(request)) => {
+            ContentKind::Uninstall => {
+                let Payload::RecipeUninstallPayload(request) = &claim.payload else {
+                    return Err("claim payload does not match its content observer".into());
+                };
                 let identity = RecipeReconciliationIdentity {
                     installation_id: request.installation_id,
                     plan_digest: request.plan_digest.clone(),
                 };
                 self.observe_removal(claim, &identity).await.map(|done| {
-                    done.then(|| ExecutionResult::done(RecipeUninstallResult::default()))
+                    if done {
+                        ContentObservation::Confirmed(ExecutionResult::done(
+                            RecipeUninstallResult::default(),
+                        ))
+                    } else {
+                        unknown("exact uninstallation checkpoint is incomplete".to_owned())
+                    }
                 })
             }
-            (ContentKind::BuildCleanup, Payload::RecipeBuildCleanupRequest(request)) => {
+            ContentKind::BuildCleanup => {
+                let Payload::RecipeBuildCleanupRequest(request) = &claim.payload else {
+                    return Err("claim payload does not match its content observer".into());
+                };
                 let done = crate::recipe_builder::observe_build_cleanup(
                     self.runtime.runner,
                     self.runtime.data_root,
@@ -117,11 +153,21 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                     Instant::now() + Duration::from_secs(15),
                 )
                 .map_err(|e| e.to_string())?;
-                Ok(done.then(|| {
-                    ExecutionResult::done(vonk_agent_protocol::RecipeBuildCleanupEvidence {})
-                }))
+                Ok(if done {
+                    ContentObservation::Confirmed(ExecutionResult::done(
+                        vonk_agent_protocol::RecipeBuildCleanupEvidence {},
+                    ))
+                } else {
+                    blocked(format!(
+                        "build {} still owns units or private staging",
+                        request.build_id
+                    ))
+                })
             }
-            (ContentKind::Build, Payload::RecipeBuildRequest(request)) => {
+            ContentKind::Build => {
+                let Payload::RecipeBuildRequest(request) = &claim.payload else {
+                    return Err("claim payload does not match its content observer".into());
+                };
                 let builder = RecipeBuilder {
                     runner: self.runtime.runner,
                     data_root: self.runtime.data_root,
@@ -134,16 +180,47 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                     Instant::now() + Duration::from_secs(15),
                     &|| false,
                 ) else {
-                    return Ok(None);
+                    let cleanup = vonk_agent_protocol::RecipeBuildCleanupRequest {
+                        build_id: request.build_id,
+                        operation_id: request.build_id,
+                    };
+                    let running = crate::recipe_builder::observe_build_running(
+                        self.runtime.runner,
+                        &cleanup,
+                        Instant::now() + Duration::from_secs(15),
+                    )
+                    .map_err(|e| e.to_string())?;
+                    return Ok(if running {
+                        ContentObservation::Progressing(PendingObservation::new(
+                            claim,
+                            WaitReason::RuntimeEffectUnconfirmed,
+                            format!("build {} still has a live owned unit", request.build_id),
+                        ))
+                    } else {
+                        unknown(format!(
+                            "build {} has no retained export or live owned unit; completion remains unknown",
+                            request.build_id
+                        ))
+                    });
                 };
                 let complete = self
                     .client
                     .observe_recipe_image(request.build_id, &evidence)
                     .await
                     .map_err(|e| e.to_string())?;
-                Ok(complete.then(|| ExecutionResult::done(evidence)))
+                Ok(if complete {
+                    ContentObservation::Confirmed(ExecutionResult::done(evidence))
+                } else {
+                    blocked(format!(
+                        "Controller upload for build {} is incomplete",
+                        request.build_id
+                    ))
+                })
             }
-            (ContentKind::Preflight, Payload::RuntimePreflightRequest(_)) => {
+            ContentKind::Preflight => {
+                let Payload::RuntimePreflightRequest(_request) = &claim.payload else {
+                    return Err("claim payload does not match its content observer".into());
+                };
                 let fingerprint = crate::runtime_preflight::host_fingerprint(
                     self.runtime.runner,
                     env!("VONK_AGENT_BUILD_DIGEST"),
@@ -157,9 +234,18 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                     &fingerprint,
                 )
                 .map_err(|e| e.to_string())?;
-                Ok(result.map(ExecutionResult::done))
+                Ok(match result {
+                    Some(result) => ContentObservation::Confirmed(ExecutionResult::done(result)),
+                    None => unknown(
+                        "current host fingerprint has no retained signed preflight result"
+                            .to_owned(),
+                    ),
+                })
             }
-            (ContentKind::Distribution, Payload::ArtifactDistributionPayload(request)) => {
+            ContentKind::Distribution => {
+                let Payload::ArtifactDistributionPayload(request) = &claim.payload else {
+                    return Err("claim payload does not match its content observer".into());
+                };
                 let assignment = self
                     .client
                     .distribution_manifest(&request.plan_digest)
@@ -180,7 +266,10 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                         .await
                         .map_err(|e| e.to_string())?
                     {
-                        return Ok(None);
+                        return Ok(blocked(format!(
+                            "managed object {} ({} bytes) is not yet present",
+                            object.sha256, object.bytes
+                        )));
                     }
                     paths.push(path);
                     digests.push(object.sha256.clone());
@@ -205,18 +294,21 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                     None,
                 );
                 if !self.observe_helper(&request).await? {
-                    return Ok(None);
+                    return Ok(blocked(format!(
+                        "runtime image {} is not yet present",
+                        assignment.oci_image_digest
+                    )));
                 }
-                Ok(Some(distribution_success(DistributionDownloadEvidence {
-                    model_digests: digests,
-                    model_paths: paths,
-                    oci_image_digest: assignment.oci_image_digest,
-                    oci_image_config_digest: assignment.oci_image_config_digest,
-                    downloaded_bytes: bytes,
-                })))
+                Ok(ContentObservation::Confirmed(distribution_success(
+                    DistributionDownloadEvidence {
+                        model_digests: digests,
+                        model_paths: paths,
+                        oci_image_digest: assignment.oci_image_digest,
+                        oci_image_config_digest: assignment.oci_image_config_digest,
+                        downloaded_bytes: bytes,
+                    },
+                )))
             }
-            // This is a malformed typed claim, never a missing observer.
-            _ => Err("claim payload does not match its content observer".into()),
         }
     }
 
@@ -276,9 +368,10 @@ pub(super) async fn reobserve_content<E: Executor>(
             | ContentObservation::Blocked(pending)
             | ContentObservation::Unknown(pending) => {
                 eprintln!(
-                    "vonk-agent: observing fence={} owner={} cause={} next_check={} deadline={}: {}",
+                    "vonk-agent: observing fence={} owner={} dependency={} cause={} next_check={} deadline={}: {}",
                     claim.fence,
                     pending.owner,
+                    pending.dependency,
                     pending.cause,
                     pending.next_check,
                     pending.deadline,

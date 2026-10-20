@@ -8,7 +8,33 @@ impl AgentHttpClient {
         path: &Path,
         bytes: u64,
     ) -> Result<bool, ClientError> {
-        Ok(inspect_trusted_final(path, bytes).await?.is_some())
+        // Reuse the transfer owner's custody predicate without its quarantine
+        // repair: an observation never moves even an unsafe managed entry.
+        let before = match tokio::fs::symlink_metadata(path).await {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+            Err(error) => return Err(ClientError::Local(error)),
+        };
+        if !validate_trusted_final_metadata(&before, bytes) {
+            return Err(ClientError::Unsettled("managed object custody is invalid"));
+        }
+        let file = tokio::fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(
+                (rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::NONBLOCK).bits() as i32,
+            )
+            .open(path)
+            .await?;
+        let after = file.metadata().await?;
+        if !validate_trusted_final_metadata(&after, bytes)
+            || !same_file_metadata(&before, &after)
+            || (after.mode() & 0o777 == 0o640 && !crate::oci::exact_runtime_file_acl(&file))
+        {
+            return Err(ClientError::Unsettled(
+                "managed object custody changed during observation",
+            ));
+        }
+        Ok(true)
     }
 
     /// Download one object from the Controller's assignment-bound delivery

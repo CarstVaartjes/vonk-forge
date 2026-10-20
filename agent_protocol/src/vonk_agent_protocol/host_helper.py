@@ -386,6 +386,10 @@ class RecipeRunInspectionRequest(WireModel):
     request_id: Uuid4Text
     request_sha256: Digest
     include_logs: bool | None = None
+    # Read only the exact ImagePull or InstallationCleanup request subject.
+    # The helper does not execute that action, acquire authority or renew it.
+    # A bound reply has exit_code=0 only when preparation is confirmed;
+    # an omitted exit_code leaves it unconfirmed. Logs are refused in this mode.
     content_observation: bool | None = None
 
 
