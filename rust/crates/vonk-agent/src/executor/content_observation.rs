@@ -261,8 +261,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                 Ok(match result {
                     Some(result) => ContentObservation::confirmed(ExecutionResult::done(result)),
                     None => unknown(
-                        "current host fingerprint has no retained signed preflight result"
-                            .to_owned(),
+                        "current host fingerprint has no retained preflight result".to_owned(),
                     ),
                 })
             }
