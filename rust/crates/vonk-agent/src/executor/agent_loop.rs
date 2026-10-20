@@ -108,80 +108,25 @@ where
     F: FnOnce() -> Result<(), LoopError>,
 {
     state.restore_custody();
-    let now = Utc::now();
-    // Delivery has one request-sized budget per pass, independent of backlog.
-    // Losing an upload response retains custody; it never authorizes replayed
-    // host effects and never holds the claim lane until every receipt lands.
-    let delivery_deadline = tokio::time::Instant::now() + crate::client::HEARTBEAT_REQUEST_TIMEOUT;
-    let delivery = async {
-        // Scan at most one bounded receipt at a time, yielding at each network
-        // observation. Projection writes never surrender receipt custody.
-        while tokio::time::Instant::now() < delivery_deadline {
-            let Some((_operation, result, acknowledged)) = state.next_delivery_result()? else {
-                break;
-            };
-            tokio::task::yield_now().await;
-            if let Some(rejection) = state.result_rejection(&result, now)? {
-                // Never silent: the retained, refused result stays visible on
-                // every pass until a fresh fence or a resend settles it.
-                eprintln!(
-                    "vonk-agent: retained result for fence {} stays refused \
-                     (http {} {} request_id={}) since {}",
-                    result.fence,
-                    rejection.http_status,
-                    rejection.code,
-                    rejection.request_id.as_deref().unwrap_or_default(),
-                    rejection.observed_at.to_rfc3339(),
-                );
-                continue;
-            }
-            let projection = match submit_or_core(client, &result).await {
-                Ok(()) | Err(ClientError::ResultSuperseded) => {
-                    if acknowledged {
-                        state.mark_reconciled(&result)
-                    } else {
-                        state.acknowledge(&result)
-                    }
-                }
-                Err(ClientError::ResultRejected(error)) => {
-                    if let Err(error) = record_result_rejection(state, &result, &error, now) {
-                        eprintln!("vonk-agent: rejection projection deferred: {error}");
-                    }
-                    continue;
-                }
-                Err(error) if error.fatal() => return Err(error.into()),
-                // A definite refusal of these bytes (400/404/410): recorded
-                // durably like an ingress rejection, never a silent stop.
-                Err(ClientError::Controller(error)) if error.disposition() == Disposition::Fail => {
-                    if let Err(error) = record_result_rejection(state, &result, &error, now) {
-                        eprintln!("vonk-agent: rejection projection deferred: {error}");
-                    }
-                    continue;
-                }
-                Err(error) => {
-                    eprintln!("vonk-agent: retained result delivery deferred: {error}");
-                    break;
-                }
-            };
-            if let Err(error) = projection {
-                eprintln!("vonk-agent: receipt acknowledgement deferred: {error}");
-            }
-        }
-        Ok::<(), LoopError>(())
-    };
-    match tokio::time::timeout(crate::client::HEARTBEAT_REQUEST_TIMEOUT, delivery).await {
-        Ok(Err(error @ LoopError::Client(_))) => return Err(error),
-        Ok(Err(error)) => eprintln!("vonk-agent: receipt scan deferred: {error}"),
-        Ok(Ok(())) => {}
-        Err(_) => eprintln!("vonk-agent: retained receipt observation budget elapsed"),
+    if let Err(error) =
+        content_observation::reobserve_content(state, executor, None, Utc::now()).await
+    {
+        eprintln!("vonk-agent: preparation observation deferred: {error}");
     }
-    let claim = client
-        .claim(
+    let now = Utc::now();
+    deliver_retained(client, state).await?;
+    let claim = content_observation::observing_during(
+        client.claim(
             policy.preflight_fingerprint,
             policy.wait_seconds,
             policy.runtime_identity,
-        )
-        .await?;
+        ),
+        client,
+        state.reopen().ok(),
+        executor,
+        None,
+    )
+    .await?;
     if let Err(error) = on_claim_accepted() {
         eprintln!("vonk-agent: readiness projection deferred: {error}");
     }
@@ -221,7 +166,13 @@ where
                 let _cancel_on_exit = cancel_on_exit;
                 heartbeats.await
             });
-            let work = executor.execute(&claim, lease_deadline, cancellation);
+            let work = content_observation::observing_during(
+                executor.execute(&claim, lease_deadline, cancellation),
+                client,
+                state.reopen().ok(),
+                executor,
+                Some(claim.fence),
+            );
             tokio::pin!(work);
             // The observation budget is a stall window: the order ends only
             // when its progress stops advancing for a whole window.
@@ -272,6 +223,7 @@ where
             result
         }
         Ok(BeginDecision::Replay(result)) => *result,
+        Err(StateError::Busy) => return Ok(()),
         Err(error) => {
             // No effect is dispatched without durable custody. Local failure
             // ends this exact attempt as uncertainty; a fresh fence still
@@ -402,3 +354,79 @@ mod stall_tests;
 
 #[cfg(test)]
 mod pull_progress_tests;
+
+/// The single durable receipt delivery path, shared by startup, idle polls and
+/// preparation observations while another effect is executing.
+pub(super) async fn deliver_retained<C: LoopClient>(
+    client: &C,
+    state: &mut StateStore,
+) -> Result<(), LoopError> {
+    let now = Utc::now();
+    // Delivery has one request-sized budget per pass, independent of backlog.
+    // Losing an upload response retains custody; it never authorizes replayed
+    // host effects and never holds the claim lane until every receipt lands.
+    let delivery_deadline = tokio::time::Instant::now() + crate::client::HEARTBEAT_REQUEST_TIMEOUT;
+    let delivery = async {
+        // Scan at most one bounded receipt at a time, yielding at each network
+        // observation. Projection writes never surrender receipt custody.
+        while tokio::time::Instant::now() < delivery_deadline {
+            let Some((_operation, result, acknowledged)) = state.next_delivery_result()? else {
+                break;
+            };
+            tokio::task::yield_now().await;
+            if let Some(rejection) = state.result_rejection(&result, now)? {
+                // Never silent: the retained, refused result stays visible on
+                // every pass until a fresh fence or a resend settles it.
+                eprintln!(
+                    "vonk-agent: retained result for fence {} stays refused \
+                     (http {} {} request_id={}) since {}",
+                    result.fence,
+                    rejection.http_status,
+                    rejection.code,
+                    rejection.request_id.as_deref().unwrap_or_default(),
+                    rejection.observed_at.to_rfc3339(),
+                );
+                continue;
+            }
+            let projection = match submit_or_core(client, &result).await {
+                Ok(()) | Err(ClientError::ResultSuperseded) => {
+                    if acknowledged {
+                        state.mark_reconciled(&result)
+                    } else {
+                        state.acknowledge(&result)
+                    }
+                }
+                Err(ClientError::ResultRejected(error)) => {
+                    if let Err(error) = record_result_rejection(state, &result, &error, now) {
+                        eprintln!("vonk-agent: rejection projection deferred: {error}");
+                    }
+                    continue;
+                }
+                Err(error) if error.fatal() => return Err(error.into()),
+                // A definite refusal of these bytes (400/404/410): recorded
+                // durably like an ingress rejection, never a silent stop.
+                Err(ClientError::Controller(error)) if error.disposition() == Disposition::Fail => {
+                    if let Err(error) = record_result_rejection(state, &result, &error, now) {
+                        eprintln!("vonk-agent: rejection projection deferred: {error}");
+                    }
+                    continue;
+                }
+                Err(error) => {
+                    eprintln!("vonk-agent: retained result delivery deferred: {error}");
+                    break;
+                }
+            };
+            if let Err(error) = projection {
+                eprintln!("vonk-agent: receipt acknowledgement deferred: {error}");
+            }
+        }
+        Ok::<(), LoopError>(())
+    };
+    match tokio::time::timeout(crate::client::HEARTBEAT_REQUEST_TIMEOUT, delivery).await {
+        Ok(Err(error @ LoopError::Client(_))) => return Err(error),
+        Ok(Err(error)) => eprintln!("vonk-agent: receipt scan deferred: {error}"),
+        Ok(Ok(())) => {}
+        Err(_) => eprintln!("vonk-agent: retained receipt observation budget elapsed"),
+    }
+    Ok(())
+}

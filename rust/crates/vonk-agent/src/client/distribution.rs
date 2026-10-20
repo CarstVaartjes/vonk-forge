@@ -3,6 +3,40 @@
 use super::*;
 
 impl AgentHttpClient {
+    pub async fn observe_distribution_object(
+        &self,
+        path: &Path,
+        bytes: u64,
+    ) -> Result<bool, ClientError> {
+        // Reuse the transfer owner's custody predicate without its quarantine
+        // repair: an observation never moves even an unsafe managed entry.
+        let before = match tokio::fs::symlink_metadata(path).await {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+            Err(error) => return Err(ClientError::Local(error)),
+        };
+        if !validate_trusted_final_metadata(&before, bytes) {
+            return Err(ClientError::Unsettled("managed object custody is invalid"));
+        }
+        let file = tokio::fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(
+                (rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::NONBLOCK).bits() as i32,
+            )
+            .open(path)
+            .await?;
+        let after = file.metadata().await?;
+        if !validate_trusted_final_metadata(&after, bytes)
+            || !same_file_metadata(&before, &after)
+            || (after.mode() & 0o777 == 0o640 && !crate::oci::exact_runtime_file_acl(&file))
+        {
+            return Err(ClientError::Unsettled(
+                "managed object custody changed during observation",
+            ));
+        }
+        Ok(true)
+    }
+
     /// Download one object from the Controller's assignment-bound delivery
     /// API. A `.partial` destination is a resumable checkpoint; the assignment,
     /// ETag, length, and range are checked on every response.
@@ -111,6 +145,26 @@ impl AgentHttpClient {
             return Err(ClientError::Protocol);
         }
         let assignment = self.distribution_manifest(plan_digest).await?;
+        self.download_assignment_with_progress(plan_digest, &assignment, destination_root, progress)
+            .await
+    }
+
+    /// Execute only the immutable assignment already bound to this claim.
+    pub async fn download_assignment_with_progress<F>(
+        &self,
+        plan_digest: &str,
+        assignment: &DistributionAssignment,
+        destination_root: &Path,
+        progress: F,
+    ) -> Result<DistributionDownloadEvidence, ClientError>
+    where
+        F: FnMut(DistributionProgress),
+    {
+        assignment.validate().map_err(|_| ClientError::Protocol)?;
+        if !valid_sha256(plan_digest) || !destination_root.is_absolute() {
+            return Err(ClientError::Protocol);
+        }
+
         let model_root = destination_root.join("models");
         ensure_managed_directory(destination_root).await?;
         ensure_managed_directory(&model_root).await?;
@@ -184,8 +238,8 @@ impl AgentHttpClient {
         Ok(DistributionDownloadEvidence {
             model_digests,
             model_paths,
-            oci_image_digest: assignment.oci_image_digest,
-            oci_image_config_digest: assignment.oci_image_config_digest,
+            oci_image_digest: assignment.oci_image_digest.clone(),
+            oci_image_config_digest: assignment.oci_image_config_digest.clone(),
             downloaded_bytes,
         })
     }

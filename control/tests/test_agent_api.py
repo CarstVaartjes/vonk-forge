@@ -1481,6 +1481,24 @@ def test_builder_uploads_digest_verified_docker_archive_without_a_registry(
     assert rejected.status_code == 415
 
     route = f"/agent/recipe-builds/{build_id}/image"
+
+    # A probe cannot allocate or repair storage. Main created a partial from
+    # HEAD alone, and a stale oversized partial was truncated by the read.
+    def storage_snapshot():
+        return sorted(
+            (
+                str(path.relative_to(services.artifact_root)),
+                path.lstat().st_size,
+                path.lstat().st_mtime_ns,
+            )
+            for path in services.artifact_root.rglob("*")
+        )
+
+    before_probe = storage_snapshot()
+    empty_cursor = client.head(route, headers=headers)
+    assert empty_cursor.status_code == 200
+    assert empty_cursor.headers["x-vonk-upload-offset"] == "0"
+    assert storage_snapshot() == before_probe
     interrupted = client.put(
         route,
         headers=headers | {"content-length": str(len(payload))},
@@ -1491,10 +1509,19 @@ def test_builder_uploads_digest_verified_docker_archive_without_a_registry(
     assert cursor.status_code == 200
     assert cursor.headers["x-vonk-upload-offset"] == "7"
     assert cursor.headers["x-vonk-upload-complete"] == "false"
+    partial = next((services.artifact_root / "image-cache").glob(".*.upload"))
+    retained_partial = partial.read_bytes()
+    partial.write_bytes(payload + b"oversized checkpoint fault")
+    oversized = partial.read_bytes()
+    assert client.head(route, headers=headers).headers["x-vonk-upload-offset"] == "0"
+    assert partial.read_bytes() == oversized
+    partial.write_bytes(retained_partial)
+    before_probe = storage_snapshot()
     wrong_identity = client.head(
         route, headers=headers | {"x-vonk-image-digest": "sha256:" + "e" * 64}
     )
     assert wrong_identity.headers["x-vonk-upload-offset"] == "0"
+    assert storage_snapshot() == before_probe
     assert client.put(route, headers=headers, content=payload).status_code == 409
     if stored_damage:
         destination = services.artifact_root / "image-cache" / layout_digest
@@ -3409,13 +3436,15 @@ def test_declared_failure_kind_survives_agent_result_ingress(agent_system) -> No
     both acceptance and the preserved receipt.
     """
 
+    from .test_agent_jobs import distribution_payload
+
     client, services, _, clock = agent_system
     services.operations.enqueue(
         parent(services.sessions, clock).id,
         NODE_A,
-        "artifact.distribution.v1",
+        OperationKind.ARTIFACT_DISTRIBUTION,
         "a" * 64,
-        {"plan_digest": "a" * 64},
+        distribution_payload(),
     )
     claim = client.post(
         "/agent/claim", headers=agent_headers(NODE_A, "serial-a")
@@ -3450,7 +3479,7 @@ def test_declared_failure_kind_survives_agent_result_ingress(agent_system) -> No
         NODE_A,
         OperationKind.ARTIFACT_DISTRIBUTION,
         "a" * 64,
-        {"plan_digest": "a" * 64},
+        distribution_payload(),
     )
     fresh = client.post("/agent/claim", headers=agent_headers(NODE_A, "serial-a"))
     assert fresh.status_code == 200

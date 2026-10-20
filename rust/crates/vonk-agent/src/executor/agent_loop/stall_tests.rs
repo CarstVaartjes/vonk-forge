@@ -45,6 +45,13 @@ struct LongExecutor {
 
 #[async_trait(?Send)]
 impl Executor for LongExecutor {
+    async fn observe(
+        &self,
+        _claim: &AgentClaim,
+    ) -> Option<crate::executor::content_observation::ContentObservation> {
+        None
+    }
+
     async fn execute(
         &self,
         _claim: &AgentClaim,

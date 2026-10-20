@@ -16,7 +16,7 @@ from vonk_control.agent_jobs.contracts import CLAIM_LEASE_SECONDS, PROGRESSING_L
 from vonk_control.models import AgentOperation, AgentOperationAttempt
 
 from .runtime_identity_support import claim_agent
-from .test_agent_jobs import COMMIT, NODE_A, parent
+from .test_agent_jobs import COMMIT, NODE_A, distribution_payload, parent
 from .test_agent_jobs import service as _service_fixture
 
 agent_service = _service_fixture
@@ -52,7 +52,7 @@ def _claimed_transfer(agent_service):
         NODE_A,
         ProtocolAgentOperation.ARTIFACT_DISTRIBUTION.value,
         COMMIT,
-        {"plan_digest": COMMIT},
+        distribution_payload(COMMIT),
     )
     claim = claim_agent(jobs, NODE_A, "serial-a")
     assert claim is not None

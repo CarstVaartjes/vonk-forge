@@ -156,6 +156,31 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         result
     }
 
+    /// Observe the exact removal checkpoint without creating directories, locks,
+    /// receipts or changing permissions. Missing history alone is not absence.
+    pub fn observe_reconciliation(
+        &self,
+        identity: &RecipeReconciliationIdentity,
+    ) -> Result<bool, OciError> {
+        identity.validate().map_err(|_| OciError::Artifact)?;
+        let id = identity.installation_id.to_string();
+        let root = self.data_root.join(INSTALLATION_RECONCILIATION_ROOT);
+        let Some(checkpoint) =
+            read_reconciliation_checkpoint(&reconciliation_checkpoint_path(&root, &id)?)?
+        else {
+            return Ok(false);
+        };
+        if checkpoint.identity != *identity
+            || checkpoint.schema_version != INSTALLATION_RECONCILIATION_SCHEMA_VERSION
+        {
+            return Err(OciError::Artifact);
+        }
+        Ok(
+            !path_exists_without_following(&managed_path(self.data_root, "installations", &id)?)?
+                && !path_exists_without_following(&reconciliation_quarantine_path(&root, &id)?)?,
+        )
+    }
+
     pub(super) fn ensure_installation_reconciliation_root(&self) -> Result<PathBuf, OciError> {
         let root = self.data_root.join(INSTALLATION_RECONCILIATION_ROOT);
         match fs::symlink_metadata(&root) {

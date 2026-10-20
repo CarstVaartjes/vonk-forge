@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 from vonk_agent_protocol import (
     AgentResultState,
+    ArtifactDistributionPayload,
     DistributionObject,
     LifecycleState,
     OperationMemberProgress,
@@ -27,7 +28,6 @@ from vonk_agent_protocol import (
     ProgressPhase,
     canonical_message,
 )
-from vonk_agent_protocol.contracts import ArtifactDistributionPayload
 from vonk_agent_protocol.host_helper import ExecuteContainerRuntimeRequestOperation
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.auth import TokenCodec
@@ -100,6 +100,7 @@ from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha
 
 from .runtime_image_fixtures import place_test_image
 from .test_agent_api import NODE_A, NODE_B, agent_headers, agent_system  # noqa: F401
+from .test_agent_jobs import distribution_payload
 from .test_recipe_operations import NOW, setup_services
 from .test_run_switch_operations import _runtime_receipt
 
@@ -380,9 +381,18 @@ def test_partial_child_replays_and_aggregates_cached_target(agent_system) -> Non
             fence=str(uuid4()),
             request_sha256="a" * 64,
         )
-        # ArtifactDistributionRequest is a plan reference. The agent fetches
-        # the registered assignment through its authenticated distribution API.
-        assert stored.payload == {"plan_digest": plan.plan_digest}
+        # The claim retains the exact assignment for read-only observation,
+        # independent of an expired transfer grant or unavailable Controller.
+        retained = ArtifactDistributionPayload.model_validate_json(
+            canonical_message(stored.payload)
+        )
+        assert retained.plan_digest == plan.plan_digest
+        assert (
+            retained.assignment
+            == distribution.authorize(
+                node_id=NODE_A, plan_digest=plan.plan_digest
+            ).wire()
+        )
         assert (
             distribution.authorize(
                 node_id=NODE_A, plan_digest=plan.plan_digest
@@ -773,7 +783,7 @@ def test_partial_child_failure_is_projected_after_aggregation(agent_system) -> N
             NODE_A,
             "artifact.distribution.v1",
             "f" * 64,
-            ArtifactDistributionPayload(plan_digest="f" * 64).model_dump(mode="json"),
+            distribution_payload("f" * 64),
             operation_id=str(uuid4()),
         )
         operation = (
@@ -863,7 +873,7 @@ def test_abandon_closes_only_a_parked_distribution_child(
             NODE_A,
             "artifact.distribution.v1",
             "f" * 64,
-            ArtifactDistributionPayload(plan_digest="f" * 64).model_dump(mode="json"),
+            distribution_payload("f" * 64),
             operation_id=str(uuid4()),
         )
         operation = (
@@ -953,7 +963,7 @@ def test_member_failure_kind_and_diagnostic_survive_aggregation(
             NODE_A,
             "artifact.distribution.v1",
             "f" * 64,
-            ArtifactDistributionPayload(plan_digest="f" * 64).model_dump(mode="json"),
+            distribution_payload("f" * 64),
             operation_id=str(uuid4()),
         )
         operation = (

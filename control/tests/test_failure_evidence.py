@@ -37,7 +37,7 @@ from vonk_control.operation_item_contract import OperationResultFacts, operation
 
 from .agent_fences import fenced_attempt
 from .runtime_identity_support import claim_agent
-from .test_agent_jobs import NODE_A, NODE_B, Clock, parent
+from .test_agent_jobs import NODE_A, NODE_B, Clock, distribution_payload, parent
 
 NOW = datetime(2026, 9, 8, 12, tzinfo=UTC)
 COMMIT = "a" * 64
@@ -530,7 +530,7 @@ def _enqueue_distribution(jobs, sessions, clock):
         NODE_A,
         ProtocolAgentOperation.ARTIFACT_DISTRIBUTION.value,
         COMMIT,
-        {"plan_digest": COMMIT},
+        distribution_payload(COMMIT),
     )
 
 

@@ -756,6 +756,7 @@ fn ungranted_inspection_frame_can_only_inspect() {
     );
 
     let frame = canonical_json(&RecipeRunInspectionRequest {
+        content_observation: None,
         include_logs: None,
         request_id: Uuid::new_v4(),
         request_sha256: "a".repeat(64),
@@ -1187,4 +1188,13 @@ fn authenticated_time_window_refusals_match_the_shared_response() {
             Err(vonk_agent_helper::protocol::HelperError::InvalidAuthorization)
         ));
     }
+}
+
+#[test]
+fn content_observation_shared_frame_is_canonical_and_grant_free() {
+    let raw = fs::read(fixtures().join("content-preparation-inspection.json")).unwrap();
+    let raw = raw.strip_suffix(b"\n").unwrap_or(&raw);
+    let frame = parse_inspection_request(raw).unwrap();
+    assert_eq!(frame.content_observation, Some(true));
+    assert_eq!(canonical_json(&frame).unwrap(), raw);
 }

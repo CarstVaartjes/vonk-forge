@@ -4,6 +4,9 @@ use super::*;
 
 #[async_trait(?Send)]
 impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
+    async fn observe(&self, claim: &AgentClaim) -> Option<content_observation::ContentObservation> {
+        self.observe_content(claim).await
+    }
     async fn execute(
         &self,
         claim: &AgentClaim,
@@ -58,6 +61,13 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
 #[cfg(test)]
 #[async_trait(?Send)]
 impl Executor for RejectingExecutor {
+    async fn observe(
+        &self,
+        _claim: &AgentClaim,
+    ) -> Option<crate::executor::content_observation::ContentObservation> {
+        None
+    }
+
     async fn execute(
         &self,
         claim: &AgentClaim,
@@ -71,6 +81,9 @@ impl Executor for RejectingExecutor {
 
 #[async_trait(?Send)]
 impl<R: ProcessRunner> Executor for ControlExecutor<'_, R> {
+    async fn observe(&self, claim: &AgentClaim) -> Option<content_observation::ContentObservation> {
+        self.recipes.observe_content(claim).await
+    }
     async fn execute(
         &self,
         claim: &AgentClaim,
@@ -308,6 +321,14 @@ mod tests {
         obsolete.payload =
             vonk_agent_protocol::generated::AgentClaimPayload::ArtifactDistributionPayload(
                 vonk_agent_protocol::generated::ArtifactDistributionPayload {
+                    assignment: serde_json::from_str::<
+                        vonk_agent_protocol::generated::ArtifactDistributionPayload,
+                    >(include_str!(concat!(
+                        env!("CARGO_MANIFEST_DIR"),
+                        "/../../../agent_protocol/fixtures/artifact-distribution-payload.json"
+                    )))
+                    .unwrap()
+                    .assignment,
                     plan_digest: "a".repeat(64),
                 },
             );
@@ -332,6 +353,10 @@ mod tests {
         drop(cancel);
         let mut current = obsolete.clone();
         current.fence = Uuid::new_v4();
+        // The accepted assignment now enters resumable object transfer directly.
+        // End this attempt's authority before its network retry backoff, rather
+        // than assuming that an unavailable Controller answers within one second.
+        current.deadline = (Utc::now() + chrono::Duration::milliseconds(250)).fixed_offset();
         let (_lease, deadline) = tokio::sync::watch::channel(current.deadline);
         let (_cancel, cancellation) = tokio::sync::watch::channel(false);
         let result = tokio::time::timeout(
@@ -345,8 +370,12 @@ mod tests {
         let ExecutionResult::Failed(failure) = &result else {
             panic!("expected the fresh distribution to reach its network dependency");
         };
-        assert_eq!(failure.code, None);
+        assert_eq!(
+            failure.code,
+            Some(FailureCode::RuntimeObservationUnavailable)
+        );
         assert_eq!(failure.stage, Some(FailureStage::ArtifactDistribution));
+        assert!(data.path().join("distribution/models").is_dir());
         assert_eq!(
             failure.failure_kind,
             Some(AgentFailureKind::TemporaryDependency)

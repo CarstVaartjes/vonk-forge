@@ -164,6 +164,13 @@ async fn journal_finish_failure_ends_unknown_then_a_fresh_fence_executes_once() 
     }
     #[async_trait(?Send)]
     impl Executor for JournalExecutor {
+        async fn observe(
+            &self,
+            _claim: &AgentClaim,
+        ) -> Option<crate::executor::content_observation::ContentObservation> {
+            None
+        }
+
         async fn execute(
             &self,
             _claim: &AgentClaim,

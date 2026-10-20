@@ -40,7 +40,11 @@ from .agent_fences import fenced_attempt, fenced_operation, park_for_operator
 from .ca_test_authority import FixtureCertificateAuthority
 from .recipe_stop_fixtures import recipe_stop_payload
 from .runtime_identity_support import claim_agent
-from .test_agent_jobs import exercise_upgrade_reconnect, superseded_order_payload
+from .test_agent_jobs import (
+    distribution_payload,
+    exercise_upgrade_reconnect,
+    superseded_order_payload,
+)
 
 NODE_A = "spk_" + "a" * 32
 NODE_B = "spk_" + "b" * 32
@@ -88,8 +92,7 @@ class RevokingAuthority(FixtureCertificateAuthority):
         return None
 
 
-@pytest.fixture
-def service(postgres_engine):
+def agent_queue_world(postgres_engine):
     Base.metadata.drop_all(postgres_engine)
     Base.metadata.create_all(postgres_engine)
     clock = Clock()
@@ -115,6 +118,11 @@ def service(postgres_engine):
                 )
             )
     return sessions, clock
+
+
+@pytest.fixture
+def service(postgres_engine):
+    return agent_queue_world(postgres_engine)
 
 
 def parent(sessions, clock) -> Job:
@@ -240,7 +248,7 @@ def test_postgres_upgrade_bypasses_unsupported_work_then_resumes_it(
     (
         (
             "artifact.distribution.v1",
-            {"plan_digest": COMMIT},
+            distribution_payload(),
             "agent_restart_interrupted",
             True,
         ),
@@ -258,7 +266,7 @@ def test_postgres_upgrade_bypasses_unsupported_work_then_resumes_it(
         ("recipe.stop", STOP_PAYLOAD, "agent_restart_interrupted", True),
         (
             "artifact.distribution.v1",
-            {"plan_digest": COMMIT},
+            distribution_payload(),
             # Any uncertain effect of a restart-safe order is reconciled by
             # re-issue, exactly like an expired lease; it is not parked.
             "operation_outcome_uncertain",

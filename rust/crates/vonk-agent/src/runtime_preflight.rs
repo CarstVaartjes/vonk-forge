@@ -811,3 +811,115 @@ mod tests {
         assert_eq!(status(&fresh, "podman_build").status, Status::Passed);
     }
 }
+
+use vonk_agent_protocol::generated::RuntimePreflightCompletion;
+
+/// Retain the full signed-helper result under the exact accepted fence. This
+/// extends the preflight cache owner, independently of receipt transmission.
+pub fn retain_completed(
+    data_root: &Path,
+    fence: uuid::Uuid,
+    result: &RuntimePreflightResult,
+) -> Result<(), ProcessError> {
+    use std::io::Write;
+    let root = crate::recipe_builder::owned_directory(data_root, "preflight-completion")
+        .map_err(|error| std::io::Error::other(format!("preflight cache directory: {error}")))?;
+    let mut file = tempfile::NamedTempFile::new_in(&root)?;
+    file.write_all(
+        &canonical_json(&RuntimePreflightCompletion {
+            fence,
+            result: result.clone(),
+        })
+        .map_err(|_| std::io::Error::other("invalid preflight result"))?,
+    )?;
+    file.as_file().sync_all()?;
+    file.persist(root.join("completed.json"))
+        .map_err(|e| e.error)?;
+    fs::File::open(root)?.sync_all()?;
+    Ok(())
+}
+
+pub fn observe_completed(
+    data_root: &Path,
+    fence: uuid::Uuid,
+    fingerprint: &str,
+) -> Result<Option<RuntimePreflightResult>, ProcessError> {
+    let path = data_root
+        .join("preflight-completion")
+        .join("completed.json");
+    let raw = match crate::oci::read_regular_file(&path, 64 * 1024) {
+        Ok(raw) => raw,
+        Err(crate::oci::OciError::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(None);
+        }
+        Err(error) => {
+            return Err(
+                std::io::Error::other(format!("preflight receipt unreadable: {error}")).into(),
+            );
+        }
+    };
+    let completed: RuntimePreflightCompletion = vonk_agent_protocol::parse_strict(&raw)
+        .map_err(|error| std::io::Error::other(format!("preflight receipt invalid: {error}")))?;
+    Ok(
+        (completed.fence == fence && completed.result.fingerprint == fingerprint)
+            .then_some(completed.result),
+    )
+}
+
+#[cfg(test)]
+mod completion_tests {
+    use super::*;
+
+    #[test]
+    fn completed_preflight_cache_reopens_the_shared_fence_bound_receipt_and_stays_bounded() {
+        // Wrong implementation: only build findings survive, or another
+        // request's preflight receipt is adopted after process death.
+        let raw =
+            include_bytes!("../../../../agent_protocol/fixtures/runtime-preflight-completion.json");
+        let completion: RuntimePreflightCompletion =
+            vonk_agent_protocol::parse_strict(raw).unwrap();
+        let root = tempfile::tempdir().unwrap();
+        retain_completed(root.path(), completion.fence, &completion.result).unwrap();
+        let path = root
+            .path()
+            .join("preflight-completion")
+            .join("completed.json");
+        assert_eq!(fs::read(path).unwrap(), raw.strip_suffix(b"\n").unwrap());
+        assert_eq!(
+            observe_completed(
+                root.path(),
+                completion.fence,
+                &completion.result.fingerprint
+            )
+            .unwrap(),
+            Some(completion.result.clone())
+        );
+        assert!(
+            observe_completed(
+                root.path(),
+                uuid::Uuid::new_v4(),
+                &completion.result.fingerprint
+            )
+            .unwrap()
+            .is_none()
+        );
+        assert!(
+            observe_completed(root.path(), completion.fence, &"b".repeat(64))
+                .unwrap()
+                .is_none()
+        );
+        let next = uuid::Uuid::new_v4();
+        retain_completed(root.path(), next, &completion.result).unwrap();
+        assert!(
+            observe_completed(
+                root.path(),
+                completion.fence,
+                &completion.result.fingerprint
+            )
+            .unwrap()
+            .is_none()
+        );
+        let directory = root.path().join("preflight-completion");
+        assert_eq!(fs::read_dir(directory).unwrap().count(), 1);
+    }
+}

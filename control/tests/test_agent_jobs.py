@@ -88,6 +88,20 @@ STOP_PAYLOAD = recipe_stop_payload(NODE_A, plan_digest=COMMIT)
 STOP_RESULT = RecipeStopResult()
 
 
+def distribution_payload(plan_digest: str = COMMIT):
+    from vonk_agent_protocol import ArtifactDistributionPayload
+
+    payload = ArtifactDistributionPayload.model_validate_json(
+        (
+            Path(__file__).parents[2]
+            / "agent_protocol/fixtures/artifact-distribution-payload.json"
+        ).read_bytes()
+    )
+    return payload.model_copy(update={"plan_digest": plan_digest}).model_dump(
+        mode="json"
+    )
+
+
 def canonical_start_payload(*, start_deadline: datetime) -> dict[str, object]:
     """One wire-valid distributed rank-launch document.
 
@@ -793,7 +807,7 @@ def test_artifact_distribution_is_serialized_as_a_mutation(
     jobs, sessions, clock = service
     parent_job = parent(sessions, clock)
     operation = ProtocolAgentOperation.ARTIFACT_DISTRIBUTION.value
-    payload = {"plan_digest": COMMIT}
+    payload = distribution_payload()
     first = jobs.enqueue(parent_job.id, NODE_A, operation, COMMIT, payload)
     clock.advance(seconds=1)
     second = jobs.enqueue(parent_job.id, NODE_A, operation, COMMIT, payload)
@@ -1776,7 +1790,7 @@ def test_a_finished_distribution_records_the_pulled_image_on_the_spark(
         NODE_A,
         ProtocolAgentOperation.ARTIFACT_DISTRIBUTION.value,
         COMMIT,
-        {"plan_digest": COMMIT},
+        distribution_payload(),
     )
     claim = claim_agent(jobs, NODE_A, "serial-a")
     assert claim is not None
@@ -1853,7 +1867,7 @@ def test_distribution_heartbeat_renews_only_live_authorized_transfer(
         NODE_A,
         kind,
         COMMIT,
-        {"plan_digest": COMMIT},
+        distribution_payload(),
     )
     with sessions.begin() as session:
         certificate = session.get(AgentCertificate, "serial-a")
@@ -2587,7 +2601,7 @@ def test_distribution_retry_preserves_durable_progress_and_accepts_object_replay
         NODE_A,
         kind,
         COMMIT,
-        {"plan_digest": COMMIT},
+        distribution_payload(),
     )
     claim = claim_agent(
         jobs,
@@ -2786,7 +2800,7 @@ def test_distribution_interrupted_twice_by_agent_restart_resumes_without_operato
     jobs, sessions, clock = service
     kind = ProtocolAgentOperation.ARTIFACT_DISTRIBUTION.value
     operation = jobs.enqueue(
-        parent(sessions, clock).id, NODE_A, kind, COMMIT, {"plan_digest": COMMIT}
+        parent(sessions, clock).id, NODE_A, kind, COMMIT, distribution_payload()
     )
     claim = claim_agent(jobs, NODE_A, "serial-a")
     assert claim is not None
@@ -2827,7 +2841,7 @@ def test_repeated_agent_restarts_without_progress_slow_down_and_say_why(
     jobs, sessions, clock = service
     kind = ProtocolAgentOperation.ARTIFACT_DISTRIBUTION.value
     operation = jobs.enqueue(
-        parent(sessions, clock).id, NODE_A, kind, COMMIT, {"plan_digest": COMMIT}
+        parent(sessions, clock).id, NODE_A, kind, COMMIT, distribution_payload()
     )
     delays: list[float] = []
     for attempt_number in range(1, 5):
@@ -2897,7 +2911,7 @@ def test_attempts_that_lapse_without_progress_slow_down_and_say_why(
     payload = (
         _single_spark_start_payload(clock)
         if kind == ProtocolAgentOperation.RECIPE_START.value
-        else {"plan_digest": COMMIT}
+        else distribution_payload()
     )
     operation = jobs.enqueue(parent(sessions, clock).id, NODE_A, kind, COMMIT, payload)
     delays: list[float] = []
@@ -2970,7 +2984,7 @@ def test_a_retried_distribution_is_issued_a_fresh_grant(service, revoked: bool) 
     clock.advance(seconds=59 * 60)
     kind = ProtocolAgentOperation.ARTIFACT_DISTRIBUTION.value
     operation = jobs.enqueue(
-        parent(sessions, clock).id, NODE_A, kind, COMMIT, {"plan_digest": COMMIT}
+        parent(sessions, clock).id, NODE_A, kind, COMMIT, distribution_payload()
     )
     with sessions.begin() as session:
         session.get(AgentCertificate, "serial-a").not_after = clock.now + timedelta(
@@ -3025,8 +3039,8 @@ def test_a_failed_job_does_not_leave_a_sibling_parked_behind_an_unclaimable_retr
     jobs, sessions, clock = service
     kind = ProtocolAgentOperation.ARTIFACT_DISTRIBUTION.value
     job = parent(sessions, clock)
-    first = jobs.enqueue(job.id, NODE_A, kind, COMMIT, {"plan_digest": COMMIT})
-    second = jobs.enqueue(job.id, NODE_B, kind, COMMIT, {"plan_digest": COMMIT})
+    first = jobs.enqueue(job.id, NODE_A, kind, COMMIT, distribution_payload())
+    second = jobs.enqueue(job.id, NODE_B, kind, COMMIT, distribution_payload())
     with sessions.begin() as session:
         for serial in ("serial-a", "serial-b"):
             session.get(AgentCertificate, serial).not_after = clock.now + timedelta(
@@ -3078,7 +3092,7 @@ def test_a_failed_job_does_not_leave_a_sibling_parked_behind_an_unclaimable_retr
     def fresh(_world: None) -> Job:
         new_job = parent(sessions, clock)
         operation = jobs.enqueue(
-            new_job.id, NODE_A, kind, COMMIT, {"plan_digest": COMMIT}
+            new_job.id, NODE_A, kind, COMMIT, distribution_payload()
         )
         claim = claim_agent(jobs, NODE_A, "serial-a")
         assert claim is not None
@@ -3124,7 +3138,7 @@ def test_distribution_parked_with_a_stale_retry_authorisation_resumes_itself(
     jobs, sessions, clock = service
     kind = ProtocolAgentOperation.ARTIFACT_DISTRIBUTION.value
     operation = jobs.enqueue(
-        parent(sessions, clock).id, NODE_A, kind, COMMIT, {"plan_digest": COMMIT}
+        parent(sessions, clock).id, NODE_A, kind, COMMIT, distribution_payload()
     )
     claim = claim_agent(jobs, NODE_A, "serial-a")
     assert claim is not None
@@ -3193,7 +3207,7 @@ def test_transient_distribution_failure_recovers_after_repeated_faults_and_resta
         NODE_A,
         kind,
         COMMIT,
-        {"plan_digest": COMMIT},
+        distribution_payload(),
     )
     for attempt_number in range(1, 5):
         claim = claim_agent(
@@ -3286,7 +3300,7 @@ def test_a_refused_distribution_stores_the_agents_denial_evidence(service) -> No
         NODE_A,
         ProtocolAgentOperation.ARTIFACT_DISTRIBUTION.value,
         COMMIT,
-        {"plan_digest": COMMIT},
+        distribution_payload(),
     )
     claim = claim_agent(jobs, NODE_A, "serial-a")
     assert claim is not None
@@ -3323,7 +3337,7 @@ def test_successful_distribution_receipt_closes_coalesced_final_counters(
         NODE_A,
         kind,
         COMMIT,
-        {"plan_digest": COMMIT},
+        distribution_payload(),
     )
     claim = claim_agent(
         jobs,
@@ -3529,7 +3543,7 @@ def _enqueue_successor_mutation(jobs, sessions, clock):
         NODE_A,
         ProtocolAgentOperation.ARTIFACT_DISTRIBUTION.value,
         COMMIT,
-        {"plan_digest": COMMIT},
+        distribution_payload(),
     )
 
 
@@ -4086,7 +4100,7 @@ def test_terminal_request_is_not_revived_by_stale_recovery_evidence(service, con
         NODE_A,
         kind,
         COMMIT,
-        {"plan_digest": COMMIT},
+        distribution_payload(),
     )
     # A security refusal ends immediately; stale evidence cannot reopen it.
     claim = claim_agent(jobs, NODE_A, "serial-a")
@@ -4173,7 +4187,7 @@ def test_terminal_request_is_not_revived_by_stale_recovery_evidence(service, con
             node.revoked_at = None
             node.workload_intent_ordinal = operation.workload_intent_ordinal
     fresh = jobs.enqueue(
-        parent(sessions, clock).id, NODE_A, kind, COMMIT, {"plan_digest": COMMIT}
+        parent(sessions, clock).id, NODE_A, kind, COMMIT, distribution_payload()
     )
     admitted = claim_agent(jobs, NODE_A, "serial-a")
     assert admitted is not None
@@ -4571,7 +4585,7 @@ def test_distribution_recovery_budget_is_a_stall_window(
     jobs, sessions, clock = service
     kind = ProtocolAgentOperation.ARTIFACT_DISTRIBUTION.value
     operation = jobs.enqueue(
-        parent(sessions, clock).id, NODE_A, kind, COMMIT, {"plan_digest": COMMIT}
+        parent(sessions, clock).id, NODE_A, kind, COMMIT, distribution_payload()
     )
     deadlines = []
     for attempt_number in range(1, 5):

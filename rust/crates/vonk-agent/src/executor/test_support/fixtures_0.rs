@@ -327,6 +327,13 @@ pub(in crate::executor) struct RenewalGatedExecutor {
 
 #[async_trait(?Send)]
 impl Executor for RenewalGatedExecutor {
+    async fn observe(
+        &self,
+        _claim: &AgentClaim,
+    ) -> Option<crate::executor::content_observation::ContentObservation> {
+        None
+    }
+
     async fn execute(
         &self,
         _claim: &AgentClaim,
@@ -354,6 +361,13 @@ pub(in crate::executor) struct BlockingCancellationExecutor {
 
 #[async_trait(?Send)]
 impl Executor for BlockingCancellationExecutor {
+    async fn observe(
+        &self,
+        _claim: &AgentClaim,
+    ) -> Option<crate::executor::content_observation::ContentObservation> {
+        None
+    }
+
     async fn execute(
         &self,
         _claim: &AgentClaim,
@@ -386,6 +400,13 @@ pub(in crate::executor) struct CancelledHeartbeatExecutor(
 
 #[async_trait(?Send)]
 impl Executor for CancelledHeartbeatExecutor {
+    async fn observe(
+        &self,
+        _claim: &AgentClaim,
+    ) -> Option<crate::executor::content_observation::ContentObservation> {
+        None
+    }
+
     async fn execute(
         &self,
         claim: &AgentClaim,
@@ -399,6 +420,13 @@ impl Executor for CancelledHeartbeatExecutor {
 
 #[async_trait(?Send)]
 impl Executor for HeartbeatGatedExecutor {
+    async fn observe(
+        &self,
+        _claim: &AgentClaim,
+    ) -> Option<crate::executor::content_observation::ContentObservation> {
+        None
+    }
+
     async fn execute(
         &self,
         _claim: &AgentClaim,
@@ -424,6 +452,13 @@ pub(in crate::executor) struct FailedExecutor;
 
 #[async_trait(?Send)]
 impl Executor for FailedExecutor {
+    async fn observe(
+        &self,
+        _claim: &AgentClaim,
+    ) -> Option<crate::executor::content_observation::ContentObservation> {
+        None
+    }
+
     async fn execute(
         &self,
         _claim: &AgentClaim,
@@ -438,6 +473,13 @@ pub(in crate::executor) struct CancellationExecutor;
 
 #[async_trait(?Send)]
 impl Executor for CancellationExecutor {
+    async fn observe(
+        &self,
+        _claim: &AgentClaim,
+    ) -> Option<crate::executor::content_observation::ContentObservation> {
+        None
+    }
+
     async fn execute(
         &self,
         claim: &AgentClaim,
@@ -460,6 +502,13 @@ pub(in crate::executor) struct OrderingExecutor {
 
 #[async_trait(?Send)]
 impl Executor for OrderingExecutor {
+    async fn observe(
+        &self,
+        _claim: &AgentClaim,
+    ) -> Option<crate::executor::content_observation::ContentObservation> {
+        None
+    }
+
     async fn execute(
         &self,
         _claim: &AgentClaim,

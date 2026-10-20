@@ -9,7 +9,6 @@ from vonk_agent_protocol import (
     AgentOperation,
     AgentResult,
     AgentResultState,
-    ArtifactDistributionResult,
     FailureCode,
     InvalidRequestReason,
     SecurityRefusalReason,
@@ -40,13 +39,13 @@ from .contracts import (
     StaleAgentFence,
     StaleAgentRequest,
 )
-from .distribution_receipts import adopt_distribution_receipt
 from .evidence import (
     _failure_result,
     _lease_expiry_reason,
     sanitized_failure_report,
 )
 from .predicates import _document
+from .preparation_receipts import adopt_preparation_receipt
 from .retirement import operator_resume_candidates_in_session
 from .retry import superseded_cancellation_deadline
 from .stored import column_field, column_is_document, column_message, column_value
@@ -207,12 +206,8 @@ def record_late_result(
             and operation.workload_intent_ordinal is not None
             and operation.workload_intent_ordinal != node.workload_intent_ordinal
         )
-        if (
-            message.state == AgentResultState.SUCCEEDED
-            and isinstance(message.result, ArtifactDistributionResult)
-            and adopt_distribution_receipt(
-                self, session, operation, attempt, parent, node, message.result, now
-            )
+        if message.state == AgentResultState.SUCCEEDED and adopt_preparation_receipt(
+            self, session, operation, attempt, parent, node, message.result, now
         ):
             return True
         if (

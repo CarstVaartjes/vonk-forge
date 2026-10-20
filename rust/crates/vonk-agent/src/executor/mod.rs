@@ -114,6 +114,8 @@ pub trait LoopClient: Clone + Send + Sync + 'static {
 
 #[async_trait(?Send)]
 pub trait Executor {
+    async fn observe(&self, claim: &AgentClaim) -> Option<content_observation::ContentObservation>;
+
     async fn execute(
         &self,
         claim: &AgentClaim,
@@ -286,3 +288,8 @@ mod test_support;
 
 #[cfg(test)]
 mod shared_vectors_tests;
+
+pub mod content_observation;
+
+#[cfg(test)]
+mod content_observation_tests;

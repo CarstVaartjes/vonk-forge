@@ -53,6 +53,7 @@ from .test_agent_jobs import (
     STOP_PAYLOAD,
     _restart_interrupted_result,
     canonical_start_payload,
+    distribution_payload,
     job_state,
     parent,
 )
@@ -582,7 +583,7 @@ def test_many_legacy_parked_orders_heal_in_one_pass(agent_service) -> None:
             NODE_A,
             KIND_DISTRIBUTION,
             COMMIT,
-            {"plan_digest": COMMIT},
+            distribution_payload(COMMIT),
         )
         ids.append(operation.id)
     assert claim_agent(jobs, NODE_A, "serial-a") is not None

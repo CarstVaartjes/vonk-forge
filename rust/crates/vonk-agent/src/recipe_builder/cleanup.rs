@@ -15,11 +15,7 @@ pub fn cleanup_build_until<R: ProcessRunner + ?Sized>(
     request: &RecipeBuildCleanupRequest,
     deadline: Instant,
 ) -> Result<RecipeBuildCleanupEvidence, RecipeBuildError> {
-    let units = [
-        format!("vonk-recipe-build-{}.service", request.build_id),
-        format!("vonk-runtime-adapter-{}.service", request.build_id),
-        format!("vonk-recipe-build-{}-e.service", request.build_id),
-    ];
+    let units = build_units(request);
     let mut pending = Vec::new();
     for attempt in 0..3 {
         pending.clear();
@@ -405,4 +401,71 @@ impl RecipeBuildError {
             _ => format!("build effects are not yet confirmed quiescent: {self}"),
         }
     }
+}
+
+/// Check the same exact unit names and private staging owned by cleanup, with
+/// no stop/remove/repair. A failed listing never establishes absence.
+pub fn observe_build_cleanup<R: ProcessRunner + ?Sized>(
+    runner: &R,
+    data_root: &Path,
+    request: &RecipeBuildCleanupRequest,
+    deadline: Instant,
+) -> Result<bool, RecipeBuildError> {
+    for unit in build_units(request) {
+        match observe_unit(runner, &unit, deadline) {
+            Ok(None) => {}
+            Ok(Some(_)) => return Ok(false),
+            Err(cause) => {
+                return Err(RecipeBuildError::CleanupPending {
+                    subject: unit,
+                    observed: cause,
+                });
+            }
+        }
+    }
+    let entries = match fs::read_dir(data_root.join("build-staging")) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(true),
+        Err(error) => return Err(at("list", &data_root.join("build-staging"))(error)),
+    };
+    let suffix = format!("-{}", request.build_id);
+    for entry in entries {
+        if entry
+            .map_err(at("list", data_root))?
+            .file_name()
+            .to_str()
+            .is_some_and(|name| name.ends_with(&suffix))
+        {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+fn build_units(request: &RecipeBuildCleanupRequest) -> [String; 3] {
+    [
+        format!("vonk-recipe-build-{}.service", request.build_id),
+        format!("vonk-runtime-adapter-{}.service", request.build_id),
+        format!("vonk-recipe-build-{}-e.service", request.build_id),
+    ]
+}
+
+pub fn observe_build_running<R: ProcessRunner + ?Sized>(
+    runner: &R,
+    request: &RecipeBuildCleanupRequest,
+    deadline: Instant,
+) -> Result<bool, RecipeBuildError> {
+    for unit in build_units(request) {
+        match observe_unit(runner, &unit, deadline) {
+            Ok(Some(_)) => return Ok(true),
+            Ok(None) => {}
+            Err(cause) => {
+                return Err(RecipeBuildError::CleanupPending {
+                    subject: unit,
+                    observed: cause,
+                });
+            }
+        }
+    }
+    Ok(false)
 }

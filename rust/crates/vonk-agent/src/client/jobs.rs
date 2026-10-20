@@ -202,6 +202,41 @@ impl AgentHttpClient {
         ))
     }
 
+    /// Read the existing upload owner's exact content cursor. No PUT or lease.
+    pub async fn observe_recipe_image(
+        &self,
+        build: uuid::Uuid,
+        evidence: &vonk_agent_protocol::RecipeBuildEvidence,
+    ) -> Result<bool, ClientError> {
+        let mut response = self
+            .current_client()
+            .await?
+            .head(self.endpoint(&format!("/agent/recipe-builds/{build}/image"))?)
+            .header("x-vonk-image-digest", &evidence.image_digest)
+            .header("x-vonk-oci-layout-sha256", &evidence.oci_layout_sha256)
+            .header("x-vonk-image-bytes", evidence.image_bytes)
+            .timeout(CONTROLLER_REQUEST_TIMEOUT)
+            .send()
+            .await?;
+        classify_response(&mut response).await?;
+        let offset = response
+            .headers()
+            .get("x-vonk-upload-offset")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.parse::<u64>().ok())
+            .filter(|v| *v <= evidence.image_bytes)
+            .ok_or(ClientError::Protocol)?;
+        match response
+            .headers()
+            .get("x-vonk-upload-complete")
+            .and_then(|v| v.to_str().ok())
+        {
+            Some("true") if offset == evidence.image_bytes => Ok(true),
+            Some("false") => Ok(false),
+            _ => Err(ClientError::Protocol),
+        }
+    }
+
     pub async fn upload_recipe_image<F>(
         &self,
         build_id: uuid::Uuid,

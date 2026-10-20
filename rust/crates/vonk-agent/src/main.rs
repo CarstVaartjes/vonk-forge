@@ -310,6 +310,13 @@ struct CustodyExecutor<'a, E> {
 
 #[async_trait::async_trait(?Send)]
 impl<E: vonk_agent::executor::Executor> vonk_agent::executor::Executor for CustodyExecutor<'_, E> {
+    async fn observe(
+        &self,
+        claim: &vonk_agent_protocol::AgentClaim,
+    ) -> Option<vonk_agent::executor::content_observation::ContentObservation> {
+        self.executor.observe(claim).await
+    }
+
     async fn execute(
         &self,
         claim: &vonk_agent_protocol::AgentClaim,

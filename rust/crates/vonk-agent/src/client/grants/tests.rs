@@ -6,6 +6,14 @@ use super::*;
 #[tokio::test]
 async fn host_runtime_grant_ttl_fits_inside_renewed_operation_lease() {
     let payload = ArtifactDistributionPayload {
+        assignment: serde_json::from_str::<
+            vonk_agent_protocol::generated::ArtifactDistributionPayload,
+        >(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../agent_protocol/fixtures/artifact-distribution-payload.json"
+        )))
+        .unwrap()
+        .assignment,
         plan_digest: "c".repeat(64),
     };
     let claim = AgentClaim {

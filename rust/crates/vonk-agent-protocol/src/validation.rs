@@ -28,6 +28,13 @@ impl AgentClaim {
         ) {
             return Err(ProtocolError::Identity("claim operation"));
         }
+        if self.operation == generated::AgentOperation::ArtifactDistributionV1 {
+            let generated::AgentClaimPayload::ArtifactDistributionPayload(request) = &self.payload
+            else {
+                return Err(ProtocolError::Identity("artifact distribution payload"));
+            };
+            request.validate()?;
+        }
         let payload = canonical_json(&self.payload)?;
         let maximum_bytes = if matches!(
             self.operation,
@@ -50,7 +57,7 @@ impl AgentClaim {
 
 /// Agent command to consume one Controller assignment. The destination is
 /// selected by the agent configuration, so claims cannot choose a filesystem
-/// path; only the plan identity crosses the wire.
+/// path; the accepted plan and immutable assignment cross the wire.
 /// The most installation directories one inventory names (the wire limit).
 pub const MAX_REPORTED_INSTALLATIONS: usize = 4096;
 /// The most run scopes one inventory names (the wire limit).
@@ -158,7 +165,7 @@ impl ArtifactDistributionRequest {
         if !lower_hex(&self.plan_digest, 64) {
             return Err(ProtocolError::Identity("artifact distribution request"));
         }
-        Ok(())
+        self.assignment.validate()
     }
 }
 

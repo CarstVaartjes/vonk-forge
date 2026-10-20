@@ -596,3 +596,65 @@ fn a_refused_result_stays_in_the_spool_with_its_refusal_and_is_offered_again_aft
         .finish(&fresh, ExecutionResult::done(RecipeStopResult::default()))
         .unwrap();
 }
+
+#[test]
+fn adding_claim_custody_preserves_existing_journal_receipts() {
+    // Wrong implementation: bumping the journal version resets retained
+    // receipts instead of adding claim custody to the existing table.
+    let directory = tempdir().unwrap();
+    let path = directory.path().join("state.sqlite");
+    let accepted = claim();
+    let mut store = StateStore::open(&path, NODE_ID).unwrap();
+    store.begin(&accepted, Utc::now()).unwrap();
+    let receipt = store
+        .finish(
+            &accepted,
+            ExecutionResult::done(RecipeStopResult::default()),
+        )
+        .unwrap();
+    drop(store);
+    let old = rusqlite::Connection::open(&path).unwrap();
+    old.execute("ALTER TABLE operations DROP COLUMN claim_json", [])
+        .unwrap();
+    drop(old);
+    let reopened = StateStore::open_recovered(&path, NODE_ID).unwrap();
+    assert_eq!(
+        reopened.pending_results().unwrap(),
+        vec![(accepted.operation, receipt)]
+    );
+}
+
+#[test]
+fn a_later_exact_completion_replaces_unknown_without_repeated_unknown_redelivery() {
+    // Wrong implementation: a delivered unknown becomes permanent, or every
+    // observation resets its acknowledgement and masquerades as new progress.
+    use vonk_agent::outcome::UnknownEvidence;
+    use vonk_agent_protocol::generated::{FailureStage, WaitReason};
+    let directory = tempdir().unwrap();
+    let path = directory.path().join("state.sqlite");
+    let accepted = claim();
+    let mut store = StateStore::open(&path, NODE_ID).unwrap();
+    store.begin(&accepted, Utc::now()).unwrap();
+    let unknown = || {
+        ExecutionResult::unknown(
+            WaitReason::RuntimeEffectUnconfirmed,
+            "exact effect remains unconfirmed",
+            UnknownEvidence::at(FailureStage::AgentRestart),
+        )
+    };
+    let receipt = store.finish(&accepted, unknown()).unwrap();
+    store.acknowledge(&receipt).unwrap();
+    assert_eq!(store.finish(&accepted, unknown()).unwrap(), receipt);
+    assert!(store.pending_results().unwrap().is_empty());
+    let complete = store
+        .finish(
+            &accepted,
+            ExecutionResult::done(RecipeStopResult::default()),
+        )
+        .unwrap();
+    assert_eq!(complete.fence, accepted.fence);
+    assert_eq!(
+        store.pending_results().unwrap(),
+        vec![(accepted.operation, complete)]
+    );
+}

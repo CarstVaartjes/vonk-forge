@@ -33,6 +33,7 @@ from .common import (
     _commit_recipe_image_upload,
     _flush_and_sync,
     _now,
+    _observe_recipe_image_upload,
     _owned_artifact,
     _prepare_recipe_image_upload,
     _range,
@@ -160,19 +161,13 @@ def install_artifacts_routes(
             return RecipeImageUploadStatus(
                 offset=headers.image_bytes, complete=True
             ).response()
-        descriptor, _temporary = await asyncio.to_thread(
-            _prepare_recipe_image_upload,
+        offset = await asyncio.to_thread(
+            _observe_recipe_image_upload,
             required.artifact_root / IMAGE_CACHE_DIRECTORY,
             key,
+            headers.image_bytes,
         )
-        try:
-            offset = os.fstat(descriptor).st_size
-            if offset > headers.image_bytes:
-                os.ftruncate(descriptor, 0)
-                offset = 0
-            return RecipeImageUploadStatus(offset=offset, complete=False).response()
-        finally:
-            os.close(descriptor)
+        return RecipeImageUploadStatus(offset=offset, complete=False).response()
 
     @agent.put(
         "/recipe-builds/{build_id}/image",

@@ -484,7 +484,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
             // Keep discovery while shared-object reclamation remains unconfirmed.
             if let Some(model) = request.cleanup_model_content_sha256.as_deref()
                 && let Err(error) = self.runtime.uninstall_with_model_cleanup(
-                    &installation_id,
+                    &identity,
                     &request.recipe_content_sha256,
                     model,
                 )
