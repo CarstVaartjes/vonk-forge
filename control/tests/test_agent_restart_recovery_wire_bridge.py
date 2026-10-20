@@ -426,7 +426,7 @@ def test_dead_agent_resumes_partial_transfer_from_fresh_controller_claim(
     # The shared read-only observer sees incomplete exact content at expiry;
     # it neither manufactures a restart result nor dispatches another transfer.
     assert isinstance(interrupted.result, OutcomeUnknown)
-    assert interrupted.result.wait_reason == WaitReason.CLEANUP_UNCONFIRMED
+    assert interrupted.result.wait_reason == WaitReason.MODEL_CUSTODY_UNCONFIRMED
     assert partial.stat().st_size == saved_bytes
     stored_body = interrupted.stored_result()
     assert stored_body["uncertain"] is True

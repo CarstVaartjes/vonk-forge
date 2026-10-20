@@ -104,12 +104,8 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                 reason,
             ))
         };
-        let blocked = |reason| {
-            ContentObservation::Blocked(PendingObservation::new(
-                claim,
-                WaitReason::CleanupUnconfirmed,
-                reason,
-            ))
+        let blocked = |cause, reason| {
+            ContentObservation::Blocked(PendingObservation::new(claim, cause, reason))
         };
         match kind {
             ContentKind::Install => {
@@ -182,10 +178,13 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                         vonk_agent_protocol::RecipeBuildCleanupEvidence {},
                     ))
                 } else {
-                    blocked(format!(
-                        "build {} still owns units or private staging",
-                        request.build_id
-                    ))
+                    blocked(
+                        WaitReason::CleanupUnconfirmed,
+                        format!(
+                            "build {} still owns units or private staging",
+                            request.build_id
+                        ),
+                    )
                 })
             }
             ContentKind::Build => {
@@ -235,10 +234,13 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                 Ok(if complete {
                     ContentObservation::confirmed(ExecutionResult::done(evidence))
                 } else {
-                    blocked(format!(
-                        "Controller upload for build {} is incomplete",
-                        request.build_id
-                    ))
+                    blocked(
+                        WaitReason::ReceiptMissing,
+                        format!(
+                            "Controller upload for build {} is incomplete",
+                            request.build_id
+                        ),
+                    )
                 })
             }
             ContentKind::Preflight => {
@@ -285,10 +287,13 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                         .await
                         .map_err(|e| e.to_string())?
                     {
-                        return Ok(blocked(format!(
-                            "managed object {} ({} bytes) is not yet present",
-                            object.sha256, object.bytes
-                        )));
+                        return Ok(blocked(
+                            WaitReason::ModelCustodyUnconfirmed,
+                            format!(
+                                "managed object {} ({} bytes) is not yet present",
+                                object.sha256, object.bytes
+                            ),
+                        ));
                     }
                     paths.push(path);
                     digests.push(object.sha256.clone());
@@ -313,10 +318,13 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                     None,
                 );
                 if !self.observe_helper(&request).await? {
-                    return Ok(blocked(format!(
-                        "runtime image {} is not yet present",
-                        assignment.oci_image_digest
-                    )));
+                    return Ok(blocked(
+                        WaitReason::RuntimeEffectUnconfirmed,
+                        format!(
+                            "runtime image {} is not yet present",
+                            assignment.oci_image_digest
+                        ),
+                    ));
                 }
                 Ok(ContentObservation::confirmed(distribution_success(
                     DistributionDownloadEvidence {
