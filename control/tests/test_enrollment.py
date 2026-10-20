@@ -23,6 +23,7 @@ from vonk_agent_protocol import AgentResult, canonical_message
 from vonk_agent_protocol.state_machines import (
     CertificateRecordState,
     CertificateRotationState,
+    EnrollmentGrantState,
     EnrollmentRecordState,
     NodeIdentityState,
 )
@@ -34,7 +35,10 @@ from vonk_control.enrollment import (
     EnrollmentGrant,
     EnrollmentService,
 )
-from vonk_control.enrollment_contract import EnrollmentObservationOutcome
+from vonk_control.enrollment_contract import (
+    EnrollmentGrantStatus,
+    EnrollmentObservationOutcome,
+)
 from vonk_control.models import (
     AgentCertificate,
     AgentCertificateRotation,
@@ -1858,28 +1862,41 @@ def test_grant_revocation_and_consumption_serialize_on_postgres(postgres_engine)
     request = csr()
     ready = threading.Barrier(2)
 
-    def submit():
+    def submit() -> EnrollmentGrantState | None:
         ready.wait(timeout=10)
         try:
             submitter.submit(grant.token, request, evidence(request))
-            return "consumed"
+            return EnrollmentGrantState.CONSUMED
         except EnrollmentDenied:
-            return "refused"
+            return None
 
-    def revoke():
+    def revoke() -> EnrollmentGrantState | None:
         ready.wait(timeout=10)
         try:
-            return revoker.revoke_grant(grant.id, actor="admin").state
+            status = revoker.revoke_grant(grant.id, actor="admin")
+            assert isinstance(status, EnrollmentGrantStatus)
+            return status.state
         except EnrollmentDenied:
-            return "refused"
+            return None
 
     with ThreadPoolExecutor(max_workers=2) as pool:
         submitted = pool.submit(submit)
         revoked = pool.submit(revoke)
         outcomes = (submitted.result(timeout=15), revoked.result(timeout=15))
-    assert outcomes in (("consumed", "refused"), ("refused", "revoked"))
+    # A consumed grant reports its recorded terminal status. Revocation
+    # must serialize before consumption or preserve the one issued certificate.
+    assert outcomes in (
+        (EnrollmentGrantState.CONSUMED, EnrollmentGrantState.CONSUMED),
+        (None, EnrollmentGrantState.REVOKED),
+    )
     final = submitter.grant_status(grant.id, actor="admin")
-    assert final.state == ("consumed" if authority.calls else "revoked")
+    assert final.state == (
+        EnrollmentGrantState.CONSUMED
+        if authority.calls
+        else EnrollmentGrantState.REVOKED
+    )
+    assert len(authority.calls) == int(final.state == EnrollmentGrantState.CONSUMED)
+    assert authority.revocations == []
 
 
 def test_rotation_reader_miss_ends_and_preserves_active_certificate(
