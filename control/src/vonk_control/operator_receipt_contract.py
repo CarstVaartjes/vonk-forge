@@ -17,8 +17,18 @@ class ReceiptCode(StrEnum):
 
 class ReceiptPolicy(StrEnum):
     OBSERVATION = "observation"
-    # Auth is deliberately the next track's boundary, not an operator exemption.
-    AUTH = "auth"
+    SECURITY_EDGE = "security-edge"
+    AGENT_CLAIM = "agent-claim"
+    AGENT_HEARTBEAT = "agent-heartbeat"
+    AGENT_RESULT = "agent-result"
+    AGENT_INVENTORY = "agent-inventory"
+    AGENT_TELEMETRY = "agent-telemetry"
+    AGENT_OBSERVATIONS = "agent-observations"
+    AGENT_IMAGE = "agent-image"
+    AGENT_OUTPUT = "agent-output"
+    AGENT_GRANT = "agent-grant"
+    ENROLLMENT_ISSUE = "enrollment-issue"
+    ENROLLMENT_ACTIVATE = "enrollment-activate"
     PROFILE_SAVE = "profile-save"
     PROFILE_LOAD = "profile-load"
     PROFILE_CANCEL = "profile-cancel"
@@ -49,6 +59,12 @@ class ReceiptOwner(StrEnum):
     ENROLLMENT = "enrollment"
     KEY = "key"
     RUN_SWITCH = "run-switch"
+    AGENT_ATTEMPT = "agent-attempt"
+    AGENT_OPERATION = "agent-operation"
+    INVENTORY = "inventory"
+    TELEMETRY = "telemetry"
+    RUN_OBSERVATION = "run-observation"
+    RECIPE_IMAGE = "recipe-image"
 
 
 class AcceptanceReceipt(StrictModel):
@@ -56,7 +72,7 @@ class AcceptanceReceipt(StrictModel):
 
     owner: ReceiptOwner
     id: str = Field(min_length=1, max_length=256)
-    href: str = Field(pattern=r"^/api/[^\x00-\x20\x7f]*$", max_length=2048)
+    href: str = Field(pattern=r"^/(?:api|agent)/[^\x00-\x20\x7f]*$", max_length=2048)
     request_id: str | None = Field(default=None, min_length=1, max_length=128)
     revision: int | None = Field(default=None, ge=1)
     content_digest: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
@@ -83,3 +99,16 @@ class JobOperatorDecisions(StrictModel):
 class JobOperatorReceipt(JobOperatorDecision):
     job_id: str
     content_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class SecurityEdge(StrEnum):
+    """Closed credential/session exemptions; never replay credential issuance."""
+
+    LOGIN = "login"
+    LOGOUT = "logout"
+    CLI_TOKEN = "cli-token"
+
+    @property
+    def endpoint(self) -> tuple[str, str]:
+        name = self.value.replace("-", "_")
+        return "vonk_control.auth_api", f"install_auth_routes.<locals>.{name}"

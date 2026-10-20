@@ -22,6 +22,7 @@ from vonk_agent_protocol.agent_words import ProgressPhase
 from ..distribution import DistributionError, DistributionUnknown
 from ..download_contract import download_responses, upload_request_body
 from ..models import RecipeBuild
+from ..operator_acceptance import ReceiptPolicy, operator_acceptance
 from ..runtime_image_preparation import IMAGE_CACHE_DIRECTORY
 from ..strict_json import _retry_later_response
 from .common import (
@@ -175,6 +176,7 @@ def install_artifacts_routes(
         openapi_extra=upload_request_body("application/x-tar")
         | {"parameters": upload_parameters},
     )
+    @operator_acceptance(ReceiptPolicy.AGENT_IMAGE)
     async def upload_recipe_image(build_id: str, request: Request) -> Response:
         required, identity, headers, key = image_upload_context(build_id, request)
         media_type = request.headers.get("content-type", "").partition(";")[0].strip()

@@ -21,8 +21,9 @@ from vonk_agent_protocol.inventory import (
     NetworkInterface,
 )
 
+from .installed_bytes import refresh_installed_bytes
 from .logging import log_event
-from .models import NodeInventorySnapshot
+from .models import AgentNode, NodeInventorySnapshot
 
 _LOG = logging.getLogger(__name__)
 
@@ -142,8 +143,21 @@ class InventoryRepository:
     ) -> None:
         self._sessions, self._clock = sessions, clock
 
-    def record(self, value: InventorySnapshotInput) -> NodeInventorySnapshot:
+    def record(
+        self, value: InventorySnapshotInput, *, report: InventoryRequest | None = None
+    ) -> NodeInventorySnapshot:
         validated = _validated_inventory(value, observed_at=value.observed_at)
+        if report is not None:
+            # These already validated report facts bind the accepted effects,
+            # but are not columns of the capacity snapshot.
+            validated = validated.model_copy(
+                update={
+                    "installations": report.installations,
+                    "runs": report.runs,
+                    "installation_bytes": report.installation_bytes,
+                }
+            )
+        measured = validated.installation_bytes
         document = validated.model_dump(mode="json", exclude={"schema_version"})
         document["node_id"] = value.node_id
         document["capabilities"] = sorted(validated.capabilities)
@@ -192,6 +206,35 @@ class InventoryRepository:
             evidence_digest=digest,
         )
         with self._sessions.begin() as session:
+            session.execute(
+                select(AgentNode.node_id)
+                .where(AgentNode.node_id == value.node_id)
+                .with_for_update(of=AgentNode)
+            ).one()
+            existing = session.scalar(
+                select(NodeInventorySnapshot).where(
+                    NodeInventorySnapshot.node_id == value.node_id,
+                    NodeInventorySnapshot.observed_at == value.observed_at,
+                )
+            )
+            if existing is not None:
+                if existing.evidence_digest != digest:
+                    raise ValueError(
+                        "inventory identity already binds different evidence"
+                    )
+                return existing
+            latest = session.scalar(
+                select(NodeInventorySnapshot.observed_at)
+                .where(NodeInventorySnapshot.node_id == value.node_id)
+                .order_by(NodeInventorySnapshot.observed_at.desc())
+                .limit(1)
+            )
+            if measured is not None and (
+                latest is None
+                or value.observed_at
+                >= (latest if latest.tzinfo is not None else latest.replace(tzinfo=UTC))
+            ):
+                refresh_installed_bytes(session, value.node_id, measured)
             session.add(row)
         return row
 
