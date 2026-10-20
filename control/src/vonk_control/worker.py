@@ -463,7 +463,6 @@ def assemble_production_worker(
     )
     from .terminal_history_collection import TerminalHistoryCollector
     from .unused_storage_collection import UnusedStorageCollector
-    from .wait_contract import WaitEvidence
     from .wait_redrive import wait_sources
 
     registry = capabilities or CapabilityRegistry(clock=clock)
@@ -718,7 +717,7 @@ def assemble_production_worker(
             reason=WaitReason.OBSERVATION_UNAVAILABLE,
         )
 
-    def agent_order(key: RowKey, wait: WaitEvidence) -> object:
+    def agent_order(key: RowKey, kind: WaitOwnerKind) -> object:
         adapter = AgentOperationAdapter(
             sessions=sessions,
             clock=clock,
@@ -726,18 +725,18 @@ def assemble_production_worker(
         )
         return _OrderStore(agent_jobs, adapter).redrive(str(key[0]))
 
-    def images(key: RowKey, wait: WaitEvidence) -> object:
+    def images(key: RowKey, kind: WaitOwnerKind) -> object:
         if image_production is None or image_production.scheduler is None:
-            return unavailable(wait.owner_kind)
+            return unavailable(kind)
         return image_production.scheduler.tick(str(key[0]))
 
-    def prebuilt(key: RowKey, wait: WaitEvidence) -> object:
+    def prebuilt(key: RowKey, kind: WaitOwnerKind) -> object:
         if prebuilt_importer is None:
-            return unavailable(wait.owner_kind)
+            return unavailable(kind)
         progressed = lifecycle.reconcile_cancelled_builds(str(key[0]))
         return prebuilt_importer.tick(str(key[0])) or progressed
 
-    def recipe(key: RowKey, wait: WaitEvidence) -> object:
+    def recipe(key: RowKey, kind: WaitOwnerKind) -> object:
         progressed = lifecycle.redrive(str(key[0]))
         progressed = lifecycle.redrive_parent(str(key[0]), agent_jobs) or progressed
         # A persisted recipe build may itself own a Controller prebuilt pull.
@@ -746,25 +745,25 @@ def assemble_production_worker(
             return prebuilt_importer.tick(str(key[0])) or progressed
         return progressed
 
-    def cache(key: RowKey, wait: WaitEvidence) -> object:
+    def cache(key: RowKey, kind: WaitOwnerKind) -> object:
         if model_cache is None:
-            return unavailable(wait.owner_kind)
+            return unavailable(kind)
         return model_cache.redrive(str(key[0]))
 
-    def cleanup(key: RowKey, wait: WaitEvidence) -> object:
+    def cleanup(key: RowKey, kind: WaitOwnerKind) -> object:
         progressed = residues.tick(str(key[0]))
         return storage_collector.redrive_installation(str(key[0])) or progressed
 
-    def certificate(key: RowKey, wait: WaitEvidence) -> object:
+    def certificate(key: RowKey, kind: WaitOwnerKind) -> object:
         if enrollment is None:
-            return unavailable(wait.owner_kind)
+            return unavailable(kind)
         return enrollment.reconcile_revocations(str(key[0]))
 
-    def catalog(key: RowKey, wait: WaitEvidence) -> object:
+    def catalog(key: RowKey, kind: WaitOwnerKind) -> object:
         from .settings import RECIPE_LIBRARY_SYNC_INTERVAL_SECONDS
 
         if catalog_sync is None:
-            return unavailable(wait.owner_kind)
+            return unavailable(kind)
         return catalog_sync.redrive(str(key[0]), RECIPE_LIBRARY_SYNC_INTERVAL_SECONDS)
 
     advancers: dict[WaitOwnerKind, AdvanceWait] = {

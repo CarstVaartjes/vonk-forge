@@ -39,8 +39,14 @@ scan frequency at once per second, including under continuous ordinary work.
 Selection releases its SQL session before calling an owner. Owner advancement
 re-reads current intent and uses the existing admission lock order, fencing and
 transport deadlines. Cancellation or newer accepted intent wins before retry.
+Due rows without wait evidence use the same advancement path; shared Job
+owners are identified by the existing payload contract binding. This adopts
+pre-existing work without rewriting it or manufacturing wait evidence.
 A malformed wait or handler exception records the table, row and cause, and
-ends only that row's turn. An examined row is not reported as completed work.
+ends only that row's turn. Repeated failures for unchanged evidence, due clock
+and lifecycle state are logged once per row per worker process. A changed
+snapshot or a successful redrive allows a fresh report. An examined row is not
+reported as completed work.
 
 Whole-tree guards compare concrete lifecycle adapters, canonical wait kinds and
 ORM wait owners with the dispatch bindings. PostgreSQL tests cover worker death,

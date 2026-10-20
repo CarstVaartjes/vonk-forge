@@ -7,6 +7,7 @@ from typing import Annotated
 from pydantic import AwareDatetime, Field
 from vonk_agent_protocol.inventory import ModelStoreObject
 
+from .lifecycle.evidence import BookkeepingReason
 from .strict_json import StrictJSONModel
 
 STORE_RETENTION_MAX_AGE = timedelta(minutes=10)
@@ -24,6 +25,16 @@ class FleetRemovalReason(StrEnum):
     UNUSED = "unused"
     REFERENCED = "referenced"
     SHARED = "shared"
+    OBSERVATION_UNAVAILABLE = "observation-unavailable"
+
+
+class FleetRemovalObservationIssue(StrictJSONModel):
+    """Incomplete owner evidence; never proof of absence or removal authority."""
+
+    kind: str
+    subject: str
+    reason: BookkeepingReason
+    detail: str
 
 
 class FleetRemovalObject(StrictJSONModel):
@@ -58,6 +69,9 @@ class FleetModelRemovalEffects(StrictJSONModel):
     nas_reason: FleetRemovalReason
     nas_detail: str
     targets: list[FleetRemovalTarget]
+    observation_issues: list[FleetRemovalObservationIssue] = Field(
+        default_factory=list, exclude_if=lambda value: not value
+    )
 
 
 class FleetModelRemovalCheckpoint(StrictJSONModel):

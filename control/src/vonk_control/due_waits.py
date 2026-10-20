@@ -12,19 +12,36 @@ import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from hashlib import sha256
 from typing import cast
 
-from sqlalchemy import Table, case, inspect, or_, select, tuple_
+from sqlalchemy import (
+    String,
+    Table,
+    case,
+    func,
+    inspect,
+    literal,
+    or_,
+    select,
+    tuple_,
+)
+from sqlalchemy import (
+    cast as sql_cast,
+)
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import WaitOwnerKind
 
 from .logging import log_event, redact_text
 from .models import Base
+from .models.waits import ScheduledWaitOwner
+from .persisted_waits import owner_identity
+from .strict_json import stored_document_detail
 from .wait_contract import WaitEvidence
 
 _LOGGER = logging.getLogger(__name__)
 type RowKey = tuple[str | int, ...]
-type AdvanceWait = Callable[[RowKey, WaitEvidence], object]
+type AdvanceWait = Callable[[RowKey, WaitOwnerKind], object]
 
 
 @dataclass(frozen=True)
@@ -69,6 +86,7 @@ class DueWaitBackstop:
         self._monotonic = monotonic or time.monotonic
         self._owner_cursor = 0
         self._row_cursors: dict[int, RowKey] = {}
+        self._failures: dict[tuple[str, RowKey], bytes] = {}
 
     def tick(self) -> int:
         """Return rows examined; this is never a measure of work completed.
@@ -97,8 +115,11 @@ class DueWaitBackstop:
             keys = tuple(table.primary_key.columns)
             mapper = inspect(source.model)
             due = mapper.attrs.next_action_at.columns[0]
-            statement = select(*keys, table.c.wait_evidence, due).where(
-                or_(table.c.wait_evidence.is_not(None), due <= now),
+            # Read JSON as text so validation cannot lose the row identity.
+            raw_evidence = func.nullif(sql_cast(table.c.wait_evidence, String), "null")
+            state = table.c.get("state", literal(None, String))
+            statement = select(*keys, raw_evidence, due, state).where(
+                or_(raw_evidence.is_not(None), due <= now),
                 or_(due <= now, due.is_(None)),
             )
             if source.kinds != self._table_kinds[table.name]:
@@ -122,6 +143,7 @@ class DueWaitBackstop:
             # Read one raw identity at a time. A corrupt JSON decoder in one
             # row cannot abort materialization of another row's batch.
             selected = False
+            fingerprint: bytes | None = None
             try:
                 with self._sessions() as session:
                     candidate = session.execute(statement).one_or_none()
@@ -137,21 +159,44 @@ class DueWaitBackstop:
                 self._row_cursors[index] = key
                 examined += 1
                 selected = True
-                evidence, next_check = candidate[-2:]
-                if not isinstance(evidence, WaitEvidence) or next_check is None:
-                    raise ValueError(
-                        "persisted wait requires typed evidence and a due clock"
-                    )
-                if evidence.owner.id != str(key[-1]):
-                    raise ValueError(
-                        "persisted wait identity does not match its storage owner"
-                    )
-                if evidence.owner_kind not in source.kinds:
-                    raise ValueError(
-                        "persisted wait kind does not belong to its storage owner"
-                    )
-                source.advance(key, evidence)
+                raw, next_check, _state = candidate[-3:]
+                fingerprint = sha256(repr(candidate[-3:]).encode()).digest()
+                if raw is None:
+                    # Ordinary due work, including rows predating wait custody,
+                    # still belongs to its existing normal advancement path.
+                    kind = next(iter(source.kinds))
+                    if len(self._table_kinds[table.name]) > 1:
+                        with self._sessions() as session:
+                            owner = session.get(source.model, key)
+                            if owner is None:
+                                continue
+                            _, kind = owner_identity(cast(ScheduledWaitOwner, owner))
+                else:
+                    evidence = WaitEvidence.model_validate_json(raw)
+                    if next_check is None:
+                        raise ValueError("persisted wait requires a due clock")
+                    if evidence.owner.id != str(key[-1]):
+                        raise ValueError(
+                            "persisted wait identity does not match its storage owner"
+                        )
+                    if evidence.owner_kind not in source.kinds:
+                        raise ValueError(
+                            "persisted wait kind does not belong to its storage owner"
+                        )
+                    kind = evidence.owner_kind
+                advance = next(
+                    binding.advance
+                    for binding in self._sources
+                    if binding.table.name == table.name and kind in binding.kinds
+                )
+                advance(key, kind)
+                self._failures.pop((table.name, key), None)
             except Exception as error:  # noqa: BLE001 - isolate one row/owner observation
+                if fingerprint is not None:
+                    failure_key = (table.name, key)
+                    if self._failures.get(failure_key) == fingerprint:
+                        continue
+                    self._failures[failure_key] = fingerprint
                 log_event(
                     _LOGGER,
                     "worker.due_wait_failed",
@@ -159,7 +204,7 @@ class DueWaitBackstop:
                     owner=table.name,
                     row=repr(self._row_cursors.get(index)),
                     error=type(error).__name__,
-                    message=redact_text(error),
+                    message=stored_document_detail(error) or redact_text(error),
                 )
                 # A failed selection has no trustworthy identity. Do not spin
                 # on the table; the next worker pass retries the observation.
