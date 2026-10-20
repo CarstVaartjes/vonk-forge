@@ -120,6 +120,13 @@ def faulty_install(tmp_path, postgres_engine, monkeypatch):
 
     with monkeypatch.context() as fault:
         fault.setattr(advance_owner, "_merge_progress_evidence", historical_merge)
+        # The historical writer also skipped schema validation. Inject both
+        # obsolete defects explicitly; the current writer must reject this.
+        fault.setattr(
+            advance_owner,
+            "_persisted_result",
+            lambda progress: progress.model_dump(mode="json"),
+        )
         with write_guard_mode(strict=False):
             assert planner.tick()
     assert advance_owner._merge_progress_evidence is original_merge

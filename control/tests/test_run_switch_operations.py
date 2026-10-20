@@ -1273,11 +1273,15 @@ def test_due_scheduler_reaches_work_past_a_full_parked_batch(
     assert seen == [due_id, due_id]
 
 
-@pytest.mark.parametrize("damage", ["plan", "result"])
+@pytest.mark.parametrize(
+    ("damage", "expected_state"),
+    [("plan", LifecycleState.FAILED), ("result", LifecycleState.RUNNING)],
+)
 @pytest.mark.usefixtures("damaged_json_rows")
-def test_malformed_operation_is_rejected_without_aborting_the_batch(
+def test_malformed_operation_is_reconciled_without_aborting_the_batch(
     tmp_path: Path,
     damage: str,
+    expected_state: LifecycleState,
 ) -> None:
     """One invalid persisted contract must not deny a valid operation its turn."""
 
@@ -1336,11 +1340,17 @@ def test_malformed_operation_is_rejected_without_aborting_the_batch(
     with sessions() as session:
         rejected = session.get(Job, malformed_id)
         assert rejected is not None
-        assert rejected.state == "failed"
-        # The invalid evidence is retained rather than rewritten into a valid
-        # contract or a claim that issued effects stopped.
+        assert rejected.state == expected_state
         if damage == "result":
-            assert rejected.result == ["malformed"]
+            # Progress is reconstructed for fresh observation under the same
+            # accepted request; no issued effect is declared stopped.
+            assert rejected.state == LifecycleState.RUNNING
+            assert rejected.result is not None
+            restored = RunSwitchOperationResult.model_validate_json(
+                json.dumps(rejected.result)
+            )
+            assert restored.force_replan
+            assert rejected.next_action_at is not None
         advanced = session.get(Job, valid.operation_id)
         assert advanced is not None and advanced.state == "running"
         after_index = (advanced.result or {}).get("phase_index")

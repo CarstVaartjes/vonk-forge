@@ -28,6 +28,7 @@ from ..run_switch_journal_contract import (
     JournalRepairDisposition,
     JournalRepairPurpose,
 )
+from ..run_switch_operations.results import _persisted_result
 from ..stall_window import Verdict, Wait, progress_verdict, stall_deadline
 from .discovery import REPAIR_WAIT, _candidate
 from .ending import _end_unproven_journal
@@ -169,7 +170,7 @@ def _observe_zero_transfer_journal(
                     canonical_message(job.result), strict=True
                 )
                 progress.cancellation = state.cancellation
-                job.result = progress.model_dump(mode="json")
+                job.result = _persisted_result(progress)
             session.delete(row)
         elif result == JournalRepairDisposition.DEFERRED:
             state.attempts += 1

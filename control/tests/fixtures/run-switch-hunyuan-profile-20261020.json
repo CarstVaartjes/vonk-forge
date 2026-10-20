@@ -1,0 +1,143 @@
+{
+  "children": [
+    {
+      "queue_index": 0,
+      "operation_id": "d5611bc0-8255-4c70-844d-4f7959dcf333",
+      "kind": "stop",
+      "state": "cancelled",
+      "result": {
+        "run_switch_operation_id": "d5611bc0-8255-4c70-844d-4f7959dcf333",
+        "run_switch": {
+          "phase_index": 0,
+          "workload_intent_ordinal": 928,
+          "profile_application_id": "9f173c1f-40b0-44d7-a8d6-f7080bf3c39f",
+          "item_index": 0,
+          "phase": "stop",
+          "completed_phases": [],
+          "child_operation_id": "d5877dcd-7253-451d-9821-40884cf0e375",
+          "phase_results": [
+            {
+              "phase": "stop",
+              "run_id": "cbfc16ad-9857-4300-86bc-4465d37f069f"
+            }
+          ],
+          "completed_bytes": 0,
+          "total_bytes": 0,
+          "total_bytes_known": true,
+          "members": [
+            {
+              "node_id": "spk_9a86fdbab116442ab6707bf4181a3c1c",
+              "phase": "stop",
+              "state": "pending",
+              "completed_bytes": 0,
+              "total_bytes": 0,
+              "cached": false
+            }
+          ],
+          "retryable": false,
+          "phase_retry_generation": 0,
+          "force_replan": false,
+          "blockers": [
+            {
+              "code": "cleanup-unconfirmed",
+              "detail": "cleanup-unconfirmed",
+              "severity": "warning",
+              "node_ids": [],
+              "operation": {
+                "id": "d5611bc0-8255-4c70-844d-4f7959dcf333",
+                "kind": "recipe.stop.v2"
+              }
+            }
+          ],
+          "refusal": []
+        }
+      }
+    },
+    {
+      "queue_index": 1,
+      "operation_id": "5692264a-216f-4660-9482-0de9e19ca46e",
+      "kind": "run",
+      "state": "failed"
+    },
+    {
+      "queue_index": 2,
+      "operation_id": "febe3af3-d542-43bd-9e91-59aa1d19692e",
+      "kind": "stop",
+      "state": "succeeded",
+      "result": {
+        "run_switch_operation_id": "febe3af3-d542-43bd-9e91-59aa1d19692e",
+        "run_switch": {
+          "phase_index": 2,
+          "workload_intent_ordinal": 928,
+          "profile_application_id": "9f173c1f-40b0-44d7-a8d6-f7080bf3c39f",
+          "item_index": 0,
+          "phase": "final_verify",
+          "completed_phases": [
+            "stop",
+            "final_verify"
+          ],
+          "phase_results": [
+            {
+              "phase": "stop",
+              "run_id": "3ee9ba02-7a96-4434-9350-aae6af9b71c7"
+            },
+            {
+              "phase": "final_verify",
+              "final_verified": true,
+              "run_id": "3ee9ba02-7a96-4434-9350-aae6af9b71c7",
+              "state": "stopped",
+              "route_state": "withdrawn",
+              "healthy": false,
+              "ranks": [
+                {
+                  "node_id": "spk_2818d189042b4c77aefa7796f4befd23",
+                  "rank": 0,
+                  "role": "entrypoint",
+                  "state": "stopped",
+                  "fresh": true
+                }
+              ]
+            }
+          ],
+          "operation_phase_index": 0,
+          "operation": {
+            "phase": "recipe.stop",
+            "completed_bytes": 0,
+            "total_bytes_known": false,
+            "activity": "active",
+            "members": [
+              {
+                "member_id": "spk_2818d189042b4c77aefa7796f4befd23",
+                "phase": "recipe.stop",
+                "kind": "recipe.stop",
+                "completed_bytes": 0,
+                "state": "succeeded"
+              }
+            ]
+          },
+          "completed_bytes": 0,
+          "total_bytes": 0,
+          "total_bytes_known": true,
+          "members": [
+            {
+              "node_id": "spk_2818d189042b4c77aefa7796f4befd23",
+              "phase": "final_verify",
+              "state": "succeeded",
+              "completed_bytes": 0,
+              "total_bytes": 0,
+              "cached": false
+            }
+          ],
+          "retryable": false,
+          "phase_retry_generation": 0,
+          "force_replan": false,
+          "blockers": [],
+          "refusal": []
+        }
+      }
+    }
+  ],
+  "assignment_ids": [
+    "23e1ddd1-6f06-5fb9-add5-e8aee00224b2"
+  ]
+}
