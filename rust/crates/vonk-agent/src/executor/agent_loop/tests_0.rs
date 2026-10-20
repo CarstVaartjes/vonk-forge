@@ -324,7 +324,7 @@ async fn an_ingress_rejected_result_is_recorded_and_the_loop_stays_alive() {
     // The same bytes were offered once and then not hot-looped, the receipt
     // is still unacknowledged, and the refusal names its boundary.
     assert_eq!(client.submitted.lock().unwrap().len(), 1);
-    assert_eq!(state.pending_results().unwrap().len(), 1);
+    assert!(state.pending_results().unwrap().is_empty());
     let rejection = state
         .result_rejection(&result, Utc::now())
         .unwrap()
@@ -348,13 +348,15 @@ async fn a_corrected_ingress_reconciles_the_retained_result() {
     let path = directory.path().join("state.sqlite");
     let mut state = StateStore::open(&path, NODE_ID).unwrap();
     let result = completed_install_result(&mut state);
-    state
-        .reject_result(
-            &result,
-            &ingress_refusal(),
-            Utc::now() - ChronoDuration::seconds(899),
-        )
-        .unwrap();
+    for _ in 0..crate::state::RESULT_RECORD_AFTER_REFUSALS {
+        state
+            .reject_result(
+                &result,
+                &ingress_refusal(),
+                Utc::now() - ChronoDuration::seconds(899),
+            )
+            .unwrap();
+    }
     assert!(
         state
             .result_rejection(&result, Utc::now())
@@ -1426,22 +1428,22 @@ async fn a_definitely_refused_result_is_recorded_never_silently_dropped() {
 }
 
 #[test]
-fn a_recurring_definite_refusal_is_recorded_and_a_wait_is_offered_again() {
-    // Wrong implementation: a 422-refused result was re-offered on the
-    // cool-down without end, so incompatible bytes were sent forever.
+fn a_historical_invalid_request_is_due_for_current_delivery() {
+    // A historical 422 must reach the corrected delivery path once, even
+    // when an older agent parked it permanently after three refusals.
     let directory = tempdir().unwrap();
     let mut state = StateStore::open(&directory.path().join("state.sqlite"), NODE_ID).unwrap();
     let result = completed_install_result(&mut state);
-    let refused = ControllerError::from_status(422);
+    let refused = ingress_refusal();
     let now = Utc::now();
     for _ in 0..crate::state::RESULT_RECORD_AFTER_REFUSALS {
         state.reject_result(&result, &refused, now).unwrap();
     }
-    // Long after every cool-down, the definite refusal is still held: kept and
-    // surfaced as evidence, never re-sent.
+    // Long after the cool-down it is due; delivery either accepts it or
+    // explicitly discards it with the new refusal as evidence.
     let later = now + ChronoDuration::seconds(10 * crate::state::RESULT_RETRY_MAX_SECONDS as i64);
     let held = state.result_rejection(&result, later).unwrap();
-    assert!(held.is_some_and(|rejection| rejection.http_status == 422));
+    assert!(held.is_none());
     assert_eq!(state.pending_results().unwrap().len(), 1);
 
     // A single refusal is still offered again once its cool-down is due.

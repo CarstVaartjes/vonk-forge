@@ -245,7 +245,15 @@ where
     result
         .validate_for_operation(&claim.operation)
         .map_err(StateError::from)?;
-    if state.result_rejection(&result, now)?.is_none() {
+    let settled = state
+        .result_delivery_settled(&result)
+        .unwrap_or_else(|error| {
+            // Offering exact receipt evidence cannot replay a host effect. Keep an
+            // unreadable settlement marker and let the Controller reconcile it.
+            eprintln!("vonk-agent: receipt settlement observation deferred: {error}");
+            false
+        });
+    if !settled && state.result_rejection(&result, now)?.is_none() {
         match submit_or_core(client, &result).await {
             Ok(()) | Err(ClientError::ResultSuperseded) => {
                 if let Err(error) = state.acknowledge(&result) {
@@ -273,10 +281,8 @@ where
 ///
 /// An accepted core settles the attempt with its true state and code, and the
 /// full result stays in local custody as the evidence.  A refused core answers
-/// with the first refusal, which is retained and re-offered under the usual
-/// cool-down: a corrected Controller rule then accepts the full result, so a
-/// Controller fix alone heals it, and the refusal stays visible on every pass
-/// and in the fleet view meanwhile.
+/// with the first refusal. A definite invalid-request verdict settles delivery
+/// as discarded, retaining the full result and refusal without claiming acceptance.
 async fn submit_or_core<C: LoopClient>(
     client: &C,
     result: &AgentResult,
@@ -313,7 +319,7 @@ async fn submit_or_core<C: LoopClient>(
     }
 }
 
-/// Persist one Controller ingress refusal and make it retrievable.
+/// Persist a Controller ingress refusal; discard invalid delivery with evidence.
 ///
 /// Only bounded, correlated control-plane facts are recorded: the durable
 /// `result_rejections` row carries the HTTP status, the validated error code,
@@ -327,6 +333,21 @@ pub(super) fn record_result_rejection(
     now: DateTime<Utc>,
 ) -> Result<(), LoopError> {
     let rejection = state.reject_result(result, error, now)?;
+    if rejection.invalid_request() {
+        state.discard_rejected_result(result)?;
+        eprintln!(
+            "vonk-agent: discarded result delivery for fence {} \
+             (http {} {} disposition={} request_id={}): {}; \
+             full result and refusal retained; Controller acceptance unconfirmed",
+            result.fence,
+            rejection.http_status,
+            rejection.code,
+            Disposition::Fail,
+            rejection.request_id.as_deref().unwrap_or_default(),
+            rejection.reason,
+        );
+        return Ok(());
+    }
     eprintln!(
         "vonk-agent: controller refused result for fence {} \
          (http {} {} request_id={}): {}; retrying the retained result after {}",
