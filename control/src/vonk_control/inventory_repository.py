@@ -15,7 +15,6 @@ from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import AgentEvidenceCode, canonical_message
 from vonk_agent_protocol.inventory import (
     HostSettings,
-    InstallationBytes,
     InventoryRequest,
     MemoryPool,
     ModelStoreObject,
@@ -56,9 +55,6 @@ class InventorySnapshotInput:
     host_settings: HostSettings | None = None
     unused_model_bytes: int | None = None
     model_objects: list[ModelStoreObject] | None = None
-    installations: list[str] | None = None
-    runs: list[str] | None = None
-    installation_bytes: list[InstallationBytes] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -124,14 +120,6 @@ def _validated_inventory(
             item.model_dump(mode="json") if isinstance(item, ModelStoreObject) else item
             for item in objects
         ]
-    if isinstance(value, InventorySnapshotInput):
-        document.update(
-            installations=value.installations,
-            runs=value.runs,
-            installation_bytes=None
-            if value.installation_bytes is None
-            else [item.model_dump(mode="json") for item in value.installation_bytes],
-        )
     document.update(schema_version=1, observed_at=observed_at.isoformat())
     validated = InventoryRequest.model_validate_json(canonical_message(document))
     if AgentEvidenceCode.INVENTORY_MODEL_OBJECTS_DROPPED in validated.evidence_warnings:
@@ -155,8 +143,21 @@ class InventoryRepository:
     ) -> None:
         self._sessions, self._clock = sessions, clock
 
-    def record(self, value: InventorySnapshotInput) -> NodeInventorySnapshot:
+    def record(
+        self, value: InventorySnapshotInput, *, report: InventoryRequest | None = None
+    ) -> NodeInventorySnapshot:
         validated = _validated_inventory(value, observed_at=value.observed_at)
+        if report is not None:
+            # These already validated report facts bind the accepted effects,
+            # but are not columns of the capacity snapshot.
+            validated = validated.model_copy(
+                update={
+                    "installations": report.installations,
+                    "runs": report.runs,
+                    "installation_bytes": report.installation_bytes,
+                }
+            )
+        measured = validated.installation_bytes
         document = validated.model_dump(mode="json", exclude={"schema_version"})
         document["node_id"] = value.node_id
         document["capabilities"] = sorted(validated.capabilities)
@@ -228,14 +229,12 @@ class InventoryRepository:
                 .order_by(NodeInventorySnapshot.observed_at.desc())
                 .limit(1)
             )
-            if value.installation_bytes is not None and (
+            if measured is not None and (
                 latest is None
                 or value.observed_at
                 >= (latest if latest.tzinfo is not None else latest.replace(tzinfo=UTC))
             ):
-                refresh_installed_bytes(
-                    session, value.node_id, value.installation_bytes
-                )
+                refresh_installed_bytes(session, value.node_id, measured)
             session.add(row)
         return row
 

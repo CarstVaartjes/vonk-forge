@@ -26,7 +26,7 @@ from vonk_control.models import (
     NodeTelemetrySample,
     RunNode,
 )
-from vonk_control.operator_receipt_contract import AcceptanceReceipt
+from vonk_control.operator_receipt_contract import AcceptanceReceipt, ReceiptCode
 
 from .test_agent_api import (
     NODE_A,
@@ -695,4 +695,39 @@ def test_invalid_claim_request_identity_is_refused_before_effects(
     with services.sessions() as session:
         assert (
             session.scalar(select(func.count()).select_from(AgentOperationAttempt)) == 0
+        )
+
+
+def test_unknown_receipt_read_after_commit_preserves_owner_and_retry(
+    tmp_path, postgres_engine, monkeypatch
+):
+    """Catches an unknown owner read being converted to a terminal internal-error response."""
+    from vonk_agent_protocol import UnknownOutcomeError, WaitReason
+    from vonk_control import agent_acceptance
+
+    client, services, _, clock = make_agent_system(tmp_path, engine=postgres_engine)
+    headers = agent_headers(NODE_A, "serial-a")
+    body = _inventory(clock)
+    original = agent_acceptance.resolve_agent_receipt
+
+    def unknown_owner(*args, **kwargs):
+        raise UnknownOutcomeError(
+            "injected owner observation loss", reason=WaitReason.OBSERVATION_UNAVAILABLE
+        )
+
+    monkeypatch.setattr(agent_acceptance, "resolve_agent_receipt", unknown_owner)
+    failed = client.post("/agent/inventory", json=body, headers=headers)
+    assert failed.status_code == 503
+    assert failed.headers["x-vonk-error-code"] == ReceiptCode.UNAVAILABLE
+    assert 0 < int(failed.headers["retry-after"]) <= 300
+    assert "x-vonk-receipt" not in failed.headers
+    with services.sessions() as session:
+        assert (
+            session.scalar(select(func.count()).select_from(NodeInventorySnapshot)) == 1
+        )
+    monkeypatch.setattr(agent_acceptance, "resolve_agent_receipt", original)
+    _reference(client.post("/agent/inventory", json=body, headers=headers))
+    with services.sessions() as session:
+        assert (
+            session.scalar(select(func.count()).select_from(NodeInventorySnapshot)) == 1
         )

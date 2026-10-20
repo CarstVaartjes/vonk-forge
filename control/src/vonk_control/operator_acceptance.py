@@ -238,7 +238,7 @@ class OperatorReceiptResolver:
             assert isinstance(result, Response)
             try:
                 return resolve_agent_receipt(self, policy, result, arguments)
-            except AVAILABILITY_ERRORS:
+            except (UnknownOutcomeError, *AVAILABILITY_ERRORS):
                 raise _refused(
                     "The agent receipt owner is unavailable; retry the same request",
                     unavailable=True,

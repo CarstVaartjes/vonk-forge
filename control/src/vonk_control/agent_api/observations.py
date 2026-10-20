@@ -202,10 +202,8 @@ def install_observations_routes(
                     host_settings=body.host_settings,
                     unused_model_bytes=body.unused_model_bytes,
                     model_objects=body.model_objects,
-                    installations=body.installations,
-                    runs=body.runs,
-                    installation_bytes=body.installation_bytes,
-                )
+                ),
+                report=body,
             )
         except ValueError as error:
             raise HTTPException(status_code=422, detail=str(error)) from None

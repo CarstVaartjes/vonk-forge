@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 from cryptography.hazmat.primitives.asymmetric import ed25519
 from vonk_agent_protocol import canonical_message
+from vonk_agent_protocol.contracts import AgentOperation as OperationKind
 from vonk_agent_protocol.host_helper import (
     ConfirmPackageActivationOperation,
     ContainerRuntimeAction,
@@ -19,7 +20,13 @@ from vonk_control.host_helper_authority import HostHelperGrantIssuer
 
 from tests.wire_probes import prebuilt_probe
 
-from .test_agent_api import NODE_A, agent_headers
+from .test_agent_api import (
+    NODE_A,
+    PACKAGED_RUNTIME_IDENTITY,
+    STOP_PAYLOAD,
+    agent_headers,
+    parent,
+)
 from .test_agent_api import agent_system as _agent_system
 
 agent_system = _agent_system
@@ -74,7 +81,7 @@ def test_python_issuer_is_consumed_and_signature_verified_by_rust(
 def test_api_grant_crosses_rust_helper_and_python_controller_wire_boundary(
     agent_system, host_helper_wire_probe: Path
 ) -> None:
-    client, services, _, _clock = agent_system
+    client, services, _, clock = agent_system
     issuer = HostHelperGrantIssuer(
         ed25519.Ed25519PrivateKey.from_private_bytes(PRIVATE_SEED),
         clock=lambda: datetime.fromtimestamp(2_100_000_000, UTC),
@@ -121,8 +128,26 @@ def test_api_grant_crosses_rust_helper_and_python_controller_wire_boundary(
             )
 
     object.__setattr__(services, "host_runtime_authority", RecordingHostAuthority())
+    fence = "40000000-0000-4000-8000-000000000004"
+    services.operations.enqueue(
+        parent(services.sessions, clock).id,
+        NODE_A,
+        OperationKind.RECIPE_STOP,
+        "a" * 64,
+        STOP_PAYLOAD,
+    )
+    # The serializer fixture still needs an existing committed grant authority.
+    assert (
+        services.operations.claim(
+            NODE_A,
+            "serial-a",
+            runtime_identity=PACKAGED_RUNTIME_IDENTITY,
+            claim_fence=fence,
+        )
+        is not None
+    )
     request = {
-        "fence": "40000000-0000-4000-8000-000000000004",
+        "fence": fence,
         "action": "run-inspect",
         "request_sha256": "a" * 64,
         "expires_in_seconds": 60,
