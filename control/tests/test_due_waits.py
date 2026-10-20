@@ -9,13 +9,15 @@ import sys
 from datetime import timedelta
 
 import pytest
-from sqlalchemy import text
+from sqlalchemy import JSON, Column, MetaData, Table, cast, inspect, literal, null, text
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import LifecycleState, WaitOwnerKind
 from vonk_control.due_waits import DueWaitBackstop, WaitSource
 from vonk_control.jobs import JobService
 from vonk_control.models import Base, Job
 from vonk_control.persisted_waits import schedule_wait
+from vonk_control.wait_contract import WaitEvidence
+from vonk_control.wait_redrive import WAIT_MODELS, wait_sources
 from vonk_control.worker import Worker
 
 from tests.signed_recipe_release import signed_recipe_releases
@@ -23,7 +25,10 @@ from tests.signed_recipe_release import signed_recipe_releases
 from .test_persisted_waits import NOW, _job
 
 
-def test_quiet_worker_reconstruction_redrives_the_same_fenced_job(postgres_engine):
+@pytest.mark.parametrize("with_evidence", (True, False))
+def test_quiet_worker_reconstruction_redrives_the_same_fenced_job(
+    postgres_engine, with_evidence
+):
     """Fails without the backstop: an idle worker never revisits this due owner."""
     Base.metadata.create_all(postgres_engine)
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)
@@ -33,7 +38,7 @@ def test_quiet_worker_reconstruction_redrives_the_same_fenced_job(postgres_engin
     script = """
 import os, signal
 from datetime import datetime
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 from vonk_control.jobs import JobService
 from vonk_control.models import Job
@@ -45,6 +50,9 @@ worker = Worker(JobService(sessions, clock=lambda: now), 'doomed-worker', {})
 with sessions.begin() as session:
     job = session.get(Job, os.environ['WAIT_TEST_JOB'])
     schedule_wait(job, datetime.fromisoformat(os.environ['WAIT_TEST_DUE']), now=now)
+    if os.environ['WAIT_TEST_EVIDENCE'] == 'False':
+        session.flush()
+        session.execute(text('UPDATE jobs SET wait_evidence = NULL WHERE id = :id'), {'id': job.id})
 print('wait committed', flush=True)
 signal.pause()
 """
@@ -59,6 +67,7 @@ signal.pause()
             ),
             "WAIT_TEST_JOB": job.id,
             "WAIT_TEST_NOW": NOW.isoformat(),
+            "WAIT_TEST_EVIDENCE": str(with_evidence),
             "WAIT_TEST_DUE": (NOW + timedelta(seconds=5)).isoformat(),
         },
     )
@@ -108,7 +117,10 @@ signal.pause()
         assert stored.current_attempt == 1
 
 
-def test_corrupt_first_row_cannot_starve_later_due_work(postgres_engine, caplog):
+@pytest.mark.parametrize("damage", ("structure", "identity", "kind", "clock"))
+def test_corrupt_first_row_cannot_starve_later_due_work(
+    postgres_engine, caplog, damage
+):
     """Catches a LIMIT-first selector repeatedly returning damaged evidence."""
     caplog.set_level(logging.INFO, logger="vonk_control.due_waits")
     Base.metadata.create_all(postgres_engine)
@@ -119,9 +131,29 @@ def test_corrupt_first_row_cannot_starve_later_due_work(postgres_engine, caplog)
         for job in (bad, good):
             session.add(job)
             schedule_wait(job, NOW, now=NOW)
+    evidence = bad.wait_evidence
+    assert isinstance(evidence, WaitEvidence)
+    if damage == "identity":
+        evidence = evidence.model_copy(
+            update={"owner": evidence.owner.model_copy(update={"id": good.id})}
+        )
+    elif damage == "kind":
+        evidence = evidence.model_copy(
+            update={"owner_kind": WaitOwnerKind.AGENT_OPERATION}
+        )
     with postgres_engine.begin() as connection:
         connection.execute(
-            text("UPDATE jobs SET wait_evidence = '{}' WHERE id = :id"), {"id": bad.id}
+            text(
+                "UPDATE jobs SET wait_evidence = CAST(:evidence AS JSON), "
+                "next_action_at = :due WHERE id = :id"
+            ),
+            {
+                "id": bad.id,
+                "evidence": '{"owner":{"id":"private-test-marker"}}'
+                if damage == "structure"
+                else evidence.model_dump_json(),
+                "due": None if damage == "clock" else NOW,
+            },
         )
     seen = []
     backstop = DueWaitBackstop(
@@ -136,10 +168,117 @@ def test_corrupt_first_row_cannot_starve_later_due_work(postgres_engine, caplog)
         clock=lambda: NOW,
         batch_limit=1,
     )
-    backstop.tick()
-    backstop.tick()
-    assert seen == [good.id]
+    for _ in range(20):
+        backstop.tick()
+    assert seen == [good.id] * 10
     assert bad.id in caplog.text
+    assert "private-test-marker" not in caplog.text
+    failures = lambda: [
+        record
+        for record in caplog.records
+        if "worker.due_wait_failed" in record.message
+    ]
+    assert len(failures()) == 1
+    # A changed corrupt snapshot earns one fresh report, not twenty more.
+    with postgres_engine.begin() as connection:
+        connection.execute(
+            text("UPDATE jobs SET state = :state WHERE id = :id"),
+            {"state": LifecycleState.BACKOFF, "id": bad.id},
+        )
+    for _ in range(20):
+        backstop.tick()
+    assert len(failures()) == 2
+    # Repair never needs a new request, revision or worker restart.
+    with postgres_engine.begin() as connection:
+        connection.execute(
+            text(
+                "UPDATE jobs SET wait_evidence = NULL, next_action_at = :due WHERE id = :id"
+            ),
+            {"id": bad.id, "due": NOW},
+        )
+    for _ in range(2):
+        backstop.tick()
+    assert bad.id in seen
+    assert len(failures()) == 2
+
+
+@pytest.mark.parametrize("json_null", (True, False))
+@pytest.mark.parametrize("kind, model", tuple(WAIT_MODELS.items()))
+def test_every_due_source_redrives_without_evidence(
+    postgres_engine, kind, model, json_null
+):
+    """Catches requiring wait JSON on ordinary due work, including aliased clocks.
+
+    Project the canonical selection columns: owner effects have their own full
+    lifecycle tests; this boundary must dispatch every source through real SQL.
+    """
+    mapper = inspect(model)
+    owner_table = model.__table__
+    keys = tuple(owner_table.primary_key.columns)
+    due = mapper.attrs.next_action_at.columns[0]
+    columns = [*keys, owner_table.c.wait_evidence, due]
+    if "state" in owner_table.c:
+        columns.append(owner_table.c.state)
+    table = Table(
+        owner_table.name,
+        MetaData(),
+        *(
+            Column(column.name, column.type, primary_key=column.primary_key)
+            for column in columns
+        ),
+    )
+    table.create(postgres_engine)
+    key = tuple(1 if column.type.python_type is int else "due-owner" for column in keys)
+    with postgres_engine.begin() as connection:
+        connection.execute(
+            table.insert().values(
+                {
+                    **dict(zip((column.name for column in keys), key, strict=True)),
+                    due.name: NOW,
+                    "wait_evidence": cast(literal("null"), JSON)
+                    if json_null
+                    else null(),
+                }
+            )
+        )
+    seen = []
+    backstop = DueWaitBackstop(
+        sessionmaker(postgres_engine),
+        [
+            WaitSource(
+                model, frozenset({kind}), lambda key, owner: seen.append((key, owner))
+            )
+        ],
+        clock=lambda: NOW,
+    )
+    assert backstop.tick() == 1
+    assert seen == [(key, kind)]
+    for next_check in (NOW + timedelta(seconds=5), None):
+        with postgres_engine.begin() as connection:
+            connection.execute(table.update().values({due.name: next_check}))
+        assert backstop.tick() == 0
+    assert seen == [(key, kind)]
+
+
+def test_unevidenced_job_uses_its_owner_instead_of_first_table_binding(postgres_engine):
+    """Catches sending an ordinary Job to the AgentUpgrade callback on shared SQL."""
+    Base.metadata.create_all(postgres_engine)
+    sessions = sessionmaker(postgres_engine, expire_on_commit=False)
+    job = _job()
+    with sessions.begin() as session:
+        session.add(job)
+        schedule_wait(job, NOW, now=NOW)
+    with postgres_engine.begin() as connection:
+        connection.execute(
+            text("UPDATE jobs SET wait_evidence = NULL WHERE id = :id"), {"id": job.id}
+        )
+    seen = []
+    sources = wait_sources(
+        dict.fromkeys(WaitOwnerKind, lambda key, kind: seen.append(kind))
+    )
+    backstop = DueWaitBackstop(sessions, sources, clock=lambda: NOW)
+    backstop.tick()
+    assert seen == [WaitOwnerKind.JOB]
 
 
 def test_logical_owners_sharing_a_table_get_independent_turns(postgres_engine):
@@ -185,8 +324,6 @@ def test_logical_owners_sharing_a_table_get_independent_turns(postgres_engine):
 
 def test_runtime_dispatch_covers_every_mapped_wait_owner():
     """Inherited/mixin ORM wait columns cannot evade the static whole-tree guard."""
-    from vonk_control.wait_redrive import WAIT_MODELS, wait_sources
-
     owners = {
         mapper.class_
         for mapper in Base.registry.mappers
@@ -359,11 +496,18 @@ def test_owner_handler_runs_after_the_selection_connection_is_released(postgres_
         engine.dispose()
 
 
+@pytest.mark.parametrize("with_evidence", (True, False))
 @pytest.mark.parametrize(
     "superseded, missing_receipt", ((False, False), (True, False), (False, True))
 )
 def test_due_recipe_parent_uses_normal_phase_advancement_after_restart(
-    tmp_path, postgres_engine, monkeypatch, request, superseded, missing_receipt
+    tmp_path,
+    postgres_engine,
+    monkeypatch,
+    request,
+    superseded,
+    missing_receipt,
+    with_evidence,
 ):
     """Catches registering a parent callback that only polls its cleanup paths."""
     from sqlalchemy import select
@@ -452,6 +596,12 @@ def test_due_recipe_parent_uses_normal_phase_advancement_after_restart(
                 targets=nodes,
                 workload_intent_ordinal=None,
                 now=now,
+            )
+    if not with_evidence:
+        with postgres_engine.begin() as connection:
+            connection.execute(
+                text("UPDATE jobs SET wait_evidence = NULL WHERE id = :id"),
+                {"id": started.id},
             )
     queue = AgentJobService(sessions, clock=lambda: now)
     worker = assemble_production_worker(
