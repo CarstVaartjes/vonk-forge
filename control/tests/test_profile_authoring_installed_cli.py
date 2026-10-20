@@ -183,13 +183,13 @@ def test_installed_profile_edit_preserves_definition_and_rejects_concurrent_save
 
 
 @pytest.mark.parametrize("action", ["remove", "pin"])
-@pytest.mark.parametrize("damaged_manifest", [False, True])
+@pytest.mark.parametrize("fault", [None, "manifest", "catalog"])
 @pytest.mark.usefixtures("damaged_json_rows")
 def test_installed_remove_and_pin_save_ignore_unrelated_cache_evidence(
     installed_vonkctl: Path,
     postgres_engine,
     tmp_path: Path,
-    damaged_manifest: bool,
+    fault: str | None,
     action: str,
 ) -> None:
     """Catches a global removal-reference scan blocking ordinary profile edits."""
@@ -245,7 +245,7 @@ def test_installed_remove_and_pin_save_ignore_unrelated_cache_evidence(
         blocker.code == RunSwitchCode.INSUFFICIENT_DISK
         for blocker in decisions["disk-blocked"].blockers
     )
-    if damaged_manifest:
+    if fault == "manifest":
         with sessions.begin() as session:
             session.add(
                 ModelCacheSet(
@@ -257,6 +257,29 @@ def test_installed_remove_and_pin_save_ignore_unrelated_cache_evidence(
                     created_at=saved.created_at,
                     updated_at=saved.updated_at,
                     last_accessed_at=saved.updated_at,
+                )
+            )
+    elif fault == "catalog":
+        with sessions.begin() as session:
+            model = session.scalar(
+                select(CatalogDocumentRevision).where(
+                    CatalogDocumentRevision.kind == "model"
+                )
+            )
+            assert model is not None
+            session.add(
+                CatalogDocumentRevision(
+                    document_id=model.document_id,
+                    kind=model.kind,
+                    publisher=model.publisher,
+                    slug=model.slug,
+                    revision_number=model.revision_number + 1,
+                    schema_version=model.schema_version,
+                    state=model.state,
+                    document={},
+                    content_digest="f" * 64,
+                    created_by=model.created_by,
+                    created_at=model.created_at,
                 )
             )
     if action == "remove":
