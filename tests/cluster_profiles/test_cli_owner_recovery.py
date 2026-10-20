@@ -516,3 +516,36 @@ def test_lost_profile_save_observes_without_overwriting_then_fresh_edit_works(
         "FleetProfileInput",
         changed | {"name": "fresh", "expected_revision": 4, "labels": {}},
     )
+
+
+def test_profile_save_keeps_typed_cause_after_inconclusive_reconciliation(capsys):
+    """Catches replacing an intact owner wait with a bare exit-2 observation."""
+    from vonk_agent_protocol import ProfileReasonCode
+
+    definition = {"name": "original", "assignments": []}
+    view = {"id": KEY, "number": 1, "revision": 3, "definition": definition}
+    client = FakeClient(
+        {
+            ("GET", "/api/profile/1/definition"): view,
+            ("PUT", "/api/profile/1"): ControlUnavailable(
+                503,
+                "exact model reference evidence is unavailable",
+                code=ProfileReasonCode.ADMISSION_EFFECT_BUSY,
+                request_id=FRESH,
+            ),
+        }
+    )
+    assert (
+        cli.main(
+            ("--profile", "1", "profile", "configure", "--name", "edited", "--json"),
+            control_client=client,
+        )
+        == 2
+    )
+    answer = json.loads(capsys.readouterr().out)
+    assert answer["code"] == ProfileReasonCode.ADMISSION_EFFECT_BUSY
+    assert answer["request_id"] == FRESH
+    assert answer["http_status"] == 503
+    assert "exact model reference evidence" in answer["detail"]
+    assert sum(method == "PUT" for method, *_ in client.calls) == 1
+    assert client.calls[-1][0] == "GET"

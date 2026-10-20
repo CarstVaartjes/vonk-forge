@@ -34,7 +34,7 @@ InstallationId = Annotated[
     Field(pattern=r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"),
 ]
 #: The most installation directories one inventory names (the agent reports
-#: the first ones in name order; the rest after those are gone).
+#: a rotating page in name order, with a cursor retained across restart).
 MAX_REPORTED_INSTALLATIONS = 4096
 #: A run scope's name on a Spark (``runs/<id>``, ``run-metadata/<id>``): the
 #: Controller's run id, or its artifact job id for a job's scope.

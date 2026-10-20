@@ -331,6 +331,13 @@ def _model_child_cancellation_pending(
 
     if self._model_cache is None:
         return False, False
+    if (
+        payload.failure is not None
+        and payload.failure.code == RecipeImageCode.PREPARATION_EXHAUSTED
+    ):
+        # Ending this observer's budget does not revoke a durable download.
+        # A later preparation can adopt it, even before this parent linked it.
+        return False, False
     child = payload.model_child
     child_id = child.id if child else None
     recipe_revision_id = payload.recipe_revision_id

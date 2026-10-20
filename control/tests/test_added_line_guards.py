@@ -859,6 +859,19 @@ def test_count_guard_does_not_exempt_the_uncancelled_else_branch() -> None:
     )
 
 
+def test_assignment_based_retry_requires_the_cause_classifier():
+    """Catches the worker's old assignment-based deterministic retry shield."""
+    from .deterministic_retries import scan_source
+
+    source = "def tick():\n try: work()\n except Exception as error:\n  self._retry_at[task] = now + 5\n"
+    assert scan_source(source)
+    assert not scan_source(
+        source.replace(
+            "  self._retry_at", "  verdict = disposition(error)\n  self._retry_at"
+        )
+    )
+
+
 def test_monotonic_agent_progress_requires_attempt_key_on_added_lines():
     # Wrong implementation: the whole-tree rule exists but CI's patch gate
     # accepts a new lifetime monotonic rejection on agent ingress.

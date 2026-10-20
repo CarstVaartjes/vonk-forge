@@ -164,6 +164,12 @@ class FleetProfileInvalid(InvalidRequestError, FleetProfileConflict):
     code = ProfileReasonCode.REQUEST_INVALID
 
 
+class FleetProfileDefinitionUnavailable(FleetProfileInvalid):
+    """A damaged draft must be replaced before it can authorize new effects."""
+
+    code = ProfileReasonCode.DEFINITION_UNAVAILABLE
+
+
 class FleetProfileUnavailable(UnknownOutcomeError, FleetProfileConflict):
     """Persisted bookkeeping or evidence that cannot settle the outcome here."""
 

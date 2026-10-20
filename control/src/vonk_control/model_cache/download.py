@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 import shutil
@@ -15,7 +16,12 @@ from urllib.parse import unquote, urlsplit
 import httpx2
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import ArtifactLifecycleCode, ModelCacheCode, ModelFileState
+from vonk_agent_protocol import (
+    ArtifactLifecycleCode,
+    ModelCacheCode,
+    ModelFileState,
+    OperatorActionName,
+)
 
 from ..artifact_lifecycle import (
     ArtifactIdentity,
@@ -192,6 +198,8 @@ class DownloadMixin:
         part: Path,
         operation_id: str,
         completed_artifacts: int,
+        *,
+        ingress_verified: bool = False,
     ) -> None:
         cache = cast("ModelCacheService", self)
         if cache._transfer_stop(operation_id).is_set() or cache._closed.is_set():
@@ -207,7 +215,7 @@ class DownloadMixin:
             state="verifying",
             completed_artifacts=completed_artifacts,
         )
-        if not cache._verify_file(part, spec):
+        if not ingress_verified and not cache._verify_file(part, spec):
             # Never keep bytes that failed the pin: discard them so the
             # automatic retry downloads the artifact again from byte zero.
             part.unlink(missing_ok=True)
@@ -237,7 +245,7 @@ class DownloadMixin:
                 raise OperationInterrupted(
                     "model download was removed during verification"
                 )
-            cache._publish_object(spec, part)
+            cache._place_object(spec, part)
             cache._mark_artifact_verified(spec, set_digest)
 
     def _publication_allowed(
@@ -356,6 +364,8 @@ class DownloadMixin:
         set_digest: str,
         operation_id: str,
         completed_artifacts: int,
+        *,
+        fetch_only: bool = False,
     ) -> bool:
         cache = cast("ModelCacheService", self)
         cache._validate_http_download(spec)
@@ -410,6 +420,7 @@ class DownloadMixin:
                     return cache._open_github_release_asset(client, spec, headers)
                 return cache._open_http_response(client, spec.source, headers)
 
+            digest = None if fetch_only else hashlib.sha256()
             with cache._sample_transfer(
                 spec,
                 set_digest,
@@ -428,6 +439,14 @@ class DownloadMixin:
                     workers=_PARALLEL_RANGE_WORKERS,
                     stream_gate=cache._stream_gate(operation_id),
                     on_bytes=cache._streams.record_bytes,
+                    on_assembled_bytes=None if digest is None else digest.update,
+                )
+            if completed and digest is not None and digest.hexdigest() != spec.sha256:
+                part.unlink(missing_ok=True)
+                raise ModelCacheStorageUnknown(
+                    ModelCacheCode.DIGEST_MISMATCH,
+                    "assembled artifact failed SHA-256 verification; the bytes were discarded and the download restarts",
+                    recovery=OperatorActionName.RESUME,
                 )
             if not completed:
                 cache._checkpoint_artifact(

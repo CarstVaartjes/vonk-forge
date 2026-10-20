@@ -65,6 +65,7 @@
         "CatalogRevisionCollector",
         "ClusterMappingService",
         "CompositeDistributionPhaseExecutor",
+        "CoordinatorFailures",
         "DatabaseSourceBundleStore",
         "DistributedRecoveryCoordinator",
         "DueWaitBackstop",

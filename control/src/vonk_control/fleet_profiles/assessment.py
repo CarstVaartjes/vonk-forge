@@ -157,13 +157,13 @@ class FleetProfileService:
                 resolved_revision = None
                 resolved_definition = None
             else:
+                resolved_definition = self._required_definition(row)
                 view = self._view(session, row)
                 resolved_assignments = self._execution_assignments(session, row)
                 resolved_name = view.name
                 resolved_digest = view.profile_digest
                 installation_policy = row.installation_policy
                 resolved_revision = row.revision
-                resolved_definition = self._definition(row)
             assignment_previews: list[FleetProfileAssignmentPreview] = []
             assignment_preparations: list[FleetProfileAssignmentPreparation] = []
             assignment_assessments: list[FleetProfileAssignmentAssessment] = []

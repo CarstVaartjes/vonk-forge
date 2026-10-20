@@ -55,6 +55,7 @@ class ProfileReasonCode(WireEnum):
 PROFILE_REFUSAL_CODES = frozenset(
     {
         ProfileReasonCode.ADMISSION_DEFECT,
+        ProfileReasonCode.DEFINITION_UNAVAILABLE,
         ProfileReasonCode.REQUEST_INVALID,
         ProfileReasonCode.REVIEW_STALE,
         ProfileReasonCode.SELECTION_LOST,

@@ -12,6 +12,7 @@ import pytest
 from sqlalchemy import JSON, Column, MetaData, Table, cast, inspect, literal, null, text
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import LifecycleState, WaitOwnerKind
+from vonk_control.coordinator_failures import CoordinatorFailures
 from vonk_control.due_waits import DueWaitBackstop, WaitSource
 from vonk_control.jobs import JobService
 from vonk_control.models import Base, Job
@@ -38,6 +39,7 @@ def test_quiet_worker_reconstruction_redrives_the_same_fenced_job(
     script = """
 import os, signal
 from datetime import datetime
+from vonk_control.coordinator_failures import CoordinatorFailures
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 from vonk_control.jobs import JobService
@@ -46,7 +48,7 @@ from vonk_control.persisted_waits import schedule_wait
 from vonk_control.worker import Worker
 sessions = sessionmaker(create_engine(os.environ['WAIT_TEST_DATABASE']))
 now = datetime.fromisoformat(os.environ['WAIT_TEST_NOW'])
-worker = Worker(JobService(sessions, clock=lambda: now), 'doomed-worker', {})
+worker = Worker(JobService(sessions, clock=lambda: now), 'doomed-worker', {}, coordinator_failures=CoordinatorFailures(sessions, lambda: now, 'a' * 64))
 with sessions.begin() as session:
     job = session.get(Job, os.environ['WAIT_TEST_JOB'])
     schedule_wait(job, datetime.fromisoformat(os.environ['WAIT_TEST_DUE']), now=now)
@@ -89,6 +91,9 @@ signal.pause()
             # Saturate the ordinary sources: only the independent backstop
             # may touch the persisted request in this test.
             background_services=(lambda: True,),
+            coordinator_failures=CoordinatorFailures(
+                sessions, lambda: now[0], "a" * 64
+            ),
         )
         backstop = DueWaitBackstop(
             sessions,
@@ -348,6 +353,7 @@ def test_cancellation_committed_after_selection_wins_before_retry(postgres_engin
         JobService(sessions, clock=lambda: NOW),
         "quiet-worker",
         {job.kind: lambda request: calls.append(request.job_id) or {}},
+        coordinator_failures=CoordinatorFailures(sessions, lambda: NOW, "a" * 64),
     )
 
     def advance(key, wait):
@@ -476,7 +482,10 @@ def test_owner_handler_runs_after_the_selection_connection_is_released(postgres_
         return {}
 
     worker = Worker(
-        JobService(sessions, clock=lambda: NOW), "connection-probe", {job.kind: handler}
+        JobService(sessions, clock=lambda: NOW),
+        "connection-probe",
+        {job.kind: handler},
+        coordinator_failures=CoordinatorFailures(sessions, lambda: NOW, "a" * 64),
     )
     backstop = DueWaitBackstop(
         sessions,

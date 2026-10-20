@@ -839,6 +839,7 @@ def test_library_pagination_covers_more_than_one_page_without_gaps(
             .where(CatalogDocumentRevision.id == revision_id)
             .values(document={"kind": "model"})
         )
+    projection.refresh_catalog()
     # One document this Controller cannot read never takes the listing down.
     assert len(projection.models(limit=_MAX_PAGE_RECIPES).models) == 4
     assert len(projection.recipe_library(limit=1).recipes) == 1
@@ -1021,6 +1022,7 @@ def test_library_cursor_observes_a_changed_accepted_catalog(tmp_path: Path, kind
         )
         assert head is not None
         head.active_revision_id = new.id
+    projection.refresh_catalog()  # the production catalog-index refresh turn
     continued = read(first.next_cursor)
     items = (
         continued.models
@@ -1336,3 +1338,266 @@ def test_recipe_library_refuses_one_item_larger_than_wire_budget_actionably(
     assert str(MAX_CONTROL_DOCUMENT_BYTES) in detail
     observed = int(detail.split("requires ", 1)[1].split(" bytes", 1)[0])
     assert observed > MAX_CONTROL_DOCUMENT_BYTES
+
+
+@pytest.mark.usefixtures("damaged_json_rows")
+def test_detail_and_page_scope_history_and_latest_request_by_time(
+    tmp_path, monkeypatch, caplog
+):
+    """Catches catalog/history scans and reverse-UUID recency overriding a request."""
+    from datetime import timedelta
+
+    from sqlalchemy import event
+    from vonk_control.library_projection import catalog, local_state
+
+    index = json.loads((ROOT / "catalog-index.json").read_text())
+    engine = create_engine(f"sqlite:///{tmp_path / 'scoped-library.sqlite'}")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    _insert_canonical_rows(
+        sessions,
+        kind="model",
+        template=index["catalog_entities"][0]["document"],
+        count=32,
+    )
+    now = datetime(2026, 10, 20, tzinfo=UTC)
+    with sessions() as session:
+        target = session.scalar(
+            select(CatalogDocumentRevision).where(
+                CatalogDocumentRevision.slug == "model-0000"
+            )
+        )
+        assert target is not None
+        digest = target.content_digest
+    with sessions.begin() as session:
+        # Wrongly loading unrelated history would parse its damaged progress.
+        session.add_all(
+            [
+                ModelCacheOperation(
+                    id=str(uuid.uuid4()),
+                    request_key=str(uuid.uuid4()),
+                    kind="download",
+                    state="failed",
+                    payload={"model_content_sha256": "e" * 64},
+                    progress={"damaged": True},
+                    actor="test",
+                    created_at=now,
+                    updated_at=now,
+                )
+                for _ in range(64)
+            ]
+        )
+        progress = ModelCacheOperationProgress(
+            phase="downloading",
+            completed_artifacts=0,
+            total_artifacts=1,
+            downloaded_bytes=2,
+            expected_bytes=10,
+            total_bytes_known=True,
+            measurement=OperationProgress(
+                phase="downloading",
+                completed_bytes=2,
+                total_bytes=10,
+                total_bytes_known=True,
+                completed_items=0,
+                total_items=1,
+            ),
+        )
+        for identity, state, instant in [
+            (
+                "ffffffff-ffff-4fff-8fff-ffffffffffff",
+                "succeeded",
+                now - timedelta(seconds=1),
+            ),
+            ("00000000-0000-4000-8000-000000000001", "running", now),
+        ]:
+            session.add(
+                ModelCacheOperation(
+                    id=identity,
+                    request_key=str(uuid.uuid4()),
+                    kind="download",
+                    state=state,
+                    payload={"model_content_sha256": digest},
+                    progress=serialize_json_value(progress),
+                    actor="test",
+                    created_at=instant,
+                    updated_at=instant,
+                )
+            )
+    projection = LibraryProjection(
+        sessions, cursors=TokenCodec(b"e" * 32).cursor_codec(), clock=lambda: now
+    )
+    observed = []
+    reader = catalog._readable_document
+
+    def capture(row, parser):
+        observed.append(row.content_digest)
+        return reader(row, parser)
+
+    monkeypatch.setattr(catalog, "_readable_document", capture)
+    queries = []
+    event.listen(
+        engine,
+        "before_cursor_execute",
+        lambda connection, cursor, statement, parameters, context, many: queries.append(
+            (statement, parameters)
+        ),
+    )
+    detail = projection.model_detail("test/model-0000")
+    assert detail.local.preparation is not None
+    assert (
+        detail.local.preparation.operation_id == "00000000-0000-4000-8000-000000000001"
+    )
+    assert detail.local.preparation.state == "running"
+    assert observed == [digest]
+    observed.clear()
+    page = projection.models(limit=1, sort="name")
+    assert len(page.models) == 1 and page.models[0].local == detail.local
+    assert observed == []  # parsed catalog index, not another full catalog read
+    histories = [
+        statement
+        for statement, _ in queries
+        if "FROM model_cache_operations" in statement
+    ]
+    assert histories and all("WHERE" in statement for statement in histories)
+    assert any(
+        "ORDER BY model_cache_operations.created_at DESC" in statement
+        and "LIMIT" in statement
+        for statement in histories
+    )
+    assert "cache progress" not in caplog.text
+
+    # Optional SQL observation failure leaves readable catalog content usable.
+    def unavailable(*args):
+        from sqlalchemy.exc import OperationalError
+
+        raise OperationalError("optional local read", {}, ConnectionError("offline"))
+
+    monkeypatch.setattr(local_state, "_database_local_state", unavailable)
+    monkeypatch.setattr(projection, "_database_local_state", unavailable)
+    assert projection.model_detail("test/model-0000").local.controller == "unknown"
+
+
+@pytest.mark.parametrize("wrong_identity", [False, True])
+def test_imported_canary_resolves_exactly_while_discovery_index_is_stale(
+    tmp_path: Path, monkeypatch, wrong_identity: bool
+) -> None:
+    """Catches gating a committed exact Recipe on stale discovery or dropping its digest check."""
+    monkeypatch.setenv(
+        "VONK_SYNTHETIC_CANARY_INDEX",
+        "tests/fixtures/canonical-synthetic-canary/index.json",
+    )
+    import importlib.util
+    import sys
+    from importlib import import_module
+
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from vonk_control.auth import TokenCodec
+    from vonk_control.catalog_api import _managed_sync
+    from vonk_control.catalog_service import CatalogService
+    from vonk_control.catalog_sync import ManagedRecipeCatalogSyncService
+    from vonk_control.library_projection import LibraryProjection
+    from vonk_control.models import Base
+    from vonk_control.source_bundles import SourceBundleStore
+
+    import tests
+
+    # Keep the Controller test package and its pass clocks while loading the
+    # shared acceptance consumer; restore package search paths after this test.
+    repository = Path(__file__).resolve().parents[2]
+    monkeypatch.setattr(tests, "__path__", [*tests.__path__, str(repository / "tests")])
+    monkeypatch.setattr(sys, "path", list(sys.path))
+    lifecycle = import_module("tests.test_spark_lifecycle_runner")._module()
+    fixture = lifecycle._artifact_job_fixture(lifecycle._canonical_canary_fixture(ROOT))
+    specification = importlib.util.spec_from_file_location(
+        "spark_canary_catalog_import", lifecycle.CANARY_CATALOG_IMPORT
+    )
+    assert specification is not None and specification.loader is not None
+    program = importlib.util.module_from_spec(specification)
+    specification.loader.exec_module(program)
+    index = json.loads(fixture.index_bytes)
+    digest = index["recipes"][0]["package"]["sha256"]
+    archive = program._cache_package(
+        tmp_path / "packages", fixture.package_bytes, digest
+    )
+    engine = create_engine(f"sqlite:///{tmp_path / 'catalog.sqlite'}")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    clock = lambda: datetime(2026, 10, 15, tzinfo=UTC)
+    reader = program.FixtureReader(index, {digest: archive})
+    sync = ManagedRecipeCatalogSyncService(
+        sessions,
+        catalog=CatalogService(
+            sessions,
+            clock=clock,
+            cursors=TokenCodec(b"s" * 32).cursor_codec(),
+            source_bundles=SourceBundleStore(tmp_path / "bundles"),
+        ),
+        reader=reader,
+        clock=clock,
+    )
+
+    projection = LibraryProjection(
+        sessions, cursors=TokenCodec(b"c" * 32).cursor_codec(), clock=clock
+    )
+    view = program.sync_canary_catalog(
+        sync,
+        request_key="eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeef",
+        snapshot=reader.snapshot,
+    )
+
+    assert (view.state, view.commit, view.imported_count, view.problems) == (
+        "current",
+        fixture.source_commit,
+        1,
+        (),
+    )
+
+    # The fixture sync is a separate process in acceptance. The running API's
+    # periodic discovery index has not refreshed, but exact reads see the commit.
+    assert projection.recipe_library().recipes == []
+    selector = f"{fixture.publisher}/{fixture.slug}"
+    detail = projection.recipe_detail(selector)
+    if wrong_identity:
+        detail = detail.model_copy(
+            update={
+                "identity": detail.identity.model_copy(
+                    update={"content_sha256": "f" * 64}
+                )
+            }
+        )
+    calls: list[tuple[str, str]] = []
+
+    class Control:
+        @staticmethod
+        def request(method, path, payload=None, **kwargs):
+            calls.append((method, path))
+            if method == "GET" and path == "/api/recipe/library":
+                return 200, projection.recipe_library().model_dump(mode="json")
+            if method == "GET" and path == f"/api/recipe/{selector}":
+                return 200, detail.model_dump(mode="json")
+            raise AssertionError((method, path))
+
+    def resolved():
+        raise lifecycle.LifecycleError("recipe resolved before effects")
+
+    run = lifecycle.SparkLifecycle.__new__(lifecycle.SparkLifecycle)
+    run.control = Control()
+    run.browser = object()
+    run.synthetic_canary_fixture = fixture
+    run._import_canary_catalog = lambda *_args: _managed_sync(view).model_dump(
+        mode="json"
+    )
+    run._fleet_snapshot = resolved
+    run._installation_failure = lambda _stage, error: lifecycle.LifecycleError(
+        str(error)
+    )
+    expected = (
+        "canonical closure differs"
+        if wrong_identity
+        else "recipe resolved before effects"
+    )
+    with pytest.raises(lifecycle.LifecycleError, match=expected):
+        run._run_synthetic_canary("spk_" + "1" * 32)
+    assert calls == [("GET", f"/api/recipe/{selector}")]

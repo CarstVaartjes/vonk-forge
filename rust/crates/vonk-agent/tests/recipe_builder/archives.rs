@@ -192,7 +192,7 @@ fn faithful_untagged_oci_layout_loads_with_spark_podman() {
         String::from_utf8_lossy(&loaded.stderr)
     );
 
-    let mut inspect_arguments = storage_arguments;
+    let mut inspect_arguments = storage_arguments.clone();
     inspect_arguments.extend([
         "image".to_owned(),
         "inspect".to_owned(),
@@ -216,6 +216,42 @@ fn faithful_untagged_oci_layout_loads_with_spark_podman() {
         String::from_utf8_lossy(&inspected.stdout).trim(),
         format!("{}\tlinux\tarm64", fixture.manifest_digest)
     );
+
+    // Import provenance must not constrain a later reference to this content.
+    // Exercise the same config-identity tag used by RecipeBuilder, offline.
+    let alias = format!("localhost/vonk/alias-{fixture_id}:another");
+    let mut tag_arguments = storage_arguments;
+    tag_arguments.extend([
+        "tag".to_owned(),
+        fixture.config_digest.clone(),
+        alias.clone(),
+    ]);
+    let mut tag = Command::new("/usr/bin/podman");
+    configure_podman(&mut tag);
+    let tagged = tag
+        .args(&tag_arguments)
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    assert!(
+        tagged.status.success(),
+        "real Podman content retag failed: {}",
+        String::from_utf8_lossy(&tagged.stderr)
+    );
+    *inspect_arguments.last_mut().unwrap() = format!("{alias}@{}", fixture.manifest_digest);
+    let mut inspect_alias = Command::new("/usr/bin/podman");
+    configure_podman(&mut inspect_alias);
+    let inspected_alias = inspect_alias
+        .args(&inspect_arguments)
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    assert!(
+        inspected_alias.status.success(),
+        "real Podman exact alias failed: {}",
+        String::from_utf8_lossy(&inspected_alias.stderr)
+    );
+    assert_eq!(inspected_alias.stdout, inspected.stdout);
 }
 
 #[test]

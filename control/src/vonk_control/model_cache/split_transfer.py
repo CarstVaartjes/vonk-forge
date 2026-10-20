@@ -425,13 +425,19 @@ class SplitTransferMixin:
                 set_digest,
                 operation_id,
                 completed_artifacts,
+                fetch_only=fetch_only,
             )
         ):
             if fetch_only:
                 cache._require_transfer_running(operation_id)
                 return
             cache._complete_download(
-                spec, set_digest, part, operation_id, completed_artifacts
+                spec,
+                set_digest,
+                part,
+                operation_id,
+                completed_artifacts,
+                ingress_verified=True,
             )
             return
         with cache._stream_gate(operation_id)():

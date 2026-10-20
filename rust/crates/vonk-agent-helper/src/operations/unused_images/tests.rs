@@ -196,7 +196,7 @@ fn disk_demand_removes_young_unused_images_but_keeps_controller_and_container_re
 }
 
 #[test]
-fn a_satisfied_demand_does_not_evict_young_images_and_unknown_references_keep_old_ones() {
+fn unavailable_projection_keeps_young_images_but_reclaims_unreferenced_old_ones() {
     let (_temp, runner, executor) = executor();
     let unused = "a".repeat(64);
     pull(&executor, &unused);
@@ -206,7 +206,7 @@ fn a_satisfied_demand_does_not_evict_young_images_and_unknown_references_keep_ol
     pulled_ago(&executor, &unused, 25);
     fs::remove_file(executor.roots.agent_data.join("store-retention.json")).unwrap();
     executor.sweep_runtime_images_unused_for(UNUSED_IMAGE_GRACE, &|| Some(0));
-    assert!(present(&runner, &unused));
+    assert!(!present(&runner, &unused));
 }
 
 #[test]
@@ -217,4 +217,41 @@ fn pressure_never_removes_an_image_pulled_after_the_controllers_reference_scan()
     pull(&executor, &image);
     executor.sweep_runtime_images_unused_for(UNUSED_IMAGE_GRACE, &|| Some(0));
     assert!(present(&runner, &image));
+}
+
+#[test]
+fn stale_or_unreadable_projection_cannot_veto_safe_image_reclamation() {
+    // Catches a stale scan globally vetoing cleanup, while retaining every
+    // readable protection and the installation/container/pull safety boundaries.
+    for corrupt in [false, true] {
+        let (_temp, runner, executor) = executor();
+        let (unused, installed, running, protected) = (
+            "a".repeat(64),
+            "b".repeat(64),
+            "d".repeat(64),
+            "e".repeat(64),
+        );
+        for manifest in [&unused, &installed, &running, &protected] {
+            pull(&executor, manifest);
+            pulled_ago(&executor, manifest, 25);
+        }
+        install(&executor, &installed);
+        runner.in_use.lock().unwrap().insert(local(&running));
+        retention(&executor, 100, vec![protected.clone()]);
+        let path = executor.roots.agent_data.join("store-retention.json");
+        if corrupt {
+            fs::write(&path, b"{").unwrap();
+        } else {
+            let mut request: vonk_agent_protocol::generated::StoreRetentionRequest =
+                serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+            request.expires_at = 0;
+            fs::write(&path, serde_json::to_vec(&request).unwrap()).unwrap();
+        }
+        executor.sweep_runtime_images_unused_for(UNUSED_IMAGE_GRACE, &|| Some(0));
+        assert!(!present(&runner, &unused));
+        assert!(present(&runner, &installed) && present(&runner, &running));
+        if !corrupt {
+            assert!(present(&runner, &protected));
+        }
+    }
 }

@@ -196,6 +196,7 @@ def test_revocation_confirmation_recovers_through_worker_callback(service):
     # Retirement is already complete; repeated requests do not reopen a gate.
     enrollment.revoke_node(NODE_ID, "admin")
     authority.revoke_failures.clear()
+    from vonk_control.coordinator_failures import CoordinatorFailures
     from vonk_control.jobs import JobService
     from vonk_control.worker import Worker
 
@@ -204,6 +205,7 @@ def test_revocation_confirmation_recovers_through_worker_callback(service):
         "enrollment-worker",
         {},
         background_services=(enrollment.reconcile_revocations,),
+        coordinator_failures=CoordinatorFailures(sessions, enrollment._clock, "a" * 64),
     )
     assert worker.run_once()
     assert enrollment.revocation_status(NODE_ID).ca_confirmation_complete

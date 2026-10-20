@@ -28,6 +28,7 @@ from ..library_contract import (
 from ..model_cache.resolution import ResolutionMixin
 from ..model_cache.source_helpers import _model_selector
 from ..models import CatalogDocumentRevision
+from ..operator_receipt_contract import ReceiptOwner
 from ..request_fault import RequestFault
 from .common import (
     _LIBRARY_ORDER,
@@ -63,8 +64,14 @@ def models(
         raise RequestFault("model library limit is invalid")
     if sort not in {"updated", "name"}:
         raise RequestFault("model library sort is invalid")
-    snapshot = self._local_state_snapshot()
-    model_rows, recipe_rows = self._documents_for_snapshot(snapshot)
+    model_rows, recipe_rows = self._documents_for_snapshot(None)
+    snapshot = (
+        self._local_state_snapshot(
+            [row.content_digest for row, _ in (*model_rows, *recipe_rows)]
+        )
+        if cached
+        else None
+    )
     alignment_by_model = self._alignment_by_model(
         document for _, document in recipe_rows
     )
@@ -160,6 +167,7 @@ def models(
             )
         ]
     response = ModelLibraryResponse(
+        catalog_observed_at=_utc(self._catalog_observed_at),
         generated_at=_utc(self._clock()),
         library=self._library_release(),
         models=[],
@@ -196,8 +204,23 @@ def models(
             boundary=boundary,
         )
 
+    selected = filtered[:limit]
+    if not cached:
+        snapshot = self._local_state_snapshot(
+            [item.identity.content_sha256 for item in selected]
+        )
+        selected = [
+            item.model_copy(
+                update={
+                    "local": self._local(
+                        item.identity.content_sha256, kind="model", snapshot=snapshot
+                    )
+                }
+            )
+            for item in selected
+        ]
     page, next_cursor = _bounded_library_page(
-        filtered[:limit],
+        selected,
         has_more_after_candidates=len(filtered) > limit,
         collection_field="models",
         empty_response=response,
@@ -211,28 +234,22 @@ def model_detail(self: LibraryProjection, selector: str) -> ModelDetailResponse:
         digest = ResolutionMixin._resolve_model_selector_in_session(
             session, _model_selector(selector).casefold()
         )
-    snapshot = self._local_state_snapshot()
-    model_rows, recipe_rows = self._documents_for_snapshot(snapshot)
-    alignment_by_model = self._alignment_by_model(
-        document for _, document in recipe_rows
+    rows = self._catalog_documents(
+        kind="model",
+        local_digests=(digest,),
+        digests=(digest,),
+        reader=_canonical_model,
     )
-    entries = [
-        self._model_projection(
-            row,
-            model,
-            snapshot,
-            alignment=sorted(
-                alignment_by_model.get(
-                    (model.identity.publisher, model.identity.slug), ()
-                )
-            ),
-        )
-        for row, model in model_rows
-    ]
-    candidates = [entry for entry in entries if entry.identity.content_sha256 == digest]
-    if not candidates:
+    if not rows:
         raise KeyError(selector)
-    entry = max(candidates, key=lambda item: item.updated_at)
+    row, model = max(rows, key=lambda pair: pair[0].created_at)
+    # Alignment comes from the derived catalog index, never a catalog read.
+    _, recipes = self._documents_for_snapshot(None)
+    alignment = self._alignment_by_model(document for _, document in recipes).get(
+        (model.identity.publisher, model.identity.slug), ()
+    )
+    snapshot = self._local_state_snapshot((digest,))
+    entry = self._model_projection(row, model, snapshot, alignment=sorted(alignment))
     return ModelDetailResponse.model_validate(entry.model_dump(mode="python"))
 
 
@@ -263,8 +280,14 @@ def recipe_library(
     if not assess and (ready is not None or fits_fleet is not None):
         raise RequestFault("readiness filters require assessment")
     deadline = time.monotonic() + self._request_budget
-    snapshot = self._local_state_snapshot()
-    model_rows, recipe_rows = self._documents_for_snapshot(snapshot)
+    model_rows, recipe_rows = self._documents_for_snapshot(None)
+    snapshot = (
+        self._local_state_snapshot(
+            [row.content_digest for row, _ in (*model_rows, *recipe_rows)]
+        )
+        if cached
+        else None
+    )
     model_by_key = {
         (model.identity.publisher, model.identity.slug, row.content_digest): model
         for row, model in model_rows
@@ -435,9 +458,26 @@ def recipe_library(
             )
         ]
     candidates = filtered[:limit]
+    if not cached:
+        snapshot = self._local_state_snapshot(
+            [item.identity.content_sha256 for item in candidates]
+        )
+        candidates = [
+            item.model_copy(
+                update={
+                    "local": self._local(
+                        item.identity.content_sha256,
+                        kind=ReceiptOwner.RECIPE,
+                        snapshot=snapshot,
+                    )
+                }
+            )
+            for item in candidates
+        ]
     if assess and not filtering_assessment:
         candidates = self._assessed(candidates, deadline=deadline)
     response = RecipeLibraryResponse(
+        catalog_observed_at=_utc(self._catalog_observed_at),
         generated_at=_utc(self._clock()),
         library=self._library_release(),
         recipes=[],
@@ -489,8 +529,58 @@ def recipe_library(
 
 def recipe_detail(self: LibraryProjection, selector: str) -> RecipeDetailResponse:
     deadline = time.monotonic() + self._request_budget
-    snapshot = self._local_state_snapshot()
-    model_rows, recipe_rows = self._documents_for_snapshot(snapshot)
+    wanted = selector.casefold()
+    with self._sessions() as session:
+        query = select(CatalogDocumentRevision).where(
+            CatalogDocumentRevision.kind == ReceiptOwner.RECIPE,
+            CatalogDocumentRevision.state == "active",
+            active_head_revision(),
+        )
+        if "/" in wanted:
+            publisher, slug = wanted.split("/", 1)
+            query = query.where(
+                CatalogDocumentRevision.publisher == publisher,
+                CatalogDocumentRevision.slug == slug,
+            )
+        else:
+            query = query.where(CatalogDocumentRevision.slug == wanted)
+        exact = list(session.scalars(query))
+    if not exact:
+        raise KeyError(selector)
+    if len(exact) > 1:
+        from .common import LibrarySelectorAmbiguous
+
+        raise LibrarySelectorAmbiguous(
+            selector, [f"{row.publisher}/{row.slug}" for row in exact]
+        )
+    exact_recipe = _canonical_recipe(exact[0])
+    model_digests = [
+        selection.model.content_sha256 for selection in exact_recipe.models
+    ]
+    model_rows = self._catalog_documents(
+        kind="model",
+        local_digests=model_digests,
+        digests=model_digests,
+        reader=_canonical_model,
+    )
+    _, indexed_recipes = self._documents_for_snapshot(None)
+    recipe_rows = [
+        (exact[0], exact_recipe),
+        *[
+            (row, recipe)
+            for row, recipe in indexed_recipes
+            # A stale index may still contain this selector's predecessor.
+            if row.document_id != exact[0].document_id
+            and row.content_digest != exact[0].content_digest
+            and any(
+                selection.model.content_sha256 in model_digests
+                for selection in recipe.models
+            )
+        ],
+    ]
+    snapshot = self._local_state_snapshot(
+        [row.content_digest for row, _ in recipe_rows]
+    )
     model_by_key = {
         (model.identity.publisher, model.identity.slug, row.content_digest): model
         for row, model in model_rows
@@ -499,13 +589,7 @@ def recipe_detail(self: LibraryProjection, selector: str) -> RecipeDetailRespons
         self._recipe_projection(row, recipe, model_by_key, snapshot)
         for row, recipe in recipe_rows
     ]
-    entry = self._resolve_selector(
-        entries,
-        selector,
-        lambda item: (item.identity.publisher, item.identity.slug),
-    )
-    assert isinstance(entry, LibraryRecipeProjection)
-    entry = self._assessed([entry], deadline=deadline)[0]
+    entry = self._assessed([entries[0]], deadline=deadline)[0]
     recipe = next(
         document
         for row, document in recipe_rows
@@ -582,7 +666,7 @@ def authoring_recipe_detail(
         revision = session.scalar(
             select(CatalogDocumentRevision).where(
                 CatalogDocumentRevision.document_id == recipe_id,
-                CatalogDocumentRevision.kind == "recipe",
+                CatalogDocumentRevision.kind == ReceiptOwner.RECIPE,
                 CatalogDocumentRevision.state == "active",
                 active_head_revision(),
             )
@@ -598,6 +682,9 @@ def authoring_recipe_detail(
                     select(CatalogDocumentRevision).where(
                         CatalogDocumentRevision.kind == "model",
                         CatalogDocumentRevision.state == "active",
+                        CatalogDocumentRevision.content_digest.in_(
+                            [reference.content_sha256 for reference in references]
+                        ),
                     )
                 )
             )

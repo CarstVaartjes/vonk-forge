@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Annotated, Any, NoReturn
 
-from fastapi import FastAPI, HTTPException, Path, Query, Request, status
+from fastapi import Depends, FastAPI, HTTPException, Path, Query, Request, status
 from vonk_agent_protocol import InvalidRequestError
 
 from .api_availability import AVAILABILITY_ERRORS
@@ -21,7 +21,11 @@ from .fleet_profile_contract import (
     FleetProfileReadView,
     FleetProfileView,
 )
-from .fleet_profiles import FleetProfileConflict, FleetProfilePermissionDenied
+from .fleet_profiles import (
+    FleetProfileConflict,
+    FleetProfilePermissionDenied,
+    FleetProfileService,
+)
 from .integer_domains import MAX_DATABASE_INTEGER
 from .operation_api import bounded_error_responses
 from .operator_acceptance import (
@@ -89,15 +93,23 @@ def install_fleet_profile_routes(
         if actor.role not in MUTATION_ROLES[(method, route)]:
             raise HTTPException(status_code=403, detail="insufficient role")
 
+    profile_dependency = Depends(service)
+
     @app.get(
         "/api/profile",
         response_model=FleetProfileList,
-        responses=bounded_error_responses(401, 503),
+        responses=bounded_error_responses(401, 422, 503),
         operation_id="listProfiles",
     )
-    def list_profiles(_actor: Actor = authenticated) -> FleetProfileList:
+    def list_profiles(
+        _actor: Actor = authenticated,
+        profile_service: FleetProfileService = profile_dependency,
+        after: Annotated[int, Query(ge=0, le=MAX_DATABASE_INTEGER)] = 0,
+    ) -> FleetProfileList:
         try:
-            return service().list()
+            return (
+                profile_service.list(after=after) if after else profile_service.list()
+            )
         except HTTPException:
             raise
         except AVAILABILITY_ERRORS:

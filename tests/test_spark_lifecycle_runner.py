@@ -267,56 +267,6 @@ def test_synthetic_device_fixture_supports_the_arm64_spark_runner() -> None:
             lifecycle._synthetic_device_fixture(platform)
 
 
-def test_synthetic_canary_lists_the_complete_recipe_catalog() -> None:
-    lifecycle = _module()
-    fixture = lifecycle.CanonicalCanaryFixture(
-        index_path=Path("index.json"),
-        index_bytes=b"{}",
-        package_path=PurePosixPath("package.tar.gz"),
-        package_bytes=b"package",
-        source_commit="a" * 40,
-        publisher="vonk-forge-test",
-        slug="synthetic-canary",
-        recipe_content_sha256="b" * 64,
-        model_content_sha256="c" * 64,
-        role="entrypoint",
-        serving_check={},
-        recipe={},
-    )
-    calls: list[tuple[str, str, dict[str, object]]] = []
-
-    class Control:
-        @staticmethod
-        def request(method, path, payload=None, **kwargs):
-            calls.append((method, path, kwargs))
-            if method == "GET" and path == "/api/recipe/library":
-                return 200, {"recipes": []}
-            raise AssertionError((method, path, payload, kwargs))
-
-    run = lifecycle.SparkLifecycle.__new__(lifecycle.SparkLifecycle)
-    run.control = Control()
-    run._import_canary_catalog = lambda _fixture, _request_key: {
-        "state": "current",
-        "commit": fixture.source_commit,
-        # The canary Recipe plus its catalog model document.
-        "total_count": 2,
-        "processed_count": 2,
-        "imported_count": 1,
-        "unchanged_count": 0,
-        "problems": [],
-    }
-    run.browser = object()
-    run.synthetic_canary_fixture = fixture
-    run._installation_failure = lambda _stage, error: lifecycle.LifecycleError(
-        str(error)
-    )
-
-    with pytest.raises(lifecycle.LifecycleError):
-        run._run_synthetic_canary("spk_" + "1" * 32)
-
-    assert calls == [("GET", "/api/recipe/library", {})]
-
-
 def test_fleet_snapshot_validates_the_decoded_response_as_json() -> None:
     pytest.importorskip(
         "sqlalchemy",

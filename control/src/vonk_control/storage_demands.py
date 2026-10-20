@@ -53,10 +53,11 @@ class StorageRelief:
     #: Eviction is paused after removals that freed far less than promised: a
     #: wait that ends by itself, not a final answer.
     paused: bool = False
+    #: Fresh capacity report after any removal has settled. None means the
+    #: collector cannot yet certify a final measured capacity verdict.
+    inventory_observed_at: datetime | None = None
 
 
-STORAGE_EVICTING = StorageDemandCode.EVICTING
-STORAGE_INSUFFICIENT = StorageDemandCode.INSUFFICIENT_AFTER_EVICTION
 STORAGE_EVICTING = StorageDemandCode.EVICTING
 STORAGE_INSUFFICIENT = StorageDemandCode.INSUFFICIENT_AFTER_EVICTION
 STORAGE_EVICTION_TIMED_OUT = StorageDemandCode.EVICTION_TIMED_OUT

@@ -25,7 +25,7 @@ pub const EXITED_SERVING_SWEEP_INTERVAL: Duration = Duration::from_secs(60 * 60)
 const GRACE: chrono::TimeDelta = chrono::TimeDelta::hours(24);
 
 /// One listing names at most this many exited managed containers, newest
-/// first, full ids only; older ones come into view as these are removed.
+/// first, full ids only; a before cursor continues past protected entries.
 const CLAIM_DIRECTORY: rustix::fs::OFlags = rustix::fs::OFlags::RDONLY
     .union(rustix::fs::OFlags::DIRECTORY)
     .union(rustix::fs::OFlags::NOFOLLOW)
@@ -97,7 +97,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
             );
             return;
         }
-        let ids = match self.list_exited_managed() {
+        let mut ids = match self.list_exited_managed(None) {
             Ok(ids) => ids,
             Err(error) => {
                 eprintln!(
@@ -106,43 +106,60 @@ impl<R: CommandRunner> OperationExecutor<R> {
                 return;
             }
         };
-        for id in ids {
-            let Some(container) = self.read_exited_serving(&id) else {
-                continue;
+        loop {
+            // Fetch before removal so Docker can still resolve the cursor id.
+            let next_page = if ids.len() == MAX_LISTED {
+                self.list_exited_managed(ids.last().map(String::as_str))
+                    .map(Some)
+            } else {
+                Ok(None)
             };
-            if now - container.exited_at < GRACE {
-                continue;
-            }
-            match self.run_claim(container.run_id) {
-                Claim::Absent => {}
-                Claim::Held => continue,
-                Claim::Unknown(error) => {
-                    eprintln!(
-                        "vonk-agent-helper: exited serving container {} of run {} kept: its claim is unreadable: {error}",
-                        container.id, container.run_id
-                    );
+            for id in ids {
+                let Some(container) = self.read_exited_serving(&id) else {
+                    continue;
+                };
+                if now - container.exited_at < GRACE {
                     continue;
                 }
+                match self.run_claim(container.run_id) {
+                    Claim::Absent => {}
+                    Claim::Held => continue,
+                    Claim::Unknown(error) => {
+                        eprintln!(
+                            "vonk-agent-helper: exited serving container {} of run {} kept: its claim is unreadable: {error}",
+                            container.id, container.run_id
+                        );
+                        continue;
+                    }
+                }
+                let outcome = self
+                    .lock_installation_runtime(&container.installation_id.to_string())
+                    .and_then(|_lock| self.remove_exited_serving(&container));
+                match outcome {
+                    Ok(()) => eprintln!(
+                        "vonk-agent-helper: exited serving container {} of ended run {} removed",
+                        container.id, container.run_id
+                    ),
+                    Err(error) => eprintln!(
+                        "vonk-agent-helper: exited serving container {} of ended run {} remains: {error}; retried next pass",
+                        container.id, container.run_id
+                    ),
+                }
             }
-            let outcome = self
-                .lock_installation_runtime(&container.installation_id.to_string())
-                .and_then(|_lock| self.remove_exited_serving(&container));
-            match outcome {
-                Ok(()) => eprintln!(
-                    "vonk-agent-helper: exited serving container {} of ended run {} removed",
-                    container.id, container.run_id
-                ),
-                Err(error) => eprintln!(
-                    "vonk-agent-helper: exited serving container {} of ended run {} remains: {error}; retried next pass",
-                    container.id, container.run_id
-                ),
+            match next_page {
+                Ok(Some(next)) => ids = next,
+                Ok(None) => break,
+                Err(error) => {
+                    eprintln!("vonk-agent-helper: exited serving continuation deferred: {error}");
+                    break;
+                }
             }
         }
     }
 
     /// Full ids of exited managed containers, newest first, bounded.
-    fn list_exited_managed(&self) -> Result<Vec<String>, OperationError> {
-        let arguments = [
+    fn list_exited_managed(&self, before: Option<&str>) -> Result<Vec<String>, OperationError> {
+        let mut arguments = [
             "container",
             "ls",
             "--all",
@@ -157,7 +174,11 @@ impl<R: CommandRunner> OperationExecutor<R> {
             "--filter",
             "status=dead",
         ]
-        .map(str::to_owned);
+        .map(str::to_owned)
+        .to_vec();
+        if let Some(before) = before {
+            arguments.extend(["--filter".to_owned(), format!("before={before}")]);
+        }
         let listing = self.run_docker_with_timeout(&arguments, Duration::from_secs(15))?;
         if !listing.success {
             return Err(CommandFailure::exit(&listing).into());

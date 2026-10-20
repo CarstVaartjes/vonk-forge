@@ -14,6 +14,7 @@ from .models import (
     ArtifactJob,
     ArtifactLifecycleGate,
     Base,
+    CoordinatorFailure,
     FleetProfileApplication,
     FleetProfileSelection,
     Job,
@@ -41,6 +42,7 @@ ADAPTER_WAIT_KINDS = {
 }
 
 WAIT_MODELS: Mapping[WaitOwnerKind, type[Base]] = {
+    WaitOwnerKind.COORDINATOR: CoordinatorFailure,
     WaitOwnerKind.AGENT_OPERATION: AgentOperation,
     WaitOwnerKind.AGENT_UPGRADE: Job,
     WaitOwnerKind.ARTIFACT_JOB: ArtifactJob,
