@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import json
+from datetime import timedelta
 from pathlib import Path
 from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
 from vonk_agent_protocol import (
+    AgentClaim,
     AgentInstallResult,
     AgentResult,
     AgentResultState,
@@ -35,6 +37,7 @@ from vonk_agent_protocol.runtime_preflight import (
     RuntimePreflightResult,
 )
 from vonk_control.agent_jobs import AgentJobService, StaleAgentFence
+from vonk_control.lifecycle.agent_operation import AgentOperationAdapter
 from vonk_control.models import AgentNode, AgentOperation, AgentOperationAttempt, Job
 
 from . import test_agent_jobs_postgres as fixtures
@@ -104,8 +107,32 @@ def _accepted(service, kind: Kind = Kind.RECIPE_INSTALL):
     owner = parent(sessions, clock)
     payload, result = _content(kind)
     operation = queue.enqueue(owner.id, NODE_A, kind, COMMIT, payload)
-    claim = claim_agent(queue, NODE_A, "serial-a")
-    assert claim is not None
+    if kind is Kind.RECIPE_BUILD:
+        # Inject a crash after the real lifecycle claim owner committed. Build
+        # admission is separate; this test starts with an accepted exact effect.
+        claim = AgentClaim(
+            fence=str(uuid4()),
+            operation=kind,
+            payload=payload,
+            deadline=clock.now + timedelta(seconds=30),
+        )
+        with sessions.begin() as session:
+            row = session.get(AgentOperation, operation.id)
+            job = session.get(Job, owner.id)
+            assert row is not None and job is not None
+            attempt = AgentOperationAdapter(session).start_attempt(
+                row,
+                job,
+                "serial-a",
+                claim.fence,
+                claim.deadline,
+                clock.now,
+                progress=None,
+            )
+            assert attempt is not None
+    else:
+        claim = claim_agent(queue, NODE_A, "serial-a")
+        assert claim is not None
     receipt = AgentResult(
         fence=claim.fence,
         state=AgentResultState.SUCCEEDED,
