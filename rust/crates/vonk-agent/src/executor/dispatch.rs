@@ -8,7 +8,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
         &self,
         claim: &AgentClaim,
     ) -> Option<operation_observation::OperationObservation> {
-        self.observe_operation(claim).await
+        Some(self.observe_operation(claim, None).await)
     }
     async fn execute(
         &self,
@@ -88,7 +88,22 @@ impl<R: ProcessRunner> Executor for ControlExecutor<'_, R> {
         &self,
         claim: &AgentClaim,
     ) -> Option<operation_observation::OperationObservation> {
-        self.recipes.observe_operation(claim).await
+        Some(
+            self.recipes
+                .observe_operation(
+                    claim,
+                    (claim.operation == AgentOperation::AgentUpgradeV1).then(|| {
+                        super::upgrade_observation::UpgradeObservation {
+                            node_id: self.upgrades.client.node_id(),
+                            identity: self.runtime_identity,
+                            receipt: crate::package_activation::read_receipt(
+                                self.activation_receipt,
+                            ),
+                        }
+                    }),
+                )
+                .await,
+        )
     }
     async fn execute(
         &self,

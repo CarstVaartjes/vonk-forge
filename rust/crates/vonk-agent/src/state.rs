@@ -427,13 +427,7 @@ impl StateStore {
                     {
                         return Err(StateError::Identity);
                     }
-                    if stored.operation == accepted.operation.as_str()
-                        && stored.result.is_none()
-                        && crate::executor::operation_observation::ObservationKind::of(
-                            &accepted.operation,
-                        )
-                        .is_some()
-                    {
+                    if stored.operation == accepted.operation.as_str() && stored.result.is_none() {
                         return Err(StateError::Busy);
                     }
                 }
@@ -987,15 +981,7 @@ impl StateStore {
         if claim.fence.to_string() != fence || claim.operation.as_str() != operation {
             return Err(StateError::Identity);
         }
-        Ok(
-            if crate::executor::operation_observation::ObservationKind::of(&claim.operation)
-                .is_some()
-            {
-                vec![claim]
-            } else {
-                Vec::new()
-            },
-        )
+        Ok(vec![claim])
     }
 
     pub fn recover_interrupted(&mut self) -> Result<(), StateError> {
@@ -1021,9 +1007,7 @@ impl StateStore {
             let Ok(operation) = operation.parse::<AgentOperation>() else {
                 continue;
             };
-            if claim
-                && crate::executor::operation_observation::ObservationKind::of(&operation).is_some()
-            {
+            if claim {
                 continue;
             }
             // Startup cannot establish whether the host action finished.

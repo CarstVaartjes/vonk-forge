@@ -19,7 +19,12 @@ from vonk_agent_protocol import (
     canonical_message,
     validate_result_for_operation,
 )
-from vonk_agent_protocol.contracts import AgentResultPayload
+from vonk_agent_protocol.contracts import (
+    AgentResultPayload,
+    AgentUpgradePayload,
+    AgentUpgradeResult,
+)
+from vonk_agent_protocol.package_upgrade import PackageActivationPhase
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest, RecipeJobRunResult
 from vonk_agent_protocol.state_machines import NodeIdentityState
 
@@ -44,17 +49,8 @@ RUNTIME_KINDS = frozenset(
     }
 )
 
-OBSERVATION_KINDS = RUNTIME_KINDS | frozenset(
-    {
-        AgentOperation.RUNTIME_PREFLIGHT,
-        AgentOperation.ARTIFACT_DISTRIBUTION,
-        AgentOperation.RECIPE_BUILD,
-        AgentOperation.RECIPE_BUILD_CLEANUP,
-        AgentOperation.RECIPE_INSTALL,
-        AgentOperation.RECIPE_RECONCILE,
-        AgentOperation.RECIPE_UNINSTALL,
-    }
-)
+OBSERVATION_KINDS = frozenset(AgentOperation)
+_FAILURE_OBSERVATION_KINDS = RUNTIME_KINDS | {AgentOperation.AGENT_UPGRADE}
 
 
 def receipt_state(kind: str, receipt: object) -> AgentResultState:
@@ -68,7 +64,7 @@ def receipt_state(kind: str, receipt: object) -> AgentResultState:
                 return AgentResultState.OBSERVING
             if job.exit_code != 0:
                 return AgentResultState.FAILED
-    if kind in RUNTIME_KINDS:
+    if kind in _FAILURE_OBSERVATION_KINDS:
         try:
             failure = AgentFailureResult.model_validate_json(canonical_message(receipt))
         except (TypeError, ValueError):
@@ -133,7 +129,7 @@ def adopt_observation_receipt(
         and not isinstance(receipt, RecipeJobRunResult)
         and not (
             state == AgentResultState.FAILED
-            and operation.kind in RUNTIME_KINDS
+            and operation.kind in _FAILURE_OBSERVATION_KINDS
             and isinstance(receipt, AgentFailureResult)
             and receipt.uncertain is not True
             and receipt.failure_kind != AgentFailureKind.UNCERTAIN_EFFECT
@@ -213,6 +209,10 @@ def adopt_observation_receipt(
         return False
     if validated != receipt:
         return False
+    if operation.kind == AgentOperation.AGENT_UPGRADE and not _upgrade_receipt_current(
+        node, operation, attempt, parent, receipt, state
+    ):
+        return False
     # Re-observing a stored authenticated receipt is not agent contact and
     # cannot renew a lease, extend a grant or revive newer/cancelled intent.
     adapter = AgentOperationAdapter(session)
@@ -240,3 +240,36 @@ def adopt_observation_receipt(
         )
     service._aggregate_parent(session, operation.parent_job_id)
     return True
+
+
+def _upgrade_receipt_current(
+    node: AgentNode,
+    operation: StoredOperation,
+    attempt: AgentOperationAttempt,
+    parent: Job,
+    receipt: AgentResultPayload,
+    state: AgentResultState,
+) -> bool:
+    # Use the upgrade owner's exact contact decision, not a second success
+    # classifier. Observation itself never records contact or renews the fence.
+    from ..agent_upgrades.dispatch import DispatchMixin
+    from ..agent_upgrades.stored import _stored_package
+    from ..package_activation import matches_receipt
+
+    if isinstance(receipt, AgentUpgradeResult):
+        package = _stored_package(parent)
+        return package is not None and DispatchMixin._contact_proves_target(
+            node,
+            operation,
+            package,
+            AgentResult(fence=attempt.fence, state=state, result=receipt),
+        )
+    payload = column_value(operation, "payload")
+    return (
+        isinstance(receipt, AgentFailureResult)
+        and isinstance(payload, AgentUpgradePayload)
+        and receipt.package_activation is not None
+        and receipt.package_activation.phase == PackageActivationPhase.ROLLED_BACK
+        and matches_receipt(receipt.package_activation, payload, node.node_id)
+        and node.binary_digest == payload.rollback.source.binary_sha256
+    )

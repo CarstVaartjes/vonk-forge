@@ -162,6 +162,8 @@ pub enum RecipeObservationError {
 }
 
 pub struct ControlExecutor<'a, R> {
+    pub runtime_identity: &'a AgentRuntimeIdentity,
+    pub activation_receipt: &'a Path,
     pub recipes: RecipeExecutor<'a, R>,
     pub upgrades: AgentUpgradeExecutor<'a>,
 }
@@ -302,3 +304,7 @@ mod content_observation_tests;
 
 #[cfg(test)]
 mod runtime_observation_tests;
+
+mod upgrade_observation;
+#[cfg(test)]
+mod upgrade_observation_tests;
