@@ -20,7 +20,6 @@ from vonk_forge_contracts import RecipeDefinition
 from .. import job_states
 from ..artifact_lifecycle import (
     ArtifactIdentity,
-    ArtifactLifecycleError,
     require_reference_open,
 )
 from ..content_identity import same_image
@@ -39,7 +38,6 @@ from ..recipe_image_availability_contract import (
     AvailabilityBuildReceipt,
 )
 from ..runtime_image_preparation import (
-    RuntimeImagePreparationRefused,
     RuntimeImageReceipt,
     RuntimeImageReferenceIntent,
     prepare_runtime_image,
@@ -217,16 +215,11 @@ def _persist_receipt(
         reference = self._image_reference_intent_for_claim(operation_payload, claim)
         if operation_payload.image_reference_intent is not None and reference is None:
             raise _AvailabilityClaimLost()
-        try:
-            require_reference_open(
-                session,
-                (ArtifactIdentity("runtime-image", receipt.oci_archive_sha256),),
-                now=self._clock(),
-            )
-        except ArtifactLifecycleError as error:
-            raise RuntimeImagePreparationRefused(
-                error.code, error.detail, retryable=error.retryable
-            ) from error
+        require_reference_open(
+            session,
+            (ArtifactIdentity("runtime-image", receipt.oci_archive_sha256),),
+            now=self._clock(),
+        )
         operation.payload = serialize_json_value(
             operation_payload.model_copy(
                 update={"image_result": receipt, "image_reference_intent": None}
@@ -268,16 +261,11 @@ def _persist_provisional_image_reference(
                 LifecycleState.RUNNING, LifecycleState.OBSERVING
             ),
         )
-        try:
-            require_reference_open(
-                session,
-                (ArtifactIdentity("runtime-image", receipt.oci_archive_sha256),),
-                now=now,
-            )
-        except ArtifactLifecycleError as error:
-            raise RuntimeImagePreparationRefused(
-                error.code, error.detail, retryable=error.retryable
-            ) from error
+        require_reference_open(
+            session,
+            (ArtifactIdentity("runtime-image", receipt.oci_archive_sha256),),
+            now=now,
+        )
         payload = self._payload(operation)
         if isinstance(payload, Residue):
             return
