@@ -79,7 +79,7 @@ class FleetProfileService:
 
             objects: set[str] = set()
             for digest in sorted(digests):
-                named, _shared = _model_objects(session, digest)
+                named, _shared = _model_objects(session, digest, include_shared=False)
                 objects.update(named)
             try:
                 identities = tuple(

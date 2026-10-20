@@ -7,6 +7,21 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from sqlalchemy import select
+from vonk_agent_protocol import DesiredAssignmentState, LifecycleState, RunSwitchCode
+from vonk_agent_protocol.reason_codes.profiles import ProfileReasonCode
+from vonk_control.fleet_profile_contract import (
+    FleetProfileAssignmentInput,
+    FleetProfileDefinition,
+    FleetProfileInput,
+    FleetProfilePreview,
+    FleetProfileView,
+)
+from vonk_control.models import (
+    CatalogDocumentRevision,
+    ModelCacheSet,
+    NodeInventorySnapshot,
+)
 
 pytest_plugins = ("tests.test_profile_load_installed_cli",)
 
@@ -132,7 +147,9 @@ def test_installed_profile_edit_preserves_definition_and_rejects_concurrent_save
 
     assert stale.returncode == 2
     assert stale.stdout.count("\n") == 1
-    json.loads(stale.stdout)
+    refusal = json.loads(stale.stdout)
+    assert refusal["code"] == ProfileReasonCode.REQUEST_INVALID
+    assert "profile revision conflict" in refusal["detail"]
     assert concurrent_write_status == [200]
     assert state.calls == [
         ("GET", "/api/profile/1/definition", None),
@@ -163,3 +180,151 @@ def test_installed_profile_edit_preserves_definition_and_rejects_concurrent_save
     )
     assert fresh.status_code == 200
     assert fresh.json()["definition"]["name"] == "Fresh edit"
+
+
+@pytest.mark.parametrize("action", ["remove", "pin"])
+@pytest.mark.parametrize("fault", [None, "manifest", "catalog"])
+@pytest.mark.usefixtures("damaged_json_rows")
+def test_installed_remove_and_pin_save_ignore_unrelated_cache_evidence(
+    installed_vonkctl: Path,
+    postgres_engine,
+    tmp_path: Path,
+    fault: str | None,
+    action: str,
+) -> None:
+    """Catches a global removal-reference scan blocking ordinary profile edits."""
+    from .test_fleet_profile_api import _client, _headers
+    from .test_profile_installed_execution import _profile_service
+    from .test_recipe_operations import setup_services
+
+    sessions, lifecycle, _, _, _, nodes = setup_services(
+        tmp_path, engine=postgres_engine, nodes=2, mapping_node_count=1
+    )
+    profiles, _planner = _profile_service(sessions, lifecycle)
+    with sessions.begin() as session:
+        revision = session.scalar(
+            select(CatalogDocumentRevision).where(
+                CatalogDocumentRevision.kind == "recipe"
+            )
+        )
+        assert revision is not None
+        selector = f"{revision.publisher}/{revision.slug}"
+        inventory = session.scalar(
+            select(NodeInventorySnapshot).where(
+                NodeInventorySnapshot.node_id == nodes[1]
+            )
+        )
+        assert inventory is not None
+        inventory.disk_free_bytes = 0
+    definition = FleetProfileDefinition(
+        name="Hardware sweep",
+        assignments=[
+            FleetProfileAssignmentInput(
+                recipe_selector=selector,
+                spark_ids=[node],
+                assignment_name=alias,
+                desired_state=DesiredAssignmentState.RUNNING,
+            )
+            for node, alias in zip(nodes, ("admitted", "disk-blocked"), strict=True)
+        ],
+    )
+    saved = profiles.create(
+        FleetProfileInput.model_validate_json(definition.model_dump_json()),
+        actor="admin",
+        number=10,
+    )
+    api, codec = _client(sessions, profiles=profiles)
+    headers = _headers(codec, "administrator")
+    review_response = api.post("/api/profile/10/preview", headers=headers)
+    assert review_response.status_code == 200, review_response.text
+    review = FleetProfilePreview.model_validate_json(review_response.content)
+    decisions = {item.alias: item for item in review.admission_decisions}
+    assert decisions["admitted"].allowed
+    assert not decisions["disk-blocked"].allowed
+    assert any(
+        blocker.code == RunSwitchCode.INSUFFICIENT_DISK
+        for blocker in decisions["disk-blocked"].blockers
+    )
+    if fault == "manifest":
+        with sessions.begin() as session:
+            session.add(
+                ModelCacheSet(
+                    artifact_set_sha256="e" * 64,
+                    model_content_sha256="f" * 64,
+                    manifest={},
+                    expected_bytes=0,
+                    state=LifecycleState.FAILED,
+                    created_at=saved.created_at,
+                    updated_at=saved.updated_at,
+                    last_accessed_at=saved.updated_at,
+                )
+            )
+    elif fault == "catalog":
+        with sessions.begin() as session:
+            model = session.scalar(
+                select(CatalogDocumentRevision).where(
+                    CatalogDocumentRevision.kind == "model"
+                )
+            )
+            assert model is not None
+            session.add(
+                CatalogDocumentRevision(
+                    document_id=model.document_id,
+                    kind=model.kind,
+                    publisher=model.publisher,
+                    slug=model.slug,
+                    revision_number=model.revision_number + 1,
+                    schema_version=model.schema_version,
+                    state=model.state,
+                    document={},
+                    content_digest="f" * 64,
+                    created_by=model.created_by,
+                    created_at=model.created_at,
+                )
+            )
+    if action == "remove":
+        arguments = (
+            "remove",
+            "admitted",
+            "--yes",
+            "--profile",
+            "10",
+            "--timeout-seconds",
+            "3",
+        )
+        expected = definition.model_copy(
+            update={"assignments": definition.assignments[1:]}
+        )
+        number, revision = 10, saved.revision + 1
+    else:
+        expected = definition.model_copy(
+            update={"name": "Sweep pins", "assignments": definition.assignments[:1]}
+        )
+        pin_path = tmp_path / "pins.json"
+        pin_path.write_text(expected.model_dump_json())
+        arguments = (
+            "import",
+            "--file",
+            str(pin_path),
+            "--expected-revision",
+            "0",
+            "--profile",
+            "13",
+        )
+        number, revision = 13, 1
+    with _https_api_peer(tmp_path, api, headers) as (url, certificate, _peer):
+        environment = _process_environment(tmp_path, url, certificate, headers)
+        edited = subprocess.run(
+            [str(installed_vonkctl), "--json", "--no-input", "profile", *arguments],
+            env=environment,
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+            timeout=45,
+            check=False,
+        )
+        assert edited.returncode == 0, edited.stdout + edited.stderr
+        view = FleetProfileView.model_validate_json(edited.stdout)
+        assert view.definition == expected and view.revision == revision
+    persisted = profiles.definition_number(number)
+    assert persisted.definition == expected and persisted.revision == revision

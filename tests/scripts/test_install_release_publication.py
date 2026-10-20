@@ -486,8 +486,14 @@ def fault(name: str, key: str) -> bool:
     counters = object_root.parent / "faults"
     counters.mkdir(exist_ok=True)
     counter = counters / (name + "-" + key.replace("/", "_"))
-    seen = int(counter.read_text()) if counter.exists() else 0
-    counter.write_text(str(seen + 1))
+    with counter.open("a+", encoding="utf-8") as state:
+        fcntl.flock(state.fileno(), fcntl.LOCK_EX)
+        state.seek(0)
+        raw = state.read()
+        seen = int(raw) if raw else 0
+        state.seek(0)
+        state.truncate()
+        state.write(str(seen + 1))
     return seen < limit
 
 if command == "lsjson":

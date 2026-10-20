@@ -95,13 +95,21 @@ def _model_objects(
     digest: str,
     *,
     observation_issues: list[FleetRemovalObservationIssue] | None = None,
+    include_shared: bool = True,
 ) -> tuple[set[str], set[str]]:
     target_objects: set[str] = set()
     shared: set[str] = set()
     issues: list[FleetRemovalObservationIssue] = []
-    for revision in session.scalars(
-        select(CatalogDocumentRevision).where(CatalogDocumentRevision.kind == "model")
-    ):
+    revisions = select(CatalogDocumentRevision).where(
+        CatalogDocumentRevision.kind == "model"
+    )
+    cache_sets = select(ModelCacheSet)
+    if not include_shared:
+        # A profile acquires references only to this exact model. Unrelated
+        # damaged evidence matters to deletion, never to acquiring this pin.
+        revisions = revisions.where(CatalogDocumentRevision.content_digest == digest)
+        cache_sets = cache_sets.where(ModelCacheSet.model_content_sha256 == digest)
+    for revision in session.scalars(revisions):
         model = read_or_rebuild(
             kind=CatalogDocumentRevision.__tablename__,
             subject=revision.id,
@@ -115,7 +123,7 @@ def _model_objects(
             target_objects.update(objects)
         else:
             shared.update(objects)
-    for row in session.scalars(select(ModelCacheSet)):
+    for row in session.scalars(cache_sets):
         manifest = read_or_rebuild(
             kind=ModelCacheSet.__tablename__,
             subject=row.artifact_set_sha256,
