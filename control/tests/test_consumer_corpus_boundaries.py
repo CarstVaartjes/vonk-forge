@@ -16,15 +16,21 @@ import pytest
 from cryptography import x509
 from cryptography.hazmat.primitives import serialization
 from pydantic import ValidationError
+from sqlalchemy import select
+from sqlalchemy.engine import Engine
 from vonk_agent_protocol import (
     AgentClaim,
     AgentDirective,
+    AgentOperation,
     AgentProgress,
     AgentResult,
     OperationProgress,
+    canonical_message,
 )
 from vonk_agent_protocol.contracts import AgentFailureResult
 from vonk_agent_protocol.failure_evidence import FailureDiagnostics
+from vonk_control.agent_jobs.stored import column_message
+from vonk_control.models import AgentOperationAttempt
 from vonk_control.operation_api import (
     JobDetailResponse,
     JobProgress,
@@ -50,6 +56,7 @@ from .cross_language_consumer_corpus import (
     job_envelope,
 )
 from .recipe_stop_fixtures import recipe_stop_payload
+from .test_agent_api import NODE_A, agent_headers, make_agent_system, parent
 from .test_agent_restart_recovery_wire_bridge import _certificate_files
 from .test_operation_api import EnqueuedJob, Jobs, _client
 from .test_profile_load_installed_cli import _https_api_peer, _process_environment
@@ -371,3 +378,54 @@ def test_real_agent_client_reads_bounded_422_and_preserves_503_status(
         server.shutdown()
         server.server_close()
         thread.join(timeout=30)
+
+
+def test_rust_produced_retained_outcomes_cross_http_validation(
+    tmp_path: Path, postgres_engine: Engine
+) -> None:
+    """Catch Rust/Python result drift at FastAPI's decoded-body boundary.
+
+    Includes every outcome with and without the job's process receipt; merely
+    round-tripping Python-produced JSON misses producer and HTTP mode errors.
+    """
+    vector = (
+        Path(__file__).parents[2]
+        / "agent_protocol/src/vonk_agent_protocol/vectors/recipe-job-run-result-v1.json"
+    )
+    receipt = AgentResult.model_validate_json(vector.read_bytes()).result
+    result = rust("retained-outcomes", receipt.model_dump_json())
+    assert result.returncode == 0, result.stderr
+    client, services, _, clock = make_agent_system(tmp_path, engine=postgres_engine)
+    claim_vector = AgentClaim.model_validate_json(
+        vector.with_name("recipe-job-run-claim-v1.json").read_bytes()
+    )
+    for document in json.loads(result.stdout):
+        services.operations.enqueue(
+            parent(services.sessions, clock).id,
+            NODE_A,
+            AgentOperation.RECIPE_JOB_RUN,
+            "a" * 64,
+            claim_vector.payload,
+        )
+        claim = client.post("/agent/claim", headers=agent_headers(NODE_A, "serial-a"))
+        assert claim.status_code == 200, claim.text
+        document["fence"] = claim.json()["fence"]
+        raw = json.dumps(document).encode()
+        message = AgentResult.model_validate_json(raw)
+        response = client.post(
+            "/agent/result",
+            content=raw,
+            headers=agent_headers(NODE_A, "serial-a")
+            | {"content-type": "application/json"},
+        )
+        assert response.status_code == 204, response.text
+        with services.sessions() as session:
+            attempt = session.scalar(
+                select(AgentOperationAttempt).where(
+                    AgentOperationAttempt.fence == message.fence
+                )
+            )
+            assert attempt is not None
+            assert column_message(attempt, "result") == canonical_message(
+                message.stored_result()
+            )
