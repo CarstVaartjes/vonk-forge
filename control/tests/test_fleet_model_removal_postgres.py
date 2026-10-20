@@ -160,12 +160,11 @@ def test_finished_recipe_model_eviction_is_exact_durable_and_waits_for_evidence(
         cache.close()
 
 
+@pytest.mark.parametrize("download_active", [False, True])
 def test_shared_content_is_retained_on_nas_and_spark(
-    postgres_engine, tmp_path: Path
+    postgres_engine, tmp_path: Path, download_active: bool
 ) -> None:
-    """Catches model-slug deletion of bytes a different model still names,
-    and acceptance of a review after a pin was added.
-    """
+    """Retain shared bytes and another model's active download ownership."""
     Base.metadata.create_all(postgres_engine)
     world = Catalog(postgres_engine)
     now = datetime.now(UTC)
@@ -178,11 +177,20 @@ def test_shared_content_is_retained_on_nas_and_spark(
     )
     try:
         selector, _, path = _prepare_removal_target(
-            cache, world.sessions, tmp_path, slug="shared-model", data=b"shared weights"
+            cache, world.sessions, tmp_path, slug="shared-model", data=b"abc"
         )
-        _register_model(
-            world.sessions, _one_model(tmp_path, "other-model", b"shared weights")
+        other_selector = _register_model(
+            world.sessions, _one_model(tmp_path, "other-model", b"abc")
         )
+        other_download = (
+            cache.download_model_selector(
+                other_selector, actor="operator", request_key=str(uuid4())
+            )
+            if download_active
+            else None
+        )
+        if other_download is not None:
+            assert other_download.state == LifecycleState.QUEUED
         inventory(
             world.sessions,
             NODE,
@@ -204,7 +212,25 @@ def test_shared_content_is_retained_on_nas_and_spark(
         for _ in range(5):
             cache.advance_removals()
         assert cache.get_operation(accepted.id).state == LifecycleState.SUCCEEDED
-        assert path.read_bytes() == b"shared weights"
+        assert path.read_bytes() == b"abc"
+        if other_download is not None:
+            observed = cache.get_operation(other_download.id)
+            assert observed.state == LifecycleState.QUEUED
+            assert observed.cancellation is None
+            assert observed.request_key == other_download.request_key
+            # Reopening the service must see the same durable active owner;
+            # shared files are retention evidence, never cancellation authority.
+            cache.close()
+            cache = ModelCacheService(
+                world.sessions,
+                tmp_path / "nas",
+                reserve_bytes=0,
+                fixture_sources=True,
+                clock=lambda: now,
+            )
+            resumed = cache.get_operation(other_download.id)
+            assert resumed.state == LifecycleState.QUEUED
+            assert resumed.cancellation is None
         with world.sessions() as session:
             request = store_retention_request(session, NODE, now)
         assert request is not None and not request.remove_model_objects
