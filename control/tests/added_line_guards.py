@@ -16,6 +16,7 @@ from . import coordination_boundaries as coordination
 from . import deterministic_retries as retries
 from . import lifecycle_reasons as reasons
 from . import principle_guards as principles
+from . import progress_attempt_boundaries as progress_attempts
 from . import short_wall_clocks as wall_clocks
 from . import untyped_mapping_boundaries as mappings
 from . import vocabulary_literals as vocabulary
@@ -47,6 +48,7 @@ MODES = (
     "boundaries",
     "locks",
     "clocks",
+    "progress",
 )
 # The agent's messages a Controller test may send only as the stand-in pinned
 # to the agent's shared vector; built by hand they are the Controller's idea of
@@ -480,6 +482,11 @@ def check_source(
             )
         )
     if python and not is_test:
+        if "progress" in modes:
+            hits.extend(
+                (line, "monotonic progress without attempt key")
+                for line in progress_attempts.scan_source(source)
+            )
         if "mapping" in modes:
             hits.extend(
                 (site.line, "untyped mapping")

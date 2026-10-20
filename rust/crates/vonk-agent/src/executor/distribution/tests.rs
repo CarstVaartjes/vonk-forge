@@ -44,3 +44,45 @@ async fn supersession_interrupts_silent_work_and_fresh_work_runs() {
     );
     drop(lease_owner);
 }
+
+#[tokio::test]
+async fn a_reissued_distribution_drops_the_old_counter_baseline_before_copying() {
+    // Wrong implementation: re-observation reuses the fence, and executing the
+    // next copy keeps its old high-water snapshot instead of a fresh attempt.
+    use crate::executor::test_support::{NODE_ID, NoProcess, claim};
+    let root = tempfile::tempdir().unwrap();
+    let client = AgentHttpClient::for_http_test("http://127.0.0.1:9/", NODE_ID);
+    let mut order = claim();
+    order.operation = vonk_agent_protocol::AgentOperation::ArtifactDistributionV1;
+    order.payload = serde_json::from_str(include_str!(
+        "../../../../../../agent_protocol/fixtures/artifact-distribution-payload.json"
+    ))
+    .unwrap();
+    order.validate().unwrap();
+    client.set_progress_phase(order.fence, ProgressPhase::Copying);
+    client.set_progress_bytes(order.fence, 100, 200);
+    let previous = LoopClient::progress_observation(&client, order.fence).unwrap();
+    let executor = RecipeExecutor {
+        client: &client,
+        helper_socket: std::path::Path::new("unused"),
+        runtime: crate::oci::OciRuntime {
+            runner: &NoProcess,
+            data_root: root.path(),
+        },
+        runtime_root: root.path(),
+    };
+    let (_lease_owner, lease) = tokio::sync::watch::channel(order.deadline);
+    // Cancel before network effects. Admission still starts an attempt, and
+    // its real execution entry point must publish the reset baseline.
+    let (_cancel_owner, cancellation) = tokio::sync::watch::channel(true);
+    executor
+        .execute_distribution(&order, lease, cancellation)
+        .await;
+    let current = LoopClient::progress_observation(&client, order.fence).unwrap();
+    assert_eq!(current.completed_bytes, 0);
+    assert!(current.checkpoint.is_some());
+    assert_ne!(
+        current.checkpoint.unwrap().key,
+        previous.checkpoint.unwrap().key
+    );
+}

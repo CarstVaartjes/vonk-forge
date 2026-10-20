@@ -857,3 +857,12 @@ def test_count_guard_does_not_exempt_the_uncancelled_else_branch() -> None:
         "if row.cancel_requested:\n    return cancelled(row)\n"
         "else:\n    if row.retry_count >= 5:\n        return None\n"
     )
+
+
+def test_monotonic_agent_progress_requires_attempt_key_on_added_lines():
+    # Wrong implementation: the whole-tree rule exists but CI's patch gate
+    # accepts a new lifetime monotonic rejection on agent ingress.
+    source = 'def ingress(previous, current):\n    if current.completed_bytes < previous.completed_bytes:\n        raise ValueError("backwards")\n'
+    path = "control/src/vonk_control/agent_jobs/example.py"
+    assert check_source(path, source, {2, 3}, modes=("progress",))
+    assert not check_source(path, source, {1}, modes=("progress",))

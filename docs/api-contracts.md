@@ -915,3 +915,24 @@ classified separately from observational previews and credential login, and thei
 receipt references the accepted attempt (or exact package-activation nonce).
 Diagnostic repeat counters are not receipt owners. Commit/storage failure cannot
 be acknowledged as acceptance; retry retains the existing effect owner.
+
+### Restarted agent progress
+
+An agent execution uses `OperationProgress.checkpoint.key` as its opaque attempt
+identity. Re-executing a transfer, even under the same Controller fence, creates
+a fresh key and starts new byte, item, activity, member and checkpoint counters.
+Only snapshots with the same explicit key are subject to monotonic validation;
+unkeyed observations cannot prove a regression. Partial Controller updates
+retain the current key. A new key resets throughput sampling but does not itself
+count as forward progress or extend a stall window.
+
+A distribution completion receipt measures model bytes, while heartbeat bytes
+also include runtime image pulls. The receipt settles the exact effect; it does
+not overwrite or validate the order-wide measured byte count. Re-observation
+can therefore confirm completed content after a cache restart without turning
+advisory progress into a refusal of the operation.
+
+A fresh, complete installation-directory inventory makes an absent installed
+rank planned and its installation partial, so normal preparation can reinstall
+it. Unknown, truncated and stale listings prove no absence. This cache repair
+never proves a running workload stopped or releases its resource claims.

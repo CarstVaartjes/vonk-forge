@@ -1,7 +1,11 @@
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from vonk_agent_protocol import OperationMemberProgress, OperationProgress
+from vonk_agent_protocol import (
+    OperationCheckpoint,
+    OperationMemberProgress,
+    OperationProgress,
+)
 from vonk_control.operation_contract import validate_progress_update
 from vonk_control.operation_progress import (
     aggregate_progress,
@@ -16,6 +20,7 @@ NOW = datetime(2026, 9, 8, tzinfo=UTC)
 
 def sample(previous=None, *, seconds=0, **values) -> OperationProgress:
     values.setdefault("phase", "copying")
+    values.setdefault("checkpoint", OperationCheckpoint(key="copy", sequence=0))
     current = validate_progress_update(previous, OperationProgress(**values))
     return sample_progress(previous, current, NOW + timedelta(seconds=seconds))
 
@@ -249,7 +254,11 @@ def test_subprocess_observations_advance_without_becoming_completed_items() -> N
     from vonk_agent_protocol import ProgressPhase
     from vonk_control.stall_window import progress_advanced
 
-    before = OperationProgress(phase=ProgressPhase.BUILDING.value, activity_sequence=1)
+    before = OperationProgress(
+        phase=ProgressPhase.BUILDING.value,
+        activity_sequence=1,
+        checkpoint=OperationCheckpoint(key="build", sequence=0),
+    )
     after = validate_progress_update(
         before,
         OperationProgress(phase=ProgressPhase.BUILDING.value, activity_sequence=4096),
@@ -260,3 +269,65 @@ def test_subprocess_observations_advance_without_becoming_completed_items() -> N
     assert not progress_advanced(after, after)
     with pytest.raises(ValueError, match="activity sequence"):
         validate_progress_update(after, before)
+
+
+def test_restart_changes_checkpoint_key_and_resets_all_attempt_counters():
+    # Wrong implementation: one lifetime high-water mark rejects a restarted
+    # copy, including member and activity evidence, before it can renew.
+    prior = OperationProgress(
+        phase="copying",
+        completed_bytes=100,
+        completed_items=2,
+        activity_sequence=20,
+        checkpoint=OperationCheckpoint(key="first-copy", sequence=10),
+        members=[
+            OperationMemberProgress(
+                member_id="rank", phase="copying", completed_bytes=100
+            )
+        ],
+    )
+    restarted = OperationProgress(
+        phase="copying",
+        completed_bytes=5,
+        completed_items=0,
+        activity_sequence=1,
+        checkpoint=OperationCheckpoint(key="second-copy", sequence=0),
+        members=[
+            OperationMemberProgress(
+                member_id="rank", phase="copying", completed_bytes=5
+            )
+        ],
+    )
+    accepted = validate_progress_update(prior, restarted, partial=False)
+    assert accepted == restarted
+    with pytest.raises(ValueError):
+        validate_progress_update(
+            accepted, restarted.model_copy(update={"completed_bytes": 4}), partial=False
+        )
+
+
+def test_rust_restart_vector_is_accepted_and_resets_throughput():
+    import json
+    from pathlib import Path
+
+    from vonk_control.stall_window import progress_advanced
+
+    first, second = [
+        OperationProgress.model_validate_json(json.dumps(value))
+        for value in json.loads(
+            (
+                Path(__file__).parents[2]
+                / "tests/fixtures/transfer-progress-restart.json"
+            ).read_text()
+        )
+    ]
+    prior = sample_progress(None, first, NOW)
+    restarted = validate_progress_update(prior, second, partial=False)
+    measured = sample_progress(prior, restarted, NOW + timedelta(seconds=2))
+    assert measured.completed_bytes == 5
+    assert measured.bytes_per_second is None
+    assert not progress_advanced(prior, measured)
+    advancing = validate_progress_update(
+        measured, second.model_copy(update={"completed_bytes": 6}), partial=False
+    )
+    assert progress_advanced(measured, advancing)

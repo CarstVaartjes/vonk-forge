@@ -680,7 +680,13 @@ class AgentJobService:
                 retained = stored_progress(attempt)
                 final_progress = OperationProgress(
                     phase=ProgressPhase.COMPLETED,
-                    completed_bytes=message.result.downloaded_bytes,
+                    # Model receipt bytes exclude Docker pulls; they cannot replace
+                    # the order-wide transfer measurement or validate its outcome.
+                    completed_bytes=(
+                        message.result.downloaded_bytes
+                        if retained is None
+                        else retained.completed_bytes
+                    ),
                     completed_items=None if retained is None else retained.total_items,
                 )
                 final_progress = validate_progress_update(retained, final_progress)

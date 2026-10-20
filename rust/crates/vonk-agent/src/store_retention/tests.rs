@@ -882,3 +882,17 @@ fn incomplete_object_inventory_is_unknown_instead_of_false_absence() {
     std::os::unix::fs::symlink(root.path().join("missing"), store.join(OTHER)).unwrap();
     assert!(super::model_objects(root.path()).is_none());
 }
+
+#[test]
+fn deleted_installation_directories_are_absent_on_the_next_inventory() {
+    // Wrong implementation: a cached install receipt keeps reporting an
+    // installation after its directory is removed, poisoning every load.
+    let root = tempfile::tempdir().unwrap();
+    let installation = root.path().join("installations").join(INSTALLATION);
+    file(&installation.join("spec.json"), b"{}");
+    assert_eq!(super::installation_names(root.path()).unwrap().len(), 1);
+    assert_eq!(super::installation_sizes(root.path()).unwrap().len(), 1);
+    fs::remove_dir_all(installation).unwrap();
+    assert_eq!(super::installation_names(root.path()), Some(vec![]));
+    assert_eq!(super::installation_sizes(root.path()), Some(vec![]));
+}

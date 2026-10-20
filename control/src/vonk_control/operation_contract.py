@@ -184,6 +184,17 @@ _CARRIED_PROGRESS_FIELDS = (
 )
 
 
+def same_progress_attempt(
+    previous: OperationProgress, current: OperationProgress
+) -> bool:
+    """Only the same explicit checkpoint key makes counters comparable."""
+    return (
+        previous.checkpoint is not None
+        and current.checkpoint is not None
+        and previous.checkpoint.key == current.checkpoint.key
+    )
+
+
 def validate_progress_update(
     previous: OperationProgress | None,
     current: OperationProgress,
@@ -198,7 +209,13 @@ def validate_progress_update(
     ``previous``; an agent snapshot is complete (``partial=False``).
     """
 
-    if previous is None:
+    if previous is None or (
+        current.checkpoint is not None
+        and (
+            previous.checkpoint is None
+            or current.checkpoint.key != previous.checkpoint.key
+        )
+    ):
         return current
     given = set(current.model_fields_set)
     # A nonempty default list is current state even if append did not update
@@ -233,6 +250,10 @@ def validate_progress_update(
             else:
                 document[key] = carried
     merged = OperationProgress.model_validate(document)
+    # A checkpoint key scopes one producer attempt. Unkeyed measurements have
+    # no comparable baseline; they must never reject an operation receipt.
+    if not same_progress_attempt(previous, merged):
+        return merged
     if merged.completed_bytes < previous.completed_bytes:
         raise ValueError("operation progress bytes cannot move backwards")
     # ``completed_items`` is optional: an operation without item accounting

@@ -18,6 +18,8 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         else {
             return failed("artifact distribution request is invalid");
         };
+        self.client
+            .restart_progress(claim.fence, uuid::Uuid::new_v4());
         self.report_phase(claim, ProgressPhase::Preparing).await;
         let assignment = &request.assignment;
         let bytes = assignment
