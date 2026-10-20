@@ -51,6 +51,7 @@ HTTP_STATUS_DISPOSITIONS = (
 PROFILE_REFUSAL_CODES = frozenset(
     {
         "profile.admission_defect",
+        "profile.definition_unavailable",
         "profile.request_invalid",
         "profile.review_stale",
         "profile.selection_lost",

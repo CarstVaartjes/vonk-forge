@@ -30,6 +30,7 @@ from ..fleet_profile_contract import (
 )
 from ..models import AgentNode, AgentNodeProfile, FleetProfile, FleetProfileApplication
 from .contracts import (
+    FleetProfileDefinitionUnavailable,
     FleetProfileInvalid,
 )
 from .projection_support import (
@@ -77,6 +78,7 @@ class FleetProfileService:
             )
             if row is None:
                 raise MissingRecord(number, reason=InvalidRequestReason.NOT_FOUND)
+            self._required_definition(row)
             return self._view(session, row)
 
     def read_number(self, number: int) -> FleetProfileReadView:
@@ -159,6 +161,18 @@ class FleetProfileService:
         """Read exact authoring intent; partial reconstruction could delete choices."""
 
         return _profile_definition(row)
+
+    def _required_definition(self, row: FleetProfile) -> FleetProfileDefinition:
+        """Refuse new effects with the same typed cause as the draft read."""
+        self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
+        try:
+            return self._definition(row)
+        except (TypeError, ValueError):
+            issue = self._definition_issue()
+            raise FleetProfileDefinitionUnavailable(
+                f"{issue.detail} {issue.next_action}",
+                reason=InvalidRequestReason.MALFORMED,
+            ) from None
 
     @staticmethod
     def _definition_issue() -> SavedProfileProjectionIssue:
@@ -275,16 +289,22 @@ class FleetProfileService:
             row = session.get(FleetProfile, profile_id, with_for_update=True)
             if row is None:
                 raise MissingRecord(profile_id, reason=InvalidRequestReason.NOT_FOUND)
-            requested = FleetProfileDefinition.model_validate(
-                value.model_dump(exclude={"expected_revision"})
-            )
-            if self._definition(row) == requested:
-                return self._view(session, row)
             if row.revision != value.expected_revision:
                 raise FleetProfileInvalid(
                     f"profile revision conflict: expected {value.expected_revision}, current {row.revision}",
                     reason=InvalidRequestReason.CONFLICT,
                 )
+            requested = FleetProfileDefinition.model_validate(
+                value.model_dump(exclude={"expected_revision"})
+            )
+            try:
+                previous = self._definition(row)
+            except (TypeError, ValueError):
+                # Equality is only an optimization. An unreadable old draft
+                # cannot prevent an authorized complete replacement.
+                previous = None
+            if previous == requested:
+                return self._view(session, row)
             assignments, notes = self._validated_assignments(session, value.assignments)
             row.name = value.name
             row.description = value.description
