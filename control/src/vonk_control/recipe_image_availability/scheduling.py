@@ -198,16 +198,25 @@ def claim_pending(
             )
             # Queued for a preparation slot (it never ran) or behind a prior
             # removal is a wait on a live owner: it never spends the window.
+            preparation_progress = progress_verdict(
+                started_at=operation.created_at,
+                progressed_at=payload.progress_advanced_at,
+                window=PREPARATION_STALL_WINDOW,
+                now=now,
+                waiting_on=Wait(operation.current_attempt == 0 or removal_pending),
+            )
+            # At expiry, reconcile the live child before cancelling its parent.
+            # Ordinary observations retain the existing retry cadence.
             if (
-                progress_verdict(
-                    started_at=operation.created_at,
-                    progressed_at=payload.progress_advanced_at,
-                    window=PREPARATION_STALL_WINDOW,
-                    now=now,
-                    waiting_on=Wait(operation.current_attempt == 0 or removal_pending),
+                operation.state in job_states.words(LifecycleState.BACKOFF)
+                and (
+                    self._retry_due(operation, now)
+                    or preparation_progress is Verdict.STALLED
                 )
-                is Verdict.STALLED
+                and self._park_for_model(operation, payload, now)
             ):
+                continue
+            if preparation_progress is Verdict.STALLED:
                 _expire_preparation(self, session, operation, payload, now)
                 continue
             if (
@@ -234,12 +243,6 @@ def claim_pending(
                     operation, now, now + timedelta(seconds=5), payload=updated
                 )
                 operation.payload = serialize_json_value(updated)
-                continue
-            if operation.state in job_states.words(
-                LifecycleState.BACKOFF
-            ) and self._park_for_model(operation, payload, now):
-                # Only the model download is outstanding: no worker slot is
-                # spent polling it, so ready work is never queued behind it.
                 continue
             if operation.current_attempt == 0:
                 # Its queue wait ends here: the stall window starts now, before

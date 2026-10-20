@@ -4241,3 +4241,70 @@ def test_operations_waiting_only_on_a_model_download_take_no_worker_slot(
         ]
     # Parked waiters are not re-examined until their poll is due.
     assert service.claim_pending(limit=4) == ()
+
+
+def test_live_download_survives_a_parent_observation_gap_and_resumes(
+    tmp_path: Path,
+    postgres_engine,
+) -> None:
+    """A stale parent checkpoint cannot cancel a live child after worker restart."""
+    from dataclasses import dataclass
+
+    from vonk_control.lifecycle.image_availability import PREPARATION_STALL_WINDOW
+
+    Base.metadata.create_all(postgres_engine)
+    sessions = sessionmaker(postgres_engine)
+    now = [datetime.now(UTC)]
+    parent_id = str(uuid.uuid4())
+    child_id = str(uuid.uuid5(uuid.NAMESPACE_URL, parent_id))
+    old = now[0] - PREPARATION_STALL_WINDOW * 2
+    with sessions.begin() as session:
+        session.add(User(subject="operator", role="operator"))
+        session.add(
+            _parked_operation(parent_id, now=old, model_child=True, updated=old)
+        )
+
+    @dataclass
+    class ModelOwner:
+        state: LifecycleState = LifecycleState.RUNNING
+
+        def get_operation(self, operation_id: str) -> ModelOwner:
+            assert operation_id == child_id
+            return self
+
+    model_owner = ModelOwner()
+
+    def reopen() -> RecipeImageAvailabilityService:
+        return _service(
+            sessions,
+            storage=FilesystemRuntimeImageStorage(tmp_path / "images"),
+            authority=lambda *_args, **_kwargs: (None, {}),
+            model_cache=model_owner,
+            clock=lambda: now[0],
+        )
+
+    service = reopen()
+    assert service.claim_pending() == ()
+    with sessions() as session:
+        parent = session.get(Job, parent_id)
+        assert parent is not None
+        assert parent.state == LifecycleState.BACKOFF
+        payload = service._payload(parent)
+        assert isinstance(payload, AvailabilityJobPayload)
+        assert payload.cancellation is None
+    # Another scheduler gap must reconnect to the same persisted parent/child,
+    # and completion of the child makes the parent claimable again.
+    now[0] += PREPARATION_STALL_WINDOW * 2
+    service = reopen()
+    assert service.claim_pending() == ()
+    model_owner.state = LifecycleState.SUCCEEDED
+    now[0] += timedelta(minutes=1)
+    (claim,) = service.claim_pending()
+    assert claim.operation_id == parent_id
+    with sessions() as session:
+        parent = session.get(Job, parent_id)
+        assert parent is not None
+        assert parent.state == LifecycleState.RUNNING
+        payload = service._payload(parent)
+        assert isinstance(payload, AvailabilityJobPayload)
+        assert payload.cancellation is None
