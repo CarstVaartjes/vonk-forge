@@ -1096,9 +1096,16 @@ fn deleted_installation_directories_are_absent_on_the_next_inventory() {
     let root = tempfile::tempdir().unwrap();
     let installation = root.path().join("installations").join(INSTALLATION);
     file(&installation.join("spec.json"), b"{}");
-    assert_eq!(super::installation_names(root.path()).unwrap().len(), 1);
-    assert_eq!(super::installation_sizes(root.path()).unwrap().len(), 1);
+    let names = super::installation_names(root.path()).unwrap();
+    assert_eq!(names.len(), 1);
+    assert_eq!(
+        super::installation_sizes(root.path(), &names)
+            .unwrap()
+            .len(),
+        1
+    );
     fs::remove_dir_all(installation).unwrap();
-    assert_eq!(super::installation_names(root.path()), Some(vec![]));
-    assert_eq!(super::installation_sizes(root.path()), Some(vec![]));
+    let names = super::installation_names(root.path()).unwrap();
+    assert!(names.is_empty());
+    assert_eq!(super::installation_sizes(root.path(), &names), Some(vec![]));
 }
