@@ -6,6 +6,7 @@ from typing import Literal
 
 from pydantic import Field, model_validator
 
+from .host_helper import Uuid4Text
 from .reason_codes import RuntimePreflightFindingCode, adopt_preflight_finding_code
 from .wire_model import WireModel
 
@@ -49,3 +50,10 @@ class RuntimePreflightResult(WireModel):
         if len({item.capability for item in self.findings}) != len(self.findings):
             raise ValueError("preflight capability findings must be unique")
         return self
+
+
+class RuntimePreflightCompletion(WireModel):
+    """Agent-local positive probe cache bound to one accepted fence."""
+
+    fence: Uuid4Text
+    result: RuntimePreflightResult

@@ -16,3 +16,17 @@ def test_content_observation_frame_round_trips_with_unused_fields_omitted():
     frame = RecipeRunInspectionRequest.model_validate_json(raw)
     assert frame.content_observation is True
     assert canonical_message(frame) == raw
+
+
+def test_preflight_completion_cache_uses_the_canonical_shared_document():
+    # Wrong implementation: native cache fields drift from their canonical
+    # fence and result, so a restarted observer cannot consume the receipt.
+    from vonk_agent_protocol.runtime_preflight import RuntimePreflightCompletion
+
+    raw = (
+        (Path(__file__).parents[1] / "fixtures/runtime-preflight-completion.json")
+        .read_bytes()
+        .strip()
+    )
+    completion = RuntimePreflightCompletion.model_validate_json(raw)
+    assert canonical_message(completion) == raw

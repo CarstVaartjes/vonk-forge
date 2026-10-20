@@ -798,12 +798,7 @@ mod tests {
     }
 }
 
-#[derive(serde::Serialize, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-struct CompletedPreflight {
-    fence: uuid::Uuid,
-    result: RuntimePreflightResult,
-}
+use vonk_agent_protocol::generated::RuntimePreflightCompletion;
 
 /// Retain the full signed-helper result under the exact accepted fence. This
 /// extends the preflight cache owner, independently of receipt transmission.
@@ -820,7 +815,7 @@ pub fn retain_completed(
     .map_err(|error| std::io::Error::other(format!("preflight cache directory: {error}")))?;
     let mut file = tempfile::NamedTempFile::new_in(&root)?;
     file.write_all(
-        &canonical_json(&CompletedPreflight {
+        &canonical_json(&RuntimePreflightCompletion {
             fence,
             result: result.clone(),
         })
@@ -852,10 +847,70 @@ pub fn observe_completed(
             );
         }
     };
-    let completed: CompletedPreflight = vonk_agent_protocol::parse_strict(&raw)
+    let completed: RuntimePreflightCompletion = vonk_agent_protocol::parse_strict(&raw)
         .map_err(|error| std::io::Error::other(format!("preflight receipt invalid: {error}")))?;
     Ok(
         (completed.fence == fence && completed.result.fingerprint == fingerprint)
             .then_some(completed.result),
     )
+}
+
+#[cfg(test)]
+mod completion_tests {
+    use super::*;
+
+    #[test]
+    fn completed_preflight_cache_reopens_the_shared_fence_bound_receipt_and_stays_bounded() {
+        // Wrong implementation: only build findings survive, or another
+        // request's preflight receipt is adopted after process death.
+        let raw =
+            include_bytes!("../../../../agent_protocol/fixtures/runtime-preflight-completion.json");
+        let completion: RuntimePreflightCompletion =
+            vonk_agent_protocol::parse_strict(raw).unwrap();
+        let root = tempfile::tempdir().unwrap();
+        retain_completed(root.path(), completion.fence, &completion.result).unwrap();
+        let path = root
+            .path()
+            .join(vonk_agent_protocol::generated::AgentOperation::RuntimePreflightV1.as_str())
+            .join("completed.json");
+        assert_eq!(fs::read(path).unwrap(), raw.strip_suffix(b"\n").unwrap());
+        assert_eq!(
+            observe_completed(
+                root.path(),
+                completion.fence,
+                &completion.result.fingerprint
+            )
+            .unwrap(),
+            Some(completion.result.clone())
+        );
+        assert!(
+            observe_completed(
+                root.path(),
+                uuid::Uuid::new_v4(),
+                &completion.result.fingerprint
+            )
+            .unwrap()
+            .is_none()
+        );
+        assert!(
+            observe_completed(root.path(), completion.fence, &"b".repeat(64))
+                .unwrap()
+                .is_none()
+        );
+        let next = uuid::Uuid::new_v4();
+        retain_completed(root.path(), next, &completion.result).unwrap();
+        assert!(
+            observe_completed(
+                root.path(),
+                completion.fence,
+                &completion.result.fingerprint
+            )
+            .unwrap()
+            .is_none()
+        );
+        let directory = root
+            .path()
+            .join(vonk_agent_protocol::generated::AgentOperation::RuntimePreflightV1.as_str());
+        assert_eq!(fs::read_dir(directory).unwrap().count(), 1);
+    }
 }
