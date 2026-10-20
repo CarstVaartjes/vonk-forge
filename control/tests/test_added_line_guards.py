@@ -765,3 +765,95 @@ def test_a_generous_bound_expected_expiry_or_named_reason_is_allowed(source):
     )
     # Product code is held to its own wait rules, not this test rule.
     assert not check_source(PATH, "future.result(timeout=1)\n", {1}, modes=("clocks",))
+
+
+@pytest.mark.parametrize(
+    "ending",
+    [
+        "return None",
+        "return replace(row, state=State.FAILED)",
+        "row.next_action_at = None",
+        "return fail(row)",
+    ],
+)
+def test_count_cannot_end_standing_intent(ending: str) -> None:
+    source = "def tick(row):\n    if row.retry_count >= 5:\n        " + ending + "\n"
+    assert check_source(PATH, source, {2}, modes=("retries",))
+    assert check_source(PATH, source, {3}, modes=("retries",))
+    assert not check_source(PATH, source, {1}, modes=("retries",))
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "if row.repeat_count >= 5:\n    show_warning(row)\n",
+        "if row.cancel_requested and row.observe_count >= STOP_BUDGET:\n    return replace(row, state=State.CANCELLED)\n",
+        "if not ongoing_intent and failed_attempts >= self.max_failures:\n    return None\n",
+        "if row.retry_count >= 5:\n    return replace(row, next_action_at=now + cooldown)\n",
+    ],
+)
+def test_count_guard_allows_evidence_backoff_cancel_and_request_local_retry(
+    source: str,
+) -> None:
+    from .deterministic_retries import scan_count_endings
+
+    assert not scan_count_endings(source)
+
+
+def test_every_durable_recovery_policy_user_keeps_a_next_observation() -> None:
+    from pathlib import Path
+
+    from .deterministic_retries import scan_recovery_policy_users
+
+    root = Path(__file__).resolve().parents[2]
+    found = [
+        f"{path.relative_to(root)}:{line}"
+        for path in (root / "control/src").rglob("*.py")
+        for line in scan_recovery_policy_users(
+            path.read_text(), path=str(path.relative_to(root))
+        )
+    ]
+    assert found == []
+
+
+def test_guard_rejects_a_durable_policy_call_without_ongoing_intent() -> None:
+    source = "due = RECOVERY.next_attempt(row.id, row.retry_count, now)\n"
+    assert check_source(PATH, source, {1}, modes=("retries",))
+    assert not check_source(PATH, source, set(), modes=("retries",))
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "count = row.retry_count + 1\nif count >= LIMIT:\n    return replace(row, state=State.FAILED)\n",
+        "if RECOVERY.exhausted(repeats):\n    return None\n",
+        "if not row.cancel_requested and row.retry_count >= 5:\n    return None\n",
+        "if row.cancel_requested or row.retry_count >= 5:\n    return None\n",
+    ],
+)
+def test_count_guard_catches_aliases_and_does_not_treat_active_intent_as_cancelled(
+    source: str,
+) -> None:
+    from .deterministic_retries import scan_count_endings
+
+    assert scan_count_endings(source)
+
+
+def test_request_local_retry_can_end_without_ending_durable_intent() -> None:
+    from .deterministic_retries import scan_count_endings
+
+    assert not scan_count_endings(
+        "for attempt in range(3):\n    if attempt == 2:\n        return None\n"
+    )
+    assert scan_count_endings(
+        "for attempt in range(3):\n    if attempt == 2:\n        return replace(row, state=State.FAILED)\n"
+    )
+
+
+def test_count_guard_does_not_exempt_the_uncancelled_else_branch() -> None:
+    from .deterministic_retries import scan_count_endings
+
+    assert scan_count_endings(
+        "if row.cancel_requested:\n    return cancelled(row)\n"
+        "else:\n    if row.retry_count >= 5:\n        return None\n"
+    )

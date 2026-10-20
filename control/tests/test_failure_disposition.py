@@ -267,7 +267,7 @@ def test_only_a_recurring_uncertain_effect_spends_the_retry_count() -> None:
         Lifecycle(id="order", kind="fake", effect=Effect.NONE), state=State.QUEUED
     )
     now = NOW
-    for spent in range(1, RECOVERY.max_failures + 1):
+    for spent in range(1, RECOVERY.max_failures * 2 + 1):
         row, now = _run(adapter, row, now)
         row = transition(
             row,
@@ -275,12 +275,12 @@ def test_only_a_recurring_uncertain_effect_spends_the_retry_count() -> None:
             adapter,
             now,
         ).row
-        if row.terminal:
-            break
         assert row.retry_count == spent
-    assert row.state is State.FAILED
-    fresh = Lifecycle(id="fresh", kind="fake", effect=Effect.NONE)
-    assert transition(fresh, Tick(), adapter, now).commands == (Execute(),)
+        assert row.state is State.BACKOFF
+        assert row.next_action_at is not None
+    row, now = _run(adapter, row, now)
+    done = transition(row, Reported(Outcome.DONE, fence=row.fence), adapter, now).row
+    assert done.id == "order" and done.state is State.SUCCEEDED
 
 
 def test_an_owner_outside_the_core_schedules_on_the_same_rule() -> None:
@@ -292,11 +292,13 @@ def test_an_owner_outside_the_core_schedules_on_the_same_rule() -> None:
         assert step.next_at is not None and step.next_at > NOW
     assert schedule(policy, "route", 0, Disposition.FAIL, NOW).next_at is None
     assert schedule(policy, "route", 0, Disposition.SECURITY, NOW).next_at is None
-    for spent in range(1, policy.max_failures + 1):
+    for spent in range(1, policy.max_failures * 2 + 1):
         step = schedule(policy, "route", failures, Disposition.OBSERVE, NOW)
         failures = step.failures
         assert failures == spent
-    assert step.next_at is None
+    assert step.next_at is not None and NOW < step.next_at <= NOW + timedelta(
+        seconds=policy.max_delay_seconds
+    )
 
 
 # ------------------------------------------------------------------ the guard

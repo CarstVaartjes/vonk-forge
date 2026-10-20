@@ -1862,8 +1862,7 @@ def _crash_rounds(
 def test_a_failure_that_changes_keeps_being_retried(
     tmp_path: Path, ending: str
 ) -> None:
-    """Retries are for causes that change: different failures never use up the
-    budget."""
+    """Changing faults keep their evidence without ending standing intent."""
 
     from vonk_control.lifecycle.core import RECOVERY
 
@@ -1890,17 +1889,22 @@ def test_a_failure_that_differs_only_in_numbers_is_the_same_failure(
         for index in range(RECOVERY.max_failures + 2)
     ]
     applications = _crash_rounds(sessions, service, clock, same, ending)
-    # Numbers are not the cause (it is one failure repeating), so it ends at the
-    # budget; the load's first, different failure was not part of the streak.
-    assert applications == RECOVERY.max_failures + 1
+    # Normalized signatures remain evidence; they cannot end recovery.
+    assert applications > RECOVERY.max_failures + 1
+    with sessions() as session:
+        rows = list(session.scalars(select(FleetProfileApplication)))
+        adapter = service._switch_adapter
+        assert adapter is not None
+        signatures = {
+            adapter.failure_signature(row.id, session=session) for row in rows
+        }
+    assert len(signatures - {None}) == 2  # initial fault and normalized runtime exit
 
 
-def test_a_stall_with_a_stable_cause_ends_after_the_budget_naming_it(
+def test_a_stall_with_a_stable_cause_keeps_retrying_with_evidence(
     tmp_path: Path,
 ) -> None:
-    """A stall ends retryable under a generic timeout code; the cause it waited
-    on is what repeats, so the lineage ends at the budget and names that cause
-    instead of being replayed forever."""
+    """A repeated expired child window cannot end standing profile intent."""
 
     from vonk_control.lifecycle.core import RECOVERY
 
@@ -1910,7 +1914,7 @@ def test_a_stall_with_a_stable_cause_ends_after_the_budget_naming_it(
     cause = "run-switch phase operation failed: failed: container exited at start"
     rounds = [cause] * (RECOVERY.max_failures + 3)
     applications = _crash_rounds(sessions, service, clock, rounds, "stall")
-    assert applications == RECOVERY.max_failures + 1
+    assert applications > RECOVERY.max_failures + 1
     with sessions() as session:
         last_id = session.scalar(
             select(FleetProfileApplication.id)
@@ -1919,11 +1923,10 @@ def test_a_stall_with_a_stable_cause_ends_after_the_budget_naming_it(
         )
     assert last_id is not None
     last = service.application(last_id)
-    assert last.state == "failed" and last.next_attempt_at is None
-    (repeated,) = (
-        blocker
-        for blocker in last.progress.blockers
-        if blocker.code == PROFILE_REPEATED_FAILURE_CODE
-    )
-    assert repeated.code == PROFILE_REPEATED_FAILURE_CODE and cause in repeated.detail
-    assert "final-verification-timeout" not in repeated.detail
+    assert last.state == LifecycleState.BACKOFF and last.next_attempt_at is not None
+    with sessions() as session:
+        adapter = service._switch_adapter
+        assert adapter is not None
+        signature = adapter.failure_signature(last.id, session=session)
+    assert signature is not None and cause in signature
+    assert "final-verification-timeout" not in signature

@@ -509,6 +509,14 @@ def check_source(
                 for line in retries.scan_source(source)
             )
             hits.extend(retries.scan_dispositions(source, path=path))
+            hits.extend(
+                (line, "count ends standing intent")
+                for line in retries.scan_count_endings(source)
+            )
+            hits.extend(
+                (line, "durable retry can exhaust")
+                for line in retries.scan_recovery_policy_users(source, path=path)
+            )
         if "repeats" in modes and path.startswith("control/src/"):
             hits.extend(
                 (line, "retry scheduled without note_repeat")

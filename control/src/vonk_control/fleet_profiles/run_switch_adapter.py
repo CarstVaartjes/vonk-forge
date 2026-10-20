@@ -179,7 +179,8 @@ class RunSwitchFleetProfileAdapter(
 
         The failed child's typed code, phase and normalized reason (operation ids,
         counts and timings stripped): the same signature on consecutive attempts
-        is the same fault, which the repeat budget ends.  An observation window
+        is evidence of the same fault, never a reason to end standing intent.
+        An observation window
         that expired (a retryable ending) is identified by what it waited on, not
         by its generic timeout code, so a stall with a stable cause is counted
         too.  None only for a Controller cache loss, which a replay repairs.
