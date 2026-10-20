@@ -286,20 +286,36 @@ impl HostRuntimeBoundary<'_> {
         self.reobserve_identity(arguments).await
     }
 
-    /// Inspect the whole accepted runtime identity; Stop requires physical
-    /// absence, so it never consults a job exit ledger. A cancel-Stop must also
-    /// have fenced pending Starts. No grant is renewed.
+    /// Inspect one whole Start identity without consulting a job exit ledger.
     pub async fn reobserve_runtime(
         &self,
         stop: &RecipeStopRequest,
     ) -> Result<RuntimeReobservation, HostRuntimeError> {
+        self.reobserve_runtime_identity(stop, vonk_agent_protocol::RUNTIME_REOBSERVATION_ARGUMENT)
+            .await
+    }
+
+    /// Stop also observes its durable generation fence. A cancel-Stop must
+    /// have fenced pending Starts and observed their quiescence. No grant is renewed.
+    pub async fn reobserve_stop(
+        &self,
+        stop: &RecipeStopRequest,
+    ) -> Result<RuntimeReobservation, HostRuntimeError> {
+        let marker = if stop.cancel_pending_start {
+            vonk_agent_protocol::CANCEL_STOP_REOBSERVATION_ARGUMENT
+        } else {
+            vonk_agent_protocol::STOP_REOBSERVATION_ARGUMENT
+        };
+        self.reobserve_runtime_identity(stop, marker).await
+    }
+
+    async fn reobserve_runtime_identity(
+        &self,
+        stop: &RecipeStopRequest,
+        marker: &str,
+    ) -> Result<RuntimeReobservation, HostRuntimeError> {
         self.reobserve_identity(vec![
-            if stop.cancel_pending_start {
-                vonk_agent_protocol::CANCEL_STOP_REOBSERVATION_ARGUMENT
-            } else {
-                vonk_agent_protocol::RUNTIME_REOBSERVATION_ARGUMENT
-            }
-            .to_owned(),
+            marker.to_owned(),
             stop.target_runtime_id.to_string(),
             stop.run_id.to_string(),
             stop.installation_id.to_string(),

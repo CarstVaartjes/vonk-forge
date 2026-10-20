@@ -240,3 +240,34 @@ fn cancel_stop_observation_requires_durable_fence_and_start_quiescence() {
         Err(OperationError::StopUncertain)
     ));
 }
+
+/// An ordinary Stop fences older launches while permitting an intentional
+/// same-generation restart. Its passive observer must retain that distinction.
+#[test]
+fn ordinary_stop_observation_requires_its_generation_high_water_mark() {
+    let host = Host::with(&[]);
+    let (_temp, executor) = host_executor(&host);
+    let marker = vonk_agent_protocol::STOP_REOBSERVATION_ARGUMENT;
+    assert!(matches!(
+        reobserve_mode(&executor, "1", marker),
+        Err(OperationError::StopUncertain)
+    ));
+    executor
+        .runtime_stop_authorized(identity(JOB), RUN.parse().unwrap(), 1, false)
+        .unwrap();
+    assert!(matches!(
+        reobserve_mode(&executor, "1", marker),
+        Err(OperationError::RuntimeRunMissing)
+    ));
+    assert!(matches!(
+        reobserve_mode(&executor, "2", marker),
+        Err(OperationError::StopUncertain)
+    ));
+    executor
+        .update_runtime_generation_fence(&identity(JOB), RuntimeGenerationFenceUse::Start)
+        .unwrap();
+    assert!(matches!(
+        reobserve_mode(&executor, "1", marker),
+        Err(OperationError::RuntimeRunMissing)
+    ));
+}

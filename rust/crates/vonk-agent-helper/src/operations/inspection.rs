@@ -2,6 +2,13 @@
 
 use super::*;
 
+#[derive(Clone, Copy)]
+enum EffectObservation {
+    Job,
+    Runtime,
+    Stop { cancel_pending_start: bool },
+}
+
 /// The one place a process-exit failure is built.  Whatever could not be read
 /// is named in the failure, so it can never read as a container with nothing to
 /// say: it carries its logs, or a typed reason they are missing, and an exit
@@ -69,17 +76,34 @@ impl<R: CommandRunner> OperationExecutor<R> {
             [marker, identity @ ..]
                 if unbound && marker == vonk_agent_protocol::JOB_REOBSERVATION_ARGUMENT =>
             {
-                self.inspect_effect(identity, include_logs, true, false)
+                self.inspect_effect(identity, include_logs, EffectObservation::Job)
             }
             [marker, identity @ ..]
                 if unbound && marker == vonk_agent_protocol::RUNTIME_REOBSERVATION_ARGUMENT =>
             {
-                self.inspect_effect(identity, include_logs, false, false)
+                self.inspect_effect(identity, include_logs, EffectObservation::Runtime)
+            }
+            [marker, identity @ ..]
+                if unbound && marker == vonk_agent_protocol::STOP_REOBSERVATION_ARGUMENT =>
+            {
+                self.inspect_effect(
+                    identity,
+                    include_logs,
+                    EffectObservation::Stop {
+                        cancel_pending_start: false,
+                    },
+                )
             }
             [marker, identity @ ..]
                 if unbound && marker == vonk_agent_protocol::CANCEL_STOP_REOBSERVATION_ARGUMENT =>
             {
-                self.inspect_effect(identity, include_logs, false, true)
+                self.inspect_effect(
+                    identity,
+                    include_logs,
+                    EffectObservation::Stop {
+                        cancel_pending_start: true,
+                    },
+                )
             }
             // A single argument is a run id alone: the Controller-side truth
             // for a run whose local metadata is unreadable, checked by
@@ -114,8 +138,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
         &self,
         identity: &[String],
         include_logs: bool,
-        retain_job_exit: bool,
-        require_cancel_fence: bool,
+        mode: EffectObservation,
     ) -> Result<RunInspection, OperationError> {
         let canonical = |value: &String| {
             uuid::Uuid::parse_str(value)
@@ -143,16 +166,20 @@ impl<R: CommandRunner> OperationExecutor<R> {
             run_generation,
         };
         // Serialize the snapshot with launch/Stop admission, but never wait or
-        // change the fence. Absence before a cancel-Stop's fence was durable
-        // cannot prove that a delayed Start will not recreate the runtime.
-        let _installation_guard = require_cancel_fence
+        // change the fence. An empty name before the high-water mark was
+        // durable cannot prove that a delayed older Start remains fenced.
+        let _installation_guard = matches!(mode, EffectObservation::Stop { .. })
             .then(|| self.lock_installation_runtime(&installation_id.to_string()))
             .transpose()?;
-        if require_cancel_fence {
+        if let EffectObservation::Stop {
+            cancel_pending_start,
+        } = mode
+        {
             let fence = self.read_runtime_generation_fence(installation_id, runtime_id)?;
-            if !fence
-                .is_some_and(|fence| fence.highest_generation == run_generation && fence.cancelled)
-                || self.job_cancellation.is_active(identity)?
+            if !fence.is_some_and(|fence| {
+                fence.highest_generation == run_generation
+                    && (!cancel_pending_start || fence.cancelled)
+            }) || (cancel_pending_start && self.job_cancellation.is_active(identity)?)
             {
                 return Err(OperationError::StopUncertain);
             }
@@ -184,7 +211,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
                 })
             }
             // Removed after its exit was retained: that exit is the answer.
-            Reobserved::Absent if retain_job_exit => self
+            Reobserved::Absent if matches!(mode, EffectObservation::Job) => self
                 .retained_job_exit(identity, run_id, plan_digest, include_logs)
                 .ok_or(OperationError::RuntimeRunMissing),
             Reobserved::Absent => Err(OperationError::RuntimeRunMissing),

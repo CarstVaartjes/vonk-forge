@@ -62,6 +62,8 @@ pub const HOST_HELPER_AUTHORITY: &str = "vonk.host-maintenance-helper";
 /// run generation, plan digest]`. A helper that predates it refuses the shape
 /// as an invalid operation.
 pub const RUNTIME_REOBSERVATION_ARGUMENT: &str = "runtime-identity";
+/// Exact Stop observation requires its durable generation high-water mark.
+pub const STOP_REOBSERVATION_ARGUMENT: &str = "stop-identity";
 /// Exact cancel-Stop observation additionally requires the durable cancelled
 /// generation fence and no in-flight Start before reporting physical absence.
 pub const CANCEL_STOP_REOBSERVATION_ARGUMENT: &str = "cancel-stop-identity";

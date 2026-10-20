@@ -45,7 +45,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                     seen
                 }
             }
-            RecipeOperationRequest::Stop(stop) => boundary.reobserve_runtime(stop).await,
+            RecipeOperationRequest::Stop(stop) => boundary.reobserve_stop(stop).await,
             RecipeOperationRequest::JobRun(job) => {
                 if let Ok(Some(receipt)) = self.runtime.retained_job_completion(job) {
                     return self.observe_job_outputs(claim, job, receipt);

@@ -46,7 +46,12 @@ pub(super) fn runtime_claims() -> Vec<AgentClaim> {
         "start_deadline": start.deadline.to_rfc3339(),
     }))
     .unwrap();
-    vec![start, stopped, job]
+    let mut ordinary_stop = stopped.clone();
+    let AgentClaimPayload::RecipeStopPayload(stop) = &mut ordinary_stop.payload else {
+        unreachable!()
+    };
+    stop.cancel_pending_start = false;
+    vec![start, stopped, ordinary_stop, job]
 }
 
 fn completion(accepted: &AgentClaim) -> ExecutionResult {
@@ -178,6 +183,12 @@ async fn runtime_process_death_at_every_custody_seam_recovers_without_new_claims
             listener.set_nonblocking(true).unwrap();
             let peer_root = root.to_owned();
             let operation = accepted.operation;
+            let stop_marker = match &accepted.payload {
+                AgentClaimPayload::RecipeStopPayload(stop) if stop.cancel_pending_start => {
+                    vonk_agent_protocol::CANCEL_STOP_REOBSERVATION_ARGUMENT
+                }
+                _ => vonk_agent_protocol::STOP_REOBSERVATION_ARGUMENT,
+            };
             let stop = Arc::new(AtomicBool::new(false));
             let done = stop.clone();
             let peer = thread::spawn(move || {
@@ -218,10 +229,7 @@ async fn runtime_process_death_at_every_custody_seam_recovers_without_new_claims
                     let effect = peer_root.join("effect").exists();
                     let unfenced_stop = operation == AgentOperation::RecipeStop && !effect;
                     if operation == AgentOperation::RecipeStop {
-                        assert_eq!(
-                            request.arguments[0],
-                            vonk_agent_protocol::CANCEL_STOP_REOBSERVATION_ARGUMENT
-                        );
+                        assert_eq!(request.arguments[0], stop_marker);
                     }
                     let absent = if operation == AgentOperation::RecipeStop {
                         effect
@@ -239,7 +247,7 @@ async fn runtime_process_death_at_every_custody_seam_recovers_without_new_claims
                             HostHelperResponseStatus::ContainerRuntimeRequestExecuted
                         },
                         error_code: if unfenced_stop {
-                            Some(HelperErrorCode::HelperStopUncertain)
+                            Some(HelperErrorCode::OperationStopUncertain)
                         } else {
                             absent.then_some(HelperErrorCode::RuntimeRunMissing)
                         },

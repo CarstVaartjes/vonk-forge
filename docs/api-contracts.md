@@ -277,8 +277,9 @@ Preparation, Start, Stop and JobRun reopen the accepted `claim_json` through
 one startup and tick dispatcher. A probe never renews a lease or grants runtime
 authority. Exact runtime labels bind run, target, installation, generation and
 plan; Stop completion requires physical absence rather than an exit receipt.
-A cancel-Stop additionally observes its durable cancelled-generation fence and
-Start quiescence; an empty name before that fence is not completion.
+Every Stop observes its durable generation high-water mark. A cancel-Stop
+additionally observes its cancelled-generation fence and Start quiescence; an
+empty name before that fence is not completion.
 Measured JobRun exits reopen output custody and authorize only delivery recovery,
 never another inference. Retained authenticated receipts use the same Controller
 adoption decision at ingress and on idle worker ticks; cancellation, revocation,
