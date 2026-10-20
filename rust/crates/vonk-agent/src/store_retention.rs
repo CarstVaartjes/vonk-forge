@@ -259,15 +259,15 @@ fn rotating_page(
         .copied()
         .filter(|id| cursor.is_some_and(|cursor| *id <= cursor));
     let page: Vec<_> = after.chain(wrapped).take(limit).collect();
-    if let Some(last) = page.last() {
-        if let Err(error) = crate::identity::atomic_private_write(
+    if let Some(last) = page.last()
+        && let Err(error) = crate::identity::atomic_private_write(
             data_root,
             cursor_file,
             last.to_string().as_bytes(),
-        ) {
-            eprintln!("vonk-agent: inventory rotation could not be saved: {error}");
-            return None;
-        }
+        )
+    {
+        eprintln!("vonk-agent: inventory rotation could not be saved: {error}");
+        return None;
     }
     Some(page)
 }
