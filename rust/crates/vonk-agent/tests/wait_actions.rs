@@ -64,6 +64,9 @@ const ADVERTISED: &[(WaitReason, Action)] = &[
     ),
     (WaitReason::StopUnconfirmed, Action::ControllerReissues),
     (WaitReason::CleanupUnconfirmed, Action::ControllerReissues),
+    // The exact build export remains in custody. A current authorized attempt
+    // resumes its upload; read-only probes can adopt the resulting receipt.
+    (WaitReason::ReceiptMissing, Action::ControllerReissues),
     (
         WaitReason::StopMetadataUnconfirmed,
         Action::ControllerReissues,
