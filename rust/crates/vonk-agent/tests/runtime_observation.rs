@@ -297,7 +297,10 @@ fn uninstall_removes_only_its_materialization_despite_unrelated_metadata() {
     assert_eq!(
         runtime
             .uninstall_with_model_cleanup(
-                INSTALLATION,
+                &vonk_agent_protocol::RecipeReconciliationIdentity {
+                    installation_id: uuid::Uuid::parse_str(INSTALLATION).unwrap(),
+                    plan_digest: "f".repeat(64)
+                },
                 &plan.identity.recipe_revision_sha256,
                 &plan.artifacts[0].model.content_sha256,
             )
@@ -305,6 +308,16 @@ fn uninstall_removes_only_its_materialization_despite_unrelated_metadata() {
         expected_bytes
     );
     assert!(!installation.exists());
+    assert!(
+        runtime
+            .observe_reconciliation(&vonk_agent_protocol::RecipeReconciliationIdentity {
+                installation_id: uuid::Uuid::parse_str(INSTALLATION).unwrap(),
+                plan_digest: "f".repeat(64),
+            })
+            .unwrap(),
+        "shared model removal retains the accepted plan identity"
+    );
+
     assert_eq!(
         fs::read(unrelated.join("spec.json")).unwrap(),
         b"invalid unrelated metadata"
@@ -394,7 +407,10 @@ fn uninstall_with_model_cleanup_keeps_a_store_object_another_installation_links(
 
     runtime
         .uninstall_with_model_cleanup(
-            INSTALLATION,
+            &vonk_agent_protocol::RecipeReconciliationIdentity {
+                installation_id: uuid::Uuid::parse_str(INSTALLATION).unwrap(),
+                plan_digest: "f".repeat(64),
+            },
             &plan.identity.recipe_revision_sha256,
             &plan.artifacts[0].model.content_sha256,
         )

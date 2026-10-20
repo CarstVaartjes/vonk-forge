@@ -10,7 +10,8 @@ use chrono::{DateTime, Utc};
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 use thiserror::Error;
 use vonk_agent_protocol::generated::{
-    AgentOperation, AgentResultState, FailureStage, LifecycleState, ProgressPhase, WaitReason,
+    AgentOperation, AgentResultResult, FailureStage, LifecycleState, OutcomeUnknownKind,
+    ProgressPhase, WaitReason,
 };
 use vonk_agent_protocol::{
     AgentClaim, AgentDirective, AgentProgress, AgentResult, canonical_json, parse_strict,
@@ -494,11 +495,11 @@ impl StateStore {
             if previous.fence != claim.fence {
                 return Err(StateError::Identity);
             }
-            if previous.state != AgentResultState::Observing {
+            if !matches!(&previous.result, AgentResultResult::OutcomeUnknown(_)) {
                 return Err(StateError::Stale);
             }
             // Repeated uncertainty is observation, not a new receipt or lease.
-            if finished.state == AgentResultState::Observing {
+            if matches!(&finished.result, AgentResultResult::OutcomeUnknown(_)) {
                 return Ok(previous);
             }
         }
@@ -954,11 +955,11 @@ impl StateStore {
             .query_row(
                 "SELECT rowid,fence,operation,CASE WHEN length(claim_json)<=?4 THEN claim_json END,deadline FROM operations
              WHERE claim_json IS NOT NULL AND (state=?3 OR
-                (json_valid(CAST(result_json AS TEXT)) AND json_extract(CAST(result_json AS TEXT),'$.state')=?2))
+                (json_valid(CAST(result_json AS TEXT)) AND json_extract(CAST(result_json AS TEXT),'$.result.kind')=?2))
              ORDER BY (rowid <= ?1),rowid LIMIT 1",
                 params![
                     self.observation_cursor,
-                    AgentResultState::Observing.as_str(),
+                    OutcomeUnknownKind::Unknown.as_str(),
                     LifecycleState::Running.as_str(),
                     vonk_agent_protocol::MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES as i64
                 ],

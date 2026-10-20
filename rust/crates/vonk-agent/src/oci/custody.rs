@@ -108,22 +108,24 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
     /// links stays for them and for future installations.
     pub fn uninstall_with_model_cleanup(
         &self,
-        installation_id: &str,
+        identity: &RecipeReconciliationIdentity,
         expected_recipe_digest: &str,
         model_content_sha256: &str,
     ) -> Result<u64, OciError> {
+        let installation_id = identity.installation_id.to_string();
+        self.prepare_reconciliation(identity)?;
         // Incomplete bookkeeping cannot veto exact installation removal.
         // Shared objects are reclaimed only when their references are proven.
         let removed_model_bytes = self
             .validate_uninstall_with_model_cleanup(
-                installation_id,
+                &installation_id,
                 expected_recipe_digest,
                 model_content_sha256,
             )
             .unwrap_or(0);
         let store_objects = self
             .model_store_objects(
-                installation_id,
+                &installation_id,
                 expected_recipe_digest,
                 model_content_sha256,
             )
@@ -131,7 +133,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         if !store_objects.is_empty() {
             // Retain discovery until reclamation succeeds, so an interrupted
             // cleanup can resume without losing its exact object identities.
-            let installation = managed_path(self.data_root, "installations", installation_id)?;
+            let installation = managed_path(self.data_root, "installations", &installation_id)?;
             let models = installation.join("models");
             match fs::symlink_metadata(&models) {
                 Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => {
@@ -144,7 +146,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
             }
             self.reclaim_unshared_model_objects(&store_objects)?;
         }
-        self.finalize_uninstall(installation_id, expected_recipe_digest)?;
+        self.finalize_reconciliation(identity)?;
         Ok(removed_model_bytes)
     }
 
