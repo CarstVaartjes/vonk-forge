@@ -55,34 +55,22 @@ impl<R: CommandRunner> OperationExecutor<R> {
             return Ok(());
         }
         let remote = format!("{registry}/vonk/runtime@{manifest_digest}");
-        let pulled = self
-            .run_docker_with_timeout(
-                &[
-                    "pull".to_owned(),
-                    "--quiet".to_owned(),
-                    "--platform".to_owned(),
-                    "linux/arm64".to_owned(),
-                    remote.clone(),
-                ],
-                RUNTIME_IMAGE_PULL_TIMEOUT,
-            )
-            .map_err(|error| match error {
-                OperationError::CommandFailed { cause } => {
-                    eprintln!("vonk-agent-helper: runtime image pull failed: {cause}");
-                    OperationError::RuntimeImageLoadFailed
-                }
-                other => other,
-            })?;
+        let pulled = self.run_docker_with_timeout(
+            &[
+                "pull".to_owned(),
+                "--quiet".to_owned(),
+                "--platform".to_owned(),
+                "linux/arm64".to_owned(),
+                remote.clone(),
+            ],
+            RUNTIME_IMAGE_PULL_TIMEOUT,
+        )?;
         if !pulled.success {
-            return Err(OperationError::RuntimeImageLoadFailed);
+            return Err(CommandFailure::exit(&pulled).into());
         }
         let inspected = self
             .inspect_runtime_image(&remote)
             .map_err(|error| match error {
-                OperationError::CommandFailed { cause } => {
-                    eprintln!("vonk-agent-helper: runtime image identity read failed: {cause}");
-                    OperationError::RuntimeImageInspectFailed
-                }
                 OperationError::InvalidArtifact => OperationError::RuntimeImageInspectFailed,
                 other => other,
             })?;
@@ -91,7 +79,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
         }
         let tagged = self.run_docker(&["tag".to_owned(), remote.clone(), local_image.clone()])?;
         if !tagged.success {
-            return Err(OperationError::RuntimeImageInspectFailed);
+            return Err(CommandFailure::exit(&tagged).into());
         }
         // The loopback reference names an ephemeral port; drop it. The image
         // stays under its local tag, and Docker's layer metadata keeps later
@@ -191,7 +179,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
             {
                 Ok(None)
             } else {
-                Err(OperationError::RuntimeImageInspectFailed)
+                Err(CommandFailure::exit(&output).into())
             };
         }
         let fields = std::str::from_utf8(&output.stdout)

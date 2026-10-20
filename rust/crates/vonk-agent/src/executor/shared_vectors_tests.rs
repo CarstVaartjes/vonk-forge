@@ -96,6 +96,7 @@ fn an_inspected_exited_workload_is_the_shared_observation_vector() {
         code: HelperErrorCode::RuntimeProcessExited,
         diagnostic: Some(crate::failure_evidence::sanitize_exit_summary(summary)),
         process_logs: Some(Box::new(crate::failure_evidence::FailureProcessLogs {
+            exit_code: None,
             stdout: crate::failure_evidence::log_tail(b"rank 0 listening on 8888\n"),
             stderr: crate::failure_evidence::log_tail(
                 b"FileNotFoundError: /opt/vonk/prewarm/sglang/flashinfer/autotune/fused_moe.json\n",

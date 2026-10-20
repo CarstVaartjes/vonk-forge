@@ -5,6 +5,10 @@ use super::*;
 pub(super) fn podman_import_diagnostic(
     output: &crate::process::ProcessOutput,
 ) -> PodmanImportDiagnostic {
+    let logs = super::diagnostics::sanitized_process_logs(output);
+    if logs.stdout.text.trim().is_empty() && logs.stderr.text.trim().is_empty() {
+        return PodmanImportDiagnostic::NonzeroWithoutOutput;
+    }
     let mut evidence = Vec::with_capacity(output.stdout.len() + output.stderr.len() + 1);
     evidence.extend_from_slice(&output.stdout);
     evidence.push(b'\n');
@@ -43,7 +47,8 @@ pub(crate) fn podman_build_diagnostic(
     evidence.push(b'\n');
     evidence.extend_from_slice(&output.stderr);
     let evidence = String::from_utf8_lossy(&evidence).to_ascii_lowercase();
-    if output.stdout.is_empty() && output.stderr.is_empty() {
+    let logs = super::diagnostics::sanitized_process_logs(output);
+    if logs.stdout.text.trim().is_empty() && logs.stderr.text.trim().is_empty() {
         PodmanBuildDiagnostic::NonzeroWithoutOutput
     } else if evidence.contains("no space left on device")
         || evidence.contains("disk quota exceeded")
@@ -119,10 +124,7 @@ pub(super) fn podman_import_process_error(error: ProcessError) -> RecipeBuildErr
             return RecipeBuildError::Process(ProcessError::Cancelled);
         }
     };
-    RecipeBuildError::BaseImageImport {
-        diagnostic,
-        logs: None,
-    }
+    RecipeBuildError::BaseImageImportProcess { diagnostic }
 }
 
 pub(super) fn recipe_base_image_error(error: BaseImageError) -> RecipeBuildError {
@@ -152,4 +154,11 @@ pub(crate) fn make_owned_directories_removable(path: &Path) -> std::io::Result<(
         make_owned_directories_removable(&entry?.path())?;
     }
     Ok(())
+}
+
+/// A deterministic conflict between Podman's database and this build's paths.
+/// Permission and integrity failures do not authorize discarding storage.
+pub(super) fn podman_database_conflict(output: &crate::process::ProcessOutput) -> bool {
+    !output.success
+        && String::from_utf8_lossy(&output.stderr).contains("database configuration mismatch")
 }

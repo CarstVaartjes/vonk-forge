@@ -103,6 +103,7 @@ impl ProcessRunner for FailedImportRunner {
             .replace(reserve.filesystem().to_path_buf());
         self.minimum_free_bytes.set(reserve.minimum_free_bytes());
         Ok(ProcessOutput {
+            exit_code: None,
             success: false,
             stdout: Vec::new(),
             stderr: self.stderr.clone(),
@@ -219,6 +220,7 @@ impl ProcessRunner for RetryManifestRunner {
             self.remaining_failures
                 .set(self.remaining_failures.get() - 1);
             return Ok(ProcessOutput {
+                exit_code: None,
                 success: false,
                 stdout: Vec::new(),
                 stderr: b"bounded registry failure".to_vec(),
@@ -436,6 +438,7 @@ impl ProcessRunner for Runner {
             fs::write(storage.join("adapter-complete"), b"completed mock image")?;
         }
         Ok(ProcessOutput {
+            exit_code: None,
             success,
             stdout,
             stderr: Vec::new(),
