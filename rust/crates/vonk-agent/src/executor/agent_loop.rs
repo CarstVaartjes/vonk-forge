@@ -24,6 +24,12 @@ impl LoopClient for AgentHttpClient {
     fn progress_observation(&self, fence: uuid::Uuid) -> Option<OperationProgress> {
         let counters = self.progress_snapshot(fence)?;
         Some(OperationProgress {
+            checkpoint: Some(vonk_agent_protocol::OperationCheckpoint {
+                key: counters.attempt.to_string(),
+                sequence: 0_u64.into(),
+                cursor: None,
+                digest: None,
+            }),
             completed_bytes: counters.bytes.into(),
             total_bytes: counters.total_bytes.map(Into::into),
             total_bytes_known: counters.total_bytes.is_some(),

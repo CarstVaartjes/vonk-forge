@@ -61,6 +61,7 @@ impl<F: FnMut(DistributionProgress)> DistributionProgressTracker<F> {
 
 pub(super) struct ProgressSnapshot {
     pub(super) fence: uuid::Uuid,
+    pub(super) attempt: uuid::Uuid,
     pub(super) phase: ProgressPhase,
     /// Bytes this order completed in its earlier phases, so the bytes it
     /// reports never move backwards when a later phase starts at zero.
@@ -76,6 +77,7 @@ pub(super) struct ProgressSnapshot {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct ProgressCounters {
     pub(crate) phase: ProgressPhase,
+    pub(crate) attempt: uuid::Uuid,
     /// Bytes across all phases of the order; never moves backwards.
     pub(crate) bytes: u64,
     pub(crate) total_bytes: Option<u64>,
@@ -85,6 +87,21 @@ pub(crate) struct ProgressCounters {
 }
 
 impl AgentHttpClient {
+    /// A restarted execution under the same fence has a new progress baseline.
+    pub(crate) fn restart_progress(&self, fence: uuid::Uuid, attempt: uuid::Uuid) {
+        *self
+            .progress_phase
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(ProgressSnapshot {
+            fence,
+            attempt,
+            phase: ProgressPhase::Preparing,
+            settled_bytes: 0,
+            counters: None,
+            activity: 0,
+        });
+    }
+
     fn with_snapshot(&self, fence: uuid::Uuid, update: impl FnOnce(&mut ProgressSnapshot)) {
         if let Some(snapshot) = self
             .progress_phase
@@ -116,6 +133,7 @@ impl AgentHttpClient {
             None => {
                 *snapshot = Some(ProgressSnapshot {
                     fence,
+                    attempt: uuid::Uuid::new_v4(),
                     phase,
                     settled_bytes: 0,
                     counters: None,
@@ -164,6 +182,7 @@ impl AgentHttpClient {
                 let (bytes, total) = snapshot.counters.unwrap_or((0, None));
                 ProgressCounters {
                     phase: snapshot.phase,
+                    attempt: snapshot.attempt,
                     bytes: snapshot.settled_bytes.saturating_add(bytes),
                     total_bytes: total.map(|total| snapshot.settled_bytes.saturating_add(total)),
                     measured: snapshot.settled_bytes > 0 || snapshot.counters.is_some(),

@@ -60,6 +60,13 @@ def progress_advanced(
 ) -> bool:
     """Whether bytes, items, subprocess observations or the phase advanced."""
 
+    if (
+        previous is not None
+        and previous.checkpoint is not None
+        and current.checkpoint is not None
+        and previous.checkpoint.key != current.checkpoint.key
+    ):
+        return False
     return (
         previous is None
         or current.completed_bytes > previous.completed_bytes

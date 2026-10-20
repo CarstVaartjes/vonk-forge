@@ -274,3 +274,46 @@ async fn a_failed_progress_post_is_carried_by_the_next_heartbeat() {
     assert_eq!(items(1), items(0));
     assert_eq!(client.inner.results.lock().unwrap().len(), 1);
 }
+
+#[test]
+fn a_restarted_copy_under_the_same_fence_reports_a_new_attempt_key() {
+    // Wrong implementation: a reissued copy retains its old high-water counter,
+    // or reports no attempt key, so the Controller cannot accept its new baseline.
+    let vectors: Vec<OperationProgress> = serde_json::from_str(include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../../agent_protocol/fixtures/transfer-progress-restart.json"
+    )))
+    .unwrap();
+    let client = AgentHttpClient::for_http_test("http://127.0.0.1:9/", NODE_ID);
+    let fence = Uuid::new_v4();
+    let mut previous = None;
+    for vector in vectors {
+        client.restart_progress(
+            fence,
+            vector.checkpoint.as_ref().unwrap().key.parse().unwrap(),
+        );
+        client.set_progress_phase(fence, ProgressPhase::Copying);
+        client.set_progress_bytes(
+            fence,
+            vector.completed_bytes.to_string().parse().unwrap(),
+            200,
+        );
+        client.note_process_activity(
+            fence,
+            vector
+                .activity_sequence
+                .as_ref()
+                .unwrap()
+                .to_string()
+                .parse()
+                .unwrap(),
+        );
+        let produced = LoopClient::progress_observation(&client, fence).unwrap();
+        assert_eq!(produced, vector);
+        if let Some(before) = previous.as_ref() {
+            // An attempt key alone must not keep a stalled operation alive.
+            assert!(!produced.advanced_from(Some(before)));
+        }
+        previous = Some(produced);
+    }
+}

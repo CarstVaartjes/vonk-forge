@@ -125,29 +125,6 @@ def heartbeat(
             try:
                 current_progress = message.progress
                 retained = stored_progress(attempt)
-                if (
-                    operation.kind == AgentOperation.ARTIFACT_DISTRIBUTION.value
-                    and retained is not None
-                ):
-                    # A restarted transfer walks already durable objects again.
-                    # Replayed offsets are not loss of retained operation bytes.
-                    replayed: dict[str, int] = {}
-                    given = current_progress.model_fields_set
-                    if "completed_bytes" in given:
-                        replayed["completed_bytes"] = max(
-                            current_progress.completed_bytes,
-                            retained.completed_bytes,
-                        )
-                    if (
-                        "completed_items" in given
-                        and current_progress.completed_items is not None
-                        and retained.completed_items is not None
-                    ):
-                        replayed["completed_items"] = max(
-                            current_progress.completed_items,
-                            retained.completed_items,
-                        )
-                    current_progress = current_progress.model_copy(update=replayed)
                 validated = validate_progress_update(
                     retained, current_progress, partial=False
                 )
