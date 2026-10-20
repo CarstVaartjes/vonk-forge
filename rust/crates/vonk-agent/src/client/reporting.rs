@@ -257,6 +257,7 @@ pub(super) fn clamp_inventory_request(request: &mut InventoryRequest) -> Vec<Age
         request.fabric_bandwidth_mbps = None;
     }
     crate::network::clamp_network_evidence(request, &mut warnings);
+    warnings.extend(crate::inventory::bound_model_object_evidence(request));
     warnings
 }
 

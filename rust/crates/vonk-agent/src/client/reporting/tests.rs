@@ -443,3 +443,26 @@ async fn an_older_controller_that_refuses_optional_evidence_still_gets_the_core(
     }
     assert!(bodies[1].contains("\"disk_free_bytes\""));
 }
+
+#[test]
+fn inventory_model_evidence_over_http_envelope_is_unknown_until_next_report() {
+    // Network enrichment happens after the collector subprocess. It must not
+    // turn optional evidence into an HTTP size refusal of the capacity core.
+    let mut request = valid_inventory();
+    request.model_objects = Some(
+        (0..16_384)
+            .map(|index| vonk_agent_protocol::generated::ModelStoreObject {
+                sha256: format!("{index:064x}"),
+                bytes: 1,
+            })
+            .collect(),
+    );
+    let warnings = clamp_inventory_request(&mut request);
+    assert!(warnings.contains(&AgentEvidenceCode::AgentEvidenceInventoryModelObjectsDropped));
+    assert!(request.model_objects.is_none());
+    assert_eq!(request.disk_free_bytes, 50);
+    request.validate().unwrap();
+    request.model_objects = Some(vec![]);
+    assert!(clamp_inventory_request(&mut request).is_empty());
+    assert_eq!(request.model_objects, Some(vec![]));
+}
