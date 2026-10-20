@@ -8,7 +8,7 @@ use vonk_agent::{
     client::{AgentHttpClient, ClientError},
     config::AgentConfig,
     identity::IdentityPaths,
-    outcome::ExecutionResult,
+    outcome::{ExecutionResult, Failure, Unconfirmed, UnknownEvidence},
     state::{BeginDecision, StateStore},
 };
 
@@ -32,6 +32,56 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let value: AgentResult = parse_strict(&raw)?;
             value.validate()?;
             canonical_json(&value)?
+        }
+        Some("retained-outcomes") => {
+            use vonk_agent_protocol::generated::{
+                AgentOperation, FailureCode, FailureStage, RecipeJobRunResult, WaitReason,
+            };
+            let mut receipt: RecipeJobRunResult = parse_strict(&raw)?;
+            let operation = AgentOperation::RecipeJobRunV1;
+            let mut results = vec![ExecutionResult::done(receipt.clone())];
+            receipt.exit_code = 1;
+            results.push(ExecutionResult::Failed(
+                Failure::new("job process failed")
+                    .code(FailureCode::RecipeJobRunFailed)
+                    .receipt(receipt.clone()),
+            ));
+            receipt.exit_code = 130;
+            results.push(ExecutionResult::Failed(
+                Failure::new("job process cancellation confirmed")
+                    .code(FailureCode::OperationCancelled)
+                    .receipt(receipt.clone()),
+            ));
+            results.push(ExecutionResult::Unknown(Unconfirmed {
+                wait_reason: WaitReason::RuntimeEffectUnconfirmed,
+                reason: "output delivery remains unconfirmed".to_owned(),
+                evidence: UnknownEvidence::at(FailureStage::JobOutputDelivery),
+                receipt: Some(receipt),
+            }));
+            results.push(ExecutionResult::failed("job launch failed"));
+            results.push(ExecutionResult::cancelled(
+                "job launch cancellation confirmed",
+            ));
+            results.push(ExecutionResult::unknown(
+                WaitReason::RuntimeEffectUnconfirmed,
+                "job launch remains unconfirmed",
+                UnknownEvidence::at(FailureStage::Unknown),
+            ));
+            let messages: Vec<_> = results
+                .into_iter()
+                .map(|result| {
+                    let finished = result.finish_for(&operation);
+                    AgentResult {
+                        fence: uuid::Uuid::new_v4(),
+                        state: finished.state,
+                        result: finished.result,
+                    }
+                })
+                .collect();
+            for message in &messages {
+                message.validate_for_operation(&operation)?;
+            }
+            canonical_json(&messages)?
         }
         Some("OperationProgress") => {
             let value: vonk_agent_protocol::OperationProgress = parse_strict(&raw)?;

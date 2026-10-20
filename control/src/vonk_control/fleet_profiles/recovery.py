@@ -20,10 +20,10 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol.agent_words import (
     ProfileAction,
     ProfileProjectionKind,
-    ProfileReasonSeverity,
 )
 
 from .. import fleet_profile_states
+from ..evidence_repeats import load_subject, note_repeat
 from ..fleet_profile_contract import (
     FleetProfileApplicationProgress,
     FleetProfileChildOperation,
@@ -36,7 +36,6 @@ from ..models import AgentNode, FleetProfileApplication, FleetProfileSelection
 from ..operation_blockers import OperationBlocker, make_blocker
 from ..persisted_waits import wait_due
 from ..profile_error_summary import _normalized_failure_text
-from ..recovery_policy import RECOVERY
 from .assessment_support import (
     _progress_with_blockers,
 )
@@ -123,8 +122,7 @@ class FleetProfileService:
                     "A newer accepted workload intent owns the effects",
                 ),
             )
-        repeated = self._repeated_failure(session, row, progress)
-        return None if repeated is None else (repeated,)
+        return None
 
     def _retries_failure(self, session: Session, row: FleetProfileApplication) -> bool:
         """The lifecycle's question when a load fails: will it be retried?
@@ -143,6 +141,24 @@ class FleetProfileService:
         except (FleetProfileConflict, ValidationError, TypeError, ValueError):
             ending = ()
         if ending is None:
+            # The signature explains repeated faults; it never revokes standing
+            # intent. The owner re-plans and reconciles exact effects on retry.
+            adapter = self._switch_adapter
+            signature = (
+                adapter.failure_signature(row.id, session=session)
+                if adapter is not None
+                else None
+            ) or _stale_plan_signature(progress)
+            if signature is not None and progress.intended_profile is not None:
+                for node_id in progress.intended_profile.scope.node_ids:
+                    note_repeat(
+                        session,
+                        load_subject(row.id),
+                        node_id,
+                        PROFILE_REPEATED_FAILURE_CODE,
+                        now=_aware(self._clock()),
+                        detail=signature,
+                    )
             return True
         recorded = {(item.code, item.detail) for item in progress.blockers}
         row.progress = _progress_with_blockers(
@@ -187,75 +203,6 @@ class FleetProfileService:
         return tuple(
             progress.intended_profile.scope.node_ids
         ) == current_scope and self._retry_eligible(session, row)
-
-    def _repeated_failure(
-        self,
-        session: Session,
-        row: FleetProfileApplication,
-        progress: FleetProfileApplicationProgress,
-    ) -> OperationBlocker | None:
-        """The evidence that this load keeps failing the same way, if it does.
-
-        Retries are for causes that change.  A definite ending is never replayed
-        (``recovery_refused``), so what reaches the budget is a replayable ending:
-        an untyped one, a digest mismatch, or an expired observation window,
-        which the adapter identifies by what it waited on.  The same
-        ``failure_signature`` as many times as ``RECOVERY`` allows failures in a
-        row (this attempt and the ones its retry lineage already recorded) does
-        not change by itself: another attempt only repeats it.  A Controller
-        cache loss has no signature and is never counted.  Read-only (views call
-        it); the failure records the ending once.
-        """
-        self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
-
-        recorded = next(
-            (
-                blocker
-                for blocker in progress.blockers
-                if blocker.code == PROFILE_REPEATED_FAILURE_CODE
-            ),
-            None,
-        )
-        if recorded is not None:
-            return recorded
-        adapter = self._switch_adapter
-        if adapter is None:
-            return None
-        signature = adapter.failure_signature(
-            row.id, session=session
-        ) or _stale_plan_signature(progress)
-        if signature is None:
-            return None
-        count = 1
-        cursor = progress.retry_of_application_id
-        while not RECOVERY.exhausted(count):
-            if cursor is None:
-                break
-            ancestor = session.get(FleetProfileApplication, cursor)
-            if ancestor is None:
-                break
-            try:
-                ancestor_progress = _persisted_profile_progress(ancestor)
-            except FleetProfileConflict:
-                break
-            if (
-                adapter.failure_signature(ancestor.id, session=session)
-                or _stale_plan_signature(ancestor_progress)
-            ) != signature:
-                break
-            count += 1
-            cursor = ancestor_progress.retry_of_application_id
-        if not RECOVERY.exhausted(count):
-            return None
-        cause = signature.partition("\n")[0].rpartition("|")[2] or signature
-        return make_blocker(
-            PROFILE_REPEATED_FAILURE_CODE,
-            f"Failed the same way {count} times in a row; not retrying: {cause}",
-            severity=ProfileReasonSeverity.ERROR.value,
-            node_ids=progress.intended_profile.scope.node_ids
-            if progress.intended_profile is not None
-            else (),
-        )
 
     def _settle_retry_candidates(
         self, adopted: Sequence[str], ended: Sequence[str], now: datetime

@@ -2261,3 +2261,93 @@ def test_upgrade_identity_warning_names_its_order_and_clears_on_confirmation(
                 now=clock(),
             )
     assert _repeating(sessions, NODE_A, clock()) == []
+
+
+@pytest.mark.parametrize(
+    "change", [None, "binary", "receipt", "revoked", "attempt", "cancel"]
+)
+def test_idle_worker_adopts_only_exact_retained_upgrade_receipt(
+    tmp_path, postgres_engine, monkeypatch, change
+):
+    """Catches upgrade exclusion from quiet-fleet receipt adoption after death.
+
+    The same stored report must settle on a reconstructed worker, without a
+    claim, contact renewal, reinstall or adoption under changed authority.
+    """
+    from vonk_agent_protocol import AgentResultState, LifecycleState, ObservationCause
+    from vonk_agent_protocol.claims import AGENT_PROTOCOL_VERSION
+    from vonk_control.agent_jobs.retry import schedule_agent_upgrade_retry
+
+    monkeypatch.setattr(f"{__name__}.create_engine", lambda *_: postgres_engine)
+    clock = Clock()
+    sessions, operations, _upgrades, job = _rollout(
+        tmp_path, "upgrade-observation", clock=clock
+    )
+    claim = _claim_upgrade(operations, NODE_A, "serial-a", OLD_IDENTITY)
+    result = AgentUpgradeResult.model_validate(_target_evidence())
+    with sessions.begin() as session:
+        operation = session.scalar(
+            select(AgentOperation).where(
+                AgentOperation.parent_job_id == job.id, AgentOperation.node_id == NODE_A
+            )
+        )
+        attempt = session.scalar(
+            select(AgentOperationAttempt).where(
+                AgentOperationAttempt.fence == claim.fence
+            )
+        )
+        node = session.get(AgentNode, NODE_A)
+        parent = session.get(Job, job.id)
+        assert (
+            operation is not None
+            and attempt is not None
+            and node is not None
+            and parent is not None
+        )
+        operation_id = operation.id
+        # Retained authenticated evidence, with the fresh contact already
+        # committed before the previous Controller worker died.
+        node.binary_digest = result.binary_digest
+        node.build_digest = result.build_digest
+        node.protocol_version = AGENT_PROTOCOL_VERSION
+        node.last_seen_at = clock()
+        schedule_agent_upgrade_retry(operation, attempt, clock())
+        contact, deadline = node.last_seen_at, attempt.lease_deadline
+        operation.state = LifecycleState.OBSERVING
+        attempt.state = LifecycleState.OBSERVING
+        attempt.observation_cause = ObservationCause.LEASE_LAPSED
+        if change == "binary":
+            node.binary_digest = OLD_IDENTITY["binary_digest"]
+        elif change == "receipt":
+            result = result.model_copy(
+                update={
+                    "activation_receipt": result.activation_receipt.model_copy(
+                        update={"attempt_nonce": "0" * 64}
+                    )
+                }
+            )
+        elif change == "revoked":
+            node.revoked_at = clock()
+        elif change == "attempt":
+            operation.current_attempt += 1
+        elif change == "cancel":
+            parent.state = LifecycleState.CANCELLED
+        attempt.result = result.model_dump(mode="json")
+    restarted = AgentJobService(sessions, clock=clock)
+    upgrades = AgentUpgradeService(sessions, restarted, clock=clock)
+    restarted.set_result_consumer(upgrades.consume_agent_result)
+    restarted.reconcile_orders()
+    with sessions() as session:
+        operation = session.get(AgentOperation, operation_id)
+        node = session.get(AgentNode, NODE_A)
+        attempt = session.scalar(
+            select(AgentOperationAttempt).where(
+                AgentOperationAttempt.fence == claim.fence
+            )
+        )
+        assert operation is not None and node is not None and attempt is not None
+        assert (operation.state == LifecycleState.SUCCEEDED) is (change is None)
+        assert node.last_seen_at == contact
+        assert attempt.lease_deadline == deadline
+        if change is None:
+            assert attempt.state == AgentResultState.SUCCEEDED

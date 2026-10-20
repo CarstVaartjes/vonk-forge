@@ -35,7 +35,6 @@ impl AgentHttpClient {
         self
     }
 
-    #[cfg(test)]
     pub(crate) fn node_id(&self) -> &str {
         &self.node_id
     }

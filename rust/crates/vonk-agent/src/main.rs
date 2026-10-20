@@ -424,6 +424,8 @@ async fn run_control_lane(
             }
         }
         let executor = ControlExecutor {
+            runtime_identity: &runtime_identity,
+            activation_receipt: Path::new(vonk_agent::package_activation::RECEIPT),
             recipes: RecipeExecutor {
                 client: &client,
                 helper_socket: Path::new(vonk_agent::host_runtime::HELPER_SOCKET),

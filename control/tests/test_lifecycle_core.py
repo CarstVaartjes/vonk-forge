@@ -308,27 +308,49 @@ def _tick_until(
     ("irreversible", "effect"),
     [(False, Effect.UNKNOWN), (True, Effect.NONE)],
 )
-def test_safe_current_intent_exhausts_retry_budget_and_fresh_work_executes(
+def test_safe_current_intent_recovers_after_repeated_faults(
     irreversible: bool, effect: Effect
 ) -> None:
-    # Wrong implementation: repeated failures retain ownership forever and
-    # leave no finite ending for the accepted request.
+    # Wrong implementation: a repetition count ends still-authorized intent,
+    # so clearing the fault cannot recover the same operation.
+    from vonk_agent_protocol import AgentFailureKind
     from vonk_control.lifecycle.core import RECOVERY
 
     adapter = FakeAdapter(is_irreversible=irreversible)
-    row = _row(
-        state=State.OBSERVING,
-        effect=effect,
-        attempt=RECOVERY.max_failures,
-        retry_count=RECOVERY.max_failures - 1,
-    )
-    decision = transition(row, Observed(effect), adapter, NOW)
-    assert decision.row.state is State.FAILED
-    assert decision.row.next_action_at is None
-    assert decision.row.lease_deadline is None
-    fresh = replace(_row(state=State.QUEUED, attempt=0, effect=Effect.NONE), id="fresh")
-    admitted = transition(fresh, Tick(), adapter, NOW)
-    assert any(isinstance(command, Execute) for command in admitted.commands)
+    row = _row(state=State.OBSERVING, effect=effect)
+    now = NOW
+    for _ in range(RECOVERY.max_failures * 2):
+        decision = transition(row, Observed(effect), adapter, now)
+        row = decision.row
+        assert row.state is State.BACKOFF
+        assert row.next_action_at is not None
+        assert (
+            now
+            < row.next_action_at
+            <= now + timedelta(seconds=RECOVERY.max_delay_seconds)
+        )
+        now = row.next_action_at
+        assert transition(row, Tick(), adapter, now).commands == (Execute(),)
+        row = transition(
+            row,
+            Claimed(row.attempt + 1, "current", now + timedelta(minutes=1)),
+            adapter,
+            now,
+        ).row
+        row = transition(
+            row,
+            Reported.failed(
+                AgentFailureKind.UNCERTAIN_EFFECT, fence=row.fence, effect=effect
+            ),
+            adapter,
+            now,
+        ).row
+        assert row.state is State.BACKOFF
+        row = replace(row, state=State.OBSERVING)
+    done = transition(row, Observed(Effect.ESTABLISHED), adapter, now).row
+    assert done.id == "op-1"
+    assert done.state is State.SUCCEEDED
+    assert done.next_action_at is None
 
 
 @pytest.mark.parametrize("deadline", [None, NOW - timedelta(minutes=1)])
@@ -663,17 +685,15 @@ def test_a_retry_never_starts_before_the_kinds_safety_fence() -> None:
     assert decision.row.next_action_at >= fence
 
 
-def test_persistent_unknown_exhausts_durable_retries_and_fresh_work_is_admitted() -> (
-    None
-):
-    # Wrong implementation: restart-safe unknowns back off forever, retaining
-    # their queue ownership instead of ending and accepting fresh intent.
+def test_persistent_unknown_keeps_its_durable_count_until_the_fault_clears() -> None:
+    # Wrong implementation: repeated unknowns end the same current intent, or
+    # a reload forgets its evidence and starts a fresh backoff window.
     from vonk_control.lifecycle.core import RECOVERY
 
     adapter = FakeAdapter()
     row = _row(state=State.RUNNING)
     now = NOW
-    for _ in range(RECOVERY.max_failures):
+    for _ in range(RECOVERY.max_failures * 2):
         reported = transition(
             row,
             Reported(Outcome.UNKNOWN, fence=row.fence, effect=Effect.UNKNOWN),
@@ -681,8 +701,7 @@ def test_persistent_unknown_exhausts_durable_retries_and_fresh_work_is_admitted(
             now,
         )
         row = reported.row
-        if row.terminal:
-            break
+        assert not row.terminal
         assert row.next_action_at is not None
         # Reloading this immutable projection stands for another process;
         # counters come from durable state, never a new per-attempt budget.
@@ -694,12 +713,9 @@ def test_persistent_unknown_exhausts_durable_retries_and_fresh_work_is_admitted(
             adapter,
             now,
         ).row
-    assert row.terminal
-    assert row.next_action_at is None
-    assert row.lease_deadline is None
-    fresh = replace(_row(state=State.QUEUED, attempt=0, effect=Effect.NONE), id="fresh")
-    admitted = transition(fresh, Tick(), adapter, now)
-    assert any(isinstance(command, Execute) for command in admitted.commands)
+    assert row.retry_count == RECOVERY.max_failures * 2
+    done = transition(row, Reported(Outcome.DONE, fence=row.fence), adapter, now).row
+    assert done.id == row.id and done.state is State.SUCCEEDED
 
 
 def test_persisted_deadline_bounds_retries_and_releases_fresh_work() -> None:

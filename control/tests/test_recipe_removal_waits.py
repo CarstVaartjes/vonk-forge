@@ -1,4 +1,4 @@
-"""A recipe cache removal is never ended by a clock; only real failures end it."""
+"""Recoverable recipe removal faults retain intent until they clear."""
 
 from __future__ import annotations
 
@@ -9,7 +9,12 @@ from pathlib import Path
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import Disposition, LifecycleState, ModelCacheCode
+from vonk_agent_protocol import (
+    Disposition,
+    LifecycleState,
+    ModelCacheCode,
+    RuntimeImageCode,
+)
 from vonk_control.models import Base, Job
 from vonk_control.recipe_image_availability_view_contract import (
     RecipeCacheRemovalStatus,
@@ -111,27 +116,29 @@ def test_a_removal_retried_past_the_old_five_minute_cap_still_completes(
         engine.dispose()
 
 
-def test_a_removal_whose_own_attempts_keep_failing_ends_with_that_evidence(
+def test_a_removal_recovers_under_the_same_request_after_repeated_failures(
     tmp_path, monkeypatch
 ) -> None:
-    """Real failures still end it: the retry budget, with the failure as cause."""
+    """Count-based termination must not poison a removal after contention clears."""
 
-    engine, _sessions, service, now, recipe = _removal(tmp_path, monkeypatch, [10**6])
+    contended = [10**6]
+    engine, sessions, service, now, _recipe = _removal(tmp_path, monkeypatch, contended)
     try:
         for _ in range(RecoveryPolicy().max_failures + 2):
             service.advance_removals(limit=1)
             now[0] += timedelta(hours=1)
-        ended = _status(service)
-        assert ended.state == LifecycleState.FAILED
-        assert ended.failure is not None
-        assert ended.failure.code == "runtime_image.publication_contended"
-        fresh = remove_after_review(
-            service,
-            recipe.identity.slug,
-            actor="operator",
-            request_id="00000000-0000-4000-8000-000000000072",
-        )
-        assert fresh["state"] == "queued"
+            waiting = _status(service)
+            assert waiting.state == LifecycleState.BACKOFF
+            assert waiting.failure is not None
+            assert waiting.failure.code == RuntimeImageCode.PUBLICATION_CONTENDED
+            with sessions() as session:
+                row = session.get(Job, waiting.operation_id)
+                assert row is not None and row.next_action_at is not None
+        contended[0] = 0
+        for _ in range(4):
+            service.advance_removals(limit=1)
+        assert _status(service).operation_id == waiting.operation_id
+        assert _status(service).state == LifecycleState.SUCCEEDED
         _admit_fresh_preparation(service)
     finally:
         engine.dispose()

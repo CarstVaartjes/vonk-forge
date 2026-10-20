@@ -12,9 +12,16 @@ use vonk_agent_protocol::{
     PackageActivationPhase, PackageActivationReceipt, canonical_json, parse_strict,
 };
 
-const RECEIPT: &str = "/var/lib/vonk-forge/package-activation.receipt.json";
+pub const RECEIPT: &str = "/var/lib/vonk-forge/package-activation.receipt.json";
 
 pub fn read_receipt(path: &Path) -> Result<Option<PackageActivationReceipt>, AgentUpgradeError> {
+    read_receipt_owned(path, 0)
+}
+
+fn read_receipt_owned(
+    path: &Path,
+    owner: u32,
+) -> Result<Option<PackageActivationReceipt>, AgentUpgradeError> {
     let fd = match rustix::fs::open(
         path,
         OFlags::RDONLY | OFlags::CLOEXEC | OFlags::NOFOLLOW,
@@ -27,7 +34,7 @@ pub fn read_receipt(path: &Path) -> Result<Option<PackageActivationReceipt>, Age
     let mut file = File::from(fd);
     let metadata = file.metadata()?;
     if !metadata.is_file()
-        || metadata.uid() != 0
+        || metadata.uid() != owner
         || metadata.nlink() != 1
         || metadata.mode() & 0o777 != 0o644
         || metadata.len() == 0
@@ -46,6 +53,14 @@ pub fn read_receipt(path: &Path) -> Result<Option<PackageActivationReceipt>, Age
         .validate()
         .map_err(|_| AgentUpgradeError::HelperResponseInvalid)?;
     Ok(Some(receipt))
+}
+
+#[cfg(test)]
+pub(crate) fn read_fixture_receipt(
+    path: &Path,
+    owner: u32,
+) -> Result<Option<PackageActivationReceipt>, AgentUpgradeError> {
+    read_receipt_owned(path, owner)
 }
 
 pub async fn acknowledge(

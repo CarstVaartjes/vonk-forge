@@ -508,7 +508,7 @@ class RecipeRouteService:
                 json.dumps(job.payload["recovery"])
             )
         except (TypeError, ValueError, KeyError) as error:
-            raise RecipeRouteNotReady("recovery metadata is unavailable") from error
+            raise RecipeRouteError("recovery metadata is invalid") from error
         return _RecoveryPublication(
             job, _aware(datetime.fromisoformat(marker.deadline))
         )

@@ -16,6 +16,8 @@ from __future__ import annotations
 import ast
 import re
 
+from vonk_agent_protocol import TERMINAL_LIFECYCLE_STATES, LifecycleState
+
 BROAD = frozenset(
     {
         "AttributeError",
@@ -287,4 +289,182 @@ def scan_rust_dispositions(
         for number, line in enumerate(source.splitlines(), start=1)
         if number not in test_lines
         and _RUST_STATUS_LITERAL.search(line.split("//", 1)[0])
+    ]
+
+
+# A standing owner bounds its retry rate; only a request-local retry may spend
+# a finite count. This is intentionally syntax detection, not a liveness proof.
+_REPETITION = re.compile(r"attempt|retr(?:y|ies)|repeat|failure", re.IGNORECASE)
+_TERMINAL = frozenset(
+    state.name for state in (*TERMINAL_LIFECYCLE_STATES, LifecycleState.NEEDS_OPERATOR)
+)
+
+
+def _ends_work(node: ast.AST) -> bool:
+    for part in ast.walk(node):
+        if isinstance(part, ast.Return) and (
+            part.value is None
+            or isinstance(part.value, ast.Constant)
+            and part.value.value is None
+        ):
+            return True
+        if isinstance(part, ast.Attribute) and part.attr in _TERMINAL:
+            return True
+        if (
+            isinstance(part, ast.keyword)
+            and part.arg in {"next_action_at", "next_at"}
+            and isinstance(part.value, ast.Constant)
+            and part.value.value is None
+        ):
+            return True
+        if isinstance(part, (ast.Assign, ast.AnnAssign)):
+            targets = part.targets if isinstance(part, ast.Assign) else [part.target]
+            if (
+                any(
+                    _name(target) in {"next_action_at", "next_at"} for target in targets
+                )
+                and isinstance(part.value, ast.Constant)
+                and part.value.value is None
+            ):
+                return True
+        if isinstance(part, ast.Call) and _name(part.func) in {
+            "fail",
+            "_fail",
+            "finish",
+            "_end",
+            "make_blocker",
+        }:
+            return True
+    return False
+
+
+def _request_or_cancel(test: ast.AST) -> bool:
+    if isinstance(test, ast.BoolOp) and isinstance(test.op, ast.And):
+        return any(_request_or_cancel(value) for value in test.values)
+    return (
+        isinstance(test, ast.Attribute)
+        and test.attr == "cancel_requested"
+        or isinstance(test, ast.UnaryOp)
+        and isinstance(test.op, ast.Not)
+        and isinstance(test.operand, ast.Name)
+        and test.operand.id == "ongoing_intent"
+    )
+
+
+def scan_count_endings(source: str) -> list[int]:
+    """Attempt/repetition comparisons that terminate work or remove its action.
+
+    Allow explicit cancellation and the shared policy's request-local branch.
+    A bounded local loop may end its request; it cannot decide the lifetime
+    of a durable row.
+    """
+    tree = ast.parse(source)
+    parents = {
+        child: parent
+        for parent in ast.walk(tree)
+        for child in ast.iter_child_nodes(parent)
+    }
+    sites: list[int] = []
+    for branch in ast.walk(tree):
+        if not isinstance(branch, ast.If):
+            continue
+        ancestors: list[ast.AST] = []
+        conditions = [branch.test]
+        cursor: ast.AST = branch
+        while cursor in parents:
+            parent = parents[cursor]
+            if isinstance(parent, ast.If) and cursor in parent.body:
+                conditions.append(parent.test)
+            ancestors.append(parent)
+            cursor = parent
+        # These are explicit endings of cancellation or a request-local budget,
+        # never continuing authorized work.
+        if any(_request_or_cancel(condition) for condition in conditions):
+            continue
+        if any(
+            isinstance(loop, ast.For)
+            and isinstance(loop.target, ast.Name)
+            and isinstance(loop.iter, ast.Call)
+            and _name(loop.iter.func) == "range"
+            and any(
+                isinstance(part, ast.Name) and part.id == loop.target.id
+                for part in ast.walk(branch.test)
+            )
+            for loop in ancestors
+        ) and not any(
+            isinstance(part, ast.Attribute)
+            and part.attr in {"state", "next_at", "next_action_at", *_TERMINAL}
+            for statement in branch.body
+            for part in ast.walk(statement)
+        ):
+            continue
+        function = next(
+            (
+                node
+                for node in ancestors
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            ),
+            tree,
+        )
+        counters = {
+            _name(part)
+            for part in ast.walk(function)
+            if isinstance(part, (ast.Name, ast.Attribute))
+            and _REPETITION.search(_name(part))
+        }
+        for assignment in ast.walk(function):
+            if isinstance(assignment, ast.Assign) and _counter(
+                assignment.value, _REPETITION
+            ):
+                counters.update(_name(target) for target in assignment.targets)
+        comparisons = [
+            part for part in ast.walk(branch.test) if isinstance(part, ast.Compare)
+        ]
+        limited = any(
+            any(_name(part) in counters for part in ast.walk(comparison))
+            and any(
+                isinstance(op, (ast.Gt, ast.GtE, ast.Lt, ast.LtE, ast.Eq))
+                for op in comparison.ops
+            )
+            for comparison in comparisons
+        ) or any(
+            isinstance(part, ast.Call) and _name(part.func) == "exhausted"
+            for part in ast.walk(branch.test)
+        )
+        if limited and _ends_work(ast.Module(body=branch.body, type_ignores=[])):
+            sites.extend(
+                [
+                    branch.lineno,
+                    *(
+                        part.lineno
+                        for statement in branch.body
+                        for part in ast.walk(statement)
+                        if isinstance(
+                            part, (ast.Return, ast.Call, ast.Assign, ast.AnnAssign)
+                        )
+                    ),
+                ]
+            )
+    return sorted(set(sites))
+
+
+def scan_recovery_policy_users(source: str, *, path: str) -> list[int]:
+    """All durable policy callers must opt into continuing intent explicitly.
+
+    The policy itself owns request-local exhaustion; its callers are standing
+    owners or checkpoint owners that reconcile effects before another attempt.
+    """
+    if path == "control/src/vonk_control/recovery_policy.py":
+        return []
+    return [
+        call.lineno
+        for call in ast.walk(ast.parse(source))
+        if isinstance(call, ast.Call)
+        and _name(call.func) == "next_attempt"
+        and not any(
+            keyword.arg == "ongoing_intent"
+            and isinstance(keyword.value, ast.Constant)
+            and keyword.value.value is True
+            for keyword in call.keywords
+        )
     ]
