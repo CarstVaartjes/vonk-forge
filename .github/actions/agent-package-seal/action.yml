@@ -114,7 +114,7 @@ runs:
         scripts/verify-agent-systemd --json \
           | tee dist/vonk-forge-systemd-security.json
     - name: Upload immutable acceptance baseline packages
-      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
       with:
         name: ${{ inputs.baseline_artifact_name }}
         if-no-files-found: error
@@ -157,7 +157,7 @@ runs:
           +refs/heads/main:refs/remotes/origin/main
         git merge-base --is-ancestor "$GITHUB_SHA" refs/remotes/origin/main
     - name: Upload exact package release set
-      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
       with:
         name: ${{ inputs.artifact_name }}
         if-no-files-found: error
@@ -175,7 +175,7 @@ runs:
         scripts/agent-package-versions write "$VERSION" "$BASELINE_VERSION" \
           "$RUNNER_TEMP/versions/versions.txt"
     - name: Upload the package set versions
-      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
       with:
         name: ${{ inputs.artifact_name }}-versions
         if-no-files-found: error
