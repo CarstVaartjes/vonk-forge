@@ -427,7 +427,8 @@ impl StateStore {
                     {
                         return Err(StateError::Identity);
                     }
-                    if stored.result.is_none()
+                    if stored.operation == accepted.operation.as_str()
+                        && stored.result.is_none()
                         && crate::executor::operation_observation::ObservationKind::of(
                             &accepted.operation,
                         )
