@@ -281,7 +281,7 @@ fn a_restarted_copy_under_the_same_fence_reports_a_new_attempt_key() {
     // or reports no attempt key, so the Controller cannot accept its new baseline.
     let vectors: Vec<OperationProgress> = serde_json::from_str(include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../../../tests/fixtures/transfer-progress-restart.json"
+        "/../../../agent_protocol/fixtures/transfer-progress-restart.json"
     )))
     .unwrap();
     let client = AgentHttpClient::for_http_test("http://127.0.0.1:9/", NODE_ID);

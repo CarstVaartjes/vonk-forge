@@ -317,7 +317,7 @@ def test_rust_restart_vector_is_accepted_and_resets_throughput():
         for value in json.loads(
             (
                 Path(__file__).parents[2]
-                / "tests/fixtures/transfer-progress-restart.json"
+                / "agent_protocol/fixtures/transfer-progress-restart.json"
             ).read_text()
         )
     ]
