@@ -353,6 +353,10 @@ mod tests {
         drop(cancel);
         let mut current = obsolete.clone();
         current.fence = Uuid::new_v4();
+        // The accepted assignment now enters resumable object transfer directly.
+        // End this attempt's authority before its network retry backoff, rather
+        // than assuming that an unavailable Controller answers within one second.
+        current.deadline = (Utc::now() + chrono::Duration::milliseconds(250)).fixed_offset();
         let (_lease, deadline) = tokio::sync::watch::channel(current.deadline);
         let (_cancel, cancellation) = tokio::sync::watch::channel(false);
         let result = tokio::time::timeout(
@@ -366,8 +370,12 @@ mod tests {
         let ExecutionResult::Failed(failure) = &result else {
             panic!("expected the fresh distribution to reach its network dependency");
         };
-        assert_eq!(failure.code, None);
+        assert_eq!(
+            failure.code,
+            Some(FailureCode::RuntimeObservationUnavailable)
+        );
         assert_eq!(failure.stage, Some(FailureStage::ArtifactDistribution));
+        assert!(data.path().join("distribution/models").is_dir());
         assert_eq!(
             failure.failure_kind,
             Some(AgentFailureKind::TemporaryDependency)
