@@ -110,6 +110,8 @@ pub const STORES: &[Store] = &[
     Store("credentials/", Bookkeeping, "the agent identity"),
     Store("state.sqlite", Bookkeeping, "the agent journal"),
     Store("store-retention.json", Bookkeeping, "the Controller inventory verdict"),
+    Store("installation-inventory-cursor", Bookkeeping, "inventory page rotation"),
+    Store("run-inventory-cursor", Bookkeeping, "inventory page rotation"),
     Store(".state-db-reserve", Bookkeeping, "the agent journal"),
     Store("preflight-completion/", Bookkeeping, "one bounded fence-bound completed preflight receipt"),
     Store("runtime-preflight-cache.json", Bookkeeping, "the host fingerprint"),
@@ -160,18 +162,28 @@ pub struct Untracked {
     /// named), and none leaves.
     pub runs: Option<BTreeSet<String>>,
     pub retention: Option<vonk_agent_protocol::generated::StoreRetentionRequest>,
+    /// Only this observed batch may be judged absent from the untracked set.
+    pub observed_installations: BTreeSet<String>,
+    pub observed_runs: BTreeSet<String>,
 }
 
 impl LatestVerdict {
     /// Record the Controller's answer to the latest inventory; `None` (an older
     /// Controller, or nothing named) leaves no verdict.
-    pub fn record(&self, verdict: Option<vonk_agent_protocol::generated::InventoryVerdict>) {
+    pub fn record(
+        &self,
+        verdict: Option<vonk_agent_protocol::generated::InventoryVerdict>,
+        observed_installations: &[uuid::Uuid],
+        observed_runs: &[uuid::Uuid],
+    ) {
         let names = |ids: &[uuid::Uuid]| ids.iter().map(ToString::to_string).collect();
         let answer = verdict.map(|verdict| {
             (
                 Instant::now(),
                 Untracked {
                     retention: verdict.store_retention,
+                    observed_installations: names(observed_installations),
+                    observed_runs: names(observed_runs),
                     installations: names(&verdict.untracked_installations),
                     runs: verdict.untracked_runs.as_deref().map(names),
                 },
@@ -198,33 +210,66 @@ impl LatestVerdict {
 }
 
 /// The installation directories below `data_root`, by id, as inventory
-/// reports them (at most the wire limit, in order); `None` when they cannot
+/// reports them (a rotating page at most the wire limit); `None` when they cannot
 /// be listed.
 pub fn installation_names(data_root: &Path) -> Option<Vec<uuid::Uuid>> {
     let mut names = BTreeSet::new();
     scope_names(&data_root.join("installations"), &mut names)?;
-    Some(
-        names
-            .into_iter()
-            .take(vonk_agent_protocol::MAX_REPORTED_INSTALLATIONS)
-            .collect(),
+    rotating_page(
+        data_root,
+        "installation-inventory-cursor",
+        names,
+        vonk_agent_protocol::MAX_REPORTED_INSTALLATIONS,
     )
 }
 
 /// The run scopes below `data_root` (`runs/` and `run-metadata/`), by id, as
-/// inventory reports them (at most the wire limit, in order); `None` when
+/// inventory reports them (a rotating page at most the wire limit); `None` when
 /// they cannot be listed.
 pub fn run_scope_names(data_root: &Path) -> Option<Vec<uuid::Uuid>> {
     let mut names = BTreeSet::new();
     for store in ["runs", "run-metadata"] {
         scope_names(&data_root.join(store), &mut names)?;
     }
-    Some(
-        names
-            .into_iter()
-            .take(vonk_agent_protocol::MAX_REPORTED_RUNS)
-            .collect(),
+    rotating_page(
+        data_root,
+        "run-inventory-cursor",
+        names,
+        vonk_agent_protocol::MAX_REPORTED_RUNS,
     )
+}
+
+/// Persist the next rotation across collect-inventory subprocesses and agent
+/// restarts. A failed report skips a page only until the next rotation.
+fn rotating_page(
+    data_root: &Path,
+    cursor_file: &str,
+    names: BTreeSet<uuid::Uuid>,
+    limit: usize,
+) -> Option<Vec<uuid::Uuid>> {
+    let cursor = fs::read_to_string(data_root.join(cursor_file))
+        .ok()
+        .and_then(|value| uuid::Uuid::parse_str(&value).ok());
+    let after = names
+        .iter()
+        .copied()
+        .filter(|id| cursor.is_none_or(|cursor| *id > cursor));
+    let wrapped = names
+        .iter()
+        .copied()
+        .filter(|id| cursor.is_some_and(|cursor| *id <= cursor));
+    let page: Vec<_> = after.chain(wrapped).take(limit).collect();
+    if let Some(last) = page.last()
+        && let Err(error) = crate::identity::atomic_private_write(
+            data_root,
+            cursor_file,
+            last.to_string().as_bytes(),
+        )
+    {
+        eprintln!("vonk-agent: inventory rotation could not be saved: {error}");
+        return None;
+    }
+    Some(page)
 }
 
 /// Add the id-named directories of `root` to `names`; `None` when it cannot
@@ -256,14 +301,15 @@ fn scope_names(root: &Path, names: &mut BTreeSet<uuid::Uuid>) -> Option<()> {
 /// installations cannot be listed. One that cannot be measured is left out.
 pub fn installation_sizes(
     data_root: &Path,
+    installations: &[uuid::Uuid],
 ) -> Option<Vec<vonk_agent_protocol::generated::InstallationBytes>> {
     Some(
-        installation_names(data_root)?
-            .into_iter()
+        installations
+            .iter()
             .filter_map(|id| {
                 match crate::oci::installation_tree_bytes(data_root, &id.to_string()) {
                     Ok(bytes) => Some(vonk_agent_protocol::generated::InstallationBytes {
-                        installation_id: id,
+                        installation_id: *id,
                         bytes,
                     }),
                     Err(error) => {
@@ -324,9 +370,15 @@ pub fn sweep(
                     && let Some(started) =
                         started_run_installations(&data_root.join("run-metadata"))
                 {
-                    pass.untracked(&root, "installation", &|name| {
-                        untracked.installations.contains(name) && !started.contains(name)
-                    });
+                    pass.untracked(
+                        &root,
+                        "installation directory",
+                        &|name| {
+                            untracked.observed_installations.contains(name)
+                                || started.contains(name)
+                        },
+                        &|name| untracked.installations.contains(name) && !started.contains(name),
+                    );
                 }
             }
             UntrackedRuns => {
@@ -334,8 +386,15 @@ pub fn sweep(
                 pass.ended(&root, &|name, _| !installation_name(name));
                 // A stopped or forgotten run's lifecycle record leaves too, so
                 // it no longer keeps its installation (that leaves a day later).
-                if let Some(runs) = untracked.and_then(|untracked| untracked.runs.as_ref()) {
-                    pass.untracked(&root, "run scope", &|name| runs.contains(name));
+                if let Some(untracked) = untracked
+                    && let Some(runs) = untracked.runs.as_ref()
+                {
+                    pass.untracked(
+                        &root,
+                        "run scope",
+                        &|name| untracked.observed_runs.contains(name),
+                        &|name| runs.contains(name),
+                    );
                 }
             }
             Reconciliation => pass.ended(&root, &|name, _| {
@@ -385,16 +444,19 @@ pub fn sweep(
         };
         if let Err(error) = publish() {
             let _ = fs::remove_file(&temporary);
-            let _ = fs::remove_file(&path);
             eprintln!("vonk-agent: store retention references unavailable: {error}");
         }
-    } else {
-        // A failed current reference scan revokes the previous projection.
-        // Waiting for its expiry could collect newly referenced content.
-        let _ = fs::remove_file(data_root.join("store-retention.json"));
     }
-    if let Some(retention) = read_retention(data_root) {
-        let keep = retention.protected_model_objects.into_iter().collect();
+    // A stale projection may still protect content, but never authorizes an
+    // explicit removal. Local ownership remains authoritative for cache relief;
+    // this pass runs between claims, with no live claim using an unlinked object.
+    let projection = retention_projection(data_root);
+    let keep = projection
+        .as_ref()
+        .map(|request| request.protected_model_objects.iter().cloned().collect())
+        .unwrap_or_default();
+    let current = untracked.and_then(|verdict| verdict.retention.as_ref());
+    if let Some(retention) = read_retention(data_root).filter(|request| Some(request) == current) {
         let requested: BTreeSet<_> = retention.remove_model_objects.into_iter().collect();
         // This is the same collector and the same local ownership predicate as
         // pressure eviction. A request selects identities, never another deleter.
@@ -408,13 +470,13 @@ pub fn sweep(
                 }
             }
         }
-        let unused_models = unused_model_objects(data_root, pass.owner, &keep);
-        pass.relieve(
-            unused_models.unwrap_or_default(),
-            disk,
-            retention.required_free_bytes,
-        );
     }
+    let unused_models = unused_model_objects(data_root, pass.owner, &keep);
+    pass.relieve(
+        unused_models.unwrap_or_default(),
+        disk,
+        projection.map_or(0, |request| request.required_free_bytes),
+    );
 
     pass.swept
 }
@@ -504,8 +566,9 @@ pub fn unused_model_bytes(data_root: &Path) -> Option<u64> {
     if !owned_directory(data_root, owner) {
         return None;
     }
-    let retention = read_retention(data_root)?;
-    let keep = retention.protected_model_objects.into_iter().collect();
+    let keep = retention_projection(data_root)
+        .map(|request| request.protected_model_objects.into_iter().collect())
+        .unwrap_or_default();
     Some(
         unused_model_objects(data_root, owner, &keep)?
             .iter()
@@ -528,11 +591,10 @@ pub fn make_room(data_root: &Path, required: u64, keep: &BTreeSet<String>) -> u6
     if !owned_directory(data_root, owner) {
         return 0;
     }
-    let Some(retention) = read_retention(data_root) else {
-        return 0;
-    };
     let mut keep = keep.clone();
-    keep.extend(retention.protected_model_objects);
+    if let Some(retention) = retention_projection(data_root) {
+        keep.extend(retention.protected_model_objects);
+    }
     let mut removed = 0_u64;
     for (_, path, metadata) in unused_model_objects(data_root, owner, &keep).unwrap_or_default() {
         if free().is_none_or(|free| free >= required) {
@@ -612,9 +674,18 @@ impl Pass<'_> {
     /// directory, the mark's age is the grace (it survives an agent restart),
     /// and a verdict that tracks it again (or, for an installation, a run that
     /// names it) removes the mark.
-    fn untracked(&mut self, root: &Path, kind: &str, untracked: &dyn Fn(&str) -> bool) {
+    fn untracked(
+        &mut self,
+        root: &Path,
+        kind: &str,
+        observed: &dyn Fn(&str) -> bool,
+        untracked: &dyn Fn(&str) -> bool,
+    ) {
         for (name, metadata) in self.list(root).into_iter().flatten() {
             if !metadata.is_dir() || !installation_name(&name) {
+                continue;
+            }
+            if !observed(&name) {
                 continue;
             }
             let directory = root.join(&name);
@@ -926,9 +997,24 @@ pub(crate) mod fake_disk;
 #[cfg(test)]
 pub(crate) mod tests;
 
-/// Read only a fresh, bounded Controller reference scan. Every cache collector
-/// treats missing or unreadable reference evidence as unknown.
+/// Only a fresh projection authorizes explicit identity-selected removals.
 pub fn read_retention(
+    data_root: &Path,
+) -> Option<vonk_agent_protocol::generated::StoreRetentionRequest> {
+    let request = retention_projection(data_root)?;
+    let now = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .ok()?
+        .as_secs();
+    (request.issued_at <= now
+        && request.expires_at > now
+        && request.expires_at <= request.issued_at.saturating_add(VERDICT_MAX_AGE.as_secs()))
+    .then_some(request)
+}
+
+/// Retain readable protection even after a projection expires. Missing optional
+/// Controller evidence cannot veto reclamation of locally unreferenced cache.
+fn retention_projection(
     data_root: &Path,
 ) -> Option<vonk_agent_protocol::generated::StoreRetentionRequest> {
     use std::io::Read;
@@ -943,14 +1029,5 @@ pub fn read_retention(
     }
     let mut body = Vec::new();
     file.take(1024 * 1024 + 1).read_to_end(&mut body).ok()?;
-    let request: vonk_agent_protocol::generated::StoreRetentionRequest =
-        serde_json::from_slice(&body).ok()?;
-    let now = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .ok()?
-        .as_secs();
-    (request.issued_at <= now
-        && request.expires_at > now
-        && request.expires_at <= request.issued_at.saturating_add(VERDICT_MAX_AGE.as_secs()))
-    .then_some(request)
+    serde_json::from_slice(&body).ok()
 }

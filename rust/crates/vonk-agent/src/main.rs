@@ -424,6 +424,8 @@ async fn run_control_lane(
             }
         }
         let executor = ControlExecutor {
+            runtime_identity: &runtime_identity,
+            activation_receipt: Path::new(vonk_agent::package_activation::RECEIPT),
             recipes: RecipeExecutor {
                 client: &client,
                 helper_socket: Path::new(vonk_agent::host_runtime::HELPER_SOCKET),
@@ -648,8 +650,10 @@ async fn run_inventory_lane(config: AgentConfig, client: AgentHttpClient, verdic
                 let evidence = vonk_agent::network::collect_optional(config.controller_url).await;
                 inventory.network_interfaces = evidence.interfaces;
                 inventory.nas_route_interface = evidence.nas_route_interface;
+                let installations = inventory.installations.clone().unwrap_or_default();
+                let runs = inventory.runs.clone().unwrap_or_default();
                 let answer = client.report_inventory_request(inventory).await?;
-                verdict.record(answer);
+                verdict.record(answer, &installations, &runs);
                 Ok(())
             }
         },

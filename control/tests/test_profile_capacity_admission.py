@@ -11,7 +11,7 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import event, select, text
 from sqlalchemy.exc import OperationalError
-from vonk_agent_protocol import LifecycleState, canonical_message
+from vonk_agent_protocol import LifecycleState, StorageDemandCode, canonical_message
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.fleet_profile_contract import (
     FleetProfileApplicationProgress,
@@ -40,6 +40,7 @@ from vonk_control.models import (
 from vonk_control.platform_ports import ENDPOINT_HOST_PORTS, RENDEZVOUS_PORT
 from vonk_control.run_switch_operations import RunSwitchOperationService
 from vonk_control.storage_demands import (
+    STORAGE_EVICTING,
     STORAGE_INSUFFICIENT,
 )
 
@@ -1341,7 +1342,7 @@ def _load_short_of_disk(tmp_path, monkeypatch, relief: _Relief | None, engine=No
     )
     assert response.status_code == 202, response.text
     monkeypatch.setattr(FleetProfileService, "_queue_application", original_queue)
-    return sessions, profiles, nodes
+    return sessions, profiles, nodes, planner._lifecycle
 
 
 def _only_application(sessions) -> FleetProfileApplication:
@@ -1363,7 +1364,9 @@ def test_admission_short_of_disk_asks_for_the_bytes_and_names_what_it_waits_for(
     Spark has room."""
 
     relief = _Relief("storage.evicting")
-    sessions, profiles, nodes = _load_short_of_disk(tmp_path, monkeypatch, relief)
+    sessions, profiles, nodes, _lifecycle = _load_short_of_disk(
+        tmp_path, monkeypatch, relief
+    )
 
     parked = _only_application(sessions)
     assert parked.state == "queued" and parked.current_operation_id is None
@@ -1411,7 +1414,7 @@ def test_fresh_settled_insufficient_inventory_ends_admission_and_fresh_request_h
     postgres_engine,
 ) -> None:
     """Catches endless storage admission despite a post-demand capacity report."""
-    sessions, profiles, nodes = _load_short_of_disk(
+    sessions, profiles, nodes, _lifecycle = _load_short_of_disk(
         tmp_path, monkeypatch, None, postgres_engine
     )
     pending = _only_application(sessions)
@@ -1458,13 +1461,15 @@ def test_storage_observation_without_fresh_inventory_has_a_durable_deadline(
     tmp_path,
     monkeypatch,
 ) -> None:
-    from vonk_control.settings import STORAGE_DEMAND_TTL_SECONDS
+    from vonk_control.settings import PROFILE_STALL_WINDOW_SECONDS
     from vonk_control.storage_demands import STORAGE_EVICTION_TIMED_OUT
 
     relief = _Relief(STORAGE_INSUFFICIENT)
-    sessions, profiles, _nodes = _load_short_of_disk(tmp_path, monkeypatch, relief)
+    sessions, profiles, _nodes, _lifecycle = _load_short_of_disk(
+        tmp_path, monkeypatch, relief
+    )
     pending = _only_application(sessions)
-    _later(profiles, STORAGE_DEMAND_TTL_SECONDS + 1)
+    _later(profiles, PROFILE_STALL_WINDOW_SECONDS + 1)
     profiles.tick()
     ended = profiles.application(pending.id)
     assert ended.state == LifecycleState.FAILED
@@ -1475,13 +1480,15 @@ def test_active_storage_relief_waits_then_settled_shortfall_ends(
     tmp_path,
     monkeypatch,
 ) -> None:
-    """An active collector owns its wait; its final capacity verdict resolves it."""
-    from vonk_control.settings import STORAGE_DEMAND_TTL_SECONDS
+    """A paused collector can recover within the bound and settle its shortfall."""
+    from vonk_control.settings import PROFILE_STALL_WINDOW_SECONDS
 
     relief = _Relief(STORAGE_INSUFFICIENT, paused=True)
-    sessions, profiles, _nodes = _load_short_of_disk(tmp_path, monkeypatch, relief)
+    sessions, profiles, _nodes, _lifecycle = _load_short_of_disk(
+        tmp_path, monkeypatch, relief
+    )
     pending = _only_application(sessions)
-    _later(profiles, STORAGE_DEMAND_TTL_SECONDS * 2)
+    _later(profiles, PROFILE_STALL_WINDOW_SECONDS - 120)
     profiles.tick()
     assert profiles.application(pending.id).state == LifecycleState.QUEUED
     relief.paused = False
@@ -1489,3 +1496,86 @@ def test_active_storage_relief_waits_then_settled_shortfall_ends(
     _later(profiles, 90)
     profiles.tick()
     assert profiles.application(pending.id).state == LifecycleState.FAILED
+
+
+@pytest.mark.parametrize("paused", [False, True])
+@pytest.mark.parametrize("code", [STORAGE_EVICTING, STORAGE_INSUFFICIENT])
+def test_storage_wait_ends_without_measured_progress_after_restart(
+    tmp_path, monkeypatch, postgres_engine, code, paused
+) -> None:
+    """Catches eviction reports resetting the durable wait on each fresh inventory."""
+    from vonk_control.settings import PROFILE_STALL_WINDOW_SECONDS
+
+    relief = _Relief(code, paused=paused)
+    sessions, profiles, nodes, _lifecycle = _load_short_of_disk(
+        tmp_path, monkeypatch, relief, postgres_engine
+    )
+    parked = profiles.application(_only_application(sessions).id)
+    since = parked.progress.storage_wait_since
+    assert since is not None
+    for seconds in (60, 120, PROFILE_STALL_WINDOW_SECONDS):
+        _later(profiles, seconds)
+        with sessions.begin() as session:
+            snapshot = session.scalar(select(NodeInventorySnapshot))
+            assert snapshot is not None
+            snapshot.observed_at = profiles._clock()
+        # A new service reads the persisted progress, without in-memory history.
+        profiles = FleetProfileService(
+            sessions,
+            clock=profiles._clock,
+            switch_adapter=profiles._switch_adapter,
+            cache_resolver=profiles._cache_resolver,
+            assessment_provider=profiles._assessment_provider,
+        )
+        profiles.bind_storage_relief(relief)
+        profiles.tick()
+        observed = profiles.application(parked.id)
+        assert observed.progress.storage_wait_since == since
+    assert observed.state == LifecycleState.FAILED, observed.status_reason
+    assert not observed.progress.admission_pending
+    assert observed.next_attempt_at is None
+    (blocker,) = observed.progress.blockers
+    assert blocker.code == StorageDemandCode.EVICTION_TIMED_OUT
+    assert blocker.node_ids == list(nodes)
+    assert blocker.storage is not None
+    assert blocker.storage.required_free_bytes > blocker.storage.available_bytes
+    assert observed.current_operation_id is None
+
+
+def test_storage_wait_extends_only_when_measured_available_bytes_increase(
+    tmp_path, monkeypatch, postgres_engine
+) -> None:
+    """Catches expiring a reclaim that advances bytes, or treating retries as progress."""
+    from vonk_control.settings import PROFILE_STALL_WINDOW_SECONDS
+
+    relief = _Relief(STORAGE_EVICTING)
+    sessions, profiles, _nodes, lifecycle = _load_short_of_disk(
+        tmp_path, monkeypatch, relief, postgres_engine
+    )
+    application_id = _only_application(sessions).id
+    _later(profiles, PROFILE_STALL_WINDOW_SECONDS - 1)
+    # Exercise the real collector's typed bytes, with optional object evidence absent.
+    from vonk_control.storage_demands import StorageDemands
+    from vonk_control.unused_storage_collection import UnusedStorageCollector
+
+    assert lifecycle is not None
+    collector = UnusedStorageCollector(
+        sessions,
+        lifecycle=lifecycle,
+        clock=profiles._clock,
+        demands=StorageDemands(profiles._clock),
+    )
+    profiles.bind_storage_relief(collector.relief_for_spark)
+    with sessions.begin() as session:
+        snapshot = session.scalar(select(NodeInventorySnapshot))
+        assert snapshot is not None
+        snapshot.unused_model_bytes = 1
+        snapshot.observed_at = profiles._clock()
+    profiles.tick()
+    progressing = profiles.application(application_id)
+    assert progressing.state == LifecycleState.QUEUED
+    assert progressing.progress.storage_wait_since == profiles._clock()
+    _free_disk(sessions)
+    admitted = _admitted_after(sessions, profiles, 61)
+    assert admitted.current_operation_id is not None, admitted.status_reason
+    assert admitted.progress["storage_wait_since"] is None

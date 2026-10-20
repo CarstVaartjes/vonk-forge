@@ -11,7 +11,7 @@ from pathlib import Path
 
 import yaml
 
-from . import fixed_caps, pass_budgets
+from . import collection_continuation, fixed_caps, pass_budgets
 from .parsed_sources import parse_file
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -1025,7 +1025,7 @@ def scan_rust(source: str, *, path: str) -> list[Site]:
         body = clean[start:end]
         # A progress window (`Inactivity`, `StallWindow`) bounds a loop too:
         # it ends the loop once its work stops progressing (principle P1).
-        if not re.search(
+        if not collection_continuation.bounded_rust_page_loop(body) and not re.search(
             r"deadline|timeout|expires|remaining|max_attempts|retry_budget"
             r"|\b(?:Inactivity|StallWindow|inactivity|stall)\b",
             match[0] + body,

@@ -7,7 +7,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import insert, select, update
 from vonk_agent_protocol import DesiredAssignmentState, LifecycleState, RunSwitchCode
 from vonk_agent_protocol.reason_codes.profiles import ProfileReasonCode
 from vonk_control.fleet_profile_contract import (
@@ -18,6 +18,8 @@ from vonk_control.fleet_profile_contract import (
     FleetProfileView,
 )
 from vonk_control.models import (
+    Base,
+    CatalogDocumentHead,
     CatalogDocumentRevision,
     ModelCacheSet,
     NodeInventorySnapshot,
@@ -183,7 +185,7 @@ def test_installed_profile_edit_preserves_definition_and_rejects_concurrent_save
 
 
 @pytest.mark.parametrize("action", ["remove", "pin"])
-@pytest.mark.parametrize("fault", [None, "manifest", "catalog"])
+@pytest.mark.parametrize("fault", [None, "manifest", "catalog", "exact-model-manifest"])
 @pytest.mark.usefixtures("damaged_json_rows")
 def test_installed_remove_and_pin_save_ignore_unrelated_cache_evidence(
     installed_vonkctl: Path,
@@ -259,7 +261,7 @@ def test_installed_remove_and_pin_save_ignore_unrelated_cache_evidence(
                     last_accessed_at=saved.updated_at,
                 )
             )
-    elif fault == "catalog":
+    elif fault in {"catalog", "exact-model-manifest"}:
         with sessions.begin() as session:
             model = session.scalar(
                 select(CatalogDocumentRevision).where(
@@ -267,21 +269,39 @@ def test_installed_remove_and_pin_save_ignore_unrelated_cache_evidence(
                 )
             )
             assert model is not None
-            session.add(
-                CatalogDocumentRevision(
-                    document_id=model.document_id,
-                    kind=model.kind,
-                    publisher=model.publisher,
-                    slug=model.slug,
-                    revision_number=model.revision_number + 1,
-                    schema_version=model.schema_version,
-                    state=model.state,
-                    document={},
-                    content_digest="f" * 64,
-                    created_by=model.created_by,
-                    created_at=model.created_at,
+            # Production retained twenty unreadable historical model rows.
+            # Neither those nor a damaged cache row owns this pin's file list.
+            for offset in range(1, 21 if fault == "exact-model-manifest" else 2):
+                session.execute(
+                    insert(
+                        Base.metadata.tables[CatalogDocumentRevision.__tablename__]
+                    ).values(
+                        document_id=model.document_id,
+                        kind=model.kind,
+                        publisher=model.publisher,
+                        slug=model.slug,
+                        revision_number=model.revision_number + offset,
+                        schema_version=model.schema_version,
+                        state=model.state,
+                        document={},
+                        content_digest=f"{offset:064x}",
+                        created_by=model.created_by,
+                        created_at=model.created_at,
+                    )
                 )
-            )
+            if fault == "exact-model-manifest":
+                session.add(
+                    ModelCacheSet(
+                        artifact_set_sha256="e" * 64,
+                        model_content_sha256=model.content_digest,
+                        manifest={},
+                        expected_bytes=0,
+                        state=LifecycleState.FAILED,
+                        created_at=saved.created_at,
+                        updated_at=saved.updated_at,
+                        last_accessed_at=saved.updated_at,
+                    )
+                )
     if action == "remove":
         arguments = (
             "remove",
@@ -328,3 +348,91 @@ def test_installed_remove_and_pin_save_ignore_unrelated_cache_evidence(
         assert view.definition == expected and view.revision == revision
     persisted = profiles.definition_number(number)
     assert persisted.definition == expected and persisted.revision == revision
+
+
+@pytest.mark.usefixtures("damaged_json_rows")
+def test_profile_save_reports_exact_model_damage_and_recovers(
+    postgres_engine, tmp_path
+):
+    """Catches an untyped reference-scan exception escaping the save boundary."""
+    from .test_fleet_profile_api import _client, _headers
+    from .test_profile_installed_execution import _profile_service
+    from .test_recipe_operations import setup_services
+
+    sessions, lifecycle, _, _, _, nodes = setup_services(
+        tmp_path, engine=postgres_engine, nodes=2, mapping_node_count=1
+    )
+    profiles, _planner = _profile_service(sessions, lifecycle)
+    with sessions.begin() as session:
+        recipe = session.scalar(
+            select(CatalogDocumentRevision).where(
+                CatalogDocumentRevision.kind == "recipe"
+            )
+        )
+        model = session.scalar(
+            select(CatalogDocumentRevision).where(
+                CatalogDocumentRevision.kind == "model"
+            )
+        )
+        assert recipe is not None and model is not None
+        selector = f"{recipe.publisher}/{recipe.slug}"
+        model_id, original = model.id, model.document
+        if (
+            session.scalar(
+                select(CatalogDocumentHead).where(
+                    CatalogDocumentHead.active_revision_id == model.id
+                )
+            )
+            is None
+        ):
+            session.add(
+                CatalogDocumentHead(
+                    kind=model.kind,
+                    publisher=model.publisher,
+                    slug=model.slug,
+                    active_revision_id=model.id,
+                )
+            )
+        session.execute(
+            update(Base.metadata.tables[CatalogDocumentRevision.__tablename__])
+            .where(
+                Base.metadata.tables[CatalogDocumentRevision.__tablename__].c.id
+                == model_id
+            )
+            .values(document={})
+        )
+    api, codec = _client(sessions, profiles=profiles)
+    headers = _headers(codec, "administrator")
+    request = FleetProfileInput(
+        name="Sweep pins",
+        assignments=[
+            FleetProfileAssignmentInput(
+                recipe_selector=selector, spark_ids=list(nodes[:1])
+            )
+        ],
+    )
+    refused = api.put(
+        "/api/profile/13", headers=headers, json=request.model_dump(mode="json")
+    )
+    from vonk_agent_protocol.reason_codes.profiles import ProfileReasonCode
+
+    assert refused.status_code == 503, refused.text
+    assert (
+        refused.headers["x-vonk-error-code"] == ProfileReasonCode.ADMISSION_EFFECT_BUSY
+    )
+    assert model_id in refused.text
+    assert profiles.definition_number(13).revision == 0
+    with sessions.begin() as session:
+        session.execute(
+            update(Base.metadata.tables[CatalogDocumentRevision.__tablename__])
+            .where(
+                Base.metadata.tables[CatalogDocumentRevision.__tablename__].c.id
+                == model_id
+            )
+            .values(document=original)
+        )
+    healed = api.put(
+        "/api/profile/13", headers=headers, json=request.model_dump(mode="json")
+    )
+    assert healed.status_code == 200, healed.text
+    assert FleetProfileView.model_validate_json(healed.content).revision == 1

@@ -454,20 +454,19 @@ def test_damaged_endpoint_projection_keeps_the_verified_serving_route(tmp_path):
         assert _recipe_run(session, run_id).route_state == RouteState.PUBLISHED
 
 
-def test_publication_outage_exhausts_across_restart_without_stopping_workload(tmp_path):
+def test_publication_recovers_after_repeated_unknown_evidence_across_restart(tmp_path):
     from datetime import UTC, timedelta
 
     from vonk_agent_protocol import RouteState, RunState
+    from vonk_control.models import RunNode
 
     clock = MutableClock(NOW)
     base, _publisher, _applied, run_id = setup(tmp_path, clock=clock)
-    fresh = add_running_run(
-        base, run_id, alias="fresh", route_state="withdrawn", identity=8
-    )
     with base.sessions.begin() as session:
+        original_plan = _recipe_run(session, run_id).plan
         _recipe_run(session, run_id).plan = {}
         _recipe_run(session, run_id).route_state = RouteState.PENDING
-    for _attempt in range(6):
+    for _attempt in range(12):
         RecipeOperationWorker(base.sessions, base, clock=clock).tick()
         with base.sessions() as session:
             row = _recipe_run(session, run_id)
@@ -477,15 +476,20 @@ def test_publication_outage_exhausts_across_restart_without_stopping_workload(tm
                 )
     with base.sessions() as session:
         row = _recipe_run(session, run_id)
-        assert row.route_state != RouteState.PENDING
+        assert row.route_state == RouteState.PENDING
         assert row.state == RunState.RUNNING
-        assert row.next_action_at is None
+        assert row.next_action_at is not None
         assert row.plan == {}
-    # No manual old-row repair is required for another accepted request.
-    clock.now = NOW
-    base.publish_run(fresh)
+    # Clear the injected storage fault; the same run is published automatically.
+    with base.sessions.begin() as session:
+        _recipe_run(session, run_id).plan = original_plan
+        for node in session.query(RunNode).filter_by(run_id=run_id):
+            node.updated_at = clock.now
+            node.observation_observed_at = clock.now
+    RecipeOperationWorker(base.sessions, base, clock=clock).tick()
     with base.sessions() as session:
-        assert _recipe_run(session, fresh).route_state == RouteState.PUBLISHED
+        assert _recipe_run(session, run_id).route_state == RouteState.PUBLISHED
+        assert _recipe_run(session, run_id).state == RunState.RUNNING
 
 
 def test_security_acknowledgement_is_never_retried_or_adopted(tmp_path):

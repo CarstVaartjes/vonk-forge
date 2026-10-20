@@ -53,6 +53,8 @@ fn judged(
 fn verdict(installations: &[&str], runs: Option<&[&str]>) -> Untracked {
     let names = |names: &[&str]| names.iter().map(|name| (*name).to_owned()).collect();
     Untracked {
+        observed_installations: names(&[INSTALLATION, ORPHAN]),
+        observed_runs: names(runs.unwrap_or_default()),
         installations: names(installations),
         runs: runs.map(names),
         retention: Some(retention()),
@@ -335,6 +337,11 @@ fn an_installation_the_controller_does_not_track_leaves_a_day_after_it_said_so()
         judged(root.path(), after_grace(), Some(&[ORPHAN]), &|| ROOMY).entries,
         0
     );
+    // Local run ownership clears an old grace mark even outside this page.
+    let mut omitted = verdict(&[], None);
+    omitted.observed_installations.clear();
+    swept_with(root.path(), after_grace(), &omitted);
+    assert!(!orphan.join("untracked-since").exists());
     // A run record that cannot be read could name any installation.
     fs::write(&lifecycle, b"{").unwrap();
     assert_eq!(
@@ -414,7 +421,8 @@ fn a_run_scope_no_record_owns_leaves_a_day_after_the_verdict_and_frees_its_insta
     swept_with(root.path(), after_grace(), &verdict(&[ORPHAN], None));
     assert!(scopes.iter().all(|path| path.exists()) && orphan.exists());
     // The first verdict that names them marks them; tracked again unmarks.
-    let forgotten = verdict(&[ORPHAN], Some(&[RUN, JOB]));
+    let mut forgotten = verdict(&[ORPHAN], Some(&[RUN, JOB]));
+    forgotten.observed_runs = [RUN, JOB, LIVE].into_iter().map(str::to_owned).collect();
     assert_eq!(
         swept_with(root.path(), SystemTime::now(), &forgotten).entries,
         0
@@ -425,11 +433,9 @@ fn a_run_scope_no_record_owns_leaves_a_day_after_the_verdict_and_frees_its_insta
         .join(RUN)
         .join("untracked-since");
     assert!(mark.exists());
-    swept_with(
-        root.path(),
-        SystemTime::now(),
-        &verdict(&[ORPHAN], Some(&[])),
-    );
+    let mut tracked_again = verdict(&[ORPHAN], Some(&[]));
+    tracked_again.observed_runs = forgotten.observed_runs.clone();
+    swept_with(root.path(), SystemTime::now(), &tracked_again);
     assert!(!mark.exists());
     swept_with(root.path(), SystemTime::now(), &forgotten);
 
@@ -597,7 +603,13 @@ fn inventory_names_the_installation_directories() {
 fn inventory_measures_each_installation_as_it_is_now() {
     let root = tempfile::tempdir().unwrap();
     authorize_retention(root.path());
-    assert_eq!(super::installation_sizes(root.path()), Some(vec![]));
+    assert_eq!(
+        super::installation_sizes(
+            root.path(),
+            &super::installation_names(root.path()).unwrap()
+        ),
+        Some(vec![])
+    );
     let installation = root.path().join("installations").join(INSTALLATION);
     let object = file(
         &root.path().join("distribution/models").join(OBJECT),
@@ -613,7 +625,11 @@ fn inventory_measures_each_installation_as_it_is_now() {
     fs::create_dir_all(&broken).unwrap();
     std::os::unix::fs::symlink("/etc", broken.join("escape")).unwrap();
 
-    let sizes = super::installation_sizes(root.path()).unwrap();
+    let sizes = super::installation_sizes(
+        root.path(),
+        &super::installation_names(root.path()).unwrap(),
+    )
+    .unwrap();
 
     assert_eq!(sizes.len(), 1);
     assert_eq!(sizes[0].installation_id.to_string(), INSTALLATION);
@@ -823,23 +839,105 @@ fn a_load_demand_above_the_low_space_line_evicts_lru_objects_and_preserves_refer
 }
 
 #[test]
-fn an_install_cannot_collect_without_current_controller_references() {
+fn unavailable_projection_does_not_veto_locally_unreferenced_model_reclamation() {
+    // Catches optional Controller evidence turning a full cache into a permanent
+    // storage blocker. Real links, installation plans and this claim's objects stay.
+    for projection in [
+        None,
+        Some(b"{".to_vec()),
+        Some({
+            let mut request = retention();
+            request.expires_at = 0;
+            serde_json::to_vec(&request).unwrap()
+        }),
+    ] {
+        let root = tempfile::tempdir().unwrap();
+        if let Some(body) = projection {
+            file(&root.path().join("store-retention.json"), &body);
+        }
+        let store = root.path().join("distribution/models");
+        let orphan = file(&store.join(OBJECT), b"unused");
+        let shared = file(&store.join(OTHER), b"shared");
+        let claimed = file(&store.join(THIRD), b"claim");
+        let installation = root.path().join("installations").join(INSTALLATION);
+        fs::create_dir_all(&installation).unwrap();
+        fs::hard_link(&shared, installation.join("model")).unwrap();
+        assert_eq!(super::unused_model_bytes(root.path()), Some(11));
+        let _disk = super::fake_disk::FakeDisk::mount(
+            root.path(),
+            super::fake_disk::stored_bytes(root.path()) + 2,
+        );
+        assert_eq!(super::disk_usage(root.path()).unwrap().0, 2);
+        assert_eq!(
+            super::make_room(root.path(), 8, &[THIRD.to_owned()].into()),
+            6
+        );
+        assert_eq!(super::disk_usage(root.path()).unwrap().0, 8);
+        assert!(!orphan.exists());
+        assert!(shared.exists() && claimed.exists());
+        assert_eq!(
+            super::make_room(root.path(), 8, &[THIRD.to_owned()].into()),
+            0
+        );
+    }
+}
+
+#[test]
+fn between_claims_pressure_reclaims_without_a_current_projection_and_reports_bytes() {
+    // Catches make_room being fixed while the autonomous demand/low-space path
+    // still requires a current inventory verdict. No per-object inventory is used.
     let root = tempfile::tempdir().unwrap();
-    let object = file(
+    let orphan = file(
         &root.path().join("distribution/models").join(OBJECT),
-        b"weights",
+        b"unused",
     );
-    assert_eq!(super::make_room(root.path(), u64::MAX, &BTreeSet::new()), 0);
-    assert!(object.exists());
+    let swept = sweep(
+        root.path(),
+        SystemTime::now(),
+        Instant::now() + Duration::from_secs(10),
+        None,
+        &|| SHORT,
+        &|| {},
+    );
+    assert_eq!((swept.entries, swept.bytes), (1, 6));
+    assert!(!orphan.exists());
+}
+
+#[test]
+fn expired_projection_still_protects_content_but_cannot_order_removals() {
+    let root = tempfile::tempdir().unwrap();
+    let protected = file(
+        &root.path().join("distribution/models").join(OBJECT),
+        b"protected",
+    );
+    let unused = file(
+        &root.path().join("distribution/models").join(OTHER),
+        b"unused",
+    );
     let mut request = retention();
     request.expires_at = 0;
-    fs::write(
-        root.path().join("store-retention.json"),
-        serde_json::to_vec(&request).unwrap(),
-    )
-    .unwrap();
-    assert_eq!(super::make_room(root.path(), u64::MAX, &BTreeSet::new()), 0);
-    assert!(object.exists());
+    request.protected_model_objects = vec![OBJECT.to_owned()];
+    request.remove_model_objects = vec![OTHER.to_owned()];
+    file(
+        &root.path().join("store-retention.json"),
+        &serde_json::to_vec(&request).unwrap(),
+    );
+    assert!(super::read_retention(root.path()).is_none());
+    assert_eq!(super::unused_model_bytes(root.path()), Some(6));
+    let pass = |disk: &dyn Fn() -> Option<(u64, u64)>| {
+        sweep(
+            root.path(),
+            SystemTime::now(),
+            Instant::now() + Duration::from_secs(10),
+            None,
+            disk,
+            &|| {},
+        )
+    };
+    assert_eq!(pass(&|| ROOMY).entries, 0);
+    assert!(unused.exists());
+    assert_eq!(pass(&|| SHORT).bytes, 6);
+    assert!(!unused.exists() && protected.exists());
 }
 
 #[test]
@@ -881,4 +979,112 @@ fn incomplete_object_inventory_is_unknown_instead_of_false_absence() {
     file(&store.join(OBJECT), b"weights");
     std::os::unix::fs::symlink(root.path().join("missing"), store.join(OTHER)).unwrap();
     assert!(super::model_objects(root.path()).is_none());
+}
+
+#[test]
+fn a_retained_projection_cannot_replay_an_explicit_removal_without_a_current_verdict() {
+    // Catches retaining old protections accidentally retaining removal authority.
+    let root = tempfile::tempdir().unwrap();
+    let object = file(
+        &root.path().join("distribution/models").join(OBJECT),
+        b"cache",
+    );
+    let mut request = retention();
+    request.remove_model_objects = vec![OBJECT.to_owned()];
+    file(
+        &root.path().join("store-retention.json"),
+        &serde_json::to_vec(&request).unwrap(),
+    );
+    let swept = sweep(
+        root.path(),
+        SystemTime::now(),
+        Instant::now() + Duration::from_secs(10),
+        None,
+        &|| ROOMY,
+        &|| {},
+    );
+    assert_eq!(swept.entries, 0);
+    assert!(object.exists());
+}
+
+#[test]
+fn inventory_rotates_past_protected_prefix_and_only_judges_its_observed_batch() {
+    use vonk_agent_protocol::generated::InventoryVerdict;
+    for count in [4096, 4097, 8193] {
+        let root = tempfile::tempdir().unwrap();
+        authorize_retention(root.path());
+        let ids: Vec<_> = (1..=count).map(uuid::Uuid::from_u128).collect();
+        for id in &ids {
+            file(
+                &root
+                    .path()
+                    .join("installations")
+                    .join(id.to_string())
+                    .join("x"),
+                b"tail",
+            );
+            file(
+                &root.path().join("runs").join(id.to_string()).join("x"),
+                b"tail",
+            );
+        }
+        let tail = *ids.last().unwrap();
+        let mut seen = BTreeSet::new();
+        let mut seen_runs = BTreeSet::new();
+        // Each call reloads the on-disk cursor, as the real inventory subprocess
+        // does after restart. The protected prefix is never removed.
+        for turn in 0..8 {
+            let installations = super::installation_names(root.path()).unwrap();
+            let runs = super::run_scope_names(root.path()).unwrap();
+            let sizes = super::installation_sizes(root.path(), &installations).unwrap();
+            assert_eq!(
+                sizes
+                    .iter()
+                    .map(|item| item.installation_id)
+                    .collect::<Vec<_>>(),
+                installations
+            );
+            seen.extend(installations.iter().copied());
+            seen_runs.extend(runs.iter().copied());
+            let verdict = super::LatestVerdict::default();
+            verdict.record(
+                Some(InventoryVerdict {
+                    untracked_installations: installations
+                        .iter()
+                        .copied()
+                        .filter(|id| *id == tail)
+                        .collect(),
+                    untracked_runs: Some(runs.iter().copied().filter(|id| *id == tail).collect()),
+                    store_retention: Some(retention()),
+                }),
+                &installations,
+                &runs,
+            );
+            let now = if turn < 4 {
+                SystemTime::now()
+            } else {
+                after_grace()
+            };
+            swept_with(root.path(), now, &verdict.fresh().unwrap());
+        }
+        assert_eq!(seen, ids.iter().copied().collect());
+        assert_eq!(seen_runs, seen);
+        assert!(
+            !root
+                .path()
+                .join("installations")
+                .join(tail.to_string())
+                .exists()
+        );
+        assert!(!root.path().join("runs").join(tail.to_string()).exists());
+        for id in &ids[..ids.len() - 1] {
+            assert!(
+                root.path()
+                    .join("installations")
+                    .join(id.to_string())
+                    .exists()
+            );
+            assert!(root.path().join("runs").join(id.to_string()).exists());
+        }
+    }
 }

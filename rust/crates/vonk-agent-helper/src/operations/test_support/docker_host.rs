@@ -116,6 +116,7 @@ impl CommandRunner for Host {
                     .iter()
                     .position(|arg| arg == "--last")
                     .map(|index| args[index + 1].parse::<usize>().unwrap());
+                let before = args.iter().find_map(|arg| arg.strip_prefix("before="));
                 let quiet = args.iter().any(|arg| arg == "--quiet");
                 let identity_read = args.iter().any(|arg| arg == REOBSERVE_FORMAT);
                 let id_filter = args.iter().find_map(|arg| arg.strip_prefix("id="));
@@ -124,6 +125,8 @@ impl CommandRunner for Host {
                 let lines: String = containers
                     .iter()
                     .rev()
+                    .skip_while(|container| before.is_some_and(|id| id != container.id()))
+                    .skip(usize::from(before.is_some()))
                     .filter(|container| run_filter.is_none_or(|run| run == container.run))
                     .filter(|container| {
                         name_filter.is_none_or(|name| name == format!("vonk-{}", container.target))

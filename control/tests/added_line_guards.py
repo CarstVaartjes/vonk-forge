@@ -11,11 +11,13 @@ from functools import cache
 from pathlib import Path
 
 from . import claim_registry as claims
+from . import collection_continuation as collections
 from . import content_identity_boundaries as identity
 from . import coordination_boundaries as coordination
 from . import deterministic_retries as retries
 from . import lifecycle_reasons as reasons
 from . import principle_guards as principles
+from . import request_path_scans
 from . import short_wall_clocks as wall_clocks
 from . import untyped_mapping_boundaries as mappings
 from . import vocabulary_literals as vocabulary
@@ -27,6 +29,7 @@ rust_test_lines = principles.rust_test_lines
 
 
 MODES = (
+    "request-scans",
     "vocabulary",
     "mapping",
     "identity",
@@ -47,6 +50,7 @@ MODES = (
     "boundaries",
     "locks",
     "clocks",
+    "collections",
 )
 # The agent's messages a Controller test may send only as the stand-in pinned
 # to the agent's shared vector; built by hand they are the Controller's idea of
@@ -480,6 +484,11 @@ def check_source(
             )
         )
     if python and not is_test:
+        if "request-scans" in modes:
+            hits.extend(
+                (line, "unbounded request catalog/history scan")
+                for line in request_path_scans.scan_tree(ast.parse(source), path=path)
+            )
         if "mapping" in modes:
             hits.extend(
                 (site.line, "untyped mapping")
@@ -509,6 +518,14 @@ def check_source(
                 for line in retries.scan_source(source)
             )
             hits.extend(retries.scan_dispositions(source, path=path))
+            hits.extend(
+                (line, "count ends standing intent")
+                for line in retries.scan_count_endings(source)
+            )
+            hits.extend(
+                (line, "durable retry can exhaust")
+                for line in retries.scan_recovery_policy_users(source, path=path)
+            )
         if "repeats" in modes and path.startswith("control/src/"):
             hits.extend(
                 (line, "retry scheduled without note_repeat")
@@ -624,6 +641,10 @@ def check_source(
         else:
             sites = []
         hits.extend((site.line, site.kind) for site in sites)
+    if not is_test and "collections" in modes:
+        hits.extend(
+            (line, collections.KIND) for line in collections.scan_source(path, source)
+        )
     if python and is_test and "clocks" in modes:
         hits.extend(
             (line, wall_clocks.KIND) for line in wall_clocks.scan_source(source)

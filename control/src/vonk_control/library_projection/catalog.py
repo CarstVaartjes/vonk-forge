@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from sqlalchemy import and_, or_, select
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition
@@ -19,7 +19,8 @@ from ..library_contract import (
     LibraryResourceProjection,
     _utc,
 )
-from ..models import CatalogDocumentRevision, RecipeLibrarySyncRun
+from ..models import CatalogDocumentRevision, ModelCacheSet, RecipeLibrarySyncRun
+from ..operator_receipt_contract import ReceiptOwner
 from .common import (
     _canonical_model,
     _canonical_recipe,
@@ -124,7 +125,9 @@ def _recipe_projection(
         model_selectors=model_selectors,
         usage=usage,
         resources=resources,
-        local=self._local(revision.content_digest, kind="recipe", snapshot=snapshot),
+        local=self._local(
+            revision.content_digest, kind=ReceiptOwner.RECIPE, snapshot=snapshot
+        ),
         updated_at=_utc(revision.created_at),
         alignment=document.metadata.alignment,
         node_count=document.topology.node_count,
@@ -138,10 +141,20 @@ def _catalog_documents[T: ModelDefinition | RecipeDefinition](
     *,
     kind: str,
     local_digests: Sequence[str],
+    digests: Sequence[str] | None = None,
     reader: Callable[[CatalogDocumentRevision], T],
 ) -> list[tuple[CatalogDocumentRevision, T]]:
     # Historical recipe revisions remain valid for exact workload reads,
     # but only the accepted head is a discoverable Library choice.
+    previous_documents = (
+        {
+            (row.content_digest, row.kind): (row.document, document)
+            for rows in self._catalog_snapshot
+            for row, document in rows
+        }
+        if digests is None
+        else {}
+    )
     with self._sessions() as session:
         query = select(CatalogDocumentRevision).where(
             CatalogDocumentRevision.kind == kind,
@@ -153,11 +166,24 @@ def _catalog_documents[T: ModelDefinition | RecipeDefinition](
             else or_(
                 CatalogDocumentRevision.state == "active",
                 CatalogDocumentRevision.content_digest.in_(local_digests),
+                select(ModelCacheSet.artifact_set_sha256)
+                .where(
+                    ModelCacheSet.model_content_sha256
+                    == CatalogDocumentRevision.content_digest
+                )
+                .exists(),
             ),
         )
+        if digests is not None:
+            query = query.where(CatalogDocumentRevision.content_digest.in_(digests))
         documents: list[tuple[CatalogDocumentRevision, T]] = []
         for row in session.scalars(query):
-            document = _readable_document(row, reader)
+            previous = previous_documents.get((row.content_digest, row.kind))
+            document = (
+                cast(T, previous[1])
+                if previous is not None and previous[0] == row.document
+                else _readable_document(row, reader)
+            )
             if document is not None:
                 documents.append((row, document))
         return documents
@@ -169,15 +195,22 @@ def _documents_for_snapshot(
     list[tuple[CatalogDocumentRevision, ModelDefinition]],
     list[tuple[CatalogDocumentRevision, RecipeDefinition]],
 ]:
-    local_digests = tuple(snapshot) if snapshot is not None else ()
-    return (
+    # The disposable catalog index is refreshed outside request handling. Local
+    # history and availability are deliberately absent from this immutable view.
+    return self._catalog_snapshot
+
+
+def refresh_catalog(self: LibraryProjection) -> None:
+    snapshot = (
         self._catalog_documents(
-            kind="model", local_digests=local_digests, reader=_canonical_model
+            kind="model", local_digests=(), reader=_canonical_model
         ),
         self._catalog_documents(
-            kind="recipe", local_digests=local_digests, reader=_canonical_recipe
+            kind=ReceiptOwner.RECIPE, local_digests=(), reader=_canonical_recipe
         ),
     )
+    self._catalog_snapshot = snapshot
+    self._catalog_observed_at = self._clock()
 
 
 def _recipe_facet_values(

@@ -315,3 +315,4 @@ FleetProfileReadView = FleetProfileView | UnavailableFleetProfileView
 class FleetProfileList(StrictModel):
     generated_at: datetime
     profiles: list[FleetProfileReadView] = Field(max_length=128)
+    next_after: int | None = Field(default=None, ge=1, le=MAX_DATABASE_INTEGER)

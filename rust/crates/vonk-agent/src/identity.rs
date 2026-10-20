@@ -627,7 +627,11 @@ fn ensure_private_directory(root: &Path) -> Result<(), std::io::Error> {
     fs::set_permissions(root, fs::Permissions::from_mode(0o700))
 }
 
-fn atomic_private_write(root: &Path, name: &str, value: &[u8]) -> Result<(), std::io::Error> {
+pub(crate) fn atomic_private_write(
+    root: &Path,
+    name: &str,
+    value: &[u8],
+) -> Result<(), std::io::Error> {
     let temporary = temporary_path(root, name);
     let mut file = OpenOptions::new()
         .write(true)

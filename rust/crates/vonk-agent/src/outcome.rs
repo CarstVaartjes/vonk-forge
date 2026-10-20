@@ -53,6 +53,7 @@ pub struct Failure {
     pub refusal_bound: Option<RefusalBound>,
     /// The process receipt of a one-shot job whose process ran.
     pub receipt: Option<RecipeJobRunResult>,
+    pub package_activation: Option<vonk_agent_protocol::PackageActivationReceipt>,
 }
 
 impl Failure {
@@ -70,6 +71,7 @@ impl Failure {
             process_logs: None,
             refusal_bound: None,
             receipt: None,
+            package_activation: None,
         }
     }
 
@@ -116,6 +118,14 @@ impl Failure {
 
     pub fn receipt(mut self, receipt: RecipeJobRunResult) -> Self {
         self.receipt = Some(receipt);
+        self
+    }
+
+    pub fn package_activation(
+        mut self,
+        receipt: vonk_agent_protocol::PackageActivationReceipt,
+    ) -> Self {
+        self.package_activation = Some(receipt);
         self
     }
 
@@ -419,7 +429,7 @@ fn finish_failure(operation: &AgentOperation, failure: Failure) -> OutcomeFailed
                 .filter(|text| !text.is_empty()),
             helper_error_code: helper_code.map(|code| code.to_string()),
             helper_exit_code,
-            package_activation: None,
+            package_activation: failure.package_activation,
             stage: failure.stage.map(|stage| stage.to_string()),
         }),
         receipt: None,

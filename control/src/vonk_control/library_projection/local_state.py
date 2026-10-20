@@ -7,10 +7,11 @@ from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, cast
 
 from pydantic import ValidationError
-from sqlalchemy import and_, select
+from sqlalchemy import and_, or_, select
 from vonk_agent_protocol import (
     AssetAvailability,
     InstallationState,
+    LifecycleState,
     RunState,
     SecurityRefusalError,
     adopt_machine_state,
@@ -18,14 +19,18 @@ from vonk_agent_protocol import (
 )
 
 from .. import model_cache_states
+from ..api_availability import AVAILABILITY_ERRORS
 from ..catalog_queries import active_head_revision
+from ..content_identity import recipe_content_membership
 from ..library_assessment import unassessed
 from ..library_contract import (
+    LibraryCacheState,
+    LibraryLocalProgress,
     LibraryLocalState,
     LibraryRecipeProjection,
 )
 from ..library_image_presence import ImageKey
-from ..model_cache_contract import ModelCacheOperationProgress
+from ..model_cache_contract import CacheOperationKind, ModelCacheOperationProgress
 from ..models import (
     CatalogDocumentRevision,
     ModelCacheOperation,
@@ -35,6 +40,7 @@ from ..models import (
     RecipeRun,
     RunNode,
 )
+from ..operator_receipt_contract import ReceiptOwner
 from ..revision_images import revision_images
 from .common import (
     _ACTIVE_RUN_STATES,
@@ -75,39 +81,37 @@ def _assessed(
 
 def _local_state_snapshot(
     self: LibraryProjection,
+    digests: Sequence[str],
 ) -> Mapping[str, LibraryLocalState] | None:
-    snapshot: dict[str, LibraryLocalState] | None = None
-    deadline = time.monotonic() + self._request_budget
-    for _attempt in range(3):
-        try:
-            candidate = self._local_state()
-            if not isinstance(candidate, Mapping):
-                continue
-            snapshot = {}
-            unreadable = False
-            for digest, raw in candidate.items():
-                if raw:
-                    try:
-                        snapshot[digest] = LibraryLocalState.model_validate_json(
-                            canonical_message(raw)
-                        )
-                    except (TypeError, ValueError):
-                        unreadable = True
-                        snapshot[digest] = LibraryLocalState(
-                            controller=cast(
-                                LibraryControllerState, AssetAvailability.UNKNOWN.value
-                            )
-                        )
-            if not unreadable:
-                return snapshot
-            if time.monotonic() >= deadline:
-                break
-        except SecurityRefusalError:
-            raise
-        except (OSError, RuntimeError, TypeError, ValueError):
-            if time.monotonic() >= deadline:
-                break
-    _note_unreadable("local-state", "provider", "observation is unavailable")
+    try:
+        candidate = (
+            self._local_state()
+            if self._local_state is not None
+            else self._database_local_state(digests)
+        )
+    except SecurityRefusalError:
+        raise
+    except (*AVAILABILITY_ERRORS, RuntimeError, TypeError, ValueError):
+        _note_unreadable("local-state", "provider", "observation is unavailable")
+        return None
+    if not isinstance(candidate, Mapping):
+        return None
+    snapshot: dict[str, LibraryLocalState] = {}
+    for digest in digests:
+        raw = candidate.get(digest)
+        if raw:
+            try:
+                snapshot[digest] = (
+                    raw
+                    if isinstance(raw, LibraryLocalState)
+                    else LibraryLocalState.model_validate_json(canonical_message(raw))
+                )
+            except (TypeError, ValueError):
+                snapshot[digest] = LibraryLocalState(
+                    controller=cast(
+                        LibraryControllerState, AssetAvailability.UNKNOWN.value
+                    )
+                )
     return snapshot
 
 
@@ -139,7 +143,8 @@ def _local(
 
 def _database_local_state(
     self: LibraryProjection,
-) -> Mapping[str, Mapping[str, object]]:
+    digests: Sequence[str],
+) -> Mapping[str, LibraryLocalState]:
     """Read all controller/cache/Spark-local evidence in one bounded batch.
 
     This is deliberately a projection query, not a per-document callback.  A
@@ -151,6 +156,8 @@ def _database_local_state(
     are large and grow with the catalog and the operation history; none of
     them is transferred or decoded here.
     """
+    if not digests:
+        return {}
     operation_payload = ModelCacheOperation.payload
     with self._sessions() as session:
         cache_sets = session.execute(
@@ -159,8 +166,40 @@ def _database_local_state(
                 ModelCacheSet.model_content_sha256,
                 ModelCacheSet.recipe_revision_sha256,
                 ModelCacheSet.state,
+            ).where(
+                or_(
+                    ModelCacheSet.model_content_sha256.in_(digests),
+                    ModelCacheSet.recipe_revision_sha256.in_(digests),
+                )
             )
         ).all()
+        # One latest request per requested content identity. An index on creation
+        # time and the existing artifact-set index bound the history lookup; UUID
+        # is only a deterministic tie-break after durable request time.
+        operation_ids: set[str] = set()
+        for digest in digests:
+            operation_id = session.scalar(
+                select(ModelCacheOperation.id)
+                .where(
+                    ModelCacheOperation.kind.in_(
+                        (CacheOperationKind.DOWNLOAD, CacheOperationKind.REPAIR)
+                    ),
+                    or_(
+                        operation_payload["model_content_sha256"].as_string() == digest,
+                        operation_payload["recipe_revision_sha256"].as_string()
+                        == digest,
+                        ModelCacheOperation.artifact_set_sha256.in_(
+                            [row[0] for row in cache_sets if digest in row[1:3]]
+                        ),
+                    ),
+                )
+                .order_by(
+                    ModelCacheOperation.created_at.desc(), ModelCacheOperation.id.desc()
+                )
+                .limit(1)
+            )
+            if operation_id is not None:
+                operation_ids.add(operation_id)
         cache_operations = session.execute(
             select(
                 ModelCacheOperation.id,
@@ -169,7 +208,9 @@ def _database_local_state(
                 operation_payload["model_content_sha256"].as_json(),
                 operation_payload["recipe_revision_sha256"].as_json(),
                 ModelCacheOperation.progress,
-            ).where(ModelCacheOperation.kind.in_(("download", "repair")))
+            )
+            .where(ModelCacheOperation.id.in_(operation_ids))
+            .order_by(ModelCacheOperation.created_at, ModelCacheOperation.id)
         ).all()
         revisions = session.execute(
             select(
@@ -179,7 +220,10 @@ def _database_local_state(
                     CatalogDocumentRevision.state == "active",
                     active_head_revision(),
                 ),
-            ).where(CatalogDocumentRevision.kind == "recipe")
+            ).where(
+                CatalogDocumentRevision.kind == ReceiptOwner.RECIPE,
+                CatalogDocumentRevision.content_digest.in_(digests),
+            )
         ).all()
         builds = session.execute(
             select(
@@ -187,28 +231,44 @@ def _database_local_state(
                 RecipeBuild.state,
                 RecipeBuild.oci_layout_sha256,
                 RecipeBuild.image_bytes,
-            )
+            ).where(recipe_content_membership(RecipeBuild.recipe_revision_id, digests))
         ).all()
         installations = session.execute(
             select(
                 RecipeInstallation.id,
                 RecipeInstallation.recipe_revision_id,
                 RecipeInstallation.state,
+            ).where(
+                recipe_content_membership(
+                    RecipeInstallation.recipe_revision_id, digests
+                )
             )
         ).all()
         invalid_run = session.scalar(
-            select(RecipeRun.id).where(RecipeRun.state.not_in(_RUN_STATES)).limit(1)
+            select(RecipeRun.id)
+            .where(
+                RecipeRun.installation_id.in_([row[0] for row in installations]),
+                RecipeRun.state.not_in(_RUN_STATES),
+            )
+            .limit(1)
         )
         runs = session.execute(
             select(
                 RecipeRun.id,
                 RecipeRun.installation_id,
                 RecipeRun.plan["model_content_sha256"].as_json(),
-            ).where(RecipeRun.state.in_(_ACTIVE_RUN_STATES))
+            ).where(
+                RecipeRun.state.in_(_ACTIVE_RUN_STATES),
+                or_(
+                    RecipeRun.installation_id.in_([row[0] for row in installations]),
+                    RecipeRun.plan["model_content_sha256"].as_string().in_(digests),
+                ),
+            )
         ).all()
         run_nodes = session.execute(
             select(RunNode.run_id, RunNode.node_id).where(
-                RunNode.state == RunState.RUNNING
+                RunNode.state == RunState.RUNNING,
+                RunNode.run_id.in_([row[0] for row in runs]),
             )
         ).all()
         # A head that reuses a predecessor's build by content has no build
@@ -239,7 +299,7 @@ def _database_local_state(
 
     revision_digests = {revision_id: digest for revision_id, digest, _ in revisions}
     head_digests = {digest for _, digest, is_head in revisions if is_head}
-    result: dict[str, dict[str, object]] = {}
+    result: dict[str, LibraryLocalState] = {}
     for _set_id, model_digest, recipe_digest, set_state in cache_sets:
         controller = _controller_state(
             {
@@ -309,6 +369,8 @@ def _database_local_state(
             else ("cached" if state == "succeeded" else "failed")
         )
         for digest in digest_values:
+            if digest not in digests:
+                continue
             if digest is not None and not isinstance(digest, str):
                 _note_unreadable("cache digest", operation_id, repr(digest))
                 continue
@@ -399,7 +461,7 @@ def _database_local_state(
 
 def _apply_image_presence(
     self: LibraryProjection,
-    result: dict[str, dict[str, object]],
+    result: dict[str, LibraryLocalState],
     *,
     head_digests: set[str],
     builds: Sequence[tuple[str | None, object, object]],
@@ -442,12 +504,15 @@ def _apply_image_presence(
         local = result.get(digest)
         if digest in unreadable:
             local = result.setdefault(
-                digest, {"controller": "unknown", "running_on": []}
+                digest, LibraryLocalState(controller=AssetAvailability.UNKNOWN.value)
             )
-            local["controller"] = "failed"
-            local["preparation"] = {
-                "state": "failed",
-                "phase": unreadable[digest],
-            }
-        elif local is not None and local.get("controller") == "cached":
-            local["controller"] = "unknown" if digest in unknown else "not_cached"
+            local.controller = LibraryCacheState.FAILED.value
+            local.preparation = LibraryLocalProgress(
+                state=LifecycleState.FAILED, phase=unreadable[digest]
+            )
+        elif local is not None and local.controller == LibraryCacheState.CACHED.value:
+            local.controller = (
+                AssetAvailability.UNKNOWN.value
+                if digest in unknown
+                else LibraryCacheState.NOT_CACHED.value
+            )

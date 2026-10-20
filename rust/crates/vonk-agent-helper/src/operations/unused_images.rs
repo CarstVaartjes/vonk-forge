@@ -38,9 +38,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
         grace: Duration,
         disk: &dyn Fn() -> Option<u64>,
     ) {
-        let Some(retention) = self.store_retention_request() else {
-            return;
-        };
+        let retention = self.store_retention_request();
         let named = match self.installation_image_addresses() {
             Ok(named) => named,
             Err(error) => {
@@ -94,29 +92,39 @@ impl<R: CommandRunner> OperationExecutor<R> {
             ];
             if names.iter().any(|name| {
                 named.contains(*name)
-                    || retention
-                        .protected_image_addresses
-                        .iter()
-                        .any(|kept| kept.as_str() == *name)
+                    || retention.as_ref().is_some_and(|request| {
+                        request
+                            .protected_image_addresses
+                            .iter()
+                            .any(|kept| kept.as_str() == *name)
+                    })
             }) {
                 continue;
             }
-            let pressured = disk().is_some_and(|free| free < retention.required_free_bytes);
+            let pressured = retention.as_ref().is_some_and(|request| {
+                disk().is_some_and(|free| free < request.required_free_bytes)
+            });
             // A pull newer than this reference scan may belong to a newly
             // accepted operation whose plan is not on disk yet. A later scan
             // must judge it before pressure may bypass the age grace.
-            let scanned =
-                std::time::SystemTime::UNIX_EPOCH + Duration::from_secs(retention.issued_at);
+            let scanned = retention
+                .as_ref()
+                .map_or_else(std::time::SystemTime::now, |request| {
+                    std::time::SystemTime::UNIX_EPOCH + Duration::from_secs(request.issued_at)
+                });
             self.remove_unused_image(
                 &address,
                 &image,
                 if pressured { Duration::ZERO } else { grace },
                 scanned,
+                disk,
             );
         }
     }
 
-    /// An agent-owned, fresh projection of the Controller's reference scan.
+    /// An agent-owned projection of the Controller's reference scan. Stale
+    /// protections still narrow collection; unreadable evidence retains the
+    /// age grace and all local installation, pull and container checks.
     /// This only narrows autonomous cache collection; it never authorizes a
     /// container removal or bypasses Docker's in-use image check.
     fn store_retention_request(
@@ -135,16 +143,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
         }
         let mut body = Vec::new();
         file.take(1024 * 1024 + 1).read_to_end(&mut body).ok()?;
-        let request: vonk_agent_protocol::generated::StoreRetentionRequest =
-            serde_json::from_slice(&body).ok()?;
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::SystemTime::UNIX_EPOCH)
-            .ok()?
-            .as_secs();
-        (request.issued_at <= now
-            && request.expires_at > now
-            && request.expires_at <= request.issued_at.saturating_add(600))
-        .then_some(request)
+        serde_json::from_slice(&body).ok()
     }
 
     /// Remove one image unless a pull is in flight or renewed it since.
@@ -154,6 +153,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
         image: &str,
         grace: Duration,
         scanned: std::time::SystemTime,
+        disk: &dyn Fn() -> Option<u64>,
     ) {
         // A pull holds this for its whole duration, so no image is removed
         // under a pull that found it present.
@@ -173,6 +173,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
         else {
             return;
         };
+        let before = disk();
         let removed = self.run_docker_with_timeout(
             &["image".to_owned(), "rm".to_owned(), image.to_owned()],
             IMAGE_REMOVE_TIMEOUT,
@@ -193,6 +194,14 @@ impl<R: CommandRunner> OperationExecutor<R> {
             return;
         }
         let _ = fs::remove_file(&receipt);
+        if let (Some(before), Some(after)) = (before, disk())
+            && after > before
+        {
+            eprintln!(
+                "vonk-agent-helper: removed runtime image {image}; observed free-space increase {} bytes",
+                after - before
+            );
+        }
         eprintln!(
             "vonk-agent-helper: removed runtime image {image}: no installation names it and it was last pulled {}s ago",
             unused_for.as_secs()

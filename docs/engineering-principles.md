@@ -137,7 +137,10 @@ remain separately recorded.
   work. A failed refresh or rebuild preserves the last verified result.
 - Automatic retries stay within current intent and authorization. Bound their
   rate and resource use, expose why work is waiting, and resume when a temporary
-  dependency recovers. Do not turn a finite attempt budget into a permanent ban
+  dependency recovers. Repetition counts and normalized failure signatures are
+  evidence, never a terminal decision for still-authorized standing intent.
+  Reconcile exact effects and schedule the next observation with bounded backoff.
+  Do not turn a finite attempt budget into a permanent ban
   on a fresh authorized request. Cancellation and newer intent remain final.
 - Recovery and cleanup are scoped to the affected object or operation. One
   malformed record must not stop unrelated work. Unavailable references or a

@@ -1073,3 +1073,9 @@ to request removal. Saved/loaded profiles, running work, live operations, pins
 and shared content retain their bytes. The returned model-operation receipt is
 durable; the [cache runbook](model-cache.md#remove-a-model-from-the-fleet) explains
 confirmation, recovery and its deadline.
+
+Profile list responses are bounded to 128 saved profiles per page. The
+Controller returns `next_after` for continuation; the CLI and web follow it
+until the complete list is read. Agent inventory rotates bounded installation
+and run-scope pages using on-disk cursors, including after restart. Retention
+judges only the exact observed batch; protected prefixes never hide the tail.

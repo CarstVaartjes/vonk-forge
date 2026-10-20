@@ -1,11 +1,12 @@
-"""The one retry clock and the one failure limit for interrupted work.
+"""The shared retry clock for interrupted work.
 
 The lifecycle core (``lifecycle/core.py``) owns the retry count of every
 lifecycle row.  An owner outside the core (route publication, distributed
 recovery) schedules through :func:`schedule`, which reads the failure's
 :class:`~vonk_agent_protocol.Disposition`: a ``WAIT`` keeps the count, a
 ``FAIL`` ends at once, only an ``OBSERVE`` spends a retry.  A request-level
-HTTP retry is deliberately outside this budget.
+HTTP retry is request-local. Standing owners bound their retry rate, never
+end authorized intent by a repetition count.
 """
 
 from __future__ import annotations
@@ -98,7 +99,7 @@ class RecoveryPolicy:
         return scheduled
 
     def exhausted(self, failures: int) -> bool:
-        """Whether ``failures`` recorded failures spend this policy's limit."""
+        """Request-local exhaustion or a diagnostic threshold, never admission."""
 
         return failures >= self.max_failures
 
@@ -108,7 +109,8 @@ class RecoveryPolicy:
 #: any failure count (a wait spends none).
 WAIT_STEP = 2
 
-#: The shared default: every lifecycle kind and every owner without its own rate.
+#: The shared rate; max_failures bounds request-local retries and warning
+#: thresholds only. Standing owners always opt into ongoing_intent.
 RECOVERY = RecoveryPolicy()
 #: Route publication and route reconciliation: a prompt first retry, so a
 #: momentary supervisor hiccup does not delay a ready run, capped at a minute.
@@ -126,9 +128,8 @@ DISTRIBUTED_RECOVERY = RecoveryPolicy(
 class Scheduled:
     """An owner's next try: the failure count to persist and when to try again.
 
-    ``next_at`` is ``None`` when the work ends: a deterministic or security
-    failure on its first occurrence, or an uncertain effect that recurred past
-    the policy's limit.
+    ``next_at`` is ``None`` only for a deterministic or security failure.
+    Repetition counts are evidence and bound the backoff rate.
     """
 
     failures: int
@@ -165,5 +166,8 @@ def schedule(
         )
     spent = failures + 1
     return Scheduled(
-        spent, policy.next_attempt(operation_id, spent, now, retry_after=retry_after)
+        spent,
+        policy.next_attempt(
+            operation_id, spent, now, retry_after=retry_after, ongoing_intent=True
+        ),
     )

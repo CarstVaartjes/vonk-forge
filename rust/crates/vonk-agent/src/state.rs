@@ -89,6 +89,16 @@ pub struct ResultRejection {
     pub rejections: u32,
 }
 
+impl ResultRejection {
+    /// The Controller's typed verdict about these exact request bytes.
+    pub fn invalid_request(&self) -> bool {
+        crate::client::http_status_disposition(self.http_status) == crate::client::Disposition::Fail
+            && self.code
+                == vonk_agent_protocol::generated::ControllerErrorCode::ControllerInvalidRequest
+                    .as_str()
+    }
+}
+
 impl StateStore {
     pub fn open(path: &Path, node_id: &str) -> Result<Self, StateError> {
         if let Some(parent) = path.parent() {
@@ -427,13 +437,7 @@ impl StateStore {
                     {
                         return Err(StateError::Identity);
                     }
-                    if stored.operation == accepted.operation.as_str()
-                        && stored.result.is_none()
-                        && crate::executor::operation_observation::ObservationKind::of(
-                            &accepted.operation,
-                        )
-                        .is_some()
-                    {
+                    if stored.operation == accepted.operation.as_str() && stored.result.is_none() {
                         return Err(StateError::Busy);
                     }
                 }
@@ -566,8 +570,9 @@ impl StateStore {
     /// Return the recorded refusal of this exact result while its cool-down
     /// is open: the delivery loop holds these bytes back until it is due.
     ///
-    /// A refusal is never a reason to stop offering a result for good, and a
-    /// record that cannot be read is never deleted: it is due now, so the
+    /// Historical invalid-request refusals get one current delivery attempt,
+    /// even when an older agent parked them permanently. An unreadable
+    /// record is never deleted: it is due now, so the
     /// Controller's next answer either acknowledges the result (the only
     /// path that clears the record) or rewrites the record whole.
     pub fn result_rejection(
@@ -578,7 +583,8 @@ impl StateStore {
         Ok(self.retained_rejection(result)?.filter(|rejection| {
             // A definite refusal that recurred is recorded: held back for good
             // and surfaced by the delivery loop, never re-sent forever.
-            let recorded = rejection.rejections >= RESULT_RECORD_AFTER_REFUSALS
+            let recorded = !rejection.invalid_request()
+                && rejection.rejections >= RESULT_RECORD_AFTER_REFUSALS
                 && crate::client::http_status_disposition(rejection.http_status)
                     == crate::client::Disposition::Fail;
             // A due date beyond the longest cool-down is clock skew, not a
@@ -773,6 +779,37 @@ impl StateStore {
         Ok(())
     }
 
+    /// Settle refused delivery without claiming that the Controller accepted it.
+    /// The immutable result and typed refusal remain in custody. The existing
+    /// reconciliation marker stops background delivery and exact-fence replay.
+    pub fn discard_rejected_result(&mut self, result: &AgentResult) -> Result<(), StateError> {
+        result.validate()?;
+        if !self
+            .retained_rejection(result)?
+            .is_some_and(|r| r.invalid_request())
+        {
+            return Err(StateError::ResultState);
+        }
+        let changed = self.connection.execute(
+            "INSERT OR IGNORE INTO result_reconciliation(fence)
+             SELECT fence FROM operations
+             WHERE fence=?1 AND result_json=?2",
+            params![result.fence.to_string(), canonical_json(result)?],
+        )?;
+        if changed == 0 && !self.result_delivery_settled(result)? {
+            return Err(StateError::Stale);
+        }
+        Ok(())
+    }
+
+    pub fn result_delivery_settled(&self, result: &AgentResult) -> Result<bool, StateError> {
+        Ok(self.connection.query_row(
+            "SELECT EXISTS(SELECT 1 FROM result_reconciliation WHERE fence=?1)",
+            [result.fence.to_string()],
+            |row| row.get(0),
+        )?)
+    }
+
     /// One byte-bounded page per pass. The cursor advances before upload so
     /// an unavailable prefix cannot monopolize delivery. Damaged bytes remain
     /// in custody; only a typed unknown is offered for the exact valid fence.
@@ -787,7 +824,7 @@ impl StateStore {
         let row = self.connection.query_row(
             "SELECT o.rowid,o.fence,o.operation,CASE WHEN length(o.result_json)<=?2 THEN o.result_json END,o.result_acknowledged
              FROM operations o LEFT JOIN result_reconciliation r ON r.fence=o.fence
-             WHERE o.state=?3 AND (o.result_acknowledged=0 OR r.fence IS NULL)
+             WHERE o.state=?3 AND r.fence IS NULL
              AND o.rowid>?1 ORDER BY o.rowid LIMIT 1",
             params![self.delivery_cursor, RECEIPT_READ_BYTES, ProgressPhase::Completed.as_str()],
             |row| {
@@ -851,7 +888,8 @@ impl StateStore {
     pub fn pending_results(&self) -> Result<Vec<(AgentOperation, AgentResult)>, StateError> {
         let mut statement = self.connection.prepare(
             "SELECT operation,result_json FROM operations
-             WHERE state='completed' AND result_acknowledged=0 ORDER BY rowid",
+             WHERE state='completed' AND result_acknowledged=0
+             AND fence NOT IN (SELECT fence FROM result_reconciliation) ORDER BY rowid",
         )?;
         let mut rows = statement.query([])?;
         let mut results = Vec::new();
@@ -987,15 +1025,7 @@ impl StateStore {
         if claim.fence.to_string() != fence || claim.operation.as_str() != operation {
             return Err(StateError::Identity);
         }
-        Ok(
-            if crate::executor::operation_observation::ObservationKind::of(&claim.operation)
-                .is_some()
-            {
-                vec![claim]
-            } else {
-                Vec::new()
-            },
-        )
+        Ok(vec![claim])
     }
 
     pub fn recover_interrupted(&mut self) -> Result<(), StateError> {
@@ -1021,9 +1051,7 @@ impl StateStore {
             let Ok(operation) = operation.parse::<AgentOperation>() else {
                 continue;
             };
-            if claim
-                && crate::executor::operation_observation::ObservationKind::of(&operation).is_some()
-            {
+            if claim {
                 continue;
             }
             // Startup cannot establish whether the host action finished.

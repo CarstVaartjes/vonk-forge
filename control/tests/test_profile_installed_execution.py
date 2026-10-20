@@ -671,14 +671,35 @@ def test_a_disk_wait_without_new_inventory_ends_then_fresh_intent_recovers(
     assert service.application(waiting.id).state == LifecycleState.FAILED
 
 
-def test_a_load_keeps_waiting_while_eviction_works_then_is_admitted(
+def test_a_load_ends_with_typed_evidence_when_reclamation_cannot_make_room(
     tmp_path: Path,
 ) -> None:
-    """Catches a load cancelled by a clock while eviction is still working.
+    """Catches the real collector's fresh insufficient answer holding admission forever."""
+    from vonk_agent_protocol import StorageDemandCode
 
-    An eviction in progress is a live owner of the wait: the load waits for
-    it past the old 30 minute bound, and is admitted once the space is there.
-    """
+    sessions, lifecycle, service, planner, waiting, nodes = _disk_starved_load(tmp_path)
+    with sessions.begin() as session:
+        snapshot = session.scalar(select(NodeInventorySnapshot))
+        assert snapshot is not None
+        snapshot.observed_at = lifecycle._clock() + timedelta(
+            seconds=PROFILE_STALL_WINDOW_SECONDS + 120
+        )
+    _after(lifecycle, service, planner, PROFILE_STALL_WINDOW_SECONDS + 120)
+    ended = service.application(waiting.id)
+    assert ended.state == LifecycleState.FAILED, ended.status_reason
+    assert ended.next_attempt_at is None
+    assert any(
+        item.code == StorageDemandCode.INSUFFICIENT_AFTER_EVICTION
+        and item.node_ids == [nodes[0]]
+        and item.storage is not None
+        for item in ended.progress.blockers
+    )
+
+
+def test_a_load_waiting_for_eviction_is_admitted_when_space_arrives(
+    tmp_path: Path,
+) -> None:
+    """Catches ending the wait before the agent can report its reclaimed space."""
 
     def evicting(node_id, required, *, source, subject, reason):
         return StorageRelief(
@@ -688,10 +709,8 @@ def test_a_load_keeps_waiting_while_eviction_works_then_is_admitted(
     sessions, lifecycle, service, planner, waiting, _nodes = _disk_starved_load(
         tmp_path, evicting
     )
-    for _ in range(4):
-        _after(lifecycle, service, planner, 1800)
-        assert service.application(waiting.id).state == "queued"
-
+    _after(lifecycle, service, planner, PROFILE_STALL_WINDOW_SECONDS - 120)
+    assert service.application(waiting.id).state == LifecycleState.QUEUED
     with sessions.begin() as session:
         snapshot = session.scalar(select(NodeInventorySnapshot))
         assert snapshot is not None
@@ -699,7 +718,6 @@ def test_a_load_keeps_waiting_while_eviction_works_then_is_admitted(
         snapshot.observed_at = lifecycle._clock()
     _after(lifecycle, service, planner, STORAGE_ADMISSION_RETRY_SECONDS + 1)
     admitted = service.application(waiting.id)
-    assert admitted.state != LifecycleState.CANCELLED
     assert admitted.current_operation_id is not None, admitted.status_reason
 
 

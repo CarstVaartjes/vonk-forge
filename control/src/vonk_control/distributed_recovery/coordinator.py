@@ -8,7 +8,13 @@ from datetime import datetime, timedelta
 
 from sqlalchemy import or_, select, true
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import Disposition, OperatorActionName, RouteState, RunState
+from vonk_agent_protocol import (
+    Disposition,
+    InvalidRequestReason,
+    OperatorActionName,
+    RouteState,
+    RunState,
+)
 
 from ..distributed_lifecycle import DistributedLifecycleError
 from ..failure_classification import is_definite
@@ -16,7 +22,7 @@ from ..job_documents import DistributedRecoveryMarker
 from ..lifecycle.evidence import BookkeepingReason, Residue
 from ..logging import log_event
 from ..models import STOPPABLE_RUN_STATES, Job, RecipeRun, RunNode
-from ..persisted_waits import schedule_wait
+from ..persisted_waits import read_wait, schedule_wait
 from ..recipe_execution_contract import (
     RecipeExecutionContractError,
     parse_stored_run_plan,
@@ -42,8 +48,10 @@ from .common import (
     _schedule_recovery_wait,
     _settle_unrecoverable,
     _superseded,
+    _unchanged_unreadable,
     _unproven,
     _unreadable_run_ids,
+    _wait_for_plan_change,
     release_inactive_run_claims_in_session,
     settle_observed_absent_runs_in_session,
 )
@@ -153,12 +161,13 @@ class DistributedRecoveryCoordinator:
                     )
                     worked = True
                     continue
+                if _unchanged_unreadable(run):
+                    worked = _wait_for_plan_change(run, now) or worked
+                    continue
                 try:
                     run_plan = parse_stored_run_plan(run.plan)
                 except RecipeExecutionContractError:
-                    # Unreadable stored state is unknown: inspected again at the
-                    # bounded rate, spending an attempt.
-                    _advance_recovery_check(run, Disposition.OBSERVE, now)
+                    worked = _wait_for_plan_change(run, now) or worked
                     continue
                 if run_plan.execution_mode == "one-shot-jobs":
                     _settle_unrecoverable(
@@ -429,17 +438,27 @@ class DistributedRecoveryCoordinator:
         """
 
         changed = False
-        for run_id in _unreadable_run_ids(session):
-            if only_id is not None and run_id != only_id:
-                continue
+        for run_id in _unreadable_run_ids(session, only_id):
             run = session.get(RecipeRun, run_id, with_for_update=True)
             if run is None or run.state not in STOPPABLE_RUN_STATES:
                 continue
-            note = "stored run plan is unreadable; retaining workload until exact observation or Stop"
-            if run.route_error != note:
-                run.route_error = note
-                run.updated_at = now
-                changed = True
+            previous = read_wait(run)
+            if (
+                previous is not None
+                and previous.reason == InvalidRequestReason.MALFORMED
+                and not _unchanged_unreadable(run)
+            ):
+                try:
+                    parse_stored_run_plan(run.plan)
+                except RecipeExecutionContractError:
+                    pass  # changed damaged content receives its own evidence below
+                else:
+                    schedule_wait(run, None)
+                    run.route_error = None
+                    run.updated_at = now
+                    changed = True
+                    continue
+            changed = _wait_for_plan_change(run, now) or changed
         return changed
 
     @staticmethod

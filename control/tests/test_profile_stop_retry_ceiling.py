@@ -1,15 +1,7 @@
-"""A profile Stop that is refused the same way every time waits visibly, then ends.
+"""A standing selected profile recovers when a repeated Stop conflict clears.
 
-A load that stops a run re-plans its Stop when the Stop's acceptance finds the
-reviewed plan stale. If every fresh plan is refused the same way, the wait is
-never forever and never silent: every load in the lineage shows the refusal as
-a named retry blocker, each Run/Switch child ends once its checkpoint window
-closes, and the
-profile's retry lineage ends ``failed`` naming the refusal once it failed the
-same way as often as recovery allows. Nothing is stopped on a guess.
-
-Wrong implementation: a profile Stop child retried under the profile's backoff
-without a window, so a Stop that can never be accepted held the load forever.
+Wrong implementation: five identical child failures permanently end the
+selected intent, so a worker restart and cleared conflict cannot finish it.
 """
 
 from __future__ import annotations
@@ -20,8 +12,12 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import select
-from vonk_control.fleet_profiles import PROFILE_REPEATED_FAILURE_CODE
-from vonk_control.models import FleetProfileApplication, RecipeRun
+from vonk_agent_protocol import LifecycleState, RunState
+from vonk_control.models import (
+    FleetProfileApplication,
+    FleetProfileSelection,
+    RecipeRun,
+)
 from vonk_control.operation_blockers import PHASE_RETRY_CODE
 from vonk_control.recovery_policy import RECOVERY
 
@@ -33,7 +29,7 @@ ROUND_SECONDS = 120
 
 
 @pytest.mark.slow(30)  # a lineage of Stop children, each held for its whole window
-def test_a_profile_stop_refused_every_time_waits_visibly_and_then_ends(
+def test_selected_stop_recovers_after_repeated_conflict_clears_and_worker_restarts(
     tmp_path: Path, postgres_engine, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     world = build_world(tmp_path, postgres_engine)
@@ -46,10 +42,10 @@ def test_a_profile_stop_refused_every_time_waits_visibly_and_then_ends(
         load = world.controller.profiles.apply(
             served, request_key=str(uuid.uuid4()), actor="admin"
         ).id
-        assert sim.settle(load) == "succeeded"
+        assert sim.settle(load) == LifecycleState.SUCCEEDED
         with world.sessions() as session:
             (run,) = session.scalars(
-                select(RecipeRun).where(RecipeRun.state == "running")
+                select(RecipeRun).where(RecipeRun.state == RunState.RUNNING)
             )
             run_id = run.id
 
@@ -84,7 +80,9 @@ def test_a_profile_stop_refused_every_time_waits_visibly_and_then_ends(
                         )
                     )
                 )
-            if not live:
+            with world.sessions() as session:
+                applications = list(session.scalars(select(FleetProfileApplication)))
+            if not live or len(applications) > RECOVERY.max_failures + 2:
                 break
             for row in live:
                 shown = world.controller.profiles.application(row.id)
@@ -95,25 +93,55 @@ def test_a_profile_stop_refused_every_time_waits_visibly_and_then_ends(
                 ):
                     waits.add(row.id)
 
-        assert not live, "the refused Stop is still waiting"
+        assert live, "the same selected intent must keep a scheduled observation"
+        assert len(applications) > RECOVERY.max_failures + 2
+        assert waits, "the Stop refusal must be visible during recovery"
         with world.sessions() as session:
-            lineage = list(
-                session.scalars(
-                    select(FleetProfileApplication)
-                    .where(FleetProfileApplication.id != load)
-                    .order_by(FleetProfileApplication.created_at)
+            selection = session.get(FleetProfileSelection, 1)
+            assert selection is not None
+            generation = selection.generation
+            selected_id = selection.application_id
+            kept = session.get(RecipeRun, run_id)
+            assert kept is not None and kept.state == RunState.RUNNING
+
+        monkeypatch.undo()
+        world.restart()
+        # No apply/retry/cancel request: the selected owner drives recovery.
+        for _ in range(120):
+            world.advance(ROUND_SECONDS)
+            world.tick()
+            sim.sparks.round()
+            with world.sessions() as session:
+                kept = session.get(RecipeRun, run_id)
+                completed = session.scalar(
+                    select(FleetProfileApplication.id).where(
+                        FleetProfileApplication.id != load,
+                        FleetProfileApplication.state == LifecycleState.SUCCEEDED,
+                    )
                 )
-            )
-        assert [row.state for row in lineage] == ["superseded"] * (
-            RECOVERY.max_failures - 1
-        ) + ["failed"]
-        assert waits == {row.id for row in lineage}
-        last = world.controller.profiles.application(lineage[-1].id)
-        # The ending is typed and names the refusal it repeated.
-        repeated = [item for item in last.progress.blockers if refusal in item.detail]
-        assert PROFILE_REPEATED_FAILURE_CODE in [item.code for item in repeated]
+                if (
+                    kept is not None
+                    and kept.state == RunState.STOPPED
+                    and completed is not None
+                ):
+                    break
         with world.sessions() as session:
             kept = session.get(RecipeRun, run_id)
-            assert kept is not None and kept.state == "running"
+            assert kept is not None and kept.state == RunState.STOPPED
+            selection = session.get(FleetProfileSelection, 1)
+            assert selection is not None
+            assert (selection.generation, selection.application_id) == (
+                generation,
+                selected_id,
+            )
+            lineage = list(
+                session.scalars(
+                    select(FleetProfileApplication).where(
+                        FleetProfileApplication.id != load
+                    )
+                )
+            )
+            assert any(row.state == LifecycleState.SUCCEEDED for row in lineage)
+            assert not any(row.state == LifecycleState.FAILED for row in lineage)
     finally:
         world.close()

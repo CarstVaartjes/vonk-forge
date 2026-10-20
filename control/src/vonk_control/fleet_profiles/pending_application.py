@@ -29,10 +29,9 @@ from ..lifecycle.types import State as _LifecycleState
 from ..models import FleetProfile, FleetProfileApplication
 from ..operation_blockers import OperationBlocker, make_blocker
 from ..persisted_waits import schedule_wait
-from ..settings import STORAGE_ADMISSION_RETRY_SECONDS, STORAGE_DEMAND_TTL_SECONDS
-from ..stall_window import Verdict, Wait, progress_verdict
+from ..settings import PROFILE_STALL_WINDOW_SECONDS, STORAGE_ADMISSION_RETRY_SECONDS
+from ..stall_window import Verdict, progress_verdict
 from ..storage_demands import (
-    STORAGE_EVICTING,
     STORAGE_EVICTION_TIMED_OUT,
     STORAGE_INSUFFICIENT,
     StorageRelief,
@@ -299,9 +298,9 @@ class FleetProfileService:
     ) -> FleetProfileApplicationView:
         """Record bounded retry state after a nonblocking admission refusal.
 
-        Disk relief waits for a settled inventory measured after the demand.
-        Insufficient capacity ends with typed evidence so the caller can re-plan.
-        An unavailable or unsettled inventory has a durable observation deadline.
+        Settled post-demand inventory resolves a shortfall with typed evidence.
+        Otherwise only measured byte progress extends the bounded storage wait;
+        eviction status or a paused collector cannot hold admission forever.
         """
         self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
 
@@ -340,16 +339,28 @@ class FleetProfileService:
             progress = _persisted_profile_progress(row)
             if not _owns_pending_admission(row, progress):
                 return self._application_view(row)
-            # Deterministic refusals end with their original typed evidence.
-            # Storage separately resolves its demand against settled inventory.
             if self._end_definite_wait(row, blockers or (), session):
                 return self._application_view(row)
+            storage_wait_since = None
             if storage is not None:
                 since = _aware(progress.storage_wait_since or now)
-                storage_wait_since = since.isoformat()
-                # A report measured after the demand, with no removal still
-                # settling, is the collector's final capacity evidence. Keep
-                # that receipt; a fresh placement/request can re-plan elsewhere.
+                previous = {
+                    node: item.storage
+                    for item in progress.blockers
+                    if item.storage is not None
+                    for node in item.node_ids
+                }
+                # Status changes, retry counts and fresh identical inventory are
+                # not progress. Only a smaller measured byte deficit is.
+                if any(
+                    item.storage is not None
+                    and (before := previous.get(node)) is not None
+                    and item.storage.required_free_bytes - item.storage.available_bytes
+                    < before.required_free_bytes - before.available_bytes
+                    for item in blockers or ()
+                    for node in item.node_ids
+                ):
+                    since = now
                 exhausted = [
                     _relief_blocker(node_id, item, needed)
                     for node_id, item, needed in relieved
@@ -358,49 +369,54 @@ class FleetProfileService:
                     and item.inventory_observed_at is not None
                     and since < _aware(item.inventory_observed_at) <= now
                 ]
+                storage_wait_since = since.isoformat()
                 if (
                     not exhausted
                     and progress_verdict(
                         started_at=since,
                         progressed_at=None,
-                        window=timedelta(seconds=STORAGE_DEMAND_TTL_SECONDS),
+                        window=timedelta(seconds=PROFILE_STALL_WINDOW_SECONDS),
                         now=now,
-                        waiting_on=Wait(
-                            any(
-                                item.code == STORAGE_EVICTING or item.paused
-                                for _, item, _needed in relieved
-                            )
-                        ),
                     )
                     is Verdict.STALLED
                 ):
                     exhausted = [
+                        item.model_copy(
+                            update={
+                                "code": STORAGE_EVICTION_TIMED_OUT,
+                                "detail": (
+                                    f"Storage reclamation made no measured progress for "
+                                    f"{PROFILE_STALL_WINDOW_SECONDS}s. {item.detail}"
+                                )[:512],
+                            }
+                        )
+                        for item in blockers or ()
+                        if item.code in _STORAGE_CODES
+                    ] or [
                         make_blocker(
                             STORAGE_EVICTION_TIMED_OUT,
-                            "Storage admission did not obtain sufficient settled inventory "
-                            f"within {STORAGE_DEMAND_TTL_SECONDS} seconds; review a new placement.",
-                            node_ids=[
-                                node_id for node_id, _needed in storage.shortfalls
-                            ],
+                            "Storage reclamation could not obtain fresh evidence "
+                            f"within {PROFILE_STALL_WINDOW_SECONDS}s; re-plan against "
+                            "current inventory.",
                         )
                     ]
                 if exhausted:
                     row.progress = _progress_with_blockers(
                         progress,
-                        [*exhausted, *(blockers or ())],
+                        [
+                            *exhausted,
+                            *(
+                                item
+                                for item in blockers or ()
+                                if item.code not in _STORAGE_CODES
+                            ),
+                        ],
                         admission_pending=False,
                         storage_wait_since=storage_wait_since,
                     ).model_dump(mode="json")
+                    schedule_wait(row, None)
                     self._lifecycle.fail(row, exhausted[0].detail, now, session=session)
                     return self._application_view(row)
-                evicting = not relieved or any(
-                    item.code != STORAGE_INSUFFICIENT or item.paused
-                    for _, item, _needed in relieved
-                )
-                if not evicting:
-                    retry_delay = None
-            else:
-                storage_wait_since = None
             attempt = progress.admission_attempt + 1
             next_retry = (
                 FleetProfileAdapter.next_retry(application_id, attempt, now)
