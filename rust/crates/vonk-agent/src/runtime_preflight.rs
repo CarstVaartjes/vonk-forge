@@ -808,11 +808,8 @@ pub fn retain_completed(
     result: &RuntimePreflightResult,
 ) -> Result<(), ProcessError> {
     use std::io::Write;
-    let root = crate::recipe_builder::owned_directory(
-        data_root,
-        vonk_agent_protocol::generated::AgentOperation::RuntimePreflightV1.as_str(),
-    )
-    .map_err(|error| std::io::Error::other(format!("preflight cache directory: {error}")))?;
+    let root = crate::recipe_builder::owned_directory(data_root, "preflight-completion")
+        .map_err(|error| std::io::Error::other(format!("preflight cache directory: {error}")))?;
     let mut file = tempfile::NamedTempFile::new_in(&root)?;
     file.write_all(
         &canonical_json(&RuntimePreflightCompletion {
@@ -834,7 +831,7 @@ pub fn observe_completed(
     fingerprint: &str,
 ) -> Result<Option<RuntimePreflightResult>, ProcessError> {
     let path = data_root
-        .join(vonk_agent_protocol::generated::AgentOperation::RuntimePreflightV1.as_str())
+        .join("preflight-completion")
         .join("completed.json");
     let raw = match crate::oci::read_regular_file(&path, 64 * 1024) {
         Ok(raw) => raw,
@@ -871,7 +868,7 @@ mod completion_tests {
         retain_completed(root.path(), completion.fence, &completion.result).unwrap();
         let path = root
             .path()
-            .join(vonk_agent_protocol::generated::AgentOperation::RuntimePreflightV1.as_str())
+            .join("preflight-completion")
             .join("completed.json");
         assert_eq!(fs::read(path).unwrap(), raw.strip_suffix(b"\n").unwrap());
         assert_eq!(
@@ -908,9 +905,7 @@ mod completion_tests {
             .unwrap()
             .is_none()
         );
-        let directory = root
-            .path()
-            .join(vonk_agent_protocol::generated::AgentOperation::RuntimePreflightV1.as_str());
+        let directory = root.path().join("preflight-completion");
         assert_eq!(fs::read_dir(directory).unwrap().count(), 1);
     }
 }

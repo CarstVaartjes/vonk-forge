@@ -356,9 +356,9 @@ def test_dead_agent_resumes_partial_transfer_from_fresh_controller_claim(
         NODE_A,
         "artifact.distribution.v1",
         assignment.plan_digest,
-        ArtifactDistributionPayload(plan_digest=assignment.plan_digest).model_dump(
-            mode="json"
-        ),
+        ArtifactDistributionPayload(
+            plan_digest=assignment.plan_digest, assignment=assignment.wire()
+        ).model_dump(mode="json"),
     )
     first = claim_agent(
         jobs,

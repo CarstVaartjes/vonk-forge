@@ -27,7 +27,6 @@ from vonk_agent_protocol import (
     ProgressPhase,
     canonical_message,
 )
-from vonk_agent_protocol.contracts import ArtifactDistributionPayload
 from vonk_agent_protocol.host_helper import ExecuteContainerRuntimeRequestOperation
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.auth import TokenCodec
@@ -100,6 +99,7 @@ from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha
 
 from .runtime_image_fixtures import place_test_image
 from .test_agent_api import NODE_A, NODE_B, agent_headers, agent_system  # noqa: F401
+from .test_agent_jobs import distribution_payload
 from .test_recipe_operations import NOW, setup_services
 from .test_run_switch_operations import _runtime_receipt
 
@@ -773,7 +773,7 @@ def test_partial_child_failure_is_projected_after_aggregation(agent_system) -> N
             NODE_A,
             "artifact.distribution.v1",
             "f" * 64,
-            ArtifactDistributionPayload(plan_digest="f" * 64).model_dump(mode="json"),
+            distribution_payload("f" * 64),
             operation_id=str(uuid4()),
         )
         operation = (
@@ -863,7 +863,7 @@ def test_abandon_closes_only_a_parked_distribution_child(
             NODE_A,
             "artifact.distribution.v1",
             "f" * 64,
-            ArtifactDistributionPayload(plan_digest="f" * 64).model_dump(mode="json"),
+            distribution_payload("f" * 64),
             operation_id=str(uuid4()),
         )
         operation = (
@@ -953,7 +953,7 @@ def test_member_failure_kind_and_diagnostic_survive_aggregation(
             NODE_A,
             "artifact.distribution.v1",
             "f" * 64,
-            ArtifactDistributionPayload(plan_digest="f" * 64).model_dump(mode="json"),
+            distribution_payload("f" * 64),
             operation_id=str(uuid4()),
         )
         operation = (

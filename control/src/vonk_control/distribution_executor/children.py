@@ -7,7 +7,7 @@ from collections.abc import Mapping
 
 from sqlalchemy import select
 from vonk_agent_protocol import AgentOperation as AgentOperationKind
-from vonk_agent_protocol import LifecycleState
+from vonk_agent_protocol import ArtifactDistributionPayload, LifecycleState
 from vonk_agent_protocol.agent_words import ProfileChildPhase, ProfileEffectState
 
 from ..distribution_assignment import NodeDistributionAssignment
@@ -219,9 +219,11 @@ class DistributionChildren(DistributionVerification):
                     session,
                     child.id,
                     node_id,
-                    "artifact.distribution.v1",
+                    AgentOperationKind.ARTIFACT_DISTRIBUTION,
                     plan.plan_digest,
-                    {"plan_digest": plan.plan_digest},
+                    ArtifactDistributionPayload(
+                        plan_digest=plan.plan_digest, assignment=assignment.wire()
+                    ),
                     operation_id=str(
                         uuid.UUID(
                             bytes=uuid.uuid5(uuid.UUID(child.id), node_id).bytes,

@@ -270,11 +270,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                 let Payload::ArtifactDistributionPayload(request) = &claim.payload else {
                     return Err("claim payload does not match its content observer".into());
                 };
-                let assignment = self
-                    .client
-                    .distribution_manifest(&request.plan_digest)
-                    .await
-                    .map_err(|e| e.to_string())?;
+                let assignment = &request.assignment;
                 let mut paths = Vec::new();
                 let mut digests = Vec::new();
                 let mut bytes = 0;
@@ -327,8 +323,8 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                     DistributionDownloadEvidence {
                         model_digests: digests,
                         model_paths: paths,
-                        oci_image_digest: assignment.oci_image_digest,
-                        oci_image_config_digest: assignment.oci_image_config_digest,
+                        oci_image_digest: assignment.oci_image_digest.clone(),
+                        oci_image_config_digest: assignment.oci_image_config_digest.clone(),
                         downloaded_bytes: bytes,
                     },
                 )))

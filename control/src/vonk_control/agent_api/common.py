@@ -562,6 +562,34 @@ def _open_upload_storage(path: Path) -> int:
     return descriptor
 
 
+def _observe_recipe_image_upload(
+    artifact_root: Path, identity: str, image_bytes: int
+) -> int:
+    """Read a partial cursor without creating, repairing, locking or truncating it."""
+    path = artifact_root / f".{identity}.upload"
+    try:
+        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except FileNotFoundError:
+        return 0
+    except OSError as error:
+        raise UnknownOutcomeError(
+            "image cursor storage observation is unavailable",
+            reason=WaitReason.OBSERVATION_UNAVAILABLE,
+        ) from error
+    try:
+        metadata = os.fstat(descriptor)
+        if not stat.S_ISREG(metadata.st_mode):
+            raise UnknownOutcomeError(
+                "image cursor is not a regular managed file",
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
+            )
+        # An invalid partial has no reusable prefix. The PUT owner repairs it
+        # under its existing exclusive lock; a status read never does.
+        return metadata.st_size if metadata.st_size <= image_bytes else 0
+    finally:
+        os.close(descriptor)
+
+
 def _prepare_recipe_image_upload(
     artifact_root: Path, identity: str
 ) -> tuple[int, Path]:

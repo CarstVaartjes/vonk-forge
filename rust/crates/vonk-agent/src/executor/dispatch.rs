@@ -321,6 +321,14 @@ mod tests {
         obsolete.payload =
             vonk_agent_protocol::generated::AgentClaimPayload::ArtifactDistributionPayload(
                 vonk_agent_protocol::generated::ArtifactDistributionPayload {
+                    assignment: serde_json::from_str::<
+                        vonk_agent_protocol::generated::ArtifactDistributionPayload,
+                    >(include_str!(concat!(
+                        env!("CARGO_MANIFEST_DIR"),
+                        "/../../../agent_protocol/fixtures/artifact-distribution-payload.json"
+                    )))
+                    .unwrap()
+                    .assignment,
                     plan_digest: "a".repeat(64),
                 },
             );

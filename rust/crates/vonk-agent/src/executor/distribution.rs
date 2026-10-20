@@ -19,26 +19,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
             return failed("artifact distribution request is invalid");
         };
         self.report_phase(claim, ProgressPhase::Preparing).await;
-        let manifest = run_with_authority(
-            self.client.distribution_manifest(&request.plan_digest),
-            lease_deadline.clone(),
-            cancellation.clone(),
-        )
-        .await;
-        let assignment = match manifest {
-            Some(Ok(value)) => value,
-            Some(Err(error)) => return distribution_failure_result(&error),
-            None if *cancellation.borrow() => {
-                return cancelled("controller cancelled distribution");
-            }
-            None => {
-                return temporary_preparation_failure(
-                    FailureStage::ArtifactDistribution,
-                    "distribution_manifest",
-                    attempt_end_cause(&lease_deadline),
-                );
-            }
-        };
+        let assignment = &request.assignment;
         let bytes = assignment
             .objects
             .iter()
@@ -46,8 +27,9 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
             .sum::<u64>();
         let destination = self.runtime.data_root.join("distribution");
         let download = run_with_authority(
-            self.client.download_distribution_with_progress(
+            self.client.download_assignment_with_progress(
                 &request.plan_digest,
+                assignment,
                 &destination,
                 |item| {
                     self.client.set_progress_phase(claim.fence, item.phase);

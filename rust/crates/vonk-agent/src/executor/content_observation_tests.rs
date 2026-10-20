@@ -208,7 +208,10 @@ async fn every_content_kind_reaches_its_real_probe_and_preserves_unknown() {
         ),
         (
             AgentOperation::ArtifactDistributionV1,
-            serde_json::json!({"plan_digest": "a".repeat(64)}),
+            serde_json::from_str(include_str!(
+                "../../../../../agent_protocol/fixtures/artifact-distribution-payload.json"
+            ))
+            .unwrap(),
         ),
         (
             AgentOperation::RecipeBuildCleanupV1,

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
@@ -19,11 +20,19 @@ from vonk_agent_protocol import (
 )
 
 
+def _distribution_payload():
+    return ArtifactDistributionPayload.model_validate_json(
+        (
+            Path(__file__).parents[1] / "fixtures/artifact-distribution-payload.json"
+        ).read_bytes()
+    ).model_dump(mode="json")
+
+
 def _claim(**overrides: object) -> dict[str, object]:
     return {
         "fence": "00000000-0000-4000-8000-000000000003",
         "operation": "artifact.distribution.v1",
-        "payload": {"plan_digest": "a" * 64},
+        "payload": _distribution_payload(),
         "deadline": "2026-08-03T12:00:00+00:00",
         "observation_budget_seconds": 3600,
         **overrides,
@@ -41,8 +50,8 @@ def test_claim_rejects_unknown_top_level_fields_and_roundtrips_json() -> None:
 
 
 def test_distribution_payload_is_typed_and_plan_bound() -> None:
-    payload = {"plan_digest": "a" * 64}
-    parsed = ArtifactDistributionPayload.model_validate(payload)
+    payload = _distribution_payload()
+    parsed = ArtifactDistributionPayload.model_validate_json(json.dumps(payload))
     assert parsed.plan_digest == "a" * 64
     with pytest.raises(ValidationError):
         ArtifactDistributionPayload.model_validate(payload | {"extra": True})

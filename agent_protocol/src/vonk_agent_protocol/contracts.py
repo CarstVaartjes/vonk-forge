@@ -141,12 +141,6 @@ _COMPILED_PLAN_OPERATIONS = frozenset(
 )
 
 
-class ArtifactDistributionPayload(WireModel):
-    """The complete payload accepted by the artifact transfer operation."""
-
-    plan_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
-
-
 from .package_upgrade import PackageActivationReceipt, PackageRollbackAuthority
 
 
@@ -768,6 +762,7 @@ from .build_import import (
     RecipeBuildEvidence,
     RecipeBuildRequest,
 )
+from .distribution import DistributionAssignment
 from .outcome import (
     OUTCOME_ARMS,
     OUTCOME_KINDS,
@@ -790,6 +785,14 @@ from .recipe_operations import (
     RecipeUninstallResult,
 )
 from .runtime_preflight import RuntimePreflightRequest, RuntimePreflightResult
+
+
+class ArtifactDistributionPayload(WireModel):
+    """Accepted transfer identity, including its exact read-only probe subject."""
+
+    plan_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    assignment: DistributionAssignment
+
 
 AgentPayload = (
     RuntimePreflightRequest
@@ -841,12 +844,11 @@ def canonical_payload(operation: AgentOperation | str, payload: Any) -> bytes:
     try:
         kind = AgentOperation(operation)
         model = PAYLOAD_MODELS[kind]
-        document = (
-            payload.model_dump(mode="python")
+        typed = (
+            model.model_validate(payload)
             if isinstance(payload, BaseModel)
-            else payload
+            else model.model_validate_json(canonical_message(payload))
         )
-        typed = model.model_validate(document)
     except (KeyError, TypeError, ValueError) as error:
         raise AgentProtocolError("operation protocol payload is invalid") from error
     return canonical_message(typed)
@@ -1003,7 +1005,9 @@ class AgentClaim(_ProtocolEnvelopeModel):
             else None
         )
         if expected_model is not None and isinstance(payload, Mapping):
-            document["payload"] = expected_model.model_validate(payload)
+            document["payload"] = expected_model.model_validate_json(
+                canonical_message(payload)
+            )
         if "deadline" in document:
             document["deadline"] = _deadline(document["deadline"])
         return document
