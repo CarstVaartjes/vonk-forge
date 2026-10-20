@@ -49,14 +49,14 @@ from .operator_acceptance import (
     ReceiptPolicy,
     operator_acceptance,
 )
-from .settings import SECRETS_ROOT
+from .runtime_init import GATEWAY_MASTER_KEY_PATH
 from .strict_json import StrictJSONModel
 
 _LOGGER = logging.getLogger(__name__)
 
 # Caddy relays only LiteLLM's key routes on this internal listener.
 LITELLM_KEY_ADMIN_URL = "http://caddy:8087"
-MASTER_KEY_FILE = SECRETS_ROOT / "gateway-litellm-master-key"
+MASTER_KEY_FILE = GATEWAY_MASTER_KEY_PATH
 # A host bind mount: the operator finds the default key in secrets/gateway/.
 DEFAULT_KEY_FILE = Path("/gateway-secrets/client-key")
 DEFAULT_KEY_NAME = "default"

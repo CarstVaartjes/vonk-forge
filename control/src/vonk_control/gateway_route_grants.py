@@ -9,6 +9,7 @@ from vonk_forge_contracts import read_recipe
 from vonk_forge_contracts.recipe import RecipeDecisionSettings
 
 from .models import CatalogDocumentRevision, RecipeInstallation, RecipeRun
+from .recipe_routes import RecipeRouteNotReady
 
 
 class GatewayInferenceRoute(StrEnum):
@@ -55,3 +56,27 @@ def recipe_key_routes(
             routes.append(GatewayInferenceRoute.SYSTEMONE.value)
             break
     return routes
+
+
+def require_existing_recipe_routes(
+    sessions: sessionmaker[Session], run_ids: frozenset[str]
+) -> None:
+    """Workers may withdraw routes, but only the API can expose a new route.
+
+    Withdrawal can retain previously published routes without gateway authority.
+    A new or recovering route waits for the API's durable publication path.
+    """
+    with sessions() as session:
+        confirmed = frozenset(
+            session.scalars(
+                select(RecipeRun.id).where(
+                    RecipeRun.id.in_(run_ids),
+                    RecipeRun.route_state.in_(
+                        (RouteState.PUBLISHED, RouteState.FAILED)
+                    ),
+                    RecipeRun.route_generation.is_not(None),
+                )
+            )
+        )
+    if confirmed != run_ids:
+        raise RecipeRouteNotReady("route publication waits for the control API")

@@ -73,6 +73,7 @@ class RecipeOperationWorker:
         routes: _RoutePublisher,
         *,
         clock: Callable[[], datetime],
+        reconcile_routes: bool = True,
         recoveries: _RecoveryCoordinator | None = None,
         fleet_profiles: _FleetProfileCoordinator | None = None,
         run_switches: _RunSwitchCoordinator | None = None,
@@ -84,6 +85,7 @@ class RecipeOperationWorker:
     ) -> None:
         self._sessions = sessions
         self._routes = routes
+        self._reconcile_routes = reconcile_routes
         self._clock = clock
         self._recoveries = recoveries
         self._fleet_profiles = fleet_profiles
@@ -118,7 +120,13 @@ class RecipeOperationWorker:
             progressed = True
             if self._recoveries is not None:
                 self._advance(self._recoveries.tick)
-        progressed = self._advance(self._publish_routes) or progressed
+        if self._reconcile_routes:
+            progressed = self.reconcile_routes() or progressed
+        return progressed
+
+    def reconcile_routes(self) -> bool:
+        """Advance durable publications and maintenance in the gateway authority owner."""
+        progressed = self._advance(self._publish_routes)
         return self._advance(self._maintain_routes) or progressed
 
     def redrive_run(self, run_id: str) -> bool:
@@ -135,7 +143,7 @@ class RecipeOperationWorker:
             )
         return (
             self._with_route_owner(lambda: self._publish_runs((run_id,)))
-            if publish
+            if publish and self._reconcile_routes
             else False
         ) or progressed
 

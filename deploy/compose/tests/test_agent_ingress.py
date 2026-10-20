@@ -375,7 +375,6 @@ def test_development_image_compose_enables_local_ca_agent_settings(
     assert api["environment"]["VONK_NAS_LAN_IP"] == "10.0.0.2"
     assert set(caddy["networks"]) == {
         "agent-proxy",
-        "gateway-key-admin",
         "hermes-inference",
         "ingress",
         "litellm-edge",

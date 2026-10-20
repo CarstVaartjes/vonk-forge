@@ -281,32 +281,59 @@ def test_shared_volume_preparation_rejects_symlinked_component(
     assert list(outside.iterdir()) == []
 
 
-def test_controller_gets_its_own_readable_master_key_copy(
-    monkeypatch: pytest.MonkeyPatch,
+def test_gateway_master_key_is_staged_only_outside_worker_volume(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    staged: list[tuple[Path, Path, int, int, int]] = []
+    # Catches copying API gateway authority into the worker's normalized mount.
+    source, shared = tmp_path / "source", tmp_path / "normalized"
+    source.mkdir()
+    shared.mkdir()
+    master = source / "litellm-master-key"
+    master.write_bytes(b"test-master-key")
+    stale = shared / "gateway-litellm-master-key"
+    stale.write_bytes(b"previous-shared-key")
+    gateway_root = tmp_path / "gateway"
+    gateway_root.mkdir()
+    api_key = gateway_root / runtime_init.GATEWAY_MASTER_KEY_PATH.relative_to(
+        "/gateway-secrets"
+    )
+    chown = os.chown
 
-    def record(source, destination, *, owner_uid=0, owner_gid=0, mode=0o444):
-        staged.append((source, destination, owner_uid, owner_gid, mode))
+    def preserve_host_owner(path, *args, **kwargs):
+        assert path != gateway_root, "staging must preserve the gateway bind owner"
+        return chown(path, *args, **kwargs)
+
+    monkeypatch.setattr(os, "chown", preserve_host_owner)
+    staged: list[tuple[Path, int, int]] = []
+    stage = runtime_init.stage_private_key
+
+    def record(source, destination, **kwargs):
+        if source == master:
+            staged.append((destination, kwargs["owner_uid"], kwargs["mode"]))
+            return stage(
+                source,
+                destination,
+                owner_uid=os.geteuid(),
+                owner_gid=os.getegid(),
+                mode=kwargs["mode"],
+            )
         return destination
 
     monkeypatch.setattr(runtime_init, "stage_private_key", record)
-    monkeypatch.setattr(runtime_init, "_stage_optional_private_key", record)
-
-    stage_compose_secrets(Path("/src"), Path("/dst"))
-
-    master = Path("/src/litellm-master-key")
-    copies = {
-        (dest.name, uid, mode) for src, dest, uid, _, mode in staged if src == master
-    }
-    assert copies == {
-        ("litellm-master-key", 10002, 0o400),
-        ("gateway-litellm-master-key", 10001, 0o400),
-    }
+    monkeypatch.setattr(
+        runtime_init, "_stage_optional_private_key", lambda *_a, **_k: None
+    )
+    stage_compose_secrets(source, shared, gateway_master_key=api_key)
+    assert api_key.read_bytes() == master.read_bytes()
+    assert stat.S_IMODE(api_key.stat().st_mode) == 0o400
+    assert not stale.exists()
+    assert staged == [
+        (api_key, 10001, 0o400),
+        (shared / "litellm-master-key", 10002, 0o400),
+    ]
     from vonk_control.gateway_keys import MASTER_KEY_FILE
-    from vonk_control.settings import SECRETS_ROOT
 
-    assert MASTER_KEY_FILE == SECRETS_ROOT / "gateway-litellm-master-key"
+    assert MASTER_KEY_FILE == runtime_init.GATEWAY_MASTER_KEY_PATH
 
 
 def test_existing_object_store_directories_stop_new_files_being_copy_on_write(
@@ -505,11 +532,17 @@ def test_compose_optional_secret_observation_ends_preserves_and_fresh_staging_se
         patch.setattr(Path, "lstat", unavailable)
         ended = False
         try:
-            stage_compose_secrets(source, destination)
+            stage_compose_secrets(
+                source,
+                destination,
+                gateway_master_key=tmp_path / "gateway" / "master-key",
+            )
         except Exception:  # noqa: BLE001 -- bound, preservation and fresh completion
             ended = True
         assert ended
         assert len(attempts) == 3
         assert projected.read_bytes() == b"previous secret"
-    stage_compose_secrets(source, destination)
+    stage_compose_secrets(
+        source, destination, gateway_master_key=tmp_path / "gateway" / "master-key"
+    )
     assert not projected.exists()

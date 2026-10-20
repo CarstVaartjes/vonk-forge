@@ -43,10 +43,13 @@ def test_native_grants_follow_published_accepted_recipe_and_public_alias(
     assert recipe_key_routes(sessions, []) == [GatewayInferenceRoute.OPENAI]
 
 
-def test_route_publication_waits_for_key_grants_then_heals(tmp_path, postgres_engine):
+def test_route_publication_waits_for_key_grants_then_heals(
+    tmp_path, postgres_engine, monkeypatch
+):
     import httpx2
     import pytest
     from sqlalchemy import event
+    from sqlalchemy.exc import SQLAlchemyError
     from vonk_agent_protocol import UnknownOutcomeError
     from vonk_control.gateway_keys import GatewayKeyCreated, GatewayKeyService
 
@@ -102,6 +105,80 @@ def test_route_publication_waits_for_key_grants_then_heals(tmp_path, postgres_en
         service.publish_run(run_id)
     assert not applied
     unavailable = False
-    service.publish_run(run_id)
+    with service.sessions.begin() as session:
+        _recipe_run(session, run_id).route_state = RouteState.PENDING
+
+    import asyncio
+
+    from vonk_control.api.production import _keep_recipe_routes
+    from vonk_control.recipe_operation_worker import RecipeOperationWorker
+
+    from .test_recipe_routes import NOW
+
+    reconcile = gateway.reconcile_route_grants
+
+    async def api_restart():
+        stop = asyncio.Event()
+        loop = asyncio.get_running_loop()
+
+        observations = 0
+
+        def observed():
+            nonlocal observations
+            observations += 1
+            if observations == 1:
+                raise SQLAlchemyError("injected database observation outage")
+            result = reconcile()
+            loop.call_soon_threadsafe(stop.set)
+            return result
+
+        monkeypatch.setattr(gateway, "reconcile_route_grants", observed)
+        # New API scheduler, same durable intent. No worker has a gateway service.
+        await asyncio.wait_for(
+            _keep_recipe_routes(
+                RecipeOperationWorker(service.sessions, service, clock=lambda: NOW),
+                gateway,
+                stop,
+                interval_seconds=0.001,
+            ),
+            timeout=30,
+        )
+        assert observations == 2
+
+    asyncio.run(api_restart())
     assert applied
     assert upstream.keys["sweep"]["key"] == original
+    # Gateway drift after publication heals on an API tick after another restart.
+    upstream.keys["sweep"]["allowed_routes"] = [GatewayInferenceRoute.OPENAI]
+    asyncio.run(api_restart())
+    assert upstream.keys["sweep"]["allowed_routes"] == [
+        GatewayInferenceRoute.OPENAI,
+        GatewayInferenceRoute.SYSTEMONE,
+    ]
+    assert upstream.keys["sweep"]["key"] == original
+
+
+def test_worker_waits_for_api_publication_without_gateway_authority(tmp_path):
+    import pytest
+    from vonk_control.gateway_route_grants import require_existing_recipe_routes
+    from vonk_control.recipe_operation_worker import RecipeOperationWorker
+    from vonk_control.recipe_routes import RecipeRouteNotReady
+
+    from .test_recipe_routes import NOW
+
+    service, _, applied, run_id = setup(tmp_path)
+    with service.sessions.begin() as session:
+        _recipe_run(session, run_id).route_state = RouteState.PENDING
+    prepare = lambda runs: require_existing_recipe_routes(service.sessions, runs)
+    with pytest.raises(RecipeRouteNotReady):
+        prepare(frozenset({run_id}))
+    worker = RecipeOperationWorker(
+        service.sessions, service, clock=lambda: NOW, reconcile_routes=False
+    )
+    worker.tick()
+    worker.redrive_run(run_id)
+    assert not applied
+    # The API publishes; the worker can then retain it while withdrawing peers.
+    service.publish_run(run_id)
+    prepare(frozenset({run_id}))
+    prepare(frozenset())

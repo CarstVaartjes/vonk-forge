@@ -9,7 +9,8 @@ from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
+from sqlalchemy.exc import SQLAlchemyError
 from vonk_agent_protocol import UnknownError, UnknownOutcomeError
 
 import vonk_control
@@ -28,7 +29,7 @@ from ..cluster_mappings import ClusterMappingService
 from ..compose_bundle import compose_bundle
 from ..distribution_executor import CompositeDistributionPhaseExecutor
 from ..failure_evidence import FailureEvidenceService
-from ..gateway_keys import GatewayKeyService, keep_default_key
+from ..gateway_keys import GatewayKeyError, GatewayKeyService, keep_default_key
 from ..gateway_route_grants import recipe_key_routes
 from ..library_assessment import LibraryAssessment
 from ..logging import configure_controller_logging
@@ -38,6 +39,7 @@ from ..model_cache_api import register_model_cache_operation_provider
 from ..operator_projection_api import build_fleet_operator_services
 from ..platform_observation import PlatformObserver
 from ..recipe_builds import RecipeBuildService
+from ..recipe_operation_worker import RecipeOperationWorker
 from ..recipe_operations import RecipeOperationService
 from ..recipe_packages import RecipePackageClient
 from ..resource_planning import PLATFORM_MEMORY_FLOOR_BYTES
@@ -60,6 +62,74 @@ from ..settings import (
 from ..source_bundles import DatabaseSourceBundleStore
 from .application import create_app
 from .common import _LOGGER, SpaFiles, refresh_fleet_metrics
+
+
+async def _keep_recipe_routes(
+    routes: RecipeOperationWorker,
+    gateway_keys: GatewayKeyService,
+    stop: asyncio.Event,
+    *,
+    interval_seconds: float = 5.0,
+) -> None:
+    """Recover route/grant effects from durable intent independently of catalog sync."""
+
+    def reconcile() -> None:
+        routes.reconcile_routes()
+        try:
+            observed = gateway_keys.reconcile_route_grants()
+            if isinstance(observed, UnknownError):
+                _LOGGER.warning("gateway route grants waiting: %s", observed.reason)
+        except (GatewayKeyError, HTTPException, OSError, SQLAlchemyError):
+            _LOGGER.exception(
+                "gateway route grants unavailable; next check in %ss", interval_seconds
+            )
+
+    if interval_seconds <= 0:
+        raise ValueError("route reconciliation interval must be positive")
+    loop = asyncio.get_running_loop()
+    completion: asyncio.Future[None] = loop.create_future()
+    task: asyncio.Task[None] | None = None
+    timer: asyncio.TimerHandle | None = None
+
+    async def tick() -> None:
+        await asyncio.to_thread(reconcile)
+
+    def completed(finished: asyncio.Task[None]) -> None:
+        nonlocal timer
+        if completion.done():
+            return
+        if finished.cancelled():
+            completion.cancel()
+            return
+        error = finished.exception()
+        if error is not None:
+            _LOGGER.error(
+                "route reconciliation task failed",
+                exc_info=(type(error), error, error.__traceback__),
+            )
+            completion.set_exception(error)
+        elif stop.is_set():
+            completion.set_result(None)
+        else:
+            # One finite turn completes before the next timer is armed.
+            timer = loop.call_later(interval_seconds, dispatch)
+
+    def dispatch() -> None:
+        nonlocal task
+        if stop.is_set():
+            completion.set_result(None)
+            return
+        task = asyncio.create_task(tick())
+        task.add_done_callback(completed)
+
+    try:
+        dispatch()
+        await completion
+    finally:
+        if timer is not None:
+            timer.cancel()
+        if task is not None:
+            task.cancel()
 
 
 async def _close_model_cache(model_cache: ModelCacheService) -> None:
@@ -460,7 +530,7 @@ def production_app(settings: Settings | None = None) -> FastAPI:
         default = gateway_keys.ensure_default()
         if isinstance(default, UnknownError):
             return default
-        return gateway_keys.reconcile_route_grants()
+        return default
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
@@ -474,6 +544,13 @@ def production_app(settings: Settings | None = None) -> FastAPI:
                 reconcile=reconcile_library_observations,
             )
         )
+        route_task = asyncio.create_task(
+            _keep_recipe_routes(
+                RecipeOperationWorker(sessions, recipe_routes, clock=clock),
+                gateway_keys,
+                automatic_sync_stop,
+            )
+        )
         default_key_task = asyncio.create_task(
             keep_default_key(gateway_keys, automatic_sync_stop)
         )
@@ -482,7 +559,7 @@ def production_app(settings: Settings | None = None) -> FastAPI:
         finally:
             automatic_sync_stop.set()
             await capabilities.stop_recovery()
-            tasks = [default_key_task]
+            tasks = [default_key_task, route_task]
             if automatic_sync_task is not None:
                 tasks.append(automatic_sync_task)
             for task in tasks:

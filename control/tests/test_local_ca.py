@@ -114,7 +114,9 @@ def test_production_factory_reads_normalized_compose_signing_secrets(tmp_path):
         )
 
     with patch.object(runtime_init, "stage_private_key", side_effect=stage_for_test):
-        runtime_init.stage_compose_secrets(secrets, normalized)
+        runtime_init.stage_compose_secrets(
+            secrets, normalized, gateway_master_key=tmp_path / "gateway" / "master-key"
+        )
     # This portable check exercises real key/certificate loading. The adjacent
     # PostgreSQL test covers revocation import and enrollment through this factory.
     with patch.object(LocalCertificateAuthority, "_import_revocations"):

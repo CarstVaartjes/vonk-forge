@@ -70,24 +70,13 @@ def test_litellm_has_no_network_path_from_control_services() -> None:
         "litellm-edge",
         "registry-edge",
         "tailnet-web-edge",
-        "gateway-key-admin",
     }
     assert set(services["registry"]["networks"]) == {
         "registry-edge",
         "registry-publisher",
     }
-    assert set(services["control-worker"]["networks"]) == {
-        "data",
-        "artifact-egress",
-        "gateway-key-admin",
-    }
+    assert set(services["control-worker"]["networks"]) == {"data", "artifact-egress"}
     assert not services["control-worker"].get("ports")
-    assert rendered["networks"]["gateway-key-admin"]["internal"]
-    assert {
-        name
-        for name, service in services.items()
-        if "gateway-key-admin" in service.get("networks", {})
-    } == {"control-worker", "caddy"}
     assert not rendered["networks"]["artifact-egress"].get("internal", False)
     assert {
         name
@@ -193,7 +182,6 @@ def test_worker_has_a_distinct_minimal_image_and_runtime_boundary() -> None:
             item["source"] for item in services[service]["volumes"]
         }
     assert {item["target"] for item in worker["volumes"]} == {
-        "/gateway-secrets",  # shared key-service mutation claims, not a second key owner
         "/routes",
         "/supervisor",
         "/state",
@@ -337,11 +325,6 @@ def test_litellm_routes_use_a_dedicated_atomic_config_volume() -> None:
         volume["target"]: volume for volume in services["litellm"]["volumes"]
     }
 
-    assert (
-        worker_volumes["/gateway-secrets"]["source"]
-        == api_volumes["/gateway-secrets"]["source"]
-    )
-    assert not worker_volumes["/gateway-secrets"].get("read_only", False)
     assert worker_volumes["/routes"]["source"] == "route-publications"
     assert api_volumes["/routes"]["source"] == "route-publications"
     assert api_volumes["/routes"].get("read_only", False) is False

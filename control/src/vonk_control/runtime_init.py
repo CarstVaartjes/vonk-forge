@@ -25,7 +25,8 @@ class RuntimeSecretError(RuntimeError):
     """A private runtime secret cannot be projected safely."""
 
 
-GATEWAY_MASTER_KEY_NAME = "gateway-litellm-master-key"
+# A private child preserves the operator-owned gateway bind directory.
+GATEWAY_MASTER_KEY_PATH = Path("/gateway-secrets/authority/master-key")
 
 
 @dataclass(frozen=True)
@@ -386,12 +387,16 @@ def _stage_runtime_assets_once(
 def stage_compose_secrets(
     source_root: Path = Path("/run/secrets"),
     destination_root: Path = Path("/normalized"),
+    *,
+    gateway_master_key: Path = GATEWAY_MASTER_KEY_PATH,
 ) -> None:
     """Startup owns bounded retries, including optional projection cleanup."""
     last_error: BaseException | None = None
     for _attempt in range(3):
         try:
-            _stage_compose_secrets_once(source_root, destination_root)
+            _stage_compose_secrets_once(
+                source_root, destination_root, gateway_master_key=gateway_master_key
+            )
             return
         except (OSError, UnsettledOutcome) as error:
             last_error = error
@@ -404,6 +409,8 @@ def stage_compose_secrets(
 def _stage_compose_secrets_once(
     source_root: Path = Path("/run/secrets"),
     destination_root: Path = Path("/normalized"),
+    *,
+    gateway_master_key: Path = GATEWAY_MASTER_KEY_PATH,
 ) -> None:
     """Normalize all file-backed Compose secrets for their runtime consumers."""
     source_root = Path(source_root)
@@ -431,15 +438,16 @@ def _stage_compose_secrets_once(
             owner_gid=10001,
             mode=0o400,
         )
-    # The Controller manages gateway client keys with the LiteLLM master key;
-    # it cannot read the litellm-owned copy below, so it gets its own.
+    # Gateway authority belongs only to the API, outside the normalized volume
+    # mounted by the worker. Remove the retired shared copy after staging.
     stage_private_key(
         source_root / "litellm-master-key",
-        destination_root / GATEWAY_MASTER_KEY_NAME,
+        gateway_master_key,
         owner_uid=10001,
         owner_gid=10001,
         mode=0o400,
     )
+    (destination_root / "gateway-litellm-master-key").unlink(missing_ok=True)
     for name in (
         "litellm-master-key",
         "litellm-database-url",
