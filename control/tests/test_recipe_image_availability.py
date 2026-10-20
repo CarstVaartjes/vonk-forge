@@ -1273,7 +1273,7 @@ def test_remove_recipe_does_not_cancel_accepted_build_or_preparation(
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
-def test_damaged_reference_owner_ends_removal_and_admits_fresh_work(
+def test_removal_recovers_when_damaged_reference_observation_clears(
     tmp_path: Path,
 ) -> None:
     engine = create_engine(f"sqlite+pysqlite:///{tmp_path / 'reference-budget.sqlite'}")
@@ -1336,12 +1336,27 @@ def test_damaged_reference_owner_ends_removal_and_admits_fresh_work(
     )
     for _ in range(8):
         service.advance_removals(limit=1)
-        observed[0] += timedelta(seconds=30)
+        observed[0] += timedelta(seconds=60)
+        with sessions() as session:
+            waiting = session.get(Job, accepted.operation_id)
+            assert waiting is not None and waiting.state == LifecycleState.BACKOFF
+            assert waiting.next_action_at is not None
+        assert receipt_path.exists()
+        assert storage.existing_archive(ARCHIVE_SHA, len(ARCHIVE)).is_file()
+    # Remove the injected unreadable reference; the same removal observes again.
+    with sessions.begin() as session:
+        broken = session.get(
+            FleetProfileApplication, "00000000-0000-4000-8000-000000000032"
+        )
+        assert broken is not None
+        session.delete(broken)
+    for _ in range(4):
+        service.advance_removals(limit=1)
+        observed[0] += timedelta(seconds=60)
     with sessions() as session:
-        ended = session.get(Job, accepted.operation_id)
-        assert ended is not None and ended.state == LifecycleState.FAILED
-    assert receipt_path.exists()
-    assert storage.existing_archive(ARCHIVE_SHA, len(ARCHIVE)).is_file()
+        completed = session.get(Job, accepted.operation_id)
+        assert completed is not None and completed.state == LifecycleState.SUCCEEDED
+    assert not receipt_path.exists()
     fresh = service.start(
         "damaged-reference", actor="operator", request_id=str(uuid.uuid4())
     )
@@ -1707,19 +1722,25 @@ def test_active_recipe_removal_admits_independent_request_and_replays_accepted_k
         )
         assert replay.operation_id == accepted.operation_id
 
-    # Both independent owners must finish or end through the normal worker;
-    # neither may leave a gate behind that prevents subsequent preparation.
+    # Both requests keep their identities. After the first removes the receipt,
+    # the second must retain its unknown observation instead of ending by count.
     for _ in range(12):
         service.advance_removals(limit=10)
         now[0] += timedelta(minutes=1)
+    waiting = [
+        service.get_operator_request(request.request_key, actor="operator")
+        for request in (accepted, newer)
+    ]
+    assert any(item.state == LifecycleState.BACKOFF for item in waiting)
+    # Restore the missing metadata observation, without changing either intent.
+    (storage.root / f"{ARCHIVE_SHA}.receipt.json").write_text(receipt.model_dump_json())
+    for _ in range(12):
+        now[0] += timedelta(minutes=1)
+        service.advance_removals(limit=10)
     for request in (accepted, newer):
         ended = service.get_operator_request(request.request_key, actor="operator")
         assert isinstance(ended, RecipeCacheRemovalStatus)
-        assert ended.state in (
-            LifecycleState.SUCCEEDED,
-            LifecycleState.FAILED,
-            LifecycleState.CANCELLED,
-        )
+        assert ended.state == LifecycleState.SUCCEEDED
         assert_ended_without_blocking(
             SimpleNamespace(sessions=sessions),
             cast(RecipeCacheRemovalStatus | RecipeImageAvailabilityView, ended),
