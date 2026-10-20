@@ -196,7 +196,7 @@ def test_linux_probe_separates_heap_cache_and_children(tmp_path) -> None:
 
 
 def test_worker_collects_footprints_and_skips_a_failing_source(tmp_path) -> None:
-    from .test_worker import _service
+    from .test_worker import _failures, _service
 
     class Broken:
         def memory_footprint(self):
@@ -205,6 +205,7 @@ def test_worker_collects_footprints_and_skips_a_failing_source(tmp_path) -> None
     demands = StorageDemands(lambda: START)
     demands.request("nas:model", 5, source="x", reason="r")
     worker = Worker(
+        coordinator_failures=_failures(tmp_path),
         jobs=_service(tmp_path),
         worker_id="w",
         handlers={},

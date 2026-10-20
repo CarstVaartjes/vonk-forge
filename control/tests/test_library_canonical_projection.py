@@ -1476,3 +1476,128 @@ def test_detail_and_page_scope_history_and_latest_request_by_time(
     monkeypatch.setattr(local_state, "_database_local_state", unavailable)
     monkeypatch.setattr(projection, "_database_local_state", unavailable)
     assert projection.model_detail("test/model-0000").local.controller == "unknown"
+
+
+@pytest.mark.parametrize("wrong_identity", [False, True])
+def test_imported_canary_resolves_exactly_while_discovery_index_is_stale(
+    tmp_path: Path, monkeypatch, wrong_identity: bool
+) -> None:
+    """Catches gating a committed exact Recipe on stale discovery or dropping its digest check."""
+    monkeypatch.setenv(
+        "VONK_SYNTHETIC_CANARY_INDEX",
+        "tests/fixtures/canonical-synthetic-canary/index.json",
+    )
+    import importlib.util
+    import sys
+    from importlib import import_module
+
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from vonk_control.auth import TokenCodec
+    from vonk_control.catalog_api import _managed_sync
+    from vonk_control.catalog_service import CatalogService
+    from vonk_control.catalog_sync import ManagedRecipeCatalogSyncService
+    from vonk_control.library_projection import LibraryProjection
+    from vonk_control.models import Base
+    from vonk_control.source_bundles import SourceBundleStore
+
+    import tests
+
+    # Keep the Controller test package and its pass clocks while loading the
+    # shared acceptance consumer; restore package search paths after this test.
+    repository = Path(__file__).resolve().parents[2]
+    monkeypatch.setattr(tests, "__path__", [*tests.__path__, str(repository / "tests")])
+    monkeypatch.setattr(sys, "path", list(sys.path))
+    lifecycle = import_module("tests.test_spark_lifecycle_runner")._module()
+    fixture = lifecycle._artifact_job_fixture(lifecycle._canonical_canary_fixture(ROOT))
+    specification = importlib.util.spec_from_file_location(
+        "spark_canary_catalog_import", lifecycle.CANARY_CATALOG_IMPORT
+    )
+    assert specification is not None and specification.loader is not None
+    program = importlib.util.module_from_spec(specification)
+    specification.loader.exec_module(program)
+    index = json.loads(fixture.index_bytes)
+    digest = index["recipes"][0]["package"]["sha256"]
+    archive = program._cache_package(
+        tmp_path / "packages", fixture.package_bytes, digest
+    )
+    engine = create_engine(f"sqlite:///{tmp_path / 'catalog.sqlite'}")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    clock = lambda: datetime(2026, 10, 15, tzinfo=UTC)
+    reader = program.FixtureReader(index, {digest: archive})
+    sync = ManagedRecipeCatalogSyncService(
+        sessions,
+        catalog=CatalogService(
+            sessions,
+            clock=clock,
+            cursors=TokenCodec(b"s" * 32).cursor_codec(),
+            source_bundles=SourceBundleStore(tmp_path / "bundles"),
+        ),
+        reader=reader,
+        clock=clock,
+    )
+
+    projection = LibraryProjection(
+        sessions, cursors=TokenCodec(b"c" * 32).cursor_codec(), clock=clock
+    )
+    view = program.sync_canary_catalog(
+        sync,
+        request_key="eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeef",
+        snapshot=reader.snapshot,
+    )
+
+    assert (view.state, view.commit, view.imported_count, view.problems) == (
+        "current",
+        fixture.source_commit,
+        1,
+        (),
+    )
+
+    # The fixture sync is a separate process in acceptance. The running API's
+    # periodic discovery index has not refreshed, but exact reads see the commit.
+    assert projection.recipe_library().recipes == []
+    selector = f"{fixture.publisher}/{fixture.slug}"
+    detail = projection.recipe_detail(selector)
+    if wrong_identity:
+        detail = detail.model_copy(
+            update={
+                "identity": detail.identity.model_copy(
+                    update={"content_sha256": "f" * 64}
+                )
+            }
+        )
+    calls: list[tuple[str, str]] = []
+
+    class Control:
+        @staticmethod
+        def request(method, path, payload=None, **kwargs):
+            calls.append((method, path))
+            if method == "GET" and path == "/api/recipe/library":
+                return 200, projection.recipe_library().model_dump(mode="json")
+            if method == "GET" and path == f"/api/recipe/{selector}":
+                return 200, detail.model_dump(mode="json")
+            raise AssertionError((method, path))
+
+    def resolved():
+        raise lifecycle.LifecycleError("recipe resolved before effects")
+
+    run = lifecycle.SparkLifecycle.__new__(lifecycle.SparkLifecycle)
+    run.control = Control()
+    run.browser = object()
+    run.synthetic_canary_fixture = fixture
+    run._import_canary_catalog = lambda *_args: _managed_sync(view).model_dump(
+        mode="json"
+    )
+    run._fleet_snapshot = resolved
+    run._installation_failure = lambda _stage, error: lifecycle.LifecycleError(
+        str(error)
+    )
+    expected = (
+        "canonical closure differs"
+        if wrong_identity
+        else "recipe resolved before effects"
+    )
+    with pytest.raises(lifecycle.LifecycleError, match=expected):
+        run._run_synthetic_canary("spk_" + "1" * 32)
+    assert calls == [("GET", f"/api/recipe/{selector}")]

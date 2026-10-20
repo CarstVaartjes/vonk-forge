@@ -27,6 +27,7 @@ provenance remains a separate observation.
 | API gateway key client | Missing master key, unavailable LiteLLM, readiness refusal | Guarded client/readiness check; retained client is probed again after backoff |
 | Worker image collector | Nested runtime image directory construction | Guarded collector; references are still required before any deletion |
 | API/worker SQL repositories, projections, admissions, operation services, profile builder, metrics registry, transport, upgrade client and scheduler wiring | Fixed budgets and in-memory wiring | Reviewed direct constructors, without startup I/O; effects remain in existing request/worker methods |
+| Worker coordinator failure store | Session factory, clock and executable identity binding only | Reviewed core wiring; injected into Worker instead of constructed through JobService internals; SQL effects remain in the worker pass |
 | Worker due-wait selector and upgrade reconciliation | In-memory cursor/callback binding; release HTTP transport is lazy | Reviewed pure/core wiring; owner failures remain row-scoped during the existing worker pass |
 | Worker prebuilt importer, telemetry/history collectors, storage demands/collector, maintenance cadence, heartbeat and memory monitor | Fixed budgets and retained paths | Reviewed wiring; existing per-source worker containment handles tick/sample failures |
 | `Settings.from_env_and_secrets`, engine/session creation | Missing/invalid database URL or inaccessible database authority | Required core dependency; database identity is never substituted |

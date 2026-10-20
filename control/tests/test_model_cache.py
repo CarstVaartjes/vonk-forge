@@ -24,6 +24,7 @@ from vonk_agent_protocol import LifecycleState, ProgressPhase
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.bounded_json import require_mapping, require_sequence, text
 from vonk_control.catalog_entities import CatalogEntityService
+from vonk_control.coordinator_failures import CoordinatorFailures
 from vonk_control.distribution import (
     CompositeObjectSource,
     MemoryObjectSource,
@@ -2286,10 +2287,12 @@ def test_provider_retry_after_and_rate_limit_reset_are_bounded_hints() -> None:
 
 
 def test_worker_prefers_nonblocking_cache_tick_when_available(cache) -> None:
-    _service, sessions = cache
     calls: list[str] = []
 
     class Jobs(JobService):
+        def __init__(self) -> None:
+            pass
+
         def claim(self, *_args, **_kwargs):
             raise AssertionError("generic jobs should not run before cache tick")
 
@@ -2299,7 +2302,11 @@ def test_worker_prefers_nonblocking_cache_tick_when_available(cache) -> None:
             return True
 
     worker = Worker(
-        Jobs(sessions, clock=lambda: NOW), "worker", {}, model_cache=Cache()
+        Jobs(),
+        "worker",
+        {},
+        model_cache=Cache(),
+        coordinator_failures=CoordinatorFailures(cache[1], lambda: NOW, "a" * 64),
     )
     assert worker.run_once() is True
     assert calls == ["tick"]
@@ -2478,10 +2485,12 @@ def test_verified_serving_seam_refuses_incomplete_or_tampered_sets(
 def test_controller_worker_drains_queued_cache_operations_without_inline_api_transfer(
     cache,
 ) -> None:
-    _service, sessions = cache
     calls: list[int] = []
 
     class Jobs(JobService):
+        def __init__(self) -> None:
+            pass
+
         def claim(self, *_args, **_kwargs):
             raise AssertionError("cache work should be selected before generic jobs")
 
@@ -2491,7 +2500,11 @@ def test_controller_worker_drains_queued_cache_operations_without_inline_api_tra
             return 1
 
     worker = Worker(
-        Jobs(sessions, clock=lambda: NOW), "worker", {}, model_cache=CacheWorker()
+        Jobs(),
+        "worker",
+        {},
+        model_cache=CacheWorker(),
+        coordinator_failures=CoordinatorFailures(cache[1], lambda: NOW, "a" * 64),
     )
     assert worker.run_once() is True
     assert calls == [1]

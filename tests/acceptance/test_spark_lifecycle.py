@@ -3320,32 +3320,26 @@ class SparkLifecycle:
                     + json.dumps(summary, sort_keys=True)[:1024]
                 )
             phase = "recipe-resolution"
-            # The browse index refreshes asynchronously. This imported fixture
-            # already has an exact selector; resolve it from current authority.
+            from vonk_control.library_contract import LibraryRecipeIdentity
+
+            # A known identity resolves directly against committed catalog state.
+            # The periodically refreshed discovery index may still be older.
             recipe_selector = f"{fixture.publisher}/{fixture.slug}"
             _, detail_payload = self.control.request(
                 "GET", f"/api/recipe/{recipe_selector}"
             )
             detail = require_object(detail_payload, "synthetic canary Recipe detail")
-            identity = require_object(
-                detail.get("identity"), "synthetic canary Recipe identity"
+            identity = LibraryRecipeIdentity.model_validate_json(
+                canonical_message(detail.get("identity"))
             )
-            recipe_id = identity.get("recipe_id")
-            revision_id = identity.get("recipe_revision_id")
-            if (
-                identity.get("publisher") != fixture.publisher
-                or identity.get("slug") != fixture.slug
-                or identity.get("content_sha256") != fixture.recipe_content_sha256
-                or not isinstance(recipe_id, str)
-                or UUID.fullmatch(recipe_id) is None
-                or not isinstance(revision_id, str)
-                or UUID.fullmatch(revision_id) is None
-                or detail.get("selector") != recipe_selector
-            ):
-                raise LifecycleError("synthetic canary Recipe identity is invalid")
+            revision_id = identity.recipe_revision_id
             model_selectors = detail.get("model_selectors")
             if (
-                not _canonical_recipe_matches(detail.get("document"), fixture.recipe)
+                detail.get("selector") != recipe_selector
+                or identity.publisher != fixture.publisher
+                or identity.slug != fixture.slug
+                or identity.content_sha256 != fixture.recipe_content_sha256
+                or not _canonical_recipe_matches(detail.get("document"), fixture.recipe)
                 or not isinstance(model_selectors, list)
                 or len(model_selectors) != 1
                 or not isinstance(model_selectors[0], str)
