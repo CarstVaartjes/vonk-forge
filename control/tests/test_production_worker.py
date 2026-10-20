@@ -24,6 +24,8 @@ from vonk_control.route_runtime import AtomicRouteBundlePublisher
 from vonk_control.run_switch_operations import RunSwitchOperationService
 from vonk_control.worker import Worker, assemble_production_worker
 
+from .test_worker import _failures
+
 
 def _jobs(tmp_path) -> JobService:
     engine = create_engine(f"sqlite:///{tmp_path / 'production-worker.sqlite'}")
@@ -41,11 +43,7 @@ def test_production_worker_leaves_unregistered_work_queued(
     job = jobs.enqueue("probe", "operator", "a" * 40, [], {})
 
     assert (
-        Worker(
-            jobs,
-            "worker",
-            {},
-        ).run_once()
+        Worker(jobs, "worker", {}, coordinator_failures=_failures(tmp_path)).run_once()
         is False
     )
     persisted = jobs.get(job.id)
@@ -61,11 +59,7 @@ def test_production_worker_does_not_claim_agent_owned_upgrade_parent(
     job = jobs.enqueue("agent-upgrade", "operator", "a" * 40, [], {})
 
     assert (
-        Worker(
-            jobs,
-            "worker",
-            {},
-        ).run_once()
+        Worker(jobs, "worker", {}, coordinator_failures=_failures(tmp_path)).run_once()
         is False
     )
     persisted = jobs.get(job.id)
@@ -321,7 +315,11 @@ def test_recipe_coordinator_fault_is_local_rate_limited_and_recovers(tmp_path, o
     fresh = jobs.enqueue("probe", "admin", "abc", [], {})
     # Fair scheduling gives an active recipe source its own first turn.
     generic_worker = Worker(
-        jobs, "fresh", {"probe": lambda _: {"done": True}}, recipes=worker
+        jobs,
+        "fresh",
+        {"probe": lambda _: {"done": True}},
+        recipes=worker,
+        coordinator_failures=_failures(tmp_path),
     )
     assert generic_worker.run_once()
     assert generic_worker.run_once()

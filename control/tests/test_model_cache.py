@@ -24,6 +24,7 @@ from vonk_agent_protocol import LifecycleState, ProgressPhase
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.bounded_json import require_mapping, require_sequence, text
 from vonk_control.catalog_entities import CatalogEntityService
+from vonk_control.coordinator_failures import CoordinatorFailures
 from vonk_control.distribution import (
     CompositeObjectSource,
     MemoryObjectSource,
@@ -2285,7 +2286,7 @@ def test_provider_retry_after_and_rate_limit_reset_are_bounded_hints() -> None:
     )
 
 
-def test_worker_prefers_nonblocking_cache_tick_when_available() -> None:
+def test_worker_prefers_nonblocking_cache_tick_when_available(cache) -> None:
     calls: list[str] = []
 
     class Jobs(JobService):
@@ -2300,7 +2301,13 @@ def test_worker_prefers_nonblocking_cache_tick_when_available() -> None:
             calls.append("tick")
             return True
 
-    worker = Worker(Jobs(), "worker", {}, model_cache=Cache())
+    worker = Worker(
+        Jobs(),
+        "worker",
+        {},
+        model_cache=Cache(),
+        coordinator_failures=CoordinatorFailures(cache[1], lambda: NOW, "a" * 64),
+    )
     assert worker.run_once() is True
     assert calls == ["tick"]
 
@@ -2475,9 +2482,9 @@ def test_verified_serving_seam_refuses_incomplete_or_tampered_sets(
         assert not observed
 
 
-def test_controller_worker_drains_queued_cache_operations_without_inline_api_transfer() -> (
-    None
-):
+def test_controller_worker_drains_queued_cache_operations_without_inline_api_transfer(
+    cache,
+) -> None:
     calls: list[int] = []
 
     class Jobs(JobService):
@@ -2492,7 +2499,13 @@ def test_controller_worker_drains_queued_cache_operations_without_inline_api_tra
             calls.append(limit)
             return 1
 
-    worker = Worker(Jobs(), "worker", {}, model_cache=CacheWorker())
+    worker = Worker(
+        Jobs(),
+        "worker",
+        {},
+        model_cache=CacheWorker(),
+        coordinator_failures=CoordinatorFailures(cache[1], lambda: NOW, "a" * 64),
+    )
     assert worker.run_once() is True
     assert calls == [1]
 

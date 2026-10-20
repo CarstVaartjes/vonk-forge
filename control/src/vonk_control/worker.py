@@ -227,6 +227,7 @@ class Worker:
         worker_id: str,
         handlers: Mapping[str, Handler],
         *,
+        coordinator_failures: CoordinatorFailures,
         housekeeping: Callable[[], object] | None = None,
         artifact_housekeeping: Callable[[], object] | None = None,
         recipes=None,
@@ -236,7 +237,6 @@ class Worker:
         loop_heartbeat: Callable[[], object] | None = None,
         memory_sources: Sequence[object] = (),
         due_waits: Callable[[], object] | None = None,
-        coordinator_content_sha256: str | None = None,
     ) -> None:
         self._jobs = jobs
         self._worker_id = worker_id
@@ -252,11 +252,7 @@ class Worker:
         self._memory_sources = tuple(memory_sources)
         self._source_cursor = 0
         self._closed = False
-        self._failures = CoordinatorFailures(
-            jobs._sessions,
-            jobs._clock,
-            coordinator_content_sha256 or _coordinator_source_content(),
-        )
+        self._failures = coordinator_failures
         self._cadence_at: dict[str, float] = {}
 
     def close(self) -> None:
@@ -766,6 +762,9 @@ def assemble_production_worker(
         jobs,
         worker_id,
         {},
+        coordinator_failures=CoordinatorFailures(
+            sessions, clock, _coordinator_source_content()
+        ),
         housekeeping=TelemetryMaintenanceCadence(
             telemetry_maintenance,
             clock=clock,
