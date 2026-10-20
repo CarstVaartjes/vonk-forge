@@ -143,7 +143,13 @@ def upgrade_credentials(
     root = bundle / "secrets"
     ensure_directory(root)
     publication.replay(bundle)
-    ensure_directory(root / "gateway")
+    # A running API reaches this installer-owned bind through its group.
+    # Do not revoke that access while preparing an in-place upgrade.
+    gateway = root / "gateway"
+    if metadata(gateway) is None:
+        ensure_directory(gateway)
+    else:
+        real_directory(gateway)
     environment = recover_environment(payload, bundle)
     if payload.install_modes and "COMPOSE_PROFILES" not in environment:
         raise ObservationUnavailable()

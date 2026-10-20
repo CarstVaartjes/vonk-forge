@@ -297,6 +297,9 @@ def test_gateway_master_key_is_staged_only_outside_worker_volume(
     api_key = gateway_root / runtime_init.GATEWAY_MASTER_KEY_PATH.relative_to(
         "/gateway-secrets"
     )
+    # This host test cannot assign the container's group. The Linux process
+    # acceptance exercises the real uid/gid boundary.
+    monkeypatch.setattr(os, "fchown", lambda *_args: None)
     chown = os.chown
 
     def preserve_host_owner(path, *args, **kwargs):
@@ -316,6 +319,7 @@ def test_gateway_master_key_is_staged_only_outside_worker_volume(
                 owner_uid=os.geteuid(),
                 owner_gid=os.getegid(),
                 mode=kwargs["mode"],
+                preserve_parent=kwargs.get("preserve_parent", False),
             )
         return destination
 
@@ -325,12 +329,34 @@ def test_gateway_master_key_is_staged_only_outside_worker_volume(
     )
     stage_compose_secrets(source, shared, gateway_master_key=api_key)
     assert api_key.read_bytes() == master.read_bytes()
-    assert stat.S_IMODE(api_key.stat().st_mode) == 0o400
+    assert api_key.stat().st_uid == gateway_root.stat().st_uid
+    assert stat.S_IMODE(api_key.stat().st_mode) == 0o640
+    assert stat.S_IMODE(api_key.parent.stat().st_mode) == 0o770
+    assert api_key.parent.stat().st_uid == gateway_root.stat().st_uid
     assert not stale.exists()
     assert staged == [
-        (api_key, 10001, 0o400),
+        (api_key, gateway_root.stat().st_uid, 0o640),
         (shared / "litellm-master-key", 10002, 0o400),
     ]
+    api_key.parent.chmod(0o755)
+    stage_compose_secrets(source, shared, gateway_master_key=api_key)
+    assert stat.S_IMODE(api_key.parent.stat().st_mode) == 0o770
+    stale.write_bytes(b"previous-shared-key")
+    with monkeypatch.context() as patch:
+
+        def unavailable(source, destination, **kwargs):
+            if destination == api_key:
+                raise OSError("authority publication unavailable")
+            return record(source, destination, **kwargs)
+
+        patch.setattr(runtime_init, "stage_private_key", unavailable)
+        with pytest.raises(Exception):  # noqa: B017 -- check publication and retirement effects
+            stage_compose_secrets(source, shared, gateway_master_key=api_key)
+    assert stale.read_bytes() == b"previous-shared-key"
+    assert api_key.read_bytes() == master.read_bytes()
+    stage_compose_secrets(source, shared, gateway_master_key=api_key)
+    assert not stale.exists()
+
     from vonk_control.gateway_keys import MASTER_KEY_FILE
 
     assert MASTER_KEY_FILE == runtime_init.GATEWAY_MASTER_KEY_PATH
@@ -519,6 +545,7 @@ def test_compose_optional_secret_observation_ends_preserves_and_fresh_staging_se
     # Other projections are independent; exercise the actual Compose staging
     # owner and optional-secret observation/cleanup boundary.
     monkeypatch.setattr(runtime_init, "stage_private_key", lambda *_a, **_k: None)
+    monkeypatch.setattr(os, "fchown", lambda *_args: None)
     original = Path.lstat
     attempts = []
     with monkeypatch.context() as patch:

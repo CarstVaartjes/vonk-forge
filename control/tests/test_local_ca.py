@@ -71,7 +71,9 @@ def _binding(ca, csr, *, source=None, generation=1):
     )
 
 
-def test_production_factory_reads_normalized_compose_signing_secrets(tmp_path):
+def test_production_factory_reads_normalized_compose_signing_secrets(
+    tmp_path, monkeypatch
+):
     """Catches staging signer secrets somewhere the production factory cannot read."""
     import os
 
@@ -100,7 +102,12 @@ def test_production_factory_reads_normalized_compose_signing_secrets(tmp_path):
     normalized = tmp_path / "normalized"
     stage = runtime_init.stage_private_key
 
-    def stage_for_test(source, destination, *, owner_uid, owner_gid, mode):
+    # Ownership is exercised in the built-image test; this test owns CA bytes.
+    monkeypatch.setattr(os, "fchown", lambda *_args: None)
+
+    def stage_for_test(
+        source, destination, *, owner_uid, owner_gid, mode, preserve_parent=False
+    ):
         if not source.exists():
             source.write_bytes(b"unrelated runtime secret\n")
         if source.name in {"step-ca-intermediate-key", "step-ca-password"}:
@@ -111,6 +118,7 @@ def test_production_factory_reads_normalized_compose_signing_secrets(tmp_path):
             owner_uid=os.geteuid(),
             owner_gid=os.getegid(),
             mode=mode,
+            preserve_parent=preserve_parent,
         )
 
     with patch.object(runtime_init, "stage_private_key", side_effect=stage_for_test):
