@@ -603,12 +603,8 @@ fn numeric_identity_resolves_in_read_only_container() {
     let roots = ManagedRoots::under(temp.path());
     let executor = OperationExecutor::new(roots, &[0; 32], MissingContainerRunner, None).unwrap();
     let mounts = executor.runtime_identity_mounts(10001, 10002).unwrap();
-    let lock: serde_json::Value = serde_json::from_str(include_str!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../../deploy/compose/images.lock.json"
-    )))
-    .unwrap();
-    let image = lock["images"]["python"].as_str().unwrap();
+    let image = std::env::var("VONK_RUNTIME_IDENTITY_TEST_IMAGE")
+        .expect("set VONK_RUNTIME_IDENTITY_TEST_IMAGE to the locked Python image");
     let probe = "import os,pwd,grp,getpass; [os.environ.pop(k,None) for k in ('LOGNAME','USER','LNAME','USERNAME','HOME')]; assert pwd.getpwuid(os.getuid()).pw_name == getpass.getuser() == 'vonk-runtime'; assert grp.getgrgid(os.getgid()).gr_name == 'vonk-runtime'";
     let mut args = vec![
         "run".to_owned(),
@@ -622,7 +618,7 @@ fn numeric_identity_resolves_in_read_only_container() {
     ];
     // The very same image fails without the helper's mounts. Environment
     // variables cannot satisfy direct passwd/group lookup.
-    let command = [image, "python", "-c", probe];
+    let command = [image.as_str(), "python", "-c", probe];
     let invoke = |options: &[String]| {
         let mut complete = options.to_vec();
         complete.extend(command.map(str::to_owned));

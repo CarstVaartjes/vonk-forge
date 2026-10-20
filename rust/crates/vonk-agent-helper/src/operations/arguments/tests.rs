@@ -41,3 +41,14 @@ fn runtime_environment_names_keep_engine_case_and_stay_shell_safe() {
         assert!(!super::valid_environment(rejected), "{rejected}");
     }
 }
+
+#[test]
+fn numeric_identity_never_defaults_an_invalid_explicit_group() {
+    // Overflow used to become an absent GID, allowing the identity producer
+    // to substitute the UID for an explicitly invalid group.
+    let user = format!("10001:{}", u64::from(u32::MAX) + 1);
+    assert!(matches!(
+        parse_numeric_user(&user),
+        Err(OperationError::InvalidOperation)
+    ));
+}
