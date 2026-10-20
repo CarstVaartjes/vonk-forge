@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
+from enum import StrEnum
 from typing import Annotated, Literal
 
 from pydantic import (
@@ -166,6 +167,14 @@ class LibraryRecipeSummary(LibraryRecipeIdentity):
     reasons: list[LibraryProjectionReason] = Field(max_length=16)
 
 
+class LibraryCacheState(StrEnum):
+    CACHED = "cached"
+    PREPARING = "preparing"
+    NOT_CACHED = "not_cached"
+    FAILED = "failed"
+    UNKNOWN = "unknown"
+
+
 class LibraryLocalProgress(StrictModel):
     """Observable progress for a Controller-local preparation operation."""
 
@@ -254,6 +263,7 @@ class LibraryFilterValues(StrictModel):
 
 
 class ModelLibraryResponse(StrictModel):
+    catalog_observed_at: datetime | None = None
     generated_at: datetime
     library: LibraryRelease | None = None
     models: list[LibraryModelProjection] = Field(max_length=_MAX_PAGE_RECIPES)
@@ -311,6 +321,7 @@ class LibraryRecipeProjection(StrictModel):
 
 
 class RecipeLibraryResponse(StrictModel):
+    catalog_observed_at: datetime | None = None
     generated_at: datetime
     library: LibraryRelease | None = None
     recipes: list[LibraryRecipeProjection] = Field(max_length=_MAX_PAGE_RECIPES)

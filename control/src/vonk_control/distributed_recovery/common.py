@@ -7,6 +7,9 @@ from collections.abc import Iterable, Mapping, Sequence
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from hashlib import (
+    sha256,
+)
 from typing import Protocol
 
 from sqlalchemy import or_, select
@@ -19,6 +22,8 @@ from vonk_agent_protocol import (
     ReservationState,
     RouteState,
     RunState,
+    WaitOwnerKind,
+    WaitResumeCondition,
     canonical_message,
 )
 from vonk_agent_protocol.route_activation import ROUTE_EVIDENCE_MAX_AGE_SECONDS
@@ -46,7 +51,8 @@ from ..models import (
     ResourceReservation,
     RunNode,
 )
-from ..persisted_waits import schedule_wait
+from ..operation_blockers import BlockingOperation, make_blocker
+from ..persisted_waits import read_wait, schedule_wait, write_wait
 from ..recipe_execution_contract import (
     RecipeExecutionContractError,
     RouteWithdrawalFollowUp,
@@ -191,11 +197,62 @@ class _RecoveryDependencyPending(UnsettledOutcome):
     disposition = Disposition.WAIT
 
 
-def _unreadable_run_ids(session: Session) -> list[str]:
+def _plan_identity(run: RecipeRun) -> str:
+    return sha256(canonical_message(run.plan)).hexdigest()
+
+
+def _unchanged_unreadable(run: RecipeRun) -> bool:
+    wait = read_wait(run)
+    return bool(
+        wait is not None
+        and wait.reason == InvalidRequestReason.MALFORMED
+        and any(
+            blocker.operation is not None
+            and blocker.operation.id == _plan_identity(run)
+            for blocker in wait.blockers
+        )
+    )
+
+
+def _wait_for_plan_change(run: RecipeRun, now: datetime) -> bool:
+    previous = read_wait(run)
+    due = run.next_action_at
+    if _unchanged_unreadable(run) and due is not None and _aware(due) > now:
+        return False
+    detail = "stored run plan is unreadable; retaining workload until exact observation, Stop, or changed plan content"
+    run.route_error = detail
+    run.updated_at = now
+    return write_wait(
+        run,
+        identity=BlockingOperation(id=run.id, kind=WaitOwnerKind.ROUTE_RECOVERY.value),
+        kind=WaitOwnerKind.ROUTE_RECOVERY,
+        reason=InvalidRequestReason.MALFORMED,
+        now=now,
+        next_check=now + timedelta(seconds=_RECOVERY_COOLDOWN_SECONDS),
+        blockers=[
+            make_blocker(InvalidRequestReason.MALFORMED, detail).model_copy(
+                update={
+                    "operation": BlockingOperation(
+                        id=_plan_identity(run), kind=WaitOwnerKind.ROUTE_RECOVERY.value
+                    )
+                }
+            )
+        ],
+        resume_condition=WaitResumeCondition.DEPENDENCY_CHANGED,
+        last_progress_at=previous.last_progress_at if previous else None,
+    )
+
+
+def _unreadable_run_ids(session: Session, only_id: str | None = None) -> list[str]:
     unreadable = []
-    for run in session.scalars(
-        select(RecipeRun).where(RecipeRun.state.in_(STOPPABLE_RUN_STATES))
-    ):
+    query = select(RecipeRun).where(RecipeRun.state.in_(STOPPABLE_RUN_STATES))
+    if only_id is not None:
+        query = query.where(RecipeRun.id == only_id)
+    for run in session.scalars(query):
+        wait = read_wait(run)
+        if wait is not None and wait.reason == InvalidRequestReason.MALFORMED:
+            unreadable.append(run.id)
+            continue
         try:
             parse_stored_run_plan(run.plan)
         except RecipeExecutionContractError:

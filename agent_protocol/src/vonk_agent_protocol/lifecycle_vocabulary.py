@@ -644,6 +644,7 @@ class WaitOwnerKind(WireEnum):
     CATALOG_SYNC = "catalog-sync"
     CERTIFICATE = "certificate"
     CERTIFICATE_REVOCATION = "certificate-revocation"
+    COORDINATOR = "coordinator"
 
 
 class ProgressAlarmCode(WireEnum):

@@ -529,6 +529,11 @@
     {
       "module": "control/src/vonk_control/fleet_model_removal_contract.py",
       "kind": "controller-contract"
+    },
+    {
+      "module": "control/src/vonk_control/coordinator_contract.py",
+      "reason": "Canonical current worker coordinator failure and wait observation contracts.",
+      "kind": "controller-contract"
     }
   ],
   "allowed_duplicates": []

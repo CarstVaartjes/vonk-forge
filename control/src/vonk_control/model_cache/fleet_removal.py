@@ -130,6 +130,12 @@ def _model_objects(
         objects = {file.sha256 for file in model.files}
         if revision.content_digest == digest:
             target_objects.update(objects)
+            if not include_shared:
+                # Acquiring a pin needs only this immutable model's files. A
+                # readable copy proves the same content even when another copy
+                # or its cache history is damaged. Deletion still scans every
+                # reference and retains its conservative unknowns below.
+                return target_objects, shared
         else:
             shared.update(objects)
     for row in session.scalars(cache_sets):

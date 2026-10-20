@@ -19,8 +19,10 @@ from cluster_profiles.runtime_identity import (
 
 from .capabilities import CapabilityRegistry
 from .capability_contract import CapabilityStatus
-from .models import ControlProcessHeartbeat, FleetProfileApplication
+from .coordinator_contract import CoordinatorFailureView
+from .models import ControlProcessHeartbeat, CoordinatorFailure, FleetProfileApplication
 from .observation_capture import begin_observation_capture
+from .persisted_waits import read_wait
 from .platform_observation_errors import ObservationCaptureUnavailable
 from .progress_stall import WAITING_STATES, is_stalled, read_stall
 from .strict_json import StrictModel
@@ -54,6 +56,7 @@ class StalledApplication(StrictModel):
 
 
 class PlatformObservation(StrictModel):
+    coordinator_failures: list[CoordinatorFailureView] = Field(default_factory=list)
     capabilities: list[CapabilityStatus] = Field(default_factory=list)
     #: Informative only: nothing is cancelled, and a load leaves this list
     #: the moment it moves again.
@@ -122,6 +125,15 @@ class PlatformObserver:
                 )
             )
             stalled = _stalled_applications(session, now)
+            failures = [
+                CoordinatorFailureView(
+                    source=row.id, failure=row.failure, wait=read_wait(row)
+                )
+                for row in session.scalars(
+                    select(CoordinatorFailure).order_by(CoordinatorFailure.id)
+                )
+            ]
+
         workers = [
             WorkerRuntimeObservation(
                 process_instance_id=row.process_instance_id,
@@ -140,6 +152,7 @@ class PlatformObserver:
         observation = PlatformObservation(
             capabilities=self._capabilities.statuses() if self._capabilities else [],
             stalled_applications=stalled,
+            coordinator_failures=failures,
             observed_at=now,
             api=ApiRuntimeObservation(
                 source_sha=identity.source_sha,

@@ -192,3 +192,20 @@ def build_source_bundles(
     if stated is not None:
         return frozenset({stated})
     return frozenset(recorded) or None
+
+
+def recipe_content_membership(column, digests: Collection[str]):
+    """Resolve relational recipe references by content for scoped observations.
+
+    The revision key locates the immutable document; the requested digest,
+    rather than editorial provenance, decides which rows belong to the read.
+    """
+    from sqlalchemy import select
+
+    from .models import CatalogDocumentRevision
+
+    return column.in_(
+        select(CatalogDocumentRevision.id).where(
+            CatalogDocumentRevision.content_digest.in_(digests)
+        )
+    )

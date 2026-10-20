@@ -4,11 +4,15 @@ import copy
 from datetime import UTC, datetime
 
 import pytest
+from fastapi import Depends, FastAPI
+from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, event, select
 from sqlalchemy.orm import sessionmaker
-from vonk_control.auth import TokenCodec
+from vonk_control.auth import Actor, TokenCodec
 from vonk_control.catalog_queries import active_head_revision
 from vonk_control.catalog_service import CatalogService
+from vonk_control.library_api import install_library_routes
+from vonk_control.library_contract import RecipeDetailResponse
 from vonk_control.library_projection import LibraryProjection, _canonical_recipe
 from vonk_control.model_cache import ModelCacheService
 from vonk_control.models import Base, CatalogDocumentHead, CatalogDocumentRevision
@@ -142,6 +146,45 @@ def test_stable_recipe_reads_follow_promotion_and_ignore_failed_successor(catalo
     fresh = catalog.entities.revise(first.document_id, fresh_document, actor="test")
     accepted = catalog.entities.resolve(fresh.id, actor="test")
     _assert_current(catalog, first, accepted)
+
+
+@pytest.mark.parametrize("qualified", [True, False], ids=["publisher-slug", "slug"])
+def test_recipe_api_reads_successor_before_catalog_index_refresh(catalog, qualified):
+    """A stale indexed predecessor must not make the accepted head ambiguous."""
+
+    model = _model()
+    _publish(catalog, model)
+    first = _publish(catalog, _recipe(model))
+    sibling = _publish(catalog, _recipe(model, slug="alternative-runtime"))
+    library = _library(catalog)
+
+    def actor() -> Actor:
+        return Actor("test", "administrator")
+
+    app = FastAPI()
+    install_library_routes(app, actor_dependency=Depends(actor), projection=library)
+    client = TestClient(app)
+    selector = f"{first.publisher}/{first.slug}" if qualified else first.slug
+    path = f"/api/recipe/{selector}"
+    initial = client.get(path)
+    assert initial.status_code == 200, initial.text
+    initial_detail = RecipeDetailResponse.model_validate_json(initial.content)
+    assert initial_detail.identity.recipe_revision_id == first.id
+
+    changed = copy.deepcopy(first.document)
+    _document_section(changed, "metadata")["description"] = "Editorial successor"
+    candidate = catalog.entities.revise(first.document_id, changed, actor="test")
+    second = catalog.entities.resolve(candidate.id, actor="test")
+    # Keep the disposable index at rev1, as between background refreshes.
+    response = client.get(path)
+    assert response.status_code == 200, response.text
+    detail = RecipeDetailResponse.model_validate_json(response.content)
+    assert detail.identity.recipe_revision_id == second.id
+    assert detail.identity.content_sha256 == second.content_digest
+    assert detail.document == RecipeDefinition.model_validate(second.document)
+    assert [item.selector for item in detail.alternatives] == [
+        f"{sibling.publisher}/{sibling.slug}"
+    ]
 
 
 def test_recipe_detail_keeps_its_exact_model_when_model_head_advances(catalog):

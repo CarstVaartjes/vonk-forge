@@ -29,8 +29,10 @@ from ..lifecycle.types import State as _LifecycleState
 from ..models import FleetProfile, FleetProfileApplication
 from ..operation_blockers import OperationBlocker, make_blocker
 from ..persisted_waits import schedule_wait
-from ..settings import STORAGE_ADMISSION_RETRY_SECONDS
+from ..settings import PROFILE_STALL_WINDOW_SECONDS, STORAGE_ADMISSION_RETRY_SECONDS
+from ..stall_window import Verdict, progress_verdict
 from ..storage_demands import (
+    STORAGE_EVICTION_TIMED_OUT,
     STORAGE_INSUFFICIENT,
     StorageRelief,
 )
@@ -296,13 +298,9 @@ class FleetProfileService:
     ) -> FleetProfileApplicationView:
         """Record bounded retry state after a nonblocking admission refusal.
 
-        A refusal for disk (``storage``) asks the storage collector to free it
-        and records what that can do as the load's typed blockers.  A Spark
-        short of disk is a wait, not a failure: the load keeps waiting while
-        eviction works, and on the bounded backoff once nothing more can be
-        freed (``storage.insufficient_after_eviction``), since a stop or a
-        removal can still free space.  ``wait_for_space`` is the load whose plan
-        is still blocked anyway: its other blockers stay next to the disk ones.
+        Settled post-demand inventory resolves a shortfall with typed evidence.
+        Otherwise only measured byte progress extends the bounded storage wait;
+        eviction status or a paused collector cannot hold admission forever.
         """
         self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
 
@@ -341,25 +339,84 @@ class FleetProfileService:
             progress = _persisted_profile_progress(row)
             if not _owns_pending_admission(row, progress):
                 return self._application_view(row)
-            # A load waiting to be admitted waits in the admission queue, a
-            # live owner: the wait never expires. Only a refusal ends it.
             if self._end_definite_wait(row, blockers or (), session):
                 return self._application_view(row)
+            storage_wait_since = None
             if storage is not None:
-                # Disk is a wait, never a refusal: eviction, a stop or a removal
-                # frees space, and the load is admitted once it fits.  While
-                # eviction works the load looks again soon; once removing
-                # everything unused is not enough, on the bounded backoff.
-                evicting = not relieved or any(
-                    item.code != STORAGE_INSUFFICIENT or item.paused
-                    for _, item, _needed in relieved
-                )
-                if not evicting:
-                    retry_delay = None
-                since = now if evicting else _aware(progress.storage_wait_since or now)
+                since = _aware(progress.storage_wait_since or now)
+                previous = {
+                    node: item.storage
+                    for item in progress.blockers
+                    if item.storage is not None
+                    for node in item.node_ids
+                }
+                # Status changes, retry counts and fresh identical inventory are
+                # not progress. Only a smaller measured byte deficit is.
+                if any(
+                    item.storage is not None
+                    and (before := previous.get(node)) is not None
+                    and item.storage.required_free_bytes - item.storage.available_bytes
+                    < before.required_free_bytes - before.available_bytes
+                    for item in blockers or ()
+                    for node in item.node_ids
+                ):
+                    since = now
+                exhausted = [
+                    _relief_blocker(node_id, item, needed)
+                    for node_id, item, needed in relieved
+                    if item.code == STORAGE_INSUFFICIENT
+                    and not item.paused
+                    and item.inventory_observed_at is not None
+                    and since < _aware(item.inventory_observed_at) <= now
+                ]
                 storage_wait_since = since.isoformat()
-            else:
-                storage_wait_since = None
+                if (
+                    not exhausted
+                    and progress_verdict(
+                        started_at=since,
+                        progressed_at=None,
+                        window=timedelta(seconds=PROFILE_STALL_WINDOW_SECONDS),
+                        now=now,
+                    )
+                    is Verdict.STALLED
+                ):
+                    exhausted = [
+                        item.model_copy(
+                            update={
+                                "code": STORAGE_EVICTION_TIMED_OUT,
+                                "detail": (
+                                    f"Storage reclamation made no measured progress for "
+                                    f"{PROFILE_STALL_WINDOW_SECONDS}s. {item.detail}"
+                                )[:512],
+                            }
+                        )
+                        for item in blockers or ()
+                        if item.code in _STORAGE_CODES
+                    ] or [
+                        make_blocker(
+                            STORAGE_EVICTION_TIMED_OUT,
+                            "Storage reclamation could not obtain fresh evidence "
+                            f"within {PROFILE_STALL_WINDOW_SECONDS}s; re-plan against "
+                            "current inventory.",
+                        )
+                    ]
+                if exhausted:
+                    row.progress = _progress_with_blockers(
+                        progress,
+                        [
+                            *exhausted,
+                            *(
+                                item
+                                for item in blockers or ()
+                                if item.code not in _STORAGE_CODES
+                            ),
+                        ],
+                        admission_pending=False,
+                        storage_wait_since=storage_wait_since,
+                    ).model_dump(mode="json")
+                    schedule_wait(row, None)
+                    self._lifecycle.fail(row, exhausted[0].detail, now, session=session)
+                    return self._application_view(row)
             attempt = progress.admission_attempt + 1
             next_retry = (
                 FleetProfileAdapter.next_retry(application_id, attempt, now)

@@ -455,7 +455,8 @@ def production_app(settings: Settings | None = None) -> FastAPI:
     automatic_sync_task: asyncio.Task[None] | None = None
     automatic_sync_stop = asyncio.Event()
 
-    def reconcile_gateway_keys() -> bool | UnknownError:
+    def reconcile_library_observations() -> bool | UnknownError:
+        visual_library.refresh_catalog()
         default = gateway_keys.ensure_default()
         if isinstance(default, UnknownError):
             return default
@@ -470,7 +471,7 @@ def production_app(settings: Settings | None = None) -> FastAPI:
                 managed_catalog_sync,
                 automatic_sync_stop,
                 interval_seconds=RECIPE_LIBRARY_SYNC_INTERVAL_SECONDS,
-                reconcile=reconcile_gateway_keys,
+                reconcile=reconcile_library_observations,
             )
         )
         default_key_task = asyncio.create_task(

@@ -152,3 +152,20 @@ fn every_container_kind_the_helper_creates_is_collected_once_unowned() {
         .collect();
     assert_eq!(left, [LIVE]);
 }
+
+#[test]
+fn protected_serving_front_page_does_not_starve_ended_tail() {
+    let mut containers = vec![job(ENDED, ENDED, "exited")];
+    containers.extend((0..MAX_LISTED).map(|n| {
+        let run = format!("f{n:07x}-0000-4000-8000-{n:012x}");
+        job(&run, &run, "exited")
+    }));
+    let host = Host::with(&containers);
+    let (_temp, executor) = host_executor(&host);
+    for container in containers.iter().skip(1) {
+        claim(&executor, &container.run);
+    }
+    executor.sweep_exited_serving_at(after(25));
+    assert!(!host.present(ENDED));
+    assert_eq!(host.containers.lock().unwrap().len(), MAX_LISTED);
+}

@@ -10,6 +10,7 @@ from sqlalchemy import select
 from vonk_agent_protocol import InvalidRequestReason, LifecycleState
 from vonk_agent_protocol.agent_words import ProfileOperationKind
 from vonk_agent_protocol.state_machines import NodeIdentityState
+from vonk_control.coordinator_failures import CoordinatorFailures
 from vonk_control.fleet_profile_contract import (
     FleetProfileApplicationView,
     FleetProfileInput,
@@ -75,6 +76,7 @@ def test_due_queued_load_is_attempted_after_worker_restart(
             recipes=RecipeOperationWorker(
                 sessions, _NoopRoutes(), clock=lambda: now, fleet_profiles=recovered
             ),
+            coordinator_failures=CoordinatorFailures(sessions, lambda: now, "a" * 64),
         )
 
     # The first process exits before the durable retry comes due. No event or

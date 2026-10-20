@@ -4241,3 +4241,155 @@ def test_operations_waiting_only_on_a_model_download_take_no_worker_slot(
         ]
     # Parked waiters are not re-examined until their poll is due.
     assert service.claim_pending(limit=4) == ()
+
+
+def test_live_download_survives_a_parent_observation_gap_and_resumes(
+    tmp_path: Path,
+    postgres_engine,
+) -> None:
+    """A stale parent checkpoint cannot cancel a live child after worker restart."""
+    from dataclasses import dataclass
+
+    from vonk_control.lifecycle.image_availability import PREPARATION_STALL_WINDOW
+
+    Base.metadata.create_all(postgres_engine)
+    sessions = sessionmaker(postgres_engine)
+    now = [datetime.now(UTC)]
+    parent_id = str(uuid.uuid4())
+    child_id = str(uuid.uuid5(uuid.NAMESPACE_URL, parent_id))
+    old = now[0] - PREPARATION_STALL_WINDOW * 2
+    with sessions.begin() as session:
+        session.add(User(subject="operator", role="operator"))
+        session.add(
+            _parked_operation(parent_id, now=old, model_child=True, updated=old)
+        )
+
+    @dataclass
+    class ModelOwner:
+        state: LifecycleState = LifecycleState.RUNNING
+
+        def get_operation(self, operation_id: str) -> ModelOwner:
+            assert operation_id == child_id
+            return self
+
+    model_owner = ModelOwner()
+
+    def reopen() -> RecipeImageAvailabilityService:
+        return _service(
+            sessions,
+            storage=FilesystemRuntimeImageStorage(tmp_path / "images"),
+            authority=lambda *_args, **_kwargs: (None, {}),
+            model_cache=model_owner,
+            clock=lambda: now[0],
+        )
+
+    service = reopen()
+    assert service.claim_pending() == ()
+    with sessions() as session:
+        parent = session.get(Job, parent_id)
+        assert parent is not None
+        assert parent.state == LifecycleState.BACKOFF
+        payload = service._payload(parent)
+        assert isinstance(payload, AvailabilityJobPayload)
+        assert payload.cancellation is None
+    # Another scheduler gap must reconnect to the same persisted parent/child,
+    # and completion of the child makes the parent claimable again.
+    now[0] += PREPARATION_STALL_WINDOW * 2
+    service = reopen()
+    assert service.claim_pending() == ()
+    model_owner.state = LifecycleState.SUCCEEDED
+    now[0] += timedelta(minutes=1)
+    (claim,) = service.claim_pending()
+    assert claim.operation_id == parent_id
+    with sessions() as session:
+        parent = session.get(Job, parent_id)
+        assert parent is not None
+        assert parent.state == LifecycleState.RUNNING
+        payload = service._payload(parent)
+        assert isinstance(payload, AvailabilityJobPayload)
+        assert payload.cancellation is None
+
+
+@pytest.mark.parametrize("checkpointed", [False, True])
+def test_preparation_expiry_preserves_download_but_explicit_cancel_still_owns_it(
+    tmp_path: Path, postgres_engine, checkpointed: bool
+) -> None:
+    from vonk_agent_protocol import RecipeImageCode, WaitReason
+    from vonk_control.recipe_lifecycle_contract import RecipeOperationCancellationResult
+
+    from .test_model_removal_worker_postgres import _prepare_removal_target
+
+    Base.metadata.create_all(postgres_engine)
+    sessions = sessionmaker(postgres_engine, expire_on_commit=False)
+    cache = ModelCacheService(
+        sessions, tmp_path / "models", reserve_bytes=0, fixture_sources=True
+    )
+    try:
+        selector, _, _ = _prepare_removal_target(
+            cache, sessions, tmp_path, slug="observer-budget", data=b"abc"
+        )
+        revision_id = str(uuid.uuid4())
+        request_id = str(uuid.uuid4())
+        parent_id = str(uuid.uuid4())
+        child_request = str(
+            uuid.uuid5(
+                uuid.NAMESPACE_URL,
+                f"vonk:recipe-availability-model:{revision_id}:{request_id}",
+            )
+        )
+        child = cache.download_model_selector(
+            selector, actor="operator", request_key=child_request
+        )
+        assert child.state == LifecycleState.QUEUED
+        payload = _availability_payload(revision_id).model_copy(
+            update={
+                "model_child": (
+                    AvailabilityModelChild(
+                        id=child.id,
+                        state=LifecycleState.QUEUED,
+                        request_key=child.request_key,
+                    )
+                    if checkpointed
+                    else None
+                ),
+                "failure": AvailabilityOperationFailure(
+                    code=RecipeImageCode.PREPARATION_EXHAUSTED,
+                    detail="Image preparation observation budget ended",
+                    retryable=False,
+                    recovery_actions=[],
+                ),
+            }
+        )
+        cancellation = RecipeOperationCancellationResult(
+            cancel_requested=True,
+            cancel_request_id=str(uuid.uuid4()),
+            cancel_actor="operator",
+            reason=WaitReason.OBSERVATION_UNAVAILABLE,
+        )
+        service = _service(
+            sessions,
+            storage=FilesystemRuntimeImageStorage(tmp_path / "images"),
+            authority=lambda *_args, **_kwargs: (None, {}),
+            model_cache=cache,
+            clock=lambda: datetime.now(UTC),
+        )
+        assert service._model_child_cancellation_pending(
+            parent_id, payload, request_id, cancellation
+        ) == (False, False)
+        retained = cache.get_operation(child.id)
+        assert retained.state == LifecycleState.QUEUED
+        assert retained.cancellation is None
+        assert retained.request_key == child_request
+        # Explicit cancellation still reaches this exact owned download, even
+        # if a crash prevented checkpointing its ID on the parent.
+        service._model_child_cancellation_pending(
+            parent_id,
+            payload.model_copy(update={"failure": None}),
+            request_id,
+            cancellation.model_copy(update={"cancel_request_id": str(uuid.uuid4())}),
+        )
+        stopped = cache.get_operation(child.id)
+        assert stopped.state == LifecycleState.CANCELLED
+        assert stopped.cancellation is not None
+    finally:
+        cache.close()

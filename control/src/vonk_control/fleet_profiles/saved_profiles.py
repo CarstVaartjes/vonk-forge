@@ -30,6 +30,7 @@ from ..fleet_profile_contract import (
 )
 from ..models import AgentNode, AgentNodeProfile, FleetProfile, FleetProfileApplication
 from .contracts import (
+    FleetProfileDefinitionUnavailable,
     FleetProfileInvalid,
 )
 from .projection_support import (
@@ -45,18 +46,22 @@ if TYPE_CHECKING:
 
 
 class FleetProfileService:
-    def list(self) -> FleetProfileList:
+    def list(self, *, after: int = 0) -> FleetProfileList:
         self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
         now = _aware(self._clock())
         with self._sessions() as session:
             rows = tuple(
                 session.scalars(
-                    select(FleetProfile).order_by(FleetProfile.number.asc()).limit(128)
+                    select(FleetProfile)
+                    .where(FleetProfile.number > after)
+                    .order_by(FleetProfile.number.asc())
+                    .limit(128)
                 )
             )
             return FleetProfileList(
                 generated_at=now,
                 profiles=[self._read_view(session, row) for row in rows],
+                next_after=rows[-1].number if len(rows) == 128 else None,
             )
 
     def get(self, profile_id: str) -> FleetProfileView:
@@ -77,6 +82,7 @@ class FleetProfileService:
             )
             if row is None:
                 raise MissingRecord(number, reason=InvalidRequestReason.NOT_FOUND)
+            self._required_definition(row)
             return self._view(session, row)
 
     def read_number(self, number: int) -> FleetProfileReadView:
@@ -159,6 +165,18 @@ class FleetProfileService:
         """Read exact authoring intent; partial reconstruction could delete choices."""
 
         return _profile_definition(row)
+
+    def _required_definition(self, row: FleetProfile) -> FleetProfileDefinition:
+        """Refuse new effects with the same typed cause as the draft read."""
+        self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
+        try:
+            return self._definition(row)
+        except (TypeError, ValueError):
+            issue = self._definition_issue()
+            raise FleetProfileDefinitionUnavailable(
+                f"{issue.detail} {issue.next_action}",
+                reason=InvalidRequestReason.MALFORMED,
+            ) from None
 
     @staticmethod
     def _definition_issue() -> SavedProfileProjectionIssue:
@@ -278,7 +296,15 @@ class FleetProfileService:
             requested = FleetProfileDefinition.model_validate(
                 value.model_dump(exclude={"expected_revision"})
             )
-            if self._definition(row) == requested:
+            try:
+                previous = self._definition(row)
+            except (TypeError, ValueError):
+                # Equality is only an optimization. An unreadable old draft
+                # cannot prevent an authorized complete replacement.
+                previous = None
+            if previous == requested:
+                # Readable equal content is the existing lost-response replay:
+                # it makes no edit and reconnects to the committed revision.
                 return self._view(session, row)
             if row.revision != value.expected_revision:
                 raise FleetProfileInvalid(

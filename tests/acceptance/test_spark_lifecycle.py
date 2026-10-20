@@ -3320,45 +3320,25 @@ class SparkLifecycle:
                     + json.dumps(summary, sort_keys=True)[:1024]
                 )
             phase = "recipe-resolution"
-            _, listed_payload = self.control.request("GET", "/api/recipe/library")
-            listed = require_object(listed_payload, "synthetic canary Library")
-            recipes = listed.get("recipes")
-            if not isinstance(recipes, list):
-                raise LifecycleError("synthetic canary Library response is invalid")
-            matches = [
-                value
-                for value in recipes
-                if isinstance(value, dict)
-                and isinstance(value.get("identity"), dict)
-                and value["identity"].get("publisher") == fixture.publisher
-                and value["identity"].get("slug") == fixture.slug
-                and value["identity"].get("content_sha256")
-                == fixture.recipe_content_sha256
-            ]
-            if len(matches) != 1:
-                raise LifecycleError("exact synthetic canary Recipe is unavailable")
-            summary = matches[0]
-            identity = summary["identity"]
-            recipe_id = identity.get("recipe_id")
-            revision_id = identity.get("recipe_revision_id")
-            recipe_selector = summary.get("selector")
-            if (
-                not isinstance(recipe_id, str)
-                or UUID.fullmatch(recipe_id) is None
-                or not isinstance(revision_id, str)
-                or UUID.fullmatch(revision_id) is None
-                or not isinstance(recipe_selector, str)
-                or recipe_selector != f"{fixture.publisher}/{fixture.slug}"
-            ):
-                raise LifecycleError("synthetic canary Recipe identity is invalid")
+            from vonk_control.library_contract import LibraryRecipeIdentity
+
+            # A known identity resolves directly against committed catalog state.
+            # The periodically refreshed discovery index may still be older.
+            recipe_selector = f"{fixture.publisher}/{fixture.slug}"
             _, detail_payload = self.control.request(
                 "GET", f"/api/recipe/{recipe_selector}"
             )
             detail = require_object(detail_payload, "synthetic canary Recipe detail")
-            detail_identity = detail.get("identity")
+            identity = LibraryRecipeIdentity.model_validate_json(
+                canonical_message(detail.get("identity"))
+            )
+            revision_id = identity.recipe_revision_id
             model_selectors = detail.get("model_selectors")
             if (
-                detail_identity != identity
+                detail.get("selector") != recipe_selector
+                or identity.publisher != fixture.publisher
+                or identity.slug != fixture.slug
+                or identity.content_sha256 != fixture.recipe_content_sha256
                 or not _canonical_recipe_matches(detail.get("document"), fixture.recipe)
                 or not isinstance(model_selectors, list)
                 or len(model_selectors) != 1

@@ -11,12 +11,14 @@ from functools import cache
 from pathlib import Path
 
 from . import claim_registry as claims
+from . import collection_continuation as collections
 from . import content_identity_boundaries as identity
 from . import coordination_boundaries as coordination
 from . import deterministic_retries as retries
 from . import lifecycle_reasons as reasons
 from . import principle_guards as principles
 from . import progress_attempt_boundaries as progress_attempts
+from . import request_path_scans
 from . import short_wall_clocks as wall_clocks
 from . import untyped_mapping_boundaries as mappings
 from . import vocabulary_literals as vocabulary
@@ -28,6 +30,7 @@ rust_test_lines = principles.rust_test_lines
 
 
 MODES = (
+    "request-scans",
     "vocabulary",
     "mapping",
     "identity",
@@ -48,6 +51,7 @@ MODES = (
     "boundaries",
     "locks",
     "clocks",
+    "collections",
     "progress",
 )
 # The agent's messages a Controller test may send only as the stand-in pinned
@@ -481,7 +485,19 @@ def check_source(
                 source, path=path, test_lines=rust_test_lines(source)
             )
         )
+    if "identity" in modes and path.endswith(".rs") and not is_test:
+        test_lines = rust_test_lines(source)
+        hits.extend(
+            (site.line, "provenance comparison")
+            for site in identity.scan_source(source, path=path)
+            if site.line not in test_lines
+        )
     if python and not is_test:
+        if "request-scans" in modes:
+            hits.extend(
+                (line, "unbounded request catalog/history scan")
+                for line in request_path_scans.scan_tree(ast.parse(source), path=path)
+            )
         if "progress" in modes:
             hits.extend(
                 (line, "monotonic progress without attempt key")
@@ -639,6 +655,10 @@ def check_source(
         else:
             sites = []
         hits.extend((site.line, site.kind) for site in sites)
+    if not is_test and "collections" in modes:
+        hits.extend(
+            (line, collections.KIND) for line in collections.scan_source(path, source)
+        )
     if python and is_test and "clocks" in modes:
         hits.extend(
             (line, wall_clocks.KIND) for line in wall_clocks.scan_source(source)

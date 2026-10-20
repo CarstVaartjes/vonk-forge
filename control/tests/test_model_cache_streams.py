@@ -4,6 +4,8 @@ import types
 from threading import Event
 
 import httpx2
+import pytest
+from vonk_agent_protocol import LifecycleState, ModelCacheFailureCode
 from vonk_control.model_cache_ranges import download_ranges
 from vonk_control.model_cache_streams import (
     PLATEAU_HOLD_WINDOWS,
@@ -223,7 +225,7 @@ def test_ranged_download_scans_the_bytes_once(cache, tmp_path, monkeypatch) -> N
         )
 
     service, client = _http_cache_service(tmp_path, sessions, handler)
-    import vonk_control.cached_file_verification as verification
+    import vonk_control.model_cache.download as verification
 
     calls = []
     real = verification.hashlib.sha256
@@ -243,6 +245,65 @@ def test_ranged_download_scans_the_bytes_once(cache, tmp_path, monkeypatch) -> N
         )
         assert operation.state == "succeeded", operation.last_error
         assert len(calls) == 1
+    finally:
+        service.close()
+        client.close()
+
+
+@pytest.mark.parametrize("corrupt", [False, True])
+def test_ranged_ingress_has_no_post_assembly_read(
+    cache,  # noqa: F811
+    tmp_path,
+    monkeypatch,
+    corrupt,
+):
+    """Catches writing a whole assembly then rereading it to hash at ingress."""
+    _existing, sessions = cache
+    payload = b"model weights" * 8192
+    serve_corrupt = corrupt
+    monkeypatch.setattr(
+        "vonk_control.model_cache.constants._PARALLEL_RANGE_MIN_BYTES", 1
+    )
+
+    def handler(request):
+        start, end = map(
+            int, request.headers["range"].removeprefix("bytes=").split("-")
+        )
+        return httpx2.Response(
+            206,
+            request=request,
+            content=(b"!" * len(payload) if serve_corrupt else payload)[
+                start : end + 1
+            ],
+            headers={"content-range": f"bytes {start}-{end}/{len(payload)}"},
+        )
+
+    service, client = _http_cache_service(tmp_path, sessions, handler)
+
+    def redundant_scan(*_args):
+        raise AssertionError("ranged ingress must hash bytes while assembling")
+
+    monkeypatch.setattr(service, "_verify_file", redundant_scan)
+    try:
+        operation = _download(
+            service,
+            [_http_artifact(payload)],
+            model_content_sha256="b" * 64,
+            request_key="00000000-0000-4000-8000-000000002001",
+        )
+        digest = str(_http_artifact(payload)["sha256"])
+        if corrupt:
+            assert operation.state == LifecycleState.QUEUED
+            assert operation.failure is not None
+            assert operation.failure["code"] == ModelCacheFailureCode.INTEGRITY_MISMATCH
+            assert not service._object_path(digest).exists()
+            assert not list((service.root / "partials").rglob("*.part*"))
+            serve_corrupt = False
+            service.run_pending()
+            operation = service.get_operation(operation.id)
+        assert operation.state == LifecycleState.SUCCEEDED, operation.last_error
+        # The durable receipt also makes ordinary reuse independent of hashing.
+        assert service._object_is_available(digest, len(payload))
     finally:
         service.close()
         client.close()

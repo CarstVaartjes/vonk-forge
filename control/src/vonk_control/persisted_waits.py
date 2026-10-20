@@ -295,6 +295,7 @@ def owner_identity(
         AgentOperation,
         ArtifactJob,
         ArtifactLifecycleGate,
+        CoordinatorFailure,
         FleetProfileApplication,
         FleetProfileSelection,
         Job,
@@ -352,6 +353,7 @@ def owner_identity(
                     break
         return BlockingOperation(id=owner.id, kind=owner.kind), kind
     for model, kind in (
+        (CoordinatorFailure, WaitOwnerKind.COORDINATOR),
         (AgentOperation, WaitOwnerKind.AGENT_OPERATION),
         (RecipeInstallation, WaitOwnerKind.CLEANUP),
         (ArtifactLifecycleGate, WaitOwnerKind.STORAGE_RELIEF),

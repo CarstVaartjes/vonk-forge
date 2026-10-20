@@ -819,3 +819,48 @@ def test_profile_routes_refuse_typed_and_answer_a_wait_with_retry_after(
         else:
             assert response.status_code == 503, conflict
             assert int(response.headers["retry-after"]) >= 1
+
+
+@pytest.mark.parametrize("count", [128, 129, 257])
+def test_profile_listing_continues_past_each_full_page(postgres_engine, count):
+    # A page size must not hide a saved identity, including an exactly full page.
+    Base.metadata.create_all(postgres_engine)
+    _assert_profile_listing_pages(
+        sessionmaker(postgres_engine, expire_on_commit=False), count
+    )
+
+
+@pytest.mark.parametrize("count", [128, 129, 257])
+def test_profile_listing_continues_portably(count):
+    engine = create_engine(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    _assert_profile_listing_pages(sessionmaker(engine, expire_on_commit=False), count)
+
+
+def _assert_profile_listing_pages(sessions, count):
+    from vonk_control.fleet_profile_contract import FleetProfileInput, FleetProfileList
+
+    profiles = FleetProfileService(
+        sessions, clock=lambda: datetime(2026, 10, 20, tzinfo=UTC)
+    )
+    for number in range(1, count + 1):
+        profiles.create(FleetProfileInput(name=f"Profile {number}"), actor="admin")
+    client, codec = _client(sessions, profiles=profiles)
+    numbers = []
+    after = 0
+    while True:
+        response = client.get(
+            "/api/profile", params={"after": after}, headers=_headers(codec)
+        )
+        assert response.status_code == 200, response.text
+        page = FleetProfileList.model_validate_json(response.content)
+        numbers.extend(item.number for item in page.profiles)
+        if page.next_after is None:
+            break
+        assert page.next_after > after
+        after = page.next_after
+    assert numbers == list(range(1, count + 1))
