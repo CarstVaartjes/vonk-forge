@@ -289,11 +289,6 @@ class FleetProfileService:
             row = session.get(FleetProfile, profile_id, with_for_update=True)
             if row is None:
                 raise MissingRecord(profile_id, reason=InvalidRequestReason.NOT_FOUND)
-            if row.revision != value.expected_revision:
-                raise FleetProfileInvalid(
-                    f"profile revision conflict: expected {value.expected_revision}, current {row.revision}",
-                    reason=InvalidRequestReason.CONFLICT,
-                )
             requested = FleetProfileDefinition.model_validate(
                 value.model_dump(exclude={"expected_revision"})
             )
@@ -304,7 +299,14 @@ class FleetProfileService:
                 # cannot prevent an authorized complete replacement.
                 previous = None
             if previous == requested:
+                # Readable equal content is the existing lost-response replay:
+                # it makes no edit and reconnects to the committed revision.
                 return self._view(session, row)
+            if row.revision != value.expected_revision:
+                raise FleetProfileInvalid(
+                    f"profile revision conflict: expected {value.expected_revision}, current {row.revision}",
+                    reason=InvalidRequestReason.CONFLICT,
+                )
             assignments, notes = self._validated_assignments(session, value.assignments)
             row.name = value.name
             row.description = value.description

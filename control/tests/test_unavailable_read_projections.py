@@ -2,6 +2,7 @@
 
 from datetime import UTC, datetime
 
+import httpx
 import pytest
 from fastapi import Depends, FastAPI
 from fastapi.routing import APIRoute
@@ -28,6 +29,7 @@ from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
 from cluster_profiles.cli_render import render_payload
 
 from .test_fleet_profile_api import _client, _headers
+from .test_operator_acceptance_postgres import DropFirstResponse
 
 NOW = datetime(2026, 10, 6, tzinfo=UTC)
 _PROFILE_MUTATIONS = {
@@ -218,6 +220,12 @@ def test_corrupt_saved_definition_does_not_become_empty_or_hide_other_profiles(
     with sessions() as session:
         row = session.get_one(FleetProfile, row_id)
         assert row.revision == 1 and getattr(row, field) == value
+    # A committed repair whose HTTP response is lost reconnects to that same
+    # revision on replay; it must neither edit again nor reject the retry.
+    with pytest.raises(httpx.ReadError):
+        TestClient(DropFirstResponse(client.app, "/api/profile/1")).put(
+            "/api/profile/1", headers=headers, json=replacement
+        )
     repaired = client.put("/api/profile/1", headers=headers, json=replacement)
     assert repaired.status_code == 200, repaired.text
     saved = FleetProfileView.model_validate_json(repaired.content)
@@ -247,12 +255,7 @@ def test_corrupt_saved_definition_does_not_become_empty_or_hide_other_profiles(
         FleetProfilePreview.model_validate_json(reviewed.content).profile_definition
         == saved.definition
     )
-    # Even an equal document needs the current revision; an equal current save
-    # remains a no-op rather than manufacturing another revision.
-    assert (
-        client.put("/api/profile/1", headers=headers, json=replacement).status_code
-        == 409
-    )
+    # Equal content keeps the existing no-op replay at the committed revision.
     unchanged = client.put(
         "/api/profile/1",
         headers=headers,
