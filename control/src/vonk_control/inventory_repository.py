@@ -15,14 +15,16 @@ from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import AgentEvidenceCode, canonical_message
 from vonk_agent_protocol.inventory import (
     HostSettings,
+    InstallationBytes,
     InventoryRequest,
     MemoryPool,
     ModelStoreObject,
     NetworkInterface,
 )
 
+from .installed_bytes import refresh_installed_bytes
 from .logging import log_event
-from .models import NodeInventorySnapshot
+from .models import AgentNode, NodeInventorySnapshot
 
 _LOG = logging.getLogger(__name__)
 
@@ -54,6 +56,9 @@ class InventorySnapshotInput:
     host_settings: HostSettings | None = None
     unused_model_bytes: int | None = None
     model_objects: list[ModelStoreObject] | None = None
+    installations: list[str] | None = None
+    runs: list[str] | None = None
+    installation_bytes: list[InstallationBytes] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -119,6 +124,14 @@ def _validated_inventory(
             item.model_dump(mode="json") if isinstance(item, ModelStoreObject) else item
             for item in objects
         ]
+    if isinstance(value, InventorySnapshotInput):
+        document.update(
+            installations=value.installations,
+            runs=value.runs,
+            installation_bytes=None
+            if value.installation_bytes is None
+            else [item.model_dump(mode="json") for item in value.installation_bytes],
+        )
     document.update(schema_version=1, observed_at=observed_at.isoformat())
     validated = InventoryRequest.model_validate_json(canonical_message(document))
     if AgentEvidenceCode.INVENTORY_MODEL_OBJECTS_DROPPED in validated.evidence_warnings:
@@ -192,6 +205,37 @@ class InventoryRepository:
             evidence_digest=digest,
         )
         with self._sessions.begin() as session:
+            session.execute(
+                select(AgentNode.node_id)
+                .where(AgentNode.node_id == value.node_id)
+                .with_for_update(of=AgentNode)
+            ).one()
+            existing = session.scalar(
+                select(NodeInventorySnapshot).where(
+                    NodeInventorySnapshot.node_id == value.node_id,
+                    NodeInventorySnapshot.observed_at == value.observed_at,
+                )
+            )
+            if existing is not None:
+                if existing.evidence_digest != digest:
+                    raise ValueError(
+                        "inventory identity already binds different evidence"
+                    )
+                return existing
+            latest = session.scalar(
+                select(NodeInventorySnapshot.observed_at)
+                .where(NodeInventorySnapshot.node_id == value.node_id)
+                .order_by(NodeInventorySnapshot.observed_at.desc())
+                .limit(1)
+            )
+            if value.installation_bytes is not None and (
+                latest is None
+                or value.observed_at
+                >= (latest if latest.tzinfo is not None else latest.replace(tzinfo=UTC))
+            ):
+                refresh_installed_bytes(
+                    session, value.node_id, value.installation_bytes
+                )
             session.add(row)
         return row
 

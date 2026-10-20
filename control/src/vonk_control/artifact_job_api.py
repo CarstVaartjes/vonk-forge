@@ -399,6 +399,7 @@ def install_artifact_job_routes(
         status_code=status.HTTP_204_NO_CONTENT,
         openapi_extra=upload_request_body("*/*"),
     )
+    @operator_acceptance(ReceiptPolicy.AGENT_OUTPUT)
     async def agent_output(
         request: Request,
         job_id: str,

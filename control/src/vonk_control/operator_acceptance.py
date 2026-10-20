@@ -28,9 +28,11 @@ from .operator_receipt_contract import (
     ReceiptCode,
     ReceiptOwner,
     ReceiptPolicy,
+    SecurityEdge,
 )
 
 if TYPE_CHECKING:
+    from .agent_api.common import AgentApiServices
     from .api.common import JobQueue
     from .artifact_jobs import ArtifactJobService
     from .fleet_profiles import FleetProfileService
@@ -53,6 +55,31 @@ def operator_acceptance(policy: ReceiptPolicy):
         return endpoint
 
     return decorate
+
+
+def security_edge(edge: SecurityEdge):
+    """Classify one reviewed credential endpoint, without a replay store."""
+
+    def decorate[T: Callable[..., Any]](endpoint: T) -> T:
+        if (endpoint.__module__, endpoint.__qualname__) != edge.endpoint:
+            raise ValueError("security-edge exemption belongs to another endpoint")
+        endpoint.__vonk_security_edge__ = edge  # type: ignore[attr-defined]
+        return operator_acceptance(ReceiptPolicy.SECURITY_EDGE)(endpoint)
+
+    return decorate
+
+
+def security_edge_policy(endpoint: Callable[..., Any]) -> SecurityEdge | None:
+    from .strict_json import route_endpoint
+
+    endpoint = route_endpoint(endpoint)
+    edge = getattr(endpoint, "__vonk_security_edge__", None)
+    if (
+        isinstance(edge, SecurityEdge)
+        and (endpoint.__module__, endpoint.__qualname__) == edge.endpoint
+    ):
+        return edge
+    return None
 
 
 def receipt_policy(endpoint: Callable[..., Any]) -> ReceiptPolicy | None:
@@ -101,12 +128,17 @@ class AcceptanceArguments:
     number: int | None
     http_request_id: str | None
     job_action: OperatorActionName
+    request: Request | None
+    body: BaseModel | None
 
 
 def acceptance_arguments(
     policy: ReceiptPolicy | None, **values: Any
 ) -> AcceptanceArguments | None:
-    if policy is None or policy in {ReceiptPolicy.OBSERVATION, ReceiptPolicy.AUTH}:
+    if policy is None or policy in {
+        ReceiptPolicy.OBSERVATION,
+        ReceiptPolicy.SECURITY_EDGE,
+    }:
         return None
     from .operation_api.contracts import JobResumeRequest
 
@@ -136,12 +168,15 @@ def acceptance_arguments(
         number,
         http_request_id,
         job_action,
+        request,
+        body if isinstance(body, BaseModel) else None,
     )
 
 
 @dataclass(frozen=True)
 class OperatorReceiptResolver:
     # These are the already installed service interfaces, not new persistence.
+    agent: AgentApiServices | None = None
     jobs: JobQueue | None = None
     profiles: FleetProfileService | None = None
     models: ModelCacheService | None = None
@@ -153,9 +188,12 @@ class OperatorReceiptResolver:
     installations: RunSwitchOperationService | None = None
 
     def bind(self, app: FastAPI) -> None:
+        from fastapi.routing import iter_route_contexts
+
         from .strict_json import ControllerAPIRoute
 
-        for route in app.routes:
+        for context in iter_route_contexts(app.routes):
+            route = context.original_route
             if isinstance(route, ControllerAPIRoute):
                 previous = route.operator_receipts or OperatorReceiptResolver()
                 route.operator_receipts = replace(
@@ -168,8 +206,12 @@ class OperatorReceiptResolver:
                 )
 
     def resolve(
-        self, policy: ReceiptPolicy, result: BaseModel, arguments: AcceptanceArguments
+        self,
+        policy: ReceiptPolicy,
+        result: BaseModel | Response,
+        arguments: AcceptanceArguments,
     ) -> AcceptanceReceipt:
+        from .agent_acceptance import AGENT_POLICIES, resolve_agent_receipt
         from .artifact_jobs import ArtifactJobResponse
         from .enrollment_contract import EnrollmentGrantStatus
         from .fleet_profile_contract import (
@@ -190,6 +232,17 @@ class OperatorReceiptResolver:
         from .recipe_image_removal_contract import RecipeRemovalUnavailableView
         from .recipe_update_contract import RecipeUpdateResponse
         from .run_switch_contract import RunSwitchOperation
+
+        if policy in AGENT_POLICIES:
+            _require(isinstance(result, Response))
+            assert isinstance(result, Response)
+            try:
+                return resolve_agent_receipt(self, policy, result, arguments)
+            except AVAILABILITY_ERRORS:
+                raise _refused(
+                    "The agent receipt owner is unavailable; retry the same request",
+                    unavailable=True,
+                ) from None
 
         actor = arguments.actor
         _require(actor is not None)
@@ -500,11 +553,11 @@ def apply_receipt(
 ) -> Response:
     if (
         policy is None
-        or policy in {ReceiptPolicy.OBSERVATION, ReceiptPolicy.AUTH}
+        or policy in {ReceiptPolicy.OBSERVATION, ReceiptPolicy.SECURITY_EDGE}
         or not 200 <= response.status_code < 300
     ):
         return response
-    if resolver is None or not isinstance(result, BaseModel):
+    if resolver is None or not isinstance(result, BaseModel | Response):
         raise _refused(
             "The mutation has no observable acceptance receipt", unavailable=True
         )

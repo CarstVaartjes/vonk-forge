@@ -1063,6 +1063,7 @@ def create_app(
         return JobResumeResponse(id=job_id, state="queued")
 
     receipts = OperatorReceiptResolver(
+        agent=agent,
         jobs=jobs,
         profiles=fleet_profiles,
         models=model_cache,
@@ -1073,7 +1074,5 @@ def create_app(
         keys=gateway_keys,
         installations=run_switch_operations,
     )
-    for route in app.routes:
-        if isinstance(route, ControllerAPIRoute):
-            route.operator_receipts = receipts
+    receipts.bind(app)
     return app

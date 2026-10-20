@@ -48,6 +48,7 @@ def claim_next_operation(
     preflight_fingerprint: str | None = None,
     hostname: str | None = None,
     source: AgentSource | None = None,
+    claim_fence: str | None = None,
 ) -> AgentClaim | None:
     self._mark_started()
     if (
@@ -100,6 +101,7 @@ def claim_next_operation(
                 preflight_fingerprint,
                 hostname,
                 source,
+                claim_fence,
             )
             if claim is not None:
                 return claim

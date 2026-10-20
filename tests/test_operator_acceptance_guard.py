@@ -8,13 +8,15 @@ from vonk_control.operator_acceptance import (
     ReceiptPolicy,
     operator_acceptance,
     receipt_policy,
+    security_edge_policy,
 )
-from vonk_control.strict_json import ControllerAPIRoute, route_endpoint
+from vonk_control.operator_receipt_contract import SecurityEdge
+from vonk_control.strict_json import ControllerAPIRoute
 
 
 def require_operator_policies(app):
     for path, route, _schema in _routes(app):
-        if not path.startswith("/api/") or not route.methods & {
+        if not route.methods & {
             "POST",
             "PUT",
             "PATCH",
@@ -27,23 +29,21 @@ def require_operator_policies(app):
                 f"Operator mutation has no acceptance policy: {path}"
             )
         if policy not in {
-            ReceiptPolicy.AUTH,
+            ReceiptPolicy.SECURITY_EDGE,
             ReceiptPolicy.OBSERVATION,
         } and not isinstance(route.original_route, ControllerAPIRoute):
             raise ContractGraphError(
                 f"Operator mutation does not enforce receipts: {path}"
             )
         if (
-            policy == ReceiptPolicy.AUTH
-            and route_endpoint(route.endpoint).__module__ != "vonk_control.auth_api"
+            policy == ReceiptPolicy.SECURITY_EDGE
+            and security_edge_policy(route.endpoint) is None
         ):
-            raise ContractGraphError(
-                f"Operator mutation cannot delegate its receipt to auth: {path}"
-            )
+            raise ContractGraphError(f"Unclassified security edge: {path}")
 
 
 @pytest.mark.parametrize("browser_auth", [False, True])
-def test_every_mounted_operator_mutation_has_receipt_semantics(browser_auth):
+def test_every_mounted_mutation_has_receipt_semantics(browser_auth):
     """Catches operator routes, including dynamically included routes, with no owner."""
     require_operator_policies(schema_application(browser_auth=browser_auth))
 
@@ -88,3 +88,60 @@ def test_declared_policy_on_an_unenforced_router_fails_the_guard():
     app.include_router(router)
     with pytest.raises(ContractGraphError, match="does not enforce receipts"):
         require_operator_policies(app)
+
+
+@pytest.mark.parametrize("browser_auth", [False, True])
+def test_security_edges_are_exactly_the_reviewed_credential_endpoints(browser_auth):
+    """Catches adding an auth route under a broad namespace exemption."""
+    app = schema_application(browser_auth=browser_auth)
+    edges = [
+        security_edge_policy(route.endpoint)
+        for _, route, _ in _routes(app)
+        if receipt_policy(route.endpoint) == ReceiptPolicy.SECURITY_EDGE
+    ]
+    assert set(edges) == (set(SecurityEdge) if browser_auth else set())
+    assert len(edges) == len(set(edges))
+
+
+@pytest.mark.parametrize("path", ["/agent/new", "/api/auth/new-token"])
+def test_new_agent_or_auth_route_requires_deliberate_classification(path):
+    """Catches subtree exemptions, including dynamically mounted auth routes."""
+    app = schema_application()
+    app.add_api_route(path, lambda: Response(status_code=204), methods=["POST"])
+    with pytest.raises(ContractGraphError, match="no acceptance policy"):
+        require_operator_policies(app)
+
+
+def test_new_auth_route_cannot_borrow_a_security_edge_exemption():
+    """Catches a generic security-edge policy on an unreviewed issuance path."""
+    app = schema_application()
+
+    @app.post("/api/auth/new-token", response_model=None)
+    @operator_acceptance(ReceiptPolicy.SECURITY_EDGE)
+    def unreviewed():
+        return Response(status_code=204)
+
+    with pytest.raises(ContractGraphError, match="Unclassified security edge"):
+        require_operator_policies(app)
+
+
+@pytest.mark.parametrize(
+    "policy",
+    [
+        policy
+        for policy in ReceiptPolicy
+        if policy not in {ReceiptPolicy.OBSERVATION, ReceiptPolicy.SECURITY_EDGE}
+    ],
+)
+def test_each_mutation_policy_rejects_uncommitted_no_content_success(policy):
+    """Catches a policy added to the runtime bypass set or a raw 204 escaping enforcement."""
+    app = schema_application()
+
+    @app.post("/api/test-uncommitted", response_model=None, status_code=204)
+    @operator_acceptance(policy)
+    def unchanged() -> Response:
+        return Response(status_code=204)
+
+    response = TestClient(app).post("/api/test-uncommitted")
+    assert response.status_code == 503
+    assert "x-vonk-receipt" not in response.headers
