@@ -359,7 +359,7 @@ class EnrollmentCore:
                 raise KeyError(grant_id)
             current = self._grant_status(grant)
             if current.state == EnrollmentGrantState.CONSUMED:
-                return current
+                require_admitted_request("enrollment grant is already consumed")
             if current.state == EnrollmentGrantState.PENDING:
                 grant.revoked_at = _utc(self._clock())
                 session.flush()
