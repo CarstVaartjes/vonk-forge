@@ -391,10 +391,11 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
 
 /// Runs before receipt delivery and claims, including an entirely idle fleet.
 /// Startup reaches this same pass through run_once; it never dispatches effects.
-pub(super) async fn reobserve_content<E: Executor>(
+pub async fn reobserve_content<E: Executor>(
     state: &mut StateStore,
     executor: &E,
     executing: Option<uuid::Uuid>,
+    now: DateTime<Utc>,
 ) -> Result<(), StateError> {
     for claim in state.observation_claims()? {
         if executing == Some(claim.fence) {
@@ -420,7 +421,7 @@ pub(super) async fn reobserve_content<E: Executor>(
                     pending.deadline,
                     pending.reason
                 );
-                if Utc::now() >= pending.deadline {
+                if now >= pending.deadline {
                     state.finish(
                         &claim,
                         ExecutionResult::unknown(
@@ -448,7 +449,7 @@ pub(super) async fn observing_during<F: Future, C: LoopClient, E: Executor>(
     let observations = stream::unfold(state, |state| async move {
         let mut state = state?;
         tokio::time::sleep(HEARTBEAT_INTERVAL).await;
-        if let Err(error) = reobserve_content(&mut state, executor, executing).await {
+        if let Err(error) = reobserve_content(&mut state, executor, executing, Utc::now()).await {
             eprintln!("vonk-agent: periodic preparation observation deferred: {error}");
         }
         if let Err(error) = super::agent_loop::deliver_retained(client, &mut state).await {

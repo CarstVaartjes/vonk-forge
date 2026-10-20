@@ -108,7 +108,9 @@ where
     F: FnOnce() -> Result<(), LoopError>,
 {
     state.restore_custody();
-    if let Err(error) = content_observation::reobserve_content(state, executor, None).await {
+    if let Err(error) =
+        content_observation::reobserve_content(state, executor, None, Utc::now()).await
+    {
         eprintln!("vonk-agent: preparation observation deferred: {error}");
     }
     let now = Utc::now();

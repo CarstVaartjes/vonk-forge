@@ -102,25 +102,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let claim = request.claim;
     claim.validate()?;
     let mut state = StateStore::open(&data_root.join("state.sqlite"), &request.node_id)?;
-    if request.mode == AgentExecutorProbeMode::Recover {
-        state.recover_interrupted()?;
-        let result = state
-            .pending_results()?
-            .into_iter()
-            .find(|(_, result)| result.fence == claim.fence)
-            .ok_or("interrupted result was not retained")?
-            .1;
-        println!("{}", serde_json::to_string(&result)?);
-        return Ok(());
-    }
-    if !matches!(
-        request.mode,
-        AgentExecutorProbeMode::ExecuteDistribution
-            | AgentExecutorProbeMode::ExecuteBuild
-            | AgentExecutorProbeMode::ExecuteUninstall
-    ) {
-        return Err("unsupported probe mode".into());
-    }
     if request.mode == AgentExecutorProbeMode::ExecuteDistribution {
         let decision = state.begin(&claim, chrono::Utc::now())?;
         if let BeginDecision::Replay(result) = decision {
@@ -146,6 +127,36 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         private_key: required(request.private_key_pem, "private_key_pem")?.into(),
     };
     let client = AgentHttpClient::from_identity_paths(&config, &identity)?;
+    if request.mode == AgentExecutorProbeMode::Recover {
+        state.recover_interrupted()?;
+        let runner = NoBuildProcess;
+        let executor = RecipeExecutor {
+            client: &client,
+            helper_socket: std::path::Path::new(vonk_agent::host_runtime::HELPER_SOCKET),
+            runtime: OciRuntime {
+                runner: &runner,
+                data_root: &data_root,
+            },
+            runtime_root: &data_root,
+        };
+        // Inject the expiry clock, never a new lease or dispatch. Startup and
+        // periodic ticks use this same observer with the real current clock.
+        vonk_agent::executor::content_observation::reobserve_content(
+            &mut state,
+            &executor,
+            None,
+            claim.deadline.with_timezone(&chrono::Utc) + chrono::Duration::seconds(1),
+        )
+        .await?;
+        let result = state
+            .pending_results()?
+            .into_iter()
+            .find(|(_, result)| result.fence == claim.fence)
+            .ok_or("observed result was not retained")?
+            .1;
+        println!("{}", serde_json::to_string(&result)?);
+        return Ok(());
+    }
     if matches!(
         request.mode,
         AgentExecutorProbeMode::ExecuteBuild | AgentExecutorProbeMode::ExecuteUninstall
@@ -192,7 +203,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let model_store = data_root.join("distribution/models");
     let distribution_store = model_store.parent().ok_or("model store parent is absent")?;
     let evidence = client
-        .download_distribution(&payload.plan_digest, distribution_store)
+        .download_assignment_with_progress(
+            &payload.plan_digest,
+            &payload.assignment,
+            distribution_store,
+            |_| {},
+        )
         .await?;
     let result = state.finish(&claim, distribution_success(evidence))?;
     println!("{}", serde_json::to_string(&result)?);

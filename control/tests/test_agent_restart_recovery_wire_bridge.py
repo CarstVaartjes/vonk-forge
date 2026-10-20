@@ -26,9 +26,11 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import (
     AgentResult,
+    AgentResultState,
     ArtifactDistributionResult,
     OutcomeDone,
     OutcomeUnknown,
+    WaitReason,
     canonical_message,
 )
 from vonk_agent_protocol.agent_state import (
@@ -420,10 +422,12 @@ def test_dead_agent_resumes_partial_transfer_from_fresh_controller_claim(
         restart_probe, _probe_request("recover", first, data_root, server, certs)
     )
     assert interrupted.fence == first.fence
-    assert interrupted.state == "observing"
-    # The real agent reports the interruption as a typed unknown outcome; the
-    # Controller stores it in the shape every reader already understands.
+    assert interrupted.state == AgentResultState.OBSERVING
+    # The shared read-only observer sees incomplete exact content at expiry;
+    # it neither manufactures a restart result nor dispatches another transfer.
     assert isinstance(interrupted.result, OutcomeUnknown)
+    assert interrupted.result.wait_reason == WaitReason.CLEANUP_UNCONFIRMED
+    assert partial.stat().st_size == saved_bytes
     stored_body = interrupted.stored_result()
     assert stored_body["uncertain"] is True
     assert (
