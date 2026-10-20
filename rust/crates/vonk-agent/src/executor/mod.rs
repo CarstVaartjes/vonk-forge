@@ -114,12 +114,7 @@ pub trait LoopClient: Clone + Send + Sync + 'static {
 
 #[async_trait(?Send)]
 pub trait Executor {
-    async fn observe(
-        &self,
-        _claim: &AgentClaim,
-    ) -> Option<content_observation::ContentObservation> {
-        None
-    }
+    async fn observe(&self, claim: &AgentClaim) -> Option<content_observation::ContentObservation>;
 
     async fn execute(
         &self,

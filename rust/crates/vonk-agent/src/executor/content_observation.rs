@@ -62,6 +62,21 @@ impl PendingObservation {
     }
 }
 
+enum ProbeError {
+    Uncertain(String),
+    Definite(Box<ExecutionResult>),
+}
+impl From<String> for ProbeError {
+    fn from(cause: String) -> Self {
+        Self::Uncertain(cause)
+    }
+}
+impl From<&str> for ProbeError {
+    fn from(cause: &str) -> Self {
+        Self::Uncertain(cause.to_owned())
+    }
+}
+
 impl<R: ProcessRunner> RecipeExecutor<'_, R> {
     pub(super) async fn observe_content(&self, claim: &AgentClaim) -> Option<ContentObservation> {
         let kind = ContentKind::of(&claim.operation)?;
@@ -71,7 +86,8 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         let observed = self.probe_content(claim, kind).await;
         Some(match observed {
             Ok(result) => result,
-            Err(error) => pending(WaitReason::ObservationUnavailable, error),
+            Err(ProbeError::Uncertain(cause)) => pending(WaitReason::ObservationUnavailable, cause),
+            Err(ProbeError::Definite(result)) => ContentObservation::confirmed(*result),
         })
     }
 
@@ -79,7 +95,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         &self,
         claim: &AgentClaim,
         kind: ContentKind,
-    ) -> Result<ContentObservation, String> {
+    ) -> Result<ContentObservation, ProbeError> {
         use vonk_agent_protocol::generated::AgentClaimPayload as Payload;
         let unknown = |reason| {
             ContentObservation::Unknown(PendingObservation::new(
@@ -103,7 +119,10 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                 let id = request.installation_id.to_string();
                 let installed = self.runtime.load_spec(&id).map_err(|e| e.to_string())?;
                 if !same_installed_workload(&installed, &request.compiled_execution_plan) {
-                    return Err("installed content differs from the accepted plan".into());
+                    return Ok(ContentObservation::confirmed(ExecutionResult::Failed(
+                        Failure::new("installed content differs from the accepted plan")
+                            .stage(FailureStage::InstallationValidation),
+                    )));
                 }
                 self.runtime
                     .observe_installation(&id)
@@ -320,7 +339,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
     async fn observe_helper(
         &self,
         request: &vonk_agent_protocol::HostRuntimeRequest,
-    ) -> Result<bool, String> {
+    ) -> Result<bool, ProbeError> {
         let root = self.runtime_root.join("runtime-requests");
         HostRuntimeBoundary {
             client: self.client,
@@ -329,13 +348,33 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         }
         .observe_preparation(request)
         .await
-        .map_err(|e| e.to_string())
+        .map_err(|error| {
+            use crate::host_runtime::HostRuntimeError;
+            if matches!(
+                &error,
+                HostRuntimeError::HelperRejected {
+                    code: HelperErrorCode::RuntimeImageIdentityInvalid
+                        | HelperErrorCode::OperationInvalid
+                        | HelperErrorCode::OperationInvalidArtifact
+                        | HelperErrorCode::PeerIdentityInvalid
+                        | HelperErrorCode::GrantUnauthorized,
+                    ..
+                }
+            ) {
+                ProbeError::Definite(Box::new(runtime_failure(
+                    "preparation observation refused the exact identity",
+                    &error,
+                )))
+            } else {
+                ProbeError::Uncertain(error.to_string())
+            }
+        })
     }
     async fn observe_removal(
         &self,
         claim: &AgentClaim,
         identity: &RecipeReconciliationIdentity,
-    ) -> Result<bool, String> {
+    ) -> Result<bool, ProbeError> {
         if !self
             .runtime
             .observe_reconciliation(identity)
@@ -360,8 +399,12 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
 pub(super) async fn reobserve_content<E: Executor>(
     state: &mut StateStore,
     executor: &E,
+    executing: Option<uuid::Uuid>,
 ) -> Result<(), StateError> {
     for claim in state.observation_claims()? {
+        if executing == Some(claim.fence) {
+            continue;
+        }
         let Some(observation) = executor.observe(&claim).await else {
             continue;
         };
@@ -396,4 +439,31 @@ pub(super) async fn reobserve_content<E: Executor>(
         }
     }
     Ok(())
+}
+
+/// Keep the same owner probe and spool delivery moving through long polls and
+/// unrelated long-running effects. The current executor owns its own fence.
+pub(super) async fn observing_during<F: Future, C: LoopClient, E: Executor>(
+    work: F,
+    client: &C,
+    state: Option<StateStore>,
+    executor: &E,
+    executing: Option<uuid::Uuid>,
+) -> F::Output {
+    let observations = stream::unfold(state, |state| async move {
+        let mut state = state?;
+        tokio::time::sleep(HEARTBEAT_INTERVAL).await;
+        if let Err(error) = reobserve_content(&mut state, executor, executing).await {
+            eprintln!("vonk-agent: periodic preparation observation deferred: {error}");
+        }
+        if let Err(error) = super::agent_loop::deliver_retained(client, &mut state).await {
+            eprintln!("vonk-agent: periodic receipt delivery deferred: {error}");
+        }
+        Some(((), Some(state)))
+    })
+    .for_each(|()| futures_util::future::ready(()));
+    match futures_util::future::select(std::pin::pin!(work), std::pin::pin!(observations)).await {
+        futures_util::future::Either::Left((result, _)) => result,
+        futures_util::future::Either::Right(((), work)) => work.await,
+    }
 }

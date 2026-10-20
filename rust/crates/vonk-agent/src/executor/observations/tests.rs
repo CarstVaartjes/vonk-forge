@@ -521,6 +521,13 @@ async fn ended_observation_loss_does_not_hold_the_next_claim() {
     }
     #[async_trait(?Send)]
     impl Executor for RecoveringExecutor {
+        async fn observe(
+            &self,
+            _claim: &AgentClaim,
+        ) -> Option<crate::executor::content_observation::ContentObservation> {
+            None
+        }
+
         async fn execute(
             &self,
             _: &AgentClaim,

@@ -224,7 +224,7 @@ async fn every_content_kind_reaches_its_real_probe_and_preserves_unknown() {
         ),
         (
             AgentOperation::RecipeUninstall,
-            serde_json::json!({"installation_id": install.installation_id, "plan_digest": "b".repeat(64), "recipe_content_sha256": "c".repeat(64)}),
+            serde_json::json!({"installation_id": install.installation_id, "plan_digest": "b".repeat(64), "recipe_content_sha256": "c".repeat(64), "cleanup_model_content_sha256": null}),
         ),
     ];
     for (operation, payload) in payloads {
@@ -242,4 +242,45 @@ async fn every_content_kind_reaches_its_real_probe_and_preserves_unknown() {
         );
     }
     assert!(executor.observe(&build).await.is_some());
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_busy_or_long_polling_lane_keeps_observing_other_exact_children() {
+    // Wrong implementation: observation only ran between claims, so a long
+    // unrelated effect or idle long poll hid the completed child's receipt.
+    let directory = tempdir().unwrap();
+    let root = directory.path();
+    let accepted = claim();
+    let mut state = StateStore::open(&root.join("state.sqlite"), NODE_ID).unwrap();
+    state.begin(&accepted, Utc::now()).unwrap();
+    prepare_effect(root, &accepted);
+    let http = AgentHttpClient::for_http_test("http://127.0.0.1/", NODE_ID);
+    let executor = RecipeExecutor {
+        client: &http,
+        helper_socket: Path::new("unused"),
+        runtime: OciRuntime {
+            runner: &NoProcess,
+            data_root: root,
+        },
+        runtime_root: root,
+    };
+    let client = RecordingClient {
+        cancel_requested: false,
+        claim: Arc::new(Mutex::new(None)),
+        fail_heartbeat: false,
+        heartbeats: Arc::new(Mutex::new(Vec::new())),
+        results: Arc::new(Mutex::new(Vec::new())),
+    };
+    let work = async {
+        tokio::time::sleep(Duration::from_secs(15)).await;
+        assert!(
+            !client.results.lock().unwrap().is_empty(),
+            "receipt must arrive before unrelated work completes"
+        );
+    };
+    observing_during(work, &client, Some(state), &executor, Some(Uuid::new_v4())).await;
+    assert!(client.heartbeats.lock().unwrap().is_empty());
+    assert!(client.results.lock().unwrap().iter().all(
+        |result| result.fence == accepted.fence && result.state == AgentResultState::Succeeded
+    ));
 }

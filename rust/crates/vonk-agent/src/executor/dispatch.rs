@@ -61,6 +61,13 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
 #[cfg(test)]
 #[async_trait(?Send)]
 impl Executor for RejectingExecutor {
+    async fn observe(
+        &self,
+        _claim: &AgentClaim,
+    ) -> Option<crate::executor::content_observation::ContentObservation> {
+        None
+    }
+
     async fn execute(
         &self,
         claim: &AgentClaim,

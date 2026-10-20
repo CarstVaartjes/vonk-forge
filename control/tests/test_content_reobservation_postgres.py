@@ -28,7 +28,7 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol import (
     AgentOperation as Kind,
 )
-from vonk_agent_protocol.contracts import AgentClaimPayload, AgentResultPayload
+from vonk_agent_protocol.contracts import AgentPayload, AgentResultPayload
 from vonk_agent_protocol.recipe_operations import RecipeInstallPayload
 from vonk_agent_protocol.runtime_preflight import (
     RuntimePreflightRequest,
@@ -47,7 +47,7 @@ def service(postgres_engine):
     return fixtures.agent_queue_world(postgres_engine)
 
 
-def _content(kind: Kind) -> tuple[AgentClaimPayload, AgentResultPayload]:
+def _content(kind: Kind) -> tuple[AgentPayload, AgentResultPayload]:
     plan = CompiledExecutionPlan.model_validate_json(
         (
             Path(__file__).parents[2]
@@ -71,6 +71,7 @@ def _content(kind: Kind) -> tuple[AgentClaimPayload, AgentResultPayload]:
             installation_id=installation_id,
             plan_digest="b" * 64,
             recipe_content_sha256=plan.identity.recipe_revision_sha256,
+            cleanup_model_content_sha256=None,
         ), RecipeUninstallResult()
     if kind is Kind.RECIPE_BUILD_CLEANUP:
         return RecipeBuildCleanupRequest(

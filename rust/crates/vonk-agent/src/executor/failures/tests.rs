@@ -725,6 +725,13 @@ async fn observation_misses_end_without_effects_and_a_fresh_fence_executes() {
     );
     #[async_trait(?Send)]
     impl Executor for RecoveringExecutor {
+        async fn observe(
+            &self,
+            _claim: &AgentClaim,
+        ) -> Option<crate::executor::content_observation::ContentObservation> {
+            None
+        }
+
         async fn execute(
             &self,
             _claim: &AgentClaim,
