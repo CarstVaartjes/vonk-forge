@@ -18,6 +18,7 @@ from vonk_control.fleet_profile_contract import (
     FleetProfileView,
 )
 from vonk_control.models import (
+    CatalogDocumentHead,
     CatalogDocumentRevision,
     ModelCacheSet,
     NodeInventorySnapshot,
@@ -183,7 +184,7 @@ def test_installed_profile_edit_preserves_definition_and_rejects_concurrent_save
 
 
 @pytest.mark.parametrize("action", ["remove", "pin"])
-@pytest.mark.parametrize("fault", [None, "manifest", "catalog"])
+@pytest.mark.parametrize("fault", [None, "manifest", "catalog", "exact-model-head"])
 @pytest.mark.usefixtures("damaged_json_rows")
 def test_installed_remove_and_pin_save_ignore_unrelated_cache_evidence(
     installed_vonkctl: Path,
@@ -259,7 +260,7 @@ def test_installed_remove_and_pin_save_ignore_unrelated_cache_evidence(
                     last_accessed_at=saved.updated_at,
                 )
             )
-    elif fault == "catalog":
+    elif fault in {"catalog", "exact-model-head"}:
         with sessions.begin() as session:
             model = session.scalar(
                 select(CatalogDocumentRevision).where(
@@ -267,21 +268,34 @@ def test_installed_remove_and_pin_save_ignore_unrelated_cache_evidence(
                 )
             )
             assert model is not None
-            session.add(
-                CatalogDocumentRevision(
+            # Production retained twenty unreadable model rows. An exact-content
+            # twin still names every byte, even if a damaged twin holds the head.
+            for offset in range(1, 21 if fault == "exact-model-head" else 2):
+                damaged = CatalogDocumentRevision(
                     document_id=model.document_id,
                     kind=model.kind,
                     publisher=model.publisher,
                     slug=model.slug,
-                    revision_number=model.revision_number + 1,
+                    revision_number=model.revision_number + offset,
                     schema_version=model.schema_version,
                     state=model.state,
                     document={},
-                    content_digest="f" * 64,
+                    content_digest=(
+                        model.content_digest if fault == "exact-model-head" else "f" * 64
+                    ),
                     created_by=model.created_by,
                     created_at=model.created_at,
                 )
-            )
+                session.add(damaged)
+                session.flush()
+            if fault == "exact-model-head":
+                head = session.scalar(
+                    select(CatalogDocumentHead).where(
+                        CatalogDocumentHead.active_revision_id == model.id
+                    )
+                )
+                assert head is not None
+                head.active_revision_id = damaged.id
     if action == "remove":
         arguments = (
             "remove",
