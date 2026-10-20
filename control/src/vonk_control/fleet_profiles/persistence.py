@@ -9,7 +9,7 @@ from pydantic import ValidationError
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import LifecycleState, canonical_message
-from vonk_agent_protocol.agent_words import ProfileProjectionKind
+from vonk_agent_protocol.agent_words import ProfileAction, ProfileProjectionKind
 from vonk_forge_contracts import RecipeDefinition
 
 from .. import job_states
@@ -370,13 +370,26 @@ def _application_order_key(
 def _workload_fence_nodes(plan: FleetProfilePreview) -> set[str]:
     """The Sparks a whole-fleet load's workload intent fences.
 
-    Its frozen fleet scope, less the Sparks of the work it adopts.
+    Its frozen fleet scope, less continuing executors and ready kept content.
+
+    A completed profile has no executor to adopt, but its kept runs (including
+    artifact jobs) and installations still own live work. Preserve their fence
+    unless an execution step changes the same Spark. Step scope already closes
+    over complete kept topologies, so a shared or multi-Spark replacement never
+    preserves just one rank.
     """
 
     adopted = {
         node_id for effect in plan.effects.adopted for node_id in effect.node_ids
     }
-    return set(plan.scope.node_ids) - adopted
+    kept = {
+        node_id
+        for effect in (*plan.effects.runs, *plan.effects.installations)
+        if effect.action == ProfileAction.KEEP.value
+        for node_id in effect.node_ids
+    }
+    changed = {node_id for step in plan.steps for node_id in step.node_ids}
+    return set(plan.scope.node_ids) - adopted - (kept - changed)
 
 
 def _kept_fence_ordinal(
