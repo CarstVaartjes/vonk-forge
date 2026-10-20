@@ -16,6 +16,9 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any, Protocol, cast, runtime_checkable
 
+from pydantic import TypeAdapter
+from vonk_forge_contracts import canonical_media_types
+
 from .cli_files import read_json_document
 from .cli_states import (
     ARTIFACT_JOB_STATES,
@@ -866,6 +869,15 @@ def _canonical_create(
     validated = validate_control_document("ArtifactJobCreate", body)
     transport = _mapping(capabilities.get("transport"), "artifact job capabilities")
     output_limits = _mapping(validated.get("output_limits"), "artifact output limits")
+    output_limits = {
+        **output_limits,
+        "allowed_media_types": canonical_media_types(
+            TypeAdapter(list[str]).validate_python(
+                output_limits.get("allowed_media_types"), strict=True
+            )
+        ),
+    }
+    validated["output_limits"] = output_limits
     maximum_timeout = _integer(
         transport.get("max_timeout_seconds"), "job timeout limit"
     )

@@ -23,7 +23,8 @@ from pydantic import (
     model_validator,
 )
 from vonk_agent_protocol import canonical_message
-from vonk_forge_contracts import RecipeDefinition
+from vonk_forge_contracts import RecipeDefinition, canonical_media_types
+from vonk_forge_contracts.media_types import MEDIA_TYPE_PATTERN
 from vonk_forge_contracts.recipe import RecipeFileSlot, RecipeJobInterface
 
 from .strict_json import StrictJSONModel
@@ -38,7 +39,7 @@ MAX_PARAMETERS = 64
 
 _SLOT = r"^[A-Za-z][A-Za-z0-9_-]{0,31}$"
 _EXTENSION = r"^\.[a-z0-9][a-z0-9._-]{0,15}$"
-_MEDIA = r"^[a-z0-9][a-z0-9!#$&^_.+-]{0,63}/[a-z0-9][a-z0-9!#$&^_.+-]{0,63}$"
+_MEDIA = MEDIA_TYPE_PATTERN
 _PARAMETER = r"^[a-z][a-z0-9_-]{0,63}$"
 _UNSAFE_PARAMETER_KEY = re.compile(
     r"^(?:apikey|passwordhash)$|"
@@ -121,7 +122,7 @@ class ArtifactInputContract(ArtifactContractModel):
     @field_validator("media_types")
     @classmethod
     def media_types_are_canonical(cls, value: tuple[str, ...]) -> tuple[str, ...]:
-        if len(set(value)) != len(value) or list(value) != sorted(value):
+        if list(value) != canonical_media_types(value):
             raise ValueError("artifact input media types are not canonical")
         return value
 
@@ -190,7 +191,7 @@ class ArtifactOutputLimits(ArtifactContractModel):
     @field_validator("allowed_media_types")
     @classmethod
     def media_types_are_canonical(cls, value: tuple[str, ...]) -> tuple[str, ...]:
-        if len(set(value)) != len(value) or list(value) != sorted(value):
+        if list(value) != canonical_media_types(value):
             raise ValueError("allowed output media types are not canonical")
         return value
 
@@ -372,7 +373,7 @@ def _slot(item: RecipeFileSlot) -> ArtifactSlotContract:
         id=item.id,
         label=item.label,
         description=item.description,
-        media_types=tuple(sorted(item.media_types)),
+        media_types=tuple(canonical_media_types(item.media_types)),
         extensions=tuple(sorted(item.extensions)),
         min_files=item.min_files,
         max_files=item.max_files,
@@ -400,7 +401,7 @@ def _input_contract(interface: RecipeJobInterface) -> ArtifactInputContract:
                 id="input",
                 label="Input",
                 description="Recipe input",
-                media_types=tuple(sorted(declared.media_types)),
+                media_types=tuple(canonical_media_types(declared.media_types)),
                 extensions=(),
                 min_files=1 if declared.required else 0,
                 max_files=MAX_INPUT_FILES,
@@ -412,7 +413,7 @@ def _input_contract(interface: RecipeJobInterface) -> ArtifactInputContract:
         slots = _slots(declared.slots)
     return ArtifactInputContract(
         required=declared.required,
-        media_types=tuple(sorted(set(declared.media_types))),
+        media_types=tuple(canonical_media_types(declared.media_types)),
         max_bytes=declared.max_bytes,
         slots=slots,
     )
@@ -482,7 +483,9 @@ def compile_artifact_contract(
                     max_file_bytes=max((s.max_file_bytes for s in slots), default=0),
                     max_total_bytes=interface.output.max_total_bytes,
                     allowed_media_types=tuple(
-                        sorted({media for s in slots for media in s.media_types})
+                        canonical_media_types(
+                            media for s in slots for media in s.media_types
+                        )
                     ),
                 ),
                 "max_timeout_seconds": 3_600,
