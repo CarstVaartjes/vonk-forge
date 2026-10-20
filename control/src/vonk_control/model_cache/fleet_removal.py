@@ -20,7 +20,7 @@ from vonk_agent_protocol import (
     ModelCacheCode,
 )
 from vonk_agent_protocol.inventory import ModelStoreObject
-from vonk_forge_contracts import read_model
+from vonk_forge_contracts import ModelDefinition
 
 from ..admission_locking import (
     AdmissionRowLock,
@@ -37,6 +37,8 @@ from ..cache_removal_review import (
     CacheRemovalReviewContent,
     seal_cache_removal_review,
 )
+from ..catalog_queries import active_head_revision
+from ..catalog_revision_contract import read_catalog_document
 from ..fleet_model_removal_contract import (
     FLEET_REMOVAL_DEADLINE,
     FleetModelRemovalCheckpoint,
@@ -100,7 +102,7 @@ def _model_objects(
     target_objects: set[str] = set()
     shared: set[str] = set()
     issues: list[FleetRemovalObservationIssue] = []
-    revisions = select(CatalogDocumentRevision).where(
+    revisions = select(CatalogDocumentRevision, active_head_revision()).where(
         CatalogDocumentRevision.kind == "model"
     )
     cache_sets = select(ModelCacheSet)
@@ -109,15 +111,21 @@ def _model_objects(
         # damaged evidence matters to deletion, never to acquiring this pin.
         revisions = revisions.where(CatalogDocumentRevision.content_digest == digest)
         cache_sets = cache_sets.where(ModelCacheSet.model_content_sha256 == digest)
-    for revision in session.scalars(revisions):
+    for revision, current_head in session.execute(revisions):
         model = read_or_rebuild(
             kind=CatalogDocumentRevision.__tablename__,
             subject=revision.id,
-            read=partial(read_model, revision.document),
+            read=partial(read_catalog_document, revision),
         )
         if isinstance(model, Residue):
-            issues.append(_observation_issue(model))
+            # Superseded documents are history, not live reference authority.
+            # Cache manifests and installed plans independently protect their
+            # bytes. A damaged current head stays visible until the ordinary
+            # catalog sync re-ingests its exact source; a read never writes.
+            if current_head:
+                issues.append(_observation_issue(model, note=model.note))
             continue
+        assert isinstance(model, ModelDefinition)
         objects = {file.sha256 for file in model.files}
         if revision.content_digest == digest:
             target_objects.update(objects)
@@ -155,12 +163,19 @@ def _model_objects(
     return target_objects, shared
 
 
-def _observation_issue(residue: Residue) -> FleetRemovalObservationIssue:
+def _observation_issue(
+    residue: Residue, *, note: str = ""
+) -> FleetRemovalObservationIssue:
+    # Only callers with safe, input-free diagnostics supply a note.
+    note = f"{note} " if note else ""
     return FleetRemovalObservationIssue(
         kind=residue.kind,
         subject=residue.subject,
         reason=residue.reason,
-        detail=f"{residue.kind} {residue.subject}: {residue.reason}. Refresh owner evidence and review again.",
+        detail=(
+            f"{residue.kind} {residue.subject}: {residue.reason}. "
+            f"{note}Refresh owner evidence and review again."
+        ),
     )
 
 

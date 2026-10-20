@@ -595,6 +595,7 @@ class ManagedRecipeCatalogSyncService:
                     return False
                 try:
                     read_catalog_document(row)
+                    read_catalog_document(selected)
                 except CatalogRevisionContractError:
                     return False
         return not snapshot.problems
