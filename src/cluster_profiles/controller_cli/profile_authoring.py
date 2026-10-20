@@ -9,6 +9,7 @@ from collections.abc import Mapping
 from typing import cast
 
 from ..cli_files import read_json_document, write_private_document
+from ..cli_outcome import ObservationStatus
 from ..cli_select import SelectorError
 from ..control_client import (
     ControlClientError,
@@ -67,7 +68,7 @@ def _profile_save(
 
         # There is no keyed PUT receipt route. Preserve the exact accepted
         # snapshot for observation; never overwrite a newer edit to reconcile.
-        return _poll_path(
+        observed = _poll_path(
             client,
             f"/api/profile/{_profile_number(args)}/definition",
             {},
@@ -78,6 +79,11 @@ def _profile_save(
             deadline=deadline,
             attempts=3,
         )
+        if args.observation.status == ObservationStatus.INTERRUPTED:
+            return observed
+        # A definition read cannot settle which PUT was accepted. Keep the
+        # original typed owner/transport cause instead of a bare timed-out read.
+        raise
     args.profile_saved = True
     return result
 
