@@ -18,6 +18,8 @@ from vonk_control.fleet_profile_contract import (
     FleetProfileView,
 )
 from vonk_control.models import (
+    Base,
+    CatalogDocumentHead,
     CatalogDocumentRevision,
     ModelCacheSet,
     NodeInventorySnapshot,
@@ -271,7 +273,9 @@ def test_installed_remove_and_pin_save_ignore_unrelated_cache_evidence(
             # Neither those nor a damaged cache row owns this pin's file list.
             for offset in range(1, 21 if fault == "exact-model-manifest" else 2):
                 session.execute(
-                    insert(CatalogDocumentRevision.__table__).values(
+                    insert(
+                        Base.metadata.tables[CatalogDocumentRevision.__tablename__]
+                    ).values(
                         document_id=model.document_id,
                         kind=model.kind,
                         publisher=model.publisher,
@@ -373,9 +377,28 @@ def test_profile_save_reports_exact_model_damage_and_recovers(
         assert recipe is not None and model is not None
         selector = f"{recipe.publisher}/{recipe.slug}"
         model_id, original = model.id, model.document
+        if (
+            session.scalar(
+                select(CatalogDocumentHead).where(
+                    CatalogDocumentHead.active_revision_id == model.id
+                )
+            )
+            is None
+        ):
+            session.add(
+                CatalogDocumentHead(
+                    kind=model.kind,
+                    publisher=model.publisher,
+                    slug=model.slug,
+                    active_revision_id=model.id,
+                )
+            )
         session.execute(
-            update(CatalogDocumentRevision.__table__)
-            .where(CatalogDocumentRevision.__table__.c.id == model_id)
+            update(Base.metadata.tables[CatalogDocumentRevision.__tablename__])
+            .where(
+                Base.metadata.tables[CatalogDocumentRevision.__tablename__].c.id
+                == model_id
+            )
             .values(document={})
         )
     api, codec = _client(sessions, profiles=profiles)
@@ -401,8 +424,11 @@ def test_profile_save_reports_exact_model_damage_and_recovers(
     assert profiles.definition_number(13).revision == 0
     with sessions.begin() as session:
         session.execute(
-            update(CatalogDocumentRevision.__table__)
-            .where(CatalogDocumentRevision.__table__.c.id == model_id)
+            update(Base.metadata.tables[CatalogDocumentRevision.__tablename__])
+            .where(
+                Base.metadata.tables[CatalogDocumentRevision.__tablename__].c.id
+                == model_id
+            )
             .values(document=original)
         )
     healed = api.put(
