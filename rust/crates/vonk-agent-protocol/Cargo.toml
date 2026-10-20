@@ -9,6 +9,7 @@ rust-version.workspace = true
 vonk-wire-codegen = { path = "../vonk-wire-codegen" }
 
 [dependencies]
+tar.workspace = true
 chrono.workspace = true
 serde.workspace = true
 serde_json.workspace = true

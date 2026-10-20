@@ -383,6 +383,7 @@ struct ValidatedDockerRun {
     run_id: String,
     installation_id: String,
     uid: u32,
+    gid: u32,
     models: Vec<PathBuf>,
     inputs: Option<PathBuf>,
     outputs: PathBuf,

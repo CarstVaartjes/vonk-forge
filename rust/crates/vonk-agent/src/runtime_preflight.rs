@@ -376,6 +376,7 @@ impl<R: ProcessRunner + ?Sized> RuntimePreflight<'_, R> {
         header.set_mode(0o1777);
         header.set_cksum();
         archive.append_data(&mut header, "tmp", std::io::empty())?;
+        vonk_agent_protocol::runtime_identity::append_to(&mut archive, 65534, 65534)?;
         archive.finish()?;
         drop(archive);
         fs::write(context.join("Containerfile"), b"FROM scratch\nADD rootfs.tar /\nRUN [\"/probe\"]\nUSER 65534:65534\nENTRYPOINT [\"/probe\"]\n")?;
@@ -574,6 +575,19 @@ mod tests {
         ) -> Result<ProcessOutput, ProcessError> {
             assert_eq!(program, Program::SystemdRun);
             assert!(timeout <= Duration::from_secs(40));
+            if arguments.iter().any(|arg| arg == "build") {
+                let context = arguments.last().unwrap();
+                let mut archive = tar::Archive::new(
+                    fs::File::open(Path::new(context).join("rootfs.tar")).unwrap(),
+                );
+                let paths = archive
+                    .entries()
+                    .unwrap()
+                    .map(|entry| entry.unwrap().path().unwrap().into_owned())
+                    .collect::<Vec<_>>();
+                assert!(paths.contains(&std::path::PathBuf::from("etc/passwd")));
+                assert!(paths.contains(&std::path::PathBuf::from("etc/group")));
+            }
             self.calls.borrow_mut().push(arguments.to_vec());
             Ok(ProcessOutput {
                 success: self.fail.is_none(),
