@@ -561,9 +561,12 @@ def assemble_production_worker(
     else:
         artifact_phase_executor = None
 
+    from .gateway_route_grants import require_existing_recipe_routes
+
     recipe_routes = RecipeRouteService(
         sessions,
         publisher=AtomicRecipeRoutePublisher(publisher),
+        prepare_key_routes=lambda runs: require_existing_recipe_routes(sessions, runs),
         management_policy=management_policy,
         clock=clock,
     )
@@ -646,6 +649,7 @@ def assemble_production_worker(
         sessions,
         recipe_routes,
         clock=clock,
+        reconcile_routes=False,
         order_reconcile=agent_jobs.reconcile_orders,
         build_cleanup=lifecycle.reconcile_cancelled_builds,
         retirement_cleanup=lifecycle.reconcile_retired_operations,

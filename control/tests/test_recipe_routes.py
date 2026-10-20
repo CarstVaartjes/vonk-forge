@@ -148,6 +148,7 @@ def setup(
     run_alias="qwen",
     runtime_model_aliases=("qwen",),
     interfaces=None,
+    settings=None,
     endpoint_owner_rank=0,
     exact_distributed=True,
     engine=None,
@@ -234,6 +235,8 @@ def setup(
             }
         else:
             recipe_document["interfaces"] = interfaces
+        if settings is not None:
+            recipe_document["settings"] = settings
         recipe = RecipeDefinition.model_validate(recipe_document)
         recipe_id = str(uuid4())
         revision_id = str(uuid4())

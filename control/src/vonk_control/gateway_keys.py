@@ -42,20 +42,21 @@ from vonk_agent_protocol import (
 )
 
 from .auth import MUTATION_ROLES, Actor
+from .gateway_route_grants import GatewayInferenceRoute
 from .operation_api import bounded_error_responses
 from .operator_acceptance import (
     OperatorReceiptResolver,
     ReceiptPolicy,
     operator_acceptance,
 )
-from .settings import SECRETS_ROOT
+from .runtime_init import GATEWAY_MASTER_KEY_PATH
 from .strict_json import StrictJSONModel
 
 _LOGGER = logging.getLogger(__name__)
 
 # Caddy relays only LiteLLM's key routes on this internal listener.
 LITELLM_KEY_ADMIN_URL = "http://caddy:8087"
-MASTER_KEY_FILE = SECRETS_ROOT / "gateway-litellm-master-key"
+MASTER_KEY_FILE = GATEWAY_MASTER_KEY_PATH
 # A host bind mount: the operator finds the default key in secrets/gateway/.
 DEFAULT_KEY_FILE = Path("/gateway-secrets/client-key")
 DEFAULT_KEY_NAME = "default"
@@ -66,7 +67,17 @@ _DURATION_PATTERN = r"^[1-9][0-9]{0,5}[smhd]$"
 _KEY_PATTERN = re.compile(r"sk-[A-Za-z0-9_-]{16,256}\Z")
 _PAGE_SIZE = 100
 _MAX_PAGES = 100
-_KEY_ROUTES = ["openai_routes"]
+_KEY_ROUTES = [GatewayInferenceRoute.OPENAI.value]
+
+
+def _safe_routes(routes: list[str]) -> bool:
+    return (
+        GatewayInferenceRoute.OPENAI in routes
+        and len(routes) == len(set(routes))
+        and set(routes) <= set(GatewayInferenceRoute)
+    )
+
+
 _KEY_PATH = "/api/key"
 _REVOKE_PATH = "/api/key/{name}/revoke"
 _ROLL_PATH = "/api/key/{name}/roll"
@@ -207,6 +218,15 @@ class _KeyUpdateRequest(_LiteLlmRequest):
     key_alias: str
 
 
+class _KeyRouteUpdateRequest(_LiteLlmRequest):
+    key: str
+    allowed_routes: list[str]
+
+
+class _ObservedKeyMetadata(BaseModel):
+    managed_by: str
+
+
 class _KeyListParams(_LiteLlmRequest):
     return_full_object: str = "true"
     page: int
@@ -243,6 +263,8 @@ class _LiteLlmKey(_LiteLlmReply):
     key_alias: _LooseText = None
     key_name: _LooseText = None
     models: list[str]
+    allowed_routes: list[str] | None = None
+    metadata: _ObservedKeyMetadata | None = None
     token: _LooseText = None
     created_at: _LooseText = None
     expires: str | None = None
@@ -339,7 +361,9 @@ class GatewayKeyService:
         master_key: Callable[[], str] | None = None,
         transport: httpx2.BaseTransport | None = None,
         intent_root: Path = DEFAULT_KEY_FILE.parent / "mutations",
+        route_grants: Callable[[list[str], frozenset[str]], list[str]] | None = None,
     ) -> None:
+        self._route_grants = route_grants or (lambda _models, _runs: list(_KEY_ROUTES))
         self._intent_root = intent_root
         self._master_key = master_key or (
             lambda: MASTER_KEY_FILE.read_text(encoding="utf-8").strip()
@@ -347,6 +371,67 @@ class GatewayKeyService:
         self._client = httpx2.Client(
             base_url=base_url, transport=transport, timeout=10.0
         )
+
+    def _routes_for(
+        self, models: list[str], run_ids: frozenset[str] = frozenset()
+    ) -> list[str]:
+        routes = self._route_grants(models, run_ids)
+        if not _safe_routes(routes):
+            raise GatewayKeyError("gateway inference route authority is invalid")
+        return routes
+
+    def reconcile_route_grants(self) -> bool | UnknownError:
+        """Converge managed keys after publication without rolling their secrets."""
+        return _observe_gateway(self._reconcile_route_grants)
+
+    def prepare_recipe_routes(self, run_ids: frozenset[str]) -> None:
+        """Authorize the candidate before its endpoint can become visible."""
+        result = _observe_gateway(lambda: self._reconcile_route_grants(run_ids))
+        if isinstance(result, UnknownError):
+            raise GatewayKeyError("gateway recipe route grants are unconfirmed")
+
+    def _reconcile_route_grants(self, run_ids: frozenset[str] = frozenset()) -> bool:
+        changed = False
+        for item in self._gateway_raw_keys():
+            if (
+                item.metadata is None
+                or item.metadata.managed_by != _KeyMetadata().managed_by
+            ):
+                continue
+            name = item.key_alias
+            if name is None:
+                continue
+            with self._mutation_claim(name) as acquired:
+                if not acquired:
+                    raise GatewayKeyError("gateway mutation claim is busy")
+                current = self._gateway_alias_info(name)
+                if current is None or current.token is None:
+                    continue  # A concurrent revoke wins; never recreate the key.
+                if (
+                    current.metadata is None
+                    or current.metadata.managed_by != _KeyMetadata().managed_by
+                ):
+                    continue
+                routes = self._routes_for(current.models, run_ids)
+                if current.allowed_routes == routes:
+                    continue
+                code, _ = self._gateway_request(
+                    "POST",
+                    "/key/update",
+                    json=_KeyRouteUpdateRequest(
+                        key=current.token, allowed_routes=routes
+                    ),
+                )
+                observed = self._gateway_key_info(current.token)
+                if (
+                    code != 200
+                    or observed is None
+                    or observed.allowed_routes != routes
+                    or observed.models != current.models
+                ):
+                    raise GatewayKeyError("gateway route grant effect is unconfirmed")
+                changed = True
+        return changed
 
     def check_health(self) -> bool:
         observed = _observe_gateway(self._gateway_check_health, attempts=3)
@@ -765,7 +850,7 @@ class GatewayKeyService:
             body = _KeyGenerateRequest(
                 key_alias=name,
                 models=list(models or []),
-                allowed_routes=list(_KEY_ROUTES),
+                allowed_routes=self._routes_for(models or []),
                 metadata=_KeyMetadata(),
                 duration=expires,
                 key=key if key is not None else "sk-" + secrets.token_urlsafe(32),
@@ -920,7 +1005,7 @@ class GatewayKeyService:
                     receipt.action != GatewayMutationAction.REVOKE
                     and (body.key is None or _KEY_PATTERN.fullmatch(body.key) is None)
                 )
-                or body.allowed_routes != _KEY_ROUTES
+                or not _safe_routes(body.allowed_routes)
                 or body.metadata != _KeyMetadata()
             ):
                 return None
@@ -983,7 +1068,7 @@ class GatewayKeyService:
             body.key_alias != name
             or body.key is None
             or _KEY_PATTERN.fullmatch(body.key) is None
-            or body.allowed_routes != _KEY_ROUTES
+            or not _safe_routes(body.allowed_routes)
             or body.metadata != _KeyMetadata()
         ):
             return None

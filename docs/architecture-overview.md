@@ -474,7 +474,7 @@ fabric recovery, and explicit break-glass inspection.
 | --- | --- |
 | Caddy | Tailnet web/API routing, distinct enrollment and agent SNI boundaries, agent mTLS verification, and denial of internal routes. |
 | Control API | Admin API/web backend, PostgreSQL authority and policy, trusted profile-cache resolution and admission, desired-state planning, agent enrollment/claims/results, and metrics. |
-| Control worker | Durable reconciliation, dependency waves, compensation, fail-closed withdrawal, and atomic route/LiteLLM publication. |
+| Control worker | Durable lifecycle reconciliation, dependency waves, compensation, and fail-closed route withdrawal. |
 | PostgreSQL | Control intent, immutable resolved plans, operation/attempt fences, identity, authorization, reservations, cancellation, and retained telemetry; current artifact bookkeeping awaits the ownership cutover above. |
 | Managed artifact storage | Model files, runnable image archives, and native transfer caches; target owner of typed verification manifests and local recovery checkpoints. |
 | LiteLLM | OpenAI-compatible aliases and quotas generated only from the last published route bundle; LiteLLM keeps serving it while the worker is stalled, and routes leave only through an explicit republish. |
@@ -483,6 +483,14 @@ fabric recovery, and explicit break-glass inspection.
 | Tailscale | Named remote services without placing remote-access software on GPU nodes. |
 | GPU node agent | Non-root outbound control client and the only routine executor of typed node/release/workload operations. |
 | GPU node runtimes | Repository-declared model adapters and verified local execution-cache artifacts; model weights and tensor traffic remain off the service host during execution. |
+
+The control API owns gateway key authority and reconciles route grants before
+publishing new recipe routes and on its five-second route reconciliation cadence.
+It resumes durable pending publications after restart independently of catalog sync.
+The worker coordinates lifecycle work and can retain previously published routes
+while withdrawing peers; it cannot introduce routes or read the API's gateway
+master key. That key is staged in the API-only gateway directory, outside the
+normalized secret volume shared with the worker.
 
 The Compose project keeps PostgreSQL, agent ingress, revision authority,
 registry publication, inference, and Hermes networks separate. Only Caddy

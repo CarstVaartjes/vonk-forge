@@ -25,7 +25,8 @@ class RuntimeSecretError(RuntimeError):
     """A private runtime secret cannot be projected safely."""
 
 
-GATEWAY_MASTER_KEY_NAME = "gateway-litellm-master-key"
+# A private child preserves the operator-owned gateway bind directory.
+GATEWAY_MASTER_KEY_PATH = Path("/gateway-secrets/authority/master-key")
 
 
 @dataclass(frozen=True)
@@ -115,6 +116,7 @@ def _stage_runtime_file_once(
     owner_uid: int = 0,
     owner_gid: int = 0,
     mode: int = 0o444,
+    preserve_parent: bool = False,
     maximum_bytes: int = _MAX_RUNTIME_FILE_BYTES,
 ) -> Path:
     """Copy file-backed runtime material into a Docker-managed volume atomically."""
@@ -124,10 +126,14 @@ def _stage_runtime_file_once(
     parent = destination.parent
     temporary = parent / f".{destination.name}.{secrets.token_hex(12)}.new"
     try:
-        parent.mkdir(mode=0o750, parents=True, exist_ok=True)
-        if os.geteuid() == 0:
-            os.chown(parent, 0, 10001)
-        os.chmod(parent, 0o755)
+        if preserve_parent:
+            if not stat.S_ISDIR(parent.lstat().st_mode):
+                raise RuntimeSecretError("runtime secret parent is unsafe")
+        else:
+            parent.mkdir(mode=0o750, parents=True, exist_ok=True)
+            if os.geteuid() == 0:
+                os.chown(parent, 0, 10001)
+            os.chmod(parent, 0o755)
         descriptor = os.open(
             temporary,
             os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC,
@@ -169,6 +175,7 @@ def stage_runtime_file(
     owner_uid: int = 0,
     owner_gid: int = 0,
     mode: int = 0o444,
+    preserve_parent: bool = False,
     maximum_bytes: int = _MAX_RUNTIME_FILE_BYTES,
 ) -> Path:
     """Each staging request owns three fresh observations; prior bytes survive."""
@@ -182,6 +189,7 @@ def stage_runtime_file(
                 owner_gid=owner_gid,
                 mode=mode,
                 maximum_bytes=maximum_bytes,
+                preserve_parent=preserve_parent,
             )
         except (OSError, UnsettledOutcome) as error:
             last_error = error
@@ -242,6 +250,7 @@ def stage_private_key(
     owner_uid: int = 0,
     owner_gid: int = 0,
     mode: int = 0o444,
+    preserve_parent: bool = False,
 ) -> Path:
     """Copy one bounded private file into a Docker-managed volume atomically."""
     return stage_runtime_file(
@@ -251,6 +260,7 @@ def stage_private_key(
         owner_gid=owner_gid,
         mode=mode,
         maximum_bytes=_MAX_PRIVATE_KEY_BYTES,
+        preserve_parent=preserve_parent,
     )
 
 
@@ -386,12 +396,16 @@ def _stage_runtime_assets_once(
 def stage_compose_secrets(
     source_root: Path = Path("/run/secrets"),
     destination_root: Path = Path("/normalized"),
+    *,
+    gateway_master_key: Path = GATEWAY_MASTER_KEY_PATH,
 ) -> None:
     """Startup owns bounded retries, including optional projection cleanup."""
     last_error: BaseException | None = None
     for _attempt in range(3):
         try:
-            _stage_compose_secrets_once(source_root, destination_root)
+            _stage_compose_secrets_once(
+                source_root, destination_root, gateway_master_key=gateway_master_key
+            )
             return
         except (OSError, UnsettledOutcome) as error:
             last_error = error
@@ -404,6 +418,8 @@ def stage_compose_secrets(
 def _stage_compose_secrets_once(
     source_root: Path = Path("/run/secrets"),
     destination_root: Path = Path("/normalized"),
+    *,
+    gateway_master_key: Path = GATEWAY_MASTER_KEY_PATH,
 ) -> None:
     """Normalize all file-backed Compose secrets for their runtime consumers."""
     source_root = Path(source_root)
@@ -431,15 +447,22 @@ def _stage_compose_secrets_once(
             owner_gid=10001,
             mode=0o400,
         )
-    # The Controller manages gateway client keys with the LiteLLM master key;
-    # it cannot read the litellm-owned copy below, so it gets its own.
+    # Gateway authority belongs only to the API, outside the normalized volume
+    # mounted by the worker. Preserve the bundle owner's ability to traverse,
+    # back up and remove every secret; the API reads through its private group.
+    # Repair an earlier root-owned authority directory on restart as well.
+    gateway_owner = gateway_master_key.parent.parent.stat().st_uid
+    _directory(gateway_master_key.parent, gateway_owner, 10001, 0o770)
     stage_private_key(
         source_root / "litellm-master-key",
-        destination_root / GATEWAY_MASTER_KEY_NAME,
-        owner_uid=10001,
+        gateway_master_key,
+        owner_uid=gateway_owner,
         owner_gid=10001,
-        mode=0o400,
+        mode=0o640,
+        preserve_parent=True,
     )
+    # Publish the replacement before retiring the old worker-visible copy.
+    (destination_root / "gateway-litellm-master-key").unlink(missing_ok=True)
     for name in (
         "litellm-master-key",
         "litellm-database-url",
