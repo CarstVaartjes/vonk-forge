@@ -385,16 +385,19 @@ pub fn sweep(
         };
         if let Err(error) = publish() {
             let _ = fs::remove_file(&temporary);
-            let _ = fs::remove_file(&path);
             eprintln!("vonk-agent: store retention references unavailable: {error}");
         }
-    } else {
-        // A failed current reference scan revokes the previous projection.
-        // Waiting for its expiry could collect newly referenced content.
-        let _ = fs::remove_file(data_root.join("store-retention.json"));
     }
-    if let Some(retention) = read_retention(data_root) {
-        let keep = retention.protected_model_objects.into_iter().collect();
+    // A stale projection may still protect content, but never authorizes an
+    // explicit removal. Local ownership remains authoritative for cache relief;
+    // this pass runs between claims, with no live claim using an unlinked object.
+    let projection = retention_projection(data_root);
+    let keep = projection
+        .as_ref()
+        .map(|request| request.protected_model_objects.iter().cloned().collect())
+        .unwrap_or_default();
+    let current = untracked.and_then(|verdict| verdict.retention.as_ref());
+    if let Some(retention) = read_retention(data_root).filter(|request| Some(request) == current) {
         let requested: BTreeSet<_> = retention.remove_model_objects.into_iter().collect();
         // This is the same collector and the same local ownership predicate as
         // pressure eviction. A request selects identities, never another deleter.
@@ -408,13 +411,13 @@ pub fn sweep(
                 }
             }
         }
-        let unused_models = unused_model_objects(data_root, pass.owner, &keep);
-        pass.relieve(
-            unused_models.unwrap_or_default(),
-            disk,
-            retention.required_free_bytes,
-        );
     }
+    let unused_models = unused_model_objects(data_root, pass.owner, &keep);
+    pass.relieve(
+        unused_models.unwrap_or_default(),
+        disk,
+        projection.map_or(0, |request| request.required_free_bytes),
+    );
 
     pass.swept
 }
@@ -504,8 +507,9 @@ pub fn unused_model_bytes(data_root: &Path) -> Option<u64> {
     if !owned_directory(data_root, owner) {
         return None;
     }
-    let retention = read_retention(data_root)?;
-    let keep = retention.protected_model_objects.into_iter().collect();
+    let keep = retention_projection(data_root)
+        .map(|request| request.protected_model_objects.into_iter().collect())
+        .unwrap_or_default();
     Some(
         unused_model_objects(data_root, owner, &keep)?
             .iter()
@@ -528,11 +532,10 @@ pub fn make_room(data_root: &Path, required: u64, keep: &BTreeSet<String>) -> u6
     if !owned_directory(data_root, owner) {
         return 0;
     }
-    let Some(retention) = read_retention(data_root) else {
-        return 0;
-    };
     let mut keep = keep.clone();
-    keep.extend(retention.protected_model_objects);
+    if let Some(retention) = retention_projection(data_root) {
+        keep.extend(retention.protected_model_objects);
+    }
     let mut removed = 0_u64;
     for (_, path, metadata) in unused_model_objects(data_root, owner, &keep).unwrap_or_default() {
         if free().is_none_or(|free| free >= required) {
@@ -926,9 +929,24 @@ pub(crate) mod fake_disk;
 #[cfg(test)]
 pub(crate) mod tests;
 
-/// Read only a fresh, bounded Controller reference scan. Every cache collector
-/// treats missing or unreadable reference evidence as unknown.
+/// Only a fresh projection authorizes explicit identity-selected removals.
 pub fn read_retention(
+    data_root: &Path,
+) -> Option<vonk_agent_protocol::generated::StoreRetentionRequest> {
+    let request = retention_projection(data_root)?;
+    let now = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .ok()?
+        .as_secs();
+    (request.issued_at <= now
+        && request.expires_at > now
+        && request.expires_at <= request.issued_at.saturating_add(VERDICT_MAX_AGE.as_secs()))
+    .then_some(request)
+}
+
+/// Retain readable protection even after a projection expires. Missing optional
+/// Controller evidence cannot veto reclamation of locally unreferenced cache.
+fn retention_projection(
     data_root: &Path,
 ) -> Option<vonk_agent_protocol::generated::StoreRetentionRequest> {
     use std::io::Read;
@@ -943,14 +961,5 @@ pub fn read_retention(
     }
     let mut body = Vec::new();
     file.take(1024 * 1024 + 1).read_to_end(&mut body).ok()?;
-    let request: vonk_agent_protocol::generated::StoreRetentionRequest =
-        serde_json::from_slice(&body).ok()?;
-    let now = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .ok()?
-        .as_secs();
-    (request.issued_at <= now
-        && request.expires_at > now
-        && request.expires_at <= request.issued_at.saturating_add(VERDICT_MAX_AGE.as_secs()))
-    .then_some(request)
+    serde_json::from_slice(&body).ok()
 }
