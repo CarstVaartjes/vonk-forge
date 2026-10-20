@@ -3436,13 +3436,15 @@ def test_declared_failure_kind_survives_agent_result_ingress(agent_system) -> No
     both acceptance and the preserved receipt.
     """
 
+    from .test_agent_jobs import distribution_payload
+
     client, services, _, clock = agent_system
     services.operations.enqueue(
         parent(services.sessions, clock).id,
         NODE_A,
-        "artifact.distribution.v1",
+        OperationKind.ARTIFACT_DISTRIBUTION,
         "a" * 64,
-        {"plan_digest": "a" * 64},
+        distribution_payload(),
     )
     claim = client.post(
         "/agent/claim", headers=agent_headers(NODE_A, "serial-a")
@@ -3477,7 +3479,7 @@ def test_declared_failure_kind_survives_agent_result_ingress(agent_system) -> No
         NODE_A,
         OperationKind.ARTIFACT_DISTRIBUTION,
         "a" * 64,
-        {"plan_digest": "a" * 64},
+        distribution_payload(),
     )
     fresh = client.post("/agent/claim", headers=agent_headers(NODE_A, "serial-a"))
     assert fresh.status_code == 200

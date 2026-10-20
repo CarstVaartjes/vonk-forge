@@ -371,7 +371,7 @@ def _validate_safe_keys(
             typed_distribution_object_name = (
                 operation is AgentOperation.ARTIFACT_DISTRIBUTION
                 and len(path) == 3
-                and path[0] == "distribution_assignment"
+                and path[0] == "assignment"
                 and path[1] == "objects"
                 and isinstance(path[2], int)
                 and key == "name"
@@ -444,7 +444,7 @@ def _validate_safe_keys(
             or (
                 operation is AgentOperation.ARTIFACT_DISTRIBUTION
                 and len(path) == 4
-                and path[0] == "distribution_assignment"
+                and path[0] == "assignment"
                 and path[1] == "objects"
                 and isinstance(path[2], int)
                 and path[3] == "name"

@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 from vonk_agent_protocol import (
     AgentResultState,
+    ArtifactDistributionPayload,
     DistributionObject,
     LifecycleState,
     OperationMemberProgress,
@@ -380,9 +381,18 @@ def test_partial_child_replays_and_aggregates_cached_target(agent_system) -> Non
             fence=str(uuid4()),
             request_sha256="a" * 64,
         )
-        # ArtifactDistributionRequest is a plan reference. The agent fetches
-        # the registered assignment through its authenticated distribution API.
-        assert stored.payload == {"plan_digest": plan.plan_digest}
+        # The claim retains the exact assignment for read-only observation,
+        # independent of an expired transfer grant or unavailable Controller.
+        retained = ArtifactDistributionPayload.model_validate_json(
+            canonical_message(stored.payload)
+        )
+        assert retained.plan_digest == plan.plan_digest
+        assert (
+            retained.assignment
+            == distribution.authorize(
+                node_id=NODE_A, plan_digest=plan.plan_digest
+            ).wire()
+        )
         assert (
             distribution.authorize(
                 node_id=NODE_A, plan_digest=plan.plan_digest
