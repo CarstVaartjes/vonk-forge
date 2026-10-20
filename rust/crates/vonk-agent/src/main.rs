@@ -1182,6 +1182,34 @@ node_id = "spk_0123456789abcdef0123456789abcdef"
         }
     }
 
+    #[test]
+    fn inventory_oversized_model_scan_keeps_capacity_and_next_scan_recovers() {
+        // Wrong implementation: a valid capacity observation is refused because
+        // optional model evidence fills the collector/HTTP envelope.
+        let mut inventory = test_inventory();
+        inventory.model_objects = Some(
+            (0..16_384)
+                .map(|index| vonk_agent_protocol::generated::ModelStoreObject {
+                    sha256: format!("{index:064x}"),
+                    bytes: 1,
+                })
+                .collect(),
+        );
+        let observed = chrono::Utc::now().into();
+        let request = inventory.to_request(observed);
+        assert!(request.model_objects.is_none());
+        assert_eq!(request.disk_free_bytes, inventory.disk_available_bytes);
+        assert_eq!(
+            request.host_memory_free_bytes,
+            inventory.memory_available_bytes
+        );
+        request.validate().unwrap();
+        inventory.model_objects.as_mut().unwrap().truncate(1024);
+        let recovered = inventory.to_request(observed);
+        assert_eq!(recovered.model_objects, inventory.model_objects);
+        recovered.validate().unwrap();
+    }
+
     #[tokio::test(start_paused = true)]
     async fn unavailable_gpu_exits_then_a_fresh_namespace_can_collect() {
         let mut failures = 0;

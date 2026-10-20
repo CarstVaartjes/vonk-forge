@@ -179,7 +179,7 @@ impl Inventory {
         &self,
         observed_at: chrono::DateTime<chrono::FixedOffset>,
     ) -> vonk_agent_protocol::generated::InventoryRequest {
-        vonk_agent_protocol::generated::InventoryRequest {
+        let mut request = vonk_agent_protocol::generated::InventoryRequest {
             schema_version: 1,
             observed_at,
             disk_total_bytes: self.disk_total_bytes,
@@ -206,7 +206,29 @@ impl Inventory {
             model_objects: self.model_objects.clone(),
             runs: self.runs.clone(),
             installation_bytes: self.installation_bytes.clone(),
+        };
+        // Optional model evidence must fit alongside the other observations,
+        // never prevent the mandatory capacity report crossing the process/HTTP
+        // boundary. Unknown is not an empty scan and cannot authorize eviction.
+        if let Some(warning) = bound_model_object_evidence(&mut request) {
+            eprintln!("vonk-agent: inventory evidence dropped: {warning}");
         }
+        request
+    }
+}
+
+/// One envelope bound for the subprocess and the later NIC-enriched HTTP report.
+pub(crate) fn bound_model_object_evidence(
+    request: &mut vonk_agent_protocol::InventoryRequest,
+) -> Option<vonk_agent_protocol::generated::AgentEvidenceCode> {
+    if request.model_objects.is_some()
+        && vonk_agent_protocol::canonical_json(request)
+            .is_ok_and(|bytes| bytes.len() as u64 > INVENTORY_OUTPUT_BYTES)
+    {
+        request.model_objects = None;
+        Some(vonk_agent_protocol::generated::AgentEvidenceCode::AgentEvidenceInventoryModelObjectsDropped)
+    } else {
+        None
     }
 }
 
@@ -235,7 +257,9 @@ static INVENTORY_PROCESS: tokio::sync::Mutex<
     )>,
 > = tokio::sync::Mutex::const_new(None);
 const INVENTORY_PROCESS_BUDGET: Duration = Duration::from_secs(60);
-const INVENTORY_OUTPUT_BYTES: u64 = 64 * 1024;
+// The agent HTTP ingress accepts one MiB. Model objects alone may occupy
+// half of that envelope; a 64-KiB process pipe silently starves fresh capacity.
+pub(crate) const INVENTORY_OUTPUT_BYTES: u64 = 1024 * 1024;
 
 pub async fn collect_process(
     executable: &Path,

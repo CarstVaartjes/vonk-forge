@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 from collections.abc import Callable
 from contextlib import nullcontext
 from dataclasses import dataclass, field
@@ -11,7 +12,7 @@ from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import canonical_message
+from vonk_agent_protocol import AgentEvidenceCode, canonical_message
 from vonk_agent_protocol.inventory import (
     HostSettings,
     InventoryRequest,
@@ -20,7 +21,10 @@ from vonk_agent_protocol.inventory import (
     NetworkInterface,
 )
 
+from .logging import log_event
 from .models import NodeInventorySnapshot
+
+_LOG = logging.getLogger(__name__)
 
 # Agent inventory may lead the Controller clock by this much. Consumers that
 # order it against Controller-owned events must retain the same uncertainty.
@@ -110,13 +114,23 @@ def _validated_inventory(
     if isinstance(document["host_settings"], HostSettings):
         document["host_settings"] = document["host_settings"].model_dump(mode="json")
     objects = document["model_objects"]
-    if objects is not None:
+    if isinstance(objects, list):
         document["model_objects"] = [
             item.model_dump(mode="json") if isinstance(item, ModelStoreObject) else item
             for item in objects
         ]
     document.update(schema_version=1, observed_at=observed_at.isoformat())
-    return InventoryRequest.model_validate_json(canonical_message(document))
+    validated = InventoryRequest.model_validate_json(canonical_message(document))
+    if AgentEvidenceCode.INVENTORY_MODEL_OBJECTS_DROPPED in validated.evidence_warnings:
+        log_event(
+            _LOG,
+            "agent.evidence_dropped",
+            service="control-api",
+            code=AgentEvidenceCode.INVENTORY_MODEL_OBJECTS_DROPPED.value,
+            endpoint="inventory",
+            node_id=value.node_id,
+        )
+    return validated
 
 
 class InventoryRepository:

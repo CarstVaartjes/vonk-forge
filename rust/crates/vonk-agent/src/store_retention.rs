@@ -461,7 +461,7 @@ pub fn model_objects(
     };
     // Reserve half of the one-MiB inventory document for other observations.
     // Bound memory while scanning, rather than after constructing a huge list.
-    const EVIDENCE_BYTES: usize = 1024 * 1024 / 2;
+    const EVIDENCE_BYTES: usize = (crate::inventory::INVENTORY_OUTPUT_BYTES / 2) as usize;
     let mut evidence_bytes = 2_usize;
     let mut objects = Vec::new();
     for entry in entries {
