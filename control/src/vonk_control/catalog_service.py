@@ -595,7 +595,21 @@ class CatalogService:
                 service.fail_candidate(root.id)
                 head.candidate_revision_id = existing.id
                 return service.resolve(existing.id, actor=actor), True
-            if head.active_revision_id is None:
+            selected = (
+                session.get(CatalogDocumentRevision, head.active_revision_id)
+                if head.active_revision_id is not None
+                else None
+            )
+            try:
+                if selected is not None:
+                    read_catalog_document(selected)
+            except CatalogRevisionContractError:
+                # This verified import is the sync owner's source, not a
+                # guess from history. Retire an unreadable selection and
+                # restore the source revision in the same transaction.
+                session.expunge(selected)
+                selected = None
+            if selected is None:
                 service.fail_candidate(root.id)
                 head.active_revision_id = existing.id
                 head.generation += 1

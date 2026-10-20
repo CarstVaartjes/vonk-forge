@@ -19,7 +19,11 @@ from vonk_forge_contracts.model import ModelIdentity
 from vonk_forge_contracts.recipe import RecipeTopology
 
 from .bounded_json import require_mapping
-from .strict_json import StrictJSONModel, serialize_json_value
+from .strict_json import (
+    StrictJSONModel,
+    serialize_json_value,
+    stored_document_detail,
+)
 
 if TYPE_CHECKING:
     from .models import CatalogDocumentRevision
@@ -263,7 +267,9 @@ def read_catalog_document(
         raise
     except (TypeError, ValueError, ValidationError) as error:
         raise CatalogRevisionContractError(
-            f"catalog revision {revision.id} has invalid document data"
+            f"{stored_document_detail(error) or type(error).__name__}; "
+            f"catalog {revision.kind} revision {revision.id} "
+            f"({revision.publisher}/{revision.slug}@{revision.content_digest})"
         ) from error
 
 
