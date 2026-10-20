@@ -479,6 +479,13 @@ def check_source(
                 source, path=path, test_lines=rust_test_lines(source)
             )
         )
+    if "identity" in modes and path.endswith(".rs") and not is_test:
+        test_lines = rust_test_lines(source)
+        hits.extend(
+            (site.line, "provenance comparison")
+            for site in identity.scan_source(source, path=path)
+            if site.line not in test_lines
+        )
     if python and not is_test:
         if "mapping" in modes:
             hits.extend(

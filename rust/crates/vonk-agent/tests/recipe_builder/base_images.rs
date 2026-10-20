@@ -610,3 +610,121 @@ fn base_image_lock_contention_waits_and_build_succeeds() {
         "build never reached the contended lock wait"
     );
 }
+
+struct OfflineAliasRunner {
+    inner: Runner,
+    config_digest: String,
+    reference_name: String,
+    tagged: Cell<bool>,
+}
+impl ProcessRunner for OfflineAliasRunner {
+    fn run(
+        &self,
+        program: Program,
+        arguments: &[String],
+        timeout: Duration,
+    ) -> Result<ProcessOutput, ProcessError> {
+        assert!(
+            !matches!(program, Program::Oras | Program::Getent),
+            "registry access is disabled"
+        );
+        if arguments.iter().any(|value| value == "tag") {
+            assert!(
+                arguments.ends_with(&[self.config_digest.clone(), self.reference_name.clone()])
+            );
+            self.tagged.set(true);
+        }
+        if arguments.iter().any(|value| value.contains("{{.Digest}}")) {
+            assert!(
+                self.tagged.get(),
+                "the requested alias must resolve before inspecting/building"
+            );
+        }
+        self.inner.run(program, arguments, timeout)
+    }
+}
+
+#[test]
+fn another_reference_to_the_same_manifest_builds_offline_without_replacing_cache() {
+    let root = tempdir().unwrap();
+    let runtime = tempdir().unwrap();
+    fresh_build(root.path(), runtime.path());
+    let stored = base_archive_path(root.path());
+    let before = fs::metadata(&stored).unwrap();
+    let fixture = registry_fixture();
+    let reference_name = "mirror.example/vonkforge/renamed:another-tag";
+    let reference = format!("{reference_name}@{}", fixture.manifest_digest);
+    let (archive, digest) = bundle_for(&reference);
+    let mut request = request(archive.len(), digest);
+    request.base_images = vec![RecipeBuildBaseImage {
+        manifest_digest: fixture.manifest_digest,
+        reference,
+    }];
+    let runner = OfflineAliasRunner {
+        inner: Runner {
+            calls: RefCell::new(Vec::new()),
+            fail_build: false,
+            oversize_base: false,
+            registry: None,
+            substitute_base: false,
+        },
+        config_digest: fixture.config_digest,
+        reference_name: reference_name.to_owned(),
+        tagged: Cell::new(false),
+    };
+    RecipeBuilder {
+        runner: &runner,
+        data_root: root.path(),
+        runtime_root: runtime.path(),
+        egress_binary: Path::new("/bin/true"),
+    }
+    .build(&request, Uuid::new_v4(), &archive)
+    .unwrap();
+    let after = fs::metadata(stored).unwrap();
+    assert_eq!((before.ino(), before.len()), (after.ino(), after.len()));
+    assert!(
+        fs::read_dir(base_archive_path(root.path()).parent().unwrap())
+            .unwrap()
+            .all(|entry| !entry
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .starts_with(".damaged-"))
+    );
+    assert!(runner.tagged.get());
+}
+
+#[test]
+fn ingress_rejects_same_size_layer_substitution_before_cache_publication() {
+    let root = tempdir().unwrap();
+    let runtime = tempdir().unwrap();
+    let (archive, digest) = bundle();
+    let mut fixture = registry_fixture();
+    fixture.layer[0] ^= 1;
+    let runner = Runner {
+        calls: RefCell::new(Vec::new()),
+        fail_build: false,
+        oversize_base: false,
+        registry: Some(fixture),
+        substitute_base: false,
+    };
+    let error = RecipeBuilder {
+        runner: &runner,
+        data_root: root.path(),
+        runtime_root: runtime.path(),
+        egress_binary: Path::new("/bin/true"),
+    }
+    .build(&request(archive.len(), digest), Uuid::new_v4(), &archive)
+    .unwrap_err();
+    assert!(matches!(
+        error,
+        vonk_agent::recipe_builder::RecipeBuildError::BaseImageBlob
+    ));
+    assert!(!base_archive_path(root.path()).exists());
+    assert!(!runner.calls.borrow().iter().any(|(_, arguments)| {
+        arguments
+            .iter()
+            .any(|value| value == "load" || value == "build")
+    }));
+    fresh_build(root.path(), runtime.path());
+}

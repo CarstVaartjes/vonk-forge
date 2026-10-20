@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import re
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -226,6 +227,46 @@ def _filters_on_provenance(func: ast.Attribute, call: ast.Call) -> bool:
     return False
 
 
+# Match a direct Rust refusal, including the multiline annotation lookup that
+# rejected an otherwise identical managed OCI archive. Metadata updates (tagging)
+# and comparisons of digest/platform identities are not refusals by provenance.
+_RUST_REFUSAL = re.compile(
+    r"\bif\s+(?P<condition>[^{};]+)\{\s*return\s+"
+    r"(?:Err\([^;]+|(?:Ok\()?false\)?)[^;]*;"
+)
+_RUST_PROVENANCE_ANNOTATION = re.compile(
+    r'\.get\(\s*"org\.opencontainers\.image\.(?:ref\.name|revision|source)"\s*\)'
+)
+
+
+def _scan_rust(source: str, path: str) -> list[Site]:
+    # Preserve line positions while excluding comments from the syntax scan.
+    code = re.sub(
+        r"//[^\n]*|/\*.*?\*/",
+        lambda m: "\n" * m[0].count("\n"),
+        source,
+        flags=re.DOTALL,
+    )
+    sites: list[Site] = []
+    for match in _RUST_REFUSAL.finditer(code):
+        condition = match["condition"]
+        annotation = _RUST_PROVENANCE_ANNOTATION.search(condition)
+        if annotation is None or not re.search(r"==|!=", condition):
+            continue
+        functions = list(re.finditer(r"\bfn\s+(\w+)", code[: match.start()]))
+        sites.append(
+            Site(
+                path=path,
+                function=functions[-1][1] if functions else "<module>",
+                kind=PROVENANCE_COMPARISON,
+                expression=" ".join(condition.split()),
+                line=code.count("\n", 0, match.start("condition") + annotation.start())
+                + 1,
+            )
+        )
+    return sites
+
+
 def scan_source(
     source: str, *, path: str, tree: ast.Module | None = None
 ) -> list[Site]:
@@ -233,6 +274,8 @@ def scan_source(
 
     ``tree`` is the already parsed ``source`` (read-only) when the caller has it."""
 
+    if path.endswith(".rs"):
+        return _scan_rust(source, path)
     if path == OWNER_MODULE:
         return []
     collector = _Collector(path)

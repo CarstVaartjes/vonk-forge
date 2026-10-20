@@ -62,6 +62,7 @@ pub(crate) enum BaseImageError {
 pub(crate) struct StoredBaseImage {
     pub(crate) bytes: u64,
     pub(crate) file: File,
+    pub(crate) config_digest: String,
 }
 
 pub(crate) struct BaseImageStore {
@@ -222,6 +223,14 @@ impl TransferBudget<'_> {
 struct BudgetReader<'a, R> {
     reader: R,
     budget: &'a TransferBudget<'a>,
+}
+impl<R: Seek> Seek for BudgetReader<'_, R> {
+    fn seek(&mut self, position: SeekFrom) -> std::io::Result<u64> {
+        self.budget
+            .check()
+            .map_err(|_| std::io::Error::from(std::io::ErrorKind::TimedOut))?;
+        self.reader.seek(position)
+    }
 }
 impl<R: Read> Read for BudgetReader<'_, R> {
     fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
@@ -613,9 +622,12 @@ fn produce_archive<R: ProcessRunner + ?Sized>(
             let mut retained = match open_regular_at(digest_root, &blob_name) {
                 Ok(Some(file))
                     if file.metadata().is_ok_and(|metadata| {
-                        metadata.is_file() && metadata.len() == descriptor.size
-                    }) && sha256_file(&file, budget).ok().as_deref()
-                        == Some(descriptor.digest.as_str()) =>
+                        metadata.is_file()
+                            && metadata.len() == descriptor.size
+                            && metadata.nlink() == 1
+                            && metadata.uid() == rustix::process::geteuid().as_raw()
+                            && metadata.permissions().mode() & 0o022 == 0
+                    }) =>
                 {
                     Some(file)
                 }
@@ -817,17 +829,12 @@ fn verified_stored_image(
     if metadata.len() > maximum_bytes {
         return Err(BaseImageError::Limit);
     }
-    verify_archive(&file, image, platform, maximum_bytes, budget)?;
+    let config_digest = verify_archive(&file, image, platform, maximum_bytes, budget)?;
     Ok(StoredBaseImage {
         bytes: metadata.len(),
         file,
+        config_digest,
     })
-}
-
-#[derive(Clone)]
-struct EntryRecord {
-    digest: String,
-    size: u64,
 }
 
 /// The exact `oci-layout` document of an image layout: one known key and no other.
@@ -843,22 +850,33 @@ fn verify_archive(
     platform: &str,
     maximum_bytes: u64,
     budget: &TransferBudget<'_>,
-) -> Result<(), BaseImageError> {
+) -> Result<String, BaseImageError> {
     let metadata = file.metadata()?;
     if metadata.len() == 0 || metadata.len() > maximum_bytes {
         return Err(BaseImageError::Limit);
     }
-    let entries = scan_archive(file, budget)?;
+    inspect_archive(file.try_clone()?, image, platform, budget)
+}
+
+// These bytes entered managed storage only after digest verification. Warm
+// reads validate structure, pinned identities and platform, seeking past layers.
+fn inspect_archive<R: Read + Seek>(
+    mut source: R,
+    image: &RecipeBuildBaseImage,
+    platform: &str,
+    budget: &TransferBudget<'_>,
+) -> Result<String, BaseImageError> {
+    let entries = scan_archive(&mut source, budget)?;
     if entries.len() > MAX_LAYERS + 5 {
         return Err(BaseImageError::Invalid);
     }
-    let layout = read_archive_entry(file, "oci-layout", MAX_JSON_BYTES, budget)?;
+    let layout = read_archive_entry(&mut source, "oci-layout", MAX_JSON_BYTES, budget)?;
     let layout: OciLayout = serde_json::from_slice(&layout).map_err(|_| BaseImageError::Invalid)?;
     if layout.image_layout_version != "1.0.0" {
         return Err(BaseImageError::Invalid);
     }
     let index: Index = serde_json::from_slice(&read_archive_entry(
-        file,
+        &mut source,
         "index.json",
         MAX_JSON_BYTES,
         budget,
@@ -868,23 +886,12 @@ fn verify_archive(
         return Err(BaseImageError::Invalid);
     }
     let descriptor = &index.manifests[0];
-    let reference_name = image
-        .reference
-        .rsplit_once('@')
-        .map(|(name, _)| name)
-        .ok_or(BaseImageError::Invalid)?;
-    if descriptor.digest != image.manifest_digest
-        || descriptor
-            .annotations
-            .get("org.opencontainers.image.ref.name")
-            .map(String::as_str)
-            != Some(reference_name)
-    {
+    if descriptor.digest != image.manifest_digest {
         return Err(BaseImageError::Invalid);
     }
     let manifest_path = blob_path(&descriptor.digest)?;
     require_record(&entries, &manifest_path, descriptor)?;
-    let manifest_raw = read_archive_entry(file, &manifest_path, MAX_JSON_BYTES, budget)?;
+    let manifest_raw = read_archive_entry(&mut source, &manifest_path, MAX_JSON_BYTES, budget)?;
     let manifest: Manifest =
         serde_json::from_slice(&manifest_raw).map_err(|_| BaseImageError::Invalid)?;
     validate_manifest(&manifest)?;
@@ -894,7 +901,7 @@ fn verify_archive(
     let config_path = blob_path(&manifest.config.digest)?;
     require_record(&entries, &config_path, &manifest.config)?;
     validate_platform(
-        &read_archive_entry(file, &config_path, MAX_JSON_BYTES, budget)?,
+        &read_archive_entry(&mut source, &config_path, MAX_JSON_BYTES, budget)?,
         platform,
     )?;
     let mut expected = BTreeSet::from([
@@ -911,23 +918,28 @@ fn verify_archive(
     if entries.keys().cloned().collect::<BTreeSet<_>>() != expected {
         return Err(BaseImageError::Invalid);
     }
-    Ok(())
+    Ok(manifest.config.digest)
 }
 
-fn scan_archive(
-    file: &File,
+fn scan_archive<R: Read + Seek>(
+    source: &mut R,
     budget: &TransferBudget<'_>,
-) -> Result<BTreeMap<String, EntryRecord>, BaseImageError> {
-    let mut source = file.try_clone()?;
+) -> Result<BTreeMap<String, u64>, BaseImageError> {
+    let archive_bytes = source.seek(SeekFrom::End(0))?;
     source.seek(SeekFrom::Start(0))?;
     let mut archive = tar::Archive::new(BudgetReader {
         reader: source,
         budget,
     });
     let mut entries = BTreeMap::new();
-    for entry in archive.entries()? {
-        let mut entry = entry?;
-        if !entry.header().entry_type().is_file() {
+    for entry in archive.entries_with_seek()? {
+        let entry = entry?;
+        if !entry.header().entry_type().is_file()
+            || entry
+                .raw_file_position()
+                .checked_add(entry.size())
+                .is_none_or(|end| end > archive_bytes)
+        {
             return Err(BaseImageError::Invalid);
         }
         let path = entry.path().map_err(|_| BaseImageError::Invalid)?;
@@ -941,43 +953,23 @@ fn scan_archive(
         if entries.contains_key(&path) {
             return Err(BaseImageError::Invalid);
         }
-        let mut hasher = Sha256::new();
-        let mut bytes = 0_u64;
-        let mut buffer = [0_u8; 1024 * 1024];
-        loop {
-            let read = entry.read(&mut buffer)?;
-            if read == 0 {
-                break;
-            }
-            bytes = bytes
-                .checked_add(read as u64)
-                .ok_or(BaseImageError::Invalid)?;
-            hasher.update(&buffer[..read]);
-        }
-        entries.insert(
-            path,
-            EntryRecord {
-                digest: format!("sha256:{}", hex::encode(hasher.finalize())),
-                size: bytes,
-            },
-        );
+        entries.insert(path, entry.size());
     }
     Ok(entries)
 }
 
-fn read_archive_entry(
-    file: &File,
+fn read_archive_entry<R: Read + Seek>(
+    source: &mut R,
     expected: &str,
     maximum_bytes: u64,
     budget: &TransferBudget<'_>,
 ) -> Result<Vec<u8>, BaseImageError> {
-    let mut source = file.try_clone()?;
     source.seek(SeekFrom::Start(0))?;
     let mut archive = tar::Archive::new(BudgetReader {
         reader: source,
         budget,
     });
-    for entry in archive.entries()? {
+    for entry in archive.entries_with_seek()? {
         let mut entry = entry?;
         if entry.path().map_err(|_| BaseImageError::Invalid)? == Path::new(expected) {
             if entry.size() > maximum_bytes {
@@ -992,12 +984,12 @@ fn read_archive_entry(
 }
 
 fn require_record(
-    entries: &BTreeMap<String, EntryRecord>,
+    entries: &BTreeMap<String, u64>,
     path: &str,
     descriptor: &Descriptor,
 ) -> Result<(), BaseImageError> {
     let record = entries.get(path).ok_or(BaseImageError::Invalid)?;
-    if record.size != descriptor.size || record.digest != descriptor.digest {
+    if *record != descriptor.size {
         return Err(BaseImageError::Invalid);
     }
     Ok(())
@@ -1102,3 +1094,6 @@ fn checked_archive_size(mut sizes: impl Iterator<Item = u64>) -> Result<u64, Bas
             .ok_or(BaseImageError::Limit)
     })
 }
+
+#[cfg(test)]
+mod tests;
