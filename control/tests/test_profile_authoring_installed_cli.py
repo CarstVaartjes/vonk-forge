@@ -7,7 +7,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import insert, select, update
 from vonk_agent_protocol import DesiredAssignmentState, LifecycleState, RunSwitchCode
 from vonk_agent_protocol.reason_codes.profiles import ProfileReasonCode
 from vonk_control.fleet_profile_contract import (
@@ -270,21 +270,21 @@ def test_installed_remove_and_pin_save_ignore_unrelated_cache_evidence(
             # Production retained twenty unreadable historical model rows.
             # Neither those nor a damaged cache row owns this pin's file list.
             for offset in range(1, 21 if fault == "exact-model-manifest" else 2):
-                damaged = CatalogDocumentRevision(
-                    document_id=model.document_id,
-                    kind=model.kind,
-                    publisher=model.publisher,
-                    slug=model.slug,
-                    revision_number=model.revision_number + offset,
-                    schema_version=model.schema_version,
-                    state=model.state,
-                    document={},
-                    content_digest=f"{offset:064x}",
-                    created_by=model.created_by,
-                    created_at=model.created_at,
+                session.execute(
+                    insert(CatalogDocumentRevision.__table__).values(
+                        document_id=model.document_id,
+                        kind=model.kind,
+                        publisher=model.publisher,
+                        slug=model.slug,
+                        revision_number=model.revision_number + offset,
+                        schema_version=model.schema_version,
+                        state=model.state,
+                        document={},
+                        content_digest=f"{offset:064x}",
+                        created_by=model.created_by,
+                        created_at=model.created_at,
+                    )
                 )
-                session.add(damaged)
-                session.flush()
             if fault == "exact-model-manifest":
                 session.add(
                     ModelCacheSet(
@@ -373,7 +373,11 @@ def test_profile_save_reports_exact_model_damage_and_recovers(
         assert recipe is not None and model is not None
         selector = f"{recipe.publisher}/{recipe.slug}"
         model_id, original = model.id, model.document
-        model.document = {}
+        session.execute(
+            update(CatalogDocumentRevision.__table__)
+            .where(CatalogDocumentRevision.__table__.c.id == model_id)
+            .values(document={})
+        )
     api, codec = _client(sessions, profiles=profiles)
     headers = _headers(codec, "administrator")
     request = FleetProfileInput(
@@ -394,9 +398,11 @@ def test_profile_save_reports_exact_model_damage_and_recovers(
     assert model_id in refused.text
     assert profiles.definition_number(13).revision == 0
     with sessions.begin() as session:
-        model = session.get(CatalogDocumentRevision, model_id)
-        assert model is not None
-        model.document = original
+        session.execute(
+            update(CatalogDocumentRevision.__table__)
+            .where(CatalogDocumentRevision.__table__.c.id == model_id)
+            .values(document=original)
+        )
     healed = api.put(
         "/api/profile/13", headers=headers, json=request.model_dump(mode="json")
     )
