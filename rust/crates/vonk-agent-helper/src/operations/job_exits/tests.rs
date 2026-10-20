@@ -185,3 +185,58 @@ fn runtime_absence_probe_never_substitutes_a_retained_exit_or_removes_a_containe
         Err(OperationError::RuntimeRunMissing)
     ));
 }
+
+/// An idle container name is already absent before Stop starts. That alone
+/// cannot acknowledge cancellation while a delayed launch can still appear.
+#[test]
+fn cancel_stop_observation_requires_durable_fence_and_start_quiescence() {
+    let host = Host::with(&[]);
+    let (_temp, executor) = host_executor(&host);
+    let marker = vonk_agent_protocol::CANCEL_STOP_REOBSERVATION_ARGUMENT;
+    assert!(matches!(
+        reobserve_mode(&executor, "1", marker),
+        Err(OperationError::StopUncertain)
+    ));
+    let active = executor.job_cancellation.begin(identity(JOB)).unwrap();
+    executor
+        .update_runtime_generation_fence(
+            &identity(JOB),
+            RuntimeGenerationFenceUse::Stop {
+                cancel_pending_start: true,
+            },
+        )
+        .unwrap();
+    assert!(matches!(
+        reobserve_mode(&executor, "1", marker),
+        Err(OperationError::StopUncertain)
+    ));
+    drop(active);
+    assert!(matches!(
+        reobserve_mode(&executor, "1", marker),
+        Err(OperationError::RuntimeRunMissing)
+    ));
+    // A restarted helper reads the same durable proof; a newer generation
+    // cannot supply the older Stop's missing fence.
+    let restarted = OperationExecutor::new(executor.roots.clone(), &[0; 32], host, None).unwrap();
+    assert!(matches!(
+        reobserve_mode(&restarted, "1", marker),
+        Err(OperationError::RuntimeRunMissing)
+    ));
+    assert!(matches!(
+        reobserve_mode(&restarted, "2", marker),
+        Err(OperationError::StopUncertain)
+    ));
+    restarted
+        .update_runtime_generation_fence(
+            &RuntimeEffectIdentity {
+                run_generation: 2,
+                ..identity(JOB)
+            },
+            RuntimeGenerationFenceUse::Start,
+        )
+        .unwrap();
+    assert!(matches!(
+        reobserve_mode(&restarted, "1", marker),
+        Err(OperationError::StopUncertain)
+    ));
+}

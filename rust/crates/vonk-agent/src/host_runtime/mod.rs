@@ -287,13 +287,19 @@ impl HostRuntimeBoundary<'_> {
     }
 
     /// Inspect the whole accepted runtime identity; Stop requires physical
-    /// absence, so it never consults a job exit ledger. No grant is renewed.
+    /// absence, so it never consults a job exit ledger. A cancel-Stop must also
+    /// have fenced pending Starts. No grant is renewed.
     pub async fn reobserve_runtime(
         &self,
         stop: &RecipeStopRequest,
     ) -> Result<RuntimeReobservation, HostRuntimeError> {
         self.reobserve_identity(vec![
-            vonk_agent_protocol::RUNTIME_REOBSERVATION_ARGUMENT.to_owned(),
+            if stop.cancel_pending_start {
+                vonk_agent_protocol::CANCEL_STOP_REOBSERVATION_ARGUMENT
+            } else {
+                vonk_agent_protocol::RUNTIME_REOBSERVATION_ARGUMENT
+            }
+            .to_owned(),
             stop.target_runtime_id.to_string(),
             stop.run_id.to_string(),
             stop.installation_id.to_string(),

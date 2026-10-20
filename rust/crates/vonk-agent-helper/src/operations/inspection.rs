@@ -69,12 +69,17 @@ impl<R: CommandRunner> OperationExecutor<R> {
             [marker, identity @ ..]
                 if unbound && marker == vonk_agent_protocol::JOB_REOBSERVATION_ARGUMENT =>
             {
-                self.inspect_effect(identity, include_logs, true)
+                self.inspect_effect(identity, include_logs, true, false)
             }
             [marker, identity @ ..]
                 if unbound && marker == vonk_agent_protocol::RUNTIME_REOBSERVATION_ARGUMENT =>
             {
-                self.inspect_effect(identity, include_logs, false)
+                self.inspect_effect(identity, include_logs, false, false)
+            }
+            [marker, identity @ ..]
+                if unbound && marker == vonk_agent_protocol::CANCEL_STOP_REOBSERVATION_ARGUMENT =>
+            {
+                self.inspect_effect(identity, include_logs, false, true)
             }
             // A single argument is a run id alone: the Controller-side truth
             // for a run whose local metadata is unreadable, checked by
@@ -110,6 +115,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
         identity: &[String],
         include_logs: bool,
         retain_job_exit: bool,
+        require_cancel_fence: bool,
     ) -> Result<RunInspection, OperationError> {
         let canonical = |value: &String| {
             uuid::Uuid::parse_str(value)
@@ -136,6 +142,21 @@ impl<R: CommandRunner> OperationExecutor<R> {
             installation_id,
             run_generation,
         };
+        // Serialize the snapshot with launch/Stop admission, but never wait or
+        // change the fence. Absence before a cancel-Stop's fence was durable
+        // cannot prove that a delayed Start will not recreate the runtime.
+        let _installation_guard = require_cancel_fence
+            .then(|| self.lock_installation_runtime(&installation_id.to_string()))
+            .transpose()?;
+        if require_cancel_fence {
+            let fence = self.read_runtime_generation_fence(installation_id, runtime_id)?;
+            if !fence
+                .is_some_and(|fence| fence.highest_generation == run_generation && fence.cancelled)
+                || self.job_cancellation.is_active(identity)?
+            {
+                return Err(OperationError::StopUncertain);
+            }
+        }
         match self.reobserve_by_identity(identity, run_id, plan_digest) {
             Reobserved::Running => Ok(RunInspection {
                 job_progress_at: self.job_progress_at(runtime_id),

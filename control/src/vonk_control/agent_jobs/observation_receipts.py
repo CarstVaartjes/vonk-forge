@@ -36,7 +36,15 @@ if TYPE_CHECKING:
     from .service import AgentJobService
 
 
-OBSERVATION_KINDS = frozenset(
+RUNTIME_KINDS = frozenset(
+    {
+        AgentOperation.RECIPE_START,
+        AgentOperation.RECIPE_STOP,
+        AgentOperation.RECIPE_JOB_RUN,
+    }
+)
+
+OBSERVATION_KINDS = RUNTIME_KINDS | frozenset(
     {
         AgentOperation.RUNTIME_PREFLIGHT,
         AgentOperation.ARTIFACT_DISTRIBUTION,
@@ -45,9 +53,6 @@ OBSERVATION_KINDS = frozenset(
         AgentOperation.RECIPE_INSTALL,
         AgentOperation.RECIPE_RECONCILE,
         AgentOperation.RECIPE_UNINSTALL,
-        AgentOperation.RECIPE_START,
-        AgentOperation.RECIPE_STOP,
-        AgentOperation.RECIPE_JOB_RUN,
     }
 )
 
@@ -57,12 +62,13 @@ def receipt_state(kind: str, receipt: object) -> AgentResultState:
         try:
             job = RecipeJobRunResult.model_validate_json(canonical_message(receipt))
         except (TypeError, ValueError):
-            return AgentResultState.SUCCEEDED
-        if job.ending is not None:
-            return AgentResultState.OBSERVING
-        if job.exit_code != 0:
-            return AgentResultState.FAILED
-    if kind in {AgentOperation.RECIPE_START, AgentOperation.RECIPE_STOP}:
+            pass
+        else:
+            if job.ending is not None:
+                return AgentResultState.OBSERVING
+            if job.exit_code != 0:
+                return AgentResultState.FAILED
+    if kind in RUNTIME_KINDS:
         try:
             failure = AgentFailureResult.model_validate_json(canonical_message(receipt))
         except (TypeError, ValueError):
@@ -127,8 +133,7 @@ def adopt_observation_receipt(
         and not isinstance(receipt, RecipeJobRunResult)
         and not (
             state == AgentResultState.FAILED
-            and operation.kind
-            in {AgentOperation.RECIPE_START, AgentOperation.RECIPE_STOP}
+            and operation.kind in RUNTIME_KINDS
             and isinstance(receipt, AgentFailureResult)
             and receipt.uncertain is not True
             and receipt.failure_kind != AgentFailureKind.UNCERTAIN_EFFECT
@@ -145,9 +150,8 @@ def adopt_observation_receipt(
     if not cancellation_stop_current(session, parent, operation):
         return False
     if isinstance(receipt, RecipeJobRunResult) and (
-        receipt.ending is not None
-        and not receipt.output_delivery_pending
-        or aware(now) >= job_output_retention_expiry(attempt.lease_deadline)
+        receipt.output_delivery_pending
+        and aware(now) >= job_output_retention_expiry(attempt.lease_deadline)
     ):
         return False
 

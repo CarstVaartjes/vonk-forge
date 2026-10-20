@@ -34,6 +34,9 @@ pub(super) fn runtime_claims() -> Vec<AgentClaim> {
     plan["runtime"]["placement"]["master_port"] = json!(29500);
     plan["runtime"]["placement"]["local_address"] = json!("192.168.100.10");
     plan["runtime"]["placement"]["endpoint_address"] = json!("192.168.100.10");
+    plan["security"]["network_mode"] = json!("host");
+    let plan: CompiledExecutionPlan = serde_json::from_value(plan).unwrap();
+    plan.validate().unwrap();
     start.operation = AgentOperation::RecipeStart;
     start.payload = serde_json::from_value(json!({
         "run_id": request.run_id, "installation_id": request.installation_id,
@@ -213,6 +216,13 @@ async fn runtime_process_death_at_every_custody_seam_recovers_without_new_claims
                     assert_eq!(request.action, HostRuntimeAction::RunInspect);
                     assert_eq!(request.arguments.len(), 6);
                     let effect = peer_root.join("effect").exists();
+                    let unfenced_stop = operation == AgentOperation::RecipeStop && !effect;
+                    if operation == AgentOperation::RecipeStop {
+                        assert_eq!(
+                            request.arguments[0],
+                            vonk_agent_protocol::CANCEL_STOP_REOBSERVATION_ARGUMENT
+                        );
+                    }
                     let absent = if operation == AgentOperation::RecipeStop {
                         effect
                     } else {
@@ -223,13 +233,17 @@ async fn runtime_process_death_at_every_custody_seam_recovers_without_new_claims
                     let response = HostHelperResponse {
                         schema_version: 1,
                         request_id: Some(frame.request_id),
-                        status: if absent {
+                        status: if absent || unfenced_stop {
                             HostHelperResponseStatus::Rejected
                         } else {
                             HostHelperResponseStatus::ContainerRuntimeRequestExecuted
                         },
-                        error_code: absent.then_some(HelperErrorCode::RuntimeRunMissing),
-                        process_running: (!absent)
+                        error_code: if unfenced_stop {
+                            Some(HelperErrorCode::HelperStopUncertain)
+                        } else {
+                            absent.then_some(HelperErrorCode::RuntimeRunMissing)
+                        },
+                        process_running: (!absent && !unfenced_stop)
                             .then_some(operation != AgentOperation::RecipeJobRunV1 && !rank_exited),
                         exit_code: if rank_exited {
                             Some(7)

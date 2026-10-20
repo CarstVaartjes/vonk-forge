@@ -16,7 +16,6 @@ from ..admission_locking import (
 )
 from ..agent_operation_facts import attempt_holds_order as _attempt_holds_order
 from ..agent_operation_facts import aware as _aware
-from ..cancelled_runtime import cancellation_stop_current
 from ..lifecycle import Reconciler
 from ..lifecycle.agent_operation import AgentOperationAdapter, lapsed_running_orders
 from ..lifecycle.artifact_job import ArtifactJobAdapter
@@ -104,6 +103,8 @@ def _sweep_lapsed_attempts(
     when its Spark never claims anything again.  Only an attempt that still
     holds a lease or an open launch budget is left alone.
     """
+
+    from ..cancelled_runtime import cancellation_stop_current
 
     now = self._clock()
     with self._sessions() as session:

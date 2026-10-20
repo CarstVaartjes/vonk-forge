@@ -499,7 +499,7 @@ def test_accepted_cancel_stop_rechecks_authority_before_grant_and_receipt(
     assert fresh.id != job.id and fresh.operation_id is None
 
 
-@pytest.mark.parametrize("kind", [Kind.RECIPE_START, Kind.RECIPE_STOP])
+@pytest.mark.parametrize("kind", RUNTIME_KINDS)
 @pytest.mark.parametrize("retained", [False, True])
 def test_definite_runtime_exit_or_refusal_survives_lost_report(service, kind, retained):
     # Wrong implementation: the observer's definite exit/refusal becomes an
@@ -509,15 +509,18 @@ def test_definite_runtime_exit_or_refusal_survives_lost_report(service, kind, re
     queue, sessions, clock, _owner, operation, claim, _receipt = _accepted(
         service, kind
     )
+    expected_reason = {
+        Kind.RECIPE_START: FailureCode.RECIPE_START_FAILED,
+        Kind.RECIPE_STOP: FailureCode.RECIPE_STOP_FAILED,
+        Kind.RECIPE_JOB_RUN: FailureCode.RECIPE_JOB_RUN_FAILED,
+    }[kind]
     receipt = AgentResult(
         fence=claim.fence,
         state=AgentResultState.FAILED,
         result=AgentFailureResult(
             status=LifecycleState.FAILED.value,
             reason="exact runtime evidence refused completion",
-            error_code=FailureCode.RECIPE_START_FAILED
-            if kind is Kind.RECIPE_START
-            else FailureCode.RECIPE_STOP_FAILED,
+            error_code=expected_reason,
             failure_kind=AgentFailureKind.INVALID_CONTRACT,
         ),
     )
@@ -555,9 +558,68 @@ def test_definite_runtime_exit_or_refusal_survives_lost_report(service, kind, re
         stored = column_value(attempt, "result")
         assert isinstance(stored, AgentFailureResult)
         reason_code = stored.error_code
-        expected_reason = (
-            FailureCode.RECIPE_START_FAILED
-            if kind is Kind.RECIPE_START
-            else FailureCode.RECIPE_STOP_FAILED
-        )
         assert reason_code == expected_reason
+
+
+def test_retained_measured_exit_delivers_storage_failure_without_reexecution(
+    service,
+):
+    # Wrong implementation: only delivery-stage receipts could be observed,
+    # so a retained exit with a storage fault was ignored until another report.
+    from vonk_agent_protocol import FailureStage
+    from vonk_agent_protocol.recipe_jobs import RecipeJobEnding
+    from vonk_control.agent_jobs.stored import column_value
+
+    queue, sessions, clock, _owner, operation, claim, receipt = _accepted(
+        service, Kind.RECIPE_JOB_RUN
+    )
+    assert isinstance(receipt.result, RecipeJobRunResult)
+    uncertain = receipt.result.model_copy(
+        update={"ending": RecipeJobEnding(stage=FailureStage.JOB_STATE)}
+    )
+    with sessions.begin() as session:
+        attempt = session.scalar(
+            select(AgentOperationAttempt).where(
+                AgentOperationAttempt.fence == claim.fence
+            )
+        )
+        assert attempt is not None
+        attempt.state = LifecycleState.OBSERVING
+        attempt.observation_cause = ObservationCause.LEASE_LAPSED
+        attempt.result = uncertain.model_dump(mode="json")
+        deadline = attempt.lease_deadline
+    queue = AgentJobService(sessions, clock=clock)
+    consumed: list[RecipeJobRunResult] = []
+
+    def consume(_session, _operation, _attempt, message):
+        assert isinstance(message, AgentResult) and isinstance(
+            message.result, RecipeJobRunResult
+        )
+        consumed.append(message.result)
+
+    queue.set_result_consumer(consume)
+    assert queue.reconcile_orders()
+    assert consumed == [uncertain]
+    with sessions() as session:
+        attempt = session.scalar(
+            select(AgentOperationAttempt).where(
+                AgentOperationAttempt.fence == claim.fence
+            )
+        )
+        assert attempt is not None
+        assert attempt.observation_cause == ObservationCause.LEASE_LAPSED
+        assert column_value(attempt, "result") == uncertain
+        assert attempt.lease_deadline == deadline
+    # Use the ordinary owner's bounded ending: a measured exit does not
+    # fabricate successfully delivered outputs, and never reissues inference.
+    assert consumed[0].ending is not None
+    reason_code = consumed[0].ending.stage
+    assert reason_code == FailureStage.JOB_STATE
+    with sessions() as session:
+        row = session.get(AgentOperation, operation.id)
+        assert (
+            row is not None
+            and row.state == LifecycleState.FAILED
+            and row.current_attempt == 1
+        )
+    assert claim_agent(queue, NODE_A, "serial-a") is None

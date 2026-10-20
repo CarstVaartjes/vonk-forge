@@ -22,7 +22,6 @@ from vonk_agent_protocol.claims import AGENT_PROTOCOL_VERSION, AgentRuntimeIdent
 from ..agent_operation_facts import aware as _aware
 from ..agent_operation_facts import lapsed_renewal_allowed as _lapsed_renewal_allowed
 from ..auth import AgentSource
-from ..cancelled_runtime import cancellation_stop_current
 from ..categorized_errors import InvalidValue
 from ..lifecycle.evidence import BookkeepingReason, retire_as_unknown
 from ..logging import redact_text
@@ -57,6 +56,8 @@ def _active(
     allow_superseded_cancellation: bool = False,
     allow_lapsed_renewal: bool = False,
 ) -> tuple[StoredOperation, AgentOperationAttempt]:
+    from ..cancelled_runtime import cancellation_stop_current
+
     token = self._fence_token(fence)
     identity_hint = session.execute(
         select(
