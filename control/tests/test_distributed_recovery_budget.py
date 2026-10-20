@@ -408,3 +408,73 @@ def test_recovery_marker_retains_timestamp_spelling_bound_to_request_identity() 
             },
             now=NOW,
         )
+
+
+@pytest.mark.usefixtures("damaged_json_rows")
+def test_malformed_plan_waits_for_changed_content_without_repeating_decision(
+    tmp_path, postgres_engine, monkeypatch
+):
+    """Catches unchanged damaged plans bypassing cooldown and re-parsing forever."""
+    from vonk_agent_protocol import InvalidRequestReason, WaitResumeCondition
+    from vonk_control.distributed_recovery import common
+    from vonk_control.persisted_waits import read_wait
+    from vonk_control.recovery_policy import DISTRIBUTED_RECOVERY
+
+    sessions, service, queue, mapping_id, build_id, nodes = setup_services(
+        tmp_path, engine=postgres_engine
+    )
+    installation = installed_recipe(
+        service, mapping_id, build_id, nodes, request_id="class-e-install"
+    )
+    started = started_recipe(
+        sessions, service, installation.owner_id, nodes, request_id="class-e-start"
+    )
+    with sessions.begin() as session:
+        run = session.get(RecipeRun, started.owner_id)
+        assert run is not None
+        original = dict(run.plan)
+        run.plan = {"damaged": True}
+        run.recovery_attempts = DISTRIBUTED_RECOVERY.max_failures
+    coordinator = DistributedRecoveryCoordinator(
+        sessions,
+        routes=bind_route_publications(sessions, service, ConcurrentPublisher())[1],
+        agent_jobs=queue,
+        clock=lambda: NOW,
+    )
+    parsed = []
+    parser = common.parse_stored_run_plan
+
+    def observe(document):
+        parsed.append(document)
+        return parser(document)
+
+    monkeypatch.setattr(common, "parse_stored_run_plan", observe)
+    monkeypatch.setattr(
+        "vonk_control.distributed_recovery.coordinator.parse_stored_run_plan", observe
+    )
+    with sessions.begin() as session:
+        assert coordinator._settle_unreadable_runs(session, NOW, started.owner_id)
+    with sessions.begin() as session:
+        assert not coordinator._settle_unreadable_runs(session, NOW, started.owner_id)
+        run = session.get(RecipeRun, started.owner_id)
+        assert run is not None
+        wait = read_wait(run)
+        assert wait is not None and wait.next_check > NOW
+        assert wait.reason == InvalidRequestReason.MALFORMED
+        assert wait.resume_condition == WaitResumeCondition.DEPENDENCY_CHANGED
+        assert run.recovery_attempts == DISTRIBUTED_RECOVERY.max_failures
+    later = NOW + timedelta(seconds=DISTRIBUTED_RECOVERY.max_delay_seconds + 1)
+    with sessions.begin() as session:
+        assert coordinator._settle_unreadable_runs(session, later, started.owner_id)
+    assert len(parsed) == 1
+    assert not coordinator.tick(started.owner_id)
+    assert len(parsed) == 1
+    with sessions.begin() as session:
+        run = session.get(RecipeRun, started.owner_id)
+        assert run is not None
+        run.plan = original
+    with sessions.begin() as session:
+        assert coordinator._settle_unreadable_runs(session, later, started.owner_id)
+        run = session.get(RecipeRun, started.owner_id)
+        assert run is not None and read_wait(run) is None
+    assert len(parsed) == 2

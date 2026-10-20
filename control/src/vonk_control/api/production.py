@@ -449,6 +449,11 @@ def production_app(settings: Settings | None = None) -> FastAPI:
         check=lambda service: service.check_health(),
     )
 
+    def reconcile_library_observations():
+        gateway = gateway_keys.ensure_default()
+        visual_library.refresh_catalog()
+        return gateway
+
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         nonlocal automatic_sync_task
@@ -458,7 +463,7 @@ def production_app(settings: Settings | None = None) -> FastAPI:
                 managed_catalog_sync,
                 automatic_sync_stop,
                 interval_seconds=RECIPE_LIBRARY_SYNC_INTERVAL_SECONDS,
-                reconcile=lambda: gateway_keys.ensure_default(),
+                reconcile=reconcile_library_observations,
             )
         )
         default_key_task = asyncio.create_task(

@@ -160,3 +160,19 @@ IPv6 is reported as a `tunnel` interface and never produces a Wi-Fi finding.
 This change deliberately reports the current coverage and leaves the Rust and
 Controller route-wide integration gaps visible until their owners land the
 corresponding producer/consumer changes.
+
+Worker coordinator faults before an operation is claimed have one current row
+per source in `coordinator_failures`. The row stores the canonical disposition,
+redacted cause and executable content identity, plus the shared typed wait evidence and due
+column. `/api/platform` exposes this evidence. Transient faults resume at their
+persisted retry time, including after restart. Deterministic faults are checked
+for a changed executable content identity without executing the unchanged decision again.
+Successful observation removes the current fault; this table is not history.
+The normal due-row backstop redrives these sources through the same worker path.
+
+Library lists use a disposable catalog index built at startup and refreshed
+outside request handling by the existing catalog-sync cadence (60 seconds). `catalog_observed_at` identifies
+the snapshot; a failed refresh retains the last complete index. Exact detail
+reads resolve the requested identity directly. Local availability and latest
+request progress are read only for selected content; optional observation failure
+returns unknown availability without hiding readable catalog content.

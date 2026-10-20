@@ -163,6 +163,11 @@ def test_public_library_read_reobserves_and_ends_with_no_retained_gate(clears):
         sessions, local_state=observe, cursors=CursorCodec(b"c" * 32)
     )
     read = projection.models()
+    assert calls == 1
+    assert read.models[0].local.controller == AssetAvailability.UNKNOWN.value
+    # Fresh requests observe again; one request never repeats unchanged evidence.
+    projection.models()
+    read = projection.models()
     assert calls == 3
     assert len(read.models) == 1
     assert (

@@ -12,6 +12,7 @@ import traceback
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from functools import cache
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -28,8 +29,11 @@ from vonk_agent_protocol.compiled_execution_plan import (
 from .bounded_retry import bounded_attempts
 from .capabilities import CapabilityRegistry
 from .capability_contract import ControllerCapability
+from .coordinator_failures import CoordinatorFailures
+from .failure_classification import disposition
 from .jobs import JobService
 from .logging import log_event, redact_text
+from .operator_receipt_contract import ReceiptOwner
 from .resource_planning import PLATFORM_MEMORY_FLOOR_BYTES
 from .worker_memory_contract import WorkerMemoryComponent
 
@@ -41,6 +45,18 @@ _PROCESS_INSTANCE = re.compile(r"[0-9a-f]{64}\Z")
 
 _LOGGER = logging.getLogger("vonk-control-worker")
 _WORKER_WATCHDOG_TIMEOUT_SECONDS = 180
+
+
+@cache
+def _coordinator_source_content() -> str:
+    """One startup identity of executable Controller content, independent of release provenance."""
+    root = Path(__file__).parent
+    digest = hashlib.sha256()
+    for path in sorted(root.rglob("*.py")):
+        digest.update(str(path.relative_to(root)).encode())
+        digest.update(b"\0")
+        digest.update(hashlib.sha256(path.read_bytes()).digest())
+    return digest.hexdigest()
 
 
 class WorkerWatchdog:
@@ -207,6 +223,7 @@ class Worker:
         loop_heartbeat: Callable[[], object] | None = None,
         memory_sources: Sequence[object] = (),
         due_waits: Callable[[], object] | None = None,
+        coordinator_content_sha256: str | None = None,
     ) -> None:
         self._jobs = jobs
         self._worker_id = worker_id
@@ -222,7 +239,12 @@ class Worker:
         self._memory_sources = tuple(memory_sources)
         self._source_cursor = 0
         self._closed = False
-        self._retry_at: dict[str, float] = {}
+        self._failures = CoordinatorFailures(
+            jobs._sessions,
+            jobs._clock,
+            coordinator_content_sha256 or _coordinator_source_content(),
+        )
+        self._cadence_at: dict[str, float] = {}
 
     def close(self) -> None:
         """Close worker-owned executors while leaving durable work resumable."""
@@ -295,8 +317,7 @@ class Worker:
         for offset in range(len(sources)):
             index = (self._source_cursor + offset) % len(sources)
             name, source = sources[index]
-            now = time.monotonic()
-            if now < self._retry_at.get(name, now):
+            if not self._failures.ready(name):
                 continue
             try:
                 progressed = source()
@@ -304,7 +325,7 @@ class Worker:
                 # A source that keeps failing must not starve the others: the
                 # failure stays visible, the turn moves on, and the failed
                 # source is retried on a later pass.
-                self._retry_at[name] = now + 5
+                self._failures.failed(name, error, disposition(error))
                 log_event(
                     _LOGGER,
                     "worker.source_failed",
@@ -315,7 +336,7 @@ class Worker:
                     traceback=redact_text(traceback.format_exc()),
                 )
                 continue
-            self._retry_at.pop(name, None)
+            self._failures.succeeded(name)
             if progressed:
                 self._source_cursor = (index + 1) % len(sources)
                 advanced = True
@@ -334,12 +355,12 @@ class Worker:
             return
         key = f"housekeeping:{name}"
         now = time.monotonic()
-        if now < self._retry_at.get(key, now):
+        if now < self._cadence_at.get(key, now) or not self._failures.ready(key):
             return
         try:
             task()
         except Exception as error:  # noqa: BLE001 - isolate one owner, report its fault
-            self._retry_at[key] = now + 5
+            self._failures.failed(key, error, disposition(error))
             log_event(
                 _LOGGER,
                 "worker.housekeeping_failed",
@@ -350,10 +371,48 @@ class Worker:
                 traceback=redact_text(traceback.format_exc()),
             )
         else:
+            self._failures.succeeded(key)
             if minimum_interval:
-                self._retry_at[key] = now + minimum_interval
-            else:
-                self._retry_at.pop(key, None)
+                self._cadence_at[key] = now + minimum_interval
+
+    def redrive_coordinator(self, source: str) -> None:
+        if source.startswith("housekeeping:"):
+            name = source.removeprefix("housekeeping:")
+            task = {
+                "due-waits": self._due_waits,
+                ReceiptOwner.TELEMETRY: self._housekeeping,
+                "artifact": self._artifact_housekeeping,
+                LifecycleEventKind.HEARTBEAT: self._loop_heartbeat,
+            }.get(name)
+            # The due backstop is already executing; its outer caller owns recovery.
+            if task is None:
+                self._failures.succeeded(source)
+            elif name != "due-waits":
+                self._run_housekeeping(name, task)
+            return
+        sources: dict[str, Callable[[], bool]] = {"jobs": self._run_generic}
+        if self._recipes is not None:
+            sources["recipes"] = self._recipes.tick
+        if self._model_cache is not None:
+            sources[WaitOwnerKind.MODEL_CACHE] = self._run_model_cache
+        sources.update(
+            {
+                f"background-{index}": lambda service=service: bool(service())
+                for index, service in enumerate(self._background_services)
+            }
+        )
+        task = sources.get(source)
+        if task is None:
+            self._failures.succeeded(source)
+            return
+        if not self._failures.ready(source):
+            return
+        try:
+            task()
+        except Exception as error:  # noqa: BLE001 - same source custody as normal dispatch
+            self._failures.failed(source, error, disposition(error))
+        else:
+            self._failures.succeeded(source)
 
     def _run_model_cache(self) -> bool:
         # The model cache is consumed structurally, like the distribution
@@ -767,6 +826,9 @@ def assemble_production_worker(
         return catalog_sync.redrive(str(key[0]), RECIPE_LIBRARY_SYNC_INTERVAL_SECONDS)
 
     advancers: dict[WaitOwnerKind, AdvanceWait] = {
+        WaitOwnerKind.COORDINATOR: lambda key, wait: worker.redrive_coordinator(
+            str(key[0])
+        ),
         WaitOwnerKind.AGENT_OPERATION: agent_order,
         WaitOwnerKind.AGENT_UPGRADE: lambda key, wait: upgrades.heal_rollouts(
             1, str(key[0])

@@ -367,6 +367,7 @@ def test_sync_reactivates_retained_recipe_without_replacing_history_or_model_hea
     first_result = apply(original, "1" * 40)
     assert first_result.state == "current"
     assert first_result.imported_count == 1
+    library.refresh_catalog()  # the normal background catalog-index turn
     first = library.recipe_library().recipes[0]
 
     changed = deepcopy(original.document)
@@ -999,6 +1000,7 @@ def test_manual_and_empty_syncs_never_retract(tmp_path: Path) -> None:
         )
 
     def offered() -> set[str]:
+        library.refresh_catalog()  # observe the completed catalog-sync turn
         return {recipe.identity.slug for recipe in library.recipe_library().recipes}
 
     # A clean first sync of a library imports and retracts nothing.
@@ -1334,6 +1336,7 @@ def test_sync_retracts_recipes_absent_from_the_published_library(
         )
 
     def offered() -> set[str]:
+        library.refresh_catalog()  # observe the completed catalog-sync turn
         return {recipe.identity.slug for recipe in library.recipe_library().recipes}
 
     both = apply((original, other), "1" * 40)

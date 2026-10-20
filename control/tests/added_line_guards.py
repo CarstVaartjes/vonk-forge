@@ -16,6 +16,7 @@ from . import coordination_boundaries as coordination
 from . import deterministic_retries as retries
 from . import lifecycle_reasons as reasons
 from . import principle_guards as principles
+from . import request_path_scans
 from . import short_wall_clocks as wall_clocks
 from . import untyped_mapping_boundaries as mappings
 from . import vocabulary_literals as vocabulary
@@ -27,6 +28,7 @@ rust_test_lines = principles.rust_test_lines
 
 
 MODES = (
+    "request-scans",
     "vocabulary",
     "mapping",
     "identity",
@@ -480,6 +482,11 @@ def check_source(
             )
         )
     if python and not is_test:
+        if "request-scans" in modes:
+            hits.extend(
+                (line, "unbounded request catalog/history scan")
+                for line in request_path_scans.scan_tree(ast.parse(source), path=path)
+            )
         if "mapping" in modes:
             hits.extend(
                 (site.line, "untyped mapping")

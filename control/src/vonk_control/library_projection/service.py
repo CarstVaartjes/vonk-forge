@@ -15,11 +15,15 @@ from ..auth import CursorCodec
 from ..library_contract import (
     FreshnessPolicy,
     LibraryFacetValues,
+    LibraryLocalProgress,
+    LibraryLocalState,
     LibraryModelProjection,
     LibraryRecipeProjection,
     LibraryResourceProjection,
 )
 from ..library_image_presence import ImagePresenceIndex
+from ..model_cache_contract import ModelCacheOperationState
+from ..models import CatalogDocumentRevision
 from .catalog import (
     _catalog_documents,
     _documents_for_snapshot,
@@ -27,6 +31,7 @@ from .catalog import (
     _model_projection,
     _recipe_facet_values,
     _recipe_projection,
+    refresh_catalog,
 )
 from .common import (
     _LOCAL_STATE_PRIORITY,
@@ -92,7 +97,7 @@ class LibraryProjection:
             telemetry_live_seconds=telemetry_live_seconds,
             telemetry_delayed_seconds=telemetry_delayed_seconds,
         )
-        self._local_state = local_state or self._database_local_state
+        self._local_state = local_state
         self._request_budget = request_budget_seconds
         self._image_budget = image_budget_seconds
         self._image_presence = (
@@ -105,6 +110,12 @@ class LibraryProjection:
             else None
         )
         self._assessment = assessment
+        self._catalog_snapshot: tuple[
+            list[tuple[CatalogDocumentRevision, ModelDefinition]],
+            list[tuple[CatalogDocumentRevision, RecipeDefinition]],
+        ] = ([], [])
+        self._catalog_observed_at = self._clock()
+        self.refresh_catalog()
 
     @staticmethod
     def selector(publisher: str, slug: str) -> str:
@@ -112,40 +123,27 @@ class LibraryProjection:
 
     @staticmethod
     def _merge_local(
-        result: dict[str, dict[str, object]],
+        result: dict[str, LibraryLocalState],
         digest: str | None,
         *,
         controller: LibraryControllerState,
         running_on: Sequence[str] = (),
-        preparation: Mapping[str, object] | None = None,
+        preparation: LibraryLocalProgress | None = None,
     ) -> None:
         if digest is None:
             return
-        current = result.setdefault(digest, {"controller": "unknown", "running_on": []})
+        current = result.setdefault(
+            digest, LibraryLocalState(controller=AssetAvailability.UNKNOWN.value)
+        )
         if (
             _LOCAL_STATE_PRIORITY[controller]
-            > _LOCAL_STATE_PRIORITY[
-                cast(LibraryControllerState, str(current["controller"]))
-            ]
+            > _LOCAL_STATE_PRIORITY[current.controller]
         ):
-            current["controller"] = controller
-        nodes = current["running_on"]
-        if not isinstance(nodes, list):
-            nodes = []
-            current["controller"] = AssetAvailability.UNKNOWN.value
-        current["running_on"] = sorted(set(nodes) | set(running_on))
+            current.controller = controller
+        current.running_on = sorted(set(current.running_on) | set(running_on))
         if preparation is not None:
-            previous = current.get("preparation")
-            previous_operation = (
-                str(previous.get("operation_id", ""))
-                if isinstance(previous, Mapping)
-                else ""
-            )
-            if (
-                previous is None
-                or str(preparation.get("operation_id", "")) >= previous_operation
-            ):
-                current["preparation"] = dict(preparation)
+            # Requests arrive in durable creation order; identity has no recency.
+            current.preparation = preparation
 
     @staticmethod
     def _cache_progress(
@@ -155,7 +153,7 @@ class LibraryProjection:
         phase: object,
         completed: object,
         total: object,
-    ) -> dict[str, object] | None:
+    ) -> LibraryLocalProgress | None:
         """The progress of one cache operation, or ``None`` when its stored
         state does not read: the asset then shows no progress (unknown)."""
 
@@ -176,13 +174,13 @@ class LibraryProjection:
         if total is not None and (type(total) is not int or total < 0):
             _note_unreadable("cache progress total", operation_id, repr(total))
             return None
-        return {
-            "operation_id": operation_id,
-            "state": projected_state,
-            "phase": phase if isinstance(phase, str) else None,
-            "completed_bytes": completed,
-            "total_bytes": total,
-        }
+        return LibraryLocalProgress(
+            operation_id=operation_id,
+            state=cast(ModelCacheOperationState, projected_state),
+            phase=phase if isinstance(phase, str) else None,
+            completed_bytes=completed,
+            total_bytes=total,
+        )
 
     @staticmethod
     def _model_usage(document: ModelDefinition) -> list[str]:
@@ -295,6 +293,7 @@ class LibraryProjection:
     _library_release = _library_release
     _model_projection = _model_projection
     _recipe_projection = _recipe_projection
+    refresh_catalog = refresh_catalog
     _catalog_documents = _catalog_documents
     _documents_for_snapshot = _documents_for_snapshot
     _recipe_facet_values = _recipe_facet_values
