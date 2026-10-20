@@ -86,7 +86,7 @@ def install_cli_wheel(uv: str, venv: Path, wheel: Path, env: dict[str, str]) -> 
 
     The wheel goes in with --no-deps; its locked dependencies come from the
     prepared CLI dependency environment through a .pth file, so the venv sees
-    the CLI and its dependencies only (no Controller, no pydantic).
+    the CLI and its dependencies only, including public contracts, without the Controller.
     """
 
     dependencies = cli_dependency_site_packages()

@@ -117,7 +117,11 @@ def installed_vonkctl(tmp_path_factory):
         [
             str(python),
             "-c",
-            "import importlib.util; assert importlib.util.find_spec('vonk_control') is None; assert importlib.util.find_spec('pydantic') is None",
+            (
+                "import importlib.util; "
+                "from cluster_profiles import cli_artifact_jobs; "
+                "assert importlib.util.find_spec('vonk_control') is None"
+            ),
         ],
         cwd=workspace,
         env={**environment, "PYTHONPATH": ""},
