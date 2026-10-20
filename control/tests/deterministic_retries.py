@@ -69,6 +69,10 @@ def _retry_lines(handler: ast.ExceptHandler) -> list[int]:
             raised = node.exc.func if isinstance(node.exc, ast.Call) else node.exc
             if _RETRY_RAISE.search(_name(raised)):
                 lines.append(node.lineno)
+        elif isinstance(node, ast.Assign | ast.AnnAssign):
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            if any(_schedules(target) for target in targets):
+                lines.append(node.lineno)
         elif isinstance(node, ast.Call):
             if _RETRY_CALL.search(_name(node.func)) or any(
                 keyword.arg == "replan"

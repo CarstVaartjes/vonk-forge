@@ -857,3 +857,16 @@ def test_count_guard_does_not_exempt_the_uncancelled_else_branch() -> None:
         "if row.cancel_requested:\n    return cancelled(row)\n"
         "else:\n    if row.retry_count >= 5:\n        return None\n"
     )
+
+
+def test_assignment_based_retry_requires_the_cause_classifier():
+    """Catches the worker's old assignment-based deterministic retry shield."""
+    from .deterministic_retries import scan_source
+
+    source = "def tick():\n try: work()\n except Exception as error:\n  self._retry_at[task] = now + 5\n"
+    assert scan_source(source)
+    assert not scan_source(
+        source.replace(
+            "  self._retry_at", "  verdict = disposition(error)\n  self._retry_at"
+        )
+    )

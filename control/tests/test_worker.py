@@ -3,7 +3,7 @@ import threading
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import LifecycleState
@@ -413,6 +413,8 @@ def test_failing_source_does_not_starve_a_healthy_durable_job(
     now = [0.0]
     monkeypatch.setattr("vonk_control.worker.time.monotonic", lambda: now[0])
     jobs = _service(tmp_path)
+    epoch = jobs._clock()
+    jobs._clock = lambda: epoch + timedelta(seconds=now[0])
     for index in range(3):
         jobs.enqueue("probe", "admin", "a" * 64, ["node"], {"index": index})
 
@@ -424,7 +426,7 @@ def test_failing_source_does_not_starve_a_healthy_durable_job(
         def tick(self) -> bool:
             self.calls += 1
             if not self.available:
-                raise RuntimeError("dependency unavailable")
+                raise ConnectionError("dependency unavailable")
             return True
 
     recipes = RecoveringSource()
@@ -528,6 +530,17 @@ def test_unexpected_owner_fault_does_not_suppress_other_work(
     fresh = jobs.enqueue("healthy", "admin", "abc", [], {})
     assert worker.run_once()
     assert jobs.get(fresh.id).result == {"done": True}
+    # A repaired closure in the same revision is no new execution evidence.
+    assert calls == [owner]
+    Worker(
+        jobs,
+        "replacement",
+        {"healthy": lambda _: {}},
+        recipes=Recipes() if owner == "recipe" else None,
+        housekeeping=task if owner == "housekeeping" else None,
+        background_services=(task,) if owner == "background" else (),
+        coordinator_content_sha256="b" * 64,
+    ).run_once()
     assert calls == [owner, owner]
 
 
@@ -555,7 +568,9 @@ def test_unavailable_model_cache_surface_is_local_and_fresh_work_observes_repair
         return False
 
     monkeypatch.setattr(Cache, "tick", tick, raising=False)
-    now[0] += 5
+    worker._failures._clock = lambda: (
+        datetime(2026, 8, 3, tzinfo=UTC) + timedelta(seconds=5)
+    )
     fresh = jobs.enqueue("healthy", "admin", "abc", [], {})
     assert worker.run_once()
     assert jobs.get(fresh.id).result == {"done": True}
@@ -617,3 +632,130 @@ def test_shutdown_fault_is_bounded_and_other_owners_and_fresh_work_continue(
     fresh = jobs.enqueue("healthy", "admin", "abc", [], {})
     assert Worker(jobs, "new", {"healthy": lambda _: {"done": True}}).run_once()
     assert jobs.get(fresh.id).result == {"done": True}
+
+
+@pytest.mark.parametrize(
+    "fault",
+    [AssertionError("broken coordinator"), ConnectionError("dependency offline")],
+)
+def test_coordinator_fault_has_durable_api_custody_and_restart_resume(
+    postgres_engine, fault
+):
+    """Catches volatile retries and repeating a deterministic source unchanged."""
+    from vonk_agent_protocol import Disposition, WaitOwnerKind, WaitResumeCondition
+    from vonk_control.coordinator_contract import CoordinatorFailureEvidence
+    from vonk_control.due_waits import DueWaitBackstop, WaitSource
+    from vonk_control.models import CoordinatorFailure
+    from vonk_control.persisted_waits import read_wait
+    from vonk_control.platform_observation import PlatformObserver
+
+    Base.metadata.create_all(postgres_engine)
+    sessions = sessionmaker(postgres_engine, expire_on_commit=False)
+    now = [datetime(2026, 10, 20, tzinfo=UTC)]
+    jobs = JobService(sessions, clock=lambda: now[0])
+    calls = []
+    broken = True
+
+    def source():
+        calls.append(now[0])
+        if broken:
+            raise fault
+        return False
+
+    worker = Worker(
+        jobs,
+        "old",
+        {},
+        background_services=(source,),
+        coordinator_content_sha256="a" * 64,
+    )
+    assert not worker.run_once()
+    with sessions() as session:
+        stored = session.scalar(select(CoordinatorFailure))
+        assert stored is not None and isinstance(
+            stored.failure, CoordinatorFailureEvidence
+        )
+        wait = read_wait(stored)
+        assert wait is not None
+        first_blocked = wait.first_blocked_at
+        assert wait.resume_condition == (
+            WaitResumeCondition.DEPENDENCY_CHANGED
+            if isinstance(fault, AssertionError)
+            else WaitResumeCondition.RETRY_DUE
+        )
+    # The existing authenticated platform projection consumes the stored contract.
+    visible = (
+        PlatformObserver(sessions, clock=lambda: now[0]).read().coordinator_failures
+    )
+    assert len(visible) == 1
+    assert isinstance(visible[0].failure, CoordinatorFailureEvidence)
+    assert visible[0].failure.detail.endswith(str(fault))
+    assert visible[0].failure.disposition == (
+        Disposition.FAIL if isinstance(fault, AssertionError) else Disposition.WAIT
+    )
+    broken = False
+    restarted = Worker(
+        jobs,
+        "new",
+        {},
+        background_services=(source,),
+        coordinator_content_sha256="a" * 64,
+    )
+    backstop = DueWaitBackstop(
+        sessions,
+        (
+            WaitSource(
+                CoordinatorFailure,
+                frozenset({WaitOwnerKind.COORDINATOR}),
+                lambda key, kind: restarted.redrive_coordinator(str(key[0])),
+            ),
+        ),
+        clock=lambda: now[0],
+    )
+    assert backstop.tick() == 0
+    now[0] += timedelta(seconds=301)
+    backstop.tick()
+    if isinstance(fault, AssertionError):
+        assert len(calls) == 1
+        with sessions() as session:
+            stored = session.scalar(select(CoordinatorFailure))
+            assert stored is not None
+            current_wait = read_wait(stored)
+            assert (
+                current_wait is not None
+                and current_wait.first_blocked_at == first_blocked
+            )
+        # Changed source is new evidence; it re-arms through the normal worker.
+        replacement = Worker(
+            jobs,
+            "fixed",
+            {},
+            background_services=(source,),
+            coordinator_content_sha256="b" * 64,
+        )
+        replacement.run_once()
+    assert len(calls) == 2
+    with sessions() as session:
+        assert session.scalar(select(CoordinatorFailure)) is None
+
+
+def test_durable_fault_stays_with_its_source_when_optional_services_reorder(tmp_path):
+    """Catches an index-named fault blocking a different coordinator after restart."""
+    jobs = _service(tmp_path)
+    calls = []
+
+    def broken():
+        calls.append("broken")
+        raise AssertionError("same deterministic input")
+
+    def healthy():
+        calls.append("healthy")
+        return False
+
+    assert not Worker(
+        jobs, "first", {}, background_services=(broken, healthy)
+    ).run_once()
+    assert not Worker(
+        jobs, "restarted", {}, background_services=(healthy, broken)
+    ).run_once()
+    assert calls == ["broken", "healthy", "healthy"]

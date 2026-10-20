@@ -434,6 +434,7 @@ def test_fleet_filter_assesses_later_candidates_before_pagination(assessed_libra
         )
         assert head is not None
         head.active_revision_id = successor.id
+    projection.refresh_catalog()
     page = projection.recipe_library(
         publisher=["test"], limit=1, sort="name", fits_fleet=True
     )

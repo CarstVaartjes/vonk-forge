@@ -338,6 +338,7 @@ bind("local_certificate_issuance", "binding", CertificateIssuanceBinding)
 from .wait_contract import WaitEvidence
 
 for _table in (
+    "coordinator_failures",
     "recipe_installations",
     "artifact_lifecycle_gates",
     "agent_operations",
@@ -353,3 +354,7 @@ for _table in (
     "agent_issued_certificate_revocations",
 ):
     bind(_table, "wait_evidence", WaitEvidence, nullable=True)
+
+from .coordinator_contract import CoordinatorFailureEvidence
+
+bind("coordinator_failures", "failure", CoordinatorFailureEvidence)
