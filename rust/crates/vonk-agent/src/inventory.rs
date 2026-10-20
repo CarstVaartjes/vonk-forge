@@ -290,7 +290,7 @@ async fn collect_process_with_budget(
         .args(arguments)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null())
+        .stderr(std::process::Stdio::inherit())
         .kill_on_drop(true)
         .process_group(0)
         .spawn()?;
