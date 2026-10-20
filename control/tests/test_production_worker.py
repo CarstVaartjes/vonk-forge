@@ -109,7 +109,19 @@ def test_recipe_worker_services_routes_while_coordinators_are_active(
 def test_production_builder_wires_recipe_operations_and_housekeeping(
     tmp_path,
     request,
+    monkeypatch,
 ) -> None:
+    from vonk_control.capabilities import CapabilityRegistry
+    from vonk_control.capability_contract import ControllerCapability
+
+    registry = CapabilityRegistry()
+    guard = registry.guard
+
+    def forbid_gateway(capability, *args, **kwargs):
+        assert capability != ControllerCapability.GATEWAY_KEYS
+        return guard(capability, *args, **kwargs)
+
+    monkeypatch.setattr(registry, "guard", forbid_gateway)
     engine = create_engine(f"sqlite:///{tmp_path / 'builder.sqlite'}")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
@@ -133,6 +145,7 @@ def test_production_builder_wires_recipe_operations_and_housekeeping(
         management_policy=ManagementAddressPolicy.parse("10.0.0.0/24"),
         clock=clock,
         worker_id="control-worker-test",
+        capabilities=registry,
         distributed_start_timeout_seconds=1800,
         artifact_job_root=tmp_path / "artifact-jobs" / "blobs",
         artifact_job_storage_max_bytes=16 * 1024**3,

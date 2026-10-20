@@ -78,11 +78,13 @@ class RecipeRouteService:
         management_policy: ManagementAddressPolicy,
         clock: Callable[[], datetime],
         maximum_age_seconds: int = ROUTE_EVIDENCE_MAX_AGE_SECONDS,
+        prepare_key_routes: Callable[[frozenset[str]], None] | None = None,
     ) -> None:
         if not 1 <= maximum_age_seconds <= ROUTE_EVIDENCE_MAX_AGE_SECONDS:
             raise ValueError("recipe route evidence age is invalid")
         self.sessions = sessions
         self._publisher = publisher
+        self._prepare_key_routes = prepare_key_routes
         self._management_policy = management_policy
         self._clock = clock
         self._maximum_age = timedelta(seconds=maximum_age_seconds)
@@ -695,6 +697,8 @@ class RecipeRouteService:
         return withdrawal_steps._maintain_empty_routes(self, session)
 
     def _publish(self, candidate: _RecipeCandidate) -> LiteLlmGeneration:
+        if self._prepare_key_routes is not None:
+            self._prepare_key_routes(candidate.included)
         return self._publisher.publish_recipe(candidate)
 
     def _publish_empty(self, route_digest: str) -> LiteLlmGeneration:

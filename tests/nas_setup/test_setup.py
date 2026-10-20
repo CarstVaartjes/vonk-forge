@@ -112,6 +112,29 @@ def test_lost_install_response_and_upgrade_preserve_credentials_and_known_settin
     assert parse_environment(installed / ".env")["COMPOSE_PROFILES"] == ""
 
 
+def test_upgrade_preserves_running_gateway_access_and_authority(
+    installed: Path, template: NasInstallTemplate
+) -> None:
+    """Catch installer chmod revoking a live API's gateway group access."""
+    gateway = installed / "secrets/gateway"
+    gateway.chmod(0o770)
+    authority = gateway / "authority"
+    authority.mkdir(mode=0o770)
+    master = authority / "master-key"
+    master.write_bytes(b"serving-master-key")
+    master.chmod(0o640)
+    before = {path: path.stat() for path in (gateway, authority, master)}
+    prepare(template, installed.parent, PromptIo(io.StringIO("")), upgrade=True)
+    for path, metadata in before.items():
+        current = path.stat()
+        assert (current.st_uid, current.st_gid, current.st_mode) == (
+            metadata.st_uid,
+            metadata.st_gid,
+            metadata.st_mode,
+        )
+    assert master.read_bytes() == b"serving-master-key"
+
+
 def test_upgrade_asks_only_new_inputs_and_keeps_secure_remote_profile(
     tmp_path: Path, template: NasInstallTemplate
 ) -> None:

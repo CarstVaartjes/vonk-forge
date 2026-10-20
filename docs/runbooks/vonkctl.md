@@ -979,7 +979,14 @@ Controller restart recreates it if it was revoked or lost.
 Then `GET https://<controller host>/v1/models` with `Authorization: Bearer
 <key>` lists the alias. Chat recipes serve `POST /v1/chat/completions`.
 Decision 3.0 recipes serve `POST /v1/systemone` with the same gateway key and
-public model alias. For example, send this JSON with `Content-Type: application/json`:
+public model alias. Managed keys receive the exact native inference route only
+when an accepted running recipe within their existing model scope declares
+that decision interface. Route publication reconciles these grants before
+advertising the endpoint; key creation also follows pending publication intents.
+Automatic gateway reconciliation updates existing keys
+without renewing their secrets, changing expiry, or broadening model scope;
+withdrawal removes the native grant. Administrative routes remain forbidden.
+For example, send this JSON with `Content-Type: application/json`:
 
 ```json
 {
