@@ -138,10 +138,15 @@ async fn malformed_range_observation_ends_boundedly_and_same_digest_is_admitted_
     let address = listener.local_addr().unwrap();
     let client = authenticated_test_client(&format!("http://{address}"), TEST_NODE_ID);
     let response_digest = digest.clone();
+    // Keep the fault active until the first owner returns. The HTTP transport
+    // may retry a connection itself; counting responses could accidentally
+    // repair the fault inside that first request and make this test flaky.
+    let repaired = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let peer_repaired = repaired.clone();
     let peer = spawn_peer(move || {
         let deadline = std::time::Instant::now() + PEER_BUDGET;
         let mut requests = Vec::new();
-        for attempt in 0..6 {
+        loop {
             let mut socket = accept_peer(&listener, deadline);
             let mut request = Vec::new();
             let mut buffer = [0_u8; 1024];
@@ -152,7 +157,8 @@ async fn malformed_range_observation_ends_boundedly_and_same_digest_is_admitted_
                 request.extend_from_slice(&buffer[..read]);
             }
             requests.push(request);
-            let range = if attempt < 5 {
+            let repair_visible = peer_repaired.load(std::sync::atomic::Ordering::Acquire);
+            let range = if !repair_visible {
                 "unreadable".to_owned()
             } else {
                 format!("bytes 0-{}/{}", model.len() - 1, model.len())
@@ -161,6 +167,9 @@ async fn malformed_range_observation_ends_boundedly_and_same_digest_is_admitted_
                 model.len(), response_digest, range).unwrap();
             // Framing loss never accepts these bytes into the final namespace.
             let _ = socket.write_all(model);
+            if repair_visible {
+                break;
+            }
         }
         requests
     });
@@ -180,6 +189,7 @@ async fn malformed_range_observation_ends_boundedly_and_same_digest_is_admitted_
     );
     assert!(started.elapsed() < Duration::from_secs(20));
     assert!(!destination.exists());
+    repaired.store(true, std::sync::atomic::Ordering::Release);
     client
         .download_distribution_object(TEST_PLAN_DIGEST, &digest, model.len() as u64, &destination)
         .await
@@ -189,5 +199,5 @@ async fn malformed_range_observation_ends_boundedly_and_same_digest_is_admitted_
         .download_distribution_object(TEST_PLAN_DIGEST, &digest, model.len() as u64, &destination)
         .await
         .unwrap();
-    assert_eq!(peer.finish().unwrap().len(), 6);
+    peer.finish().unwrap();
 }
