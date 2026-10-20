@@ -59,6 +59,12 @@ impl OperationProgress {
     /// lease renewals and retries are liveness, never progress.
     pub fn advanced_from(&self, previous: Option<&Self>) -> bool {
         previous.is_none_or(|previous| {
+            if let (Some(old), Some(new)) = (&previous.checkpoint, &self.checkpoint)
+                && old.key != new.key
+            {
+                return false;
+            }
+
             self.completed_bytes > previous.completed_bytes
                 || self.completed_items.clone().unwrap_or_default()
                     > previous.completed_items.clone().unwrap_or_default()

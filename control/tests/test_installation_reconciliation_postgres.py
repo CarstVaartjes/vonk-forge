@@ -347,3 +347,52 @@ def test_postgres_new_review_keeps_the_reconciled_rank_after_a_cancelled_rank(
         assert claims and all(
             item.state == ReservationState.RELEASED for item in claims
         )
+
+
+def test_postgres_cache_loss_reinstalls_through_normal_prepared_installation(
+    tmp_path: Path, postgres_engine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Wrong implementation: marking missing bytes absent is cosmetic if normal
+    # preparation still returns the old successful receipt instead of repairing.
+    from vonk_agent_protocol import InstallationNodeState, InstallationState
+    from vonk_control.installed_bytes import reconcile_missing_installations
+
+    sessions, lifecycle, _queue, mapping_id, build_id, node_ids = setup_services(
+        tmp_path, engine=postgres_engine
+    )
+    installed = installed_recipe(
+        lifecycle, mapping_id, build_id, node_ids, request_id=str(uuid.uuid4())
+    )
+    now = NOW + timedelta(seconds=60)
+    monkeypatch.setattr(lifecycle, "_clock", lambda: now)
+    with sessions.begin() as session:
+        assert (
+            reconcile_missing_installations(
+                session,
+                node_ids[0],
+                [],
+                observed_at=now,
+                before=now - timedelta(seconds=30),
+            )
+            == 1
+        )
+    repair = lifecycle.start_installation(
+        installed.owner_id, actor="admin", request_id=str(uuid.uuid4())
+    )
+    assert repair.id != installed.id
+    with sessions() as session:
+        row = session.get(RecipeInstallation, installed.owner_id)
+        assert row is not None and row.state == InstallationState.INSTALLING
+    lifecycle.record_node_result(
+        repair.id, node_ids[0], succeeded=True, evidence={"installed_bytes": 120}
+    )
+    with sessions() as session:
+        row = session.get(RecipeInstallation, installed.owner_id)
+        rank = session.scalar(
+            select(InstallationNode).where(
+                InstallationNode.installation_id == installed.owner_id
+            )
+        )
+        assert row is not None and row.state == InstallationState.INSTALLED
+        assert rank is not None and rank.state == InstallationNodeState.INSTALLED
+        assert rank.installed_bytes == 120

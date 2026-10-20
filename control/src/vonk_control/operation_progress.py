@@ -25,6 +25,7 @@ from vonk_agent_protocol import (
 
 from . import agent_operation_states, job_states
 from .lifecycle.evidence import Residue
+from .operation_contract import same_progress_attempt
 from .stall_window import progress_advanced
 from .stored_json import read_row_column
 from .strict_json import read_stored_model
@@ -117,6 +118,10 @@ def sample_progress(
     }
     if (
         previous is not None
+        and (
+            same_progress_attempt(previous, current)
+            or (previous.checkpoint is None and current.checkpoint is None)
+        )
         and delta_time > 0
         and is_transfer_phase(current.phase)
         and current.phase == previous.phase

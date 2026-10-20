@@ -312,6 +312,13 @@ pub fn installation_sizes(
                         installation_id: *id,
                         bytes,
                     }),
+                    // A directory/file removed during the scan is a cache miss.
+                    // Permission and other I/O errors remain visible, never absence.
+                    Err(crate::oci::OciError::Io(error))
+                        if error.kind() == std::io::ErrorKind::NotFound =>
+                    {
+                        None
+                    }
                     Err(error) => {
                         eprintln!(
                             "vonk-agent: inventory cannot measure installation {id}: {error}"

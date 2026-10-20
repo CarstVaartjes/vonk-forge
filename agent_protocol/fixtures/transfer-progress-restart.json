@@ -1,0 +1,4 @@
+[
+  {"phase":"copying","completed_bytes":100,"total_bytes":200,"total_bytes_known":true,"activity_sequence":10,"checkpoint":{"key":"00000000-0000-4000-8000-000000000001","sequence":0}},
+  {"phase":"copying","completed_bytes":5,"total_bytes":200,"total_bytes_known":true,"activity_sequence":1,"checkpoint":{"key":"00000000-0000-4000-8000-000000000002","sequence":0}}
+]

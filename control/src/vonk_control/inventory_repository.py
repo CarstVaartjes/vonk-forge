@@ -21,7 +21,7 @@ from vonk_agent_protocol.inventory import (
     NetworkInterface,
 )
 
-from .installed_bytes import refresh_installed_bytes
+from .installed_bytes import reconcile_missing_installations, refresh_installed_bytes
 from .logging import log_event
 from .models import AgentNode, NodeInventorySnapshot
 
@@ -229,12 +229,18 @@ class InventoryRepository:
                 .order_by(NodeInventorySnapshot.observed_at.desc())
                 .limit(1)
             )
-            if measured is not None and (
-                latest is None
-                or value.observed_at
-                >= (latest if latest.tzinfo is not None else latest.replace(tzinfo=UTC))
+            if latest is None or value.observed_at >= (
+                latest if latest.tzinfo is not None else latest.replace(tzinfo=UTC)
             ):
-                refresh_installed_bytes(session, value.node_id, measured)
+                reconcile_missing_installations(
+                    session,
+                    value.node_id,
+                    validated.installations,
+                    observed_at=value.observed_at,
+                    before=value.observed_at - MAX_INVENTORY_FUTURE_SKEW,
+                )
+                if measured is not None:
+                    refresh_installed_bytes(session, value.node_id, measured)
             session.add(row)
         return row
 

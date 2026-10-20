@@ -1088,3 +1088,17 @@ fn inventory_rotates_past_protected_prefix_and_only_judges_its_observed_batch() 
         }
     }
 }
+
+#[test]
+fn deleted_installation_directories_are_absent_on_the_next_inventory() {
+    // Wrong implementation: a cached install receipt keeps reporting an
+    // installation after its directory is removed, poisoning every load.
+    let root = tempfile::tempdir().unwrap();
+    let installation = root.path().join("installations").join(INSTALLATION);
+    file(&installation.join("spec.json"), b"{}");
+    assert_eq!(super::installation_names(root.path()).unwrap().len(), 1);
+    assert_eq!(super::installation_sizes(root.path()).unwrap().len(), 1);
+    fs::remove_dir_all(installation).unwrap();
+    assert_eq!(super::installation_names(root.path()), Some(vec![]));
+    assert_eq!(super::installation_sizes(root.path()), Some(vec![]));
+}

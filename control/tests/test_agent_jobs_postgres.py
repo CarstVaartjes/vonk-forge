@@ -1362,3 +1362,66 @@ def test_operator_wait_check_clock_does_not_authorize_another_attempt(service):
     with sessions() as session:
         row = session.get(AgentOperation, queued.id)
         assert row is not None and row.current_attempt == 1
+
+
+@pytest.mark.parametrize("restart", [False, True])
+def test_postgres_distribution_lower_receipt_settles_without_lease_retry(
+    service, restart
+):
+    # Wrong implementation: heartbeats include Docker pull bytes, but the model
+    # receipt is smaller; a high-water validation rolls back the whole result,
+    # leaving a live agent's attempt to expire and repeat the copy forever.
+    from vonk_agent_protocol import (
+        AgentOperation as Operation,
+    )
+    from vonk_agent_protocol import (
+        ArtifactDistributionResult,
+        LifecycleState,
+        OperationCheckpoint,
+        ProgressPhase,
+    )
+    from vonk_control.operation_progress import stored_progress
+
+    sessions, clock = service
+    jobs = AgentJobService(sessions, clock=clock)
+    operation = jobs.enqueue(
+        parent(sessions, clock).id,
+        NODE_A,
+        Operation.ARTIFACT_DISTRIBUTION,
+        COMMIT,
+        distribution_payload(),
+    )
+    claim = claim_agent(jobs, NODE_A, "serial-a")
+    assert claim is not None
+    jobs.heartbeat(
+        claim,
+        OperationProgress(
+            phase=ProgressPhase.COPYING,
+            completed_bytes=100,
+            checkpoint=OperationCheckpoint(key="copy-one", sequence=9),
+        ),
+        60,
+    )
+    if restart:
+        clock.advance(seconds=2)
+        jobs.heartbeat(
+            claim,
+            OperationProgress(
+                phase=ProgressPhase.COPYING,
+                completed_bytes=5,
+                checkpoint=OperationCheckpoint(key="copy-two", sequence=0),
+            ),
+            60,
+        )
+        progress = stored_progress(fenced_attempt(sessions, claim))
+        assert progress is not None and progress.completed_bytes == 5
+    jobs.succeed(claim, ArtifactDistributionResult(downloaded_bytes=50))
+    # Restarting the Controller and advancing past the old lease cannot reissue
+    # an exact effect whose successful receipt was accepted.
+    clock.advance(seconds=3600)
+    jobs = AgentJobService(sessions, clock=clock)
+    assert claim_agent(jobs, NODE_A, "serial-a") is None
+    with sessions() as session:
+        row = session.get(AgentOperation, operation.id)
+        assert row is not None and row.state == LifecycleState.SUCCEEDED
+        assert row.current_attempt == 1

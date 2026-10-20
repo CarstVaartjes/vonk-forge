@@ -1419,10 +1419,26 @@ def test_heartbeat_with_progress_that_regresses_still_renews_the_lease(
     )
     claim = claim_agent(jobs, NODE_A, "serial-a")
     assert claim is not None
-    jobs.heartbeat(claim, {"phase": "copying", "completed_bytes": 10}, 60)
+    jobs.heartbeat(
+        claim,
+        {
+            "phase": "copying",
+            "completed_bytes": 10,
+            "checkpoint": {"key": "one-attempt", "sequence": 0},
+        },
+        60,
+    )
     clock.advance(seconds=30)
 
-    directive = jobs.heartbeat(claim, {"phase": "copying", "completed_bytes": 3}, 60)
+    directive = jobs.heartbeat(
+        claim,
+        {
+            "phase": "copying",
+            "completed_bytes": 3,
+            "checkpoint": {"key": "one-attempt", "sequence": 0},
+        },
+        60,
+    )
 
     assert directive.deadline >= clock.now + timedelta(seconds=60)
     with sessions() as session:
@@ -2593,7 +2609,7 @@ def test_progress_snapshots_and_phase_changes_have_bounded_write_frequency(
         assert rows[0].progress["completed_bytes"] == 100
 
 
-def test_distribution_retry_preserves_durable_progress_and_accepts_object_replay(
+def test_distribution_retry_records_reobserved_progress_without_a_high_water_clamp(
     service,
 ) -> None:
     jobs, sessions, clock = service
@@ -2641,8 +2657,8 @@ def test_distribution_retry_preserves_durable_progress_and_accepts_object_replay
                 AgentOperationAttempt.fence == resumed.fence
             )
         )
-        assert current.progress["completed_bytes"] == 100
-        assert current.progress["completed_items"] == 1
+        assert current.progress["completed_bytes"] == 50
+        assert current.progress["completed_items"] == 0
         assert current.progress["phase"] == "verifying"
 
 
@@ -3342,7 +3358,7 @@ def test_a_refused_distribution_stores_the_agents_denial_evidence(service) -> No
         assert attempt.result["stage"] == evidence["stage"]
 
 
-def test_successful_distribution_receipt_closes_coalesced_final_counters(
+def test_successful_distribution_receipt_preserves_observed_order_wide_bytes(
     service,
 ) -> None:
     jobs, sessions, clock = service
@@ -3382,7 +3398,7 @@ def test_successful_distribution_receipt_closes_coalesced_final_counters(
                 AgentOperationAttempt.fence == claim.fence
             )
         )
-        assert attempt.progress["completed_bytes"] == 200
+        assert attempt.progress["completed_bytes"] == 100
         assert attempt.progress["completed_items"] == 2
         assert attempt.progress["phase"] == "completed"
 
