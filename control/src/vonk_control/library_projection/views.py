@@ -569,7 +569,9 @@ def recipe_detail(self: LibraryProjection, selector: str) -> RecipeDetailRespons
         *[
             (row, recipe)
             for row, recipe in indexed_recipes
-            if row.content_digest != exact[0].content_digest
+            # A stale index may still contain this selector's predecessor.
+            if row.document_id != exact[0].document_id
+            and row.content_digest != exact[0].content_digest
             and any(
                 selection.model.content_sha256 in model_digests
                 for selection in recipe.models
@@ -587,13 +589,7 @@ def recipe_detail(self: LibraryProjection, selector: str) -> RecipeDetailRespons
         self._recipe_projection(row, recipe, model_by_key, snapshot)
         for row, recipe in recipe_rows
     ]
-    entry = self._resolve_selector(
-        entries,
-        selector,
-        lambda item: (item.identity.publisher, item.identity.slug),
-    )
-    assert isinstance(entry, LibraryRecipeProjection)
-    entry = self._assessed([entry], deadline=deadline)[0]
+    entry = self._assessed([entries[0]], deadline=deadline)[0]
     recipe = next(
         document
         for row, document in recipe_rows
