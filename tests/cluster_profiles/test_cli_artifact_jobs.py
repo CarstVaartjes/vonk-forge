@@ -125,6 +125,45 @@ def _capabilities(*, maximum_input_file_bytes: int = 64) -> dict[str, object]:
     }
 
 
+def test_create_canonicalizes_moss_output_media_without_mutating_binding() -> None:
+    limits = {
+        **OUTPUT_LIMITS,
+        "allowed_media_types": ["video/mp4", "application/x-ndjson", "video/mp4"],
+    }
+    create = {
+        "interface": "artifact-job",
+        "parameters": {},
+        "output_limits": limits,
+        "timeout_seconds": 1,
+    }
+    body = cli_artifact_jobs._canonical_create(create, [], _capabilities())
+    expected = {
+        **limits,
+        "allowed_media_types": ["application/x-ndjson", "video/mp4"],
+    }
+    assert body["output_limits"] == expected
+    assert limits["allowed_media_types"] == [
+        "video/mp4",
+        "application/x-ndjson",
+        "video/mp4",
+    ]
+
+
+@pytest.mark.parametrize("media", ["Video/MP4", "video/mp4; codecs=h264"])
+def test_create_rejects_invalid_media_spelling_before_sending(media: str) -> None:
+    with pytest.raises(ValueError):
+        cli_artifact_jobs._canonical_create(
+            {
+                "interface": "artifact-job",
+                "parameters": {},
+                "output_limits": {**OUTPUT_LIMITS, "allowed_media_types": [media]},
+                "timeout_seconds": 1,
+            },
+            [],
+            _capabilities(),
+        )
+
+
 class ArtifactJobClient:
     request_timeout_seconds = 15.0
 

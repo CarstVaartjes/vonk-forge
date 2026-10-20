@@ -191,6 +191,45 @@ def test_assertion_parser_rejects_unknown_fields_and_missing_semantics() -> None
     )
 
 
+def test_fixture_producer_canonicalizes_moss_output_media() -> None:
+    recipe = _parse_recipe_fixture(
+        "vonk-forge/moss-vl-realtime-11b-pytorch-single",
+        {
+            "content_sha256": "a" * 64,
+            "interface": "artifact-job",
+            "parameters": {},
+            "inputs": [],
+            "output_limits": {
+                "max_files": 2,
+                "max_file_bytes": 1024,
+                "max_total_bytes": 2048,
+                "allowed_media_types": ["video/mp4", "application/x-ndjson"],
+            },
+            "timeout_seconds": 60,
+            "assertions": [
+                {
+                    "kind": "video-metadata",
+                    "media_type": "video/mp4",
+                    "width": 64,
+                    "height": 64,
+                    "fps": 24,
+                    "frame_count": 48,
+                },
+                {
+                    "kind": "realtime-transcript",
+                    "media_type": "application/x-ndjson",
+                    "model_revision": "06b067617677661194cf837970fe3a10f1a0e56d",
+                },
+            ],
+        },
+        {},
+    )
+    assert recipe.output_limits["allowed_media_types"] == [
+        "application/x-ndjson",
+        "video/mp4",
+    ]
+
+
 def _ocr_zip(*, characters_delta: int = 0, extra_name: str | None = None) -> bytes:
     markdown = "# OCR\n\n7\n"
     manifest = {

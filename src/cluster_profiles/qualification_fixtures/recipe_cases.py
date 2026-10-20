@@ -6,6 +6,8 @@ import json
 from collections.abc import Mapping
 from dataclasses import replace
 
+from vonk_forge_contracts import canonical_media_types
+
 from .assertions import _parse_assertion
 from .contracts import (
     _CASE_ID,
@@ -137,7 +139,7 @@ def _parse_recipe_case(
         )
     ):
         raise FixtureError(f"recipe fixture {key} output media types are invalid")
-    allowed = raw_allowed
+    allowed = canonical_media_types(raw_allowed)
     output_limits: _OutputLimits = {
         "max_files": max_files,
         "max_file_bytes": max_file_bytes,

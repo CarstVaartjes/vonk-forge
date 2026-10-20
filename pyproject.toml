@@ -10,6 +10,7 @@ requires-python = ">=3.14"
 dependencies = [
   "argon2-cffi>=25.1.0",
   "attrs>=26.1.0",
+  "vonk-forge-public-contracts @ git+https://github.com/CarstVaartjes/vonk-forge-recipes.git@a0b0ef57d5504bf3ac305aa215cdfa59a2250dc9#subdirectory=contracts",
   "httpx2>=2.13.1",
   "jsonschema>=4.23",
   "pillow>=12.3.0",
@@ -34,6 +35,9 @@ dev = [
 packages = ["src/cluster_profiles"]
 # The hook includes these explicitly, including builds without .gitignore.
 exclude = ["src/cluster_profiles/generated_control", "src/cluster_profiles/schemas/control-openapi.json"]
+
+[tool.hatch.metadata]
+allow-direct-references = true
 
 [tool.hatch.build.hooks.custom]
 path = "tools/hatch_build.py"
