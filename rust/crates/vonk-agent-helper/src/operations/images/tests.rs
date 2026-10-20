@@ -501,3 +501,55 @@ fn receipt_projection_reuses_verified_observation_after_daemon_loss() {
         config
     );
 }
+
+#[test]
+fn preparation_observation_reads_exact_images_without_pull_tag_or_receipt_writes() {
+    // Wrong implementation: a grant-free probe enters runtime_image_pull and
+    // mutates Docker, a receipt, or the authority/intent ledger.
+    let temp = tempfile::tempdir().unwrap();
+    let roots = ManagedRoots::under(temp.path());
+    fs::create_dir_all(&roots.runtime_requests).unwrap();
+    fs::set_permissions(&roots.runtime_requests, fs::Permissions::from_mode(0o700)).unwrap();
+    let runner = PullRunner::default();
+    let manifest = "a".repeat(64);
+    let config = "c".repeat(64);
+    runner.images.lock().unwrap().insert(
+        format!("localhost/vonk/compiled-runtime-{manifest}"),
+        format!("sha256:{config}"),
+    );
+    let executor = OperationExecutor::new(roots.clone(), &[0; 32], runner.clone(), None).unwrap();
+    let request = HostRuntimeRequest {
+        action: HostRuntimeAction::ImagePull,
+        fence: uuid::Uuid::new_v4(),
+        arguments: pull_arguments(&manifest, &config),
+        installation_id: None,
+        reconciliation_identity: None,
+        run_generation: None,
+        start_plan: None,
+        stop_plan: None,
+        job_plan: None,
+    };
+    let raw = canonical_json(&request).unwrap();
+    let digest = hex_sha256(&raw);
+    let path = roots.runtime_requests.join(format!("{digest}.json"));
+    fs::write(&path, raw).unwrap();
+    fs::set_permissions(path, fs::Permissions::from_mode(0o600)).unwrap();
+    assert!(executor.observe_preparation(&digest).unwrap());
+    assert!(
+        runner
+            .calls
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|args| args.starts_with(&["image".into(), "inspect".into()]))
+    );
+    assert!(!roots.runtime_image_receipts.exists());
+    runner.images.lock().unwrap().insert(
+        format!("localhost/vonk/compiled-runtime-{manifest}"),
+        format!("sha256:{}", "d".repeat(64)),
+    );
+    assert!(matches!(
+        executor.observe_preparation(&digest),
+        Err(OperationError::RuntimeImageIdentityInvalid)
+    ));
+}

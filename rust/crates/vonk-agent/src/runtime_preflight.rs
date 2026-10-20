@@ -798,6 +798,13 @@ mod tests {
     }
 }
 
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CompletedPreflight {
+    fence: uuid::Uuid,
+    result: RuntimePreflightResult,
+}
+
 /// Retain the full signed-helper result under the exact accepted fence. This
 /// extends the preflight cache owner, independently of receipt transmission.
 pub fn retain_completed(
@@ -813,10 +820,14 @@ pub fn retain_completed(
     .map_err(|error| std::io::Error::other(format!("preflight cache directory: {error}")))?;
     let mut file = tempfile::NamedTempFile::new_in(&root)?;
     file.write_all(
-        &canonical_json(result).map_err(|_| std::io::Error::other("invalid preflight result"))?,
+        &canonical_json(&CompletedPreflight {
+            fence,
+            result: result.clone(),
+        })
+        .map_err(|_| std::io::Error::other("invalid preflight result"))?,
     )?;
     file.as_file().sync_all()?;
-    file.persist(root.join(format!("{fence}.json")))
+    file.persist(root.join("completed.json"))
         .map_err(|e| e.error)?;
     fs::File::open(root)?.sync_all()?;
     Ok(())
@@ -829,7 +840,7 @@ pub fn observe_completed(
 ) -> Result<Option<RuntimePreflightResult>, ProcessError> {
     let path = data_root
         .join(vonk_agent_protocol::generated::AgentOperation::RuntimePreflightV1.as_str())
-        .join(format!("{fence}.json"));
+        .join("completed.json");
     let raw = match crate::oci::read_regular_file(&path, 64 * 1024) {
         Ok(raw) => raw,
         Err(crate::oci::OciError::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => {
@@ -841,7 +852,10 @@ pub fn observe_completed(
             );
         }
     };
-    let result: RuntimePreflightResult = vonk_agent_protocol::parse_strict(&raw)
-        .map_err(|_| std::io::Error::other("preflight receipt invalid"))?;
-    Ok((result.fingerprint == fingerprint).then_some(result))
+    let completed: CompletedPreflight = vonk_agent_protocol::parse_strict(&raw)
+        .map_err(|error| std::io::Error::other(format!("preflight receipt invalid: {error}")))?;
+    Ok(
+        (completed.fence == fence && completed.result.fingerprint == fingerprint)
+            .then_some(completed.result),
+    )
 }

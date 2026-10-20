@@ -2,24 +2,27 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from sqlalchemy import select
 from vonk_agent_protocol import (
     AgentInstallResult,
     AgentResult,
     AgentResultState,
+    CompiledExecutionPlan,
     LifecycleState,
     ObservationCause,
 )
 from vonk_agent_protocol import (
     AgentOperation as Kind,
 )
+from vonk_agent_protocol.recipe_operations import RecipeInstallPayload
 from vonk_control.agent_jobs import AgentJobService, StaleAgentFence
 from vonk_control.models import AgentNode, AgentOperation, AgentOperationAttempt, Job
 
 from . import test_agent_jobs_postgres as fixtures
 from .runtime_identity_support import claim_agent
-from .test_agent_jobs import canonical_install_payload
 from .test_agent_jobs_postgres import COMMIT, NODE_A, parent
 
 
@@ -33,7 +36,21 @@ def _accepted(service):
     queue = AgentJobService(sessions, clock=clock)
     owner = parent(sessions, clock)
     operation = queue.enqueue(
-        owner.id, NODE_A, Kind.RECIPE_INSTALL, COMMIT, canonical_install_payload()
+        owner.id,
+        NODE_A,
+        Kind.RECIPE_INSTALL,
+        COMMIT,
+        RecipeInstallPayload(
+            installation_id="00000000-0000-4000-8000-000000000001",
+            plan_digest="b" * 64,
+            expected_bytes=1,
+            compiled_execution_plan=CompiledExecutionPlan.model_validate_json(
+                (
+                    Path(__file__).parents[2]
+                    / "agent_protocol/tests/fixtures/compiled-execution-plan-v2.json"
+                ).read_bytes()
+            ),
+        ),
     )
     claim = claim_agent(queue, NODE_A, "serial-a")
     assert claim is not None
