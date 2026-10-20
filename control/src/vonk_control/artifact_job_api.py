@@ -17,14 +17,12 @@ from vonk_agent_protocol import (
 from .artifact_blob_store import ArtifactBlobStore
 from .artifact_jobs import (
     MAX_INPUT_FILE_BYTES,
-    ArtifactFileDeclaration,
     ArtifactJobCapabilitiesResponse,
     ArtifactJobError,
     ArtifactJobListResponse,
     ArtifactJobResponse,
     ArtifactJobService,
     ArtifactJobView,
-    OutputLimits,
 )
 from .auth import Actor, agent_identity_from_scope
 from .compiled_artifact_contract import ParameterScalar
@@ -57,8 +55,8 @@ class ArtifactJobCreate(ArtifactJobModel):
         pattern=r"^(audio-job|video-job|image-job|mesh-job|artifact-job)$"
     )
     parameters: dict[str, ParameterScalar] = Field(default_factory=dict)
-    inputs: list[ArtifactFileDeclaration] = Field(default_factory=list, max_length=32)
-    output_limits: OutputLimits
+    inputs: list[RecipeJobInputFile] = Field(default_factory=list, max_length=32)
+    output_limits: RecipeJobOutputLimits
     timeout_seconds: int = Field(ge=1, le=3_600)
 
 
@@ -139,13 +137,8 @@ def install_artifact_job_routes(
                     run_id,
                     interface=body.interface,
                     parameters=body.parameters,
-                    inputs=[
-                        RecipeJobInputFile.model_validate(item.model_dump())
-                        for item in body.inputs
-                    ],
-                    output_limits=RecipeJobOutputLimits.model_validate(
-                        body.output_limits.model_dump()
-                    ),
+                    inputs=body.inputs,
+                    output_limits=body.output_limits,
                     timeout_seconds=body.timeout_seconds,
                     actor=actor.subject,
                     request_id=request_id,
