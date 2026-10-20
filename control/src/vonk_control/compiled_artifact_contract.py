@@ -23,8 +23,8 @@ from pydantic import (
     model_validator,
 )
 from vonk_agent_protocol import canonical_message
-from vonk_forge_contracts import RecipeDefinition, canonical_media_types
-from vonk_forge_contracts.media_types import MEDIA_TYPE_PATTERN
+from vonk_agent_protocol.recipe_jobs import MediaType, canonical_media_types
+from vonk_forge_contracts import RecipeDefinition
 from vonk_forge_contracts.recipe import RecipeFileSlot, RecipeJobInterface
 
 from .strict_json import StrictJSONModel
@@ -39,7 +39,6 @@ MAX_PARAMETERS = 64
 
 _SLOT = r"^[A-Za-z][A-Za-z0-9_-]{0,31}$"
 _EXTENSION = r"^\.[a-z0-9][a-z0-9._-]{0,15}$"
-_MEDIA = MEDIA_TYPE_PATTERN
 _PARAMETER = r"^[a-z][a-z0-9_-]{0,63}$"
 _UNSAFE_PARAMETER_KEY = re.compile(
     r"^(?:apikey|passwordhash)$|"
@@ -54,7 +53,6 @@ _UNSAFE_PARAMETER_KEY = re.compile(
 
 SlotId = Annotated[str, StringConstraints(pattern=_SLOT)]
 Extension = Annotated[str, StringConstraints(pattern=_EXTENSION)]
-MediaType = Annotated[str, StringConstraints(pattern=_MEDIA)]
 ParameterName = Annotated[str, StringConstraints(pattern=_PARAMETER)]
 type ParameterScalar = bool | int | float | str
 

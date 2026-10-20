@@ -16,9 +16,6 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any, Protocol, cast, runtime_checkable
 
-from pydantic import TypeAdapter
-from vonk_forge_contracts import canonical_media_types
-
 from .cli_files import read_json_document
 from .cli_states import (
     ARTIFACT_JOB_STATES,
@@ -40,6 +37,7 @@ from .control_client import (
 )
 from .control_client.transfers import download_destination as _download_destination
 from .control_client.transfers import verified_output as _existing_verified_file
+from .generated_control.media_types import canonical_media_types
 
 _UUID = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
@@ -872,9 +870,7 @@ def _canonical_create(
     output_limits = {
         **output_limits,
         "allowed_media_types": canonical_media_types(
-            TypeAdapter(list[str]).validate_python(
-                output_limits.get("allowed_media_types"), strict=True
-            )
+            cast(list[str], output_limits["allowed_media_types"])
         ),
     }
     validated["output_limits"] = output_limits

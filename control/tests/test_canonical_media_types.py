@@ -2,9 +2,9 @@
 
 import pytest
 from pydantic import ValidationError
+from vonk_agent_protocol.recipe_jobs import canonical_media_types
 from vonk_control.artifact_job_api import ArtifactJobCreate
 from vonk_control.compiled_artifact_contract import ArtifactOutputLimits
-from vonk_forge_contracts import canonical_media_types
 
 
 @pytest.mark.parametrize(

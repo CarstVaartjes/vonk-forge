@@ -30,7 +30,7 @@ vonk-nas-setup = { path = "../nas_setup", editable = true }
 # Resolve the public contract from the recipe repository's moving main branch.
 # control/packaging/public-contracts.lock records the exact commit consumed by
 # each lock/build update; the image build uses that same commit explicitly.
-vonk-forge-public-contracts = { git = "https://github.com/CarstVaartjes/vonk-forge-recipes.git", rev = "a0b0ef57d5504bf3ac305aa215cdfa59a2250dc9", subdirectory = "contracts" }
+vonk-forge-public-contracts = { git = "https://github.com/CarstVaartjes/vonk-forge-recipes.git", rev = "1514c9f43b099b041a80ce6c8c516d04d2e9e05c", subdirectory = "contracts" }
 
 # The one locked tool environment for every suite, lint and type check, local
 # and CI alike (docs/testing-and-ci.md). Nothing is added with `uv run --with`

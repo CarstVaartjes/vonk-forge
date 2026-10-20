@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Sync the vonkctl CLI's own locked runtime dependencies (the root project's,
-# without the project, dev tools or the Controller) into one
+# without the project, dev tools, the Controller or pydantic) into one
 # environment. The installed-CLI tests install each wheel they build into a
 # scratch venv with --no-deps and link this environment in, so no test
 # resolves or downloads a dependency.

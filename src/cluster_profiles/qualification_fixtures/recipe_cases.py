@@ -6,8 +6,7 @@ import json
 from collections.abc import Mapping
 from dataclasses import replace
 
-from vonk_forge_contracts import canonical_media_types
-
+from ..generated_control.media_types import canonical_media_types
 from .assertions import _parse_assertion
 from .contracts import (
     _CASE_ID,
