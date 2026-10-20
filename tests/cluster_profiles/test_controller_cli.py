@@ -201,7 +201,7 @@ class FakeClient:
             )
 
         if method == "GET":
-            if path.endswith("/library"):
+            if path.endswith("/library") or path == "/api/profile":
                 parameters = _operation(path, method)["parameters"]
                 assert isinstance(parameters, list)
                 assert query is None or set(query) <= {
@@ -4981,3 +4981,24 @@ def test_a_successful_run_prints_its_result_and_exits_zero(capsys) -> None:
     output = capsys.readouterr()
     assert status == 0, output.err
     assert _RUN_APPLICATION in output.out
+
+
+def test_profile_list_traverses_the_server_continuation():
+    # A full first page cannot hide later profiles from ordinary CLI output.
+    client = FakeClient(
+        {
+            ("GET", "/api/profile"): [
+                {
+                    "profiles": [{"number": number} for number in range(1, 129)],
+                    "next_after": 128,
+                },
+                {"profiles": [{"number": 129}], "next_after": None},
+            ]
+        }
+    )
+    status, result = run(("profile", "list", "--json"), client)
+    assert status == 0
+    profiles = result["profiles"]
+    assert isinstance(profiles, list)
+    assert [item["number"] for item in profiles] == list(range(1, 130))
+    assert client.calls[-1][3] == {"after": 128}

@@ -33,10 +33,51 @@ def _profile(
 ) -> dict[str, object]:
     number = _profile_number(args)
     action = getattr(args, "profile_action", None)
-    if action is None or action == "list":
+    if action == "list":
+
+        def listing(remaining: float):
+            page = client.request(
+                "GET", "/api/profile", timeout_seconds=remaining, retry=False
+            )
+            entries = page.get("profiles")
+            if not isinstance(entries, list):
+                raise ControlMalformedResponse("profile listing is unreadable")
+            profiles = list(entries)
+            previous = 0
+            after = page.get("next_after")
+            while after is not None:
+                if type(after) is not int or after <= previous:
+                    raise ControlMalformedResponse(
+                        "profile listing cursor did not advance"
+                    )
+                previous = after
+                page = client.request(
+                    "GET",
+                    "/api/profile",
+                    query={"after": after},
+                    timeout_seconds=remaining,
+                    retry=False,
+                )
+                entries = page.get("profiles")
+                if not isinstance(entries, list):
+                    raise ControlMalformedResponse("profile listing is unreadable")
+                profiles.extend(entries)
+                after = page.get("next_after")
+            return {**page, "profiles": profiles}
+
         return _poll_path(
             client,
-            "/api/profile" if action == "list" else f"/api/profile/{number}",
+            "/api/profile",
+            {},
+            args,
+            fetch_initial=True,
+            fetch=listing,
+            terminal=lambda _: True,
+        )
+    if action is None:
+        return _poll_path(
+            client,
+            f"/api/profile/{number}",
             {},
             args,
             fetch_initial=True,

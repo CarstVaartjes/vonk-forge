@@ -1142,3 +1142,18 @@ def test_wait_for_bounds_only_an_async_event(event_type: str, bounded: bool) -> 
     assert scan_source(
         source.replace("timeout=5", "timeout=None"), path="worker.py", mode="waits"
     )
+
+
+def test_rust_collection_loop_exhausts_pages_instead_of_waiting():
+    source = """fn containers() { loop {
+        let next_page = self.list_containers(cursor);
+        match next_page {
+            Some(next) => page = next,
+            None => break,
+        }
+    }}"""
+    assert not scan_rust(source, path="agent.rs")
+    assert scan_rust(source.replace("page = next", "observe(next)"), path="agent.rs")
+    assert scan_rust(
+        source.replace("None => break", "None => continue"), path="agent.rs"
+    )

@@ -600,3 +600,34 @@ test("resume refusal never becomes acceptance through another request", async ()
   await expect(new ApiClient().resumeJob(JOB_ID)).rejects.toMatchObject({ status: 409 });
   expect(requests).toHaveLength(1);
 });
+
+test("profile listing follows every continuation beyond the full first page", async () => {
+  const urls: string[] = [];
+  vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {
+    const request = input instanceof Request ? input : new Request(String(input));
+    urls.push(request.url);
+    const after = Number(new URL(request.url).searchParams.get("after") ?? "0");
+    const numbers = after === 0 ? Array.from({ length: 128 }, (_, n) => n + 1) : [129];
+    return new Response(
+      JSON.stringify({
+        generated_at: SINCE,
+        profiles: numbers.map((number) => ({
+          id: `00000000-0000-4000-8000-${String(number).padStart(12, "0")}`,
+          number,
+          revision: 1,
+          projection_issue: {
+            detail: "Saved definition is unreadable",
+            next_action: "Restore saved definition",
+          },
+        })),
+        next_after: after === 0 ? 128 : null,
+      }),
+      { status: 200, headers: { "Content-Type": "application/json" } },
+    );
+  });
+  const result = await new ApiClient().profiles();
+  expect(result.profiles.map((profile) => profile.number)).toEqual(
+    Array.from({ length: 129 }, (_, n) => n + 1),
+  );
+  expect(new URL(urls[1]!).searchParams.get("after")).toBe("128");
+});

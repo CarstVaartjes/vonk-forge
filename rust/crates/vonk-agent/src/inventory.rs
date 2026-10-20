@@ -475,6 +475,10 @@ impl<R: ProcessRunner> InventoryCollector<'_, R> {
         if let Some(speed) = self.fabric_bandwidth_mbps {
             capabilities.push(format!("fabric.connected.mbps.{speed}"));
         }
+        let installations = crate::store_retention::installation_names(self.store_path);
+        let installation_bytes = installations
+            .as_deref()
+            .and_then(|names| crate::store_retention::installation_sizes(self.store_path, names));
         Ok(Inventory {
             memory_total_bytes,
             memory_available_bytes,
@@ -496,11 +500,11 @@ impl<R: ProcessRunner> InventoryCollector<'_, R> {
             network_interfaces: None,
             nas_route_interface: None,
             host_settings: host_settings(self.runner),
-            installations: crate::store_retention::installation_names(self.store_path),
+            installations,
             unused_model_bytes: crate::store_retention::unused_model_bytes(self.store_path),
             model_objects: crate::store_retention::model_objects(self.store_path),
             runs: crate::store_retention::run_scope_names(self.store_path),
-            installation_bytes: crate::store_retention::installation_sizes(self.store_path),
+            installation_bytes,
         })
     }
 }

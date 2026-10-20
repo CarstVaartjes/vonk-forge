@@ -45,18 +45,22 @@ if TYPE_CHECKING:
 
 
 class FleetProfileService:
-    def list(self) -> FleetProfileList:
+    def list(self, *, after: int = 0) -> FleetProfileList:
         self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
         now = _aware(self._clock())
         with self._sessions() as session:
             rows = tuple(
                 session.scalars(
-                    select(FleetProfile).order_by(FleetProfile.number.asc()).limit(128)
+                    select(FleetProfile)
+                    .where(FleetProfile.number > after)
+                    .order_by(FleetProfile.number.asc())
+                    .limit(128)
                 )
             )
             return FleetProfileList(
                 generated_at=now,
                 profiles=[self._read_view(session, row) for row in rows],
+                next_after=rows[-1].number if len(rows) == 128 else None,
             )
 
     def get(self, profile_id: str) -> FleetProfileView:
