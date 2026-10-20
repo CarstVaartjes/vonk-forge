@@ -186,6 +186,9 @@ impl<R: CommandRunner> OperationExecutor<R> {
         let mut compiled = validated.docker_arguments()?;
         let image_index = omit_container_memory_limit(&mut compiled, validated.image_index);
         compiled[image_index] = operational_image;
+        // Helper-owned launch policy also covers accepted images built before
+        // passwd adaptation. Keep files durable for delayed Docker starts.
+        let identity_mounts = self.runtime_identity_mounts(validated.uid, validated.gid)?;
         let launch_options = vec![
             WORKLOAD_OOM_SCORE_ADJ.to_owned(),
             "--label".to_owned(),
@@ -206,6 +209,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
         // Options are spliced before the image while `image_index` still
         // names it; a later insert shifts it.
         compiled.splice(image_index..image_index, launch_options);
+        compiled.splice(1..1, identity_mounts);
         if validated.job_timeout_seconds.is_some() && !validated.detached {
             // JobRun retains its canonical attached contract; detached Docker
             // launch is only the helper transport that permits concurrent Stop.
@@ -448,3 +452,53 @@ impl<R: CommandRunner> OperationExecutor<R> {
 
 #[cfg(test)]
 mod tests;
+
+impl<R: CommandRunner> OperationExecutor<R> {
+    fn identity_directory(&self, path: &Path) -> Result<(), OperationError> {
+        use std::os::unix::fs::DirBuilderExt;
+        match fs::DirBuilder::new().mode(0o700).create(path) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(error) => return Err(error.into()),
+        }
+        require_exact_directory(path, self.required_owner_uid, 0o700)?;
+        Ok(())
+    }
+
+    fn runtime_identity_mounts(&self, uid: u32, gid: u32) -> Result<Vec<String>, OperationError> {
+        self.require_directory(&self.roots.data)?;
+        let root = self.roots.data.join("runtime-identities");
+        self.identity_directory(&root)?;
+        let directory = root.join(format!("{uid}-{gid}"));
+        self.identity_directory(&directory)?;
+        let mut arguments = Vec::new();
+        for (target, content) in vonk_agent_protocol::runtime_identity::files(uid, gid) {
+            let name = Path::new(target)
+                .file_name()
+                .ok_or(OperationError::UnsafePath)?;
+            let destination = directory.join(name);
+            // Atomic publication replaces a damaged file without following it;
+            // only the helper can traverse this private directory.
+            let mut temporary = tempfile::NamedTempFile::new_in(&directory)?;
+            temporary.write_all(content.as_bytes())?;
+            temporary
+                .as_file()
+                .set_permissions(fs::Permissions::from_mode(0o444))?;
+            temporary.as_file().sync_all()?;
+            temporary
+                .persist(&destination)
+                .map_err(|error| error.error)?;
+            arguments.extend([
+                "--mount".to_owned(),
+                format!(
+                    "type=bind,src={},dst=/{target},readonly",
+                    destination.display()
+                ),
+            ]);
+        }
+        sync_directory(&directory)?;
+        sync_directory(&root)?;
+        sync_directory(&self.roots.data)?;
+        Ok(arguments)
+    }
+}

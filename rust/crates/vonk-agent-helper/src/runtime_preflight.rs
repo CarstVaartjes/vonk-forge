@@ -56,6 +56,7 @@ pub fn run(
     temporary.set_size(0);
     temporary.set_cksum();
     archive.append(&temporary, io::empty())?;
+    vonk_agent_protocol::runtime_identity::append_to(&mut archive, 65534, 65534)?;
     archive.finish()?;
     drop(archive);
     let image = format!("vonk-runtime-preflight:{nonce}");

@@ -35,6 +35,20 @@ impl CommandRunner for LaunchRunner {
         self.calls.lock().unwrap().push(args.to_vec());
         let first = args.first().map(String::as_str);
         if first == Some("run") {
+            for pair in args.windows(2).filter(|pair| pair[0] == "--mount") {
+                if let Some((source, _)) = pair[1]
+                    .strip_prefix("type=bind,src=")
+                    .and_then(|s| s.split_once(",dst=/etc/"))
+                {
+                    let content = fs::read_to_string(source).unwrap();
+                    assert!(
+                        content
+                            .lines()
+                            .any(|row| row.split(':').nth(2) == Some("10001"))
+                    );
+                    assert_eq!(fs::metadata(source).unwrap().mode() & 0o777, 0o444);
+                }
+            }
             *self.created.lock().unwrap() = self.launched.is_some();
             if let RunAnswer::Deadline = self.run {
                 return Err("compiled command exceeded its deadline".to_owned());
@@ -559,4 +573,71 @@ fn a_granted_inspection_is_bound_to_the_generation_its_grant_names() {
         ));
     }
     assert!(matches!(inspect("1", None, None), Ok(())));
+}
+
+// A pre-#1795 image can still be bound to an accepted plan. Both launch
+// kinds must supply NSS files independently of that image and USER/HOME.
+fn assert_runtime_identity(run: &[String]) {
+    for target in ["/etc/passwd", "/etc/group"] {
+        assert!(
+            run.windows(2).any(|pair| pair[0] == "--mount"
+                && pair[1].ends_with(&format!(",dst={target},readonly")))
+        );
+    }
+}
+
+#[test]
+fn service_launch_supplies_numeric_identity_for_old_images() {
+    assert_runtime_identity(&launched_run(recipe_start_plan_for_authority(1)));
+}
+
+#[test]
+fn job_launch_supplies_numeric_identity_for_old_images() {
+    assert_runtime_identity(&launched_run(job_plan(recipe_start_plan_for_authority(1))));
+}
+
+#[test]
+#[ignore = "requires local Docker and the locked Python image"]
+fn numeric_identity_resolves_in_read_only_container() {
+    let temp = tempfile::tempdir_in(std::env::current_dir().unwrap()).unwrap();
+    let roots = ManagedRoots::under(temp.path());
+    let executor = OperationExecutor::new(roots, &[0; 32], MissingContainerRunner, None).unwrap();
+    let mounts = executor.runtime_identity_mounts(10001, 10002).unwrap();
+    let image = std::env::var("VONK_RUNTIME_IDENTITY_TEST_IMAGE")
+        .expect("set VONK_RUNTIME_IDENTITY_TEST_IMAGE to the locked Python image");
+    let probe = "import os,pwd,grp,getpass; [os.environ.pop(k,None) for k in ('LOGNAME','USER','LNAME','USERNAME','HOME')]; assert pwd.getpwuid(os.getuid()).pw_name == getpass.getuser() == 'vonk-runtime'; assert grp.getgrgid(os.getgid()).gr_name == 'vonk-runtime'";
+    let mut args = vec![
+        "run".to_owned(),
+        "--rm".to_owned(),
+        "--pull=never".to_owned(),
+        "--read-only".to_owned(),
+        "--network=none".to_owned(),
+        "--cap-drop=ALL".to_owned(),
+        "--security-opt=no-new-privileges".to_owned(),
+        "--user=10001:10002".to_owned(),
+    ];
+    // The very same image fails without the helper's mounts. Environment
+    // variables cannot satisfy direct passwd/group lookup.
+    let command = [image.as_str(), "python", "-c", probe];
+    let invoke = |options: &[String]| {
+        let mut complete = options.to_vec();
+        complete.extend(command.map(str::to_owned));
+        ProcessCommandRunner
+            .run_with_timeout(
+                Path::new("/usr/bin/docker"),
+                &complete,
+                Duration::from_secs(30),
+            )
+            .unwrap()
+    };
+    let broken = invoke(&args);
+    assert!(!broken.success);
+    assert!(String::from_utf8_lossy(&broken.stderr).contains("getpwuid"));
+    args.extend(mounts);
+    let repaired = invoke(&args);
+    assert!(
+        repaired.success,
+        "{}",
+        String::from_utf8_lossy(&repaired.stderr)
+    );
 }
