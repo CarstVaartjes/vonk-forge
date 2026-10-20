@@ -115,6 +115,7 @@ class RecipeOperationService(
         self._run_admission = run_admission
         self._agent_jobs = agent_jobs
         self._clock = clock
+        self._cancelled_runtime_cursor: str | None = None
         self._route_withdrawer = route_withdrawer or (lambda _run_id: None)
         self._route_publications = route_publications
         self._builds = builds

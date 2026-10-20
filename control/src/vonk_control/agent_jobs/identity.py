@@ -22,6 +22,7 @@ from vonk_agent_protocol.claims import AGENT_PROTOCOL_VERSION, AgentRuntimeIdent
 from ..agent_operation_facts import aware as _aware
 from ..agent_operation_facts import lapsed_renewal_allowed as _lapsed_renewal_allowed
 from ..auth import AgentSource
+from ..cancelled_runtime import cancellation_stop_current
 from ..categorized_errors import InvalidValue
 from ..lifecycle.evidence import BookkeepingReason, retire_as_unknown
 from ..logging import redact_text
@@ -146,6 +147,7 @@ def _active(
         )
         or node.state != "active"
         or node.revoked_at is not None
+        or not cancellation_stop_current(session, parent, operation)
     ):
         raise StaleAgentFence(
             "agent operation lease, certificate, or fence is stale",

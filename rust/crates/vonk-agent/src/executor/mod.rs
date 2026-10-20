@@ -114,7 +114,10 @@ pub trait LoopClient: Clone + Send + Sync + 'static {
 
 #[async_trait(?Send)]
 pub trait Executor {
-    async fn observe(&self, claim: &AgentClaim) -> Option<content_observation::ContentObservation>;
+    async fn observe(
+        &self,
+        claim: &AgentClaim,
+    ) -> Option<operation_observation::OperationObservation>;
 
     async fn execute(
         &self,
@@ -206,6 +209,8 @@ const RETAINED_FOREIGN_RETRY_SECONDS: u32 = 30;
 /// before a start reports it unconfirmed or failed.
 const ACL_SETTLE_RETRIES: u32 = 3;
 
+const RANK_STABILITY_WINDOW: Duration = Duration::from_secs(2);
+
 enum InterruptibleJob<T> {
     Completed(T),
     Cancelled { stopped: bool },
@@ -289,7 +294,11 @@ mod test_support;
 #[cfg(test)]
 mod shared_vectors_tests;
 
-pub mod content_observation;
+pub mod operation_observation;
+mod runtime_observation;
 
 #[cfg(test)]
 mod content_observation_tests;
+
+#[cfg(test)]
+mod runtime_observation_tests;

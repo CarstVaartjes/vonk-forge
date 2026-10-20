@@ -1,4 +1,4 @@
-"""Adopt exact content/preparation receipts without issuing another effect."""
+"""Adopt exact observed receipts without issuing another runtime effect."""
 
 from __future__ import annotations
 
@@ -8,19 +8,24 @@ from typing import TYPE_CHECKING, cast
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
+    AgentFailureKind,
+    AgentFailureResult,
     AgentOperation,
     AgentResult,
     AgentResultState,
     ArtifactDistributionResult,
     FailureStage,
     LifecycleState,
+    canonical_message,
     validate_result_for_operation,
 )
 from vonk_agent_protocol.contracts import AgentResultPayload
+from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest, RecipeJobRunResult
 from vonk_agent_protocol.state_machines import NodeIdentityState
 
 from .. import agent_operation_states as aos
-from ..lifecycle import Outcome, Reported
+from ..agent_operation_facts import aware, job_output_retention_expiry
+from ..agent_outcome import agent_outcome
 from ..lifecycle.agent_operation import AgentOperationAdapter
 from ..models import AgentNode, AgentOperationAttempt, Job
 from ..models import AgentOperation as StoredOperation
@@ -31,7 +36,7 @@ if TYPE_CHECKING:
     from .service import AgentJobService
 
 
-CONTENT_KINDS = frozenset(
+OBSERVATION_KINDS = frozenset(
     {
         AgentOperation.RUNTIME_PREFLIGHT,
         AgentOperation.ARTIFACT_DISTRIBUTION,
@@ -40,21 +45,48 @@ CONTENT_KINDS = frozenset(
         AgentOperation.RECIPE_INSTALL,
         AgentOperation.RECIPE_RECONCILE,
         AgentOperation.RECIPE_UNINSTALL,
+        AgentOperation.RECIPE_START,
+        AgentOperation.RECIPE_STOP,
+        AgentOperation.RECIPE_JOB_RUN,
     }
 )
 
 
-def retained_preparation_receipt(
+def receipt_state(kind: str, receipt: object) -> AgentResultState:
+    if kind == AgentOperation.RECIPE_JOB_RUN:
+        try:
+            job = RecipeJobRunResult.model_validate_json(canonical_message(receipt))
+        except (TypeError, ValueError):
+            return AgentResultState.SUCCEEDED
+        if job.ending is not None:
+            return AgentResultState.OBSERVING
+        if job.exit_code != 0:
+            return AgentResultState.FAILED
+    if kind in {AgentOperation.RECIPE_START, AgentOperation.RECIPE_STOP}:
+        try:
+            failure = AgentFailureResult.model_validate_json(canonical_message(receipt))
+        except (TypeError, ValueError):
+            pass
+        else:
+            if (
+                failure.uncertain is not True
+                and failure.failure_kind != AgentFailureKind.UNCERTAIN_EFFECT
+            ):
+                return AgentResultState.FAILED
+    return AgentResultState.SUCCEEDED
+
+
+def retained_observation_receipt(
     operation: StoredOperation, attempt: AgentOperationAttempt | None
 ) -> AgentResultPayload | None:
-    """Read the exact late success the old ingress retained after lease lapse.
+    """Read the exact retained outcome the old ingress retained after lease lapse.
 
     Its body was authenticated and validated at ingress. Its original attempt
     remained lapsed, so consume the receipt's own canonical contract rather
     than interpreting it as a failure under that lapsed state.
     """
     if (
-        operation.kind not in CONTENT_KINDS
+        operation.kind not in OBSERVATION_KINDS
         or attempt is None
         or attempt.attempt != operation.current_attempt
         or not aos.attempt_lapsed(attempt)
@@ -65,14 +97,16 @@ def retained_preparation_receipt(
         return cast(
             AgentResultPayload,
             validate_result_for_operation(
-                operation.kind, attempt.result, state=AgentResultState.SUCCEEDED
+                operation.kind,
+                attempt.result,
+                state=receipt_state(operation.kind, attempt.result),
             ),
         )
     except (TypeError, ValueError):
         return None
 
 
-def adopt_preparation_receipt(
+def adopt_observation_receipt(
     service: AgentJobService,
     session: Session,
     operation: StoredOperation,
@@ -81,9 +115,41 @@ def adopt_preparation_receipt(
     node: AgentNode,
     receipt: AgentResultPayload,
     now: datetime,
+    *,
+    state: AgentResultState = AgentResultState.SUCCEEDED,
 ) -> bool:
     """One decision for live ingress and worker replay under the queue's locks."""
+    from ..cancelled_runtime import cancellation_stop_current
     from ..job_documents import DistributionJobPayload
+
+    if (
+        state != AgentResultState.SUCCEEDED
+        and not isinstance(receipt, RecipeJobRunResult)
+        and not (
+            state == AgentResultState.FAILED
+            and operation.kind
+            in {AgentOperation.RECIPE_START, AgentOperation.RECIPE_STOP}
+            and isinstance(receipt, AgentFailureResult)
+            and receipt.uncertain is not True
+            and receipt.failure_kind != AgentFailureKind.UNCERTAIN_EFFECT
+        )
+    ):
+        return False
+    if isinstance(receipt, RecipeJobRunResult):
+        request = column_value(operation, "payload")
+        if not isinstance(request, RecipeJobRunRequest) or (
+            receipt.job_id,
+            receipt.run_id,
+        ) != (request.job_id, request.run_id):
+            return False
+    if not cancellation_stop_current(session, parent, operation):
+        return False
+    if isinstance(receipt, RecipeJobRunResult) and (
+        receipt.ending is not None
+        and not receipt.output_delivery_pending
+        or aware(now) >= job_output_retention_expiry(attempt.lease_deadline)
+    ):
+        return False
 
     distribution = column_value(parent, "payload")
     assignment = (
@@ -92,7 +158,7 @@ def adopt_preparation_receipt(
         else None
     )
     if not (
-        operation.kind in CONTENT_KINDS
+        operation.kind in OBSERVATION_KINDS
         and node.state == NodeIdentityState.ACTIVE
         and node.revoked_at is None
         and operation.node_id == node.node_id
@@ -133,14 +199,12 @@ def adopt_preparation_receipt(
         and (
             attempt.result is None
             or aos.attempt_reported_unknown(attempt)
-            or retained_preparation_receipt(operation, attempt) == receipt
+            or retained_observation_receipt(operation, attempt) == receipt
         )
     ):
         return False
     try:
-        validated = validate_result_for_operation(
-            operation.kind, receipt, state=AgentResultState.SUCCEEDED
-        )
+        validated = validate_result_for_operation(operation.kind, receipt, state=state)
     except (TypeError, ValueError):
         return False
     if validated != receipt:
@@ -148,12 +212,19 @@ def adopt_preparation_receipt(
     # Re-observing a stored authenticated receipt is not agent contact and
     # cannot renew a lease, extend a grant or revive newer/cancelled intent.
     adapter = AgentOperationAdapter(session)
-    adapter.record_report(attempt, AgentResultState.SUCCEEDED, receipt)
+    adapter.record_report(attempt, state, receipt)
     adapter.settle(
         operation,
         attempt,
         parent,
-        Reported(Outcome.DONE, fence=attempt.fence),
+        service._report_event(
+            operation,
+            attempt,
+            parent,
+            agent_outcome(operation.kind, state, receipt),
+            receipt,
+            now,
+        ),
         now,
     )
     if service._result_consumer is not None:
@@ -161,9 +232,7 @@ def adopt_preparation_receipt(
             session,
             operation,
             attempt,
-            AgentResult(
-                fence=attempt.fence, state=AgentResultState.SUCCEEDED, result=receipt
-            ),
+            AgentResult(fence=attempt.fence, state=state, result=receipt),
         )
     service._aggregate_parent(session, operation.parent_job_id)
     return True

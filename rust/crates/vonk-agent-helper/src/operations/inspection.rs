@@ -69,7 +69,12 @@ impl<R: CommandRunner> OperationExecutor<R> {
             [marker, identity @ ..]
                 if unbound && marker == vonk_agent_protocol::JOB_REOBSERVATION_ARGUMENT =>
             {
-                self.inspect_job(identity, include_logs)
+                self.inspect_effect(identity, include_logs, true)
+            }
+            [marker, identity @ ..]
+                if unbound && marker == vonk_agent_protocol::RUNTIME_REOBSERVATION_ARGUMENT =>
+            {
+                self.inspect_effect(identity, include_logs, false)
             }
             // A single argument is a run id alone: the Controller-side truth
             // for a run whose local metadata is unreadable, checked by
@@ -100,10 +105,11 @@ impl<R: CommandRunner> OperationExecutor<R> {
     /// answers running; an ended one its recorded exit, and for a failure its
     /// output and exit account when asked; proven absence is
     /// `RuntimeRunMissing`; anything unread keeps its cause.
-    fn inspect_job(
+    fn inspect_effect(
         &self,
         identity: &[String],
         include_logs: bool,
+        retain_job_exit: bool,
     ) -> Result<RunInspection, OperationError> {
         let canonical = |value: &String| {
             uuid::Uuid::parse_str(value)
@@ -157,9 +163,10 @@ impl<R: CommandRunner> OperationExecutor<R> {
                 })
             }
             // Removed after its exit was retained: that exit is the answer.
-            Reobserved::Absent => self
+            Reobserved::Absent if retain_job_exit => self
                 .retained_job_exit(identity, run_id, plan_digest, include_logs)
                 .ok_or(OperationError::RuntimeRunMissing),
+            Reobserved::Absent => Err(OperationError::RuntimeRunMissing),
             Reobserved::Unknown(cause) => Err(cause.into()),
         }
     }

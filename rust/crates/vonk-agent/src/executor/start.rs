@@ -374,7 +374,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                     lease_deadline.clone(),
                     cancellation.clone(),
                     phase_deadline,
-                    Duration::from_secs(2),
+                    RANK_STABILITY_WINDOW,
                 )
                 .await;
             if settled && let Err(ended) = inspect().await {

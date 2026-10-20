@@ -22,19 +22,24 @@ fn reobserve(
     executor: &OperationExecutor<Host>,
     generation: &str,
 ) -> Result<RunInspection, OperationError> {
+    reobserve_mode(
+        executor,
+        generation,
+        vonk_agent_protocol::JOB_REOBSERVATION_ARGUMENT,
+    )
+}
+
+fn reobserve_mode(
+    executor: &OperationExecutor<Host>,
+    generation: &str,
+    marker: &str,
+) -> Result<RunInspection, OperationError> {
     let request = HostRuntimeRequest {
         action: HostRuntimeAction::RunInspect,
         fence: uuid::Uuid::new_v4(),
-        arguments: [
-            vonk_agent_protocol::JOB_REOBSERVATION_ARGUMENT,
-            JOB,
-            RUN,
-            INSTALLATION,
-            generation,
-            PLAN_DIGEST,
-        ]
-        .map(str::to_owned)
-        .to_vec(),
+        arguments: [marker, JOB, RUN, INSTALLATION, generation, PLAN_DIGEST]
+            .map(str::to_owned)
+            .to_vec(),
         job_plan: None,
         installation_id: None,
         reconciliation_identity: None,
@@ -141,6 +146,42 @@ fn a_stopped_running_job_retains_no_invented_exit() {
 
     assert!(matches!(
         reobserve(&executor, "1"),
+        Err(OperationError::RuntimeRunMissing)
+    ));
+}
+
+/// Stop observes physical absence even when a JobRun's retained exit exists.
+#[test]
+fn runtime_absence_probe_never_substitutes_a_retained_exit_or_removes_a_container() {
+    let host = exited_job(3);
+    let (_temp, executor) = host_executor(&host);
+    let observed = reobserve_mode(
+        &executor,
+        "1",
+        vonk_agent_protocol::RUNTIME_REOBSERVATION_ARGUMENT,
+    )
+    .unwrap();
+    assert_eq!(observed.exit_code, Some(3));
+    assert!(host.present(JOB), "observation cannot stop or remove");
+    executor.sweep_stray_jobs();
+    assert!(
+        reobserve(&executor, "1").is_ok(),
+        "job retains its real exit"
+    );
+    assert!(matches!(
+        reobserve_mode(
+            &executor,
+            "1",
+            vonk_agent_protocol::RUNTIME_REOBSERVATION_ARGUMENT
+        ),
+        Err(OperationError::RuntimeRunMissing)
+    ));
+    assert!(matches!(
+        reobserve_mode(
+            &executor,
+            "2",
+            vonk_agent_protocol::RUNTIME_REOBSERVATION_ARGUMENT
+        ),
         Err(OperationError::RuntimeRunMissing)
     ));
 }

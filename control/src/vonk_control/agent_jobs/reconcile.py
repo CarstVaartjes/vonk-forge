@@ -16,6 +16,7 @@ from ..admission_locking import (
 )
 from ..agent_operation_facts import attempt_holds_order as _attempt_holds_order
 from ..agent_operation_facts import aware as _aware
+from ..cancelled_runtime import cancellation_stop_current
 from ..lifecycle import Reconciler
 from ..lifecycle.agent_operation import AgentOperationAdapter, lapsed_running_orders
 from ..lifecycle.artifact_job import ArtifactJobAdapter
@@ -24,13 +25,14 @@ from ..models import AgentNode, AgentOperationAttempt, Job
 from ..models import AgentOperation as StoredOperation
 from ..own_cleanup import CLEANUP_KINDS
 from .endings import end_unobserved_order
+from .observation_receipts import (
+    OBSERVATION_KINDS,
+    adopt_observation_receipt,
+    receipt_state,
+    retained_observation_receipt,
+)
 from .ownership import observation_ownership
 from .persistence import _OrderStore
-from .preparation_receipts import (
-    CONTENT_KINDS,
-    adopt_preparation_receipt,
-    retained_preparation_receipt,
-)
 from .retirement import operator_resume_candidates_in_session
 from .waits import refresh_queue_waits
 
@@ -116,7 +118,7 @@ def _sweep_lapsed_attempts(
                     lapsed_running_orders(now),
                     # Re-read an authenticated terminal transfer receipt
                     # even during backoff: its effect already happened.
-                    StoredOperation.kind.in_(CONTENT_KINDS)
+                    StoredOperation.kind.in_(OBSERVATION_KINDS)
                     & StoredOperation.state.in_(aos.PARKED)
                     & select(AgentOperationAttempt.id)
                     .where(
@@ -217,14 +219,37 @@ def _sweep_lapsed_attempts(
                     None,
                 )
                 now = self._clock()
-                receipt = retained_preparation_receipt(operation, attempt)
+                receipt = retained_observation_receipt(operation, attempt)
                 parent = session.get(Job, parent_job_id)
+                if parent is not None and not cancellation_stop_current(
+                    session, parent, operation
+                ):
+                    end_unobserved_order(
+                        self,
+                        session,
+                        operation,
+                        attempt,
+                        parent,
+                        now,
+                        reason=WaitReason.SCOPE_CHANGED,
+                        note="inherited cancellation Stop owner changed",
+                    )
+                    progressed = True
+                    continue
                 if (
                     receipt is not None
                     and attempt is not None
                     and parent is not None
-                    and adopt_preparation_receipt(
-                        self, session, operation, attempt, parent, node, receipt, now
+                    and adopt_observation_receipt(
+                        self,
+                        session,
+                        operation,
+                        attempt,
+                        parent,
+                        node,
+                        receipt,
+                        now,
+                        state=receipt_state(operation.kind, receipt),
                     )
                 ):
                     progressed = True
@@ -266,7 +291,7 @@ def _sweep_would_act(self: AgentJobService, operation_id: str, node_id: str) -> 
                 AgentOperationAttempt.attempt == operation.current_attempt,
             )
         )
-        if retained_preparation_receipt(operation, attempt) is not None:
+        if retained_observation_receipt(operation, attempt) is not None:
             return True
         if operation.state in aos.PARKED:
             return operation.recovery_deadline is not None and _aware(

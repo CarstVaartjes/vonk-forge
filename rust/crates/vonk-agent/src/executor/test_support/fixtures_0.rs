@@ -330,7 +330,7 @@ impl Executor for RenewalGatedExecutor {
     async fn observe(
         &self,
         _claim: &AgentClaim,
-    ) -> Option<crate::executor::content_observation::ContentObservation> {
+    ) -> Option<crate::executor::operation_observation::OperationObservation> {
         None
     }
 
@@ -364,7 +364,7 @@ impl Executor for BlockingCancellationExecutor {
     async fn observe(
         &self,
         _claim: &AgentClaim,
-    ) -> Option<crate::executor::content_observation::ContentObservation> {
+    ) -> Option<crate::executor::operation_observation::OperationObservation> {
         None
     }
 
@@ -403,7 +403,7 @@ impl Executor for CancelledHeartbeatExecutor {
     async fn observe(
         &self,
         _claim: &AgentClaim,
-    ) -> Option<crate::executor::content_observation::ContentObservation> {
+    ) -> Option<crate::executor::operation_observation::OperationObservation> {
         None
     }
 
@@ -423,7 +423,7 @@ impl Executor for HeartbeatGatedExecutor {
     async fn observe(
         &self,
         _claim: &AgentClaim,
-    ) -> Option<crate::executor::content_observation::ContentObservation> {
+    ) -> Option<crate::executor::operation_observation::OperationObservation> {
         None
     }
 
@@ -455,7 +455,7 @@ impl Executor for FailedExecutor {
     async fn observe(
         &self,
         _claim: &AgentClaim,
-    ) -> Option<crate::executor::content_observation::ContentObservation> {
+    ) -> Option<crate::executor::operation_observation::OperationObservation> {
         None
     }
 
@@ -476,7 +476,7 @@ impl Executor for CancellationExecutor {
     async fn observe(
         &self,
         _claim: &AgentClaim,
-    ) -> Option<crate::executor::content_observation::ContentObservation> {
+    ) -> Option<crate::executor::operation_observation::OperationObservation> {
         None
     }
 
@@ -505,7 +505,7 @@ impl Executor for OrderingExecutor {
     async fn observe(
         &self,
         _claim: &AgentClaim,
-    ) -> Option<crate::executor::content_observation::ContentObservation> {
+    ) -> Option<crate::executor::operation_observation::OperationObservation> {
         None
     }
 

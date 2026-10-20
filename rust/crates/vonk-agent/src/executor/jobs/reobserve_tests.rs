@@ -399,20 +399,17 @@ async fn a_job_without_its_record_reports_its_kept_exit_and_never_runs_again() {
     assert!(log[..log.len() - 1].iter().all(|event| *event == "exited"));
 }
 
-/// A job proven never seen is dispatched afresh, and so is one whose helper
-/// predates job re-observation (it keeps no exit to read).
+/// Only proven absence permits fresh dispatch; an unsupported probe cannot
+/// establish that a job was never executed.
 #[tokio::test]
 async fn a_job_never_seen_is_dispatched_afresh() {
-    for (answer, event) in [(Answer::Absent, "absent"), (Answer::Refused, "refused")] {
-        let (result, log) = claim_without_record(vec![answer], true).await;
-        // The fresh dispatch's first step: the installation download.
-        assert_eq!(
-            result.failure().and_then(|failure| failure.stage),
-            Some(FailureStage::ArtifactDistribution),
-            "{result:?}"
-        );
-        assert_eq!(log, [event]);
-    }
+    let (result, log) = claim_without_record(vec![Answer::Absent], true).await;
+    assert_eq!(
+        result.failure().and_then(|failure| failure.stage),
+        Some(FailureStage::ArtifactDistribution),
+        "{result:?}"
+    );
+    assert_eq!(log, ["absent"]);
 }
 
 /// A job whose re-observation was not read runs nothing: the attempt waits
@@ -457,4 +454,16 @@ async fn a_progressing_job_survives_a_lost_helper_reply_past_its_original_deadli
     assert_eq!(outcome.exit_code, Some(7));
     assert_eq!(log[..2], ["progressing", "exited"]);
     assert!(log[2..].iter().all(|event| *event == "grant"));
+}
+
+#[tokio::test]
+async fn an_unsupported_probe_never_authorizes_fresh_inference() {
+    let (result, log) = claim_without_record(vec![Answer::Refused], true).await;
+    assert!(matches!(result, ExecutionResult::Failed(_)));
+    assert_ne!(
+        result.failure().and_then(|failure| failure.stage),
+        Some(FailureStage::ArtifactDistribution),
+        "unsupported observation is not proof of absence"
+    );
+    assert_eq!(log, ["refused"]);
 }

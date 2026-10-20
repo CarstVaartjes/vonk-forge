@@ -273,6 +273,22 @@ to renew its lease. A terminal heartbeat
 failure, panic, or task cancellation stops the executing process even when its
 executor is blocked in synchronous process polling.
 
+Preparation, Start, Stop and JobRun reopen the accepted `claim_json` through
+one startup and tick dispatcher. A probe never renews a lease or grants runtime
+authority. Exact runtime labels bind run, target, installation, generation and
+plan; Stop completion requires physical absence rather than an exit receipt.
+Measured JobRun exits reopen output custody and authorize only delivery recovery,
+never another inference. Retained authenticated receipts use the same Controller
+adoption decision at ingress and on idle worker ticks; cancellation, revocation,
+a newer attempt or a newer owner rejects adoption.
+
+A terminal uncertain artifact cancellation retains its accepted result while
+an independent, idempotent Stop removes only that job's exact runtime target.
+The child inherits the original current intent; it cannot adopt a newer owner,
+stop the job member's run, or release its standing capacity reservation. Exact
+Stop evidence settles the residue without changing the terminal cancellation.
+Package handoff observation remains the next structural track.
+
 Every agent claim carries `observation_budget_seconds`, the stall window for
 that attempt's observation and effects: it restarts only when the order's
 measured progress advances, and lease renewal cannot reset it. A start holds to

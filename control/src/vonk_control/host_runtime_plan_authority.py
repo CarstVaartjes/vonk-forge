@@ -19,6 +19,7 @@ from vonk_agent_protocol import (
     SecurityRefusalError,
     SecurityRefusalReason,
     UnknownOutcomeError,
+    WaitOwnerKind,
     WaitReason,
     canonical_message,
 )
@@ -115,6 +116,19 @@ def derive_runtime_plan_binding(
     if action not in {ContainerRuntimeAction.START, ContainerRuntimeAction.STOP}:
         return RuntimePlanBinding()
     if action is ContainerRuntimeAction.STOP:
+        from .cancelled_runtime import cancellation_stop_current
+        from .job_documents import RecipeStopParent
+
+        document = read_row_column(parent, "payload")
+        if not cancellation_stop_current(session, parent, operation) or (
+            isinstance(document, RecipeStopParent)
+            and document.owner_kind == WaitOwnerKind.ARTIFACT_JOB
+            and stop_plan_sha256 != operation.payload_digest
+        ):
+            raise RuntimePlanAuthorityStale(
+                "accepted cancellation runtime owner changed",
+                reason=InvalidRequestReason.SUPERSEDED,
+            )
         return _own_stop_binding(parent, operation, stop_plan_sha256)
     _validate_child_record(parent, operation, node_id)
     if operation.kind not in {
@@ -259,7 +273,7 @@ def _job_run_authority(
 ) -> _RunAuthority:
     if (
         parent.kind != "recipe.job.run.v1"
-        or parent.payload.get("owner_kind") != "artifact-job"
+        or parent.payload.get("owner_kind") != WaitOwnerKind.ARTIFACT_JOB
         or parent.payload.get("owner_id") != request.job_id
     ):
         raise RuntimePlanAuthorityRefused(

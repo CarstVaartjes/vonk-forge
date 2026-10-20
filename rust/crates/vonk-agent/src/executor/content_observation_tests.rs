@@ -1,7 +1,7 @@
 #![cfg(test)]
 //! Wrong implementation: restart converts a completed effect to interrupted,
 //! or an idle tick reexecutes it because the receipt/ack was lost.
-use super::content_observation::*;
+use super::operation_observation::*;
 use super::run_once;
 use super::test_support::*;
 use std::io::{BufRead, BufReader};
@@ -15,7 +15,7 @@ impl ProcessRunner for UnavailableProcess {
     }
 }
 
-fn prepare_effect(root: &Path, claim: &AgentClaim) {
+pub(super) fn prepare_effect(root: &Path, claim: &AgentClaim) {
     let AgentClaimPayload::RecipeInstallPayload(request) = &claim.payload else {
         panic!("install fixture");
     };
@@ -175,7 +175,7 @@ async fn process_death_at_four_boundaries_recovers_on_an_idle_tick_without_execu
 }
 
 #[tokio::test]
-async fn every_content_kind_reaches_its_real_probe_and_preserves_unknown() {
+async fn every_dispatched_kind_reaches_its_real_probe_and_preserves_unknown() {
     // Enum exhaustiveness catches new kinds; invocation catches a registered
     // placeholder which returns no observation instead of probing its owner.
     let root = tempdir().unwrap();
@@ -240,11 +240,21 @@ async fn every_content_kind_reaches_its_real_probe_and_preserves_unknown() {
             .await
             .expect("real observer for content kind");
         assert!(
-            !matches!(result, ContentObservation::Confirmed(_)),
+            !matches!(result, OperationObservation::Confirmed(_)),
             "absent evidence cannot complete {operation}"
         );
     }
     assert!(executor.observe(&build).await.is_some());
+    for accepted in super::runtime_observation_tests::runtime_claims() {
+        accepted.validate().unwrap();
+        assert!(
+            matches!(
+                executor.observe(&accepted).await,
+                Some(OperationObservation::Unknown(_))
+            ),
+            "every runtime kind must probe, preserving unavailable evidence"
+        );
+    }
 }
 
 #[tokio::test(start_paused = true)]

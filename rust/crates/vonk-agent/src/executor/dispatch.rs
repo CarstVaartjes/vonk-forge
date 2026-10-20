@@ -4,8 +4,11 @@ use super::*;
 
 #[async_trait(?Send)]
 impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
-    async fn observe(&self, claim: &AgentClaim) -> Option<content_observation::ContentObservation> {
-        self.observe_content(claim).await
+    async fn observe(
+        &self,
+        claim: &AgentClaim,
+    ) -> Option<operation_observation::OperationObservation> {
+        self.observe_operation(claim).await
     }
     async fn execute(
         &self,
@@ -64,7 +67,7 @@ impl Executor for RejectingExecutor {
     async fn observe(
         &self,
         _claim: &AgentClaim,
-    ) -> Option<crate::executor::content_observation::ContentObservation> {
+    ) -> Option<crate::executor::operation_observation::OperationObservation> {
         None
     }
 
@@ -81,8 +84,11 @@ impl Executor for RejectingExecutor {
 
 #[async_trait(?Send)]
 impl<R: ProcessRunner> Executor for ControlExecutor<'_, R> {
-    async fn observe(&self, claim: &AgentClaim) -> Option<content_observation::ContentObservation> {
-        self.recipes.observe_content(claim).await
+    async fn observe(
+        &self,
+        claim: &AgentClaim,
+    ) -> Option<operation_observation::OperationObservation> {
+        self.recipes.observe_operation(claim).await
     }
     async fn execute(
         &self,

@@ -313,7 +313,7 @@ impl<E: vonk_agent::executor::Executor> vonk_agent::executor::Executor for Custo
     async fn observe(
         &self,
         claim: &vonk_agent_protocol::AgentClaim,
-    ) -> Option<vonk_agent::executor::content_observation::ContentObservation> {
+    ) -> Option<vonk_agent::executor::operation_observation::OperationObservation> {
         self.executor.observe(claim).await
     }
 

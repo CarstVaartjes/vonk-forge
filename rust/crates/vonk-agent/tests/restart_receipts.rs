@@ -183,14 +183,19 @@ fn interrupted_mutation_is_not_executed_twice_after_restart() {
 
     let mut restarted = StateStore::open(&path, NODE_ID).unwrap();
     restarted.recover_interrupted().unwrap();
-    let decision = restarted.begin(&claim, Utc::now()).unwrap();
-
-    let BeginDecision::Replay(result) = decision else {
-        panic!("an interrupted attempt must not execute without fresh Controller authority");
-    };
-    let AgentResultResult::OutcomeUnknown(_) = result.result else {
-        panic!("restart must report a typed unknown outcome");
-    };
+    assert!(matches!(
+        restarted.begin(&claim, Utc::now()),
+        Err(vonk_agent::state::StateError::Busy)
+    ));
+    assert_eq!(
+        restarted.observation_claims().unwrap(),
+        vec![claim.clone()],
+        "restart retains accepted custody for the shared exact probe"
+    );
+    assert!(
+        restarted.pending_results().unwrap().is_empty(),
+        "no interruption result may replace the runtime observation"
+    );
     let mut fresh = claim.clone();
     fresh.fence = Uuid::new_v4();
     assert_eq!(

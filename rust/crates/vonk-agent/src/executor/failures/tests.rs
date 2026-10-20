@@ -728,7 +728,7 @@ async fn observation_misses_end_without_effects_and_a_fresh_fence_executes() {
         async fn observe(
             &self,
             _claim: &AgentClaim,
-        ) -> Option<crate::executor::content_observation::ContentObservation> {
+        ) -> Option<crate::executor::operation_observation::OperationObservation> {
             None
         }
 

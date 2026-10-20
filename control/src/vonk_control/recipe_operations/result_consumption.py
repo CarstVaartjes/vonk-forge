@@ -21,6 +21,8 @@ from vonk_agent_protocol import (
     RouteState,
     RunState,
     UnknownOutcomeError,
+    WaitOwnerKind,
+    WaitReason,
     canonical_message,
 )
 
@@ -170,6 +172,24 @@ class ResultConsumptionMixin:
         if job is None or not job.kind.startswith("recipe."):
             return
         if job.kind == WireAgentOperation.RECIPE_JOB_RUN.value:
+            return
+        if (
+            job.kind == WireAgentOperation.RECIPE_STOP
+            and _parent_identity(job, "owner_kind") == WaitOwnerKind.ARTIFACT_JOB
+        ):
+            from ..cancelled_runtime import cancellation_stop_current
+            from ..lifecycle.artifact_job import ArtifactJobAdapter
+            from ..models import ArtifactJob
+
+            artifact = session.get(ArtifactJob, _parent_identity(job, "owner_id"))
+            if (
+                artifact is not None
+                and getattr(message, "state", None) == LifecycleState.SUCCEEDED
+                and cancellation_stop_current(session, job, operation)
+            ):
+                ArtifactJobAdapter(session, clock=service._clock).confirm_stopped(
+                    artifact, WaitReason.JOB_STOP_UNCONFIRMED, service._clock()
+                )
             return
         state = getattr(message, "state", None)
         result = getattr(message, "result", None)

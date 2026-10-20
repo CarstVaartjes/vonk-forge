@@ -61,6 +61,8 @@ pub const HOST_HELPER_AUTHORITY: &str = "vonk.host-maintenance-helper";
 /// container by its whole identity: `[this, job id, run id, installation id,
 /// run generation, plan digest]`. A helper that predates it refuses the shape
 /// as an invalid operation.
+pub const RUNTIME_REOBSERVATION_ARGUMENT: &str = "runtime-identity";
+
 pub const JOB_REOBSERVATION_ARGUMENT: &str = "job-identity";
 pub(super) const HOST_HELPER_GRANT_DOMAIN: &[u8] = b"VONK-HOST-MAINTENANCE-HELPER-GRANT-V1\0";
 

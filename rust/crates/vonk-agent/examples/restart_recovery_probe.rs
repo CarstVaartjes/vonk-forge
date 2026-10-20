@@ -141,7 +141,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         };
         // Inject the expiry clock, never a new lease or dispatch. Startup and
         // periodic ticks use this same observer with the real current clock.
-        vonk_agent::executor::content_observation::reobserve_content(
+        vonk_agent::executor::operation_observation::reobserve_operations(
             &mut state,
             &executor,
             None,

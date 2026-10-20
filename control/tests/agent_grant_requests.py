@@ -94,13 +94,18 @@ def own_stop_grant_request(
     clean up after readiness fails or to heal a retained run and ``True`` when
     it cancels; a JobRun always sends ``True``.
     """
+    return stop_grant_request(
+        own_stop_payload(order, cancel_pending_start=cancel_pending_start), fence=fence
+    )
+
+
+def own_stop_payload(
+    order: RecipeStartPayload | RecipeJobRunRequest, *, cancel_pending_start: bool
+) -> RecipeStopPayload:
+    """The native builder's exact Stop, shared with receipt recovery fixtures."""
     if isinstance(order, RecipeStartPayload):
-        stop = stop_payload_from_start(order, cancel_pending_start=cancel_pending_start)
-    else:
-        stop = stop_payload_from_job_run(
-            order, cancel_pending_start=cancel_pending_start
-        )
-    return stop_grant_request(stop, fence=fence)
+        return stop_payload_from_start(order, cancel_pending_start=cancel_pending_start)
+    return stop_payload_from_job_run(order, cancel_pending_start=cancel_pending_start)
 
 
 def stop_grant_request(
