@@ -797,3 +797,43 @@ mod tests {
         assert_eq!(status(&fresh, "podman_build").status, Status::Passed);
     }
 }
+
+/// Retain the full signed-helper result under the exact accepted fence. This
+/// extends the preflight cache owner, independently of receipt transmission.
+pub fn retain_completed(
+    data_root: &Path,
+    fence: uuid::Uuid,
+    result: &RuntimePreflightResult,
+) -> Result<(), ProcessError> {
+    use std::io::Write;
+    let root = crate::recipe_builder::owned_directory(data_root, "runtime-preflight")?;
+    let mut file = tempfile::NamedTempFile::new_in(&root)?;
+    file.write_all(
+        &canonical_json(result).map_err(|_| std::io::Error::other("invalid preflight result"))?,
+    )?;
+    file.as_file().sync_all()?;
+    file.persist(root.join(format!("{fence}.json")))
+        .map_err(|e| e.error)?;
+    fs::File::open(root)?.sync_all()?;
+    Ok(())
+}
+
+pub fn observe_completed(
+    data_root: &Path,
+    fence: uuid::Uuid,
+    fingerprint: &str,
+) -> Result<Option<RuntimePreflightResult>, ProcessError> {
+    let path = data_root
+        .join("runtime-preflight")
+        .join(format!("{fence}.json"));
+    let raw = match crate::oci::read_regular_file(&path, 64 * 1024) {
+        Ok(raw) => raw,
+        Err(crate::oci::OciError::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(None);
+        }
+        Err(_) => return Err(std::io::Error::other("preflight receipt unreadable").into()),
+    };
+    let result: RuntimePreflightResult = vonk_agent_protocol::parse_strict(&raw)
+        .map_err(|_| std::io::Error::other("preflight receipt invalid"))?;
+    Ok((result.fingerprint == fingerprint).then_some(result))
+}

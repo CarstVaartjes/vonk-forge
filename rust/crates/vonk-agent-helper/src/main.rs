@@ -450,6 +450,33 @@ fn handle(
             HelperRejection::new(HelperErrorCode::PeerIdentityInvalid, error.safe_detail())
         })?;
         let request_id = inspection.request_id.to_string();
+        if inspection.content_observation == Some(true) {
+            if inspection.include_logs == Some(true) {
+                return Err(HelperRejection::new(
+                    HelperErrorCode::RequestInvalid,
+                    "content observation cannot read logs",
+                ));
+            }
+            let complete = executor
+                .observe_preparation(&inspection.request_sha256)
+                .map_err(|error| HelperRejection::for_error(&request_id, false, error))?;
+            return respond(
+                stream,
+                &request_id,
+                HelperResponse {
+                    schema_version: 1,
+                    request_id: Some(inspection.request_id),
+                    status: HostHelperResponseStatus::ContainerRuntimeRequestExecuted,
+                    exit_code: complete.then_some(0),
+                    error_code: None,
+                    installation_intent_nonce: None,
+                    process_running: None,
+                    job_progress_at: None,
+                    diagnostic: None,
+                    process_logs: None,
+                },
+            );
+        }
         let inspected = executor
             .inspect_recipe_run_with_logs(
                 &inspection.request_sha256,

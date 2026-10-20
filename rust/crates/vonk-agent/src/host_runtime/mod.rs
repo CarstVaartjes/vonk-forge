@@ -352,6 +352,7 @@ impl HostRuntimeBoundary<'_> {
             request_id,
             request_sha256: digest,
             include_logs: include_logs.then_some(true),
+            content_observation: None,
         })
         .map_err(|_| HostRuntimeError::HelperProtocol(HelperProtocolCause::RequestEncoding))?;
         let helper_socket = self.helper_socket.to_path_buf();
@@ -378,6 +379,52 @@ impl HostRuntimeBoundary<'_> {
             ));
         }
         Ok(response)
+    }
+
+    /// Grant-free exact preparation observation; never renews authority.
+    pub async fn observe_preparation(
+        &self,
+        request: &HostRuntimeRequest,
+    ) -> Result<bool, HostRuntimeError> {
+        request
+            .validate()
+            .map_err(HostRuntimeError::request_refusal)?;
+        let body = canonical_json(request)
+            .map_err(|_| HostRuntimeError::HelperProtocol(HelperProtocolCause::RequestEncoding))?;
+        let digest = hex_sha256(&body);
+        let cleanup = RequestFileCleanup(write_request(self.request_root, &digest, &body)?);
+        let id = uuid::Uuid::new_v4();
+        let frame = canonical_generated_json(&RecipeRunInspectionRequest {
+            request_id: id,
+            request_sha256: digest,
+            include_logs: None,
+            content_observation: Some(true),
+        })
+        .map_err(|_| HostRuntimeError::HelperProtocol(HelperProtocolCause::RequestEncoding))?;
+        let socket = self.helper_socket.to_path_buf();
+        let response = tokio::task::spawn_blocking(move || {
+            let _cleanup = cleanup;
+            call_helper(
+                &socket,
+                &frame,
+                &Inactivity::new(RUN_INSPECTION_REQUEST_TIMEOUT),
+            )
+        })
+        .await
+        .map_err(|_| HostRuntimeError::HelperProtocol(HelperProtocolCause::HelperCallJoin))??;
+        require_bound_response(&response, &id.to_string())?;
+        if response.error_code.is_some() {
+            return Err(runtime_rejection(&response, request.action));
+        }
+        if response.status != HostHelperResponseStatus::ContainerRuntimeRequestExecuted
+            || response.process_running.is_some()
+            || response.exit_code.is_some_and(|code| code != 0)
+        {
+            return Err(HostRuntimeError::HelperProtocol(
+                HelperProtocolCause::InspectionOutcome,
+            ));
+        }
+        Ok(response.exit_code == Some(0))
     }
 
     pub async fn execute(

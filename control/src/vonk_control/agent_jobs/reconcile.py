@@ -23,13 +23,13 @@ from ..lifecycle.types import State as _LifecycleState
 from ..models import AgentNode, AgentOperationAttempt, Job
 from ..models import AgentOperation as StoredOperation
 from ..own_cleanup import CLEANUP_KINDS
-from .distribution_receipts import (
-    adopt_distribution_receipt,
-    retained_distribution_receipt,
-)
 from .endings import end_unobserved_order
 from .ownership import observation_ownership
 from .persistence import _OrderStore
+from .preparation_receipts import (
+    adopt_preparation_receipt,
+    retained_preparation_receipt,
+)
 from .retirement import operator_resume_candidates_in_session
 from .waits import refresh_queue_waits
 
@@ -218,13 +218,13 @@ def _sweep_lapsed_attempts(
                     None,
                 )
                 now = self._clock()
-                receipt = retained_distribution_receipt(operation, attempt)
+                receipt = retained_preparation_receipt(operation, attempt)
                 parent = session.get(Job, parent_job_id)
                 if (
                     receipt is not None
                     and attempt is not None
                     and parent is not None
-                    and adopt_distribution_receipt(
+                    and adopt_preparation_receipt(
                         self, session, operation, attempt, parent, node, receipt, now
                     )
                 ):
@@ -267,7 +267,7 @@ def _sweep_would_act(self: AgentJobService, operation_id: str, node_id: str) -> 
                 AgentOperationAttempt.attempt == operation.current_attempt,
             )
         )
-        if retained_distribution_receipt(operation, attempt) is not None:
+        if retained_preparation_receipt(operation, attempt) is not None:
             return True
         if operation.state in aos.PARKED:
             return operation.recovery_deadline is not None and _aware(

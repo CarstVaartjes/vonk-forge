@@ -260,3 +260,5 @@ use storage::*;
 pub(crate) mod test_support;
 
 pub use errors::OciError;
+
+pub(crate) use storage::read_regular_file;

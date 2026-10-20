@@ -264,6 +264,11 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         }) {
             return unavailable("a preflight finding stayed unknown");
         }
+        if let Err(error) =
+            crate::runtime_preflight::retain_completed(self.runtime.data_root, claim.fence, &result)
+        {
+            return unavailable(&format!("preflight custody: {error}"));
+        }
         ExecutionResult::done(result)
     }
 }

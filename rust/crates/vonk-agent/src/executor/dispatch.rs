@@ -4,6 +4,9 @@ use super::*;
 
 #[async_trait(?Send)]
 impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
+    async fn observe(&self, claim: &AgentClaim) -> Option<content_observation::ContentObservation> {
+        self.observe_content(claim).await
+    }
     async fn execute(
         &self,
         claim: &AgentClaim,
@@ -71,6 +74,9 @@ impl Executor for RejectingExecutor {
 
 #[async_trait(?Send)]
 impl<R: ProcessRunner> Executor for ControlExecutor<'_, R> {
+    async fn observe(&self, claim: &AgentClaim) -> Option<content_observation::ContentObservation> {
+        self.recipes.observe_content(claim).await
+    }
     async fn execute(
         &self,
         claim: &AgentClaim,

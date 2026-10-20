@@ -259,6 +259,24 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         read_persisted_plan(self.data_root, installation_id)
     }
 
+    /// Read trusted managed object metadata without repairing its projection.
+    pub fn observe_installation(&self, id: &str) -> Result<(), OciError> {
+        let plan = self.load_spec(id)?;
+        let installation = managed_path(self.data_root, "installations", id)?;
+        for artifact in unique_plan_artifacts(&plan) {
+            let path = installation
+                .join("models")
+                .join(&artifact.selection_id)
+                .join(&artifact.path);
+            open_trusted_model_file(
+                &path,
+                artifact.size_bytes,
+                shared_store_inode(self.data_root, &artifact.sha256),
+            )?;
+        }
+        Ok(())
+    }
+
     pub fn verify_installation(&self, installation_id: &str) -> Result<(), OciError> {
         let (_, plan) = self.load_persisted_spec(installation_id)?;
         self.verify_plan_materialization(installation_id, &plan)

@@ -509,3 +509,55 @@ pub(super) fn bounded_container_wait_exit_code(output: &CommandOutput) -> Option
 
 #[cfg(test)]
 mod tests;
+
+impl<R: CommandRunner> OperationExecutor<R> {
+    /// Read-only preparation probes. No grant, nonce, ledger, receipt or runtime
+    /// mutation is performed; the request digest binds the exact subject.
+    pub fn observe_preparation(&self, digest: &str) -> Result<bool, OperationError> {
+        self.require_directory(&self.roots.data)?;
+        let request = self.read_runtime_request(digest)?;
+        match request.action {
+            HostRuntimeAction::ImagePull => {
+                let [_, manifest, config, reference] = request.arguments.as_slice() else {
+                    return Err(OperationError::InvalidOperation);
+                };
+                let (local, embedded) = parse_local_image_reference(reference)?;
+                if embedded != *manifest || !valid_oci_digest(config) {
+                    return Err(OperationError::InvalidOperation);
+                }
+                let Some(image) = self.inspect_runtime_image_if_present(&local)? else {
+                    return Ok(false);
+                };
+                if (image.0 != *config && image.0 != *manifest)
+                    || image.1 != "linux"
+                    || image.2 != "arm64"
+                    || image.3 != "v1"
+                    || !numeric_non_root_user(&image.4)
+                {
+                    return Err(OperationError::RuntimeImageIdentityInvalid);
+                }
+                Ok(true)
+            }
+            HostRuntimeAction::InstallationCleanup => {
+                let id = request
+                    .installation_id
+                    .ok_or(OperationError::InvalidOperation)?
+                    .to_string();
+                self.require_no_unclassified_installation_runtime(&id)?;
+                let cache = self
+                    .roots
+                    .agent_data
+                    .join("installations")
+                    .join(id)
+                    .join("runtime-cache");
+                match fs::symlink_metadata(cache) {
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(true),
+                    Err(error) => Err(error.into()),
+                    Ok(_) => Ok(false),
+                }
+            }
+            // Never dispatch a mutator through the observation frame.
+            _ => Err(OperationError::InvalidOperation),
+        }
+    }
+}

@@ -1,0 +1,301 @@
+//! One read-only observation path for content/preparation custody on startup
+//! and every idle tick. Runtime and package children remain separate tracks.
+use super::*;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ContentKind {
+    Preflight,
+    Distribution,
+    Build,
+    BuildCleanup,
+    Install,
+    Reconcile,
+    Uninstall,
+}
+impl ContentKind {
+    pub fn of(operation: &AgentOperation) -> Option<Self> {
+        match operation {
+            AgentOperation::RuntimePreflightV1 => Some(Self::Preflight),
+            AgentOperation::ArtifactDistributionV1 => Some(Self::Distribution),
+            AgentOperation::RecipeBuildV1 => Some(Self::Build),
+            AgentOperation::RecipeBuildCleanupV1 => Some(Self::BuildCleanup),
+            AgentOperation::RecipeInstall => Some(Self::Install),
+            AgentOperation::RecipeReconcile => Some(Self::Reconcile),
+            AgentOperation::RecipeUninstall => Some(Self::Uninstall),
+            AgentOperation::RecipeStart
+            | AgentOperation::RecipeStop
+            | AgentOperation::RecipeJobRunV1
+            | AgentOperation::AgentUpgradeV1 => None,
+        }
+    }
+}
+
+pub struct PendingObservation {
+    pub cause: WaitReason,
+    pub reason: String,
+    pub owner: AgentOperation,
+    pub next_check: DateTime<Utc>,
+    pub deadline: DateTime<FixedOffset>,
+}
+pub enum ContentObservation {
+    Confirmed(ExecutionResult),
+    Progressing(PendingObservation),
+    Blocked(PendingObservation),
+    Unknown(PendingObservation),
+}
+impl PendingObservation {
+    fn new(claim: &AgentClaim, cause: WaitReason, reason: impl Into<String>) -> Self {
+        Self {
+            cause,
+            reason: reason.into(),
+            owner: claim.operation,
+            next_check: Utc::now() + chrono::Duration::seconds(15),
+            deadline: claim.deadline,
+        }
+    }
+}
+
+impl<R: ProcessRunner> RecipeExecutor<'_, R> {
+    pub(super) async fn observe_content(&self, claim: &AgentClaim) -> Option<ContentObservation> {
+        let kind = ContentKind::of(&claim.operation)?;
+        let pending = |cause, reason| {
+            ContentObservation::Unknown(PendingObservation::new(claim, cause, reason))
+        };
+        let observed = self.probe_content(claim, kind).await;
+        Some(match observed {
+            Ok(Some(result)) => ContentObservation::Confirmed(result),
+            Ok(None) => pending(
+                WaitReason::RuntimeEffectUnconfirmed,
+                "exact preparation completion is not yet established".to_owned(),
+            ),
+            Err(error) => pending(WaitReason::ObservationUnavailable, error),
+        })
+    }
+
+    async fn probe_content(
+        &self,
+        claim: &AgentClaim,
+        kind: ContentKind,
+    ) -> Result<Option<ExecutionResult>, String> {
+        use vonk_agent_protocol::generated::AgentClaimPayload as Payload;
+        match (kind, &claim.payload) {
+            (ContentKind::Install, Payload::RecipeInstallPayload(request)) => {
+                let id = request.installation_id.to_string();
+                let installed = self.runtime.load_spec(&id).map_err(|e| e.to_string())?;
+                if !same_installed_workload(&installed, &request.compiled_execution_plan) {
+                    return Err("installed content differs from the accepted plan".into());
+                }
+                self.runtime
+                    .observe_installation(&id)
+                    .map_err(|e| e.to_string())?;
+                let bytes = self
+                    .runtime
+                    .installed_bytes(&id)
+                    .map_err(|e| e.to_string())?;
+                Ok(Some(recipe_install_success(bytes)))
+            }
+            (ContentKind::Reconcile, Payload::RecipeReconcilePayload(request)) => {
+                let identity = RecipeReconciliationIdentity::from(request);
+                self.observe_removal(claim, &identity).await.map(|done| {
+                    done.then(|| ExecutionResult::done(RecipeReconcileResult::default()))
+                })
+            }
+            (ContentKind::Uninstall, Payload::RecipeUninstallPayload(request)) => {
+                let identity = RecipeReconciliationIdentity {
+                    installation_id: request.installation_id,
+                    plan_digest: request.plan_digest.clone(),
+                };
+                self.observe_removal(claim, &identity).await.map(|done| {
+                    done.then(|| ExecutionResult::done(RecipeUninstallResult::default()))
+                })
+            }
+            (ContentKind::BuildCleanup, Payload::RecipeBuildCleanupRequest(request)) => {
+                let done = crate::recipe_builder::observe_build_cleanup(
+                    self.runtime.runner,
+                    self.runtime.data_root,
+                    request,
+                    Instant::now() + Duration::from_secs(15),
+                )
+                .map_err(|e| e.to_string())?;
+                Ok(done.then(|| {
+                    ExecutionResult::done(vonk_agent_protocol::RecipeBuildCleanupEvidence {})
+                }))
+            }
+            (ContentKind::Build, Payload::RecipeBuildRequest(request)) => {
+                let builder = RecipeBuilder {
+                    runner: self.runtime.runner,
+                    data_root: self.runtime.data_root,
+                    runtime_root: self.runtime_root,
+                    egress_binary: Path::new("/usr/lib/vonk-forge/vonk-build-egress"),
+                };
+                let Some(evidence) = builder.retained_export(
+                    request,
+                    request.build_id,
+                    Instant::now() + Duration::from_secs(15),
+                    &|| false,
+                ) else {
+                    return Ok(None);
+                };
+                let complete = self
+                    .client
+                    .observe_recipe_image(request.build_id, &evidence)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                Ok(complete.then(|| ExecutionResult::done(evidence)))
+            }
+            (ContentKind::Preflight, Payload::RuntimePreflightRequest(_)) => {
+                let fingerprint = crate::runtime_preflight::host_fingerprint(
+                    self.runtime.runner,
+                    env!("VONK_AGENT_BUILD_DIGEST"),
+                    self.runtime.data_root,
+                    self.runtime_root,
+                )
+                .map_err(|e| e.to_string())?;
+                let result = crate::runtime_preflight::observe_completed(
+                    self.runtime.data_root,
+                    claim.fence,
+                    &fingerprint,
+                )
+                .map_err(|e| e.to_string())?;
+                Ok(result.map(ExecutionResult::done))
+            }
+            (ContentKind::Distribution, Payload::ArtifactDistributionPayload(request)) => {
+                let assignment = self
+                    .client
+                    .distribution_manifest(&request.plan_digest)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                let mut paths = Vec::new();
+                let mut digests = Vec::new();
+                let mut bytes = 0;
+                for object in &assignment.objects {
+                    let path = self
+                        .runtime
+                        .data_root
+                        .join("distribution/models")
+                        .join(&object.sha256);
+                    if !self
+                        .client
+                        .observe_distribution_object(&path, object.bytes)
+                        .await
+                        .map_err(|e| e.to_string())?
+                    {
+                        return Ok(None);
+                    }
+                    paths.push(path);
+                    digests.push(object.sha256.clone());
+                    bytes += object.bytes;
+                }
+                let reference = format!(
+                    "localhost/vonk/compiled-runtime-{}@{}",
+                    assignment.oci_image_digest.trim_start_matches("sha256:"),
+                    assignment.oci_image_digest
+                );
+                let request = crate::host_runtime::runtime_request(
+                    claim,
+                    HostRuntimeAction::ImagePull,
+                    vec![
+                        "127.0.0.1:1".into(),
+                        assignment.oci_image_digest.clone(),
+                        assignment.oci_image_config_digest.clone(),
+                        reference,
+                    ],
+                    None,
+                    None,
+                    None,
+                );
+                if !self.observe_helper(&request).await? {
+                    return Ok(None);
+                }
+                Ok(Some(distribution_success(DistributionDownloadEvidence {
+                    model_digests: digests,
+                    model_paths: paths,
+                    oci_image_digest: assignment.oci_image_digest,
+                    oci_image_config_digest: assignment.oci_image_config_digest,
+                    downloaded_bytes: bytes,
+                })))
+            }
+            // This is a malformed typed claim, never a missing observer.
+            _ => Err("claim payload does not match its content observer".into()),
+        }
+    }
+
+    async fn observe_helper(
+        &self,
+        request: &vonk_agent_protocol::HostRuntimeRequest,
+    ) -> Result<bool, String> {
+        let root = self.runtime_root.join("runtime-requests");
+        HostRuntimeBoundary {
+            client: self.client,
+            request_root: &root,
+            helper_socket: self.helper_socket,
+        }
+        .observe_preparation(request)
+        .await
+        .map_err(|e| e.to_string())
+    }
+    async fn observe_removal(
+        &self,
+        claim: &AgentClaim,
+        identity: &RecipeReconciliationIdentity,
+    ) -> Result<bool, String> {
+        if !self
+            .runtime
+            .observe_reconciliation(identity)
+            .map_err(|e| e.to_string())?
+        {
+            return Ok(false);
+        }
+        let request = crate::host_runtime::runtime_request(
+            claim,
+            HostRuntimeAction::InstallationCleanup,
+            vec![],
+            Some(identity.installation_id),
+            Some(identity.clone()),
+            None,
+        );
+        self.observe_helper(&request).await
+    }
+}
+
+/// Runs before receipt delivery and claims, including an entirely idle fleet.
+/// Startup reaches this same pass through run_once; it never dispatches effects.
+pub(super) async fn reobserve_content<E: Executor>(
+    state: &mut StateStore,
+    executor: &E,
+) -> Result<(), StateError> {
+    for claim in state.observation_claims()? {
+        let Some(observation) = executor.observe(&claim).await else {
+            continue;
+        };
+        match observation {
+            ContentObservation::Confirmed(result) => {
+                state.finish(&claim, result)?;
+            }
+            ContentObservation::Progressing(pending)
+            | ContentObservation::Blocked(pending)
+            | ContentObservation::Unknown(pending) => {
+                eprintln!(
+                    "vonk-agent: observing fence={} owner={} cause={} next_check={} deadline={}: {}",
+                    claim.fence,
+                    pending.owner,
+                    pending.cause,
+                    pending.next_check,
+                    pending.deadline,
+                    pending.reason
+                );
+                if Utc::now() >= pending.deadline {
+                    state.finish(
+                        &claim,
+                        ExecutionResult::unknown(
+                            pending.cause,
+                            pending.reason,
+                            UnknownEvidence::at(FailureStage::AgentRestart),
+                        ),
+                    )?;
+                }
+            }
+        }
+    }
+    Ok(())
+}

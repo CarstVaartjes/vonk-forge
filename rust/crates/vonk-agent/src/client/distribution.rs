@@ -3,6 +3,14 @@
 use super::*;
 
 impl AgentHttpClient {
+    pub async fn observe_distribution_object(
+        &self,
+        path: &Path,
+        bytes: u64,
+    ) -> Result<bool, ClientError> {
+        Ok(inspect_trusted_final(path, bytes).await?.is_some())
+    }
+
     /// Download one object from the Controller's assignment-bound delivery
     /// API. A `.partial` destination is a resumable checkpoint; the assignment,
     /// ETag, length, and range are checked on every response.

@@ -88,8 +88,7 @@ class RevokingAuthority(FixtureCertificateAuthority):
         return None
 
 
-@pytest.fixture
-def service(postgres_engine):
+def agent_queue_world(postgres_engine):
     Base.metadata.drop_all(postgres_engine)
     Base.metadata.create_all(postgres_engine)
     clock = Clock()
@@ -115,6 +114,11 @@ def service(postgres_engine):
                 )
             )
     return sessions, clock
+
+
+@pytest.fixture
+def service(postgres_engine):
+    return agent_queue_world(postgres_engine)
 
 
 def parent(sessions, clock) -> Job:

@@ -278,7 +278,8 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                 // The Controller holds the image now and the result is journaled,
                 // so the export's owner has ended: it is scratch, not a cache. A
                 // failed upload keeps it for the retry, until store retention.
-                builder.discard_export(request.build_id);
+                // Retention owns export removal after receipt custody; a crash
+                // before finish can still observe the exact uploaded result.
                 ExecutionResult::done(evidence)
             }
             Err(error) => build_error_outcome(&error),

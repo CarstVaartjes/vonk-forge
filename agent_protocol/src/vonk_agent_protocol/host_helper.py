@@ -386,6 +386,7 @@ class RecipeRunInspectionRequest(WireModel):
     request_id: Uuid4Text
     request_sha256: Digest
     include_logs: bool | None = None
+    content_observation: bool | None = None
 
 
 def host_helper_grant_signing_bytes(claims: HostHelperGrantClaims) -> bytes:

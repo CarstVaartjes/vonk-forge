@@ -108,6 +108,9 @@ where
     F: FnOnce() -> Result<(), LoopError>,
 {
     state.restore_custody();
+    if let Err(error) = content_observation::reobserve_content(state, executor).await {
+        eprintln!("vonk-agent: preparation observation deferred: {error}");
+    }
     let now = Utc::now();
     // Delivery has one request-sized budget per pass, independent of backlog.
     // Losing an upload response retains custody; it never authorizes replayed
@@ -272,6 +275,7 @@ where
             result
         }
         Ok(BeginDecision::Replay(result)) => *result,
+        Err(StateError::Busy) => return Ok(()),
         Err(error) => {
             // No effect is dispatched without durable custody. Local failure
             // ends this exact attempt as uncertainty; a fresh fence still
