@@ -3094,7 +3094,6 @@ def test_installation_content_references_hold_but_provenance_does_not(
             compiled.identity.model_artifact_set_sha256,
             compiled.runtime_image.image_digest.removeprefix("sha256:"),
             compiled.runtime_image.oci_layout_sha256,
-            compiled.artifacts[0].sha256,
             compiled.artifacts[0].model.content_sha256,
         )
         for identity in identities:
@@ -3127,3 +3126,115 @@ def test_pressure_never_promises_profile_pinned_model_objects_as_reclaimable(
         items = UnusedStorageCollector._spark_items(session, NODE, evidence, Counter())
     # M1's A+B stay; M2 can free only C (30) and each model's private 10.
     assert sum(item.freeable for item in items) == 50 * GIB
+
+
+def test_shared_file_does_not_pin_an_unrelated_installation(
+    postgres_engine: Engine, tmp_path: Path
+) -> None:
+    """Fault: a pending install uses a file also linked by an unused install.
+
+    Catches retaining all of its gigabytes for one shared tokenizer file.
+    Exact installation and aggregate model/image references still retain use.
+    """
+    from vonk_agent_protocol import AgentOperation as OperationKind
+    from vonk_agent_protocol.recipe_operations import RecipeInstallPayload
+    from vonk_control.job_documents import InstallPhaseOperation, RecipeInstallParent
+    from vonk_control.model_cache.artifacts import ArtifactSetManifest, ArtifactSpec
+    from vonk_control.recipe_execution_contract import parse_stored_installation_plan
+
+    sessions, _, installation_id, nodes = _real_lifecycle(
+        tmp_path, engine=postgres_engine
+    )
+    other_id = str(uuid.uuid4())
+    with sessions.begin() as session:
+        installation = _required(session.get(RecipeInstallation, installation_id))
+        plan = parse_stored_installation_plan(installation.plan)
+        compiled = next(iter(plan.compiled_execution_plans.values())).model_copy(
+            deep=True
+        )
+        model = _required(installation.model_content_sha256)
+        objects = {
+            artifact.sha256: artifact.size_bytes for artifact in compiled.artifacts
+        }
+        manifest = ArtifactSetManifest(
+            model_content_sha256=model,
+            recipe_revision_sha256=None,
+            model_content_digests=(model,),
+            artifacts=tuple(
+                ArtifactSpec(
+                    key=artifact.file_id,
+                    artifact_id=artifact.file_id,
+                    path=artifact.path,
+                    kind="huggingface.file",
+                    repository=None,
+                    source="https://huggingface.co/test/model",
+                    revision=None,
+                    sha256=artifact.sha256,
+                    expected_bytes=artifact.size_bytes,
+                    roles=tuple(artifact.roles),
+                    model_content_sha256=model,
+                )
+                for artifact in compiled.artifacts
+            ),
+        )
+        ModelCacheService(sessions, tmp_path / "model-cache")._ensure_set(
+            session, manifest
+        )
+        node = _required(
+            session.scalar(
+                select(InstallationNode).where(
+                    InstallationNode.installation_id == installation_id
+                )
+            )
+        )
+        node.installed_bytes = sum(objects.values()) + 1000
+        # A different model selection and image, with one byte-identical file.
+        compiled.identity.model_artifact_set_sha256 = "8" * 64
+        compiled.runtime_image.image_digest = "sha256:" + "9" * 64
+        compiled.runtime_image.oci_layout_sha256 = "a" * 64
+        for artifact in compiled.artifacts:
+            artifact.model.content_sha256 = "b" * 64
+        payload = RecipeInstallPayload(
+            installation_id=other_id,
+            plan_digest="c" * 64,
+            expected_bytes=100,
+            compiled_execution_plan=compiled,
+        )
+        session.add(
+            Job(
+                request_id=str(uuid.uuid4()),
+                kind=OperationKind.RECIPE_INSTALL.value,
+                state=LifecycleState.RUNNING,
+                actor="test",
+                authority_revision="r",
+                targets=list(nodes),
+                payload_digest="0" * 64,
+                payload=RecipeInstallParent(
+                    schema_version=1,
+                    owner_kind="installation",
+                    owner_id=other_id,
+                    plan_digest=payload.plan_digest,
+                    phases=[
+                        [
+                            InstallPhaseOperation(
+                                operation_id=str(uuid.uuid4()),
+                                node_id=nodes[0],
+                                payload=payload,
+                            )
+                        ]
+                    ],
+                ).model_dump(mode="json"),
+                current_attempt=1,
+                created_at=OLD,
+                updated_at=NOW,
+            )
+        )
+    with sessions() as session:
+        from vonk_control.unused_storage_collection import _installation_kept
+
+        evidence = _Evidence.read(session, _REAL_CLOCK)
+        assert compiled.artifacts[0].sha256 in evidence.operations
+        assert _installation_kept(session, installation_id, evidence) is None
+        # Only private bytes can be promised. The live operation still pins
+        # the shared object in the native store after the uninstall drops links.
+        assert spark_eviction_capacity(session, nodes[0], _REAL_CLOCK).freeable == 1000
