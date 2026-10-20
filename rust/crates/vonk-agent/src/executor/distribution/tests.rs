@@ -53,7 +53,7 @@ async fn a_reissued_distribution_drops_the_old_counter_baseline_before_copying()
     let root = tempfile::tempdir().unwrap();
     let client = AgentHttpClient::for_http_test("http://127.0.0.1:9/", NODE_ID);
     let mut order = claim();
-    order.operation = vonk_agent_protocol::AgentOperation::ArtifactDistributionV1;
+    order.operation = vonk_agent_protocol::generated::AgentOperation::ArtifactDistributionV1;
     order.payload = serde_json::from_str(include_str!(
         "../../../../../../agent_protocol/fixtures/artifact-distribution-payload.json"
     ))
