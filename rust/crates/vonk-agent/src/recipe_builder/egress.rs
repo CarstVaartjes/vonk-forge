@@ -466,6 +466,7 @@ pub(super) fn write_proxy_rootfs(
     header.set_mtime(0);
     header.set_cksum();
     archive.append_data(&mut header, "vonk-build-egress", &mut source)?;
+    vonk_agent_protocol::runtime_identity::append_to(&mut archive, 65532, 65532)?;
     archive.finish()?;
     Ok(())
 }

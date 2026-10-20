@@ -378,7 +378,7 @@ pub(super) fn validate_docker_run_with_archive(
     {
         return Err(OperationError::InvalidOperation);
     }
-    let (uid, _gid) = user.ok_or(OperationError::InvalidOperation)?;
+    let (uid, gid) = user.ok_or(OperationError::InvalidOperation)?;
     let outputs = outputs.ok_or(OperationError::InvalidOperation)?;
     let cache_root = cache_root.ok_or(OperationError::InvalidOperation)?;
     require_runtime_directory(&cache_root, agent_data_owner_uid, uid)?;
@@ -598,6 +598,7 @@ pub(super) fn validate_docker_run_with_archive(
         run_id: state_run_id.to_owned(),
         installation_id,
         uid,
+        gid: gid.unwrap_or(uid),
         models,
         inputs,
         cache_root: cache_root.clone(),

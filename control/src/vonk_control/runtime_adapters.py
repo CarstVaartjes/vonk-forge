@@ -8,6 +8,9 @@ Vonk contract layered onto that built upstream image:
 * the canonical ``/opt/vonk/bin/<engine>`` launcher, and
 * the numeric runtime user plus ownership of the writable output paths.
 
+The execution boundary supplies passwd/group identity, including for images
+prepared before the current adapter.
+
 One reviewed, digest-identified adaptation stage provides that contract instead
 of boilerplate every recipe Dockerfile reproduces.  The ``v1`` interface label
 only marks compatibility; it does not identify the implementation that was
@@ -177,11 +180,6 @@ def render_adaptation_stage(engine: str, *, launcher: str | None) -> str:
         f"FROM ${{{_RECIPE_IMAGE_ARGUMENT}}}",
         "USER 0",
         "RUN set -eu \\",
-        (
-            f" && if ! getent passwd {uid} >/dev/null; then "
-            f"printf 'vonk-runtime:x:{uid}:{gid or uid}:Vonk runtime:/outputs/cache/home:/bin/false\\n' "
-            ">> /etc/passwd; fi \\"
-        ),
         f" && install --directory --mode=0755 {PurePosixPath(wrapper).parent} \\",
         " && install --directory "
         f"--owner={uid} --group={gid or uid} " + " ".join(directories) + " \\",
