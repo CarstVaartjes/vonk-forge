@@ -1,5 +1,5 @@
 //! One observation dispatcher for preparation and runtime custody on startup
-//! and every idle tick. Package handoff joins in the next track.
+//! and every idle tick, including the signed package handoff.
 use super::*;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -14,21 +14,22 @@ pub enum ObservationKind {
     Start,
     Stop,
     JobRun,
+    Upgrade,
 }
 impl ObservationKind {
-    pub fn of(operation: &AgentOperation) -> Option<Self> {
+    pub fn of(operation: &AgentOperation) -> Self {
         match operation {
-            AgentOperation::RuntimePreflightV1 => Some(Self::Preflight),
-            AgentOperation::ArtifactDistributionV1 => Some(Self::Distribution),
-            AgentOperation::RecipeBuildV1 => Some(Self::Build),
-            AgentOperation::RecipeBuildCleanupV1 => Some(Self::BuildCleanup),
-            AgentOperation::RecipeInstall => Some(Self::Install),
-            AgentOperation::RecipeReconcile => Some(Self::Reconcile),
-            AgentOperation::RecipeUninstall => Some(Self::Uninstall),
-            AgentOperation::RecipeStart => Some(Self::Start),
-            AgentOperation::RecipeStop => Some(Self::Stop),
-            AgentOperation::RecipeJobRunV1 => Some(Self::JobRun),
-            AgentOperation::AgentUpgradeV1 => None,
+            AgentOperation::RuntimePreflightV1 => Self::Preflight,
+            AgentOperation::ArtifactDistributionV1 => Self::Distribution,
+            AgentOperation::RecipeBuildV1 => Self::Build,
+            AgentOperation::RecipeBuildCleanupV1 => Self::BuildCleanup,
+            AgentOperation::RecipeInstall => Self::Install,
+            AgentOperation::RecipeReconcile => Self::Reconcile,
+            AgentOperation::RecipeUninstall => Self::Uninstall,
+            AgentOperation::RecipeStart => Self::Start,
+            AgentOperation::RecipeStop => Self::Stop,
+            AgentOperation::RecipeJobRunV1 => Self::JobRun,
+            AgentOperation::AgentUpgradeV1 => Self::Upgrade,
         }
     }
 }
@@ -84,23 +85,25 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
     pub(super) async fn observe_operation(
         &self,
         claim: &AgentClaim,
-    ) -> Option<OperationObservation> {
-        let kind = ObservationKind::of(&claim.operation)?;
+        upgrade: Option<super::upgrade_observation::UpgradeObservation<'_>>,
+    ) -> OperationObservation {
+        let kind = ObservationKind::of(&claim.operation);
         let pending = |cause, reason| {
             OperationObservation::Unknown(PendingObservation::new(claim, cause, reason))
         };
-        let observed = self.probe_content(claim, kind).await;
-        Some(match observed {
+        let observed = self.probe_effect(claim, kind, upgrade).await;
+        match observed {
             Ok(result) => result,
             Err(ProbeError::Uncertain(cause)) => pending(WaitReason::ObservationUnavailable, cause),
             Err(ProbeError::Definite(result)) => OperationObservation::confirmed(*result),
-        })
+        }
     }
 
-    async fn probe_content(
+    async fn probe_effect(
         &self,
         claim: &AgentClaim,
         kind: ObservationKind,
+        upgrade: Option<super::upgrade_observation::UpgradeObservation<'_>>,
     ) -> Result<OperationObservation, ProbeError> {
         use vonk_agent_protocol::generated::AgentClaimPayload as Payload;
         let unknown = |reason| {
@@ -114,6 +117,9 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
             OperationObservation::Blocked(PendingObservation::new(claim, cause, reason))
         };
         match kind {
+            ObservationKind::Upgrade => {
+                Ok(super::upgrade_observation::observe_upgrade(claim, upgrade))
+            }
             ObservationKind::Start | ObservationKind::Stop | ObservationKind::JobRun => {
                 Ok(self.observe_runtime(claim).await)
             }

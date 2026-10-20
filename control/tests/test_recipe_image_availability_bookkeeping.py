@@ -513,10 +513,10 @@ def test_a_gone_model_child_ends_parent_and_admits_fresh_preparation(
     engine.dispose()
 
 
-def test_terminal_removal_releases_storage_gate_before_a_fresh_preparation(
+def test_recovered_removal_releases_storage_gate_before_a_fresh_preparation(
     tmp_path: Path,
 ) -> None:
-    """A missing child is retried, ends when its retries are spent and releases its gate."""
+    """An uncertain child observation recovers after the former count ceiling."""
     import json
 
     from vonk_agent_protocol import ModelCacheCode
@@ -576,8 +576,7 @@ def test_terminal_removal_releases_storage_gate_before_a_fresh_preparation(
             row = session.get(Job, operation_id)
             assert row is not None
             assert row.state == LifecycleState.BACKOFF.value
-        # The child stays gone: each attempt is a real failure, and the retry
-        # budget (not a clock) ends the removal.
+        # The observation keeps failing past the former ceiling.
         policy = RecoveryPolicy()
         for _ in range(policy.max_failures):
             now[0] += timedelta(seconds=policy.max_delay_seconds + 1)
@@ -587,8 +586,18 @@ def test_terminal_removal_releases_storage_gate_before_a_fresh_preparation(
                 detail="the exact child is gone",
                 cause=Disposition.OBSERVE,
             )
-        service.advance_removals()
-        return service.get_operator_operation(operation_id)
+        with sessions() as session:
+            row = session.get(Job, operation_id)
+            assert row is not None and row.state == LifecycleState.BACKOFF
+            assert row.next_action_at is not None
+        # Stop injecting the missing-child observation. Normal execution now
+        # observes the exact scope and finishes the original request.
+        for _ in range(4):
+            now[0] += timedelta(seconds=policy.max_delay_seconds + 1)
+            service.advance_removals()
+        completed = service.get_operator_operation(operation_id)
+        assert completed.state == LifecycleState.SUCCEEDED
+        return completed
 
     assert_ended_without_blocking(
         SimpleNamespace(sessions=sessions),

@@ -225,12 +225,11 @@ def test_worker_adopts_retained_runtime_receipt_without_contact(service, kind, p
         assert row is not None and row.state == LifecycleState.SUCCEEDED
 
 
-def test_shared_observer_covers_every_kind_except_package_handoff():
-    # Wrong implementation: a newly added enum member silently takes the
-    # generic restart-interrupted path instead of an owner probe.
+def test_shared_observer_covers_every_kind():
+    # A newly added enum member must participate in stored receipt observation.
     from vonk_control.agent_jobs.observation_receipts import OBSERVATION_KINDS
 
-    assert OBSERVATION_KINDS == set(Kind) - {Kind.AGENT_UPGRADE}
+    assert OBSERVATION_KINDS == set(Kind)
 
 
 def _cancelled_job(tmp_path, postgres_engine):

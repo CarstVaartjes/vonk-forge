@@ -13,6 +13,7 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import select
+from vonk_agent_protocol import LifecycleState
 from vonk_control.lifecycle.core import RECOVERY
 from vonk_control.models import FleetProfileApplication, Job
 
@@ -97,15 +98,16 @@ def test_a_retryable_failure_backs_off_with_its_evidence_and_its_retry_succeeds(
     assert service.application(retry.id).state == "succeeded"
 
 
-def test_an_exhausted_retry_ends_failed_once_and_is_never_rewritten(
-    tmp_path: Path,
-) -> None:
-    sessions, lifecycle, service, *_rest = _failed_profile(tmp_path)
+def test_repeated_failure_recovers_without_a_new_load(tmp_path: Path) -> None:
+    sessions, lifecycle, service, _profile, _desired, _first, first_child, _nodes = (
+        _failed_profile(tmp_path)
+    )
     clock = {"now": lifecycle._clock()}
     service._clock = lambda: clock["now"]
     cause = "runtime exited at start"
     rounds = [cause] * (RECOVERY.max_failures + 2)
     applications = _crash_rounds(sessions, service, clock, rounds)
+    assert applications > RECOVERY.max_failures + 1
     with sessions() as session:
         last_id = session.scalar(
             select(FleetProfileApplication.id)
@@ -113,21 +115,26 @@ def test_an_exhausted_retry_ends_failed_once_and_is_never_rewritten(
             .limit(1)
         )
     assert last_id is not None
-    ended = _stored(sessions, last_id)
-    assert ended.state == "failed"
-    assert service.application(last_id).next_attempt_at is None
-
-    for _ in range(2):
+    waiting = service.application(last_id)
+    assert waiting.state == LifecycleState.BACKOFF
+    assert waiting.next_attempt_at is not None
+    assert cause in (waiting.status_reason or "")
+    # The runtime fault clears. The standing owner retries the same intent;
+    # there is no second apply or explicit retry request.
+    for _ in range(12):
         clock["now"] += timedelta(hours=2)
         service.tick()
-    again = _stored(sessions, last_id)
-    assert (again.state, again.status_reason, again.progress, again.updated_at) == (
-        ended.state,
-        ended.status_reason,
-        ended.progress,
-        ended.updated_at,
-    )
-    assert _crash_rounds(sessions, service, clock, []) == applications
+        _complete_switch_children(sessions, besides=first_child)
+        with sessions() as session:
+            succeeded = session.scalar(
+                select(FleetProfileApplication.id).where(
+                    FleetProfileApplication.state == LifecycleState.SUCCEEDED
+                )
+            )
+        if succeeded is not None:
+            break
+    assert succeeded is not None
+    assert service.application(last_id).state == LifecycleState.SUPERSEDED
 
 
 def test_a_newer_load_supersedes_a_backing_off_load(tmp_path: Path) -> None:

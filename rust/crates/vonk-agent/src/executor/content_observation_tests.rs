@@ -244,6 +244,14 @@ async fn every_dispatched_kind_reaches_its_real_probe_and_preserves_unknown() {
             "absent evidence cannot complete {operation}"
         );
     }
+    let upgrade = super::upgrade_observation_tests::upgrade_claim();
+    assert!(
+        matches!(
+            executor.observe(&upgrade).await,
+            Some(OperationObservation::Unknown(_))
+        ),
+        "every wire kind must reach an observer, including unavailable package identity"
+    );
     assert!(executor.observe(&build).await.is_some());
     for accepted in super::runtime_observation_tests::runtime_claims() {
         accepted.validate().unwrap();

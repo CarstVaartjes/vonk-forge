@@ -33,7 +33,7 @@ from .optional_evidence import (
     redacted_prose,
 )
 from .reason_codes import AgentEvidenceCode
-from .wire_model import ErrorCode, OperationProgress, WireModel
+from .wire_model import ErrorCode, OperationProgress, WireEnum, WireModel
 
 # Backstop above a full 4096-object distribution assignment (~0.5 MiB); the
 # real GLM shape is ~18 KiB, only 3x under the previous 64 KiB.
@@ -174,6 +174,10 @@ class AgentInstallResult(WireModel):
     installed_bytes: int = Field(strict=True, ge=0, le=16 * 1024**4)
 
 
+class AgentUpgradeStatus(WireEnum):
+    UPGRADED = "upgraded"
+
+
 class AgentUpgradeResult(WireModel):
     """Evidence emitted after the Rust agent reports an exact upgrade."""
 
@@ -184,7 +188,7 @@ class AgentUpgradeResult(WireModel):
     package_version: Annotated[
         str, Field(pattern=r"^[0-9A-Za-z][0-9A-Za-z.+~-]{0,127}$")
     ]
-    status: Literal["upgraded"]
+    status: AgentUpgradeStatus
     activation_receipt: PackageActivationReceipt
 
 

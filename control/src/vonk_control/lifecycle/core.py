@@ -220,24 +220,6 @@ def _retry(
     """Rule 1: schedule the next attempt; never an operator wait."""
 
     count = row.retry_count + int(consumes_retry)
-    deadline_reader = getattr(adapter, "recovery_deadline", None)
-    deadline = row.recovery_deadline or (
-        deadline_reader(row) if deadline_reader is not None else None
-    )
-    if deadline is None and consumes_retry and count >= RECOVERY.max_failures:
-        why = reason or row.reason or FailureCode.OPERATION_FAILED
-        return Decision(
-            replace(
-                row,
-                state=State.FAILED,
-                retry_count=count,
-                next_action_at=None,
-                lease_deadline=None,
-                effect=effect,
-                reason=why,
-            ),
-            (RecordResidue(why),) if effect is Effect.UNKNOWN else (),
-        )
     return Decision(
         replace(
             row,
@@ -545,8 +527,7 @@ def _observed(
         deadline_reader(row) if deadline_reader is not None else None
     )
     if (
-        (deadline is not None and now >= deadline)
-        or (deadline is None and row.retry_count >= RECOVERY.max_failures)
+        deadline is not None and now >= deadline
     ) and event.effect is not Effect.ESTABLISHED:
         if event.effect is Effect.UNKNOWN and not blind_retry_is_safe(row, adapter):
             return _lost(row, now, event.reason)

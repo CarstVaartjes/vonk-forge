@@ -131,10 +131,9 @@ async fn a_result_refused_as_invalid_settles_with_its_core() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_refused_core_leaves_the_full_result_retained_and_visible() {
-    // The core is offered once; refused too, the full result keeps its
-    // custody and the first refusal, re-offered under the cool-down so a
-    // corrected Controller accepts it, never hot-looped.
+async fn a_refused_core_discards_delivery_with_evidence_across_restart() {
+    // A deterministic refusal must settle delivery, with the full result and
+    // typed refusal still in custody. Restart must never resend these bytes.
     let directory = tempdir().unwrap();
     let mut state = StateStore::open(&directory.path().join("state.sqlite"), NODE_ID).unwrap();
     let full = completed_failed_result(&mut state);
@@ -147,11 +146,46 @@ async fn a_refused_core_leaves_the_full_result_retained_and_visible() {
     deliver(&client, &mut state).await;
 
     assert_eq!(client.submitted.lock().unwrap().len(), 2);
-    assert_eq!(state.pending_results().unwrap().len(), 1);
+    assert!(state.pending_results().unwrap().is_empty());
     let rejection = state
-        .result_rejection(&full, Utc::now())
+        .retained_rejection(&full)
         .unwrap()
         .expect("the refusal is retained");
     assert_eq!(rejection.http_status, 422);
-    assert!(rejection.retry_due_at > Utc::now());
+    assert_eq!(rejection.code, ingress_refusal().code);
+    assert_eq!(rejection.request_id, ingress_refusal().request_id);
+    let path = directory.path().join("state.sqlite");
+    drop(state);
+    let mut restarted = StateStore::open(&path, NODE_ID).unwrap();
+    deliver(&client, &mut restarted).await;
+    deliver(&client, &mut restarted).await;
+    assert_eq!(client.submitted.lock().unwrap().len(), 2);
+    assert!(restarted.retained_rejection(&full).unwrap().is_some());
+    let replay = RecordingClient {
+        cancel_requested: false,
+        claim: Arc::new(Mutex::new(Some(claim()))),
+        fail_heartbeat: false,
+        heartbeats: Arc::new(Mutex::new(Vec::new())),
+        results: Arc::new(Mutex::new(Vec::new())),
+    };
+    run_once(&replay, &mut restarted, &RejectingExecutor, None, 0, None)
+        .await
+        .unwrap();
+    assert!(replay.results.lock().unwrap().is_empty());
+    let (acknowledged, retained): (bool, Vec<u8>) = rusqlite::Connection::open(path)
+        .unwrap()
+        .query_row(
+            "SELECT result_acknowledged,result_json FROM operations",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(
+        retained,
+        vonk_agent_protocol::canonical_json(&full).unwrap()
+    );
+    assert!(
+        !acknowledged,
+        "discarding delivery must not claim acceptance"
+    );
 }

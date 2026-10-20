@@ -3853,7 +3853,7 @@ def test_removal_with_a_deterministic_failure_still_fails_promptly(
     _seed_removal(service, tmp_path, "d" * 64, "00000000-0000-4000-8000-000000001052")
 
     def broken(*_args, **_kwargs):
-        raise OSError("disk refuses the delete")
+        raise ValueError("invalid exact deletion contract")
 
     monkeypatch.setattr(service, "_remove_model_object_files", broken)
     removal = service.remove_model_selector(
@@ -3863,7 +3863,7 @@ def test_removal_with_a_deterministic_failure_still_fails_promptly(
     service._clock = lambda: clock[0]
     _advance_on_fake_clock(service, sessions, removal.id, clock, rounds=20)
     ended = service.get_operation(removal.id)
-    assert ended.state == "failed"
+    assert ended.state == LifecycleState.FAILED
     release_ended_gates(service)
 
     assert_ended_without_blocking(
@@ -3877,7 +3877,7 @@ def test_removal_with_a_deterministic_failure_still_fails_promptly(
             _artifact(tmp_path, b"long wait weights", model_content_sha256="d" * 64),
         ),
     )
-    assert "disk refuses the delete" in str(ended.last_error or ended.failure)
+    assert "invalid exact deletion contract" in str(ended.last_error or ended.failure)
 
 
 def test_model_removal_child_replay_and_visible_writer_wait(cache, tmp_path: Path):

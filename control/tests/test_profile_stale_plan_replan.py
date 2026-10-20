@@ -9,10 +9,9 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
-from vonk_agent_protocol import UnknownOutcomeError, WaitReason
+from vonk_agent_protocol import LifecycleState, UnknownOutcomeError, WaitReason
 from vonk_control.fleet_profile_contract import FleetProfileInput, FleetProfilePreview
 from vonk_control.fleet_profiles import (
-    PROFILE_REPEATED_FAILURE_CODE,
     _persisted_profile_progress,
     build_production_fleet_profile_service,
 )
@@ -164,16 +163,10 @@ def test_a_load_admitted_without_an_image_decision_recovers_by_itself(
 
 
 @pytest.mark.parametrize("looping_before_upgrade", [False, True])
-def test_a_refusal_no_fresh_plan_clears_ends_the_load_with_its_cause(
+def test_repeated_stale_plan_reconciles_after_the_fault_clears(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, looping_before_upgrade: bool
 ) -> None:
-    """Catches a re-plan loop: the same refusal of every fresh plan ends it.
-
-    Every plan of the load is refused the same way (fault injected at the
-    exact step).  Each refusal plans the load again, and once the lineage
-    failed the same way as often as recovery allows, it ends ``failed`` naming
-    the refusal: a wait is never forever.
-    """
+    """Repeated conflicts re-plan with bounded backoff until conditions clear."""
     inspector = CompleteArtifactInspector()
     sessions, service, profile, now = _installed_load(tmp_path, inspector)
 
@@ -202,22 +195,20 @@ def test_a_refusal_no_fresh_plan_clears_ends_the_load_with_its_cause(
         if not _live_applications(sessions):
             break
 
-    assert not _live_applications(sessions)
+    assert _live_applications(sessions)
     with sessions() as session:
-        rows = list(
-            session.scalars(
-                select(FleetProfileApplication).order_by(
-                    FleetProfileApplication.created_at
-                )
-            )
-        )
-    assert len(rows) == RECOVERY.max_failures
-    assert [row.state for row in rows] == ["superseded"] * (len(rows) - 1) + ["failed"]
-    last = service.application(rows[-1].id)
-    (repeated,) = (
-        item
-        for item in last.progress.blockers
-        if item.code == PROFILE_REPEATED_FAILURE_CODE
+        rows = list(session.scalars(select(FleetProfileApplication)))
+    assert len(rows) > RECOVERY.max_failures
+    assert not any(row.state == LifecycleState.FAILED for row in rows)
+    monkeypatch.undo()
+    # The same accepted intent is observed again; no new operator request.
+    for _ in range(12):
+        now[0] += timedelta(minutes=10)
+        service.tick()
+    assert _live_applications(sessions)
+    # Planning now progressed into a real Run/Switch child, whose fake executor
+    # is deliberately unfinished in this fixture.
+    last = service.application(_live_applications(sessions)[-1].id)
+    assert last.progress.effects and all(
+        effect.operation_id is not None for effect in last.progress.effects
     )
-    assert repeated.code == PROFILE_REPEATED_FAILURE_CODE
-    assert "accepted capacity no longer matches" in repeated.detail
