@@ -1421,7 +1421,7 @@ def test_release_actions_are_commit_pinned_and_secrets_are_environment_scoped() 
         in unified_text
     )
     assert (
-        "uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"
+        "uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9"
         in package_text
     )
     assert (
