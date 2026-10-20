@@ -79,6 +79,7 @@ def download_ranges(
     workers: int = 4,
     stream_gate: Callable[[], AbstractContextManager[object]] | None = None,
     on_bytes: Callable[[int], None] | None = None,
+    on_assembled_bytes: Callable[[bytes], None] | None = None,
 ) -> bool:
     """Complete target atomically, or return False for sequential fallback.
 
@@ -87,6 +88,7 @@ def download_ranges(
     Interrupted/truncated transfers retain valid segment prefixes for retry.
     Assembly temporarily needs space for another full object alongside segments.
     The caller must serialize attempts for this target and use stable workers.
+    on_assembled_bytes lets ingress hash the ordered bytes in this same read.
     """
     segments = list(_segments(target, expected_bytes, workers))
     _reset_symlink(target)
@@ -243,6 +245,8 @@ def download_ranges(
                         if stop_event.is_set():
                             raise InterruptedError("range assembly interrupted")
                         output.write(chunk)
+                        if on_assembled_bytes is not None:
+                            on_assembled_bytes(chunk)
             output.flush()
             os.fsync(output.fileno())
         os.replace(assembly, target)
