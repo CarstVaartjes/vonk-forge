@@ -152,6 +152,11 @@ services:
     secrets: []
     volumes:
       - route-publications:/routes
+      # The same key-service mutation claims fence API rolls and route grants.
+      - type: bind
+        source: ./secrets/gateway
+        target: /gateway-secrets
+        bind: {create_host_path: true}
       # API pre-exec stages the same encrypted intermediate/password as private
       # UID 10001 files; enrollment and worker recovery share this authority.
       - normalized-private-keys:/run/vonk-normalized-secrets:ro
@@ -163,7 +168,7 @@ services:
     # The cache worker fetches pinned models and OCI images from public
     # providers. Keep its outbound network separate from ingress and do not
     # publish worker ports; the API and database retain internal networks.
-    networks: [data, artifact-egress]
+    networks: [data, artifact-egress, gateway-key-admin]
     depends_on:
       postgres: {condition: service_healthy}
       control-api: {condition: service_healthy}
@@ -296,7 +301,7 @@ services:
     environment:
       VONK_CONTROL_HOSTNAME: ${VONK_CONTROL_HOSTNAME:?set the control hostname}
     secrets: [agent-client-ca, agent-proxy-auth, controller-server-certificate, controller-server-key]
-    networks: [ingress, agent-proxy, registry-edge, tailnet-web-edge, hermes-inference, litellm-edge]
+    networks: [ingress, agent-proxy, registry-edge, tailnet-web-edge, hermes-inference, litellm-edge, gateway-key-admin]
     depends_on:
       control-api: {condition: service_started, required: false, restart: true}
       registry: {condition: service_healthy}
@@ -387,6 +392,7 @@ secrets:
     file: ./secrets/step-ca-password
 
 networks:
+  gateway-key-admin: {internal: true}
   ingress: {}
   agent-proxy: {internal: true}
   application: {internal: true}

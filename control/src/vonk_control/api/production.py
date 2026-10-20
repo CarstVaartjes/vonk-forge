@@ -10,7 +10,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from fastapi import FastAPI
-from vonk_agent_protocol import UnknownOutcomeError
+from vonk_agent_protocol import UnknownError, UnknownOutcomeError
 
 import vonk_control
 
@@ -29,6 +29,7 @@ from ..compose_bundle import compose_bundle
 from ..distribution_executor import CompositeDistributionPhaseExecutor
 from ..failure_evidence import FailureEvidenceService
 from ..gateway_keys import GatewayKeyService, keep_default_key
+from ..gateway_route_grants import recipe_key_routes
 from ..library_assessment import LibraryAssessment
 from ..logging import configure_controller_logging
 from ..metrics import MetricsRegistry, read_runnable_job_ages
@@ -217,12 +218,24 @@ def production_app(settings: Settings | None = None) -> FastAPI:
             ),
         ),
     )
+    gateway_keys = capabilities.guard(
+        ControllerCapability.GATEWAY_KEYS,
+        GatewayKeyService,
+        lambda: GatewayKeyService(
+            route_grants=lambda models, runs: recipe_key_routes(
+                sessions, models, include_run_ids=runs
+            )
+        ),
+        check=lambda service: service.check_health(),
+    )
+
     recipe_routes = capabilities.guard(
         ControllerCapability.RECIPE_ROUTES,
         RecipeRouteService,
         lambda: RecipeRouteService(
             sessions,
             publisher=AtomicRecipeRoutePublisher(recipe_route_runtime),
+            prepare_key_routes=gateway_keys.prepare_recipe_routes,
             management_policy=ManagementAddressPolicy.parse(
                 settings.management_cidrs,
                 forbidden_cidrs=settings.direct_fabric_cidrs,
@@ -442,12 +455,11 @@ def production_app(settings: Settings | None = None) -> FastAPI:
     automatic_sync_task: asyncio.Task[None] | None = None
     automatic_sync_stop = asyncio.Event()
 
-    gateway_keys = capabilities.guard(
-        ControllerCapability.GATEWAY_KEYS,
-        GatewayKeyService,
-        GatewayKeyService,
-        check=lambda service: service.check_health(),
-    )
+    def reconcile_gateway_keys() -> bool | UnknownError:
+        default = gateway_keys.ensure_default()
+        if isinstance(default, UnknownError):
+            return default
+        return gateway_keys.reconcile_route_grants()
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
@@ -458,7 +470,7 @@ def production_app(settings: Settings | None = None) -> FastAPI:
                 managed_catalog_sync,
                 automatic_sync_stop,
                 interval_seconds=RECIPE_LIBRARY_SYNC_INTERVAL_SECONDS,
-                reconcile=lambda: gateway_keys.ensure_default(),
+                reconcile=reconcile_gateway_keys,
             )
         )
         default_key_task = asyncio.create_task(

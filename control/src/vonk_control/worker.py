@@ -491,9 +491,23 @@ def assemble_production_worker(
     else:
         artifact_phase_executor = None
 
+    from .gateway_keys import GatewayKeyService
+    from .gateway_route_grants import recipe_key_routes
+
+    gateway_keys = registry.guard(
+        ControllerCapability.GATEWAY_KEYS,
+        GatewayKeyService,
+        lambda: GatewayKeyService(
+            route_grants=lambda models, runs: recipe_key_routes(
+                sessions, models, include_run_ids=runs
+            )
+        ),
+        check=lambda service: service.check_health(),
+    )
     recipe_routes = RecipeRouteService(
         sessions,
         publisher=AtomicRecipeRoutePublisher(publisher),
+        prepare_key_routes=gateway_keys.prepare_recipe_routes,
         management_policy=management_policy,
         clock=clock,
     )

@@ -95,6 +95,7 @@ class FakeLiteLlm:
                 "key_alias": body["key_alias"],
                 "models": body["models"],
                 "allowed_routes": body["allowed_routes"],
+                "metadata": body["metadata"],
                 "expires": "2026-10-28T00:00:00Z" if body.get("duration") else None,
                 "created_at": "2026-09-28T00:00:00Z",
                 "duration": body.get("duration"),
@@ -102,7 +103,13 @@ class FakeLiteLlm:
             return httpx2.Response(200, json=self.keys[body["key_alias"]])
         if path == "/key/update":
             for alias, item in list(self.keys.items()):
-                if item["key"] == body["key"]:
+                if (
+                    item["key"] == body["key"]
+                    or hashlib.sha256(item["key"].encode()).hexdigest() == body["key"]
+                ):
+                    if "allowed_routes" in body:
+                        item["allowed_routes"] = body["allowed_routes"]
+                        return httpx2.Response(200, json={"key": body["key"]})
                     del self.keys[alias]
                     self.keys[body["key_alias"]] = {
                         **item,
@@ -1117,3 +1124,68 @@ def test_gateway_dependency_recovers_after_prolonged_outage(tmp_path, http_statu
     assert _authorizes(peer, path.read_text().strip())
     assert service.ensure_default(path) is False
     client.close()
+
+
+def test_published_native_routes_reconcile_existing_scoped_keys_without_renewal():
+    from vonk_control.gateway_route_grants import GatewayInferenceRoute
+
+    litellm = FakeLiteLlm()
+    service = _service(litellm)
+    published = set()
+
+    def grants(models, _runs):
+        routes = [GatewayInferenceRoute.OPENAI.value]
+        if published and (not models or published.intersection(models)):
+            routes.append(GatewayInferenceRoute.SYSTEMONE.value)
+        return routes
+
+    service._route_grants = grants
+    for name, models in (("sweep", []), ("d3", ["d3"]), ("chat", ["chat"])):
+        _created(service.create(name, models=models, expires="30d"))
+    original = {name: dict(item) for name, item in litellm.keys.items()}
+    published.add("d3")
+    assert service.reconcile_route_grants() is True
+    for name in ("sweep", "d3"):
+        assert litellm.keys[name]["allowed_routes"] == [
+            GatewayInferenceRoute.OPENAI,
+            GatewayInferenceRoute.SYSTEMONE,
+        ]
+    assert litellm.keys["chat"]["allowed_routes"] == [GatewayInferenceRoute.OPENAI]
+    for name, item in litellm.keys.items():
+        for field in ("key", "models", "expires", "created_at", "duration"):
+            assert item[field] == original[name][field]
+    assert service.reconcile_route_grants() is False
+    published.clear()
+    assert service.reconcile_route_grants() is True
+    assert all(
+        item["allowed_routes"] == [GatewayInferenceRoute.OPENAI]
+        for item in litellm.keys.values()
+    )
+
+
+def test_new_key_grants_native_route_only_inside_its_existing_model_scope():
+    from vonk_control.gateway_route_grants import GatewayInferenceRoute
+
+    litellm = FakeLiteLlm()
+    service = _service(litellm)
+    service._route_grants = lambda models, _runs: (
+        [GatewayInferenceRoute.OPENAI.value]
+        + (
+            [GatewayInferenceRoute.SYSTEMONE.value]
+            if not models or "d3" in models
+            else []
+        )
+    )
+    _created(service.create("d3", models=["d3"]))
+    _created(service.create("chat", models=["chat"]))
+    assert litellm.keys["d3"]["allowed_routes"] == [
+        GatewayInferenceRoute.OPENAI,
+        GatewayInferenceRoute.SYSTEMONE,
+    ]
+    assert litellm.keys["chat"]["allowed_routes"] == [GatewayInferenceRoute.OPENAI]
+    service._route_grants = lambda _models, _runs: [
+        GatewayInferenceRoute.OPENAI.value,
+        "/key/generate",
+    ]
+    assert isinstance(service.create("forbidden"), UnknownError)
+    assert "forbidden" not in litellm.keys
