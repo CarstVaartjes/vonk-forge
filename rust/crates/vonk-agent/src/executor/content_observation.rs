@@ -39,10 +39,15 @@ pub struct PendingObservation {
     pub deadline: DateTime<FixedOffset>,
 }
 pub enum ContentObservation {
-    Confirmed(ExecutionResult),
+    Confirmed(Box<ExecutionResult>),
     Progressing(PendingObservation),
     Blocked(PendingObservation),
     Unknown(PendingObservation),
+}
+impl ContentObservation {
+    fn confirmed(result: ExecutionResult) -> Self {
+        Self::Confirmed(Box::new(result))
+    }
 }
 impl PendingObservation {
     fn new(claim: &AgentClaim, cause: WaitReason, reason: impl Into<String>) -> Self {
@@ -107,7 +112,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                     .runtime
                     .installed_bytes(&id)
                     .map_err(|e| e.to_string())?;
-                Ok(ContentObservation::Confirmed(recipe_install_success(bytes)))
+                Ok(ContentObservation::confirmed(recipe_install_success(bytes)))
             }
             ContentKind::Reconcile => {
                 let Payload::RecipeReconcilePayload(request) = &claim.payload else {
@@ -116,7 +121,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                 let identity = RecipeReconciliationIdentity::from(request);
                 self.observe_removal(claim, &identity).await.map(|done| {
                     if done {
-                        ContentObservation::Confirmed(ExecutionResult::done(
+                        ContentObservation::confirmed(ExecutionResult::done(
                             RecipeReconcileResult::default(),
                         ))
                     } else {
@@ -134,7 +139,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                 };
                 self.observe_removal(claim, &identity).await.map(|done| {
                     if done {
-                        ContentObservation::Confirmed(ExecutionResult::done(
+                        ContentObservation::confirmed(ExecutionResult::done(
                             RecipeUninstallResult::default(),
                         ))
                     } else {
@@ -154,7 +159,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                 )
                 .map_err(|e| e.to_string())?;
                 Ok(if done {
-                    ContentObservation::Confirmed(ExecutionResult::done(
+                    ContentObservation::confirmed(ExecutionResult::done(
                         vonk_agent_protocol::RecipeBuildCleanupEvidence {},
                     ))
                 } else {
@@ -209,7 +214,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                     .await
                     .map_err(|e| e.to_string())?;
                 Ok(if complete {
-                    ContentObservation::Confirmed(ExecutionResult::done(evidence))
+                    ContentObservation::confirmed(ExecutionResult::done(evidence))
                 } else {
                     blocked(format!(
                         "Controller upload for build {} is incomplete",
@@ -235,7 +240,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                 )
                 .map_err(|e| e.to_string())?;
                 Ok(match result {
-                    Some(result) => ContentObservation::Confirmed(ExecutionResult::done(result)),
+                    Some(result) => ContentObservation::confirmed(ExecutionResult::done(result)),
                     None => unknown(
                         "current host fingerprint has no retained signed preflight result"
                             .to_owned(),
@@ -299,7 +304,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                         assignment.oci_image_digest
                     )));
                 }
-                Ok(ContentObservation::Confirmed(distribution_success(
+                Ok(ContentObservation::confirmed(distribution_success(
                     DistributionDownloadEvidence {
                         model_digests: digests,
                         model_paths: paths,
@@ -362,7 +367,7 @@ pub(super) async fn reobserve_content<E: Executor>(
         };
         match observation {
             ContentObservation::Confirmed(result) => {
-                state.finish(&claim, result)?;
+                state.finish(&claim, *result)?;
             }
             ContentObservation::Progressing(pending)
             | ContentObservation::Blocked(pending)

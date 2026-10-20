@@ -24,7 +24,7 @@ from ..lifecycle import Outcome, Reported
 from ..lifecycle.agent_operation import AgentOperationAdapter
 from ..models import AgentNode, AgentOperationAttempt, Job
 from ..models import AgentOperation as StoredOperation
-from .contracts import _ENDED_PARENT_STATES
+from .contracts import _ENDED_PARENT_STATES, _WORKLOAD_INTENT_OPERATIONS
 from .stored import column_field, column_value
 
 if TYPE_CHECKING:
@@ -119,9 +119,14 @@ def adopt_preparation_receipt(
         and operation.state in aos.RUNNING_OR_PARKED
         and parent.state not in _ENDED_PARENT_STATES
         and column_field(parent, "result", "cancel_requested") is not True
-        and operation.workload_intent_ordinal == node.workload_intent_ordinal
-        and operation.workload_intent_ordinal
-        == column_field(parent, "payload", "workload_intent_ordinal")
+        and (
+            operation.kind not in _WORKLOAD_INTENT_OPERATIONS
+            or (
+                operation.workload_intent_ordinal == node.workload_intent_ordinal
+                and operation.workload_intent_ordinal
+                == column_field(parent, "payload", "workload_intent_ordinal")
+            )
+        )
         and (
             attempt.state == LifecycleState.RUNNING or aos.attempt_is_observing(attempt)
         )

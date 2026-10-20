@@ -27,6 +27,7 @@ from .endings import end_unobserved_order
 from .ownership import observation_ownership
 from .persistence import _OrderStore
 from .preparation_receipts import (
+    CONTENT_KINDS,
     adopt_preparation_receipt,
     retained_preparation_receipt,
 )
@@ -115,7 +116,7 @@ def _sweep_lapsed_attempts(
                     lapsed_running_orders(now),
                     # Re-read an authenticated terminal transfer receipt
                     # even during backoff: its effect already happened.
-                    (StoredOperation.kind == AgentOperation.ARTIFACT_DISTRIBUTION)
+                    StoredOperation.kind.in_(CONTENT_KINDS)
                     & StoredOperation.state.in_(aos.PARKED)
                     & select(AgentOperationAttempt.id)
                     .where(
@@ -123,9 +124,7 @@ def _sweep_lapsed_attempts(
                         AgentOperationAttempt.attempt
                         == StoredOperation.current_attempt,
                         aos.sql_attempt_lapsed(AgentOperationAttempt),
-                        AgentOperationAttempt.result["downloaded_bytes"]
-                        .as_string()
-                        .is_not(None),
+                        AgentOperationAttempt.result.is_not(None),
                     )
                     .exists(),
                     # Only a running order is decided here; a lost one

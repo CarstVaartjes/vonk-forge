@@ -120,7 +120,7 @@ async fn process_death_at_four_boundaries_recovers_on_an_idle_tick_without_execu
             assert!(Instant::now() < deadline, "child must exit after kill");
             thread::sleep(Duration::from_millis(1));
         }
-        assert_eq!(reached.unwrap(), true, "child must reach fault boundary");
+        assert!(reached.unwrap(), "child must reach fault boundary");
         let http = AgentHttpClient::for_http_test("http://127.0.0.1/", NODE_ID);
         let executor = RecipeExecutor {
             client: &http,
@@ -193,11 +193,14 @@ async fn every_content_kind_reaches_its_real_probe_and_preserves_unknown() {
     let AgentClaimPayload::RecipeInstallPayload(install) = &base.payload else {
         panic!("install");
     };
-    let mut build: AgentClaim = serde_json::from_str(include_str!(
+    let vector: serde_json::Value = serde_json::from_str(include_str!(
         "../../../../../agent_protocol/src/vonk_agent_protocol/vectors/recipe-build-claim-v1.json"
     ))
     .unwrap();
-    build.deadline = base.deadline;
+    let mut build = base.clone();
+    build.operation = AgentOperation::RecipeBuildV1;
+    build.payload = serde_json::from_value(vector["base_payload"].clone()).unwrap();
+    build.validate().unwrap();
     let payloads = [
         (
             AgentOperation::RuntimePreflightV1,
