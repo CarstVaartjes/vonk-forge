@@ -24,11 +24,13 @@ from ..models import (
     RunSwitchJournalRepairPending,
 )
 from ..persisted_waits import clear_wait, read_wait
+from ..run_switch_contract import RunSwitchOperationResult
 from ..run_switch_journal_contract import (
     JournalRepairDisposition,
     JournalRepairPurpose,
     RunSwitchJournalRepairEvidence,
 )
+from ..run_switch_operations.results import _persisted_result
 from .discovery import (
     REPAIR_WAIT,
     _candidate,
@@ -201,7 +203,11 @@ def _try_repair_once(
                         mode="json"
                     )
                 session.delete(pending)
-            job.result = corrected
+            job.result = _persisted_result(
+                RunSwitchOperationResult.model_validate_json(
+                    journal_document(corrected)
+                )
+            )
             clear_wait(job)
             job.updated_at = now
             if (job.status_reason or "").startswith(REPAIR_WAIT):

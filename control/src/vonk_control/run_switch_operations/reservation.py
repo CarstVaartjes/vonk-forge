@@ -427,6 +427,10 @@ class ReservationMixin:
                         "subphase": refreshed.phases[phase_index].subphase
                         if refreshed.phases
                         else None,
+                        "completed_bytes": 0,
+                        "operation": None,
+                        "operation_phase_index": None,
+                        "members": [],
                         "total_bytes": total_bytes,
                         "total_bytes_known": total_bytes is not None,
                         "force_replan": False,
