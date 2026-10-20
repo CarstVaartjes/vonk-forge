@@ -403,7 +403,7 @@ def test_worker_reobserves_retained_success_after_controller_restart(
     # The historical producer authenticated and stored the receipt but never
     # projected its success. Exercise that real producer/store boundary.
     with monkeypatch.context() as fault:
-        fault.setattr(ingress, "adopt_distribution_receipt", lambda *_args: False)
+        fault.setattr(ingress, "adopt_preparation_receipt", lambda *_args: False)
         jobs.record_late_result(receipt)
     with sessions() as session:
         order = session.scalar(
@@ -456,7 +456,7 @@ def test_an_invalid_retained_receipt_cannot_starve_another_exact_transfer(
     assert current.result is not None and current.result.child_operation_id is not None
     old_id = current.result.child_operation_id
     with monkeypatch.context() as fault:
-        fault.setattr(ingress, "adopt_distribution_receipt", lambda *_args: False)
+        fault.setattr(ingress, "adopt_preparation_receipt", lambda *_args: False)
         jobs.record_late_result(
             AgentResult(
                 fence=claim.fence,
@@ -494,7 +494,7 @@ def test_an_invalid_retained_receipt_cannot_starve_another_exact_transfer(
     assert fresh is not None and fresh.fence != claim.fence
     now[0] = fresh.deadline + timedelta(seconds=1)
     with monkeypatch.context() as fault:
-        fault.setattr(ingress, "adopt_distribution_receipt", lambda *_args: False)
+        fault.setattr(ingress, "adopt_preparation_receipt", lambda *_args: False)
         jobs.record_late_result(
             AgentResult(
                 fence=fresh.fence,
