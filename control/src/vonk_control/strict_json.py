@@ -156,19 +156,19 @@ def _retry_later_response(error: UnknownOutcomeError) -> Response:
     _LOGGER.info(
         "route answered retry-later: %s (retry after %ss)", type(error).__name__, delay
     )
-    headers = {"Retry-After": str(delay)}
-    code = getattr(error, "code", None)
-    if isinstance(code, str) and code:
-        headers["x-vonk-error-code"] = code
-    return Response(
+    response = Response(
         content=json.dumps(
             {"detail": f"Temporarily unavailable, retry: {detail}"},
             separators=(",", ":"),
         ).encode(),
         status_code=503,
-        headers=headers,
+        headers={"Retry-After": str(delay)},
         media_type="application/json",
     )
+    code = getattr(error, "code", None)
+    if isinstance(code, str) and code:
+        response.headers["x-vonk-error-code"] = code
+    return response
 
 
 def _presence_policy_endpoint(
