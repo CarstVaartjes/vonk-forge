@@ -20,7 +20,7 @@ from vonk_control.models import (
 from vonk_forge_contracts import RecipeDefinition
 
 from .test_catalog_revision_collection import NODE, Catalog
-from .test_fleet_model_removal_postgres import inventory
+from .test_fleet_model_removal_postgres import inventory, submit_model_download
 from .test_model_removal_reference_lifecycle import _one_model, _register_model
 from .test_model_removal_worker_postgres import _prepare_removal_target
 from .test_operator_acceptance_postgres import _api
@@ -103,6 +103,8 @@ def test_review_of_shared_content_survives_partial_evidence_and_heals(
             item.code == ArtifactLifecycleCode.REFERENCE_SCAN_FAILED
             for item in wire.blockers
         )
+        if fault == "manifest":
+            assert wire.nas_reclaimable_bytes is None
         assert path.read_bytes() == b"shared weights"
         # A read never repairs SQL or submits a removal. Fresh owner evidence heals.
         if manifest is not None:
@@ -167,5 +169,66 @@ def test_unreadable_installation_is_unknown_and_next_review_recovers(
         healed = cache.review_fleet_model_removal(digest)
         assert healed.fleet is not None and healed.fleet.nas_remove
         assert not healed.blockers
+    finally:
+        cache.close()
+
+
+def test_accepted_removal_waits_for_repaired_evidence_under_original_request(
+    postgres_engine, tmp_path: Path
+) -> None:
+    """Catches treating a post-acceptance observation fault as permanent failure."""
+    from uuid import uuid4
+
+    from vonk_agent_protocol import LifecycleState
+
+    Base.metadata.create_all(postgres_engine)
+    world = Catalog(postgres_engine)
+    now = [datetime.now(UTC)]
+    cache = ModelCacheService(
+        world.sessions,
+        tmp_path / "nas",
+        reserve_bytes=0,
+        fixture_sources=True,
+        clock=lambda: now[0],
+    )
+    try:
+        selector, _, path = _prepare_removal_target(
+            cache, world.sessions, tmp_path, slug="recover", data=b"weights"
+        )
+        inventory(
+            world.sessions,
+            NODE,
+            now[0],
+            [ModelStoreObject(sha256=path.name, bytes=path.stat().st_size)],
+        )
+        review = cache.review_fleet_model_removal(selector)
+        accepted = cache.remove_fleet_model_selector(
+            selector,
+            actor="operator",
+            request_key=str(uuid4()),
+            review_digest=review.review_digest,
+        )
+        with world.sessions.begin() as session:
+            row = session.scalar(select(ModelCacheSet))
+            assert row is not None
+            original = row.manifest
+            row.manifest = {}
+        cache.advance_removals()
+        waiting = cache.get_operation(accepted.id)
+        assert waiting.state == LifecycleState.BACKOFF
+        assert waiting.fleet is not None and accepted.fleet is not None
+        assert waiting.fleet.deadline_at == accepted.fleet.deadline_at
+        assert path.read_bytes() == b"weights"
+        with world.sessions.begin() as session:
+            row = session.scalar(select(ModelCacheSet))
+            assert row is not None
+            row.manifest = original
+        now[0] += timedelta(minutes=1)
+        inventory(world.sessions, NODE, now[0], [])
+        for _ in range(6):
+            cache.advance_removals()
+        assert cache.get_operation(accepted.id).state == LifecycleState.SUCCEEDED
+        assert not path.exists()
+        submit_model_download(cache, tmp_path)
     finally:
         cache.close()

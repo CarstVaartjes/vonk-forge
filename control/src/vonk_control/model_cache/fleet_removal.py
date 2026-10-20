@@ -395,7 +395,8 @@ class FleetRemovalMixin:
         ]
         reclaimable = (
             None
-            if any(value is None for value in candidates)
+            if effects.nas_reason == R.OBSERVATION_UNAVAILABLE
+            or any(value is None for value in candidates)
             else sum(value for value in candidates if value is not None)
         )
         return seal_cache_removal_review(
@@ -595,6 +596,13 @@ class FleetRemovalMixin:
                 current_effects = cache._fleet_effects(
                     session, payload.model_content_sha256 or ""
                 )
+            if current_effects.observation_issues:
+                cache._defer_model_removal(
+                    operation_id,
+                    detail=current_effects.observation_issues[0].detail,
+                    cause=Disposition.WAIT,
+                )
+                return False
             # Our own unfinished uninstall is a dependency; its job deliberately
             # protects bytes. Current profile/pin/workload protection is final.
             if not current_effects.nas_remove and not any(
