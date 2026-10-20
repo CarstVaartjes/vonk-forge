@@ -267,7 +267,7 @@ def test_synthetic_device_fixture_supports_the_arm64_spark_runner() -> None:
             lifecycle._synthetic_device_fixture(platform)
 
 
-def test_synthetic_canary_lists_the_complete_recipe_catalog() -> None:
+def test_synthetic_canary_resolves_exact_recipe_without_the_browse_snapshot() -> None:
     lifecycle = _module()
     fixture = lifecycle.CanonicalCanaryFixture(
         index_path=Path("index.json"),
@@ -314,7 +314,7 @@ def test_synthetic_canary_lists_the_complete_recipe_catalog() -> None:
     with pytest.raises(lifecycle.LifecycleError):
         run._run_synthetic_canary("spk_" + "1" * 32)
 
-    assert calls == [("GET", "/api/recipe/library", {})]
+    assert calls == [("GET", "/api/recipe/vonk-forge-test/synthetic-canary", {})]
 
 
 def test_fleet_snapshot_validates_the_decoded_response_as_json() -> None:
