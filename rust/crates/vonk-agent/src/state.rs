@@ -467,16 +467,26 @@ impl StateStore {
         let transaction = self
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let (operation, retained): (String, Option<Vec<u8>>) = transaction
-            .query_row(
-                "SELECT operation,result_json FROM operations WHERE fence=?1",
-                [claim.fence.to_string()],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .optional()?
-            .ok_or(StateError::Stale)?;
+        let (operation, retained, accepted): (String, Option<Vec<u8>>, Option<Vec<u8>>) =
+            transaction
+                .query_row(
+                    "SELECT operation,result_json,claim_json FROM operations WHERE fence=?1",
+                    [claim.fence.to_string()],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                )
+                .optional()?
+                .ok_or(StateError::Stale)?;
         if operation != claim.operation.as_str() {
             return Err(StateError::Identity);
+        }
+        if let Some(body) = accepted {
+            let accepted: AgentClaim = parse_strict(&body)?;
+            if accepted.fence != claim.fence
+                || accepted.operation != claim.operation
+                || canonical_json(&accepted.payload)? != canonical_json(&claim.payload)?
+            {
+                return Err(StateError::Identity);
+            }
         }
         if let Some(body) = retained {
             let previous: AgentResult = parse_strict(&body)?;
