@@ -2,21 +2,24 @@ use super::*;
 use std::io::Cursor;
 
 fn fixture() -> (Vec<u8>, RecipeBuildBaseImage, std::ops::Range<u64>) {
-    let config = br#"{"os":"linux","architecture":"arm64"}"#;
+    let config = serde_json::to_vec(&ImageConfig {
+        os: "linux".to_owned(),
+        architecture: "arm64".to_owned(),
+    })
+    .unwrap();
     let layer = vec![42; 8192];
-    let descriptor = |content: &[u8], media_type: &str| {
-        serde_json::json!({
-            "mediaType": media_type,
-            "digest": format!("sha256:{}", hex_digest(content)),
-            "size": content.len(),
-        })
+    let descriptor = |content: &[u8], media_type: &str| Descriptor {
+        media_type: media_type.to_owned(),
+        digest: format!("sha256:{}", hex_digest(content)),
+        size: content.len() as u64,
+        annotations: BTreeMap::new(),
     };
-    let manifest = serde_json::to_vec(&serde_json::json!({
-        "schemaVersion": 2,
-        "mediaType": OCI_MANIFEST,
-        "config": descriptor(config, OCI_CONFIG),
-        "layers": [descriptor(&layer, "application/vnd.oci.image.layer.v1.tar")],
-    }))
+    let manifest = serde_json::to_vec(&Manifest {
+        schema_version: 2,
+        media_type: OCI_MANIFEST.to_owned(),
+        config: descriptor(&config, OCI_CONFIG),
+        layers: vec![descriptor(&layer, "application/vnd.oci.image.layer.v1.tar")],
+    })
     .unwrap();
     let digest = format!("sha256:{}", hex_digest(&manifest));
     let index = serde_json::to_vec(&Index {
@@ -42,7 +45,7 @@ fn fixture() -> (Vec<u8>, RecipeBuildBaseImage, std::ops::Range<u64>) {
             (layer_path.clone(), layer.as_slice()),
             (blob_path(&digest).unwrap(), manifest.as_slice()),
             (
-                blob_path(&format!("sha256:{}", hex_digest(config))).unwrap(),
+                blob_path(&format!("sha256:{}", hex_digest(&config))).unwrap(),
                 config.as_slice(),
             ),
         ] {

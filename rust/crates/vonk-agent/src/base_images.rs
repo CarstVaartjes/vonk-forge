@@ -493,7 +493,7 @@ struct Descriptor {
     annotations: BTreeMap<String, String>,
 }
 
-#[derive(Deserialize)]
+#[derive(Serialize, Deserialize)]
 struct Manifest {
     #[serde(rename = "schemaVersion")]
     schema_version: u8,
@@ -503,7 +503,7 @@ struct Manifest {
     layers: Vec<Descriptor>,
 }
 
-#[derive(Deserialize)]
+#[derive(Serialize, Deserialize)]
 struct ImageConfig {
     architecture: String,
     os: String,
