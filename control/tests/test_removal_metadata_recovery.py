@@ -18,14 +18,14 @@ from vonk_control import model_cache_states
 from vonk_control.artifact_blob_store import ArtifactBlobStore
 from vonk_control.artifact_jobs import ArtifactJobService
 from vonk_control.artifact_lifecycle import ArtifactReferenceUnverified
-from vonk_control.model_cache import CacheOperationView, removal_execution
+from vonk_control.model_cache import removal_execution
 from vonk_control.model_cache_contract import CacheManifest
 from vonk_control.models import (
     ArtifactJobBlob,
+    Job,
     ModelCacheSet,
     ModelCacheSetArtifact,
 )
-from vonk_control.operation_contract import AvailabilityOperationFailure
 
 from .non_blocking import assert_ended_without_blocking
 from .removal_settle import advance_until_ended, release_ended_gates
@@ -148,10 +148,10 @@ def test_verified_blob_ingress_repairs_stale_sql_metadata(tmp_path: Path):
     assert stored.path.read_bytes() == data
 
 
-def test_unavailable_scan_ends_with_bytes_retained_and_fresh_download_admitted(
+def test_unavailable_scan_recovers_same_removal_after_repeated_failures(
     cache, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    """Catches indefinite retry, unsafe unlink, or a terminal removal stranding gates."""
+    """Catches count-based termination or unlinking before an exact scan recovers."""
     service, sessions = cache
     accepted, _ = _queue(service, tmp_path, str(uuid.uuid4()))
     service.run_pending()
@@ -176,24 +176,18 @@ def test_unavailable_scan_ends_with_bytes_retained_and_fresh_download_admitted(
     for _ in range(8):
         service.advance_removals(limit=1)
         now[0] += timedelta(minutes=1)
-        if service.get_operation(removal.id).state == LifecycleState.FAILED:
-            break
+        waiting = service.get_operation(removal.id)
+        assert waiting.state == LifecycleState.BACKOFF
+        assert waiting.next_attempt_at is not None
+        assert (
+            service._object_path(hashlib.sha256(b"x").hexdigest()).read_bytes() == b"x"
+        )
+    monkeypatch.undo()
+    advance_until_ended(service, removal.id)
     ended = service.get_operation(removal.id)
-    assert ended.state not in model_cache_states.LIVE
-    assert ended.state != LifecycleState.SUCCEEDED
+    assert ended.state == LifecycleState.SUCCEEDED
     release_ended_gates(service)
-    assert service._object_path(hashlib.sha256(b"x").hexdigest()).read_bytes() == b"x"
-
-    def validate_failure(receipt: CacheOperationView) -> None:
-        AvailabilityOperationFailure.model_validate(receipt.failure)
-
-    _, fresh = assert_ended_without_blocking(
-        SimpleNamespace(sessions=sessions),
-        ended,
-        end=lambda receipt: receipt,
-        assert_reason=validate_failure,
-        fresh=lambda _: _queue(service, tmp_path, str(uuid.uuid4()))[0],
-    )
+    fresh, _ = _queue(service, tmp_path, str(uuid.uuid4()))
     service.run_pending()
     assert service.get_operation(fresh.id).state == LifecycleState.SUCCEEDED
 
@@ -278,19 +272,22 @@ def test_recipe_scan_unknown_is_accepted_and_never_blocks_fresh_preparation(
             for _ in range(8):
                 now[0] += timedelta(minutes=1)
                 service.advance_removals(limit=1)
+                waiting = service.get_operator_request(key, actor="operator")
+                assert isinstance(waiting, RecipeCacheRemovalStatus)
+                assert waiting.state == LifecycleState.BACKOFF
+                with sessions() as session:
+                    pending = session.get(Job, waiting.operation_id)
+                    assert pending is not None and pending.next_action_at is not None
+                assert receipt_path.exists()
+                assert storage.existing_archive(ARCHIVE_SHA, len(ARCHIVE)).is_file()
     now[0] += timedelta(minutes=1)
     for _ in range(4):
         service.advance_removals(limit=1)
     finished = service.get_operator_request(key, actor="operator")
     assert isinstance(finished, RecipeCacheRemovalStatus)
     assert finished.operation_id == waiting.operation_id
-    if restored:
-        assert finished.state == LifecycleState.SUCCEEDED
-        assert not receipt_path.exists()
-    else:
-        assert finished.state not in model_cache_states.LIVE
-        assert finished.state != LifecycleState.SUCCEEDED
-        assert receipt_path.exists()
+    assert finished.state == LifecycleState.SUCCEEDED
+    assert not receipt_path.exists()
     assert_ended_without_blocking(
         SimpleNamespace(sessions=sessions),
         cast(RecipeCacheRemovalStatus | RecipeImageAvailabilityView, finished),
@@ -476,7 +473,9 @@ def test_damaged_exact_scope_is_admitted_and_reconstructed(
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
-def test_scope_observation_exhausts_without_inventing_objects(cache, tmp_path: Path):
+def test_scope_observation_recovers_same_removal_without_inventing_objects(
+    cache, tmp_path: Path
+):
     """Catches damaged scope deleting guessed objects or poisoning a new request."""
     from vonk_control.models import ModelCacheOperation
 
@@ -489,6 +488,7 @@ def test_scope_observation_exhausts_without_inventing_objects(cache, tmp_path: P
         row = session.get(ModelCacheSet, digest)
         producer = session.get(ModelCacheOperation, accepted.id)
         assert row is not None and producer is not None
+        original_manifest, original_payload = row.manifest, producer.payload
         row.manifest = {}
         producer.payload = {}
         removal = service.accept_removal_for_sets_in_session(
@@ -503,10 +503,18 @@ def test_scope_observation_exhausts_without_inventing_objects(cache, tmp_path: P
     for _ in range(8):
         service.advance_removals(limit=1)
         now[0] += timedelta(minutes=1)
-        if service.get_operation(removal.id).state not in model_cache_states.LIVE:
-            break
-    assert service.get_operation(removal.id).state == LifecycleState.FAILED
+        waiting = service.get_operation(removal.id)
+        assert waiting.state == LifecycleState.BACKOFF
+        assert waiting.next_attempt_at is not None
     assert service._object_path(hashlib.sha256(b"x").hexdigest()).read_bytes() == b"x"
+    with sessions.begin() as session:
+        row = session.get(ModelCacheSet, digest)
+        producer = session.get(ModelCacheOperation, accepted.id)
+        assert row is not None and producer is not None
+        row.manifest, producer.payload = original_manifest, original_payload
+    advance_until_ended(service, removal.id)
+    assert service.get_operation(removal.id).state == LifecycleState.SUCCEEDED
+    assert not service._object_path(hashlib.sha256(b"x").hexdigest()).exists()
     with sessions.begin() as session:
         fresh = service.accept_removal_for_sets_in_session(
             session,
@@ -581,10 +589,25 @@ def test_recipe_receipt_observation_is_request_owned(
     for _ in range(8):
         now[0] += timedelta(minutes=1)
         service.advance_removals(limit=1)
+    if not repair:
+        waiting = service.get_operator_request(request_key, actor="operator")
+        from vonk_control.recipe_image_availability_view_contract import (
+            RecipeCacheRemovalStatus,
+        )
+
+        assert isinstance(waiting, RecipeCacheRemovalStatus)
+        assert waiting.state == LifecycleState.BACKOFF
+        with sessions() as session:
+            pending = session.get(Job, waiting.operation_id)
+            assert pending is not None and pending.next_action_at is not None
+        assert (storage.layout.root / "blobs" / "sha256" / ARCHIVE_SHA).exists()
+        # The cause clears after the former ceiling; no new request is needed.
+        receipt_path.write_text(valid)
+        for _ in range(8):
+            now[0] += timedelta(minutes=1)
+            service.advance_removals(limit=1)
     ended = service.get_operator_request(request_key, actor="operator")
-    assert ended.state == (
-        LifecycleState.SUCCEEDED if repair else LifecycleState.FAILED
-    )
+    assert ended.state == LifecycleState.SUCCEEDED
     with sessions() as session:
         assert (
             session.scalar(
@@ -594,8 +617,6 @@ def test_recipe_receipt_observation_is_request_owned(
             )
             is None
         )
-    if not repair:
-        assert (storage.layout.root / "blobs" / "sha256" / ARCHIVE_SHA).exists()
     assert_ended_without_blocking(
         SimpleNamespace(sessions=sessions),
         ended,

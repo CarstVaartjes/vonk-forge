@@ -156,14 +156,12 @@ class _ActivatedRecipeRouteError(UnknownOutcomeError, RecipeRouteError):
 
 
 def publication_disposition(error: BaseException) -> Disposition:
-    """What a failed route publication or reconciliation does, on the one
-    disposition: a publication that raised did not confirm its route, so a
-    definite-looking error is observed again within the bounded count (the
-    peer's state is what is unknown); a held owner or a dependency is a wait;
-    a security refusal ends it."""
+    """Preserve the shared verdict, including deterministic failures.
 
-    verdict = disposition(error)
-    return Disposition.OBSERVE if verdict is Disposition.FAIL else verdict
+    A typed unknown publication is observed with bounded backoff. Invalid
+    input and security refusals end immediately with their evidence.
+    """
+    return disposition(error)
 
 
 @dataclass(frozen=True)

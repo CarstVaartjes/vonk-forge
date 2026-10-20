@@ -886,7 +886,7 @@ def test_candidate_contains_published_runs_and_explicit_pending_run_only(
     ]
 
 
-class _TransientFirstPublish:
+class _PublicationFault:
     """Real route service whose first publication attempts fail transiently.
 
     ``publish_run`` is the boundary the worker drives, so injecting the failure
@@ -936,7 +936,7 @@ def test_temporary_publication_failure_stays_pending_and_converges(
     with service.sessions.begin() as session:
         _recipe_run(session, run_id).route_state = "pending"
     now = [NOW]
-    routes = _TransientFirstPublish(service, OSError("supervisor socket unavailable"))
+    routes = _PublicationFault(service, OSError("supervisor socket unavailable"))
     worker = RecipeOperationWorker(service.sessions, routes, clock=lambda: now[0])
 
     assert worker.tick() is True
@@ -964,40 +964,57 @@ def test_temporary_publication_failure_stays_pending_and_converges(
         assert run.route_error is None
 
 
-@pytest.mark.parametrize(
-    "error",
-    [
-        OSError("supervisor socket unavailable"),
-        RuntimeError("recipe route document is invalid"),
-    ],
-)
-def test_route_publication_ends_its_observation_without_claiming_workload_stopped(
-    tmp_path: Path, error: BaseException
+def test_publication_recovers_after_more_than_a_request_retry_budget(
+    tmp_path: Path,
 ) -> None:
+    # Wrong implementation: an uncertain publication ends after six attempts,
+    # leaving the same running intent unpublished after the dependency recovers.
     clock = MutableClock(NOW)
     service, _publisher, _applied, run_id = setup(tmp_path, clock=clock)
-    fresh = add_running_run(
-        service, run_id, alias="fresh", route_state="withdrawn", identity=8
-    )
     with service.sessions.begin() as session:
-        _recipe_run(session, run_id).route_state = "pending"
-    routes = _TransientFirstPublish(service, error, failures=12)
-    worker = RecipeOperationWorker(service.sessions, routes, clock=clock)
-    for _attempt in range(6):
+        _recipe_run(session, run_id).route_state = RouteState.PENDING
+    routes = _PublicationFault(
+        service, OSError("supervisor socket unavailable"), failures=12
+    )
+    for attempt in range(13):
+        with service.sessions.begin() as session:
+            for node in session.query(RunNode).filter_by(run_id=run_id):
+                node.updated_at = clock.now
+                node.observation_observed_at = clock.now
+        # Restart the observer while retaining the same durable run and backoff.
+        worker = RecipeOperationWorker(service.sessions, routes, clock=clock)
         worker.tick()
         with service.sessions() as session:
-            due = _recipe_run(session, run_id).next_action_at
-        if due is not None:
-            clock.now = _aware(due) + timedelta(seconds=1)
+            run = _recipe_run(session, run_id)
+            assert run.state == RunState.RUNNING
+            if attempt < 12:
+                assert run.route_state == RouteState.PENDING
+                assert run.next_action_at is not None
+                assert clock.now < _aware(run.next_action_at)
+                assert _aware(run.next_action_at) <= clock.now + timedelta(seconds=60)
+                clock.now = _aware(run.next_action_at) + timedelta(seconds=1)
+            else:
+                assert run.route_state == RouteState.PUBLISHED
+    assert routes.attempts == 13
+
+
+def test_invalid_publication_ends_immediately_with_its_evidence(tmp_path: Path) -> None:
+    clock = MutableClock(NOW)
+    service, _publisher, _applied, run_id = setup(tmp_path, clock=clock)
+    with service.sessions.begin() as session:
+        _recipe_run(session, run_id).route_state = RouteState.PENDING
+    error = RuntimeError("recipe route document is invalid")
+    routes = _PublicationFault(service, error, failures=12)
+    worker = RecipeOperationWorker(service.sessions, routes, clock=clock)
+    worker.tick()
+    worker.tick()
     with service.sessions() as session:
         run = _recipe_run(session, run_id)
-        assert run.route_state != "pending"
-        assert run.state == "running"
+        assert run.state == RunState.RUNNING
+        assert run.route_state == RouteState.FAILED
         assert run.next_action_at is None
-    clock.now = NOW
-    service.publish_run(fresh)
-    with service.sessions() as session:
-        assert _recipe_run(session, fresh).route_state == "published"
+        assert run.route_error is not None and str(error) in run.route_error
+    assert routes.attempts == 1
 
 
 def test_worker_publishes_pending_route_and_records_failure(tmp_path: Path) -> None:
@@ -1165,10 +1182,10 @@ def test_initial_observation_expiry_preserves_workload_and_allows_fresh_route(
     assert _live_models(tmp_path / "litellm") == ["qwen"]
 
 
-def test_publication_exhaustion_cannot_erase_initial_observation_lifetime(
+def test_continuing_publication_preserves_initial_observation_lifetime(
     tmp_path: Path,
 ) -> None:
-    """An exhausted publisher must not strand a missing observation after restart."""
+    """Ongoing publication cannot erase the exact-observation deadline."""
     now = [NOW]
     service, _publisher, _applied, run_id = setup(tmp_path, clock=lambda: now[0])
     deadline = NOW + timedelta(minutes=10)
@@ -1191,11 +1208,12 @@ def test_publication_exhaustion_cannot_erase_initial_observation_lifetime(
         now[0] = due.replace(tzinfo=UTC)
     with service.sessions() as session:
         run = _recipe_run(session, run_id)
-        assert run.next_action_at is None
+        assert run.route_state == RouteState.PENDING
+        assert run.next_action_at is not None
         assert run.observation_deadline_at is not None
         assert run.observation_deadline_at.replace(tzinfo=UTC) == deadline
 
-    # A terminal, never-published observation cannot supply unchecked evidence
+    # A pending, never-published observation cannot supply unchecked evidence
     # to a fresh route's bundle, even before the initial deadline expires.
     fresh = add_running_run(
         service, run_id, alias="fresh", route_state=RouteState.PENDING, identity=9
