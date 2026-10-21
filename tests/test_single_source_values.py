@@ -290,14 +290,29 @@ def _memory_admission_delegates(source: str) -> bool:
     import ast
 
     tree = ast.parse(source)
-    fits = {
-        target.id: node.value
+    sites = [
+        (target.id, node.value)
         for node in ast.walk(tree)
         if isinstance(node, ast.Assign)
         for target in node.targets
         if isinstance(target, ast.Name)
         and target.id in {"current_admission", "after_admission"}
-    }
+    ]
+    fits = dict(sites)
+    owner_imported = any(
+        isinstance(node, ast.ImportFrom)
+        and node.module == "vonk_forge_contracts.memory_admission"
+        and any(
+            alias.name == "evaluate_memory_admission" and alias.asname is None
+            for alias in node.names
+        )
+        for node in tree.body
+    )
+    owner_shadowed = any(
+        isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+        and node.name == "evaluate_memory_admission"
+        for node in ast.walk(tree)
+    )
     never_fits = next(
         node
         for node in tree.body
@@ -312,7 +327,10 @@ def _memory_admission_delegates(source: str) -> bool:
         for node in ast.walk(never_fits)
     )
     return (
-        not copied_floor_comparison
+        owner_imported
+        and not owner_shadowed
+        and len(sites) == 2
+        and not copied_floor_comparison
         and set(fits) == {"current_admission", "after_admission"}
         and all(
             isinstance(value, ast.Call)
@@ -332,4 +350,8 @@ def test_memory_admission_rejects_reimplemented_fit_predicates() -> None:
     assert _memory_admission_delegates(source)
     assert not _memory_admission_delegates(
         source + "\ncurrent_admission = available - occupied - total_bytes\n"
+    )
+
+    assert not _memory_admission_delegates(
+        source + "\ndef evaluate_memory_admission(*args, **kwargs): return True\n"
     )
