@@ -22,6 +22,17 @@ fn runtime_rejection_binds_and_redacts_captured_process_logs() {
             .diagnostic()
             .is_none()
     );
+    // A workload exit formatter must not relabel an actual helper refusal.
+    // Other rejections cannot carry an inspection diagnostic.
+    response.diagnostic = None;
+    let refused = super::super::runtime_rejection(&response, HostRuntimeAction::RunInspect);
+    assert_eq!(
+        refused.to_string(),
+        format!(
+            "host runtime helper rejected request: {}",
+            HelperErrorCode::OperationUnsafePath
+        )
+    );
     response.process_running = Some(true);
     assert!(require_executed_outcome(&response, false).is_err());
     require_executed_outcome(&valid_executed_response(), false).unwrap();
