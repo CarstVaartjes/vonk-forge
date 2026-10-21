@@ -299,7 +299,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
 pub(super) fn build_error_outcome(
     error: &crate::recipe_builder::RecipeBuildError,
 ) -> ExecutionResult {
-    use crate::recipe_builder::{PodmanImportDiagnostic, RecipeBuildError};
+    use crate::recipe_builder::{PodmanBuildDiagnostic, PodmanImportDiagnostic, RecipeBuildError};
 
     if let RecipeBuildError::BaseImageImport { diagnostic, .. }
     | RecipeBuildError::BaseImageImportProcess { diagnostic } = error
@@ -312,6 +312,8 @@ pub(super) fn build_error_outcome(
             PodmanImportDiagnostic::DeadlineExceeded => failure
                 .kind(AgentFailureKind::TemporaryDependency)
                 .retry_after(Some(30)),
+            PodmanImportDiagnostic::SubordinateIdMappingUnavailable
+            | PodmanImportDiagnostic::PermissionDenied => platform_build_blocked(failure),
             // Unknown output is evidence to inspect, not evidence of a
             // transient fault. Retrying the same verified bytes hides it.
             _ => failure,
@@ -325,17 +327,16 @@ pub(super) fn build_error_outcome(
     | RecipeBuildError::NetworkBoundary { diagnostic, .. } = error
     {
         let failure = error.failure_evidence();
-        return ExecutionResult::Failed(
-            if *diagnostic
-                == crate::recipe_builder::PodmanBuildDiagnostic::TemporaryStorageExhausted
-            {
-                failure
-                    .kind(AgentFailureKind::ResourcePrerequisite)
-                    .retry_after(Some(30))
-            } else {
-                failure
-            },
-        );
+        return ExecutionResult::Failed(match diagnostic {
+            PodmanBuildDiagnostic::TemporaryStorageExhausted => failure
+                .kind(AgentFailureKind::ResourcePrerequisite)
+                .retry_after(Some(30)),
+            PodmanBuildDiagnostic::SubordinateIdMappingUnavailable
+            | PodmanBuildDiagnostic::UserNamespaceDenied
+            | PodmanBuildDiagnostic::ProcMountDenied
+            | PodmanBuildDiagnostic::PermissionDenied => platform_build_blocked(failure),
+            _ => failure,
+        });
     }
     // Actual source/adapter digest ingress still refuses substitution.
     if matches!(
@@ -354,6 +355,11 @@ pub(super) fn build_error_outcome(
         UnknownEvidence::at(FailureStage::BoundedBuildProcess)
             .because("bounded build observation ended; retained content and exact units are reconciled on the next request")
             .diagnostics(crate::failure_evidence::from_failure(&AgentOperation::RecipeBuildV1, &error.failure_evidence())))
+}
+
+fn platform_build_blocked(mut failure: crate::outcome::Failure) -> crate::outcome::Failure {
+    failure.reason = format!("rootless Podman platform is blocked: {}", failure.reason);
+    failure.code(vonk_agent_protocol::generated::FailureCode::RecipeBuildPlatformBlocked)
 }
 
 fn build_transfer_outcome(
@@ -459,6 +465,46 @@ mod import_tests {
 mod command_evidence_tests {
     use super::*;
     use crate::recipe_builder::{PodmanBuildDiagnostic, RecipeBuildError};
+
+    #[test]
+    fn host_denials_are_platform_blockers_not_recipe_failures_or_silent_retries() {
+        // Wrong implementation: classify the same host denial as a bad recipe,
+        // or an unknown effect which the Controller keeps reissuing.
+        for diagnostic in [
+            PodmanBuildDiagnostic::SubordinateIdMappingUnavailable,
+            PodmanBuildDiagnostic::UserNamespaceDenied,
+            PodmanBuildDiagnostic::ProcMountDenied,
+            PodmanBuildDiagnostic::PermissionDenied,
+        ] {
+            let error = RecipeBuildError::ImageBuild {
+                diagnostic,
+                logs: Box::new(crate::failure_evidence::FailureProcessLogs {
+                    exit_code: Some(125),
+                    stdout: crate::failure_evidence::log_tail(b""),
+                    stderr: crate::failure_evidence::log_tail(
+                        b"cannot clone: Operation not permitted",
+                    ),
+                }),
+            };
+            let wire = build_error_outcome(&error).finish_for(&AgentOperation::RecipeBuildV1);
+            let vonk_agent_protocol::generated::AgentResultResult::OutcomeFailed(outcome) =
+                wire.result
+            else {
+                panic!("a host denial is a definite platform blocker");
+            };
+            assert_eq!(
+                outcome.code,
+                vonk_agent_protocol::generated::FailureCode::RecipeBuildPlatformBlocked
+            );
+            assert_eq!(outcome.retry_after_seconds, None);
+            let evidence = outcome.evidence.unwrap().diagnostics.unwrap();
+            assert_eq!(
+                evidence.category,
+                crate::failure_evidence::FailureCategory::PlatformPolicy
+            );
+            assert!(evidence.stderr.text.contains("cannot clone"));
+        }
+    }
 
     #[test]
     fn every_nonzero_build_stage_survives_executor_classification_with_its_evidence() {

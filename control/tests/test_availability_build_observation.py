@@ -7,13 +7,24 @@ from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import select
-from vonk_agent_protocol import LifecycleState, ProgressPhase, canonical_message
+from vonk_agent_protocol import (
+    AgentFailureKind,
+    AgentFailureResult,
+    FailureCode,
+    LifecycleState,
+    ProgressPhase,
+    canonical_message,
+)
+from vonk_agent_protocol import (
+    AgentOperation as WireAgentOperation,
+)
 from vonk_control import availability_production
 from vonk_control.availability_production import build_recipe_image_availability
 from vonk_control.bounded_json import require_mapping
 from vonk_control.job_documents import AvailabilityJobPayload, RecipeBuildParent
 from vonk_control.models import AgentOperation, Job, NodeInventorySnapshot, RecipeBuild
 from vonk_control.oci_image_store import OciImageStore
+from vonk_control.operation_contract import AvailabilityOperationFailure
 from vonk_control.prebuilt_images import PrebuiltImageImporter
 from vonk_control.recipe_image_availability import (
     BuildUnsettled,
@@ -385,6 +396,101 @@ def test_unbound_adoption_repairs_projection_and_reuses_accepted_content(
     production.close()
 
 
+@pytest.mark.parametrize(
+    "code,kind",
+    [
+        (FailureCode.RECIPE_BUILD_FAILED, AgentFailureKind.INVALID_CONTRACT),
+        (FailureCode.RECIPE_BUILD_PLATFORM_BLOCKED, None),
+    ],
+)
+def test_deterministic_build_failure_ends_preparation_without_hammering(
+    tmp_path, postgres_engine, code, kind
+):
+    # Wrong implementation: every non-security child failure starts another
+    # identical build forever, even when the agent definitively rejected it.
+    sessions, builds, operations, _storage, now, node, revision, _plan = _services(
+        tmp_path, postgres_engine
+    )
+    clock = [now]
+    operations._clock = lambda: clock[0]
+    production = build_recipe_image_availability(
+        sessions,
+        artifact_root=tmp_path / "images",
+        managed_catalog_sync=None,
+        recipe_builds=builds,
+        recipe_operations=operations,
+        clock=lambda: clock[0],
+    )
+    service = production.service
+    try:
+        parent = service.start(
+            revision.id, actor="operator", request_id=str(uuid.uuid4())
+        )
+        assert service.run_pending(limit=1) == 1
+        with sessions() as session:
+            child = session.scalar(
+                select(Job).where(Job.kind == WireAgentOperation.RECIPE_BUILD)
+            )
+            assert child is not None
+            child_id = child.id
+        operations.record_node_result(
+            child_id,
+            node,
+            succeeded=False,
+            evidence=AgentFailureResult(
+                error_code=code,
+                failure_kind=kind,
+                reason="definite build refusal",
+            ).model_dump(mode="json", exclude_none=True),
+        )
+        waiting = service.get(parent.id)
+        assert waiting.next_attempt_at is not None
+        clock[0] = datetime.fromisoformat(waiting.next_attempt_at) + timedelta(
+            seconds=1
+        )
+        assert service.run_pending(limit=1) == 1
+        failed = service.get(parent.id)
+        assert failed.state == LifecycleState.FAILED
+        assert failed.failure is not None
+        assert AvailabilityOperationFailure.model_validate(failed.failure).code == code
+        assert failed.next_attempt_at is None
+        clock[0] += timedelta(hours=1)
+        assert service.run_pending(limit=10) == 0
+        with sessions() as session:
+            assert list(
+                session.scalars(
+                    select(Job.id).where(Job.kind == WireAgentOperation.RECIPE_BUILD)
+                )
+            ) == [child_id]
+        # Host repair also supplies fresh inventory for new capacity admission.
+        with sessions.begin() as session:
+            snapshot = session.scalar(select(NodeInventorySnapshot))
+            assert snapshot is not None
+            snapshot.observed_at = clock[0]
+            snapshot.received_at = clock[0]
+        # A new explicit request after repair is not poisoned by the old failure.
+        fresh = service.start(
+            revision.id, actor="operator", request_id=str(uuid.uuid4())
+        )
+        assert fresh.id != parent.id
+        assert service.run_pending(limit=1) == 1
+        with sessions() as session:
+            assert (
+                len(
+                    list(
+                        session.scalars(
+                            select(Job.id).where(
+                                Job.kind == WireAgentOperation.RECIPE_BUILD
+                            )
+                        )
+                    )
+                )
+                == 2
+            )
+    finally:
+        production.close()
+
+
 @pytest.mark.parametrize("outcome", ["failed", "missing_archive"])
 def test_settled_child_failure_gets_new_execution_identity_on_recovery(
     tmp_path, postgres_engine, outcome
@@ -415,10 +521,11 @@ def test_settled_child_failure_gets_new_execution_identity_on_recovery(
         succeeded=outcome == "missing_archive",
         evidence=_evidence(plan)
         if outcome == "missing_archive"
-        else {
-            "failure_kind": "temporary-dependency",
-            "reason": "build executor failed",
-        },
+        else AgentFailureResult(
+            failure_kind=AgentFailureKind.TEMPORARY_DEPENDENCY,
+            retry_after_seconds=30,
+            reason="build executor failed",
+        ).model_dump(mode="json", exclude_none=True),
     )
     waiting = production.service.get(parent.id)
     assert waiting.next_attempt_at is not None
@@ -428,6 +535,12 @@ def test_settled_child_failure_gets_new_execution_identity_on_recovery(
     assert waiting.state == "queued", waiting.failure
     assert waiting.failure is not None
     assert waiting.next_attempt_at is not None
+    if outcome == "failed":
+        # The typed transient cause keeps a visible lower-bound retry clock;
+        # observing it cannot immediately reissue a costly build.
+        assert datetime.fromisoformat(waiting.next_attempt_at) >= clock[0] + timedelta(
+            seconds=30
+        )
     clock[0] = datetime.fromisoformat(waiting.next_attempt_at) + timedelta(seconds=1)
     assert production.service.run_pending(limit=1) == 1
     with sessions() as session:

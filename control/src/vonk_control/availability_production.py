@@ -16,8 +16,8 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
-    AgentFailureKind,
     AgentFailureResult,
+    Disposition,
     InvalidRequestReason,
     LifecycleState,
     RecipeBuildCode,
@@ -42,7 +42,7 @@ from .bounded_json import require_mapping
 from .catalog_revision_contract import read_catalog_document
 from .catalog_sync import CatalogSyncError
 from .categorized_errors import InvalidValue
-from .failure_classification import is_security_failure
+from .failure_classification import disposition, is_security_failure
 from .failure_evidence import safe_text
 from .job_documents import AvailabilityJobPayload, AvailabilityRuntime
 from .models import (
@@ -88,6 +88,7 @@ from .recipe_runtime_specs import (
     resolve_recipe_entities,
 )
 from .recipe_update_contract import UPDATE_KIND
+from .recovery_policy import kind_for_failure_fields
 from .runtime_image_preparation import (
     FilesystemRuntimeImageStorage,
     OciLayoutImageTransport,
@@ -1413,11 +1414,13 @@ def _observe_build(
                 step="build",
                 reason=WaitReason.RECEIPT_MISSING,
             )
-        # The durable owner bounds non-security recovery; denied authority
-        # remains a security edge even when the child omits an error code.
-        retryable = (
-            failure.failure_kind is not AgentFailureKind.INVALID_AUTHORITY
-            and not is_security_failure(failure.error_code or "")
+        # A returned deterministic failure must end this preparation too.
+        # Reissuing fresh children here bypassed the agent queue's fail-fast
+        # decision and hammered the same broken build indefinitely.
+        retryable = disposition(
+            kind_for_failure_fields(failure.failure_kind, failure.error_code)
+        ) in {Disposition.WAIT, Disposition.OBSERVE} and not is_security_failure(
+            failure.error_code or ""
         )
         summary = failure.summary or failure.reason or "canonical Recipe build failed"
         category = (
