@@ -49,6 +49,7 @@ from ..models import (
 )
 from ..preparation_contract import RolloutPreparation, RuntimeImageIdentity
 from ..profile_capacity import plan_kept_runs, sibling_runs
+from ..profile_read_observation import profile_read
 from ..recipe_runtime_specs import recipe_topology
 from ..run_switch_contract import RunSwitchAssessment
 from .assessment_support import (
@@ -67,6 +68,7 @@ from .projection_support import (
     _aware,
     _choice_id,
     _digest,
+    _profile_document,
     _review_effects_digest,
 )
 
@@ -76,6 +78,7 @@ if TYPE_CHECKING:
 
 
 class FleetProfileService:
+    @profile_read
     def preview(
         self,
         profile_id: str,
@@ -158,10 +161,9 @@ class FleetProfileService:
                 resolved_definition = None
             else:
                 resolved_definition = self._required_definition(row)
-                view = self._view(session, row)
                 resolved_assignments = self._execution_assignments(session, row)
-                resolved_name = view.name
-                resolved_digest = view.profile_digest
+                resolved_name = row.name
+                resolved_digest = _digest(_profile_document(row))
                 installation_policy = row.installation_policy
                 resolved_revision = row.revision
             assignment_previews: list[FleetProfileAssignmentPreview] = []
@@ -187,6 +189,7 @@ class FleetProfileService:
                     .order_by(AgentNode.node_id)
                 )
             )
+            enrolled_node_ids = set(session.scalars(select(AgentNode.node_id)))
             switch_steps: list[FleetProfilePlanStep] = []
             preparation_unavailable_reported = False
             # Scope is the authoritative reconciliation boundary.  An idle
@@ -234,13 +237,7 @@ class FleetProfileService:
                 )
                 active_node_ids = {node.node_id for node in roster}
                 unavailable_nodes = sorted(set(expected_nodes) - active_node_ids)
-                known_node_ids = set(
-                    session.scalars(
-                        select(AgentNode.node_id).where(
-                            AgentNode.node_id.in_(unavailable_nodes)
-                        )
-                    )
-                )
+                known_node_ids = set(unavailable_nodes) & enrolled_node_ids
                 unknown_nodes = sorted(set(unavailable_nodes) - known_node_ids)
                 removed_nodes = sorted(known_node_ids)
                 revision = session.get(

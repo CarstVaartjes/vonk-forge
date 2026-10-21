@@ -218,3 +218,12 @@ def catalog_selector_membership(
     from sqlalchemy import tuple_
 
     return tuple_(publisher, slug).in_(selectors)
+
+
+def catalog_reference_membership(column, identities: Collection[str]):
+    """Locate relational catalog references, including damaged/missing documents.
+
+    This selects the rows to observe; it asserts no artifact availability or
+    reuse. The caller still checks the exact mapping, options and image bytes.
+    """
+    return column.in_(identities)

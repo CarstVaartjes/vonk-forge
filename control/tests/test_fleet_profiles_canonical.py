@@ -16,6 +16,8 @@ from vonk_control.fleet_profile_contract import (
     FleetProfileAssignmentInput,
     FleetProfileDefinition,
     FleetProfileInput,
+    FleetProfilePreview,
+    FleetProfileView,
 )
 from vonk_control.fleet_profiles import FleetProfileConflict, FleetProfileService
 from vonk_control.model_cache_contract import (
@@ -1241,3 +1243,271 @@ def test_save_observer_timeout_is_atomic_and_reconnects_to_committed_content(
     # content replay, even with the client's original expected revision.
     replayed = service.update_number(13, requested, actor="test")
     assert replayed.revision == before.revision + 1
+
+
+@pytest.mark.parametrize("endpoint", ["get", "preview"])
+@pytest.mark.parametrize("selector_count", [1, 34])
+def test_profile_read_observes_distinct_content_once(
+    monkeypatch, postgres_engine, tmp_path, endpoint, selector_count
+):
+    """Duplicate assignments must not repeat storage observation or model lookup."""
+    import time
+
+    Base.metadata.create_all(postgres_engine)
+    sessions = sessionmaker(postgres_engine, expire_on_commit=False)
+    _seed(sessions)
+    from collections import Counter, OrderedDict
+
+    from vonk_control import catalog_revision_contract as contract
+    from vonk_control.catalog_entities import CatalogEntityService
+
+    selectors = ["vonk-forge/synthetic-tiny-build"]
+    with sessions() as session:
+        template_row = session.get(CatalogDocumentRevision, RECIPE_REVISION_ID)
+        assert template_row is not None
+        template = template_row.document
+    catalog = CatalogEntityService(sessions, clock=lambda: NOW)
+    for index in range(1, selector_count):
+        document = json.loads(json.dumps(template))
+        document["identity"]["slug"] = f"latency-{index}"
+        revision = catalog.create_draft(document, actor="test")
+        catalog.resolve(revision.id, actor="test")
+        selectors.append(f"vonk-forge/latency-{index}")
+    from vonk_control.model_cache import ModelCacheService
+    from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
+
+    cache = ModelCacheService(sessions, tmp_path / "models", clock=lambda: NOW)
+    images = FilesystemRuntimeImageStorage(tmp_path / "images")
+    storage_calls = Counter()
+
+    def model_receipt(_digest, _size):
+        storage_calls["model"] += 1
+        time.sleep(0.5)  # injected network storage latency
+
+    def image_receipt(_digest):
+        storage_calls["image"] += 1
+        time.sleep(0.5)  # injected network storage latency
+
+    monkeypatch.setattr(cache, "_read_object_receipt", model_receipt)
+    monkeypatch.setattr(images, "_observe_stored_image", image_receipt)
+    calls = []
+
+    def resolve(**kwargs):
+        calls.append(kwargs["exact_revision_id"])
+        cache._stored_object("a" * 64, 1)
+        present = images.build_archive_available("b" * 64, 1)
+        return _resolution(kwargs["exact_revision_id"], recipe_cached=present)
+
+    service = FleetProfileService(sessions, clock=lambda: NOW, cache_resolver=resolve)
+    service.update_number(
+        1,
+        FleetProfileInput(
+            name="Latency",
+            assignments=[
+                FleetProfileAssignmentInput(
+                    recipe_selector=selectors[index % selector_count],
+                    spark_ids=[NODE_1],
+                    assignment_name=f"slot-{index}",
+                )
+                for index in range(34)
+            ],
+        ),
+        actor="test",
+    )
+    parses = Counter()
+    monkeypatch.setattr(contract, "_document_cache", OrderedDict())
+    monkeypatch.setattr(contract, "_document_cache_size", 0)
+    parser = contract.read_recipe
+
+    def parsed(raw):
+        parses["recipe"] += 1
+        return parser(raw)
+
+    monkeypatch.setattr(contract, "read_recipe", parsed)
+    queries = []
+
+    def counted(_connection, _cursor, statement, _parameters, _context, _many):
+        queries.append(statement)
+
+    event.listen(postgres_engine, "before_cursor_execute", counted)
+    started = time.monotonic()
+    try:
+        if endpoint == "get":
+            result = service.get_number(1)
+            assert len(result.assignments) == 34
+        else:
+            # This is the numbered route's producer sequence.
+            identity = service.definition_number(1)
+            assert identity.id is not None
+            result = service.preview(identity.id)
+            assert len(result.assignments) == 34
+    finally:
+        elapsed = time.monotonic() - started
+        event.remove(postgres_engine, "before_cursor_execute", counted)
+    print(
+        f"{endpoint} selectors={selector_count}: {elapsed:.3f}s SQL={len(queries)} resolutions={len(calls)} storage={storage_calls} parses={parses}"
+    )
+    assert len(calls) <= (selector_count if endpoint == "get" else 0)
+    assert storage_calls == (
+        Counter(model=1, image=1) if endpoint == "get" else Counter()
+    )
+    assert parses["recipe"] <= selector_count
+    assert elapsed < 5.0  # wall-clock: injected latency budget
+    assert len(queries) <= (12 if endpoint == "get" else 25)
+    assert not any("FOR UPDATE" in query for query in queries)
+
+
+@pytest.mark.parametrize("endpoint", ["get", "list", "preview"])
+@pytest.mark.parametrize("asset", ["model", "image"])
+def test_profile_storage_wait_is_bounded_and_recovers(
+    monkeypatch, postgres_engine, tmp_path, endpoint, asset
+):
+    """A stalled receipt cannot hold a profile response or be called per assignment."""
+    import time
+    from threading import Event
+
+    from vonk_agent_protocol import ProfileReasonCode
+    from vonk_control.model_cache import ModelCacheService
+    from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
+
+    from tests.test_fleet_profiles import _assessment, _exact_preparation
+
+    Base.metadata.create_all(postgres_engine)
+    sessions = sessionmaker(postgres_engine, expire_on_commit=False)
+    _seed(sessions)
+    cache = ModelCacheService(sessions, tmp_path / "cache", clock=lambda: NOW)
+    entered, release, completed = Event(), Event(), Event()
+    storage_calls = []
+    images = FilesystemRuntimeImageStorage(tmp_path / "images")
+    original = (
+        cache._read_object_receipt if asset == "model" else images._observe_stored_image
+    )
+
+    def delayed(digest, *args):
+        storage_calls.append(digest)
+        entered.set()
+        assert release.wait(30), "test did not release its injected storage fault"
+        try:
+            return original(digest, *args)
+        finally:
+            completed.set()
+
+    if asset == "model":
+        monkeypatch.setattr(cache, "_read_object_receipt", delayed)
+    else:
+        monkeypatch.setattr(images, "_observe_stored_image", delayed)
+
+    def stored():
+        if asset == "model":
+            return cache._stored_object("a" * 64, 1)
+        return images.build_archive_available("a" * 64, 1)
+
+    def resolve(**kwargs):
+        stored()
+        return _resolution(kwargs["exact_revision_id"], recipe_cached=True)
+
+    def assess(_session, _assignment, nodes, **_kwargs):
+        stored()
+        return _assessment(_exact_preparation(nodes))
+
+    service = FleetProfileService(
+        sessions, clock=lambda: NOW, cache_resolver=resolve, assessment_provider=assess
+    )
+    saved = service.update_number(
+        1,
+        FleetProfileInput(
+            name="Fault",
+            assignments=[
+                FleetProfileAssignmentInput(
+                    recipe_selector="vonk-forge/synthetic-tiny-build",
+                    spark_ids=[NODE_1],
+                    assignment_name=f"slot-{index}",
+                )
+                for index in range(34)
+            ],
+        ),
+        actor="test",
+    )
+
+    def read():
+        if endpoint == "preview":
+            return service.preview(saved.id)
+        if endpoint == "list":
+            return service.list().profiles[0]
+        return service.read_number(1)
+
+    started = time.monotonic()
+    try:
+        result = read()
+        elapsed = time.monotonic() - started
+        assert entered.is_set()
+        assert elapsed < 5.0  # wall-clock: injected receipt stall budget
+        assert not release.is_set(), "the response waited for the fault to clear"
+        assert storage_calls == ["a" * 64]
+        if endpoint == "preview":
+            assert isinstance(result, FleetProfilePreview)
+            assert not result.allowed
+            assert any(
+                reason.code == ProfileReasonCode.PREPARATION_UNAVAILABLE
+                and "pending" in reason.detail
+                for reason in result.reasons
+            )
+        else:
+            assert isinstance(result, FleetProfileView)
+            assert result.cache_summary.unknown == 34
+            assert any("pending" in warning for warning in result.warnings)
+        print(
+            f"{endpoint} stalled {asset} receipt: {elapsed:.3f}s storage={len(storage_calls)}"
+        )
+    finally:
+        release.set()
+        assert completed.wait(30)
+    # A new observation uses the storage owner again after the fault clears.
+    result = read()
+    if endpoint == "preview":
+        assert isinstance(result, FleetProfilePreview)
+        assert not any("pending after" in reason.detail for reason in result.reasons)
+    else:
+        assert isinstance(result, FleetProfileView)
+        assert result.cache_summary.unknown == 0
+    assert 1 <= len(storage_calls) <= 2
+    # Admission outside a profile observation never uses the request memo.
+    before = len(storage_calls)
+    stored()
+    assert len(storage_calls) == before + 1
+
+
+def test_profile_observation_reuses_only_fresh_results(monkeypatch):
+    """Completed probes expire; admission outside the read scope always observes."""
+    from threading import Event
+    from types import SimpleNamespace
+
+    from vonk_control import profile_read_observation as observation
+
+    now = [0.0]
+    monkeypatch.setattr(observation, "time", SimpleNamespace(monotonic=lambda: now[0]))
+    published = Event()
+    finish = observation._finished
+
+    def finished(key, future):
+        finish(key, future)
+        published.set()
+
+    monkeypatch.setattr(observation, "_finished", finished)
+    calls = []
+
+    @observation.observe_storage
+    def probe():
+        calls.append(True)
+        return len(calls)
+
+    @observation.profile_read
+    def read():
+        return probe()
+
+    assert read() == 1
+    assert published.wait(30)
+    assert read() == 1
+    now[0] = 6.0
+    assert read() == 2
+    assert probe() == 3

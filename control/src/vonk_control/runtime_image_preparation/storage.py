@@ -26,6 +26,7 @@ from ..oci_image_store import (
     StoreUnknown,
 )
 from ..operation_contract import AvailabilityRecoveryAction
+from ..profile_read_observation import observe_storage
 from .contracts import (
     _IMAGE_DIGEST,
     _LOGGER,
@@ -237,6 +238,7 @@ class FilesystemRuntimeImageStorage:
             )
         return self.layout.blob_path(image.manifest_digest)
 
+    @observe_storage
     def _stored_image(self, archive_sha256: str) -> StoredImage | None:
         last_error = None
         for _attempt in range(3):
@@ -351,6 +353,7 @@ class FilesystemRuntimeImageStorage:
             return False
         return True
 
+    @observe_storage
     def find_verified(
         self,
         image_digest: str,
@@ -389,6 +392,7 @@ class FilesystemRuntimeImageStorage:
             return receipt
         return None
 
+    @observe_storage
     def find_build(
         self,
         build_input_sha256: str,
@@ -520,6 +524,7 @@ class FilesystemRuntimeImageStorage:
             return False
         return True
 
+    @observe_storage
     def read_receipt(self, archive_sha256: str) -> RuntimeImageReceipt:
         last_error = RuntimeImagePreparationUnknown(
             RuntimeImageCode.RECEIPT_UNAVAILABLE,

@@ -34,6 +34,7 @@ from ..fleet_profile_contract import (
     UnavailableFleetProfileView,
 )
 from ..models import AgentNode, AgentNodeProfile, FleetProfile, FleetProfileApplication
+from ..profile_read_observation import profile_read
 from .contracts import (
     FleetProfileDefinitionUnavailable,
     FleetProfileInvalid,
@@ -51,6 +52,7 @@ if TYPE_CHECKING:
 
 
 class FleetProfileService:
+    @profile_read
     def list(self, *, after: int = 0) -> FleetProfileList:
         self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
         now = _aware(self._clock())
@@ -69,6 +71,7 @@ class FleetProfileService:
                 next_after=rows[-1].number if len(rows) == 128 else None,
             )
 
+    @profile_read
     def get(self, profile_id: str) -> FleetProfileView:
         self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
         with self._sessions() as session:
@@ -77,6 +80,7 @@ class FleetProfileService:
                 raise MissingRecord(profile_id, reason=InvalidRequestReason.NOT_FOUND)
             return self._view(session, row)
 
+    @profile_read
     def get_number(self, number: int) -> FleetProfileView:
         self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
         if type(number) is not int or number < 1:
@@ -90,6 +94,7 @@ class FleetProfileService:
             self._required_definition(row)
             return self._view(session, row)
 
+    @profile_read
     def read_number(self, number: int) -> FleetProfileReadView:
         """Read a stable unused number without creating persistent state."""
         self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface

@@ -25,6 +25,7 @@ from ..fleet_profile_contract import (
 from ..lifecycle.evidence import BookkeepingReason, Residue, retire_as_unknown
 from ..model_cache_contract import CacheResolution
 from ..models import CatalogDocument, CatalogDocumentRevision, FleetProfile
+from ..profile_read_observation import observe_storage
 from ..recipe_runtime_specs import recipe_topology
 from .contracts import (
     FleetProfileInvalid,
@@ -121,7 +122,10 @@ class FleetProfileService:
 
     @staticmethod
     def _prefetch_recipe_documents(
-        session: Session, choices: Sequence[FleetProfileAssignmentInput]
+        session: Session,
+        choices: Sequence[FleetProfileAssignmentInput],
+        *,
+        include_documents: bool = False,
     ) -> None:
         """Read this request's exact recipe heads in two queries, without source JSON."""
         transaction = session.get_transaction()
@@ -134,7 +138,7 @@ class FleetProfileService:
                 choice.recipe_selector.strip().casefold().split("/")
             )
             for choice in choices
-            if choice.recipe_selector not in reads.documents
+            if include_documents or choice.recipe_selector not in reads.documents
         }
         # Invalid or ambiguous selectors retain the existing typed refusal in
         # _recipe_document. An absent head remains explicit unavailable evidence.
@@ -184,7 +188,13 @@ class FleetProfileService:
                 select(CatalogDocumentRevision)
                 .join(ranked, ranked.c.id == CatalogDocumentRevision.id)
                 .where(ranked.c.head_rank == 1)
-                .options(defer(CatalogDocumentRevision.document))
+                .options(
+                    *(
+                        ()
+                        if include_documents
+                        else (defer(CatalogDocumentRevision.document),)
+                    )
+                )
             )
         }
         for selector, identity in selectors.items():
@@ -205,9 +215,11 @@ class FleetProfileService:
         ):
             reads = _RecipeReads(session.get_transaction())
             session.info["profile_recipe_documents"] = reads
-        if revision.id not in reads.projections:
-            reads.projections[revision.id] = read_recipe_projection(revision)
-        return reads.projections[revision.id]
+        if revision.content_digest not in reads.projections:
+            reads.projections[revision.content_digest] = read_recipe_projection(
+                revision
+            )
+        return reads.projections[revision.content_digest]
 
     @classmethod
     def _recipe_document(
@@ -293,7 +305,7 @@ class FleetProfileService:
         cache: CacheResolution | None = None
         if self._cache_resolver is not None:
             try:
-                candidate = self._cache_resolver(
+                candidate = observe_storage(self._cache_resolver)(
                     recipe_identity=document.id,
                     model_variant=choice.model_variant,
                     exact_revision_id=revision.id,
@@ -387,14 +399,17 @@ class FleetProfileService:
         self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
 
         result: list[FleetProfileAssignment] = []
-        for choice in self._choices(row):
-            resolved = self._resolve_choice(session, choice)
+        choices = self._choices(row)
+        self._prefetch_recipe_documents(session, choices, include_documents=True)
+        titles = self._model_titles(session, choices)
+        for choice in choices:
+            resolved = self._recipe_document(session, choice.recipe_selector)
             if isinstance(resolved, Residue):
                 # The recipe resolves to no active revision: it is not part of the
                 # resolved set, and the preview names it as a reason that waits for
                 # the catalog sync (it never loads a profile without it silently).
                 continue
-            document, revision, _cache = resolved
+            document, revision = resolved
             definition = _stored_recipe(revision)
             if isinstance(definition, Residue):
                 # No readable revision of this recipe: the same as no active one.
@@ -430,7 +445,13 @@ class FleetProfileService:
                     gpu_clock=choice.gpu_clock,
                     recipe_id=document.id,
                     recipe_title=document.title,
-                    model_title=self._model_title(session, definition),
+                    model_title=titles.get(
+                        (
+                            definition.models[0].model.publisher,
+                            definition.models[0].model.slug,
+                            definition.models[0].model.content_sha256,
+                        )
+                    ),
                 )
             )
         return tuple(result)

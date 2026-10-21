@@ -55,7 +55,7 @@ CASES = [
     ("fleet_profiles", "list", "GET", "/api/profile"),
     ("fleet_profiles", "read_number", "GET", "/api/profile/1"),
     ("fleet_profiles", "definition_number", "GET", "/api/profile/1/definition"),
-    ("fleet_profiles", "get_number", "POST", "/api/profile/1/preview"),
+    ("fleet_profiles", "definition_number", "POST", "/api/profile/1/preview"),
     ("fleet_profiles", "progress_number", "GET", "/api/profile/1/progress"),
     (
         "fleet_profiles",
