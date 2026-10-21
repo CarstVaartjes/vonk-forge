@@ -49,6 +49,15 @@ impl<R: CommandRunner> OperationExecutor<R> {
         let installation_id = identity.installation_id.to_string();
         let started_at = Instant::now();
         let (launch, active_start) = {
+            // Nonblocking: a collecting pass releases this before the next
+            // authorized START retries. Lock order is stores, installation.
+            let _stores = match self.runtime_stores.try_read() {
+                Ok(guard) => guard,
+                Err(std::sync::TryLockError::Poisoned(guard)) => guard.into_inner(),
+                Err(std::sync::TryLockError::WouldBlock) => {
+                    return Err(OperationError::InstallationReconciliationBusy);
+                }
+            };
             let _installation_guard = self.lock_installation_runtime(&installation_id)?;
             self.prepare_runtime_generation_fence(&identity)?;
             self.accept_installation_intent(
