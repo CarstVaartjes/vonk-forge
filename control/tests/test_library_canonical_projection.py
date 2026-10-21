@@ -1606,3 +1606,107 @@ def test_list_shared_vector_preserves_sweep_inputs_without_executable_documents(
         for reference in recipe.projected.models
     ]
     assert recipe.projected.interfaces and recipe.projected.validation.serving.checks
+
+
+@pytest.mark.needs_recipe_library
+def test_connected_consumers_read_documents_only_from_detail(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Catch API/CLI acceptance readers that still expect documents in lists."""
+    import runpy
+    import subprocess
+    import time
+    from typing import Any
+
+    import httpx2
+
+    repository = Path(__file__).resolve().parents[2]
+    consumer = runpy.run_path(
+        str(repository / "tests/acceptance/test_candidate_recipe_e2e.py")
+    )["test_controller_sync_exposes_canonical_library_documents_to_api_and_cli"]
+
+    library_root = ROOT
+    index = json.loads((library_root / "catalog-index.json").read_text())
+    entry = index["recipes"][0]
+    model_digests = {
+        selection["model"]["content_sha256"]
+        for selection in entry["document"]["models"]
+    }
+    index["recipes"] = [entry]
+    index["catalog_entities"] = [
+        row
+        for row in index["catalog_entities"]
+        if row["content_sha256"] in model_digests
+    ]
+    engine = create_engine(f"sqlite:///{tmp_path / 'catalog.sqlite'}")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    clock = lambda: datetime.now(UTC)
+    codec = TokenCodec(b"a" * 32)
+    catalog = CatalogEntityService(sessions, clock=clock, cursors=codec.cursor_codec())
+    for row in [*index["catalog_entities"], entry]:
+        revision = catalog.create_draft(row["document"], actor="test")
+        catalog.resolve(revision.id, actor="test")
+    app = FastAPI()
+    app.router.route_class = ControllerAPIRoute
+    install_library_routes(
+        app,
+        actor_dependency=Depends(lambda: Actor("test", "viewer")),
+        projection=LibraryProjection(
+            sessions, clock=clock, cursors=codec.cursor_codec()
+        ),
+    )
+    token = tmp_path / "test-token"
+    token.write_text("synthetic-local-test-token")
+    monkeypatch.setenv("VONK_ACCEPTANCE_CONTROL_URL", "https://controller.invalid")
+    monkeypatch.setenv(
+        "VONK_ACCEPTANCE_PACKAGE_INDEX_URL", "https://publication.invalid/index.json"
+    )
+    monkeypatch.setenv("VONK_ACCEPTANCE_TOKEN_FILE", str(token))
+    monkeypatch.setitem(
+        consumer.__globals__, "_package_inputs", lambda: (index, entry, library_root)
+    )
+    original_client = httpx2.Client
+    cli_actions: list[str] = []
+    detail_paths: set[str] = set()
+    with TestClient(app) as api:
+
+        def respond(request: httpx2.Request) -> httpx2.Response:
+            if request.url.host == "publication.invalid":
+                return httpx2.Response(200, json=index)
+            path = request.url.path
+            if path.startswith(("/api/model/", "/api/recipe/")) and not path.endswith(
+                "/library"
+            ):
+                detail_paths.add(path)
+            response = api.get(path, params=dict(request.url.params))
+            return httpx2.Response(response.status_code, content=response.content)
+
+        def client(**kwargs: Any) -> httpx2.Client:
+            return original_client(transport=httpx2.MockTransport(respond), **kwargs)
+
+        def cli(command: list[str], **_kwargs: Any) -> subprocess.CompletedProcess[str]:
+            assert command[1:3] == ["--json", "recipe"]
+            action = command[3]
+            cli_actions.append(action)
+            path = (
+                "/api/recipe/library"
+                if action == "library"
+                else "/api/recipe/" + command[4]
+            )
+            response = api.get(path)
+            assert response.status_code == 200, response.text
+            return subprocess.CompletedProcess(command, 0, response.text, "")
+
+        monkeypatch.setattr(httpx2, "Client", client)
+        monkeypatch.setattr(subprocess, "run", cli)
+        # The seeded catalog is already current. A stale reader must fail here,
+        # rather than hiding its KeyError in the connected lane's polling loop.
+        monkeypatch.setattr(
+            time, "sleep", lambda _delay: pytest.fail("current catalog did not parse")
+        )
+        consumer()
+    assert cli_actions == ["library", "detail"]
+    assert any(path.startswith("/api/model/") for path in detail_paths)
+    assert any(path.startswith("/api/recipe/") for path in detail_paths)
+    engine.dispose()
