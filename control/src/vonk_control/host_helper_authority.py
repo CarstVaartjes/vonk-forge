@@ -19,6 +19,7 @@ from vonk_agent_protocol import (
     AgentOperation,
     AgentProtocolError,
     InvalidRequestReason,
+    SecurityRefusalReason,
     canonical_message,
 )
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
@@ -81,6 +82,15 @@ def _aware(value: datetime) -> datetime:
 
 class HostHelperAuthorityError(RuntimeError):
     """The host-helper grant could not be issued safely."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        reason: SecurityRefusalReason = SecurityRefusalReason.HOST_HELPER_AUTHORITY_DENIED,
+    ) -> None:
+        super().__init__(message)
+        self.denial_reason = reason
 
 
 class HostRuntimeGrantUnsatisfiable(HostHelperAuthorityError):
@@ -367,8 +377,8 @@ class HostRuntimeAuthorityService:
             expires_in_seconds=expires_in_seconds,
         )
         if grant.claims.expires_at > int(lease_deadline.timestamp()):
-            raise HostHelperAuthorityError(
-                "host runtime grant exceeds the active attempt lease"
+            raise HostRuntimeEvidenceUnavailable(
+                "host runtime grant awaits active attempt lease renewal"
             )
         return grant
 
@@ -676,7 +686,8 @@ class HostRuntimeAuthorityService:
                 ) from error
             except (RuntimePlanAuthorityError, TypeError, ValueError) as error:
                 raise HostHelperAuthorityError(
-                    "container runtime lifecycle authority is invalid"
+                    "container runtime lifecycle authority is invalid",
+                    reason=SecurityRefusalReason.HELPER_REQUEST_PLAN_BINDING_INVALID,
                 ) from error
             if (
                 start_plan_sha256 != binding.start_plan_sha256
@@ -687,7 +698,8 @@ class HostRuntimeAuthorityService:
                 or runtime_installation_id != binding.runtime_installation_id
             ):
                 raise HostHelperAuthorityError(
-                    "container runtime lifecycle binding differs from exact plan"
+                    "container runtime lifecycle binding differs from exact plan",
+                    reason=SecurityRefusalReason.HELPER_REQUEST_PLAN_BINDING_INVALID,
                 )
             return (
                 lease_deadline,

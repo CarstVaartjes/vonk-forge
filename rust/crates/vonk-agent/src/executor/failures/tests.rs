@@ -937,18 +937,46 @@ fn a_permanent_preparation_cause_is_not_a_temporary_dependency() {
 }
 
 #[test]
-fn grant_403_waits_per_operation_without_refusing_agent_identity() {
+fn grant_403_ends_its_operation_with_evidence_without_refusing_agent_identity() {
     // Wrong implementation: any grant 403 poisons the whole control lane.
     let mut denied = crate::client::ControllerError::from_status(403);
     denied.endpoint = "/agent/host-runtime/grant".into();
+    denied.code = vonk_agent_protocol::generated::SecurityRefusalReason::HostHelperAuthorityDenied
+        .to_string();
     let client_error = ClientError::Controller(Box::new(denied));
     assert!(!client_error.fatal());
-    assert!(client_error.retryable());
+    assert!(!client_error.retryable());
     let error = crate::host_runtime::HostRuntimeError::Controller(client_error);
-    assert!(temporary_observation_error(&error));
+    assert!(!temporary_observation_error(&error));
     assert!(matches!(
         runtime_failure("runtime grant denied", &error),
-        ExecutionResult::Unknown(_)
+        ExecutionResult::Failed(_)
+    ));
+    let result = stop_failure("stop is unconfirmed", &error);
+    let failure = result.failure().unwrap();
+    assert_eq!(
+        failure.failure_kind,
+        Some(AgentFailureKind::InvalidAuthority)
+    );
+    assert!(failure.retry_after_seconds.is_none());
+    assert!(
+        failure
+            .diagnostic
+            .as_deref()
+            .unwrap()
+            .contains("http_status=403")
+    );
+    let finished = result.finish_for(&AgentOperation::RecipeStop);
+    let AgentResultResult::OutcomeFailed(failed) = finished.result else {
+        panic!("grant refusal is definite");
+    };
+    let evidence = failed.evidence.unwrap();
+    assert_eq!(
+        evidence.helper_error_code,
+        Some(HelperErrorCode::GrantUnauthorized.to_string())
+    );
+    assert!(evidence.diagnostic.unwrap().contains(
+        vonk_agent_protocol::generated::SecurityRefusalReason::HostHelperAuthorityDenied.as_str()
     ));
     // Renewal/activation denials still stop effects.
     for endpoint in ["/agent/renew", "/agent/renew/activate"] {

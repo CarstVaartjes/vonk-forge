@@ -18,6 +18,8 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         );
         self.report_phase(claim, ProgressPhase::Starting).await;
         let installation_id = request.installation_id.to_string();
+        let collective_readiness =
+            matches!(request.phase, Some(RecipeStartPhase::CollectiveReadiness));
         let phase_deadline = match request
             .start_deadline
             .as_deref()
@@ -42,15 +44,19 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         if *cancellation.borrow() {
             return cancelled("controller cancelled before installation preparation");
         }
-        if let Err(result) = self
-            .prepare_installation(
-                claim,
-                &spec,
-                &installation_id,
-                &lease_deadline,
-                &cancellation,
-            )
-            .await
+        // Readiness only observes the rank launched by the preceding phase.
+        // Repreparing it asks for an image-pull grant this phase cannot own,
+        // and may rewrite storage that the running workload is using.
+        if !collective_readiness
+            && let Err(result) = self
+                .prepare_installation(
+                    claim,
+                    &spec,
+                    &installation_id,
+                    &lease_deadline,
+                    &cancellation,
+                )
+                .await
         {
             return *result;
         }
@@ -79,8 +85,6 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         let inspection_identity = Some(RecipeRunStartIdentity {
             run_generation: request.run_generation,
         });
-        let collective_readiness =
-            matches!(request.phase, Some(RecipeStartPhase::CollectiveReadiness));
         let rank_launch = matches!(request.phase, Some(RecipeStartPhase::RankLaunch));
         if request.phase.is_some()
             && !before_phase_deadline(&lease_deadline, phase_deadline.as_ref())
@@ -487,3 +491,6 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         success
     }
 }
+
+#[cfg(test)]
+mod tests;
