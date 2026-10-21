@@ -17,7 +17,12 @@ from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, select, update
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import AgentFailureResult, LifecycleState, canonical_message
+from vonk_agent_protocol import (
+    AgentFailureResult,
+    FailureStage,
+    LifecycleState,
+    canonical_message,
+)
 from vonk_control import availability_production
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.availability_production import (
@@ -1511,10 +1516,10 @@ def test_builder_parent_preserves_typed_failure_and_retry_policy(
     if has_evidence:
         child_document: dict[str, object] = {
             "reason": "Package source rejected the build request",
-            "summary": "PyTorch package index rejected access",
+            "summary": "Podman recipe image build failed",
             "status": "failed",
             "operation": "recipe.build.v1",
-            "stage": "build",
+            "stage": FailureStage.IMAGE_BUILD.value,
         }
         if failure_kind is not None:
             child_document["failure_kind"] = failure_kind
@@ -1530,7 +1535,12 @@ def test_builder_parent_preserves_typed_failure_and_retry_policy(
                 if diagnostic_category == "platform-policy"
                 else "HTTP 503 package index temporarily unavailable"
             )
+            stderr += "\n" + "unrelated compiler output\n" * 60
+            if diagnostic_category == "platform-policy":
+                stderr += "Authorization: Bearer child-secret-value\n"
+            stderr += "rootless pause directory is missing"
             child_document["diagnostics"] = {
+                "process_exit_code": 125,
                 "schema_version": 1,
                 "collected_at": now.isoformat(),
                 "phase": "build",
@@ -1641,10 +1651,11 @@ def test_builder_parent_preserves_typed_failure_and_retry_policy(
     assert isinstance(detail, str)
     if has_evidence and not malformed_kind:
         if diagnostic_category is not None:
+            assert "exit code 125" in detail
+            assert detail.endswith("rootless pause directory is missing")
+            assert "child-secret-value" not in detail
             assert "child-secret-value" not in str(failed.failure["log_excerpt"])
-            if diagnostic_category == "platform-policy":
-                assert "<redacted>" in str(failed.failure["log_excerpt"])
-        assert "PyTorch package index rejected access" in detail
+        assert "Podman recipe image build failed" in detail
     assert operations.calls == 1
     assert production.service.run_pending() == 0
     assert operations.calls == 1

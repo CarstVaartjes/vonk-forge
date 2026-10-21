@@ -1050,3 +1050,66 @@ def test_oversized_failure_evidence_keeps_the_container_diagnostics():
     facts = OperationResultFacts.model_validate(kept)
     assert facts.diagnostics is not None
     assert facts.diagnostics.stderr.text == "segfault\n"
+
+
+def test_subprocess_exit_and_final_stderr_survive_store_and_evidence_download(tmp_path):
+    # A classifier label cannot replace the opaque command's own explanation.
+    from vonk_agent_protocol import (
+        FailureCode,
+        OutcomeEvidence,
+        OutcomeFailed,
+        OutcomeKind,
+    )
+    from vonk_agent_protocol.outcome import outcome_body
+
+    value = item(ProtocolAgentOperation.RECIPE_BUILD.value)
+    diagnostics = collect_failure(
+        FailedAttempt.model_validate(value), now=NOW
+    ).diagnostics
+    diagnostics = diagnostics.model_copy(
+        update={
+            "process_exit_code": 125,
+            "stderr": log_tail("opaque Podman database failure"),
+        }
+    )
+    outcome = OutcomeFailed(
+        kind=OutcomeKind.FAILED,
+        code=FailureCode.RECIPE_BUILD_FAILED,
+        reason="Podman import failed",
+        evidence=OutcomeEvidence(diagnostics=diagnostics),
+    )
+    sessions = _agent_sessions(tmp_path)
+    operation_id = str(uuid4())
+    with sessions.begin() as session:
+        session.add(
+            AgentOperation(
+                id=operation_id,
+                parent_job_id=str(uuid4()),
+                node_id=NODE_A,
+                kind=ProtocolAgentOperation.RECIPE_BUILD.value,
+                payload_digest="b" * 64,
+                payload={},
+                authority_revision=COMMIT,
+                state=LifecycleState.FAILED.value,
+                current_attempt=1,
+                created_at=NOW,
+                updated_at=NOW,
+            )
+        )
+        session.add(
+            AgentOperationAttempt(
+                id=str(uuid4()),
+                operation_id=operation_id,
+                attempt=1,
+                fence=str(uuid4()),
+                lease_deadline=NOW,
+                agent_certificate_serial="test-serial",
+                state=LifecycleState.FAILED.value,
+                progress=None,
+                result=outcome_body(outcome).model_dump(mode="json", exclude_none=True),
+            )
+        )
+    consumed = FailureEvidenceService(sessions, clock=lambda: NOW).read(operation_id, 1)
+    downloaded = FailureEvidenceBundle.model_validate_json(consumed.model_dump_json())
+    assert downloaded.diagnostics.process_exit_code == 125
+    assert downloaded.diagnostics.stderr.text == "opaque Podman database failure"

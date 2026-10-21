@@ -38,6 +38,7 @@ impl ProcessRunner for FakeRunner {
             _ => unreachable!(),
         };
         Ok(ProcessOutput {
+            exit_code: None,
             success: true,
             stdout,
             stderr: vec![],
@@ -61,6 +62,7 @@ impl ProcessRunner for DelayedReadyRunner {
         if failures > 0 {
             self.failures_remaining.set(failures - 1);
             return Ok(ProcessOutput {
+                exit_code: None,
                 success: false,
                 stdout: Vec::new(),
                 stderr: Vec::new(),
@@ -407,6 +409,7 @@ impl ProcessRunner for SystemdHost {
             self.display_manager
         };
         Ok(ProcessOutput {
+            exit_code: None,
             // `is-active` exits zero only for an active unit.
             success: arguments == ["get-default"] || answer == "active",
             stdout: format!("{answer}\n").into_bytes(),

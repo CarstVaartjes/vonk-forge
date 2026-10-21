@@ -159,6 +159,7 @@ async fn settle_failed(seen: Seen, failed: Failed) -> Settled {
                     response.error_code = Some(HelperErrorCode::RuntimeProcessExited);
                     response.diagnostic = Some("exit_code=3".to_owned());
                     response.process_logs = Some(HostHelperProcessLogs {
+                        exit_code: None,
                         stdout: crate::failure_evidence::log_tail(b"loading\n"),
                         stderr: crate::failure_evidence::log_tail(b"out of memory\n"),
                     });

@@ -44,6 +44,7 @@ impl ProcessRunner for NoBuildProcess {
             && arguments.get(1).map(String::as_str) == Some("list-units")
         {
             return Ok(ProcessOutput {
+                exit_code: None,
                 success: true,
                 stdout: Vec::new(),
                 stderr: Vec::new(),

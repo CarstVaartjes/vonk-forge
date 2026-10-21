@@ -120,6 +120,7 @@ fn process_logs(
         .diagnostics
         .as_ref()
         .map(|diagnostics| crate::failure_evidence::FailureProcessLogs {
+            exit_code: None,
             stdout: diagnostics.stdout.clone(),
             stderr: diagnostics.stderr.clone(),
         })

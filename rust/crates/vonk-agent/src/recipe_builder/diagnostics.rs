@@ -21,14 +21,17 @@ pub enum RecipeBuildError {
     #[error("Podman could not import the verified base image ({diagnostic})")]
     BaseImageImport {
         diagnostic: PodmanImportDiagnostic,
-        logs: Option<Box<crate::failure_evidence::FailureProcessLogs>>,
+        logs: Box<crate::failure_evidence::FailureProcessLogs>,
     },
+    /// The process did not return command output (spawn, deadline or guard).
+    #[error("Podman base image import did not complete ({diagnostic})")]
+    BaseImageImportProcess { diagnostic: PodmanImportDiagnostic },
     #[error("Podman imported base image evidence is invalid")]
     BaseImageInspect,
     #[error("Podman recipe image build failed ({diagnostic})")]
     ImageBuild {
         diagnostic: PodmanBuildDiagnostic,
-        logs: Option<Box<crate::failure_evidence::FailureProcessLogs>>,
+        logs: Box<crate::failure_evidence::FailureProcessLogs>,
     },
     #[error("built recipe image evidence is invalid")]
     ImageInspect,
@@ -37,12 +40,16 @@ pub enum RecipeBuildError {
     #[error("platform runtime adapter build failed ({diagnostic})")]
     AdapterBuild {
         diagnostic: PodmanBuildDiagnostic,
-        logs: Option<Box<crate::failure_evidence::FailureProcessLogs>>,
+        logs: Box<crate::failure_evidence::FailureProcessLogs>,
     },
     #[error("adapted runtime image evidence is invalid")]
     AdapterInspect,
-    #[error("Podman could not export the built recipe image")]
-    ImageExport,
+    #[error("Podman command failed during {stage} ({diagnostic})")]
+    Command {
+        stage: FailureStage,
+        diagnostic: PodmanBuildDiagnostic,
+        logs: Box<crate::failure_evidence::FailureProcessLogs>,
+    },
     #[error("build output exceeded its declared limit")]
     OutputLimit,
     #[error(
@@ -75,9 +82,8 @@ pub enum RecipeBuildError {
     CleanupBlocked(String),
 }
 
-/// Stable, secret-free evidence extracted from bounded Podman output. Raw
-/// subprocess output can contain host paths and registry details, so operation
-/// results expose only this reviewed classification.
+/// Classification supplements the bounded, sanitized command output; it never
+/// replaces the subprocess evidence.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PodmanImportDiagnostic {
     TemporaryStorageExhausted,
@@ -87,6 +93,7 @@ pub enum PodmanImportDiagnostic {
     DeadlineExceeded,
     DiagnosticOutputLimitExceeded,
     SubprocessUnavailable,
+    NonzeroWithoutOutput,
     Unknown,
 }
 
@@ -162,6 +169,9 @@ impl fmt::Display for PodmanBuildDiagnostic {
 impl fmt::Display for PodmanImportDiagnostic {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(match self {
+            Self::NonzeroWithoutOutput => {
+                return PodmanBuildDiagnostic::NonzeroWithoutOutput.fmt(formatter);
+            }
             Self::TemporaryStorageExhausted => "temporary-storage-exhausted",
             Self::SubordinateIdMappingUnavailable => "subordinate-id-mapping-unavailable",
             Self::ArchiveFormatRejected => "archive-format-rejected",
@@ -184,19 +194,27 @@ impl RecipeBuildError {
             Self::Process(error) => failure
                 .stage(FailureStage::BoundedBuildProcess)
                 .diagnostic(process_error_diagnostic(error)),
+            Self::BaseImageImportProcess { diagnostic } => failure
+                .stage(FailureStage::BaseImageImport)
+                .diagnostic(diagnostic.to_string()),
             Self::BaseImageImport { diagnostic, logs } => failure
                 .stage(FailureStage::BaseImageImport)
                 .diagnostic(diagnostic.to_string())
-                .process_logs(logs.as_deref().cloned()),
+                .process_logs(Some((**logs).clone())),
             Self::ImageBuild { diagnostic, logs } => failure
                 .stage(FailureStage::ImageBuild)
                 .diagnostic(diagnostic.to_string())
-                .process_logs(logs.as_deref().cloned()),
+                .process_logs(Some((**logs).clone())),
             Self::AdapterBuild { diagnostic, logs } => failure
                 .stage(FailureStage::RuntimeAdapter)
                 .diagnostic(diagnostic.to_string())
-                .process_logs(logs.as_deref().cloned()),
-            Self::NetworkBoundary {
+                .process_logs(Some((**logs).clone())),
+            Self::Command {
+                stage,
+                diagnostic,
+                logs,
+            }
+            | Self::NetworkBoundary {
                 stage,
                 diagnostic,
                 logs,
@@ -209,10 +227,22 @@ impl RecipeBuildError {
     }
 }
 
+pub(super) fn command_failure(
+    stage: FailureStage,
+    output: &crate::process::ProcessOutput,
+) -> RecipeBuildError {
+    RecipeBuildError::Command {
+        stage,
+        diagnostic: podman_build_diagnostic(output),
+        logs: Box::new(sanitized_process_logs(output)),
+    }
+}
+
 pub(super) fn sanitized_process_logs(
     output: &crate::process::ProcessOutput,
 ) -> crate::failure_evidence::FailureProcessLogs {
     crate::failure_evidence::FailureProcessLogs {
+        exit_code: output.exit_code.and_then(|code| u32::try_from(code).ok()),
         stdout: crate::failure_evidence::log_tail(&output.stdout),
         stderr: crate::failure_evidence::log_tail(&output.stderr),
     }
@@ -234,8 +264,78 @@ mod tests {
     use crate::process::ProcessOutput;
 
     #[test]
+    fn absent_or_unretainable_output_is_never_reported_as_unclassified() {
+        for bytes in [
+            b"".as_slice(),
+            b"\r\n\t\0".as_slice(),
+            "\u{200b}".as_bytes(),
+        ] {
+            let output = ProcessOutput {
+                exit_code: Some(125),
+                success: false,
+                stdout: bytes.to_vec(),
+                stderr: bytes.to_vec(),
+            };
+            assert_eq!(
+                podman_import_diagnostic(&output),
+                PodmanImportDiagnostic::NonzeroWithoutOutput
+            );
+            assert_eq!(
+                podman_build_diagnostic(&output),
+                PodmanBuildDiagnostic::NonzeroWithoutOutput
+            );
+        }
+    }
+
+    #[test]
+    fn unclassified_commands_keep_exit_status_and_bounded_stderr_in_wire_evidence() {
+        let output = ProcessOutput {
+            exit_code: Some(125),
+            success: false,
+            stdout: vec![],
+            stderr: format!("{}\nopaque podman failure", "progress\r".repeat(5000)).into_bytes(),
+        };
+        assert_eq!(
+            podman_import_diagnostic(&output),
+            PodmanImportDiagnostic::Unknown
+        );
+        assert_eq!(
+            podman_build_diagnostic(&output),
+            PodmanBuildDiagnostic::Unknown
+        );
+        let errors = [
+            RecipeBuildError::BaseImageImport {
+                diagnostic: podman_import_diagnostic(&output),
+                logs: Box::new(sanitized_process_logs(&output)),
+            },
+            RecipeBuildError::ImageBuild {
+                diagnostic: podman_build_diagnostic(&output),
+                logs: Box::new(sanitized_process_logs(&output)),
+            },
+            RecipeBuildError::AdapterBuild {
+                diagnostic: podman_build_diagnostic(&output),
+                logs: Box::new(sanitized_process_logs(&output)),
+            },
+            command_failure(FailureStage::ImageVerification, &output),
+            super::network_boundary_error(FailureStage::EgressImageImport, &output),
+        ];
+        for error in errors {
+            let body = error.failure_evidence();
+            let evidence = crate::failure_evidence::from_failure(
+                &vonk_agent_protocol::generated::AgentOperation::RecipeBuildV1,
+                &body,
+            );
+            assert_eq!(evidence.process_exit_code, Some(125));
+            assert!(evidence.stderr.text.contains("opaque podman failure"));
+            assert!(evidence.stderr.text.len() <= 2048);
+            evidence.validate().unwrap();
+        }
+    }
+
+    #[test]
     fn podman_failure_retains_sanitized_final_ring_output() {
         let output = crate::process::ProcessOutput {
+            exit_code: None,
             success: false,
             stdout: Vec::new(),
             stderr: format!(
@@ -247,7 +347,7 @@ mod tests {
         let errors = [
             RecipeBuildError::ImageBuild {
                 diagnostic: podman_build_diagnostic(&output),
-                logs: Some(Box::new(super::sanitized_process_logs(&output))),
+                logs: Box::new(super::sanitized_process_logs(&output)),
             },
             super::network_boundary_error(FailureStage::EgressNetworkCreate, &output),
         ];
@@ -323,16 +423,15 @@ mod tests {
             ),
         ] {
             let classified = podman_build_diagnostic(&ProcessOutput {
+                exit_code: None,
                 success: false,
                 stdout: stdout.to_vec(),
                 stderr: stderr.to_vec(),
             });
-            let error = RecipeBuildError::ImageBuild {
-                diagnostic: classified,
-                logs: None,
-            };
-            assert!(!format!("{:?}", error.failure_evidence()).contains("private"));
-            assert!(!format!("{:?}", error.failure_evidence()).contains("secret"));
+            // Classification is bounded; the actual command's separately
+            // sanitized tails remain mandatory in the error type.
+            assert!(!classified.to_string().contains("private"));
+            assert!(!classified.to_string().contains("secret"));
         }
     }
 
@@ -371,7 +470,7 @@ mod tests {
         assert!(matches!(error, ProcessError::StorageLimit));
         assert!(matches!(
             podman_import_process_error(error),
-            RecipeBuildError::BaseImageImport {
+            RecipeBuildError::BaseImageImportProcess {
                 diagnostic: PodmanImportDiagnostic::TemporaryStorageExhausted,
                 ..
             }
