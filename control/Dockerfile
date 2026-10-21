@@ -242,6 +242,7 @@ COPY deploy/compose/tailscale/compose.yaml /compose/tailscale/compose.yaml
 COPY deploy/compose/hermes-agent/compose.yaml /compose/hermes-agent/compose.yaml
 COPY deploy/compose/image-janitor/janitor.py /compose/image-janitor/janitor.py
 COPY scripts/render-dev-compose /compose/render-dev-compose
+COPY scripts/image_policy.py /compose/image_policy.py
 RUN python -c 'import pathlib, runpy; print(runpy.run_path("/compose/render-dev-compose")["bundle_digest"](pathlib.Path("/compose/compose.yaml")))' > /compose-bundle-digest \
     && grep -Eqx '[0-9a-f]{64}' /compose-bundle-digest
 

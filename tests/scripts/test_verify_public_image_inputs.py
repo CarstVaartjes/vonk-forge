@@ -170,3 +170,50 @@ def test_every_wheel_in_the_docker_copy_is_scanned(tmp_path: Path) -> None:
     assert result.returncode == 1
     assert f"{extra.name}!/vonk_agent_protocol/leak.py: github-token" in result.stderr
     assert value not in result.stdout + result.stderr
+
+
+def test_scripts_copied_into_the_controller_image_bring_their_sibling_modules() -> None:
+    import ast
+    import posixpath
+
+    copied: dict[str, set[str]] = {}
+    for line in (ROOT / "control/Dockerfile").read_text().splitlines():
+        words = line.split()
+        if len(words) < 3 or words[0] != "COPY" or words[1].startswith("--"):
+            continue
+        *sources, destination = words[1:]
+        scripts = [source for source in sources if source.startswith("scripts/")]
+        for source in scripts:
+            directory = (
+                destination
+                if destination.endswith("/")
+                else posixpath.dirname(destination) + "/"
+            )
+            copied.setdefault(directory, set()).add(Path(source).name)
+            if not destination.endswith("/"):
+                copied[directory].add(Path(destination).name)
+
+    missing = []
+    for directory, names in copied.items():
+        for name in sorted(names):
+            path = ROOT / "scripts" / name
+            if (
+                not path.is_file()
+                or "python" not in path.read_text().partition("\n")[0]
+                and path.suffix != ".py"
+            ):
+                continue
+            for node in ast.walk(ast.parse(path.read_text())):
+                modules = (
+                    [alias.name for alias in node.names]
+                    if isinstance(node, ast.Import)
+                    else [node.module or ""]
+                    if isinstance(node, ast.ImportFrom) and node.level == 0
+                    else []
+                )
+                for module in modules:
+                    sibling = f"{module.split('.')[0]}.py"
+                    if (ROOT / "scripts" / sibling).is_file() and sibling not in names:
+                        missing.append(f"{directory}{name} imports scripts/{sibling}")
+
+    assert missing == []

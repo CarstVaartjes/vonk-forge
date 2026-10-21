@@ -175,6 +175,7 @@ PRODUCERS = {
             "scripts/dev-image-metadata",
             "scripts/export-agent-wire-schema",
             "scripts/generate-control-clients",
+            "scripts/image_policy.py",
             "scripts/publish-immutable-image",
             "scripts/pull-test-images",
             "scripts/render-dev-compose",
