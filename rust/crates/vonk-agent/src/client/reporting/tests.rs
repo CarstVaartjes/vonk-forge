@@ -339,7 +339,6 @@ fn inventory_with_all_evidence() -> vonk_agent_protocol::InventoryRequest {
     request.host_settings = Some(vonk_agent_protocol::generated::HostSettings {
         display_manager_active: false,
         graphical_default_target: false,
-        gpu_clock_cap_active: Some(true),
         gpu_clock_support: None,
     });
     request.installations = Some(vec![uuid::Uuid::nil()]);

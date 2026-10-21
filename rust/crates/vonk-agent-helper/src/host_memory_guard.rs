@@ -186,8 +186,12 @@ fn evidence(sample: Sample, trigger: &str, duration: Duration) -> FailureDiagnos
     }
 }
 
-fn evidence_path(root: &Path, id: &str) -> Option<PathBuf> {
-    valid_id(id).then(|| root.join("host-memory-evidence").join(format!("{id}.json")))
+fn evidence_path(data_root: &Path, id: &str) -> Option<PathBuf> {
+    valid_id(id).then(|| {
+        data_root
+            .join("host-memory-evidence")
+            .join(format!("{id}.json"))
+    })
 }
 fn valid_id(id: &str) -> bool {
     id.len() == 64
@@ -196,8 +200,8 @@ fn valid_id(id: &str) -> bool {
             .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
 }
 
-pub fn load_evidence(root: &Path, id: &str) -> Option<FailureDiagnostics> {
-    let path = evidence_path(root, id)?;
+pub fn load_evidence(data_root: &Path, id: &str) -> Option<FailureDiagnostics> {
+    let path = evidence_path(data_root, id)?;
     let mut bytes = Vec::new();
     File::open(path)
         .ok()?
@@ -212,8 +216,8 @@ pub fn load_evidence(root: &Path, id: &str) -> Option<FailureDiagnostics> {
     Some(value)
 }
 
-fn publish(root: &Path, id: &str, value: &FailureDiagnostics) -> std::io::Result<()> {
-    let path = evidence_path(root, id)
+fn publish(data_root: &Path, id: &str, value: &FailureDiagnostics) -> std::io::Result<()> {
+    let path = evidence_path(data_root, id)
         .ok_or_else(|| std::io::Error::other("invalid container identity"))?;
     fs::create_dir_all(path.parent().expect("evidence parent"))?;
     let temporary = path.with_extension("tmp");
@@ -254,7 +258,7 @@ fn inventory_ids(bytes: &[u8]) -> Result<Vec<String>, String> {
     Ok(ids.into_iter().map(str::to_owned).collect())
 }
 
-fn collect_absent_receipts(runner: &impl CommandRunner, root: &Path) {
+fn collect_absent_receipts(runner: &impl CommandRunner, data_root: &Path) {
     let inventory = docker(
         runner,
         &[
@@ -271,12 +275,12 @@ fn collect_absent_receipts(runner: &impl CommandRunner, root: &Path) {
     let Ok(ids) = inventory else {
         return;
     }; // unavailable is never absent
-    if let Ok(entries) = fs::read_dir(root.join("host-memory-evidence")) {
+    if let Ok(entries) = fs::read_dir(data_root.join("host-memory-evidence")) {
         for entry in entries.flatten() {
             let path = entry.path();
             if path
                 .extension()
-                .is_some_and(|extension| extension == "json")
+                .is_some_and(|extension| extension == "json" || extension == "tmp")
                 && let Some(id) = path.file_stem().and_then(|id| id.to_str())
                 && valid_id(id)
                 && !ids.iter().any(|existing| existing == id)
@@ -371,7 +375,7 @@ fn kill_now(
 // acquired: a fresh authorized attempt remains admissible.
 fn stop_managed(
     runner: &impl CommandRunner,
-    root: &Path,
+    data_root: &Path,
     cgroup: Option<&Path>,
     id: &str,
     value: &FailureDiagnostics,
@@ -380,7 +384,7 @@ fn stop_managed(
         return Err("invalid container id".into());
     }
     let kernel = cgroup.map(|path| cgroup::kill(path, cgroup::sigkill));
-    if let Err(error) = publish(root, id, value) {
+    if let Err(error) = publish(data_root, id, value) {
         eprintln!("host_memory_guard: evidence unavailable: {error}");
     }
     let kernel = match kernel {
@@ -405,7 +409,7 @@ fn identity_checked(runner: &impl CommandRunner, id: &str) -> Result<(), String>
 // Separate command lane: Docker delays never delay /proc sampling or kills.
 struct Lane<R> {
     runner: R,
-    root: PathBuf,
+    data_root: PathBuf,
     cgroups: PathBuf,
     known: Known,
     shared: Arc<Mutex<Known>>,
@@ -426,7 +430,7 @@ impl<R: CommandRunner> Lane<R> {
         let mut gone = Vec::new();
         for (id, value) in &self.pending {
             let cgroup = self.known.get(id).and_then(Option::as_deref);
-            match stop_managed(&self.runner, &self.root, cgroup, id, value) {
+            match stop_managed(&self.runner, &self.data_root, cgroup, id, value) {
                 Ok(true) => gone.push(id.clone()),
                 Ok(false) => {}
                 Err(error) => eprintln!(
@@ -441,7 +445,7 @@ impl<R: CommandRunner> Lane<R> {
             Ok(known) => {
                 for id in known.keys() {
                     if !self.pending.contains_key(id)
-                        && let Some(value) = load_evidence(&self.root, id)
+                        && let Some(value) = load_evidence(&self.data_root, id)
                     {
                         self.pending.insert(id.clone(), value);
                     }
@@ -459,7 +463,7 @@ impl<R: CommandRunner> Lane<R> {
             ),
         }
         if Instant::now() >= self.next_collection {
-            collect_absent_receipts(&self.runner, &self.root);
+            collect_absent_receipts(&self.runner, &self.data_root);
             self.next_collection = Instant::now()
                 + vonk_agent_protocol::host_memory_guard_policy::RECEIPT_COLLECTION_INTERVAL;
         }
@@ -534,13 +538,13 @@ fn kernel_events() -> Receiver<Instant> {
     receive
 }
 
-pub fn spawn(root: PathBuf) {
+pub fn spawn(data_root: PathBuf) {
     let kernel = kernel_events();
     let active = Arc::new(Mutex::new(Known::new()));
     let (send, receive) = mpsc::sync_channel::<Trip>(1);
     let mut lane = Lane {
         runner: ProcessCommandRunner,
-        root,
+        data_root,
         cgroups: PathBuf::from(cgroup::ROOT),
         known: Known::new(),
         shared: Arc::clone(&active),
@@ -603,6 +607,39 @@ pub fn spawn(root: PathBuf) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn absent_container_receipts_and_interrupted_writes_leave_after_inventory_recovers() {
+        // Catches collecting only JSON while per-container .tmp files leak.
+        struct Inventory(bool);
+        impl CommandRunner for Inventory {
+            fn run(
+                &self,
+                _: &Path,
+                _: &[String],
+            ) -> Result<crate::operations::CommandOutput, String> {
+                if !self.0 {
+                    return Err("injected inventory outage".into());
+                }
+                Ok(crate::operations::CommandOutput {
+                    success: true,
+                    stdout: vec![],
+                    stderr: vec![],
+                    exit_code: Some(0),
+                })
+            }
+        }
+        let root = tempfile::tempdir().unwrap();
+        let receipt = evidence_path(root.path(), &"a".repeat(64)).unwrap();
+        fs::create_dir_all(receipt.parent().unwrap()).unwrap();
+        let temporary = receipt.with_extension("tmp");
+        fs::write(&receipt, b"receipt").unwrap();
+        fs::write(&temporary, b"partial").unwrap();
+        collect_absent_receipts(&Inventory(false), root.path());
+        assert!(receipt.exists() && temporary.exists());
+        collect_absent_receipts(&Inventory(true), root.path());
+        assert!(!receipt.exists() && !temporary.exists());
+    }
+
     #[test]
     fn tight_kit_and_bursts_are_allowed_but_sustained_exhaustion_is_not() {
         let now = Instant::now();
@@ -1002,7 +1039,7 @@ mod tests {
                 })
             }
         }
-        let root = tempfile::tempdir().unwrap();
+        let data_root = tempfile::tempdir().unwrap();
         let runner = FakeRunner {
             managed: true,
             calls: Mutex::new(vec![]),
@@ -1017,8 +1054,8 @@ mod tests {
         );
         let id = "a".repeat(64);
         // Without a recorded cgroup, the identity-checked Docker kill remains.
-        assert!(!stop_managed(&runner, root.path(), None, &id, &value).unwrap());
-        let recorded = load_evidence(root.path(), &id).unwrap();
+        assert!(!stop_managed(&runner, data_root.path(), None, &id, &value).unwrap());
+        let recorded = load_evidence(data_root.path(), &id).unwrap();
         let state = crate::runtime_logs::ContainerExit {
             exit_code: Some(137),
             oom_killed: Some(false),
@@ -1043,13 +1080,13 @@ mod tests {
         drop(calls);
         // Neither a fence nor a global busy/ban survives a safety ending.
         let fresh = "b".repeat(64);
-        assert!(load_evidence(root.path(), &fresh).is_none());
-        stop_managed(&runner, root.path(), None, &fresh, &value).unwrap();
+        assert!(load_evidence(data_root.path(), &fresh).is_none());
+        stop_managed(&runner, data_root.path(), None, &fresh, &value).unwrap();
         let foreign = FakeRunner {
             managed: false,
             calls: Mutex::new(vec![]),
         };
-        assert!(stop_managed(&foreign, root.path(), None, &id, &value).is_err());
+        assert!(stop_managed(&foreign, data_root.path(), None, &id, &value).is_err());
         assert_eq!(foreign.calls.lock().unwrap().len(), 1);
     }
     #[test]
@@ -1115,20 +1152,20 @@ mod tests {
         }
     }
     fn lane<F>(answer: F, known: Known) -> (Lane<Scripted<F>>, tempfile::TempDir) {
-        let root = tempfile::tempdir().unwrap();
+        let data_root = tempfile::tempdir().unwrap();
         let lane = Lane {
             runner: Scripted {
                 answer,
                 calls: Mutex::new(vec![]),
             },
-            root: root.path().to_path_buf(),
-            cgroups: root.path().join("cgroup"),
+            data_root: data_root.path().to_path_buf(),
+            cgroups: data_root.path().join("cgroup"),
             shared: Arc::new(Mutex::new(known.clone())),
             known,
             pending: BTreeMap::new(),
             next_collection: Instant::now() + Duration::from_secs(3600),
         };
-        (lane, root)
+        (lane, data_root)
     }
     fn trip() -> FailureDiagnostics {
         evidence(
@@ -1162,7 +1199,7 @@ mod tests {
         assert!(reported.contains(&id));
         fs::write(&kill_file, "").unwrap();
         let observed = kill_file.clone();
-        let (mut lane, root) = lane(
+        let (mut lane, data_root) = lane(
             move |_: &[String], timeout: Duration| {
                 // Each Docker call starts only after the kernel kill landed.
                 assert!(fs::read_to_string(&observed).map_or(true, |text| text == "1"));
@@ -1173,7 +1210,7 @@ mod tests {
         );
         lane.cycle(Some((vec![id.clone()], trip())));
         assert_eq!(lane.runner.calls.lock().unwrap().len(), 1);
-        assert!(load_evidence(root.path(), &id).is_some());
+        assert!(load_evidence(data_root.path(), &id).is_some());
         // The failed inventory keeps the last known set for the next decision.
         assert_eq!(*lane.shared.lock().unwrap(), known);
         assert!(lane.pending.contains_key(&id));

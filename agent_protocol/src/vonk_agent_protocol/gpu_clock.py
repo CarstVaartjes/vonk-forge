@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-from enum import StrEnum
 from typing import Annotated, Literal
 
 from pydantic import Field, field_validator, model_validator
 
-from .wire_model import MAX_RUN_GENERATION, WireModel
+from .wire_model import MAX_RUN_GENERATION, WireEnum, WireModel
 
 
 class GpuClockPolicy(WireModel):
@@ -26,9 +25,9 @@ GPU_CLOCK_SAFETY_EDGE_DETAIL = (
 
 
 class GpuClockRange(WireModel):
-    min_mhz: int = Field(gt=0, le=GPU_CLOCK_POLICY.hard_max_mhz, strict=True)
+    min_mhz: int = Field(ge=0, le=GPU_CLOCK_POLICY.hard_max_mhz, strict=True)
     max_mhz: int = Field(
-        gt=0,
+        ge=0,
         le=GPU_CLOCK_POLICY.hard_max_mhz,
         strict=True,
         description=GPU_CLOCK_SAFETY_EDGE_DETAIL,
@@ -72,13 +71,6 @@ class GpuClockSupport(WireModel):
             raise ValueError("GPU supported clock levels and range disagree")
         return self
 
-    def validate_range(self, requested: GpuClockRange) -> None:
-        if requested.min_mhz < self.min_mhz or requested.max_mhz > self.max_mhz:
-            raise ValueError(
-                f"GPU clock range {requested.min_mhz}-{requested.max_mhz} MHz is "
-                f"outside this Spark's reported {self.min_mhz}-{self.max_mhz} MHz range"
-            )
-
 
 class GpuClockIntent(WireModel):
     """A selected profile generation fences delayed requests on the Spark."""
@@ -87,14 +79,14 @@ class GpuClockIntent(WireModel):
     range: GpuClockRange
 
 
-class GpuClockApplyState(StrEnum):
+class GpuClockApplyState(WireEnum):
     APPLIED = "applied"
     WAITING = "waiting"
     EXPIRED = "expired"
     REFUSED = "refused"
 
 
-class GpuClockMetric(StrEnum):
+class GpuClockMetric(WireEnum):
     GRAPHICS = "graphics_mhz"
     SM = "sm_mhz"
     MAX_GRAPHICS = "max_graphics_mhz"
@@ -102,7 +94,7 @@ class GpuClockMetric(StrEnum):
     THROTTLE = "throttle_reasons"
 
 
-class GpuClockUnavailableReason(StrEnum):
+class GpuClockUnavailableReason(WireEnum):
     NOT_SUPPORTED = "not-supported"
     COMMAND_FAILED = "command-failed"
     INVALID_OUTPUT = "invalid-output"

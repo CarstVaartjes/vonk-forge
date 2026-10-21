@@ -696,35 +696,52 @@ fn every_store_below_the_data_root_has_an_owner_and_a_collector() {
     let mut names = BTreeSet::new();
     for source in &sources {
         let text = fs::read_to_string(source).unwrap();
-        for prefix in [
-            "data_root.join(\"",
-            "data_dir.join(\"",
-            "agent_data.join(\"",
-            "data_root, \"",
-            "&data_root_file, \"",
-            "/var/lib/vonk-forge-agent/",
-        ] {
-            for (index, _) in text.match_indices(prefix) {
-                let rest = &text[index + prefix.len()..];
-                let name: String = rest
-                    .chars()
-                    .take_while(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
-                    .collect();
-                // A mktemp template names the temporary's prefix.
-                let name = name.strip_suffix(".XXXXXX").unwrap_or(&name).to_owned();
-                if !name.is_empty() {
-                    names.insert((name, source.display().to_string()));
+        if source
+            .extension()
+            .is_some_and(|extension| extension == "rs")
+        {
+            let mut constants = std::collections::BTreeMap::new();
+            // Constants in a parent module are visible in its child sources.
+            for parent in source
+                .ancestors()
+                .skip(1)
+                .take_while(|path| *path != repository)
+            {
+                for name in ["mod.rs", "lib.rs"] {
+                    if let Ok(text) = fs::read_to_string(parent.join(name)) {
+                        constants.extend(super::source_guard::constants(&text));
+                    }
                 }
+            }
+            constants.extend(super::source_guard::constants(&text));
+            let default = if source
+                .components()
+                .any(|component| component.as_os_str() == "vonk-agent-helper")
+            {
+                super::StoreRoot::Helper
+            } else {
+                super::StoreRoot::Agent
+            };
+            for (root, name) in super::source_guard::stores(&text, &constants, default) {
+                names.insert((root, name, source.display().to_string()));
+            }
+        } else {
+            for (root, name) in super::source_guard::package_stores(&text) {
+                names.insert((root, name, source.display().to_string()));
             }
         }
     }
     let declared: BTreeSet<_> = STORES
         .iter()
-        .map(|store| store.0.trim_end_matches('/'))
+        .map(|store| (store.3, store.0.trim_end_matches('/')))
         .collect();
     let undeclared: Vec<_> = names
         .iter()
-        .filter(|(name, _)| !declared.contains(name.as_str()))
+        .filter(|(root, name, _)| {
+            !STORES
+                .iter()
+                .any(|store| store.3 == *root && store.0.split('/').next() == Some(name.as_str()))
+        })
         .collect();
     assert!(
         undeclared.is_empty(),
@@ -756,11 +773,7 @@ fn collect_sources(directory: &Path, sources: &mut Vec<PathBuf>) {
             if name != "tests" && name != "test_support" {
                 collect_sources(&path, sources);
             }
-        } else if name.ends_with(".rs")
-            && name != "tests.rs"
-            && !name.ends_with("_tests.rs")
-            && name != "store_retention.rs"
-        {
+        } else if name.ends_with(".rs") && name != "tests.rs" && !name.ends_with("_tests.rs") {
             sources.push(path);
         }
     }

@@ -10,6 +10,7 @@ from pydantic import ValidationError
 from vonk_agent_protocol import canonical_message
 from vonk_agent_protocol.gpu_clock import (
     GPU_CLOCK_POLICY,
+    GpuClockApplyState,
     GpuClockIntent,
     GpuClockRange,
     GpuClockSupport,
@@ -82,20 +83,8 @@ def test_profile_assignments_roundtrip_and_refuse_conflicting_ranges() -> None:
         FleetProfileDefinition.model_validate_json(json.dumps(definition))
 
 
-def test_hardware_supported_minimum_and_maximum_are_checked_independently_of_policy() -> (
-    None
-):
-    support = GpuClockSupport(min_mhz=500, max_mhz=2000, levels_mhz=[500, 1800, 2000])
-    for requested in [GpuClockRange(min_mhz=300, max_mhz=1800), default_gpu_clock()]:
-        with pytest.raises(ValueError, match="outside this Spark's reported"):
-            support.validate_range(requested)
-    support.validate_range(GpuClockRange(min_mhz=500, max_mhz=1800))
-
-
-def test_run_switch_warns_above_default_and_refuses_unknown_or_unsupported_hardware() -> (
-    None
-):
-    """Catches using the policy ceiling as a substitute for driver evidence."""
+def test_run_switch_warns_above_default_without_requiring_supported_levels() -> None:
+    """Catches refusing GB10 policy-valid intent solely for missing clock levels."""
     from datetime import UTC, datetime
 
     from sqlalchemy import create_engine
@@ -151,24 +140,35 @@ def test_run_switch_warns_above_default_and_refuses_unknown_or_unsupported_hardw
         blockers, _ = assess_gpu_clock(
             session, [NODE], GpuClockRange(min_mhz=200, max_mhz=1800)
         )
-        assert blockers[0].code == RunSwitchCode.GPU_CLOCK_INVALID
+        assert not blockers
         blockers, _ = assess_gpu_clock(
             session, ["spk_" + "b" * 32], default_gpu_clock()
         )
-        assert "unknown" in blockers[0].detail
+        assert not blockers
 
 
-def test_failed_reassertion_warns_even_when_the_previous_receipt_matches_desired() -> (
-    None
-):
-    """A failed hourly write must not look healthy because an older command succeeded."""
+@pytest.mark.parametrize(
+    ("state", "receipt", "graphics", "sm", "throttle", "warns"),
+    [
+        (GpuClockApplyState.WAITING, True, 305, 305, 0, True),
+        (GpuClockApplyState.APPLIED, True, 305, 305, 0, False),
+        (GpuClockApplyState.APPLIED, True, 2400, 2400, 0, True),
+        (GpuClockApplyState.APPLIED, False, 305, 305, 0, True),
+        (GpuClockApplyState.APPLIED, True, None, 305, 0, True),
+        (GpuClockApplyState.APPLIED, True, 305, 305, None, True),
+    ],
+)
+def test_uncapped_attention_requires_receipt_and_current_evidence(
+    state, receipt, graphics, sm, throttle, warns
+) -> None:
+    """Catches false alarms on hardware maxima and idle clocks masking missing receipts."""
     import uuid
     from datetime import UTC, datetime
 
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
     from vonk_agent_protocol import ProjectionCode
-    from vonk_agent_protocol.gpu_clock import GpuClockApplyState, GpuClockObservation
+    from vonk_agent_protocol.gpu_clock import GpuClockObservation
     from vonk_control.fleet_projection import FleetProjection
     from vonk_control.models import AgentNode, Base
     from vonk_control.telemetry import TelemetryRepository, TelemetrySampleInput
@@ -179,6 +179,7 @@ def test_failed_reassertion_warns_even_when_the_previous_receipt_matches_desired
     now = datetime.now(UTC)
     with sessions.begin() as session:
         session.add(AgentNode(node_id=NODE, state="active"))
+    cause = "injected driver outage: " + "full driver diagnostic " * 100
     TelemetryRepository(sessions, clock=lambda: now).record_batch(
         NODE,
         (
@@ -193,21 +194,39 @@ def test_failed_reassertion_warns_even_when_the_previous_receipt_matches_desired
                 gpu_memory_total_bytes=None,
                 gpu_memory_free_bytes=None,
                 gpu_clock=GpuClockObservation(
-                    locked_range=default_gpu_clock(),
-                    apply_state=GpuClockApplyState.WAITING,
-                    detail="injected driver outage",
+                    locked_range=default_gpu_clock() if receipt else None,
+                    apply_state=state,
+                    graphics_mhz=graphics,
+                    sm_mhz=sm,
+                    max_graphics_mhz=3003,
+                    max_sm_mhz=3003,
+                    throttle_reasons=throttle,
+                    detail=cause if state == GpuClockApplyState.WAITING else None,
+                    next_attempt_at=1060,
+                    deadline=1600,
                 ),
             ),
         ),
     )
     node = FleetProjection(sessions, clock=lambda: now).read().nodes[0]
-    assert ProjectionCode.HOST_GPU_CLOCK_UNCAPPED in [
-        warning.code for warning in node.warnings
+    warnings = [
+        warning
+        for warning in node.warnings
+        if warning.code == ProjectionCode.HOST_GPU_CLOCK_UNCAPPED
     ]
+    assert bool(warnings) == warns
+    if state == GpuClockApplyState.WAITING:
+        assert node.telemetry is not None and node.telemetry.sample is not None
+        assert node.telemetry.sample.gpu_clock is not None
+        assert node.telemetry.sample.gpu_clock.detail == cause
+        assert "1060" in warnings[0].detail
 
 
-def test_older_agent_default_start_omits_the_new_strict_wire_field() -> None:
-    """An old agent accepts the unchanged start payload and keeps its boot cap."""
+@pytest.mark.parametrize("maximum", [1800, 2200])
+def test_start_always_binds_the_selected_clock_without_supported_levels(
+    monkeypatch, maximum
+) -> None:
+    """Catches dropping clock intent on GB10 and relying on another boot writer."""
     from sqlalchemy import create_engine
     from sqlalchemy.orm import Session
     from vonk_control.gpu_clock import gpu_clock_start_intent
@@ -216,7 +235,13 @@ def test_older_agent_default_start_omits_the_new_strict_wire_field() -> None:
     engine = create_engine("sqlite://")
     Base.metadata.create_all(engine)
     with Session(engine) as session:
-        assert gpu_clock_start_intent(session, NODE) is None
+        desired = GpuClockIntent(
+            generation=1, range=GpuClockRange(min_mhz=300, max_mhz=maximum)
+        )
+        monkeypatch.setattr(
+            "vonk_control.gpu_clock.selected_gpu_clock", lambda *_: desired
+        )
+        assert gpu_clock_start_intent(session, NODE) == desired
 
 
 from .test_agent_api import NODE_A, agent_headers, make_agent_system, telemetry_payload

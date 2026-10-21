@@ -347,6 +347,7 @@ pub struct OperationExecutor<R> {
     /// Held shared by every image pull and exclusively by the removal of an
     /// unused image, so no image is removed under a pull that found it.
     image_pulls: std::sync::RwLock<()>,
+    runtime_stores: std::sync::RwLock<()>,
     job_cancellation: JobCancellationFence,
 }
 
@@ -454,3 +455,5 @@ mod test_support;
 mod errors;
 
 mod installation_intent;
+
+mod store_retention;

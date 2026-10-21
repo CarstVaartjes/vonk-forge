@@ -1107,7 +1107,8 @@ vonkctl --profile 2 profile configure --assignment coding --gpu-clock 300,1800
 vonkctl --profile 2 profile configure --assignment coding --clear-gpu-clock
 ```
 
-Load reviews validate against each Spark's reported supported clock range.
+Load reviews validate 0 ≤ minimum ≤ maximum ≤ 2300 MHz. Supported clock
+levels are informational: GB10 can apply a range without enumerating levels.
 A ceiling above 2200 MHz is a visible warning; anything above 2300 MHz is
 refused at the hardware-safety edge. Sustained load above the cap has
 hard-powered Sparks off. No value is silently clamped. The default and hard
@@ -1121,11 +1122,15 @@ throttle-reason bitmask. A last applied range is a helper command receipt for
 this boot, not a hardware readback: NVIDIA exposes no graphics-lock getter.
 Unknown readings stay unknown. A desired/applied mismatch remains a warning.
 
-The boot-time service retains the default cap. The signed start and inventory
-response carry the active selected-profile generation; the helper persists
-that intent before effects and fences older generations. Its hourly settings
-pass reapplies the active range, never restarts the fixed-default service over
-a profile setting. Transient driver failures permit workload start and keep
+The helper is the single clock writer at boot and during operation. Signed
+start and inventory responses carry the active selected-profile generation;
+the helper persists that intent before effects and fences older generations.
+With no selected assignment it applies the default. Its hourly settings pass
+reapplies the active range without stopping workloads. A successful command
+plus current graphics/SM readings at or below the requested ceiling and an
+available event-reason bitmask yields an applied receipt. Idle readings alone
+do not prove enforcement; unavailable or excessive readings retain a visible
+bounded retry. Transient driver failures permit workload start and keep
 the previous cap: retaining an available workload with a visible bounded wait
 is safer than making a recoverable clock-setting failure a service outage.
 Ranges outside the safety contract and denied authority remain fail-closed.

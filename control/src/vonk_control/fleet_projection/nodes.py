@@ -9,8 +9,8 @@ from typing import TYPE_CHECKING, Annotated
 from pydantic import Field, TypeAdapter
 from vonk_agent_protocol import NodeOfflineReason, ProjectionCode
 from vonk_agent_protocol.agent_words import ProfileReasonSeverity
+from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.gpu_clock import (
-    GPU_CLOCK_POLICY,
     GpuClockApplyState,
     GpuClockRange,
 )
@@ -157,9 +157,6 @@ def _node(
     warnings.extend(
         _host_settings_warnings(
             None if inventory_state is None else inventory_state.host_settings,
-            clock_applied=telemetry is not None
-            and telemetry.gpu_clock is not None
-            and telemetry.gpu_clock.locked_range is not None,
         )
     )
     if telemetry_state is None:
@@ -204,12 +201,10 @@ def _node(
         clock = telemetry.gpu_clock
         if gpu_clock_desired is not None and (
             clock.locked_range != gpu_clock_desired
-            or clock.apply_state
-            in {
-                GpuClockApplyState.WAITING,
-                GpuClockApplyState.EXPIRED,
-                GpuClockApplyState.REFUSED,
-            }
+            or clock.apply_state != GpuClockApplyState.APPLIED
+            or clock.graphics_mhz is None
+            or clock.sm_mhz is None
+            or clock.throttle_reasons is None
             or (
                 clock.graphics_mhz is not None
                 and clock.graphics_mhz > gpu_clock_desired.max_mhz
@@ -219,7 +214,13 @@ def _node(
             warnings.append(
                 ProjectionReason(
                     code=ProjectionCode.HOST_GPU_CLOCK_UNCAPPED,
-                    detail=f"GPU clock evidence differs from desired {gpu_clock_desired.min_mhz}-{gpu_clock_desired.max_mhz} MHz; inspect GPU enforcement state, cause and retry deadline.",
+                    detail=(
+                        f"GPU clock {gpu_clock_desired.min_mhz}-{gpu_clock_desired.max_mhz} MHz is unconfirmed "
+                        f"(last apply {clock.apply_state.value if clock.apply_state is not None else 'not reported'}). "
+                        "See GPU clock evidence for the full cause. "
+                        f"Next check: {clock.next_attempt_at if clock.next_attempt_at is not None else 'inventory/hourly helper reconciliation'}; "
+                        f"deadline: {clock.deadline if clock.deadline is not None else 'not reported'}."
+                    ),
                     severity=ProfileReasonSeverity.WARNING.value,
                     recommendation="The helper retries through inventory and hourly host-settings reconciliation; see GPU clock deadline and next attempt.",
                 )
@@ -271,6 +272,29 @@ def _node(
             )
     labels = {} if profile is None else profile.labels
     projection_issues: list[str] = []
+    agent_runtime = None
+    if any(
+        value is not None
+        for value in (
+            agent.semantic_version,
+            agent.build_digest,
+            agent.binary_digest,
+        )
+    ):
+        try:
+            agent_runtime = AgentRuntimeIdentity.model_validate(
+                {
+                    "architecture": agent.architecture,
+                    "semantic_version": agent.semantic_version,
+                    "build_digest": agent.build_digest,
+                    "binary_digest": agent.binary_digest,
+                }
+            )
+        except ValueError:
+            projection_issues.append(
+                "Stored agent runtime identity is unreadable; running build is unknown."
+            )
+            warn_unreadable_once("Fleet agent runtime identity", node_id)
     try:
         labels = TypeAdapter(
             Annotated[dict[Text64, Text256], Field(max_length=64)]
@@ -282,6 +306,7 @@ def _node(
         )
         warn_unreadable_once("Fleet node labels", node_id)
     return FleetNode(
+        agent_runtime=agent_runtime,
         gpu_clock_desired=gpu_clock_desired,
         id=node_id,
         display_name=node_id if profile is None else profile.display_name,
@@ -393,9 +418,7 @@ _HELPER_CORRECTS = (
 )
 
 
-def _host_settings_warnings(
-    host: HostSettings | None, *, clock_applied: bool = False
-) -> list[ProjectionReason]:
+def _host_settings_warnings(host: HostSettings | None) -> list[ProjectionReason]:
     """Drift from the declared headless Spark; unknown (an older agent) is none."""
     warnings: list[ProjectionReason] = []
     if host is not None and host.display_manager_active:
@@ -417,21 +440,6 @@ def _host_settings_warnings(
                 detail="This Spark boots to the desktop (graphical.target).",
                 severity=ProfileReasonSeverity.WARNING.value,
                 recommendation=_HELPER_CORRECTS,
-            )
-        )
-    if host is not None and host.gpu_clock_cap_active is False and not clock_applied:
-        warnings.append(
-            ProjectionReason(
-                code=ProjectionCode.HOST_GPU_CLOCK_UNCAPPED,
-                detail=(
-                    f"The boot GPU clock ceiling ({GPU_CLOCK_POLICY.default_min_mhz}–{GPU_CLOCK_POLICY.default_max_mhz} MHz) is not "
-                    "applied this boot: sustained load can power this Spark off."
-                ),
-                severity=ProfileReasonSeverity.WARNING.value,
-                recommendation=(
-                    "The helper enforces the active desired range on its next pass; "
-                    "inspect GPU clock telemetry and the helper journal if this persists."
-                ),
             )
         )
     return warnings

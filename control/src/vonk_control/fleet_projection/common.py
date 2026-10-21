@@ -15,6 +15,7 @@ from vonk_agent_protocol import (
     ProjectionCode,
     RunDegradedReason,
 )
+from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.failure_evidence import ModelStoreLayoutFault
 from vonk_agent_protocol.gpu_clock import (
     GpuClockObservation,
@@ -550,6 +551,7 @@ class CapacityReservations(StrictModel):
 
 
 class FleetNode(StrictModel):
+    agent_runtime: AgentRuntimeIdentity | None = None
     gpu_clock_desired: GpuClockRange | None = None
     gpu_clock_policy: GpuClockPolicy = GpuClockPolicy()
     id: NodeId

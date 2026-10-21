@@ -719,7 +719,6 @@ def test_agent_posts_authenticated_runtime_and_fabric_inventory(
         "host_settings": {
             "display_manager_active": True,
             "graphical_default_target": False,
-            "gpu_clock_cap_active": True,
         },
         "unused_model_bytes": 123,
     }
@@ -4584,6 +4583,136 @@ def test_expired_renewal_endpoint_requires_enrolled_key_without_mtls(tmp_path, f
     fresh_grant = enrollment.create("spk_" + "e" * 32, "admin", 60)
     assert isinstance(fresh_grant, EnrollmentGrant)
     assert fresh_grant.node_id == "spk_" + "e" * 32
+
+
+def test_fleet_detail_reports_the_claimed_agent_build_and_updates_it(
+    agent_system, capsys
+):
+    """An upgrade result is not proof of the binary that most recently claimed."""
+    from vonk_agent_protocol.claims import AgentRuntimeIdentity
+    from vonk_control.fleet_projection import FleetProjection
+
+    from cluster_profiles.cli_render import render_payload
+
+    client, services, _, clock = agent_system
+    projection = FleetProjection(services.sessions, clock=clock)
+    initial = next(node for node in projection.read().nodes if node.id == NODE_A)
+    assert initial.agent_runtime is None
+    first = AgentRuntimeIdentity.model_validate(PACKAGED_RUNTIME_IDENTITY)
+    for identity in (
+        first,
+        first.model_copy(
+            update={
+                "semantic_version": "1.2.4",
+                "build_digest": "sha256:" + "d" * 64,
+                "binary_digest": "e" * 64,
+            }
+        ),
+    ):
+        response = client.post(
+            "/agent/claim",
+            headers=agent_headers(NODE_A, "serial-a"),
+            json={"runtime_identity": identity.model_dump(mode="json")},
+        )
+        assert response.status_code == 204, response.text
+        node = next(node for node in projection.read().nodes if node.id == NODE_A)
+        assert node.agent_runtime == identity
+        render_payload(
+            node.model_dump(mode="json", exclude_none=True), "fleet", action="detail"
+        )
+        output = capsys.readouterr().out
+        assert identity.semantic_version in output
+        assert identity.build_digest in output
+        assert identity.binary_digest in output
+
+
+def test_gpu_clock_failure_evidence_survives_http_storage_and_fleet_detail(
+    agent_system, capsys
+):
+    """Catches dropping the whole clock when decoded JSON contains metric enums."""
+    from vonk_agent_protocol.gpu_clock import (
+        GpuClockMetric,
+        GpuClockObservation,
+        GpuClockUnavailable,
+        GpuClockUnavailableReason,
+    )
+    from vonk_agent_protocol.telemetry import TelemetryRequest, TelemetrySample
+    from vonk_control.fleet_projection import FleetProjection
+    from vonk_control.telemetry import TelemetryRepository
+
+    from cluster_profiles.cli_render import render_payload
+
+    client, services, _, clock = agent_system
+    sample = TelemetrySample(
+        boot_id="00000000-0000-4000-8000-000000000001",
+        observed_at=clock.now,
+        memory_total_bytes=130_663_235_584,
+        memory_available_bytes=126_065_086_464,
+        disk_total_bytes=4_031_871_553_536,
+        disk_free_bytes=1_290_377_957_376,
+        gpu_utilization_percent=0.0,
+        gpu_memory_total_bytes=None,
+        gpu_memory_free_bytes=None,
+        gpu_temperature_c=41,
+        cpu_frequency_avg_mhz=3354,
+        cpu_frequency_min_mhz=2808,
+        cpu_frequency_max_mhz=3900,
+    )
+
+    # The production shape has fresh scalars and no clock field at all.
+    def report(value: TelemetrySample) -> None:
+        response = client.post(
+            "/agent/telemetry",
+            headers={
+                **agent_headers(NODE_A, "serial-a"),
+                "content-type": "application/json",
+            },
+            content=canonical_message(TelemetryRequest(samples=[value])),
+        )
+        assert response.status_code == 204, response.text
+
+    report(sample)
+    projection = FleetProjection(services.sessions, clock=clock)
+    node = next(node for node in projection.read().nodes if node.id == NODE_A)
+    assert node.telemetry is not None and node.telemetry.sample is not None
+    assert (
+        "gpu_clock"
+        not in node.model_dump(mode="json", exclude_none=True)["telemetry"]["sample"]
+    )
+    observation = GpuClockObservation(
+        graphics_mhz=300,
+        sm_mhz=300,
+        unavailable=[
+            GpuClockUnavailable(
+                metric=GpuClockMetric.THROTTLE,
+                reason=GpuClockUnavailableReason.NOT_SUPPORTED,
+                detail="driver does not support throttle reasons",
+            ),
+            GpuClockUnavailable(
+                metric=GpuClockMetric.MAX_SM,
+                reason=GpuClockUnavailableReason.COMMAND_FAILED,
+                detail="driver command failed",
+            ),
+        ],
+    )
+    clock.now += timedelta(seconds=2)
+    report(
+        sample.model_copy(update={"observed_at": clock.now, "gpu_clock": observation})
+    )
+    stored = TelemetryRepository(services.sessions, clock=clock).latest((NODE_A,))[
+        NODE_A
+    ]
+    assert stored.gpu_clock == observation
+    node = next(node for node in projection.read().nodes if node.id == NODE_A)
+    assert node.telemetry is not None and node.telemetry.sample is not None
+    assert node.telemetry.sample.gpu_clock == observation
+    render_payload(
+        node.model_dump(mode="json", exclude_none=True), "fleet", action="detail"
+    )
+    output = capsys.readouterr().out
+    assert "graphics 300 / SM 300 MHz" in output
+    assert "driver does not support throttle reasons" in output
+    assert "driver command failed" in output
 
 
 def test_gpu_collection_reason_reaches_fleet_and_fresh_report_recovers(agent_system):

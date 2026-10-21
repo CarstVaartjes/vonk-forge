@@ -20,9 +20,7 @@ pub fn default_range() -> GpuClockRange {
 }
 
 pub fn valid_range(range: &GpuClockRange) -> bool {
-    range.min_mhz > 0
-        && range.min_mhz <= range.max_mhz
-        && u64::from(range.max_mhz) <= policy().hard_max_mhz
+    range.min_mhz <= range.max_mhz && u64::from(range.max_mhz) <= policy().hard_max_mhz
 }
 
 pub fn supported_range(bytes: &[u8]) -> Option<GpuClockSupport> {
@@ -41,10 +39,6 @@ pub fn supported_range(bytes: &[u8]) -> Option<GpuClockSupport> {
         max_mhz: *levels.last()?,
         levels_mhz: levels,
     })
-}
-
-pub fn supports(support: &GpuClockSupport, range: &GpuClockRange) -> bool {
-    valid_range(range) && range.min_mhz >= support.min_mhz && range.max_mhz <= support.max_mhz
 }
 
 #[cfg(test)]

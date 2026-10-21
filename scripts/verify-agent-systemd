@@ -17,7 +17,6 @@ UNITS = (
     "vonk-forge-agent.service",
     "vonk-forge-monitor.service",
     "vonk-forge-docker-firewall.service",
-    "vonk-forge-gpu-clock-cap.service",
     "vonk-forge-package-helper.service",
     "vonk-forge-package-helper.socket",
     "vonk-forge-package-upgrade-recover.service",
@@ -225,6 +224,11 @@ def _package_helper_socket(root: Path) -> tuple[dict[str, str], dict[str, str]]:
         or monitor["Service"].get("NoNewPrivileges") != "yes"
     ):
         raise RuntimeError("monitor service boundary is invalid")
+    if (
+        monitor["Unit"].get("PartOf") != "vonk-forge-agent.service"
+        or "vonk-forge-monitor.service" not in agent["Unit"].get("Wants", "").split()
+    ):
+        raise RuntimeError("monitor package activation dependency is invalid")
     if (
         helper["Service"].get("RuntimeDirectory") != "vonk-forge-package-candidates"
         or helper["Service"].get("RuntimeDirectoryMode") != "0700"

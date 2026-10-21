@@ -13,7 +13,6 @@ from vonk_agent_protocol.agent_words import (
     ProfileDocumentState,
     RunSwitchReasonScopeName,
 )
-from vonk_forge_contracts import RecipeDefinition
 
 from ..catalog_revision_contract import RecipeRevisionProjection
 from ..fleet_profile_contract import (
@@ -35,8 +34,8 @@ from ..models import (
     CatalogDocumentRevision,
     FleetProfile,
 )
-from ..recipe_runtime_specs import resolve_recipe_entities
 from ..recipe_update_notice import RecipeUpdateNotice, recipe_update_notice
+from .assignment_assessment import _AssignmentRows
 from .dependencies import (
     _INSTALLATION_POLICY_ADAPTER,
     _LOGGER,
@@ -80,6 +79,11 @@ class FleetProfileService:
             if selection is not None and selection.profile_id == row.id
             else None
         )
+        assignment_rows = (
+            self._assignment_rows(session, loaded_assignments)
+            if observe and loaded_assignments
+            else None
+        )
         assigned_nodes = (
             {
                 node.node_id
@@ -100,32 +104,7 @@ class FleetProfileService:
                 projections[selector] = self._recipe_projection(session, head[1])
             except ValueError as error:
                 head_errors[selector] = str(error)
-        model_names: dict[tuple[str, str, str], str | None] = {
-            (reference.publisher, reference.slug, reference.content_sha256): None
-            for definition in projections.values()
-            for reference in definition.models
-        }
-        if model_names:
-            for publisher, slug, digest, title in session.execute(
-                select(
-                    CatalogDocumentRevision.publisher,
-                    CatalogDocumentRevision.slug,
-                    CatalogDocumentRevision.content_digest,
-                    CatalogDocument.title,
-                )
-                .join(
-                    CatalogDocument,
-                    CatalogDocument.id == CatalogDocumentRevision.document_id,
-                )
-                .where(
-                    CatalogDocumentRevision.kind == RunSwitchReasonScopeName.MODEL,
-                    CatalogDocumentRevision.state == ProfileDocumentState.ACTIVE.value,
-                    CatalogDocumentRevision.content_digest.in_(
-                        sorted({key[2] for key in model_names})
-                    ),
-                )
-            ):
-                model_names[(publisher, slug, digest)] = title
+        model_names = self._model_titles(session, choices)
         resolved_choices: dict[
             tuple[str, str | None],
             tuple[CatalogDocument, CatalogDocumentRevision, CacheResolution | None]
@@ -155,6 +134,7 @@ class FleetProfileService:
                         choice,
                         loaded_assignments=loaded_assignments,
                         observe=observe,
+                        rows=assignment_rows,
                     )
                 )
                 continue
@@ -176,6 +156,7 @@ class FleetProfileService:
                         choice,
                         loaded_assignments=loaded_assignments,
                         observe=observe,
+                        rows=assignment_rows,
                     )
                 )
                 continue
@@ -212,6 +193,9 @@ class FleetProfileService:
                 else AssetAvailability.UNKNOWN.value
             )
             if cache is None:
+                warnings.append(
+                    "Cache observation is pending or unavailable; retry this profile read."
+                )
                 cache_unknown += 1
             elif recipe_state == "Cached" and model_state == "Cached":
                 cache_cached += 1
@@ -249,6 +233,7 @@ class FleetProfileService:
                         choice,
                         loaded_assignments=loaded_assignments,
                         observe=observe,
+                        rows=assignment_rows,
                     )
                 )
                 continue
@@ -300,6 +285,7 @@ class FleetProfileService:
                             loaded_assignments,
                             recipe_id=recipe.id,
                             spark_ids=choice.spark_ids,
+                            rows=assignment_rows,
                         )
                         if observe
                         else AssetAvailability.UNKNOWN.value
@@ -409,6 +395,7 @@ class FleetProfileService:
         *,
         recipe_id: str,
         spark_ids: Sequence[str],
+        rows: _AssignmentRows | None = None,
     ) -> str:
         """Project one saved assignment onto the live loaded application.
 
@@ -434,7 +421,7 @@ class FleetProfileService:
         if loaded is None:
             return "Not loaded"
         return _OBSERVED_ASSIGNMENT_LABELS[
-            cls._assignment_state(session, loaded).current_state
+            cls._assignment_state(session, loaded, rows=rows).current_state
         ]
 
     def _attention_assignment(
@@ -444,6 +431,7 @@ class FleetProfileService:
         *,
         loaded_assignments: Sequence[FleetProfileAssignment] | None,
         observe: bool = True,
+        rows: _AssignmentRows | None = None,
     ) -> FleetProfileAssignmentView:
         self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
         document_id = session.scalar(
@@ -472,6 +460,7 @@ class FleetProfileService:
                     loaded_assignments,
                     recipe_id=document_id,
                     spark_ids=choice.spark_ids,
+                    rows=rows,
                 )
                 if observe and document_id is not None
                 else AssetAvailability.UNKNOWN.value
@@ -480,21 +469,47 @@ class FleetProfileService:
             ),
         )
 
-    @staticmethod
-    def _model_title(session: Session, document: RecipeDefinition) -> str | None:
-        # Both call paths read the same persisted recipe document through
-        # ``_stored_recipe`` before this projection runs, so an unreadable
-        # document is already a residue there. The only resolution failure reachable
-        # here is a referenced model revision that is not currently active,
-        # for which a missing display title is deliberate.
-        try:
-            models = resolve_recipe_entities(
-                session, document.model_dump(mode="json")
-            ).model_revisions
-        except (KeyError, RuntimeError, TypeError, ValueError):
-            return None
-        if not models:
-            return None
-        model = models[0]
-        root = session.get(CatalogDocument, model.document_id)
-        return root.title if root is not None else f"{model.publisher}/{model.slug}"
+    def _model_titles(
+        self, session: Session, choices: Sequence[FleetProfileAssignmentInput]
+    ) -> dict[tuple[str, str, str], str | None]:
+        """Resolve exact model titles in one query, without parsing recipes again."""
+        self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
+        references = set()
+        for selector in dict.fromkeys(choice.recipe_selector for choice in choices):
+            head = self._recipe_document(session, selector)
+            if isinstance(head, Residue):
+                continue
+            try:
+                definition = self._recipe_projection(session, head[1])
+            except ValueError:
+                continue
+            references.update(
+                (item.publisher, item.slug, item.content_sha256)
+                for item in definition.models
+            )
+        if not references:
+            return {}
+        titles: dict[tuple[str, str, str], str | None] = {
+            key: None for key in references
+        }
+        for publisher, slug, digest, title in session.execute(
+            select(
+                CatalogDocumentRevision.publisher,
+                CatalogDocumentRevision.slug,
+                CatalogDocumentRevision.content_digest,
+                CatalogDocument.title,
+            )
+            .join(
+                CatalogDocument,
+                CatalogDocument.id == CatalogDocumentRevision.document_id,
+            )
+            .where(
+                CatalogDocumentRevision.kind == RunSwitchReasonScopeName.MODEL,
+                CatalogDocumentRevision.state == ProfileDocumentState.ACTIVE.value,
+                CatalogDocumentRevision.content_digest.in_(
+                    [item[2] for item in references]
+                ),
+            )
+        ):
+            titles[(publisher, slug, digest)] = title
+        return titles

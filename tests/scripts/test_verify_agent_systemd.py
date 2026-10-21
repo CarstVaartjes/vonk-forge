@@ -14,7 +14,6 @@ PACKAGED_UNITS = [
     "vonk-forge-agent.service",
     "vonk-forge-monitor.service",
     "vonk-forge-docker-firewall.service",
-    "vonk-forge-gpu-clock-cap.service",
     "vonk-forge-package-helper.service",
     "vonk-forge-package-helper.socket",
     "vonk-forge-package-upgrade-recover.service",
@@ -35,21 +34,6 @@ def test_control_services_keep_memory_and_survive_workload_oom(name: str) -> Non
     assert service.getint("OOMScoreAdjust") == -900
     assert service["MemoryMin"] == "512M"
     assert service["MemoryLow"] == "512M"
-
-
-def test_gpu_clock_cap_keeps_only_the_driver_admin_capability_and_follows_the_driver() -> (
-    None
-):
-    # The clock ceiling guards against hard power-off; it must be re-applied
-    # when the NVIDIA persistence daemon restarts, and hold no capability
-    # beyond the one the driver checks for locking clocks.
-    from configparser import ConfigParser
-
-    unit = ConfigParser(strict=False)
-    unit.read(ROOT / "packaging/systemd/vonk-forge-gpu-clock-cap.service")
-    assert unit["Unit"]["PartOf"] == "nvidia-persistenced.service"
-    assert unit["Service"]["CapabilityBoundingSet"] == "CAP_SYS_ADMIN"
-    assert unit["Service"]["AmbientCapabilities"] == ""
 
 
 def test_monitor_unit_allows_clean_start_before_agent_state_exists() -> None:
@@ -140,6 +124,8 @@ def test_agent_orders_driver_without_udevadm_and_allows_namespace_recovery() -> 
     after = unit["Unit"]["After"].split()
     wants = unit["Unit"]["Wants"].split()
     assert "nvidia-persistenced.service" in set(wants) & set(after)
+    # The single clock owner must start at boot even if the Controller is down.
+    assert "vonk-forge-package-helper.service" in set(wants) & set(after)
     # Startup must work on hosts without udevadm; missing GPU devices are
     # observed through the live device namespace, without a service restart.
     assert "udevadm" not in agent
@@ -172,3 +158,12 @@ def test_retry_policy_checks_packaged_services_without_adopting_host_units(
         verify(tmp_path)
     agent.write_text(valid)
     verify(tmp_path)
+    monitor = units / "vonk-forge-monitor.service"
+    valid_monitor = monitor.read_text()
+    monitor.write_text(valid_monitor.replace("PartOf=vonk-forge-agent.service\n", ""))
+    with pytest.raises(RuntimeError, match="monitor.*activation"):
+        verify(tmp_path)
+    monitor.write_text(valid_monitor)
+    agent.write_text(valid.replace("vonk-forge-monitor.service", ""))
+    with pytest.raises(RuntimeError, match="monitor.*activation"):
+        verify(tmp_path)

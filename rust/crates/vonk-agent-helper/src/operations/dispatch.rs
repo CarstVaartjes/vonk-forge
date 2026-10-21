@@ -24,6 +24,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
             runtime_request_owner_uid: required_owner_uid,
             package_install: Mutex::new(()),
             image_pulls: std::sync::RwLock::new(()),
+            runtime_stores: std::sync::RwLock::new(()),
             job_cancellation: JobCancellationFence::default(),
         })
     }
