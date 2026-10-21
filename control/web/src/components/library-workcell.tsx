@@ -162,7 +162,7 @@ export type LibraryRecipeRecord = {
   modelCapabilities?: LibraryViewModel["model_capabilities"];
   modelKey: string;
   modelTitle: string;
-  modelFiles: LibraryViewModel["model_document"]["files"];
+  modelFileCount: WireNumber;
   modelBytes: WireNumber;
   modelCached: boolean;
   capabilities: string[];
@@ -287,8 +287,8 @@ export function buildLibraryRecipeRecords(snapshot: LibraryViewSnapshot): Librar
   return snapshot.models.flatMap((model) => {
     const key = modelKey(model.model);
     const title = modelTitle(model);
-    const files = model.model_document.files;
-    const bytes = files.reduce<WireNumber>((total, file) => addWire(total, file.size_bytes), 0);
+    const fileCount = model.model_file_count;
+    const bytes = model.model_bytes;
     const capabilities = model.model_capabilities ?? [];
     const modelCached = isModelCached(model);
     if (model.recipes.length === 0)
@@ -301,7 +301,7 @@ export function buildLibraryRecipeRecords(snapshot: LibraryViewSnapshot): Librar
           modelCapabilities: model.model_capabilities,
           modelKey: key,
           modelTitle: title,
-          modelFiles: files,
+          modelFileCount: fileCount,
           modelBytes: bytes,
           modelCached,
           capabilities,
@@ -316,7 +316,7 @@ export function buildLibraryRecipeRecords(snapshot: LibraryViewSnapshot): Librar
       modelCapabilities: model.model_capabilities,
       modelKey: key,
       modelTitle: title,
-      modelFiles: files,
+      modelFileCount: fileCount,
       modelBytes: bytes,
       modelCached,
       capabilities: [...new Set([...capabilities, ...recipe.capabilities])],
@@ -768,7 +768,7 @@ export function LibraryWorkcell({
                         {model.model?.publisher}/{model.model?.slug}
                       </small>
                       <small>
-                        {model.modelFiles.length} files · {formatBytes(model.modelBytes)}
+                        {formatWire(model.modelFileCount)} files · {formatBytes(model.modelBytes)}
                       </small>
                       <em>{model.capabilities.join(" · ") || "Capabilities not declared"}</em>
                     </span>
@@ -799,8 +799,9 @@ export function LibraryWorkcell({
               <div className="library-selected-model-context">
                 <strong>{selectedModel.modelTitle}</strong>
                 <span>
-                  {selectedModel.modelFiles.length} files · {formatBytes(selectedModel.modelBytes)}{" "}
-                  · {selectedModel.capabilities.join(" · ") || "Capabilities not declared"}
+                  {formatWire(selectedModel.modelFileCount)} files ·{" "}
+                  {formatBytes(selectedModel.modelBytes)} ·{" "}
+                  {selectedModel.capabilities.join(" · ") || "Capabilities not declared"}
                 </span>
               </div>
             )}

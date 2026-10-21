@@ -879,3 +879,12 @@ def test_monotonic_agent_progress_requires_attempt_key_on_added_lines():
     path = "control/src/vonk_control/agent_jobs/example.py"
     assert check_source(path, source, {2, 3}, modes=("progress",))
     assert not check_source(path, source, {1}, modes=("progress",))
+
+
+def test_document_hashing_stays_at_ingress_and_ignores_existing_calls():
+    source = "from vonk_forge_contracts import document_sha256 as digest\nvalue = digest(document)\n"
+    assert check_source(PATH, source, {2}, modes=("identity",))
+    assert not check_source(PATH, source, {1}, modes=("identity",))
+    assert not check_source(
+        "control/src/vonk_control/catalog_service.py", source, {2}, modes=("identity",)
+    )

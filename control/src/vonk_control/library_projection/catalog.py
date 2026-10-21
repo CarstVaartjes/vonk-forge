@@ -6,9 +6,15 @@ from collections.abc import Callable, Mapping, Sequence
 from typing import TYPE_CHECKING, cast
 
 from sqlalchemy import and_, or_, select
+from sqlalchemy.orm import defer
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition
 
 from ..catalog_queries import active_head_revision
+from ..catalog_revision_contract import (
+    ModelRevisionProjection,
+    RecipeRevisionProjection,
+    read_catalog_projection,
+)
 from ..library_contract import (
     LibraryFacetValues,
     LibraryLocalState,
@@ -22,8 +28,6 @@ from ..library_contract import (
 from ..models import CatalogDocumentRevision, ModelCacheSet, RecipeLibrarySyncRun
 from ..operator_receipt_contract import ReceiptOwner
 from .common import (
-    _canonical_model,
-    _canonical_recipe,
     _model_identity,
     _readable_document,
     _recipe_creator,
@@ -61,14 +65,16 @@ def _library_release(self: LibraryProjection) -> LibraryRelease | None:
 def _model_projection(
     self: LibraryProjection,
     revision: CatalogDocumentRevision,
-    document: ModelDefinition,
+    document: ModelDefinition | ModelRevisionProjection,
     snapshot: Mapping[str, LibraryLocalState] | None,
     alignment: Sequence[str] = (),
 ) -> LibraryModelProjection:
     return LibraryModelProjection(
         selector=self.selector(document.identity.publisher, document.identity.slug),
         identity=_model_identity(revision, document),
-        document=document,
+        projected=document
+        if isinstance(document, ModelRevisionProjection)
+        else cast(ModelRevisionProjection, read_catalog_projection(revision)),
         family=self.selector(
             document.identity.family.publisher, document.identity.family.slug
         ),
@@ -86,25 +92,23 @@ def _model_projection(
 def _recipe_projection(
     self: LibraryProjection,
     revision: CatalogDocumentRevision,
-    document: RecipeDefinition,
-    model_by_key: Mapping[tuple[str, str, str], ModelDefinition],
+    document: RecipeDefinition | RecipeRevisionProjection,
+    model_by_key: Mapping[str, ModelDefinition | ModelRevisionProjection],
     snapshot: Mapping[str, LibraryLocalState] | None,
 ) -> LibraryRecipeProjection:
+    projected = (
+        document
+        if isinstance(document, RecipeRevisionProjection)
+        else cast(RecipeRevisionProjection, read_catalog_projection(revision))
+    )
     model_selectors = [
-        self.selector(selection.model.publisher, selection.model.slug)
-        for selection in document.models
+        self.selector(reference.publisher, reference.slug)
+        for reference in projected.models
     ]
     known_models = [
-        model_by_key[key]
-        for selection in document.models
-        if (
-            key := (
-                selection.model.publisher,
-                selection.model.slug,
-                selection.model.content_sha256,
-            )
-        )
-        in model_by_key
+        model_by_key[reference.content_sha256]
+        for reference in projected.models
+        if reference.content_sha256 in model_by_key
     ]
     usage = sorted(
         {item for model in known_models for item in self._model_usage(model)}
@@ -121,7 +125,17 @@ def _recipe_projection(
             title=document.metadata.title,
             description=document.metadata.description,
         ),
-        document=document,
+        projected=projected.model_copy(
+            update={
+                "build_resources": None,
+                "build_security": None,
+                "build_options": None,
+                "build_model_artifacts": None,
+                "artifact_inputs": None,
+                "package_handle": None,
+            }
+        ),
+        prebuilt_image=projected.prebuilt_image,
         model_selectors=model_selectors,
         usage=usage,
         resources=resources,
@@ -131,30 +145,22 @@ def _recipe_projection(
         updated_at=_utc(revision.created_at),
         alignment=document.metadata.alignment,
         node_count=document.topology.node_count,
-        engine=document.runtime.engine,
+        engine=projected.runtime_engine,
         creator=_recipe_creator(document),
     )
 
 
-def _catalog_documents[T: ModelDefinition | RecipeDefinition](
+def _catalog_documents[T](
     self,
     *,
     kind: str,
     local_digests: Sequence[str],
     digests: Sequence[str] | None = None,
     reader: Callable[[CatalogDocumentRevision], T],
+    projection_only: bool = False,
 ) -> list[tuple[CatalogDocumentRevision, T]]:
     # Historical recipe revisions remain valid for exact workload reads,
     # but only the accepted head is a discoverable Library choice.
-    previous_documents = (
-        {
-            (row.content_digest, row.kind): (row.document, document)
-            for rows in self._catalog_snapshot
-            for row, document in rows
-        }
-        if digests is None
-        else {}
-    )
     with self._sessions() as session:
         query = select(CatalogDocumentRevision).where(
             CatalogDocumentRevision.kind == kind,
@@ -174,16 +180,13 @@ def _catalog_documents[T: ModelDefinition | RecipeDefinition](
                 .exists(),
             ),
         )
+        if projection_only:
+            query = query.options(defer(CatalogDocumentRevision.document))
         if digests is not None:
             query = query.where(CatalogDocumentRevision.content_digest.in_(digests))
         documents: list[tuple[CatalogDocumentRevision, T]] = []
         for row in session.scalars(query):
-            previous = previous_documents.get((row.content_digest, row.kind))
-            document = (
-                cast(T, previous[1])
-                if previous is not None and previous[0] == row.document
-                else _readable_document(row, reader)
-            )
+            document = _readable_document(row, reader)
             if document is not None:
                 documents.append((row, document))
         return documents
@@ -192,21 +195,43 @@ def _catalog_documents[T: ModelDefinition | RecipeDefinition](
 def _documents_for_snapshot(
     self: LibraryProjection, snapshot: Mapping[str, LibraryLocalState] | None
 ) -> tuple[
-    list[tuple[CatalogDocumentRevision, ModelDefinition]],
-    list[tuple[CatalogDocumentRevision, RecipeDefinition]],
+    list[tuple[CatalogDocumentRevision, ModelRevisionProjection]],
+    list[tuple[CatalogDocumentRevision, RecipeRevisionProjection]],
 ]:
     # The disposable catalog index is refreshed outside request handling. Local
     # history and availability are deliberately absent from this immutable view.
     return self._catalog_snapshot
 
 
+def _model_revision_projection(row: CatalogDocumentRevision) -> ModelRevisionProjection:
+    parsed = read_catalog_projection(row)
+    if not isinstance(parsed, ModelRevisionProjection):
+        raise TypeError("catalog revision is not a model")
+    return parsed
+
+
+def _recipe_revision_projection(
+    row: CatalogDocumentRevision,
+) -> RecipeRevisionProjection:
+    parsed = read_catalog_projection(row)
+    if not isinstance(parsed, RecipeRevisionProjection):
+        raise TypeError("catalog revision is not a recipe")
+    return parsed
+
+
 def refresh_catalog(self: LibraryProjection) -> None:
     snapshot = (
         self._catalog_documents(
-            kind="model", local_digests=(), reader=_canonical_model
+            kind="model",
+            local_digests=(),
+            reader=_model_revision_projection,
+            projection_only=True,
         ),
         self._catalog_documents(
-            kind=ReceiptOwner.RECIPE, local_digests=(), reader=_canonical_recipe
+            kind=ReceiptOwner.RECIPE,
+            local_digests=(),
+            reader=_recipe_revision_projection,
+            projection_only=True,
         ),
     )
     self._catalog_snapshot = snapshot

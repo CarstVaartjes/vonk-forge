@@ -185,7 +185,7 @@ def test_missing_nas_assets_do_not_hide_a_fitting_recipe_or_create_work(
         assert tuple(session.scalars(select(Job.id))) == jobs
     assert (
         projection.recipe_detail(rows[0]["selector"]).assessment
-        == projection.recipe_library().recipes[0].assessment
+        == projection.recipe_library(assess=True).recipes[0].assessment
     )
 
 
@@ -197,7 +197,7 @@ def test_stale_capacity_is_unavailable_and_filter_cannot_report_empty_success(
         for row in session.scalars(select(NodeInventorySnapshot)):
             row.observed_at = NOW - timedelta(hours=1)
     with TestClient(app) as client:
-        response = client.get("/api/recipe/library", params={})
+        response = client.get("/api/recipe/library", params={"assess": True})
         assert response.status_code == 200, response.text
         assert (
             response.json()["recipes"][0]["assessment"]["fleet_fit"]["state"]
@@ -211,9 +211,10 @@ def test_stale_capacity_is_unavailable_and_filter_cannot_report_empty_success(
         )
         response = client.get(
             "/api/recipe/library",
-            params={"assess": False, "ready": True},
+            params={"assess": False, "fits_fleet": True},
         )
-        assert response.status_code == 422
+        assert response.status_code == 200
+        assert response.json()["recipes"][0]["assessment"] is not None
 
 
 def _publish_model_fixture(cache, sessions, manifest: ArtifactSetManifest):
@@ -259,7 +260,7 @@ def test_ready_uses_actual_nas_files_and_does_not_require_spark_copies(
     with sessions() as session:
         build = session.get(RecipeBuild, build_id)
         assert build is not None
-    ready = projection.recipe_library().recipes[0].assessment
+    ready = projection.recipe_library(assess=True).recipes[0].assessment
     assert ready is not None
     assert ready.readiness.state == "ready", ready.readiness.model_dump(mode="json")
     assert ready.fleet_fit.state == "ready"
@@ -280,7 +281,7 @@ def test_ready_uses_actual_nas_files_and_does_not_require_spark_copies(
     )
     _publish_model_fixture(cache, sessions, other)
     paths[0].unlink()
-    missing = projection.recipe_library().recipes[0].assessment
+    missing = projection.recipe_library(assess=True).recipes[0].assessment
     assert missing is not None
     assert missing.cache.state == "blocked"
     assert missing.fleet_fit.state == "ready"
@@ -288,7 +289,7 @@ def test_ready_uses_actual_nas_files_and_does_not_require_spark_copies(
     with paths[0].open("wb") as output:
         output.truncate(manifest.artifacts[0].expected_bytes)
     remove_test_image(storage, build.oci_layout_sha256)
-    missing = projection.recipe_library().recipes[0].assessment
+    missing = projection.recipe_library(assess=True).recipes[0].assessment
     assert missing is not None
     assert missing.readiness.state == "blocked"
 
@@ -356,7 +357,12 @@ def test_late_assessment_is_discarded_and_selector_scan_does_not_assess(
         assessment_module, "time", SimpleNamespace(monotonic=lambda: clock[0])
     )
     monkeypatch.setattr(service, "inspect_candidate", slow_inspect)
-    projection.recipe_library(assess=False)
+    projection.recipe_library()
+    projection.models()
+    with TestClient(app) as client:
+        response = client.get("/api/recipe/library")
+        assert response.status_code == 200
+        assert response.json()["recipes"][0].get("assessment") is None
     assert calls == []
     with TestClient(app) as client:
         response = client.get("/api/recipe/library", params={"fits_fleet": True})
@@ -366,7 +372,7 @@ def test_late_assessment_is_discarded_and_selector_scan_does_not_assess(
             == "unavailable"
         )
     assert len(calls) == 1
-    assessment = projection.recipe_library().recipes[0].assessment
+    assessment = projection.recipe_library(assess=True).recipes[0].assessment
     assert assessment is not None
     assert assessment.fleet_fit.state == "unavailable"
 
@@ -377,7 +383,9 @@ def test_fleet_filter_assesses_later_candidates_before_pagination(assessed_libra
     _insert_canonical_rows(
         sessions,
         kind="recipe",
-        template=recipe.document.model_dump(mode="json"),
+        template=projection.recipe_detail(recipe.selector).document.model_dump(
+            mode="json"
+        ),
         count=2,
     )
     with sessions.begin() as session:

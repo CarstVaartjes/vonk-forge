@@ -785,10 +785,13 @@ export class ApiClient implements ControlApi {
     sort?: LibrarySort,
     updatedSince?: string,
     signal?: AbortSignal,
+    fitsFleet?: boolean,
   ): Promise<RecipeLibrary> {
     return resultData(
       await this.generated.GET("/api/recipe/library", {
-        params: { query: { cursor, limit: 100, sort, updated_since: updatedSince } },
+        params: {
+          query: { cursor, limit: 100, sort, updated_since: updatedSince, fits_fleet: fitsFleet },
+        },
         signal,
       }),
     );

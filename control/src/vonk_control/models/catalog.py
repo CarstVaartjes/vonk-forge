@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import uuid
 from datetime import datetime
@@ -318,16 +317,56 @@ def _active_catalog_document_revision_cannot_be_deleted(
         raise ValueError("active catalog document revisions are immutable")
 
 
+def _catalog_document_json(value: object) -> str:
+    return json.dumps(
+        value,
+        ensure_ascii=False,
+        allow_nan=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+
+def _remember_catalog_document(target: CatalogDocumentRevision) -> None:
+    state = inspect(target)
+    # Deferred documents stay deferred. Only bytes actually read or written
+    # need a snapshot to detect an in-place edit that SQLAlchemy cannot track.
+    if "document" in state.dict:
+        state.info["catalog_document_source"] = _catalog_document_json(
+            state.dict["document"]
+        )
+
+
+@event.listens_for(CatalogDocumentRevision, "load")
+def _catalog_document_loaded(target: CatalogDocumentRevision, _context) -> None:
+    _remember_catalog_document(target)
+
+
+@event.listens_for(CatalogDocumentRevision, "refresh")
+def _catalog_document_refreshed(
+    target: CatalogDocumentRevision, _context, _attrs
+) -> None:
+    if _attrs is None or "document" in _attrs:
+        _remember_catalog_document(target)
+
+
+@event.listens_for(CatalogDocumentRevision, "after_insert")
+@event.listens_for(CatalogDocumentRevision, "after_update")
+def _catalog_document_written(
+    _mapper, _connection, target: CatalogDocumentRevision
+) -> None:
+    _remember_catalog_document(target)
+
+
 @event.listens_for(Session, "before_commit")
 def _active_catalog_document_json_is_immutable(session: Session) -> None:
     for value in session.identity_map.values():
         if isinstance(value, CatalogDocumentRevision) and value.state == "active":
-            payload = json.dumps(
-                value.document,
-                ensure_ascii=False,
-                allow_nan=False,
-                sort_keys=True,
-                separators=(",", ":"),
-            ).encode("utf-8")
-            if hashlib.sha256(payload).hexdigest() != value.content_digest:
+            state = inspect(value)
+            if (
+                "document" in state.dict
+                and "catalog_document_source" in state.info
+                and _catalog_document_json(state.dict["document"])
+                != state.info["catalog_document_source"]
+            ):
                 raise ValueError("active catalog document revisions are immutable")

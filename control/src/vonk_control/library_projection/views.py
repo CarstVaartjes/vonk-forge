@@ -107,8 +107,8 @@ def models(
         and (
             wanted_search is None
             or wanted_search in item.selector.casefold()
-            or wanted_search in item.document.identity.model.title.casefold()
-            or wanted_search in item.document.metadata.description.casefold()
+            or wanted_search in item.projected.identity.model.title.casefold()
+            or wanted_search in item.projected.metadata.description.casefold()
         )
         and (updated_since is None or item.updated_at >= _utc(updated_since))
     ]
@@ -250,7 +250,9 @@ def model_detail(self: LibraryProjection, selector: str) -> ModelDetailResponse:
     )
     snapshot = self._local_state_snapshot((digest,))
     entry = self._model_projection(row, model, snapshot, alignment=sorted(alignment))
-    return ModelDetailResponse.model_validate(entry.model_dump(mode="python"))
+    return ModelDetailResponse.model_validate(
+        entry.model_dump(mode="python") | {"document": model}
+    )
 
 
 def recipe_library(
@@ -262,7 +264,7 @@ def recipe_library(
     cached: bool = False,
     ready: bool | None = None,
     fits_fleet: bool | None = None,
-    assess: bool = True,
+    assess: bool = False,
     usage: Sequence[str] = (),
     publisher: Sequence[str] = (),
     alignment: Sequence[str] = (),
@@ -277,8 +279,6 @@ def recipe_library(
         raise RequestFault("recipe library limit is invalid")
     if sort not in {"updated", "name"}:
         raise RequestFault("recipe library sort is invalid")
-    if not assess and (ready is not None or fits_fleet is not None):
-        raise RequestFault("readiness filters require assessment")
     deadline = time.monotonic() + self._request_budget
     model_rows, recipe_rows = self._documents_for_snapshot(None)
     snapshot = (
@@ -288,10 +288,7 @@ def recipe_library(
         if cached
         else None
     )
-    model_by_key = {
-        (model.identity.publisher, model.identity.slug, row.content_digest): model
-        for row, model in model_rows
-    }
+    model_by_key = {row.content_digest: model for row, model in model_rows}
     alignment_by_model = self._alignment_by_model(
         document for _, document in recipe_rows
     )
@@ -308,7 +305,7 @@ def recipe_library(
         )
         for row, model in model_rows
     ]
-    selected_keys: set[tuple[str, str, str]] | None = None
+    selected_keys: set[str] | None = None
     local_recipe_digests: set[str] = set()
     if model_selectors:
         # Every requested selector must resolve; the union is the scope.
@@ -320,20 +317,10 @@ def recipe_library(
                 lambda item: (item.identity.publisher, item.identity.slug),
             )
             assert isinstance(selected, LibraryModelProjection)
-            selected_keys.add(
-                (
-                    selected.identity.publisher,
-                    selected.identity.slug,
-                    selected.identity.content_sha256,
-                )
-            )
+            selected_keys.add(selected.identity.content_sha256)
     if cached:
         cached_keys = {
-            (
-                item.identity.publisher,
-                item.identity.slug,
-                item.identity.content_sha256,
-            )
+            item.identity.content_sha256
             for item in model_entries
             if item.local.controller in {"cached", "preparing"} or item.local.running_on
         }
@@ -355,13 +342,8 @@ def recipe_library(
             selected_keys is None
             or item.identity.content_sha256 in local_recipe_digests
             or any(
-                (
-                    selection.model.publisher,
-                    selection.model.slug,
-                    selection.model.content_sha256,
-                )
-                in selected_keys
-                for selection in item.document.models
+                reference.content_sha256 in selected_keys
+                for reference in item.projected.models
             )
         )
         and self._matches_any(item.usage, usage)
@@ -373,8 +355,8 @@ def recipe_library(
         and (
             wanted_search is None
             or wanted_search in item.selector.casefold()
-            or wanted_search in item.document.metadata.title.casefold()
-            or wanted_search in item.document.metadata.description.casefold()
+            or wanted_search in item.projected.metadata.title.casefold()
+            or wanted_search in item.projected.metadata.description.casefold()
         )
         and (updated_since is None or item.updated_at >= _utc(updated_since))
     ]
@@ -573,28 +555,20 @@ def recipe_detail(self: LibraryProjection, selector: str) -> RecipeDetailRespons
             if row.document_id != exact[0].document_id
             and row.content_digest != exact[0].content_digest
             and any(
-                selection.model.content_sha256 in model_digests
-                for selection in recipe.models
+                reference.content_sha256 in model_digests for reference in recipe.models
             )
         ],
     ]
     snapshot = self._local_state_snapshot(
         [row.content_digest for row, _ in recipe_rows]
     )
-    model_by_key = {
-        (model.identity.publisher, model.identity.slug, row.content_digest): model
-        for row, model in model_rows
-    }
+    model_by_key = {row.content_digest: model for row, model in model_rows}
     entries = [
         self._recipe_projection(row, recipe, model_by_key, snapshot)
         for row, recipe in recipe_rows
     ]
     entry = self._assessed([entries[0]], deadline=deadline)[0]
-    recipe = next(
-        document
-        for row, document in recipe_rows
-        if row.content_digest == entry.identity.content_sha256
-    )
+    recipe = exact_recipe
     siblings = [
         item
         for item in entries
@@ -608,7 +582,7 @@ def recipe_detail(self: LibraryProjection, selector: str) -> RecipeDetailRespons
             engine=item.engine,
             creator=item.creator,
             node_count=item.node_count,
-            version=item.document.release.version,
+            version=item.projected.release.version,
             cache=item.local.controller,
             fits_fleet=(
                 "unavailable"
@@ -628,13 +602,7 @@ def recipe_detail(self: LibraryProjection, selector: str) -> RecipeDetailRespons
     ]
     model_documents = []
     for selection in recipe.models:
-        model = model_by_key.get(
-            (
-                selection.model.publisher,
-                selection.model.slug,
-                selection.model.content_sha256,
-            )
-        )
+        model = model_by_key.get(selection.model.content_sha256)
         if model is None:
             # The recipe pins a Model document that is not active: leave it
             # out of the detail (the pin stays in ``selection``) instead of
@@ -651,6 +619,7 @@ def recipe_detail(self: LibraryProjection, selector: str) -> RecipeDetailRespons
     return RecipeDetailResponse.model_validate(
         entry.model_dump(mode="python")
         | {
+            "document": exact_recipe,
             "model_documents": [
                 model.model_dump(mode="json") for model in model_documents
             ],

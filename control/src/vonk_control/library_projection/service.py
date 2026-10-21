@@ -12,6 +12,10 @@ from vonk_forge_contracts import ModelDefinition, RecipeDefinition
 
 from .. import model_cache_states
 from ..auth import CursorCodec
+from ..catalog_revision_contract import (
+    ModelRevisionProjection,
+    RecipeRevisionProjection,
+)
 from ..library_contract import (
     FreshnessPolicy,
     LibraryFacetValues,
@@ -111,8 +115,8 @@ class LibraryProjection:
         )
         self._assessment = assessment
         self._catalog_snapshot: tuple[
-            list[tuple[CatalogDocumentRevision, ModelDefinition]],
-            list[tuple[CatalogDocumentRevision, RecipeDefinition]],
+            list[tuple[CatalogDocumentRevision, ModelRevisionProjection]],
+            list[tuple[CatalogDocumentRevision, RecipeRevisionProjection]],
         ] = ([], [])
         self._catalog_observed_at = self._clock()
         self.refresh_catalog()
@@ -183,11 +187,13 @@ class LibraryProjection:
         )
 
     @staticmethod
-    def _model_usage(document: ModelDefinition) -> list[str]:
+    def _model_usage(document: ModelDefinition | ModelRevisionProjection) -> list[str]:
         return sorted(document.capabilities)
 
     @staticmethod
-    def _recipe_resources(document: RecipeDefinition) -> LibraryResourceProjection:
+    def _recipe_resources(
+        document: RecipeDefinition | RecipeRevisionProjection,
+    ) -> LibraryResourceProjection:
         roles = document.topology.roles
         memory = max((role.resources.memory.peak_bytes for role in roles), default=None)
         disk = max(
@@ -210,7 +216,7 @@ class LibraryProjection:
 
     @staticmethod
     def _alignment_by_model(
-        recipe_documents: Iterable[RecipeDefinition],
+        recipe_documents: Iterable[RecipeDefinition | RecipeRevisionProjection],
     ) -> dict[tuple[str, str], set[str]]:
         """Map each model publisher/slug to the alignments of recipes serving it."""
 
@@ -219,10 +225,15 @@ class LibraryProjection:
             alignment = document.metadata.alignment
             if alignment is None:
                 continue
-            for selection in document.models:
-                alignments.setdefault(
-                    (selection.model.publisher, selection.model.slug), set()
-                ).add(alignment)
+            references = (
+                document.models
+                if isinstance(document, RecipeRevisionProjection)
+                else [selection.model for selection in document.models]
+            )
+            for reference in references:
+                alignments.setdefault((reference.publisher, reference.slug), set()).add(
+                    alignment
+                )
         return alignments
 
     @staticmethod

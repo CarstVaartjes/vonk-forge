@@ -18,7 +18,11 @@ from vonk_forge_contracts import (
 
 from cluster_profiles.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 
-from ..catalog_revision_contract import read_catalog_document
+from ..catalog_revision_contract import (
+    ModelRevisionProjection,
+    RecipeRevisionProjection,
+    read_catalog_document,
+)
 from ..library_contract import (
     LibraryModelIdentity,
     LibraryRecipeSummary,
@@ -203,7 +207,7 @@ def _note_unreadable(kind: str, key: str, detail: str) -> None:
         _LOGGER.warning("ignoring unreadable %s %s: %s", kind, key, detail)
 
 
-def _readable_document[T: ModelDefinition | RecipeDefinition](
+def _readable_document[T](
     revision: CatalogDocumentRevision,
     reader: Callable[[CatalogDocumentRevision], T],
 ) -> T | None:
@@ -211,7 +215,7 @@ def _readable_document[T: ModelDefinition | RecipeDefinition](
 
     try:
         return reader(revision)
-    except LibraryProjectionError as error:
+    except (LibraryProjectionError, TypeError, ValueError) as error:
         if revision.id not in _LOGGED_UNREADABLE:
             _LOGGED_UNREADABLE.add(revision.id)
             _LOGGER.warning(
@@ -253,7 +257,8 @@ def _canonical_recipe(revision: CatalogDocumentRevision) -> RecipeDefinition:
 
 
 def _model_identity(
-    revision: CatalogDocumentRevision, document: ModelDefinition
+    revision: CatalogDocumentRevision,
+    document: ModelDefinition | ModelRevisionProjection,
 ) -> LibraryModelIdentity:
     return LibraryModelIdentity(
         kind="model",
@@ -263,7 +268,9 @@ def _model_identity(
     )
 
 
-def _recipe_creator(document: RecipeDefinition) -> str | None:
+def _recipe_creator(
+    document: RecipeDefinition | RecipeRevisionProjection,
+) -> str | None:
     """The upstream creator: the owner in the source reference, else attribution.
 
     The contract has no creator field and every recipe is published by the

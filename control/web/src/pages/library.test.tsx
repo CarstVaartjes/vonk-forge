@@ -128,3 +128,24 @@ test("offers artifact jobs the running runs of this exact recipe revision from t
   ]} as unknown as VisualFleetSnapshot;
   expect(withObservedRuns(minimalLibraryDetail, fleet)!.operational_state.runs).toEqual([{run_id: "run-a", state: "running"}]);
 });
+
+test("assesses placement only when the library fleet filter is requested", async () => {
+  const seen: URL[] = [];
+  vi.stubGlobal("fetch", async (request: Request) => {
+    const url = new URL(request.url);
+    seen.push(url);
+    return new Response(
+      JSON.stringify(url.pathname === "/api/model/library" ? modelLibrary : recipeLibrary),
+      { status: 200, headers: { "Content-Type": "application/json" } },
+    );
+  });
+  await loadLibraryView(new ApiClient(), new AbortController().signal);
+  expect(
+    seen.find((url) => url.pathname === "/api/recipe/library")!.searchParams.has("fits_fleet"),
+  ).toBe(false);
+  seen.length = 0;
+  await loadLibraryView(new ApiClient(), new AbortController().signal, undefined, undefined, true);
+  expect(
+    seen.find((url) => url.pathname === "/api/recipe/library")!.searchParams.get("fits_fleet"),
+  ).toBe("true");
+});

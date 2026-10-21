@@ -277,3 +277,45 @@ def test_an_older_load_holding_a_higher_ordinal_elsewhere_is_superseded():
 
     older = service.application(first.id)
     assert older.state == "superseded" and older.superseded_by == newer.id
+
+
+def test_running_application_keeps_its_stored_recipe_after_catalog_head_changes():
+    """A projection refresh must not replace the exact recipe already accepted."""
+    from vonk_control.catalog_entities import CatalogEntityService
+    from vonk_control.fleet_profiles.persistence import _stored_recipe
+    from vonk_control.models import CatalogDocumentRevision
+    from vonk_forge_contracts import RecipeDefinition
+
+    sessions, service, _adapter, first, original, _ = _world()
+    assert original.progress.intended_profile is not None
+    pinned = original.progress.intended_profile.assignments[0].recipe_revision_id
+    with sessions() as session:
+        old = session.get(CatalogDocumentRevision, pinned)
+        assert old is not None
+        old_definition = _stored_recipe(old)
+        assert isinstance(old_definition, RecipeDefinition)
+        changed = old_definition.model_dump(mode="json")
+    changed["metadata"]["description"] += " current head"
+    catalog = CatalogEntityService(sessions, clock=lambda: NOW)
+    successor = catalog.revise(old.document_id, changed, actor="admin")
+    catalog.resolve(successor.id, actor="admin")
+    assert successor.id != pinned
+    with sessions() as session:
+        stored = session.get(CatalogDocumentRevision, pinned)
+        assert stored is not None
+        assert _stored_recipe(stored) == old_definition
+    from .test_fleet_profiles import _follow_profile_retry
+
+    now = [NOW + timedelta(seconds=1)]
+    service._clock = lambda: now[0]
+    for _ in range(8):
+        _follow_profile_retry(service, first.id, now)
+        service.tick()
+        if service.application(first.id).state == "succeeded":
+            break
+    finished = service.application(first.id)
+    assert finished.state == "succeeded"
+    assert finished.progress.intended_profile is not None
+    assert (
+        finished.progress.intended_profile.assignments[0].recipe_revision_id == pinned
+    )

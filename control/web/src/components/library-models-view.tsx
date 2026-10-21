@@ -351,10 +351,7 @@ function ModelRevisionsRow({
     revisions.find((item) => item.recipes.length > 0) ??
     revisions[0]!;
   const key = modelKey(model.model);
-  const bytes = model.model_document.files.reduce<WireNumber>(
-    (sum, file) => addWire(sum, file.size_bytes),
-    0,
-  );
+  const bytes = model.model_bytes;
   const capabilities = model.model_capabilities ?? [];
   const running = (model.local.running_on ?? []).length;
   const preparation = model.local.preparation;
@@ -424,7 +421,7 @@ function ModelRevisionsRow({
       <dl>
         <div>
           <dt>Files</dt>
-          <dd>{model.model_document.files.length}</dd>
+          <dd>{formatWire(model.model_file_count)}</dd>
         </div>
         <div>
           <dt>Size</dt>

@@ -91,7 +91,7 @@ def _library_item(item: Mapping[str, object], noun: str, *, detail: bool) -> Non
             _field("Engine", item.get("engine"))
             _field("Creator", item.get("creator"))
             _field("Models", _words(item.get("model_selectors")))
-            _recipe_options(_optional(item.get("document"), "document"))
+            _recipe_options(_optional(item.get("projected"), "projected"))
             _recipe_alternatives(item)
         else:
             _field("Variant", item.get("variant"))

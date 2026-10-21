@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
-from vonk_control.catalog_entities import build_policy_projection
+from vonk_control.catalog_entities import recipe_document_projection
 from vonk_control.execution_plan_service import _runtime_image_receipt
 from vonk_control.models import (
     Base,
@@ -55,15 +55,7 @@ def _runtime() -> dict[str, str]:
 
 
 def _projection(recipe: RecipeDefinition) -> dict[str, object]:
-    value: dict[str, object] = {
-        "title": recipe.metadata.title,
-        "description": recipe.metadata.description,
-        "tags": list(recipe.metadata.tags),
-        "runtime_engine": recipe.runtime.engine,
-        "topology": recipe.topology.model_dump(mode="json"),
-    }
-    value.update(build_policy_projection(recipe))
-    return value
+    return recipe_document_projection(recipe)
 
 
 def _add_build(

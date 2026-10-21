@@ -85,8 +85,9 @@ def _apply_option_choices(
     selector = str(assignment["recipe_selector"])
     deadline = time.monotonic() + getattr(args, "timeout_seconds", 30)
 
-    from ..generated_control.models.recipe_definition import RecipeDefinition
-    from ..generated_control.types import Unset
+    from ..generated_control.models.recipe_revision_projection import (
+        RecipeRevisionProjection,
+    )
 
     def recipe_options():
         detail = client.request(
@@ -94,12 +95,14 @@ def _apply_option_choices(
             f"/api/recipe/{_quoted(selector)}",
             timeout_seconds=_selection_remaining(deadline),
         )
-        return RecipeDefinition.from_dict(
-            validate_control_document("RecipeDefinition", detail.get("document"))
+        return RecipeRevisionProjection.from_dict(
+            validate_control_document(
+                "RecipeRevisionProjection", detail.get("projected")
+            )
         )
 
     document = _observe_selection(recipe_options, deadline=deadline)
-    options = [] if isinstance(document.options, Unset) else document.options
+    options = document.options
     for option in options:
         name = option.name
         if name in chosen:

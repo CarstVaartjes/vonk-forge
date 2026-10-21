@@ -11,7 +11,7 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
-from vonk_control.catalog_entities import build_policy_projection
+from vonk_control.catalog_entities import recipe_document_projection
 from vonk_control.catalog_revision_contract import write_catalog_projection
 from vonk_control.compiled_execution_plan import VerifiedModelObject
 from vonk_control.model_cache import ModelCacheService
@@ -114,6 +114,9 @@ def _add_active(
         parsed = ModelDefinition.model_validate(document)
         projected: dict[str, object] = {
             "identity": parsed.identity.model_dump(mode="json"),
+            "metadata": parsed.metadata.model_dump(mode="json"),
+            "format": parsed.format.model_dump(mode="json"),
+            "capabilities": parsed.capabilities,
             "modalities": parsed.modalities,
             "artifact_count": len(parsed.files),
             "download_bytes": parsed.download_bytes,
@@ -121,14 +124,7 @@ def _add_active(
         }
     else:
         parsed = RecipeDefinition.model_validate(document)
-        projected = {
-            "title": parsed.metadata.title,
-            "description": parsed.metadata.description,
-            "tags": list(parsed.metadata.tags),
-            "runtime_engine": parsed.runtime.engine,
-            "topology": parsed.topology.model_dump(mode="json"),
-        }
-        projected.update(build_policy_projection(parsed))
+        projected = recipe_document_projection(parsed)
     root = CatalogDocument(
         id=root_id,
         kind=kind,

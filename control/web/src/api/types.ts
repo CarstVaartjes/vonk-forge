@@ -64,7 +64,13 @@ export type LibraryViewRecipe = {
   capabilities: string[];
   content_sha256: string;
   description: string;
-  recipe_document: RecipeDefinition;
+  recipe_document: Pick<
+    RecipeDefinition,
+    "identity" | "metadata" | "provenance" | "topology" | "release"
+  > & {
+    runtime: Pick<RecipeDefinition["runtime"], "engine">;
+    models: { model: RecipeDefinition["models"][number]["model"] }[];
+  };
   recipe_id: string;
   recipe_revision_id: string;
   publisher: string;
@@ -96,7 +102,9 @@ export function canonicalRecipeSelector(
 export type LibraryViewModel = {
   page_local?: boolean;
   model: { kind: "model"; publisher: string; slug: string; content_sha256: string };
-  model_document: ModelDefinition;
+  model_document: Pick<ModelDefinition, "identity" | "metadata" | "format" | "capabilities">;
+  model_file_count: WireNumber;
+  model_bytes: WireNumber;
   model_capabilities?: string[];
   local: components["schemas"]["LibraryLocalState"];
   // Projected facets, named exactly as the CLI filter flags and the
@@ -184,6 +192,7 @@ export interface LibraryApi {
     sort?: LibrarySort,
     updatedSince?: string,
     signal?: AbortSignal,
+    fitsFleet?: boolean,
   ): Promise<RecipeLibrary>;
   recipeDetail(selector: string, signal?: AbortSignal): Promise<RecipeDetail>;
   artifactJobsForRun(runId: string, signal?: AbortSignal): Promise<ArtifactJobList>;
