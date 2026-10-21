@@ -70,6 +70,7 @@ def test_publisher_fixture_imports_all_published_recipes_and_reuses_persistent_p
     snapshot = client.list()
     client.prepare(snapshot)
     assert len(snapshot.items) == expected_recipe_count
+    assert all(item.source_bundle_sha256 is not None for item in snapshot.items)
     assert release.library_downloads == 1
     client.close()
 
@@ -80,7 +81,9 @@ def test_publisher_fixture_imports_all_published_recipes_and_reuses_persistent_p
     restarted.close()
 
 
-@pytest.mark.parametrize("tampered_field", ["publisher", "content_sha256"])
+@pytest.mark.parametrize(
+    "tampered_field", ["publisher", "content_sha256", "source_bundle_sha256"]
+)
 def test_publisher_package_binds_manifest_metadata_identity_and_digest(
     tmp_path: Path, tampered_field: str
 ) -> None:
@@ -99,6 +102,8 @@ def test_publisher_package_binds_manifest_metadata_identity_and_digest(
         recipe = json.loads(files["recipe.json"])
         recipe["identity"]["publisher"] = "broken-publisher"
         files["recipe.json"] = _canonical(recipe) + b"\n"
+    elif tampered_field == "source_bundle_sha256":
+        row["source_bundle_sha256"] = "0" * 64
     else:
         manifest["recipe_content_sha256"] = "0" * 64
     manifest["files"] = [

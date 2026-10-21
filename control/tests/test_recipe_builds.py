@@ -14,7 +14,7 @@ import pytest
 import vonk_control.availability_production as availability_production_module
 import vonk_control.recipe_builds as recipe_builds_module
 import vonk_control.runtime_adapters as runtime_adapters_module
-from sqlalchemy import Table, create_engine, select
+from sqlalchemy import Table, create_engine, select, update
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
     AgentClaim,
@@ -2573,3 +2573,52 @@ def test_verified_completion_does_not_let_lost_or_damaged_index_block_new_reques
         assert current.image_digest == completion.image_digest
         assert current.oci_layout_sha256 == completion.oci_layout_sha256
         assert current.image_bytes == completion.image_bytes
+
+
+def test_context_refresh_between_review_and_acceptance_requires_new_build(
+    tmp_path: Path,
+    postgres_engine,
+) -> None:
+    # Wrong implementation: recipe JSON equality admits a plan whose context
+    # was replaced by catalog sync, then reuses the old image for the new fix.
+    sessions, bundles, now, node_id, revision = setup(tmp_path, engine=postgres_engine)
+    service = RecipeBuildService(sessions, bundles=bundles)
+    old = service.plan(revision.id, node_id, now=now)
+    service.record_success(
+        old.build_id,
+        build_input_sha256=old.build_input_sha256,
+        image_digest="sha256:" + "b" * 64,
+        oci_layout_sha256="c" * 64,
+        image_bytes=500,
+        now=now,
+    )
+    reviewed = service.prepare_plan(revision.id, node_id, now=now)
+    bundle = generate_source_bundle(
+        {
+            "Dockerfile": (
+                "FROM ghcr.io/example/vllm@sha256:"
+                + "a" * 64
+                + "\nUSER 10001:10001\n# repaired adapter\n"
+            ).encode()
+        }
+    )
+    bundles.put(bundle.sha256, io.BytesIO(bundle.archive))
+    with sessions.begin() as session:
+        stored = session.get(CatalogDocumentRevision, revision.id)
+        assert stored is not None
+        session.execute(
+            update(CatalogDocumentRevision)
+            .where(CatalogDocumentRevision.id == revision.id)
+            .values(
+                projected={**stored.projected, "source_bundle_sha256": bundle.sha256}
+            )
+        )
+    with pytest.raises(RecipeBuildError), sessions.begin() as session:
+        service.persist_plan_in_session(session, reviewed, now=now)
+    resolved = service.resolve(revision.id)
+    assert not resolved.cached
+    fresh = service.plan(revision.id, node_id, now=now)
+    assert fresh.source_bundle_sha256 == bundle.sha256
+    assert fresh.build_input_sha256 != old.build_input_sha256
+    assert fresh.build_id != old.build_id
+    assert fresh.agent_payload["source_bundle_sha256"] == bundle.sha256

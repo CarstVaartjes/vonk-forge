@@ -21,6 +21,7 @@ from vonk_control.recipe_packages import (
     RecipePackageError,
 )
 from vonk_control.recipe_release import RecipeReleaseError
+from vonk_control.source_bundles import generate_source_bundle
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
 
@@ -214,7 +215,11 @@ def _canonical_package_fixture() -> tuple[bytes, dict[str, object], bytes]:
         "models/tiny-model.json": _canonical(model_document) + b"\n",
         "recipe.json": _canonical(recipe_document) + b"\n",
     }
+    source_digest = generate_source_bundle(
+        {"Dockerfile": files["build/Dockerfile"]}
+    ).sha256
     manifest = {
+        "source_bundle_sha256": source_digest,
         "schema_version": 2,
         "kind": "recipe-package",
         "package_type": "recipe",
@@ -234,10 +239,12 @@ def _canonical_package_fixture() -> tuple[bytes, dict[str, object], bytes]:
     package = _repack({"manifest.json": _canonical(manifest) + b"\n", **files})
     row = {
         "source_path": "recipes/tiny-recipe.json",
+        "source_bundle_sha256": source_digest,
         "document": recipe_document,
         "content_sha256": recipe_digest,
         "package": {
             "path": "packages/tiny-recipe.tar.gz",
+            "source_bundle_sha256": source_digest,
             "sha256": hashlib.sha256(package).hexdigest(),
             "expected_bytes": len(package),
             "recipe_content_sha256": recipe_digest,

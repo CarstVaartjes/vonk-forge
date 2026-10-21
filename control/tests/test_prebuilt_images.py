@@ -16,7 +16,7 @@ from pathlib import Path
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import LifecycleState
+from vonk_agent_protocol import LifecycleState, PrebuiltImageCode, RecipeBuildCode
 from vonk_control.auth import TokenCodec
 from vonk_control.availability_production import build_recipe_image_availability
 from vonk_control.bounded_json import require_mapping, require_sequence
@@ -46,7 +46,7 @@ from vonk_control.prebuilt_images import (
     PrebuiltImageImporter,
     write_library_image_plan,
 )
-from vonk_control.recipe_builds import RecipeBuildService
+from vonk_control.recipe_builds import RecipeBuildService, RecipeBuildUnknown
 from vonk_control.recipe_library_types import RecipeLibrarySnapshot
 from vonk_control.recipe_operations import RecipeOperationService
 from vonk_control.run_admission import RunAdmissionService
@@ -325,21 +325,19 @@ def test_catalog_prebuilt_image_is_pulled_instead_of_built_on_a_spark(
     assert resolution.cached and resolution.build_id == plan.build_id
 
 
-def test_pinned_prebuilt_content_is_reused_despite_source_key_provenance(
-    tmp_path: Path,
-) -> None:
+def test_prebuilt_image_for_old_build_inputs_is_never_reused(tmp_path: Path) -> None:
+    # A signed pin authorizes these image bytes, but a stale build key does not
+    # prove those bytes contain the repaired adapter. Missing builder capacity
+    # must wait rather than laundering the old image into the new build key.
     sessions, revision_id = _published_library(tmp_path, build_key="0" * 64)
     builds, _operations = _services(sessions, tmp_path)
-
-    planned = builds.prepare_plan(revision_id, NODE, now=NOW)
-    assert planned.policy_report is not None
-    assert planned.policy_report["prebuilt_image"] == REFERENCE
+    with pytest.raises(RecipeBuildUnknown) as refused:
+        builds.prepare_plan(revision_id, NODE, now=NOW)
+    assert refused.value.code == RecipeBuildCode.INVENTORY_MISSING
     with sessions() as session:
+        assert not tuple(session.scalars(select(RecipeBuild)))
         assert not tuple(session.scalars(select(ResourceReservation)))
         assert not tuple(session.scalars(select(AgentOperation)))
-    fresh = builds.prepare_plan(revision_id, NODE, now=NOW)
-    assert fresh.policy_report is not None
-    assert fresh.policy_report["prebuilt_image"] == REFERENCE
 
 
 def test_failed_pull_ends_and_a_fresh_request_recovers_the_pinned_image(
@@ -517,7 +515,7 @@ def test_image_preparation_pulls_the_prebuilt_image_without_a_spark_build(
     production.close()
 
 
-def test_pinned_prebuilt_preparation_does_not_allocate_spark_capacity(
+def test_prebuilt_key_mismatch_builds_fresh_instead_of_reusing_old_image(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A Spark that can build still reports the fallback; it is never silent."""
@@ -558,9 +556,13 @@ def test_pinned_prebuilt_preparation_does_not_allocate_spark_capacity(
 
     with sessions() as session:
         (build,) = session.scalars(select(RecipeBuild)).all()
-        assert build.policy_report["prebuilt_image"] == REFERENCE
-        assert not tuple(session.scalars(select(AgentOperation)))
-        assert not tuple(session.scalars(select(ResourceReservation)))
+        assert build.policy_report.get("prebuilt_image") is None
+        assert (
+            build.policy_report["prebuilt_decision"]["code"]
+            == PrebuiltImageCode.BUILD_KEY_MISMATCH
+        )
+        assert tuple(session.scalars(select(AgentOperation)))
+        assert tuple(session.scalars(select(ResourceReservation)))
 
     view = production.service.get(operation.id)
     assert view.state == LifecycleState.QUEUED

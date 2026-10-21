@@ -21,9 +21,11 @@ from ..catalog_revision_contract import PrebuiltImage, RecipeRevisionProjection
 from ..disk_reservations import outstanding_disk_reservation_bytes
 from ..models import AgentNode, CatalogDocumentRevision
 from ..prebuilt_images import (
+    PREBUILT_KEY_MISMATCH,
     PREBUILT_NOT_PINNED,
     PREBUILT_USED,
     PrebuiltDecision,
+    executable_build_key,
 )
 from ..recipe_execution_contract import (
     RecipeExecutionContractError,
@@ -144,16 +146,32 @@ def _usable_prebuilt(
     adapter: RuntimeAdapter,
     now: datetime,
 ) -> tuple[PrebuiltImage | None, PrebuiltDecision]:
-    """Use the authority-pinned content, independently of build provenance.
+    """Use a signed image only when its key binds these executable inputs.
 
     Historical pull failures belong to their request. A new request observes
-    the same pinned digest again; it never silently selects other content.
+    the same matching pinned digest again; changed source requires a new build.
     """
     image = projected.prebuilt_image
     if image is None:
         decision = PrebuiltDecision(
             PREBUILT_NOT_PINNED,
             "the signed catalog pins no prebuilt image for this revision",
+        )
+        _LOGGER.info("recipe revision %s: %s", recipe_revision_id, decision)
+        return None, decision
+    identity = derive_build_input_identity(
+        build,
+        source_bundle_sha256=source_sha256,
+        builder_binary_digest=None,
+        base_images=base_images,
+        runtime_adapter=adapter.document(),
+    )
+    expected_key = executable_build_key(identity)
+    if image.build_key != expected_key:
+        decision = PrebuiltDecision(
+            PREBUILT_KEY_MISMATCH,
+            f"published image build key {image.build_key} differs from "
+            f"current inputs {expected_key} (source {source_sha256})",
         )
         _LOGGER.info("recipe revision %s: %s", recipe_revision_id, decision)
         return None, decision
