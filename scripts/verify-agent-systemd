@@ -226,6 +226,11 @@ def _package_helper_socket(root: Path) -> tuple[dict[str, str], dict[str, str]]:
     ):
         raise RuntimeError("monitor service boundary is invalid")
     if (
+        monitor["Unit"].get("PartOf") != "vonk-forge-agent.service"
+        or "vonk-forge-monitor.service" not in agent["Unit"].get("Wants", "").split()
+    ):
+        raise RuntimeError("monitor package activation dependency is invalid")
+    if (
         helper["Service"].get("RuntimeDirectory") != "vonk-forge-package-candidates"
         or helper["Service"].get("RuntimeDirectoryMode") != "0700"
         or helper["Service"].get("RuntimeDirectoryPreserve") != "restart"

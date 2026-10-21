@@ -69,6 +69,10 @@ def _node(node: Mapping[str, object], *, detail: bool) -> None:
         if run.get("degraded_reason") is not None:
             _reasons([run["degraded_reason"]], subject=name)
     if detail:
+        runtime = _optional(node.get("agent_runtime"), "agent runtime identity")
+        _field("Agent version", runtime.get("semantic_version", UNKNOWN))
+        _field("Agent build", runtime.get("build_digest", UNKNOWN))
+        _field("Agent binary", runtime.get("binary_digest", UNKNOWN))
         _field("Lifecycle", node.get("lifecycle"))
         for key, value in _optional(node.get("labels", {}), "labels").items():
             _field("Label", f"{key}={_text(value)}")
