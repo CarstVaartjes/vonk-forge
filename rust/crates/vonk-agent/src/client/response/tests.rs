@@ -326,12 +326,16 @@ async fn transport_timeout_uses_full_jitter_with_a_cap() {
 }
 
 #[tokio::test]
-async fn host_grant_403_keeps_safe_denial_and_retry_decision_on_the_wire_path() {
+async fn host_grant_403_keeps_typed_denial_without_retrying_or_stopping_the_agent() {
     // Wrong implementation: shared HTTP classification turns a grant refusal
     // into an identity refusal before its operation owner can report it.
     let (client, server) = request_capture_client(
         403,
-        Vec::new(),
+        vec![format!(
+            "x-vonk-error-code: {}",
+            vonk_agent_protocol::generated::SecurityRefusalReason::HostHelperAuthorityDenied
+                .as_str()
+        )],
         Vec::new(),
         None,
         CONTROLLER_REQUEST_TIMEOUT,
@@ -350,12 +354,20 @@ async fn host_grant_403_keeps_safe_denial_and_retry_decision_on_the_wire_path() 
     assert_eq!(error.endpoint(), Some("/agent/host-runtime/grant"));
     assert_eq!(error.status(), Some(403));
     assert!(!error.fatal());
-    assert!(error.retryable());
+    assert!(!error.retryable());
+    assert_eq!(error.disposition(), Disposition::Security);
+    assert_eq!(
+        error.code(),
+        Some(
+            vonk_agent_protocol::generated::SecurityRefusalReason::HostHelperAuthorityDenied
+                .as_str()
+        )
+    );
     assert_eq!(
         error.decision(),
-        vonk_agent_protocol::generated::AgentClientDecision::Retry.as_str()
+        vonk_agent_protocol::generated::AgentClientDecision::Defer.as_str()
     );
-    assert!(error.to_string().contains("[retry]"));
+    assert!(error.to_string().contains("[defer]"));
 }
 
 #[tokio::test]

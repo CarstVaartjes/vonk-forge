@@ -3,6 +3,8 @@ import os
 import subprocess
 from pathlib import Path
 
+from scripts.image_policy import FLOATING_TAGS
+
 
 def _rendered() -> dict:
     root = Path(__file__).resolve().parents[3]
@@ -35,10 +37,9 @@ def test_only_caddy_publishes_ports_and_images_are_version_pinned() -> None:
         name for name, service in rendered["services"].items() if service.get("ports")
     }
     assert published == {"caddy"}
-    floating = {"latest", "main", "edge", "stable", "master", "dev"}
     assert all(
         "@sha256:" in service["image"]
-        or service["image"].rsplit(":", 1)[-1].lower() not in floating
+        or service["image"].rsplit(":", 1)[-1].lower() not in FLOATING_TAGS
         or service.get("build")
         for service in rendered["services"].values()
     )

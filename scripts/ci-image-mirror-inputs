@@ -1,0 +1,31 @@
+#!/usr/bin/env python3
+"""Emit the mirror matrix from the reviewed image lock, never from registry discovery."""
+
+from __future__ import annotations
+
+import json
+import re
+import sys
+from pathlib import Path
+
+
+def mirror_inputs(root: Path) -> list[str]:
+    lock = json.loads((root / "deploy/compose/images.lock.json").read_text())
+    images = sorted(
+        {
+            reference
+            for section in ("images", "build_bases", "ci_tools")
+            for reference in lock[section].values()
+        }
+    )
+    for image in images:
+        if re.fullmatch(r"[^\s@]+@sha256:[0-9a-f]{64}", image) is None:
+            raise ValueError(f"mirror requires a reviewed immutable image: {image}")
+    return images
+
+
+if __name__ == "__main__":
+    root = (
+        Path(sys.argv[1]) if len(sys.argv) == 2 else Path(__file__).resolve().parents[1]
+    )
+    print(json.dumps(mirror_inputs(root), separators=(",", ":")))

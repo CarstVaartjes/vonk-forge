@@ -228,7 +228,9 @@ pub(crate) fn controller_error(
     };
     error.decision = if error.retryable() {
         vonk_agent_protocol::generated::AgentClientDecision::Retry.as_str()
-    } else if super::http_status_disposition(status_code) == super::Disposition::Security {
+    } else if super::http_status_disposition(status_code) == super::Disposition::Security
+        && !error.host_runtime_grant_denied()
+    {
         vonk_agent_protocol::generated::AgentClientDecision::Exit.as_str()
     } else {
         vonk_agent_protocol::generated::AgentClientDecision::Defer.as_str()

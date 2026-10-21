@@ -35,6 +35,7 @@ INPUTS = (
     "deploy/compose/tailscale/compose.yaml",
     "deploy/compose/hermes-agent/compose.yaml",
     "scripts/render-dev-compose",
+    "scripts/image_policy.py",
 )
 
 EXCLUDED_DIRECTORIES = frozenset(

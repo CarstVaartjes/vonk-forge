@@ -7,7 +7,7 @@ Do not add a whole-tree scan to SCOPED: select its file or node in GUARDS.
 """
 
 GUARDS: tuple[str, ...] = (
-    "tests/test_protocol_wheel_identity.py",
+    "tests/test_single_source_values.py",
     "tests/test_request_path_scan_guard.py",
     "tests/test_progress_attempt_guard.py",
     "tests/test_agent_observation_coverage.py",
@@ -47,6 +47,10 @@ GUARDS: tuple[str, ...] = (
 )
 
 SCOPED: tuple[tuple[str, str], ...] = (
+    (
+        "tests/test_protocol_wheel_identity.py",
+        "Metadata-derived protocol wheel CLI behavior from outside the repository; literal ownership is guarded by test_single_source_values.",
+    ),
     (
         "control/tests/test_artifact_reference_busy_recovery.py",
         "Artifact ownership conflict classification, real PostgreSQL collection/download race and bounded restart recovery.",

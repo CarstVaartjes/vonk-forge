@@ -1,0 +1,11 @@
+[[values]]
+semantic_id = "agent_protocol.wheel"
+owner = "scripts/protocol_wheel.py"
+selector = "protocol_wheel_name"
+family = "protocol_wheel"
+projections = ["control/uv.lock", "agent_protocol/uv.lock"]
+
+[[values.exceptions]]
+file = "tests/test_single_source_values.py"
+function = "test_guard_rejects_old_and_future_wheel_filenames"
+reason = "Adversarial stale and future filenames exercise the complete wheel family."

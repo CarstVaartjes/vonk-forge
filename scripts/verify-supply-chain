@@ -12,6 +12,7 @@ import sys
 import tomllib
 from pathlib import Path
 
+from image_policy import FLOATING_TAGS
 from protocol_wheel import protocol_wheel_name
 
 # Images are pinned by explicit version tag, not by digest. A tag with a
@@ -24,7 +25,6 @@ from protocol_wheel import protocol_wheel_name
 # present and must not be a floating channel name. The path excludes `@`, so a
 # digest reference fails this check.
 VERSIONED_IMAGE = re.compile(r"^[^\s@]+:[^\s@]+$")
-FLOATING_TAGS = frozenset({"latest", "main", "edge", "stable", "master", "dev"})
 PUBLIC_CONTRACT_LOCK = "control/packaging/public-contracts.lock"
 PUBLIC_CONTRACT_WHEEL = (
     "inventory/wheels/vonk_forge_public_contracts-2.3.0-py3-none-any.whl"

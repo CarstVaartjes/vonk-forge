@@ -1,0 +1,10 @@
+[[values]]
+semantic_id = "images.floating_tags"
+owner = "scripts/image_policy.py"
+selector = "FLOATING_TAGS"
+family = "floating_tags"
+
+[[values.exceptions]]
+file = "tests/test_single_source_values.py"
+function = "test_guard_rejects_copied_policy_in_executable_surfaces"
+reason = "Adversarial copied policy in executable surfaces must be rejected."

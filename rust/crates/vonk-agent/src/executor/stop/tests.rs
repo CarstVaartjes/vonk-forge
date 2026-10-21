@@ -107,7 +107,10 @@ async fn damaged_history_never_prevents_exact_stop_from_reaching_current_authori
         let result = executor
             .execute_stop(&claim, cancellation.clone(), request.clone())
             .await;
-        assert!(matches!(result, ExecutionResult::Unknown(_)));
+        assert_eq!(
+            result.failure().unwrap().failure_kind,
+            Some(AgentFailureKind::InvalidAuthority)
+        );
     }
     assert_eq!(
         peer.join().unwrap(),
