@@ -30,6 +30,7 @@ from ..model_cache_contract import (
 )
 from ..model_cache_progress import progress_document
 from ..models import ModelCacheOperation
+from ..profile_read_observation import observe_storage
 from ..settings import DATABASE_WAIT_BUDGETS
 from ..strict_json import serialize_json_value
 from .artifacts import (
@@ -344,6 +345,7 @@ class DownloadAdmissionMixin:
             )
         return manifest
 
+    @observe_storage
     def download_preview(
         self,
         *,

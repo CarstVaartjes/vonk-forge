@@ -113,11 +113,13 @@ class FleetProfileService:
         adopted_assignments = {
             identifier for effect in adopted for identifier in effect.assignment_ids
         }
+        assignment_rows = cls._assignment_rows(session, resolved_assignments)
         states = {
             assignment.id: cls._assignment_state(
                 session,
                 assignment,
                 expected_image=(expected_images or {}).get(assignment.id),
+                rows=assignment_rows,
             )
             for assignment in resolved_assignments
         }

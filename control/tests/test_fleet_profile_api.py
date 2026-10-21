@@ -729,7 +729,7 @@ _CONFLICT_ROUTES = {
         {"name": "Probe", "expected_revision": 0},
     ),
     ("POST", "/api/profile/{number}/preview"): (
-        "get_number",
+        "definition_number",
         "/api/profile/1/preview",
         None,
     ),
