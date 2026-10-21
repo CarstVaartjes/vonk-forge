@@ -12,6 +12,9 @@ struct IntentRunner {
 }
 impl CommandRunner for IntentRunner {
     fn run(&self, executable: &Path, args: &[String]) -> Result<CommandOutput, String> {
+        if executable == Path::new("/usr/bin/nvidia-smi") {
+            return Err("injected GPU clock driver outage".to_owned());
+        }
         self.calls.lock().unwrap().push(args.to_vec());
         let image = args.first().map(String::as_str) == Some("image");
         let missing = args.get(1).map(String::as_str) == Some("inspect") && !image;
@@ -99,6 +102,10 @@ fn signed_cleanup_fences_never_executed_start_and_newer_intent_launches_after_re
     fs::create_dir_all(&roots.data).unwrap();
     fs::create_dir_all(&roots.runtime_requests).unwrap();
     let mut plan = recipe_start_plan_for_authority(1);
+    plan.gpu_clock = Some(vonk_agent_protocol::generated::GpuClockIntent {
+        generation: 1,
+        range: vonk_agent_protocol::gpu_clock::default_range(),
+    });
     plan.compiled_execution_plan.runtime_image.oci_layout_sha256 = plan
         .compiled_execution_plan
         .runtime_image
@@ -234,6 +241,27 @@ fn signed_cleanup_fences_never_executed_start_and_newer_intent_launches_after_re
             .filter(|args| args.first().map(String::as_str) == Some("run"))
             .count(),
         1
+    );
+    let clock: vonk_agent_protocol::generated::GpuClockCheckpoint = parse_strict(
+        &fs::read(
+            roots
+                .data
+                .join("gpu-clock")
+                .join(vonk_agent_protocol::gpu_clock::CHECKPOINT_FILE),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        clock.state,
+        vonk_agent_protocol::generated::GpuClockApplyState::Waiting
+    );
+    assert!(clock.next_attempt_at.is_some());
+    assert!(
+        clock
+            .detail
+            .unwrap()
+            .contains("supported clocks unavailable")
     );
     // A damaged fence requires a new authenticated current-intent challenge,
     // and never revives the outstanding old signed grant.

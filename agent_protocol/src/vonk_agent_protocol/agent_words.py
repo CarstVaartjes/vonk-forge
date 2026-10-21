@@ -156,6 +156,7 @@ class FailureStage(WireEnum):
 class HostHelperResponseStatus(WireEnum):
     """The verdict a privileged-helper reply carries."""
 
+    GPU_CLOCK_RECONCILED = "gpu-clock-reconciled"
     REJECTED = "rejected"
     PACKAGE_INSTALLED = "package-installed"
     PACKAGE_ACTIVATION_CONFIRMED = "package-activation-confirmed"
@@ -356,3 +357,15 @@ class RecipeRunDispositionValue(WireEnum):
     """The header verdict for a run the Controller never owned."""
 
     UNOWNED = "unowned"
+
+
+class RunSwitchReasonScopeName(WireEnum):
+    MODEL = "model"
+    RECIPE = "recipe"
+    MAPPING = "mapping"
+    GROUP = "group"
+    NODE = "node"
+    ARTIFACT = "artifact"
+    FRESHNESS = "freshness"
+    CONFLICT = "conflict"
+    OPERATION = "operation"

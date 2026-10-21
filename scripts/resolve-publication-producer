@@ -29,6 +29,7 @@ SHA = re.compile(r"[a-f0-9]{40}\Z")
 PAGE_SIZE = 100
 # Every producer is rebuilt when the release graph or this reuse rule changes.
 ORCHESTRATION = (RELEASE_WORKFLOW, "scripts/resolve-publication-producer")
+PROTOCOL_WHEEL_INPUTS = ("scripts/protocol-wheel-name", "scripts/protocol_wheel.py")
 
 
 class ProducerName(StrEnum):
@@ -104,6 +105,7 @@ PRODUCERS = {
             "rust/crates/vonk-spark-setup/**",
             "rust/crates/vonk-wire-codegen/**",
             "scripts/build-control-wheel",
+            *PROTOCOL_WHEEL_INPUTS,
             "scripts/build-recipe-library",
             "scripts/check_environment.py",
             "scripts/ci-apt-install",
@@ -165,6 +167,7 @@ PRODUCERS = {
             "schemas/install-release-manifest.schema.json",
             "scripts/accept-development-image-archive",
             "scripts/build-control-wheel",
+            *PROTOCOL_WHEEL_INPUTS,
             "scripts/check_environment.py",
             "scripts/ci-apt-install",
             "scripts/dev-image-acceptance-receipt",
@@ -204,6 +207,7 @@ PRODUCERS = {
             "control/pyproject.toml",
             "rust-toolchain.toml",
             "scripts/build-control-wheel",
+            *PROTOCOL_WHEEL_INPUTS,
             "scripts/retry-dependency-fetch",
             "scripts/retry_dependency_fetch.py",
             "agent_protocol/**",

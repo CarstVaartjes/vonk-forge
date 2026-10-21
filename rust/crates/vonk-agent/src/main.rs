@@ -653,6 +653,10 @@ async fn run_inventory_lane(config: AgentConfig, client: AgentHttpClient, verdic
                 let installations = inventory.installations.clone().unwrap_or_default();
                 let runs = inventory.runs.clone().unwrap_or_default();
                 let answer = client.report_inventory_request(inventory).await?;
+                if let Some(grant) = answer.as_ref().and_then(|answer| answer.gpu_clock_grant.clone()) {
+                    let applied = tokio::task::spawn_blocking(move || vonk_agent::host_runtime::apply_gpu_clock_grant(&grant)).await;
+                    if !matches!(applied, Ok(Ok(()))) { eprintln!("vonk-agent: GPU clock grant not applied; next inventory retries: {applied:?}"); }
+                }
                 verdict.record(answer, &installations, &runs);
                 Ok(())
             }

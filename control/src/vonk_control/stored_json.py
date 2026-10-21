@@ -202,8 +202,8 @@ class ContractJSON[T](TypeDecorator[T | Residue]):
     impl = JSON
     cache_ok = True
 
-    def __init__(self, table: str, column: str) -> None:
-        super().__init__()
+    def __init__(self, table: str, column: str, *, none_as_null: bool = False) -> None:
+        super().__init__(none_as_null=none_as_null)
         self.table = table
         self.column = column
 

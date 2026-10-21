@@ -357,6 +357,7 @@ pub(in crate::operations) fn recipe_start_plan_for_authority(
 ) -> RecipeStartPayload {
     let compiled = compiled_plan_for_runtime_authority();
     RecipeStartPayload {
+        gpu_clock: None,
         compiled_execution_plan: compiled,
         installation_id: runtime_effect_identity(run_generation).installation_id,
         mapping_id: uuid::Uuid::parse_str("70000000-0000-4000-8000-000000000007").unwrap(),

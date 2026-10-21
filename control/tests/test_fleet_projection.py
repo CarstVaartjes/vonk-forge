@@ -554,7 +554,12 @@ def test_read_uses_postgresql_registration_latest_rows_and_a_bounded_query_set()
             },
         ],
     }
-    assert snapshot == FleetSnapshot.model_validate_json(json.dumps(expected_document))
+    from vonk_agent_protocol.gpu_clock import default_gpu_clock
+
+    expected = FleetSnapshot.model_validate_json(json.dumps(expected_document))
+    for node in expected.nodes:
+        node.gpu_clock_desired = default_gpu_clock()
+    assert snapshot == expected
     assert EXTRA_NODE not in {node.id for node in snapshot.nodes}
     # A fresh read consumes the same committed observations without mutating
     # registrations, reservations or their reported capacity.

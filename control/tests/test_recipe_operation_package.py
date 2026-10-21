@@ -11,6 +11,7 @@ from vonk_agent_protocol import (
     UnknownOutcomeError,
     WaitReason,
 )
+from vonk_agent_protocol.gpu_clock import GpuClockRange
 from vonk_control.recipe_operations import RecipeOperationService
 
 
@@ -41,6 +42,7 @@ from vonk_control.recipe_operations import RecipeOperationService
                 "request_id": "request",
                 "workload_intent_ordinal": None,
                 "profile_application_id": None,
+                "gpu_clock": GpuClockRange(min_mhz=300, max_mhz=1800),
             },
         ),
         (
@@ -114,6 +116,7 @@ def test_request_reobserves_identical_input_with_a_finite_budget(
                 "request_id": "request",
                 "workload_intent_ordinal": None,
                 "profile_application_id": None,
+                "gpu_clock": GpuClockRange(min_mhz=300, max_mhz=1800),
             },
         ),
         (

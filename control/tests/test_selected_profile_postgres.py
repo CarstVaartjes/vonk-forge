@@ -783,3 +783,40 @@ def test_retry_uses_selected_snapshot_after_saved_profile_edit(
     assert selected["generation"] == 1
     assert selected["application_id"] == retried.id
     assert service.retry_eligible(accepted.id) is False
+
+
+def test_gpu_clock_uses_the_selected_snapshot_after_saved_edit_and_controller_restart(
+    postgres_engine: Engine,
+) -> None:
+    """Catches authoring changing a live cap, dropping assignment JSON, or idle inheritance."""
+    from vonk_agent_protocol.gpu_clock import GpuClockRange, default_gpu_clock
+    from vonk_control.gpu_clock import selected_gpu_clock
+
+    Base.metadata.create_all(postgres_engine)
+    sessions = sessionmaker(postgres_engine, expire_on_commit=False)
+    _recipe_id, revision_id = _seed(sessions)
+    service = _service(sessions)
+    desired = GpuClockRange(min_mhz=300, max_mhz=1800)
+    definition = _input(revision_id)
+    definition.assignments[0].gpu_clock = desired
+    profile = service.create(definition, actor="admin")
+    preview = service.preview(profile.id)
+    assert preview.effects.gpu_clocks is not None
+    assert preview.effects.gpu_clocks[0].desired == desired
+    assert preview.effects.gpu_clocks[0].previous_desired == default_gpu_clock()
+    accepted = service.apply(profile.id, request_key=_uuid(992), actor="admin")
+    with sessions() as session:
+        selected = selected_gpu_clock(session, _node_id(1))
+        assert selected.range == desired
+        assert selected_gpu_clock(session, _node_id(2)).range == default_gpu_clock()
+    # Saving a new setting remains a draft until that profile is loaded.
+    definition.assignments[0].gpu_clock = GpuClockRange(min_mhz=300, max_mhz=2000)
+    definition.expected_revision = profile.revision
+    service.update(profile.id, definition, actor="admin")
+    restarted_engine = create_engine(postgres_engine.url)
+    try:
+        with Session(restarted_engine) as session:
+            assert selected_gpu_clock(session, _node_id(1)) == selected
+        assert service.application(accepted.id).progress.intended_profile is not None
+    finally:
+        restarted_engine.dispose()

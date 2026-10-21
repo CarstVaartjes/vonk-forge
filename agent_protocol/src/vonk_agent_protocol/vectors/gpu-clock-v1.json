@@ -1,0 +1,49 @@
+{
+  "valid": [
+    {
+      "min_mhz": 300,
+      "max_mhz": 1800
+    },
+    {
+      "min_mhz": 300,
+      "max_mhz": 2200
+    },
+    {
+      "min_mhz": 300,
+      "max_mhz": 2300
+    }
+  ],
+  "invalid": [
+    {
+      "min_mhz": 0,
+      "max_mhz": 1800
+    },
+    {
+      "min_mhz": 1801,
+      "max_mhz": 1800
+    },
+    {
+      "min_mhz": 300,
+      "max_mhz": 2301
+    },
+    {
+      "min_mhz": true,
+      "max_mhz": 1800
+    },
+    {
+      "min_mhz": "300;touch /tmp/no",
+      "max_mhz": 1800
+    },
+    {
+      "min_mhz": 300,
+      "max_mhz": "1800,2301"
+    },
+    {
+      "min_mhz": 300,
+      "max_mhz": 1800,
+      "arguments": [
+        "-rgc"
+      ]
+    }
+  ]
+}

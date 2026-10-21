@@ -6,6 +6,7 @@ license.workspace = true
 rust-version.workspace = true
 
 [build-dependencies]
+serde_json.workspace = true
 vonk-wire-codegen = { path = "../vonk-wire-codegen" }
 
 [dependencies]

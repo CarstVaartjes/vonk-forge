@@ -10,6 +10,7 @@ from pydantic import (
     StringConstraints,
     model_validator,
 )
+from vonk_agent_protocol.gpu_clock import GpuClockRange
 
 from ..preparation_contract import RolloutPreparation
 from ..run_switch_identity_contract import UuidId
@@ -125,6 +126,7 @@ class RunSwitchAssessment(StrictModel):
 
 
 class RunSwitchPlan(RunSwitchAssessment):
+    gpu_clock: GpuClockRange | None = None
     schema_version: Literal[2] = 2
     generated_at: datetime
     action: RunSwitchAction

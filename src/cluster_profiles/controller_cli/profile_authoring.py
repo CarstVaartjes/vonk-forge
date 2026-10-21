@@ -162,8 +162,25 @@ def _profile_authoring(
             and not args.label
             and not args.remove_label
             and not args.option
+            and args.gpu_clock is None
+            and not args.clear_gpu_clock
         ):
             raise ValueError("profile configure requires at least one change")
+        if args.gpu_clock is not None or args.clear_gpu_clock:
+            target = _configure_option_target(assignments, args.assignment)
+            if args.clear_gpu_clock:
+                target.pop("gpu_clock", None)
+            else:
+                assert args.gpu_clock is not None
+                parts = args.gpu_clock.split(",")
+                if len(parts) != 2 or not all(
+                    part.isascii() and part.isdigit() for part in parts
+                ):
+                    raise ValueError("--gpu-clock requires MIN,MAX in whole MHz")
+                target["gpu_clock"] = {
+                    "min_mhz": int(parts[0]),
+                    "max_mhz": int(parts[1]),
+                }
         if args.option:
             target = _configure_option_target(assignments, args.assignment)
             _apply_option_choices(client, target, args)

@@ -73,7 +73,13 @@ impl<R: CommandRunner> OperationExecutor<R> {
                     logical_run_id,
                     &plan_digest,
                     &image_config_id,
-                    &binding,
+                    &RuntimeRequestGrantBinding {
+                        gpu_clock: request
+                            .start_plan
+                            .as_ref()
+                            .and_then(|plan| plan.gpu_clock.as_ref()),
+                        ..binding
+                    },
                 )
             }
             HostRuntimeAction::Stop => {

@@ -93,11 +93,9 @@ def _server_process(
                     Path(__file__).resolve().parents[1],
                     Path(__file__).resolve().parents[1] / "src",
                     Path(__file__).resolve().parents[2] / "src",
-                    Path("/opt/vonk-forge-recipes/contracts/src"),
                 )
             ),
             "VONK_TEST_DATABASE_URL": database_url,
-            "VONK_RECIPE_LIBRARY_ROOT": "/opt/vonk-forge-recipes",
         },
     )
     process = subprocess.Popen(

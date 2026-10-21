@@ -16,6 +16,11 @@ from vonk_agent_protocol import (
     RunDegradedReason,
 )
 from vonk_agent_protocol.failure_evidence import ModelStoreLayoutFault
+from vonk_agent_protocol.gpu_clock import (
+    GpuClockObservation,
+    GpuClockPolicy,
+    GpuClockRange,
+)
 from vonk_agent_protocol.inventory import HostSettings, NetworkInterface
 from vonk_agent_protocol.telemetry import GpuUnavailableReason
 from vonk_forge_contracts import RecipeDefinition, document_sha256, read_recipe
@@ -393,6 +398,7 @@ class TelemetryPoint(StrictModel):
     )
     gpu_unavailable_reason: GpuUnavailableReason | None = None
     gpu_temperature_c: int | None = Field(default=None, ge=0, le=150)
+    gpu_clock: GpuClockObservation | None = None
     cpu_frequency_avg_mhz: int | None = Field(default=None, ge=1, le=20_000)
     cpu_frequency_min_mhz: int | None = Field(default=None, ge=1, le=20_000)
     cpu_frequency_max_mhz: int | None = Field(default=None, ge=1, le=20_000)
@@ -544,6 +550,8 @@ class CapacityReservations(StrictModel):
 
 
 class FleetNode(StrictModel):
+    gpu_clock_desired: GpuClockRange | None = None
+    gpu_clock_policy: GpuClockPolicy = GpuClockPolicy()
     id: NodeId
     display_name: Text200
     hostname: Annotated[str, StringConstraints(max_length=255)]
@@ -593,6 +601,7 @@ def telemetry_point(value: TelemetrySampleView) -> TelemetryPoint:
         gpu_memory_free_bytes=value.gpu_memory_free_bytes,
         gpu_unavailable_reason=value.gpu_unavailable_reason,
         gpu_temperature_c=value.gpu_temperature_c,
+        gpu_clock=value.gpu_clock,
         cpu_frequency_avg_mhz=value.cpu_frequency_avg_mhz,
         cpu_frequency_min_mhz=value.cpu_frequency_min_mhz,
         cpu_frequency_max_mhz=value.cpu_frequency_max_mhz,

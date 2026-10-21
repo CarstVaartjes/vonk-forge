@@ -285,12 +285,9 @@ def image_job_inputs() -> set[str]:
         path = path.rstrip("/")
         return f"{path}/**" if (ROOT / path).is_dir() else path
 
-    wheel = re.search(
-        r"^wheel_name=(\S+)$",
-        (ROOT / "scripts/build-control-wheel").read_text(),
-        re.MULTILINE,
-    )
-    assert wheel
+    wheel = module(
+        "protocol_wheel_inputs", "scripts/protocol_wheel.py"
+    ).protocol_wheel_name(ROOT)
     inputs: set[str] = set()
     # The Controller images read their COPY sources from the repository root.
     dockerfile = (ROOT / "control/Dockerfile").read_text()
@@ -301,7 +298,7 @@ def image_job_inputs() -> set[str]:
             continue
         for source in [word for word in words if not word.startswith("--")][:-1]:
             # The job builds the protocol wheel from agent_protocol sources.
-            if source != f"inventory/wheels/{wheel[1]}":
+            if not fnmatch.fnmatchcase(f"inventory/wheels/{wheel}", source):
                 assert (ROOT / source).exists(), source
                 inputs.add(pattern(source))
     # Hermes and LiteLLM build from isolated contexts under their policy.
@@ -440,6 +437,11 @@ def named_inputs(path: str, *, text: str | None = None) -> set[str]:
             name = "/".join(parts[start:])
             if (len(parts) > 1 or "." in name) and (ROOT / name).is_file():
                 names.add(name)
+    # Shell tools also invoke siblings relative to their own script directory.
+    for sibling in re.findall(r"\$\(dirname [^\n]*?\)/([\w.-]+)", text):
+        candidate = source.parent / sibling
+        if candidate.is_file():
+            names.add(candidate.relative_to(ROOT).as_posix())
     for module, members in IMPORT.findall(text):
         stem = module.replace(".", "/")
         for base in (source.parent, ROOT):

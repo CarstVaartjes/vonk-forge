@@ -1,19 +1,4 @@
-//! Spark host settings.
-//!
-//! A Spark runs headless: a desktop session holds about 1 GB of the memory
-//! recipe envelopes count on. Its GPU clock is capped (the packaged one-shot
-//! `vonk-forge-gpu-clock-cap.service` runs `nvidia-smi -lgc 300,2200`) so
-//! sustained load cannot hard power it off. At start, and at most hourly on a
-//! helper request, the helper reads the default boot target, whether the
-//! display manager runs and whether the clock cap unit is active this boot,
-//! and corrects only what drifted with one exact command each:
-//! `systemctl set-default multi-user.target`,
-//! `systemctl stop display-manager.service` and
-//! `systemctl start vonk-forge-gpu-clock-cap.service`. None touches a
-//! container; the lock cannot be read back, so the unit state is the evidence.
-//! Every correction is journaled with the state before and after it; a
-//! setting that cannot be read is left alone until the next pass.
-
+//! Headless host enforcement and the active durable GPU clock intent.
 use super::*;
 
 /// How often the helper checks the host settings.
@@ -25,13 +10,9 @@ const GET_DEFAULT: &str = "get-default";
 const SET_HEADLESS: &str = "set-default multi-user.target";
 const IS_DISPLAY_MANAGER_ACTIVE: &str = "is-active display-manager.service";
 const STOP_DISPLAY_MANAGER: &str = "stop display-manager.service";
-const IS_CLOCK_CAP_ACTIVE: &str = "is-active vonk-forge-gpu-clock-cap.service";
-const START_CLOCK_CAP: &str = "start vonk-forge-gpu-clock-cap.service";
 const QUERY_TIMEOUT: Duration = Duration::from_secs(10);
 /// A stop waits for the desktop session to end.
 const STOP_TIMEOUT: Duration = Duration::from_secs(90);
-/// A start waits for the one-shot `nvidia-smi` to finish.
-const START_TIMEOUT: Duration = Duration::from_secs(60);
 
 impl<R: CommandRunner> OperationExecutor<R> {
     /// One pass; what it cannot correct now waits for the next one.
@@ -65,21 +46,10 @@ impl<R: CommandRunner> OperationExecutor<R> {
                 );
             }
         }
-        match self.unit_state(IS_CLOCK_CAP_ACTIVE) {
-            None => eprintln!(
-                "vonk-agent-helper: host settings: GPU clock cap state unreadable; the next pass tries again"
-            ),
-            Some((true, _)) => {}
-            Some((false, state)) => {
-                let cause = self.correct(START_CLOCK_CAP, START_TIMEOUT);
-                let after = self
-                    .unit_state(IS_CLOCK_CAP_ACTIVE)
-                    .map_or_else(|| "unreadable".to_owned(), |(_, after)| after);
-                eprintln!(
-                    "vonk-agent-helper: host settings: GPU clock cap {state} -> {after}{cause}"
-                );
-            }
-        }
+        self.reconcile_gpu_clock(None, true)
+            .unwrap_or_else(|error| {
+                eprintln!("vonk-agent-helper: GPU clock settings unavailable: {error}");
+            });
     }
 
     /// The default boot target, when systemd names one.

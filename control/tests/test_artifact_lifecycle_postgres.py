@@ -7,10 +7,13 @@ from threading import Event
 import pytest
 from sqlalchemy import Engine, select, text
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_agent_protocol import ArtifactLifecycleCode
 from vonk_control.artifact_lifecycle import (
     ArtifactIdentity,
+    ArtifactReferenceUnsettled,
     check_removal_fence_nowait,
     clear_removal,
+    lock_reference_gates,
     reference_gate_is_open_nowait,
     require_reference_open,
     reserve_removal,
@@ -28,6 +31,48 @@ def artifact_engine(postgres_engine: Engine) -> Engine:
 @pytest.fixture
 def artifact_sessions(artifact_engine: Engine) -> sessionmaker[Session]:
     return sessionmaker(artifact_engine, expire_on_commit=False)
+
+
+@pytest.mark.parametrize("existing_gate", [False, True])
+def test_concurrent_reference_snapshots_still_exclude_deletion(
+    artifact_sessions: sessionmaker[Session], existing_gate: bool
+) -> None:
+    """Catches removing admission locks to make reads pass: even an absent
+    fence row must remain protected until the new reference commits.
+    """
+    identity = ArtifactIdentity("runtime-image", "a" * 64)
+    now = datetime.now(UTC)
+    if existing_gate:
+        with artifact_sessions.begin() as session:
+            lock_reference_gates(session, (identity,), now=now)
+    with artifact_sessions.begin() as first:
+        require_reference_open(first, (identity,), now=now)
+        with artifact_sessions.begin() as second:
+            require_reference_open(second, (identity,), now=now)
+        with artifact_sessions.begin() as remover:
+            with pytest.raises(ArtifactReferenceUnsettled) as busy:
+                reserve_removal(
+                    remover,
+                    (identity,),
+                    owner_kind="recipe-image-job",
+                    owner_id="8f19e31a-7155-45da-9f1b-c7da400180b7",
+                    fence="ac30cde4-34ee-4b4a-9ad0-e9da0ba2dffd",
+                    now=now,
+                )
+            assert busy.value.code == ArtifactLifecycleCode.REFERENCE_BUSY
+    with artifact_sessions.begin() as remover:
+        reserve_removal(
+            remover,
+            (identity,),
+            owner_kind="recipe-image-job",
+            owner_id="8f19e31a-7155-45da-9f1b-c7da400180b7",
+            fence="ac30cde4-34ee-4b4a-9ad0-e9da0ba2dffd",
+            now=now,
+        )
+    with artifact_sessions.begin() as reader:
+        with pytest.raises(ArtifactReferenceUnsettled) as closed:
+            require_reference_open(reader, (identity,), now=now)
+        assert closed.value.code == ArtifactLifecycleCode.DELETION_IN_PROGRESS
 
 
 def test_reference_admission_cannot_cross_uncommitted_deletion_reservation(
@@ -87,6 +132,8 @@ def test_reused_session_refreshes_committed_deletion_fence(
     reused = artifact_sessions()
     try:
         with reused.begin():
+            # Only deletion materializes fence rows; admissions read snapshots.
+            lock_reference_gates(reused, (identity,), now=datetime.now(UTC))
             require_reference_open(reused, (identity,), now=datetime.now(UTC))
             preloaded = reused.get(
                 ArtifactLifecycleGate,

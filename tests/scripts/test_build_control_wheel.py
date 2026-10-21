@@ -8,9 +8,11 @@ from pathlib import Path
 
 import pytest
 
+from scripts.protocol_wheel import protocol_wheel_name
+
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts/build-control-wheel"
-WHEEL_NAME = "vonk_agent_protocol-4.1.0-py3-none-any.whl"
+WHEEL_NAME = protocol_wheel_name(ROOT)
 # A command that runs in the control environment: uv against the control
 # project, or scripts/test, which always does.
 CONTROL_UV_COMMAND = re.compile(
@@ -28,6 +30,9 @@ def _repository(tmp_path: Path, *, wheel_bytes: bytes) -> tuple[Path, Path]:
     root = tmp_path / "repository"
     (root / "control").mkdir(parents=True)
     (root / "agent_protocol").mkdir()
+    (root / "agent_protocol/pyproject.toml").write_bytes(
+        (ROOT / "agent_protocol/pyproject.toml").read_bytes()
+    )
     wheel_path = root / "inventory/wheels" / WHEEL_NAME
     wheel_path.parent.mkdir(parents=True)
     wheel_path.write_bytes(wheel_bytes)
@@ -36,7 +41,7 @@ def _repository(tmp_path: Path, *, wheel_bytes: bytes) -> tuple[Path, Path]:
         "[[package]]\n"
         'name = "vonk-agent-protocol"\n'
         "wheels = [\n"
-        f'  {{ filename = "{WHEEL_NAME}", hash = "sha256:{expected_hash}" }},\n'
+        f'  {{ path = "{WHEEL_NAME}", hash = "sha256:{expected_hash}" }},\n'
         "]\n",
         encoding="utf-8",
     )
@@ -170,10 +175,7 @@ def test_build_script_verifies_the_frozen_wheel_digest(tmp_path: Path) -> None:
 
     assert result.returncode == 0, result.stderr
     assert (root / "inventory/wheels" / WHEEL_NAME).read_bytes() == expected_bytes
-    assert (
-        "Verified vonk_agent_protocol-4.1.0-py3-none-any.whl against control/uv.lock"
-        in result.stdout
-    )
+    assert f"Verified {WHEEL_NAME} against control/uv.lock" in result.stdout
 
 
 def test_build_script_refuses_a_wheel_with_a_stale_lock_hash(tmp_path: Path) -> None:
@@ -182,7 +184,7 @@ def test_build_script_refuses_a_wheel_with_a_stale_lock_hash(tmp_path: Path) -> 
         "[[package]]\n"
         'name = "vonk-agent-protocol"\n'
         "wheels = [\n"
-        f'  {{ filename = "{WHEEL_NAME}", hash = "sha256:{"0" * 64}" }},\n'
+        f'  {{ path = "{WHEEL_NAME}", hash = "sha256:{"0" * 64}" }},\n'
         "]\n",
         encoding="utf-8",
     )

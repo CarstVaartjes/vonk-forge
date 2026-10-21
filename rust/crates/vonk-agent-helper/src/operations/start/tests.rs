@@ -541,6 +541,7 @@ fn a_granted_inspection_is_bound_to_the_generation_its_grant_names() {
             .execute_runtime_request(
                 &ContainerRuntimeAction::RunInspect,
                 RuntimeRequestGrantBinding {
+                    gpu_clock: None,
                     fence: &fence,
                     installation_intent_nonce: None,
                     installation_intent_ordinal: None,

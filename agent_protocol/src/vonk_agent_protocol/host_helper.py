@@ -18,6 +18,7 @@ from .contracts import (
     AgentProtocolError,
     canonical_message,
 )
+from .gpu_clock import GpuClockIntent
 from .package_upgrade import PackageRollbackAuthority
 from .wire_model import MAX_RUN_GENERATION, WireModel
 
@@ -188,6 +189,7 @@ class ContainerRuntimeAction(StrEnum):
 
 
 class HostOperationKind(StrEnum):
+    APPLY_GPU_CLOCK = "apply-gpu-clock"
     INSTALL_VONK_DEB = "install-vonk-deb"
     CONFIRM_PACKAGE_ACTIVATION = "confirm-package-activation"
     EXECUTE_CONTAINER_RUNTIME_REQUEST = "execute-container-runtime-request"
@@ -196,6 +198,11 @@ class HostOperationKind(StrEnum):
 class _HostOperation(WireModel):
     def to_mapping(self) -> dict[str, object]:
         return self.model_dump(mode="json")
+
+
+class ApplyGpuClockOperation(_HostOperation):
+    type: Literal[HostOperationKind.APPLY_GPU_CLOCK] = HostOperationKind.APPLY_GPU_CLOCK
+    desired: GpuClockIntent
 
 
 class InstallVonkDebOperation(_HostOperation):
@@ -303,7 +310,8 @@ class ExecuteContainerRuntimeRequestOperation(_HostOperation):
 
 
 type HostOperation = Annotated[
-    InstallVonkDebOperation
+    ApplyGpuClockOperation
+    | InstallVonkDebOperation
     | ConfirmPackageActivationOperation
     | ExecuteContainerRuntimeRequestOperation,
     Field(discriminator="type"),
