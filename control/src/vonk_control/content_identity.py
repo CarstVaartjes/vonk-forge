@@ -209,3 +209,12 @@ def recipe_content_membership(column, digests: Collection[str]):
             CatalogDocumentRevision.content_digest.in_(digests)
         )
     )
+
+
+def catalog_selector_membership(
+    publisher, slug, selectors: Collection[tuple[str, str]]
+):
+    """Look up exact logical catalog choices, without asserting artifact reuse."""
+    from sqlalchemy import tuple_
+
+    return tuple_(publisher, slug).in_(selectors)

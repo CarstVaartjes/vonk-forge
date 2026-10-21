@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 from threading import Event
 
 import pytest
-from sqlalchemy import Engine, select, text
+from sqlalchemy import Engine, event, select, text
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import ArtifactLifecycleCode
 from vonk_control.artifact_lifecycle import (
@@ -34,21 +34,37 @@ def artifact_sessions(artifact_engine: Engine) -> sessionmaker[Session]:
 
 
 @pytest.mark.parametrize("existing_gate", [False, True])
+@pytest.mark.parametrize("object_count", [1, 128])
 def test_concurrent_reference_snapshots_still_exclude_deletion(
-    artifact_sessions: sessionmaker[Session], existing_gate: bool
+    artifact_sessions: sessionmaker[Session], existing_gate: bool, object_count: int
 ) -> None:
     """Catches removing admission locks to make reads pass: even an absent
     fence row must remain protected until the new reference commits.
     """
-    identity = ArtifactIdentity("runtime-image", "a" * 64)
+    identities = tuple(
+        ArtifactIdentity("runtime-image", f"{index:064x}")
+        for index in range(object_count)
+    )
+    identity = identities[-1]
     now = datetime.now(UTC)
     if existing_gate:
         with artifact_sessions.begin() as session:
-            lock_reference_gates(session, (identity,), now=now)
+            lock_reference_gates(session, identities, now=now)
+    engine = artifact_sessions.kw["bind"]
+    queries = []
+
+    def counted(_connection, _cursor, statement, _parameters, _context, _many):
+        queries.append(statement)
+
     with artifact_sessions.begin() as first:
-        require_reference_open(first, (identity,), now=now)
+        event.listen(engine, "before_cursor_execute", counted)
+        try:
+            require_reference_open(first, identities, now=now)
+        finally:
+            event.remove(engine, "before_cursor_execute", counted)
+        assert len(queries) == 2, queries
         with artifact_sessions.begin() as second:
-            require_reference_open(second, (identity,), now=now)
+            require_reference_open(second, identities, now=now)
         with artifact_sessions.begin() as remover:
             with pytest.raises(ArtifactReferenceUnsettled) as busy:
                 reserve_removal(

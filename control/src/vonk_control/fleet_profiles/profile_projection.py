@@ -8,11 +8,14 @@ from typing import cast as _typing_cast
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import ModelCacheBlockerCode
-from vonk_agent_protocol.agent_words import ProfileDocumentState
+from vonk_agent_protocol import AssetAvailability, ModelCacheBlockerCode
+from vonk_agent_protocol.agent_words import (
+    ProfileDocumentState,
+    RunSwitchReasonScopeName,
+)
 from vonk_forge_contracts import RecipeDefinition
 
-from ..catalog_revision_contract import RecipeRevisionProjection, read_recipe_projection
+from ..catalog_revision_contract import RecipeRevisionProjection
 from ..fleet_profile_contract import (
     FleetAssignmentModelView,
     FleetAssignmentRecipeView,
@@ -52,9 +55,15 @@ if TYPE_CHECKING:
 
 
 class FleetProfileService:
-    def _view(self, session: Session, row: FleetProfile) -> FleetProfileView:
+    def _view(
+        self, session: Session, row: FleetProfile, *, observe: bool = True
+    ) -> FleetProfileView:
         self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
+        # Saves return the same typed projection with unobserved cache/live
+        # fields unknown. Admission and full reads still observe exact assets;
+        # a draft edit needs neither filesystem walks nor workload assessment.
         choices = self._choices(row)
+        self._prefetch_recipe_documents(session, choices)
         assignments: list[FleetProfileAssignmentView] = []
         cache_cached = 0
         cache_missing = 0
@@ -81,7 +90,42 @@ class FleetProfileService:
             else {node_id for choice in choices for node_id in choice.spark_ids}
         )
         projections: dict[str, RecipeRevisionProjection] = {}
-        model_names: dict[tuple[str, str, str], str | None] = {}
+        head_errors: dict[str, str] = {}
+        for selector in dict.fromkeys(choice.recipe_selector for choice in choices):
+            head = self._recipe_document(session, selector)
+            if isinstance(head, Residue):
+                head_errors[selector] = head.note
+                continue
+            try:
+                projections[selector] = self._recipe_projection(session, head[1])
+            except ValueError as error:
+                head_errors[selector] = str(error)
+        model_names: dict[tuple[str, str, str], str | None] = {
+            (reference.publisher, reference.slug, reference.content_sha256): None
+            for definition in projections.values()
+            for reference in definition.models
+        }
+        if model_names:
+            for publisher, slug, digest, title in session.execute(
+                select(
+                    CatalogDocumentRevision.publisher,
+                    CatalogDocumentRevision.slug,
+                    CatalogDocumentRevision.content_digest,
+                    CatalogDocument.title,
+                )
+                .join(
+                    CatalogDocument,
+                    CatalogDocument.id == CatalogDocumentRevision.document_id,
+                )
+                .where(
+                    CatalogDocumentRevision.kind == RunSwitchReasonScopeName.MODEL,
+                    CatalogDocumentRevision.state == ProfileDocumentState.ACTIVE.value,
+                    CatalogDocumentRevision.content_digest.in_(
+                        sorted({key[2] for key in model_names})
+                    ),
+                )
+            ):
+                model_names[(publisher, slug, digest)] = title
         resolved_choices: dict[
             tuple[str, str | None],
             tuple[CatalogDocument, CatalogDocumentRevision, CacheResolution | None]
@@ -89,17 +133,7 @@ class FleetProfileService:
         ] = {}
         for choice in choices:
             resolved_head = self._recipe_document(session, choice.recipe_selector)
-            head_error: str | None = None
-            if isinstance(resolved_head, Residue):
-                head_error = resolved_head.note
-            else:
-                try:
-                    if choice.recipe_selector not in projections:
-                        projections[choice.recipe_selector] = read_recipe_projection(
-                            resolved_head[1]
-                        )
-                except ValueError as error:
-                    head_error = str(error)
+            head_error = head_errors.get(choice.recipe_selector)
             if head_error is not None:
                 # Show an unreadable head as needing attention; never substitute
                 # a different revision or hide the rest of the saved profile.
@@ -117,27 +151,38 @@ class FleetProfileService:
                 cache_unknown += 1
                 assignments.append(
                     self._attention_assignment(
-                        session, choice, loaded_assignments=loaded_assignments
+                        session,
+                        choice,
+                        loaded_assignments=loaded_assignments,
+                        observe=observe,
                     )
                 )
                 continue
+            assert not isinstance(resolved_head, Residue)
             choice_key = (choice.recipe_selector, choice.model_variant)
             if choice_key not in resolved_choices:
-                resolved_choices[choice_key] = self._resolve_choice(session, choice)
+                resolved_choices[choice_key] = (
+                    self._resolve_choice(session, choice)
+                    if observe
+                    else (*resolved_head, None)
+                )
             resolved_choice = resolved_choices[choice_key]
             if isinstance(resolved_choice, Residue):
                 # (Unreachable in practice: the head resolved just above.)
                 cache_unknown += 1
                 assignments.append(
                     self._attention_assignment(
-                        session, choice, loaded_assignments=loaded_assignments
+                        session,
+                        choice,
+                        loaded_assignments=loaded_assignments,
+                        observe=observe,
                     )
                 )
                 continue
             recipe, revision, cache = resolved_choice
             definition = projections[choice.recipe_selector]
             required = definition.topology.node_count
-            if self._cache_resolver is None:
+            if observe and self._cache_resolver is None:
                 warnings.append(
                     "Cache resolution is unavailable until the cache service is configured"
                 )
@@ -145,6 +190,8 @@ class FleetProfileService:
                 "Cached"
                 if cache is not None and cache.recipe.cached
                 else "Recipe not cached"
+                if cache is not None
+                else AssetAvailability.UNKNOWN.value
             )
             if cache is not None and (
                 ModelCacheBlockerCode.RECIPE_NOT_CACHED in cache.blockers
@@ -161,6 +208,8 @@ class FleetProfileService:
                 "Cached"
                 if cache is not None and cache.model.cached
                 else "Model not cached"
+                if cache is not None
+                else AssetAvailability.UNKNOWN.value
             )
             if cache is None:
                 cache_unknown += 1
@@ -171,30 +220,6 @@ class FleetProfileService:
             resources = (
                 cache.resources if cache is not None else CachedResourceEstimate()
             )
-            for reference in definition.models:
-                model_key = (
-                    reference.publisher,
-                    reference.slug,
-                    reference.content_sha256,
-                )
-                if model_key not in model_names:
-                    model_names[model_key] = session.scalar(
-                        select(CatalogDocument.title)
-                        .join(
-                            CatalogDocumentRevision,
-                            CatalogDocumentRevision.document_id == CatalogDocument.id,
-                        )
-                        .where(
-                            CatalogDocumentRevision.kind == "model",
-                            CatalogDocumentRevision.publisher == reference.publisher,
-                            CatalogDocumentRevision.slug == reference.slug,
-                            CatalogDocumentRevision.content_digest
-                            == reference.content_sha256,
-                            CatalogDocumentRevision.state
-                            == ProfileDocumentState.ACTIVE.value,
-                        )
-                        .limit(1)
-                    )
             missing = next(
                 (
                     reference
@@ -220,7 +245,10 @@ class FleetProfileService:
                 warnings.append(unavailable.note)
                 assignments.append(
                     self._attention_assignment(
-                        session, choice, loaded_assignments=loaded_assignments
+                        session,
+                        choice,
+                        loaded_assignments=loaded_assignments,
+                        observe=observe,
                     )
                 )
                 continue
@@ -266,11 +294,15 @@ class FleetProfileService:
                     resources=resources,
                     option_choices=effective_choices,
                     gpu_clock=choice.gpu_clock,
-                    observed_state=self._observed_assignment_state(
-                        session,
-                        loaded_assignments,
-                        recipe_id=recipe.id,
-                        spark_ids=choice.spark_ids,
+                    observed_state=(
+                        self._observed_assignment_state(
+                            session,
+                            loaded_assignments,
+                            recipe_id=recipe.id,
+                            spark_ids=choice.spark_ids,
+                        )
+                        if observe
+                        else AssetAvailability.UNKNOWN.value
                     ),
                     recipe_update=recipe_update,
                 )
@@ -411,6 +443,7 @@ class FleetProfileService:
         choice: FleetProfileAssignmentInput,
         *,
         loaded_assignments: Sequence[FleetProfileAssignment] | None,
+        observe: bool = True,
     ) -> FleetProfileAssignmentView:
         self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
         document_id = session.scalar(
@@ -440,7 +473,9 @@ class FleetProfileService:
                     recipe_id=document_id,
                     spark_ids=choice.spark_ids,
                 )
-                if document_id is not None
+                if observe and document_id is not None
+                else AssetAvailability.UNKNOWN.value
+                if not observe
                 else "Not loaded"
             ),
         )

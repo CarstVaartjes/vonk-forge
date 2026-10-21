@@ -14,6 +14,7 @@ from sqlalchemy.pool import StaticPool
 from vonk_agent_protocol import DesiredAssignmentState, ModelCacheBlockerCode
 from vonk_control.fleet_profile_contract import (
     FleetProfileAssignmentInput,
+    FleetProfileDefinition,
     FleetProfileInput,
 )
 from vonk_control.fleet_profiles import FleetProfileConflict, FleetProfileService
@@ -572,6 +573,7 @@ def test_profile_read_uses_the_read_only_latest_cache_resolver() -> None:
         ),
         actor="test",
     )
+    profile = service.get(profile.id)
     assert calls == [
         {
             "recipe_identity": RECIPE_DOCUMENT_ID,
@@ -662,6 +664,7 @@ def test_profile_read_ignores_a_resolver_that_substitutes_an_older_revision() ->
         ),
         actor="test",
     )
+    created = service.get(created.id)
     # Bound to the selected head; the substituted cache claim is not shown as cached.
     assert [item.recipe_id for item in created.assignments] == [RECIPE_DOCUMENT_ID]
     assert all(item.recipe.state != "Cached" for item in created.assignments)
@@ -732,6 +735,7 @@ def test_profile_read_names_a_missing_exact_cache_instead_of_substituting() -> N
         actor="test",
     )
 
+    profile = service.get(profile.id)
     assert profile.assignments[0].recipe.revision_id == newer_revision_id
     assert profile.assignments[0].recipe.state == "Recipe not cached"
     assert any("is not in the local cache" in warning for warning in profile.warnings)
@@ -1043,9 +1047,11 @@ def test_a_run_made_with_other_option_choices_is_not_the_assignments_state() -> 
         assert service._assignment_state(session, matching).current_state == "placed"
 
 
-@pytest.mark.parametrize("selector_count", [1, 50])
-def test_fifty_assignment_save_bounds_document_parses_and_database_round_trips(
+@pytest.mark.parametrize("assignment_count,selector_count", [(1, 1), (34, 1), (34, 34)])
+def test_profile_save_bounds_document_parses_and_database_round_trips(
     monkeypatch,
+    postgres_engine,
+    assignment_count,
     selector_count,
 ):
     """A save must not resolve and parse the same selector per assignment and view."""
@@ -1053,15 +1059,25 @@ def test_fifty_assignment_save_bounds_document_parses_and_database_round_trips(
 
     import vonk_control.catalog_revision_contract as contract
 
-    sessions = _sessions()
+    Base.metadata.create_all(postgres_engine)
+    sessions = sessionmaker(postgres_engine, expire_on_commit=False)
     _seed(sessions)
     from vonk_control.catalog_entities import CatalogEntityService
 
     selectors = ["vonk-forge/synthetic-tiny-build"]
-    with sessions() as session:
+    with sessions.begin() as session:
         template_row = session.get(CatalogDocumentRevision, RECIPE_REVISION_ID)
         assert template_row is not None
         template = template_row.document
+        session.execute(
+            update(CatalogDocumentRevision)
+            .where(CatalogDocumentRevision.id == template_row.id)
+            .values(
+                projected=contract.write_catalog_projection(
+                    contract.read_recipe_projection(template_row)
+                )
+            )
+        )
     catalog = CatalogEntityService(sessions, clock=lambda: NOW)
     for index in range(1, selector_count):
         document = json.loads(json.dumps(template))
@@ -1069,7 +1085,16 @@ def test_fifty_assignment_save_bounds_document_parses_and_database_round_trips(
         revision = catalog.create_draft(document, actor="test")
         catalog.resolve(revision.id, actor="test")
         selectors.append(f"vonk-forge/synthetic-{index}")
-    service = FleetProfileService(sessions, clock=lambda: NOW)
+
+    def reject_observation(*_args, **_kwargs):
+        raise AssertionError("a draft save consulted cache storage or placement")
+
+    service = FleetProfileService(
+        sessions,
+        clock=lambda: NOW,
+        cache_resolver=reject_observation,
+        assessment_provider=reject_observation,
+    )
     created = service.update_number(1, FleetProfileInput(name="Before"), actor="test")
     monkeypatch.setattr(contract, "_document_cache", OrderedDict(), raising=False)
     monkeypatch.setattr(contract, "_document_cache_size", 0, raising=False)
@@ -1082,6 +1107,15 @@ def test_fifty_assignment_save_bounds_document_parses_and_database_round_trips(
             return parser(raw)
 
         monkeypatch.setattr(contract, f"read_{kind}", counting)
+    project = contract.RecipeRevisionProjection.model_validate_json
+
+    def projected(_cls, raw, *args, **kwargs):
+        parses["projection"] += 1
+        return project(raw, *args, **kwargs)
+
+    monkeypatch.setattr(
+        contract.RecipeRevisionProjection, "model_validate_json", classmethod(projected)
+    )
     original_hash = hashlib.sha256
 
     def reject_catalog_hash(data=b"", *args, **kwargs):
@@ -1109,7 +1143,7 @@ def test_fifty_assignment_save_bounds_document_parses_and_database_round_trips(
         saved = service.update_number(
             1,
             FleetProfileInput(
-                name="Fifty",
+                name="Pins",
                 expected_revision=created.revision,
                 assignments=[
                     FleetProfileAssignmentInput(
@@ -1117,16 +1151,93 @@ def test_fifty_assignment_save_bounds_document_parses_and_database_round_trips(
                         spark_ids=[NODE_1],
                         assignment_name=f"slot-{index}",
                     )
-                    for index in range(50)
+                    for index in range(assignment_count)
                 ],
             ),
             actor="test",
         )
     finally:
         event.remove(engine, "before_cursor_execute", counted)
-    assert len(saved.assignments) == 50
+    assert len(saved.assignments) == assignment_count
+    assert saved.cache_summary.unknown == assignment_count
     assert parses["recipe"] <= selector_count, parses
+    assert parses["projection"] <= selector_count, parses
     assert parses["model"] <= 1, parses
-    # Four identity/row reads per unique selector, one shared model title and
-    # reference gate, and shared profile/roster reads; repeated choices add none.
-    assert len(queries) < 4 * selector_count + 30, (len(queries), queries)
+    # Recipe heads, shared model titles and gates are batched; this fixture
+    # shares one model, so adding distinct recipes adds no SQL round trips.
+    assert len(queries) <= 20, (len(queries), queries)
+
+
+@pytest.mark.parametrize("projection_fails", [False, True])
+def test_save_observer_timeout_is_atomic_and_reconnects_to_committed_content(
+    postgres_engine, monkeypatch, projection_fails
+):
+    """Catches an early commit, a partial draft, or a replay editing twice."""
+    from threading import Event
+
+    from vonk_control.models import FleetProfile
+
+    Base.metadata.create_all(postgres_engine)
+    sessions = sessionmaker(postgres_engine, expire_on_commit=False)
+    _seed(sessions)
+    service = FleetProfileService(sessions, clock=lambda: NOW)
+    before = service.update_number(13, FleetProfileInput(name="Before"), actor="test")
+    requested = FleetProfileInput(
+        name="After",
+        expected_revision=before.revision,
+        assignments=[
+            FleetProfileAssignmentInput(
+                recipe_selector="vonk-forge/synthetic-tiny-build",
+                spark_ids=[NODE_1],
+            )
+        ],
+    )
+    entered, release = Event(), Event()
+    original = service._view
+
+    def delayed(session, row, **kwargs):
+        # The write has flushed, but the transaction must still be atomic.
+        entered.set()
+        assert release.wait(timeout=10)
+        if projection_fails:
+            raise RuntimeError("injected response projection fault")
+        return original(session, row, **kwargs)
+
+    with monkeypatch.context() as patch, ThreadPoolExecutor(max_workers=1) as pool:
+        patch.setattr(service, "_view", delayed)
+        pending = pool.submit(service.update_number, 13, requested, actor="test")
+        try:
+            assert entered.wait(timeout=10)
+            with pytest.raises(TimeoutError):
+                pending.result(
+                    timeout=0.01
+                )  # wall-clock: deliberately expire observation while the injected fault holds
+            # Losing the response does not cancel the server thread, and other
+            # readers see the whole old document until the transaction commits.
+            observed = service.definition_number(13)
+            assert observed.revision == before.revision
+            assert observed.definition == before.definition
+        finally:
+            release.set()
+        if projection_fails:
+            with pytest.raises(
+                RuntimeError, match="injected response projection fault"
+            ):
+                pending.result(timeout=10)
+        else:
+            assert pending.result(timeout=10).revision == before.revision + 1
+    with sessions() as session:
+        stored = session.get(FleetProfile, before.id)
+        assert stored is not None
+        assert stored.revision == before.revision + (not projection_fails)
+        assert service._definition(stored) == (
+            before.definition
+            if projection_fails
+            else FleetProfileDefinition.model_validate(
+                requested.model_dump(exclude={"expected_revision"})
+            )
+        )
+    # A failed transaction is retryable; a committed lost response is an equal
+    # content replay, even with the client's original expected revision.
+    replayed = service.update_number(13, requested, actor="test")
+    assert replayed.revision == before.revision + 1
