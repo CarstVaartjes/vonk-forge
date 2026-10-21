@@ -7,7 +7,7 @@ from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, cast
 
 from pydantic import ValidationError
-from sqlalchemy import and_, or_, select
+from sqlalchemy import String, and_, column, func, or_, select, values
 from vonk_agent_protocol import (
     AssetAvailability,
     InstallationState,
@@ -176,30 +176,51 @@ def _database_local_state(
         # One latest request per requested content identity. An index on creation
         # time and the existing artifact-set index bound the history lookup; UUID
         # is only a deterministic tie-break after durable request time.
-        operation_ids: set[str] = set()
-        for digest in digests:
-            operation_id = session.scalar(
-                select(ModelCacheOperation.id)
-                .where(
-                    ModelCacheOperation.kind.in_(
-                        (CacheOperationKind.DOWNLOAD, CacheOperationKind.REPAIR)
-                    ),
-                    or_(
-                        operation_payload["model_content_sha256"].as_string() == digest,
-                        operation_payload["recipe_revision_sha256"].as_string()
-                        == digest,
-                        ModelCacheOperation.artifact_set_sha256.in_(
-                            [row[0] for row in cache_sets if digest in row[1:3]]
-                        ),
+        requested = (
+            values(column("digest", String), name="requested")
+            .data([(digest,) for digest in sorted(set(digests))])
+            .cte()
+        )
+        latest = (
+            select(
+                ModelCacheOperation.id,
+                func.row_number()
+                .over(
+                    partition_by=requested.c.digest,
+                    order_by=(
+                        ModelCacheOperation.created_at.desc(),
+                        ModelCacheOperation.id.desc(),
                     ),
                 )
-                .order_by(
-                    ModelCacheOperation.created_at.desc(), ModelCacheOperation.id.desc()
-                )
-                .limit(1)
+                .label("position"),
             )
-            if operation_id is not None:
-                operation_ids.add(operation_id)
+            .join(
+                requested,
+                or_(
+                    operation_payload["model_content_sha256"].as_string()
+                    == requested.c.digest,
+                    operation_payload["recipe_revision_sha256"].as_string()
+                    == requested.c.digest,
+                    select(ModelCacheSet.artifact_set_sha256)
+                    .where(
+                        ModelCacheSet.artifact_set_sha256
+                        == ModelCacheOperation.artifact_set_sha256,
+                        or_(
+                            ModelCacheSet.model_content_sha256 == requested.c.digest,
+                            ModelCacheSet.recipe_revision_sha256 == requested.c.digest,
+                        ),
+                    )
+                    .exists(),
+                ),
+            )
+            .where(
+                ModelCacheOperation.kind.in_(
+                    (CacheOperationKind.DOWNLOAD, CacheOperationKind.REPAIR)
+                )
+            )
+            .subquery()
+        )
+        operation_ids = select(latest.c.id).where(latest.c.position == 1)
         cache_operations = session.execute(
             select(
                 ModelCacheOperation.id,

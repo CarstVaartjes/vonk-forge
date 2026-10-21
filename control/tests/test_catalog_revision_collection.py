@@ -138,6 +138,9 @@ class Catalog:
                 model = ModelDefinition.model_validate(document)
                 projected = ModelRevisionProjection(
                     identity=model.identity,
+                    metadata=model.metadata,
+                    format=model.format,
+                    capabilities=model.capabilities,
                     modalities=model.modalities,
                     artifact_count=len(model.files),
                     download_bytes=model.download_bytes,

@@ -12,7 +12,7 @@ from vonk_agent_protocol import ModelCacheBlockerCode
 from vonk_agent_protocol.agent_words import ProfileDocumentState
 from vonk_forge_contracts import RecipeDefinition
 
-from ..catalog_revision_contract import read_catalog_document
+from ..catalog_revision_contract import RecipeRevisionProjection, read_recipe_projection
 from ..fleet_profile_contract import (
     FleetAssignmentModelView,
     FleetAssignmentRecipeView,
@@ -24,7 +24,7 @@ from ..fleet_profile_contract import (
     FleetProfileView,
 )
 from ..lifecycle.evidence import BookkeepingReason, Residue, retire_as_unknown
-from ..model_cache_contract import CachedResourceEstimate
+from ..model_cache_contract import CachedResourceEstimate, CacheResolution
 from ..models import (
     AgentNode,
     AgentNodeProfile,
@@ -32,14 +32,13 @@ from ..models import (
     CatalogDocumentRevision,
     FleetProfile,
 )
-from ..recipe_runtime_specs import recipe_topology, resolve_recipe_entities
+from ..recipe_runtime_specs import resolve_recipe_entities
 from ..recipe_update_notice import RecipeUpdateNotice, recipe_update_notice
 from .dependencies import (
     _INSTALLATION_POLICY_ADAPTER,
     _LOGGER,
     _OBSERVED_ASSIGNMENT_LABELS,
 )
-from .persistence import _stored_recipe
 from .projection_support import (
     _aware,
     _digest,
@@ -81,6 +80,13 @@ class FleetProfileService:
             if loaded_assignments is not None
             else {node_id for choice in choices for node_id in choice.spark_ids}
         )
+        projections: dict[str, RecipeRevisionProjection] = {}
+        model_names: dict[tuple[str, str, str], str | None] = {}
+        resolved_choices: dict[
+            tuple[str, str | None],
+            tuple[CatalogDocument, CatalogDocumentRevision, CacheResolution | None]
+            | Residue,
+        ] = {}
         for choice in choices:
             resolved_head = self._recipe_document(session, choice.recipe_selector)
             head_error: str | None = None
@@ -88,13 +94,15 @@ class FleetProfileService:
                 head_error = resolved_head.note
             else:
                 try:
-                    read_catalog_document(resolved_head[1])
+                    if choice.recipe_selector not in projections:
+                        projections[choice.recipe_selector] = read_recipe_projection(
+                            resolved_head[1]
+                        )
                 except ValueError as error:
                     head_error = str(error)
             if head_error is not None:
-                # No readable (or no active) revision exists for this recipe (the
-                # identity lookup already prefers the newest readable one). Show the
-                # choice as needing attention instead of failing the profile.
+                # Show an unreadable head as needing attention; never substitute
+                # a different revision or hide the rest of the saved profile.
                 _LOGGER.warning(
                     "profile %s choice %s needs attention: %s",
                     row.id,
@@ -113,7 +121,10 @@ class FleetProfileService:
                     )
                 )
                 continue
-            resolved_choice = self._resolve_choice(session, choice)
+            choice_key = (choice.recipe_selector, choice.model_variant)
+            if choice_key not in resolved_choices:
+                resolved_choices[choice_key] = self._resolve_choice(session, choice)
+            resolved_choice = resolved_choices[choice_key]
             if isinstance(resolved_choice, Residue):
                 # (Unreachable in practice: the head resolved just above.)
                 cache_unknown += 1
@@ -124,22 +135,8 @@ class FleetProfileService:
                 )
                 continue
             recipe, revision, cache = resolved_choice
-            definition = _stored_recipe(revision)
-            if isinstance(definition, Residue):
-                # The head became unreadable after it was resolved: this choice
-                # needs attention; the rest of the profile is still shown.
-                warnings.append(
-                    f"Recipe {choice.recipe_selector} needs attention: revision "
-                    f"{revision.id} is unreadable ({definition.note})"
-                )
-                cache_unknown += 1
-                assignments.append(
-                    self._attention_assignment(
-                        session, choice, loaded_assignments=loaded_assignments
-                    )
-                )
-                continue
-            required = recipe_topology(definition).node_count
+            definition = projections[choice.recipe_selector]
+            required = definition.topology.node_count
             if self._cache_resolver is None:
                 warnings.append(
                     "Cache resolution is unavailable until the cache service is configured"
@@ -174,17 +171,51 @@ class FleetProfileService:
             resources = (
                 cache.resources if cache is not None else CachedResourceEstimate()
             )
-            try:
-                model_document = resolve_recipe_entities(
-                    session,
-                    definition.model_dump(mode="json"),
-                ).model_revisions
-            except (RuntimeError, TypeError, ValueError) as error:
+            for reference in definition.models:
+                model_key = (
+                    reference.publisher,
+                    reference.slug,
+                    reference.content_sha256,
+                )
+                if model_key not in model_names:
+                    model_names[model_key] = session.scalar(
+                        select(CatalogDocument.title)
+                        .join(
+                            CatalogDocumentRevision,
+                            CatalogDocumentRevision.document_id == CatalogDocument.id,
+                        )
+                        .where(
+                            CatalogDocumentRevision.kind == "model",
+                            CatalogDocumentRevision.publisher == reference.publisher,
+                            CatalogDocumentRevision.slug == reference.slug,
+                            CatalogDocumentRevision.content_digest
+                            == reference.content_sha256,
+                            CatalogDocumentRevision.state
+                            == ProfileDocumentState.ACTIVE.value,
+                        )
+                        .limit(1)
+                    )
+            missing = next(
+                (
+                    reference
+                    for reference in definition.models
+                    if model_names[
+                        (
+                            reference.publisher,
+                            reference.slug,
+                            reference.content_sha256,
+                        )
+                    ]
+                    is None
+                ),
+                None,
+            )
+            if missing is not None:
                 unavailable = retire_as_unknown(
                     "profile-model",
                     revision.id,
                     BookkeepingReason.EVIDENCE_UNAVAILABLE,
-                    str(error),
+                    f"exact recipe model {missing.publisher}/{missing.slug}@{missing.content_sha256} is not active",
                 )
                 warnings.append(unavailable.note)
                 assignments.append(
@@ -193,17 +224,11 @@ class FleetProfileService:
                     )
                 )
                 continue
-            candidate_model = next(iter(model_document), None)
-            model = (
-                candidate_model
-                if isinstance(candidate_model, CatalogDocumentRevision)
-                else None
-            )
-            model_selector = None
-            model_name = None
-            if model is not None:
-                model_selector = f"{model.publisher}/{model.slug}"
-                model_name = self._model_title(session, definition)
+            primary = definition.models[0]
+            model_name = model_names[
+                (primary.publisher, primary.slug, primary.content_sha256)
+            ]
+            model_selector = f"{primary.publisher}/{primary.slug}"
             assignment_selector = self._assignment_selector(choice)
             effective_choices, choice_notes = _effective_option_choices(
                 definition, choice.option_choices

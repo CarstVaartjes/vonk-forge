@@ -23,9 +23,10 @@ from vonk_agent_protocol.agent_words import (
     ProfileProjectionKind,
     ProfileSwitchChildKind,
 )
-from vonk_forge_contracts import RecipeDefinition, RecipeOptionError
+from vonk_forge_contracts import RecipeDefinition
 from vonk_forge_contracts.recipe import RecipeTopology
 
+from ..catalog_revision_contract import RecipeRevisionProjection
 from ..fleet_profile_contract import (
     MAX_PROFILE_WARNINGS,
     FleetProfileApplicationCancellationView,
@@ -488,7 +489,7 @@ def _validate_remaining_effects(
 
 
 def _effective_option_choices(
-    recipe: RecipeDefinition,
+    recipe: RecipeDefinition | RecipeRevisionProjection,
     stored: Mapping[str, str],
 ) -> tuple[dict[str, str], list[str]]:
     """The choice for every option the recipe declares, defaults filled in.
@@ -500,10 +501,6 @@ def _effective_option_choices(
     it is shown instead of blocking the profile.
     """
 
-    try:
-        return recipe.resolve_options(stored), []
-    except RecipeOptionError:
-        pass
     declared = {option.name: option for option in recipe.options}
     kept: dict[str, str] = {}
     notes: list[str] = []
@@ -518,7 +515,10 @@ def _effective_option_choices(
             )
         else:
             kept[name] = value
-    return recipe.resolve_options(kept), notes
+    return {
+        option.name: kept.get(option.name, option.default_value)
+        for option in recipe.options
+    }, notes
 
 
 def _with_save_notes(view: FleetProfileView, notes: Sequence[str]) -> FleetProfileView:

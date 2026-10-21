@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+from collections import OrderedDict
 from collections.abc import Mapping
+from copy import deepcopy
+from dataclasses import dataclass
+from threading import Lock
 from typing import TYPE_CHECKING, Literal
 
 from pydantic import ConfigDict, Field, ValidationError
@@ -15,8 +19,22 @@ from vonk_forge_contracts import (
     read_model,
     read_recipe,
 )
-from vonk_forge_contracts.model import ModelIdentity
-from vonk_forge_contracts.recipe import RecipeTopology
+from vonk_forge_contracts.model import (
+    ModelFormat,
+    ModelIdentity,
+    ModelMetadata,
+)
+from vonk_forge_contracts.recipe import (
+    ModelReference,
+    RecipeIdentity,
+    RecipeInterface,
+    RecipeMetadata,
+    RecipeOption,
+    RecipeProvenance,
+    RecipeRelease,
+    RecipeTopology,
+    RecipeValidation,
+)
 
 from .bounded_json import require_mapping
 from .strict_json import (
@@ -131,6 +149,9 @@ class ArtifactInputProjection(StrictJSONModel):
 
 class ModelRevisionProjection(_CatalogRevisionProjection):
     identity: ModelIdentity
+    metadata: ModelMetadata
+    format: ModelFormat
+    capabilities: list[str]
     modalities: ModelModalities
     artifact_count: int = Field(ge=0)
     download_bytes: int = Field(ge=0)
@@ -138,6 +159,15 @@ class ModelRevisionProjection(_CatalogRevisionProjection):
 
 
 class RecipeRevisionProjection(_CatalogRevisionProjection):
+    identity: RecipeIdentity
+    metadata: RecipeMetadata
+    provenance: RecipeProvenance
+    release: RecipeRelease
+    models: list[ModelReference] = Field(min_length=1)
+    interfaces: list[RecipeInterface]
+    validation: RecipeValidation
+    base_image_digest: str
+    options: list[RecipeOption]
     title: str
     description: str
     tags: list[str]
@@ -203,6 +233,9 @@ def read_catalog_projection(
         if isinstance(parsed, ModelDefinition):
             return ModelRevisionProjection(
                 identity=parsed.identity,
+                metadata=parsed.metadata,
+                format=parsed.format,
+                capabilities=parsed.capabilities,
                 modalities=parsed.modalities,
                 artifact_count=len(parsed.files),
                 download_bytes=parsed.download_bytes,
@@ -213,6 +246,15 @@ def read_catalog_projection(
         return RecipeRevisionProjection.model_validate_json(
             canonical_message(recipe_document_projection(parsed))
         )
+
+
+def read_recipe_projection(
+    revision: CatalogDocumentRevision,
+) -> RecipeRevisionProjection:
+    parsed = read_catalog_projection(revision)
+    if not isinstance(parsed, RecipeRevisionProjection):
+        raise CatalogRevisionContractError("catalog revision is not a recipe")
+    return parsed
 
 
 def write_catalog_projection(
@@ -240,29 +282,66 @@ def write_catalog_projection(
     )
 
 
+# Bound retained source and parsed trees by source bytes, rather than catalog
+# cardinality. Immutable content is shared by every stored-document consumer.
+_DOCUMENT_CACHE_BYTES = 64 * 1024 * 1024
+
+
+@dataclass(frozen=True)
+class _CachedDocument:
+    source: object
+    parsed: ModelDefinition | RecipeDefinition
+    source_bytes: int
+
+
+_document_cache: OrderedDict[tuple[str, str], _CachedDocument] = OrderedDict()
+_document_cache_size = 0
+_document_cache_lock = Lock()
+
+
+def cached_catalog_document(
+    kind: str, digest: str, raw: object
+) -> ModelDefinition | RecipeDefinition:
+    from .operator_receipt_contract import ReceiptOwner
+
+    global _document_cache_size
+    document = require_mapping(raw, "catalog document is not a JSON object")
+    key = (kind, digest)
+    with _document_cache_lock:
+        previous = _document_cache.get(key)
+        if previous is not None and previous.source == document:
+            _document_cache.move_to_end(key)
+            return previous.parsed.model_copy(deep=True)
+        if kind == "model":
+            parsed: ModelDefinition | RecipeDefinition = read_model(document)
+        elif kind == ReceiptOwner.RECIPE:
+            parsed = read_recipe(document)
+        else:
+            raise CatalogRevisionContractError(f"unknown catalog kind {kind!r}")
+        # Digests are verified at ingress, not on trusted immutable row reads.
+        size = len(_json(document))
+        if previous is not None:
+            _document_cache_size -= _document_cache.pop(key).source_bytes
+        if size <= _DOCUMENT_CACHE_BYTES:
+            while _document_cache_size + size > _DOCUMENT_CACHE_BYTES:
+                _document_cache_size -= _document_cache.popitem(last=False)[
+                    1
+                ].source_bytes
+            _document_cache[key] = _CachedDocument(deepcopy(document), parsed, size)
+            _document_cache_size += size
+            return parsed.model_copy(deep=True)
+        return parsed
+
+
 def read_catalog_document(
     revision: CatalogDocumentRevision,
 ) -> ModelDefinition | RecipeDefinition:
     """Parse one persisted published document; its digest is stored with it."""
 
     try:
-        document = require_mapping(
-            revision.document, "catalog document is not a JSON object"
+        return cached_catalog_document(
+            revision.kind, revision.content_digest, revision.document
         )
-        if revision.kind == "model":
-            parsed: ModelDefinition | RecipeDefinition = read_model(document)
-        elif revision.kind == "recipe":
-            parsed = read_recipe(document)
-        else:
-            raise CatalogRevisionContractError(
-                f"catalog revision {revision.id} has unknown kind {revision.kind!r}"
-            )
-        stored_digest = revision.content_digest
-        if document_sha256(document) != stored_digest:
-            raise CatalogRevisionContractError(
-                f"catalog revision {revision.id} document identity does not match"
-            )
-        return parsed
     except CatalogRevisionContractError:
         raise
     except (TypeError, ValueError, ValidationError) as error:

@@ -39,6 +39,9 @@ from vonk_control.catalog_sync_contract import (
 )
 from vonk_control.library_api import install_library_routes
 from vonk_control.library_contract import (
+    LibraryModelProjection,
+    LibraryRecipeProjection,
+    ModelDetailResponse,
     ModelLibraryResponse,
     RecipeDetailResponse,
     RecipeLibraryResponse,
@@ -210,10 +213,10 @@ def _api_page_limit(api: TestClient, path: str) -> int:
     pytest.fail(f"{path} does not publish a bounded maximum page size")
 
 
-def _library_models(api: TestClient) -> list[Any]:
+def _library_models(api: TestClient) -> list[LibraryModelProjection]:
     limit = _api_page_limit(api, "/api/model/library")
     cursor: str | None = None
-    models: list[Any] = []
+    models: list[LibraryModelProjection] = []
     while True:
         params: dict[str, Any] = {"limit": limit}
         if cursor is not None:
@@ -228,10 +231,10 @@ def _library_models(api: TestClient) -> list[Any]:
         cursor = page.next_cursor
 
 
-def _library_recipes(api: TestClient) -> list[Any]:
+def _library_recipes(api: TestClient) -> list[LibraryRecipeProjection]:
     limit = _api_page_limit(api, "/api/recipe/library")
     cursor: str | None = None
-    recipes: list[Any] = []
+    recipes: list[LibraryRecipeProjection] = []
     while True:
         params: dict[str, Any] = {"limit": limit}
         if cursor is not None:
@@ -267,9 +270,9 @@ def test_frozen_corpus_closure_is_dynamic() -> None:
 
 # Slow by design: cold-verifies every canonical package, imports the whole
 # corpus into fresh PostgreSQL, validates every API page and restarts the cache.
-# Hosted phase timings total about 32s for 223 Models and 301 Recipes; allow
-# 45s for this whole-corpus acceptance while retaining the same assertions.
-@pytest.mark.slow(45)
+# Import plus every canonical detail round-trip takes about 55s in the local
+# Linux container; allow 60s for this whole-corpus acceptance.
+@pytest.mark.slow(60)
 def test_fresh_postgres_imports_typed_canonical_model_recipe_api(
     postgres_engine: Engine, tmp_path: Path
 ) -> None:
@@ -400,16 +403,18 @@ def test_fresh_postgres_imports_typed_canonical_model_recipe_api(
     expected_model_documents = {
         _model_key(row): row["document"] for row in corpus.index["catalog_entities"]
     }
-    assert {
-        (
+    for item in library_models:
+        response = api.get(f"/api/model/{item.selector}")
+        assert response.status_code == 200, response.text
+        detail = ModelDetailResponse.model_validate_json(response.content)
+        assert detail.identity == item.identity
+        assert detail.projected == item.projected
+        key = (
             item.identity.publisher,
             item.identity.slug,
             item.identity.content_sha256,
-        ): item.document
-        for item in library_models
-    } == {
-        key: read_model(document) for key, document in expected_model_documents.items()
-    }
+        )
+        assert detail.document == read_model(expected_model_documents[key])
 
     lap("model_api_pages_validation")
     library_recipes = _library_recipes(api)
@@ -419,27 +424,28 @@ def test_fresh_postgres_imports_typed_canonical_model_recipe_api(
     expected_recipe_documents = {
         _recipe_key(row)[2]: row["document"] for row in corpus.index["recipes"]
     }
-    assert {
-        item.identity.content_sha256: item.document for item in library_recipes
-    } == {
-        digest: read_recipe(document)
-        for digest, document in expected_recipe_documents.items()
-    }
+    recipe_details: dict[str, RecipeDetailResponse] = {}
+    for item in library_recipes:
+        response = api.get(f"/api/recipe/{item.selector}")
+        assert response.status_code == 200, response.text
+        detail = RecipeDetailResponse.model_validate_json(response.content)
+        assert detail.identity == item.identity
+        assert detail.projected == item.projected
+        assert detail.document == read_recipe(
+            expected_recipe_documents[item.identity.content_sha256]
+        )
+        recipe_details[item.identity.content_sha256] = detail
     lap("recipe_api_pages_validation")
     multi_model_detail_seen = False
-    # The listing above already compares every recipe document. Detail adds
-    # per-selection Model resolution, whose paths are single- and multi-Model
-    # bindings, so one of each covers it. Each detail read re-projects the whole
-    # catalog; reading all of them cost over a minute without another way to fail.
+    # Every canonical document round-trips through its detail endpoint above.
+    # Also check Model resolution for single- and multi-Model bindings.
     detail_rows = [
         next(r for r in corpus.index["recipes"] if len(r["document"]["models"]) == 1),
         next(r for r in corpus.index["recipes"] if len(r["document"]["models"]) > 1),
     ]
     for row in detail_rows:
         digest = _recipe_key(row)[2]
-        detail_response = api.get(f"/api/recipe/{by_digest[digest].selector}")
-        assert detail_response.status_code == 200, detail_response.text
-        detail = RecipeDetailResponse.model_validate_json(detail_response.content)
+        detail = recipe_details[digest]
         assert detail.identity.content_sha256 == digest
         assert detail.identity.slug == row["document"]["identity"]["slug"]
         assert [entry.selection for entry in detail.model_documents] == read_recipe(
@@ -492,6 +498,7 @@ def test_fresh_postgres_imports_typed_canonical_model_recipe_api(
         "/api/model/library",
         "/api/recipe/library",
         "/api/recipe/{selector}",
+        "/api/model/{selector}",
     }
     assert canonical_library_paths <= set(app.openapi()["paths"])
     operation_ids = {

@@ -320,6 +320,24 @@ def read_column(
 def read_row_column(row: object, column: str) -> Any | Residue | None:
     """:func:`read_column` for ``row.column``, with the row's own kind and id."""
 
+    from .models import CatalogDocumentRevision
+
+    if isinstance(row, CatalogDocumentRevision) and column == "document":
+        from .catalog_revision_contract import cached_catalog_document
+
+        try:
+            return cached_catalog_document(
+                row.kind,
+                row.content_digest,
+                getattr(row, column),
+            )
+        except (TypeError, ValueError) as error:
+            return retire_as_unknown(
+                "catalog_document_revisions.document",
+                _row_subject(row),
+                BookkeepingReason.PERSISTED_STATE_DAMAGED,
+                stored_document_detail(error) or type(error).__name__,
+            )
     binding = binding_for(_row_table(row), column)
     return read_column(
         binding,

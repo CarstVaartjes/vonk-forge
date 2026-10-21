@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import io
+import json
 from dataclasses import replace
+from importlib.resources import files
 
 import pytest
 from sqlalchemy import create_engine
@@ -14,6 +16,7 @@ from vonk_agent_protocol import (
     canonical_message,
 )
 from vonk_agent_protocol.source_bundles import SourceBundleManifest
+from vonk_control.catalog_entities import recipe_document_projection
 from vonk_control.catalog_revision_contract import RecipeRevisionProjection
 from vonk_control.models import Base, RecipeSourceBundle
 from vonk_control.recipe_builds import RecipeBuildService, RecipeBuildUnknown
@@ -23,8 +26,7 @@ from vonk_control.source_bundles import (
     generate_source_bundle,
 )
 from vonk_control.source_policy import enforce_build_source_policy
-
-from .test_distributed_lifecycle import _topology
+from vonk_forge_contracts import RecipeDefinition
 
 
 def _service(store, archive):
@@ -36,12 +38,13 @@ def _service(store, archive):
 
 
 def _projected():
-    return RecipeRevisionProjection(
-        title="test",
-        description="",
-        tags=[],
-        runtime_engine="test",
-        topology=_topology(),
+    recipe = RecipeDefinition.model_validate_json(
+        files("vonk_forge_contracts")
+        .joinpath("examples", "recipe-source-build.json")
+        .read_text()
+    )
+    return RecipeRevisionProjection.model_validate_json(
+        json.dumps(recipe_document_projection(recipe))
     )
 
 

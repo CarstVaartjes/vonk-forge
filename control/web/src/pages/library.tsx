@@ -44,13 +44,18 @@ function viewRecipe(recipe: RecipeLibrary["recipes"][number]): LibraryViewRecipe
     capabilities: recipe.usage,
     content_sha256: recipe.identity.content_sha256,
     description: recipe.identity.description,
-    recipe_document: recipe.document,
+    recipe_document: {
+      ...recipe.projected,
+      models: recipe.projected.models.map((model) => ({ model })),
+      identity: recipe.projected.identity,
+      runtime: { engine: recipe.projected.runtime_engine },
+    },
     recipe_id: recipe.identity.recipe_id,
     recipe_revision_id: recipe.identity.recipe_revision_id,
     publisher: recipe.identity.publisher,
     slug: recipe.identity.slug,
     title: recipe.identity.title,
-    topology_name: recipe.document.topology.name,
+    topology_name: recipe.projected.topology.name,
     engine: recipe.engine,
     creator: recipe.creator,
     model_selectors: recipe.model_selectors,
@@ -69,8 +74,10 @@ function viewModel(
       slug: model.identity.slug,
       content_sha256: model.identity.content_sha256,
     },
-    model_document: model.document,
-    model_capabilities: model.document.capabilities,
+    model_document: model.projected,
+    model_file_count: model.projected.artifact_count,
+    model_bytes: model.projected.download_bytes,
+    model_capabilities: model.projected.capabilities,
     local: model.local,
     family: model.family,
     version: model.version,
@@ -105,13 +112,14 @@ export async function loadLibraryView(
   signal: AbortSignal,
   sort?: LibrarySort,
   updatedSince?: string,
+  fitsFleet?: boolean,
 ): Promise<LibraryViewSnapshot> {
   // Every load starts from the first page: the cursor belongs to the ordering
   // and filters that produced it, so the caller re-derives the whole view when
   // either changes rather than resuming a page in the previous order.
   const [modelPages, recipePages] = await Promise.all([
     loadAll((cursor) => api.modelLibrary(cursor, sort, updatedSince, signal), signal),
-    loadAll((cursor) => api.recipeLibrary(cursor, sort, updatedSince, signal), signal),
+    loadAll((cursor) => api.recipeLibrary(cursor, sort, updatedSince, signal, fitsFleet), signal),
   ]);
   const models = modelPages.flatMap((page) => page.models);
   const recipes = recipePages.flatMap((page) => page.recipes).map(viewRecipe);
@@ -219,15 +227,22 @@ export function LibraryPage({
   const route = useMemo(() => libraryRoute(new URL(path, location.origin).pathname), [path]);
   const view = subview(path);
   const preferredNodeId = new URL(path, location.origin).searchParams.get("spark") ?? undefined;
-  const { sort: librarySort, updated: libraryUpdated } = useMemo(
-    () => libraryFiltersFromSearch(new URL(path, location.origin).searchParams),
-    [path],
-  );
+  const {
+    sort: librarySort,
+    updated: libraryUpdated,
+    fits: libraryFits,
+  } = useMemo(() => libraryFiltersFromSearch(new URL(path, location.origin).searchParams), [path]);
   useEffect(() => setQuery(new URL(path, location.origin).searchParams.get("q") ?? ""), [path]);
   useEffect(() => {
     const controller = new AbortController();
     setError("");
-    void loadLibraryView(api, controller.signal, librarySort, libraryRecencySince(libraryUpdated))
+    void loadLibraryView(
+      api,
+      controller.signal,
+      librarySort,
+      libraryRecencySince(libraryUpdated),
+      libraryFits || undefined,
+    )
       .then((value) => {
         if (!controller.signal.aborted) setSnapshot(value);
       })
@@ -236,7 +251,7 @@ export function LibraryPage({
           setError(value instanceof Error ? value.message.slice(0, 512) : "Unable to load Library");
       });
     return () => controller.abort();
-  }, [api, attempt, librarySort, libraryUpdated]);
+  }, [api, attempt, librarySort, libraryUpdated, libraryFits]);
   useEffect(() => {
     if (!api.visualFleet) return;
     const controller = new AbortController();

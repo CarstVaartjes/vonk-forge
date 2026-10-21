@@ -535,6 +535,11 @@ class CatalogService:
         )
         if existing is not None:
             try:
+                # Ingress verifies stored bytes before reusing a signed identity.
+                if canonical_json(existing.document) != captured.document_json:
+                    raise CatalogRevisionContractError(
+                        "stored catalog content differs from verified ingress"
+                    )
                 read_catalog_document(existing)
                 projection_type = (
                     ModelRevisionProjection
@@ -550,6 +555,9 @@ class CatalogService:
                 projection = (
                     ModelRevisionProjection(
                         identity=parsed.identity,
+                        metadata=parsed.metadata,
+                        format=parsed.format,
+                        capabilities=parsed.capabilities,
                         modalities=parsed.modalities,
                         artifact_count=len(parsed.files),
                         download_bytes=parsed.download_bytes,

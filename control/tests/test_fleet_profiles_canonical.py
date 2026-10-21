@@ -8,7 +8,7 @@ from importlib.resources import files
 from threading import Barrier
 
 import pytest
-from sqlalchemy import create_engine, update
+from sqlalchemy import create_engine, event, update
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 from vonk_agent_protocol import DesiredAssignmentState, ModelCacheBlockerCode
@@ -738,7 +738,9 @@ def test_profile_read_names_a_missing_exact_cache_instead_of_substituting() -> N
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
-def test_profile_reads_the_newest_readable_revision_of_its_recipe() -> None:
+def test_profile_reports_an_unreadable_head_without_substituting_older_content() -> (
+    None
+):
     sessions = _sessions()
     _seed(sessions)
     service = FleetProfileService(sessions, clock=lambda: NOW)
@@ -780,9 +782,9 @@ def test_profile_reads_the_newest_readable_revision_of_its_recipe() -> None:
             )
         )
 
-    # The newest revision is unreadable, so the profile keeps the readable one.
+    # A broken head is actionable; it must not silently select older content.
     view = service.get_number(profile.number)
-    assert view.assignments[0].recipe.revision_id == RECIPE_REVISION_ID
+    assert view.assignments[0].recipe.state == "Needs attention"
 
     with sessions.begin() as session:
         session.execute(
@@ -1039,3 +1041,92 @@ def test_a_run_made_with_other_option_choices_is_not_the_assignments_state() -> 
             update={"option_choices": {"verification": "standard"}}
         )
         assert service._assignment_state(session, matching).current_state == "placed"
+
+
+@pytest.mark.parametrize("selector_count", [1, 50])
+def test_fifty_assignment_save_bounds_document_parses_and_database_round_trips(
+    monkeypatch,
+    selector_count,
+):
+    """A save must not resolve and parse the same selector per assignment and view."""
+    from collections import Counter, OrderedDict
+
+    import vonk_control.catalog_revision_contract as contract
+
+    sessions = _sessions()
+    _seed(sessions)
+    from vonk_control.catalog_entities import CatalogEntityService
+
+    selectors = ["vonk-forge/synthetic-tiny-build"]
+    with sessions() as session:
+        template_row = session.get(CatalogDocumentRevision, RECIPE_REVISION_ID)
+        assert template_row is not None
+        template = template_row.document
+    catalog = CatalogEntityService(sessions, clock=lambda: NOW)
+    for index in range(1, selector_count):
+        document = json.loads(json.dumps(template))
+        document["identity"]["slug"] = f"synthetic-{index}"
+        revision = catalog.create_draft(document, actor="test")
+        catalog.resolve(revision.id, actor="test")
+        selectors.append(f"vonk-forge/synthetic-{index}")
+    service = FleetProfileService(sessions, clock=lambda: NOW)
+    created = service.update_number(1, FleetProfileInput(name="Before"), actor="test")
+    monkeypatch.setattr(contract, "_document_cache", OrderedDict(), raising=False)
+    monkeypatch.setattr(contract, "_document_cache_size", 0, raising=False)
+    parses = Counter()
+    for kind in ("model", "recipe"):
+        original = getattr(contract, f"read_{kind}")
+
+        def counting(raw, parser=original, name=kind):
+            parses[name] += 1
+            return parser(raw)
+
+        monkeypatch.setattr(contract, f"read_{kind}", counting)
+    original_hash = hashlib.sha256
+
+    def reject_catalog_hash(data=b"", *args, **kwargs):
+        try:
+            payload = json.loads(data)
+        except (TypeError, ValueError, UnicodeError):
+            payload = None
+        assert not (
+            isinstance(payload, dict)
+            and "identity" in payload
+            and "kind" in payload
+            and ("models" in payload or "files" in payload)
+        ), "profile save re-hashed a stored catalog document"
+        return original_hash(data, *args, **kwargs)
+
+    monkeypatch.setattr(hashlib, "sha256", reject_catalog_hash)
+    queries = []
+    engine = sessions.kw["bind"]
+
+    def counted(_connection, _cursor, statement, _parameters, _context, _many):
+        queries.append(statement)
+
+    event.listen(engine, "before_cursor_execute", counted)
+    try:
+        saved = service.update_number(
+            1,
+            FleetProfileInput(
+                name="Fifty",
+                expected_revision=created.revision,
+                assignments=[
+                    FleetProfileAssignmentInput(
+                        recipe_selector=selectors[index % selector_count],
+                        spark_ids=[NODE_1],
+                        assignment_name=f"slot-{index}",
+                    )
+                    for index in range(50)
+                ],
+            ),
+            actor="test",
+        )
+    finally:
+        event.remove(engine, "before_cursor_execute", counted)
+    assert len(saved.assignments) == 50
+    assert parses["recipe"] <= selector_count, parses
+    assert parses["model"] <= 1, parses
+    # Four identity/row reads per unique selector, one shared model title and
+    # reference gate, and shared profile/roster reads; repeated choices add none.
+    assert len(queries) < 4 * selector_count + 30, (len(queries), queries)

@@ -100,3 +100,102 @@ def test_model_cache_operation_payload_round_trips_through_database_and_reads_ma
     assert restarted.progress["phase"] == "queued"
     assert restarted.progress["downloaded_bytes"] == 0
     cache.close()
+
+
+@pytest.mark.parametrize(
+    "kind,example",
+    [("model", "model-definition.json"), ("recipe", "recipe-source-build.json")],
+)
+def test_catalog_readers_parse_one_content_identity_once(monkeypatch, kind, example):
+    """Separate ORM rows and read APIs must share one strict parse, without hashing."""
+    from collections import OrderedDict
+    from copy import deepcopy
+
+    import vonk_control.catalog_revision_contract as contract
+    from vonk_control.fleet_profiles.persistence import _stored_recipe
+    from vonk_control.stored_json import read_row_column
+    from vonk_forge_contracts import document_sha256
+
+    monkeypatch.setattr(contract, "_document_cache", OrderedDict(), raising=False)
+    monkeypatch.setattr(contract, "_document_cache_size", 0, raising=False)
+    raw = json.loads(
+        files("vonk_forge_contracts").joinpath("examples", example).read_text()
+    )
+    digest = document_sha256(raw)
+    parser = getattr(contract, f"read_{kind}")
+    calls = []
+
+    def counting(value):
+        calls.append(value)
+        return parser(value)
+
+    def forbidden(*args):
+        raise AssertionError("trusted catalog read re-hashed the document")
+
+    monkeypatch.setattr(contract, f"read_{kind}", counting)
+    monkeypatch.setattr(contract, "document_sha256", forbidden)
+    for index in range(50):
+        row = CatalogDocumentRevision(
+            id=str(index), kind=kind, content_digest=digest, document=deepcopy(raw)
+        )
+        parsed = read_catalog_document(row)
+        assert read_row_column(row, "document") == parsed
+        if kind == "recipe":
+            assert _stored_recipe(row) == parsed
+    assert len(calls) == 1
+    # A caller cannot poison another reader of this immutable content identity.
+    parsed.metadata.description = "caller-local edit"
+    assert (
+        read_catalog_document(row).metadata.description
+        == raw["metadata"]["description"]
+    )
+    assert len(calls) == 1
+    # A second identity cannot borrow the first identity's parsed document.
+    changed = deepcopy(raw)
+    changed["metadata"]["description"] += " changed"
+    other = CatalogDocumentRevision(
+        id="other", kind=kind, content_digest="a" * 64, document=changed
+    )
+    assert (
+        read_catalog_document(other).metadata.description
+        == changed["metadata"]["description"]
+    )
+    assert len(calls) == 2
+
+
+def test_import_refuses_a_mismatched_digest_even_when_content_was_cached(tmp_path):
+    """The process cache cannot bypass the signed ingress content identity check."""
+    from vonk_agent_protocol import CatalogCode
+    from vonk_control.auth import TokenCodec
+    from vonk_control.catalog_entities import CatalogValidationError
+    from vonk_control.catalog_service import CatalogService
+    from vonk_forge_contracts import document_sha256
+
+    sessions = _database(tmp_path)
+    raw = json.loads(
+        files("vonk_forge_contracts")
+        .joinpath("examples", "recipe-source-build.json")
+        .read_text()
+    )
+    read_catalog_document(
+        CatalogDocumentRevision(
+            id="cached",
+            kind="recipe",
+            content_digest=document_sha256(raw),
+            document=raw,
+        )
+    )
+    service = CatalogService(
+        sessions,
+        clock=lambda: datetime.now(UTC),
+        cursors=TokenCodec(b"s" * 32).cursor_codec(),
+    )
+    with pytest.raises(CatalogValidationError) as caught:
+        service.import_recipe_library(
+            "test",
+            library_commit="a" * 40,
+            source_path="recipes/example.json",
+            document=raw,
+            expected_content_sha256="f" * 64,
+        )
+    assert caught.value.code == CatalogCode.HASH_MISMATCH

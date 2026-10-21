@@ -29,7 +29,7 @@ from vonk_control.artifact_reference_scan import (
 )
 from vonk_control.auth import Actor
 from vonk_control.bounded_json import require_mapping, require_sequence
-from vonk_control.catalog_entities import build_policy_projection
+from vonk_control.catalog_entities import recipe_document_projection
 from vonk_control.catalog_revision_contract import write_catalog_projection
 from vonk_control.job_documents import (
     AvailabilityJobPayload,
@@ -429,14 +429,7 @@ def _recipe_projection(
 ) -> dict[str, object]:
     """The stored catalog projection of one recipe, with its source bundle."""
 
-    projected = {
-        "title": recipe.metadata.title,
-        "description": recipe.metadata.description,
-        "tags": list(recipe.metadata.tags),
-        "runtime_engine": recipe.runtime.engine,
-        "topology": recipe.topology.model_dump(mode="json"),
-    }
-    projected.update(build_policy_projection(recipe))
+    projected = recipe_document_projection(recipe)
     projected["source_bundle_sha256"] = source_bundle_sha256
     return write_catalog_projection(projected, kind="recipe")
 

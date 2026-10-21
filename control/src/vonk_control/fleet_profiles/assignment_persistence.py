@@ -16,6 +16,7 @@ from ..artifact_lifecycle import (
     require_reference_open,
 )
 from ..artifact_reference_scan import require_model_sets_open
+from ..catalog_revision_contract import RecipeRevisionProjection, read_recipe_projection
 from ..fleet_profile_contract import FleetProfileAssignmentInput, FleetProfilePreview
 from ..lifecycle.evidence import Residue
 from ..model_cache.persistence import _operation_removal
@@ -23,7 +24,6 @@ from ..models import ModelCacheOperation
 from .contracts import (
     FleetProfileAdmissionEffectBusy,
 )
-from .persistence import _stored_recipe
 from .projection_support import (
     _effective_option_choices,
 )
@@ -53,6 +53,7 @@ class FleetProfileService:
         assignments: list[FleetProfileAssignmentInput] = []
         notes: list[str] = []
         digests: set[str] = set()
+        projections: dict[str, RecipeRevisionProjection] = {}
         for value in values:
             resolved = self._recipe_document(session, value.recipe_selector)
             if isinstance(resolved, Residue):
@@ -64,9 +65,14 @@ class FleetProfileService:
                 )
                 continue
             document, revision = resolved
-            definition = _stored_recipe(revision)
-            if isinstance(definition, Residue):
-                # No readable revision: keep the operator's choices as given.
+            try:
+                if value.recipe_selector not in projections:
+                    projections[value.recipe_selector] = read_recipe_projection(
+                        revision
+                    )
+                definition = projections[value.recipe_selector]
+            except ValueError:
+                # Keep authoring intent while the catalog owner repairs evidence.
                 assignments.append(value)
                 notes.append(
                     f"{value.recipe_selector}: revision {revision.id} is unreadable"
@@ -74,7 +80,7 @@ class FleetProfileService:
                 continue
             if value.recipe_selector not in retained_selectors:
                 digests.update(
-                    selection.model.content_sha256 for selection in definition.models
+                    reference.content_sha256 for reference in definition.models
                 )
             # Every option is saved with an explicit value: the operator's
             # choice, or the recipe default where none was made or offered.

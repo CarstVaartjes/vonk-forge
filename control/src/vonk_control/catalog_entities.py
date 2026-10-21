@@ -629,6 +629,9 @@ def _revision(
         download, installed = parsed.download_bytes, parsed.installed_bytes
         projected = {
             "identity": parsed.identity.model_dump(mode="json"),
+            "metadata": parsed.metadata.model_dump(mode="json"),
+            "format": parsed.format.model_dump(mode="json"),
+            "capabilities": parsed.capabilities,
             "modalities": parsed.modalities,
             "artifact_count": len(parsed.files),
             "download_bytes": download,
@@ -659,6 +662,19 @@ def _revision(
 def recipe_document_projection(recipe: RecipeDefinition) -> dict[str, object]:
     """Every projection field the immutable recipe document alone determines."""
     return {
+        "identity": recipe.identity.model_dump(mode="json"),
+        "metadata": recipe.metadata.model_dump(mode="json"),
+        "provenance": recipe.provenance.model_dump(mode="json"),
+        "release": recipe.release.model_dump(mode="json"),
+        "models": [
+            selection.model.model_dump(mode="json") for selection in recipe.models
+        ],
+        "interfaces": [
+            interface.model_dump(mode="json") for interface in recipe.interfaces
+        ],
+        "validation": recipe.validation.model_dump(mode="json"),
+        "base_image_digest": recipe.execution.build.base_image.digest,
+        "options": [option.model_dump(mode="json") for option in recipe.options],
         "title": recipe.metadata.title,
         "description": recipe.metadata.description,
         "tags": recipe.metadata.tags,

@@ -25,6 +25,11 @@ from vonk_agent_protocol import (
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition
 from vonk_forge_contracts.recipe import RecipeModelSelection, RecipeTopology
 
+from .catalog_revision_contract import (
+    ModelRevisionProjection,
+    PrebuiltImage,
+    RecipeRevisionProjection,
+)
 from .cursor_contract import MAX_CURSOR_LENGTH
 from .machine_states import (
     InstallationStateField,
@@ -207,7 +212,7 @@ class LibraryModelProjection(StrictModel):
 
     selector: Text256
     identity: LibraryModelIdentity
-    document: ModelDefinition
+    projected: ModelRevisionProjection
     family: Text128
     version: Text128
     variant: Text128
@@ -274,7 +279,7 @@ class ModelLibraryResponse(StrictModel):
 
 
 class ModelDetailResponse(LibraryModelProjection):
-    pass
+    document: ModelDefinition
 
 
 class RecipeReadinessCheck(StrictModel):
@@ -306,7 +311,7 @@ class LibraryRecipeProjection(StrictModel):
 
     selector: Text256
     identity: LibraryRecipeIdentity
-    document: RecipeDefinition
+    projected: RecipeRevisionProjection
     model_selectors: list[Text256] = Field(min_length=1, max_length=32)
     usage: list[Text64] = Field(max_length=64)
     resources: LibraryResourceProjection
@@ -318,6 +323,7 @@ class LibraryRecipeProjection(StrictModel):
     # The upstream creator: owner of the source reference, else first attribution.
     creator: Text128 | None = None
     assessment: RecipeReadiness | None = None
+    prebuilt_image: PrebuiltImage | None = None
 
 
 class RecipeLibraryResponse(StrictModel):
@@ -553,6 +559,7 @@ class RecipeAlternative(StrictModel):
 
 
 class RecipeDetailResponse(LibraryRecipeProjection):
+    document: RecipeDefinition
     model_documents: list[LibraryRecipeModel] = Field(max_length=32)
     alternatives: list[RecipeAlternative] = Field(
         default_factory=list, max_length=_MAX_PAGE_RECIPES
