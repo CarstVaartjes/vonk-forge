@@ -115,18 +115,6 @@ impl HelperRejection {
             _ => None,
         };
         let (diagnostic, process_logs) = match &error {
-            OperationError::CommandFailed { cause } => {
-                let (code, stderr) = match cause {
-                    vonk_agent_helper::operations::CommandFailure::Exit { code, stderr } => {
-                        (*code, stderr.clone())
-                    }
-                    other => (None, other.to_string()),
-                };
-                let mut logs =
-                    vonk_agent_helper::runtime_logs::retain_container(&[], stderr.as_bytes());
-                logs.exit_code = code.and_then(|code| u32::try_from(code).ok());
-                (None, Some(Box::new(logs)))
-            }
             // The container's own output is the evidence for an exited
             // workload, so it crosses as its own typed per-stream document
             // rather than as a line of free text.
@@ -856,32 +844,6 @@ mod tests {
     }
 
     #[test]
-    fn runtime_command_rejection_retains_stderr_and_numeric_exit_in_frame() {
-        let (mut client, mut server) = std::os::unix::net::UnixStream::pair().unwrap();
-        let error = HelperRejection::for_error(
-            uuid::Uuid::new_v4().to_string(),
-            false,
-            OperationError::CommandFailed {
-                cause: vonk_agent_helper::operations::CommandFailure::Exit {
-                    code: Some(125),
-                    stderr: "opaque runtime failure".into(),
-                },
-            },
-        );
-        super::reject(&mut server, &error);
-        let bytes = vonk_agent_helper::protocol::read_frame(&mut client).unwrap();
-        let response: HelperResponse = vonk_agent_protocol::parse_strict(&bytes).unwrap();
-        assert_eq!(
-            response.error_code,
-            Some(HelperErrorCode::OperationCommandFailed)
-        );
-        let logs = response.process_logs.unwrap();
-        assert_eq!(logs.exit_code, Some(125));
-        assert!(logs.stderr.text.contains("opaque runtime failure"));
-        assert!(logs.stderr.text.len() <= 2048);
-    }
-
-    #[test]
     fn framed_rejection_uses_the_shared_response_contract() {
         let (mut client, mut server) = std::os::unix::net::UnixStream::pair().unwrap();
         super::reject(
@@ -1089,8 +1051,8 @@ mod tests {
             assert_eq!(rejection.detail, journaled);
             assert!(rejection.detail.ends_with(&cause.to_string()));
 
-            // Command evidence accompanies the unchanged rejection code;
-            // numeric status belongs to these command logs, not a job receipt.
+            // The wire reply is the one every agent already accepts: the code
+            // alone, with no diagnostic and no exit code.
             let (mut client, mut server) = std::os::unix::net::UnixStream::pair().unwrap();
             super::reject(&mut server, &rejection);
             let bytes = vonk_agent_helper::protocol::read_frame(&mut client).unwrap();
@@ -1102,13 +1064,6 @@ mod tests {
             assert_eq!(response.status, HostHelperResponseStatus::Rejected);
             assert_eq!(response.diagnostic, None);
             assert_eq!(response.exit_code, None);
-            let logs = response.process_logs.unwrap();
-            if let CommandFailure::Exit { code, .. } = cause {
-                assert_eq!(
-                    logs.exit_code,
-                    code.and_then(|code| u32::try_from(code).ok())
-                );
-            }
         }
     }
 }

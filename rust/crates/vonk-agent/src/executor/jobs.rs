@@ -616,7 +616,6 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         } else {
             let logs = receipt.diagnostics.as_ref().map(|diagnostics| {
                 Box::new(crate::failure_evidence::FailureProcessLogs {
-                    exit_code: None,
                     stdout: diagnostics.stdout.clone(),
                     stderr: diagnostics.stderr.clone(),
                 })

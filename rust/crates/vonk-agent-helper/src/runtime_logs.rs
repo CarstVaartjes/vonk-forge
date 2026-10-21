@@ -433,7 +433,6 @@ pub fn retain(stream: &[u8]) -> FailureLogTail {
 /// The retained output of one failed container, per stream.
 pub fn retain_container(stdout: &[u8], stderr: &[u8]) -> HostHelperProcessLogs {
     HostHelperProcessLogs {
-        exit_code: None,
         stdout: retain(stdout),
         stderr: retain(stderr),
     }

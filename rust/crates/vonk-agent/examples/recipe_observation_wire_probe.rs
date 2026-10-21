@@ -27,7 +27,6 @@ impl ProcessRunner for NoProcess {
         _timeout: std::time::Duration,
     ) -> Result<ProcessOutput, ProcessError> {
         Ok(ProcessOutput {
-            exit_code: None,
             success: true,
             stdout: Vec::new(),
             stderr: Vec::new(),

@@ -257,7 +257,6 @@ impl HostRuntimeBoundary<'_> {
             running,
             process_logs: response.process_logs.as_ref().map(|logs| {
                 Box::new(FailureProcessLogs {
-                    exit_code: None,
                     stdout: sanitize_tail(&logs.stdout),
                     stderr: sanitize_tail(&logs.stderr),
                 })
@@ -354,7 +353,6 @@ impl HostRuntimeBoundary<'_> {
                         .map(crate::failure_evidence::sanitize_exit_summary),
                     process_logs: response.process_logs.as_ref().map(|logs| {
                         Box::new(FailureProcessLogs {
-                            exit_code: None,
                             stdout: sanitize_tail(&logs.stdout),
                             stderr: sanitize_tail(&logs.stderr),
                         })
@@ -709,7 +707,6 @@ impl HostRuntimeBoundary<'_> {
                     .map(crate::failure_evidence::sanitize_exit_summary),
                 process_logs: response.process_logs.as_ref().map(|logs| {
                     Box::new(FailureProcessLogs {
-                        exit_code: None,
                         stdout: sanitize_tail(&logs.stdout),
                         stderr: sanitize_tail(&logs.stderr),
                     })

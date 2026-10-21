@@ -68,9 +68,6 @@ REVIEWED_CORE_DEFAULTS = {
     "RecipeJobRunResult.ending",
     "RecipeJobEnding.diagnostic",
     "FailureDiagnostics.schema_version",
-    # Reached through successful job receipt diagnostics too: an observed
-    # subprocess status is optional detail, never a core acceptance predicate.
-    "FailureDiagnostics.process_exit_code",
     # The failure code (model_store_layout) already names a layout fault; the
     # struct only adds path and errno detail, absent from older agents.
     "FailureDiagnostics.model_store_layout",

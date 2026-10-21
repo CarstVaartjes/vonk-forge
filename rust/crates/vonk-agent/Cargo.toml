@@ -6,7 +6,6 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-base64.workspace = true
 async-trait.workspace = true
 futures-util.workspace = true
 chrono.workspace = true

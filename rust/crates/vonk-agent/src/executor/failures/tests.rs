@@ -332,7 +332,6 @@ fn an_exited_workload_failure_carries_the_captured_container_output() {
         code: HelperErrorCode::RuntimeProcessExited,
         diagnostic: None,
         process_logs: Some(Box::new(crate::failure_evidence::FailureProcessLogs {
-            exit_code: None,
             stdout: crate::failure_evidence::log_tail(b"rank 0 listening on 8888\n"),
             stderr: crate::failure_evidence::log_tail(b"ModuleNotFoundError: runtime module\n"),
         })),
@@ -447,7 +446,6 @@ fn an_exited_workload_failure_always_has_logs_or_a_typed_reason_and_the_exit_fac
         (
             Some("exit_code=1 exit_cause=bad_arguments"),
             Some(crate::failure_evidence::FailureProcessLogs {
-                exit_code: None,
                 stdout: crate::failure_evidence::log_tail(b""),
                 stderr: crate::failure_evidence::log_tail(b"error: unknown argument\n"),
             }),
@@ -519,7 +517,6 @@ fn rank_launch_failure_keeps_sanitized_logs_in_the_controller_contract() {
         code: HelperErrorCode::RuntimeProcessExited,
         diagnostic: None,
         process_logs: Some(Box::new(crate::failure_evidence::FailureProcessLogs {
-            exit_code: None,
             stdout: crate::failure_evidence::log_tail(b"starting the engine core\n"),
             stderr: crate::failure_evidence::log_tail(
                 b"ModuleNotFoundError: runtime module\nAPI_TOKEN=private-value\n",
@@ -1137,7 +1134,6 @@ fn a_start_whose_exception_names_host_paths_is_the_shared_vector_on_the_wire() {
         code: HelperErrorCode::RuntimeProcessExited,
         diagnostic: Some(crate::failure_evidence::sanitize_exit_summary(summary)),
         process_logs: Some(Box::new(crate::failure_evidence::FailureProcessLogs {
-            exit_code: None,
             stdout: crate::failure_evidence::log_tail(
                 b"loading weights from /outputs/cache/home/.cache/huggingface\n",
             ),

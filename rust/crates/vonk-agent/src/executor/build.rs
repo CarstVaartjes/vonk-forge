@@ -61,8 +61,7 @@ pub(super) fn build_cleanup_unconfirmed(
 ) -> ExecutionResult {
     if error.cleanup_cannot_succeed_as_is() {
         return ExecutionResult::Failed(
-            error
-                .failure_evidence()
+            Failure::new(error.cleanup_reason())
                 .stage(FailureStage::BoundedBuildProcess)
                 .diagnostic(error.cleanup_diagnostic()),
         );
@@ -70,12 +69,7 @@ pub(super) fn build_cleanup_unconfirmed(
     ExecutionResult::unknown(
         WaitReason::CleanupUnconfirmed,
         error.cleanup_reason(),
-        UnknownEvidence::at(FailureStage::BoundedBuildProcess)
-            .because(error.cleanup_diagnostic())
-            .diagnostics(crate::failure_evidence::from_failure(
-                &AgentOperation::RecipeBuildCleanupV1,
-                &error.failure_evidence(),
-            )),
+        UnknownEvidence::at(FailureStage::BoundedBuildProcess).because(error.cleanup_diagnostic()),
     )
 }
 
@@ -301,9 +295,7 @@ pub(super) fn build_error_outcome(
 ) -> ExecutionResult {
     use crate::recipe_builder::{PodmanImportDiagnostic, RecipeBuildError};
 
-    if let RecipeBuildError::BaseImageImport { diagnostic, .. }
-    | RecipeBuildError::BaseImageImportProcess { diagnostic } = error
-    {
+    if let RecipeBuildError::BaseImageImport { diagnostic, .. } = error {
         let failure = error.failure_evidence();
         return ExecutionResult::Failed(match diagnostic {
             PodmanImportDiagnostic::TemporaryStorageExhausted => failure
@@ -316,26 +308,6 @@ pub(super) fn build_error_outcome(
             // transient fault. Retrying the same verified bytes hides it.
             _ => failure,
         });
-    }
-    // A returned nonzero command is a definite failure. Do not replace its
-    // status and tails with a generic observation-unavailable account.
-    if let RecipeBuildError::ImageBuild { diagnostic, .. }
-    | RecipeBuildError::AdapterBuild { diagnostic, .. }
-    | RecipeBuildError::Command { diagnostic, .. }
-    | RecipeBuildError::NetworkBoundary { diagnostic, .. } = error
-    {
-        let failure = error.failure_evidence();
-        return ExecutionResult::Failed(
-            if *diagnostic
-                == crate::recipe_builder::PodmanBuildDiagnostic::TemporaryStorageExhausted
-            {
-                failure
-                    .kind(AgentFailureKind::ResourcePrerequisite)
-                    .retry_after(Some(30))
-            } else {
-                failure
-            },
-        );
     }
     // Actual source/adapter digest ingress still refuses substitution.
     if matches!(
@@ -351,9 +323,7 @@ pub(super) fn build_error_outcome(
         return ExecutionResult::Failed(error.failure_evidence());
     }
     ExecutionResult::unknown(WaitReason::ObservationUnavailable, error.to_string(),
-        UnknownEvidence::at(FailureStage::BoundedBuildProcess)
-            .because("bounded build observation ended; retained content and exact units are reconciled on the next request")
-            .diagnostics(crate::failure_evidence::from_failure(&AgentOperation::RecipeBuildV1, &error.failure_evidence())))
+        UnknownEvidence::at(FailureStage::BoundedBuildProcess).because("bounded build observation ended; retained content and exact units are reconciled on the next request"))
 }
 
 fn build_transfer_outcome(
@@ -411,13 +381,12 @@ mod import_tests {
         ] {
             let error = RecipeBuildError::BaseImageImport {
                 diagnostic,
-                logs: Box::new(crate::failure_evidence::FailureProcessLogs {
-                    exit_code: None,
+                logs: Some(Box::new(crate::failure_evidence::FailureProcessLogs {
                     stdout: crate::failure_evidence::log_tail(b""),
                     stderr: crate::failure_evidence::log_tail(
                         b"import rejected\nAuthorization: Bearer never-persist\n",
                     ),
-                }),
+                })),
             };
             let ExecutionResult::Failed(failure) = build_error_outcome(&error) else {
                 panic!("a completed import failure must not become an unknown observation");
@@ -451,51 +420,6 @@ mod import_tests {
                 outcome.evidence.unwrap().stage.as_deref(),
                 Some(FailureStage::BaseImageImport.as_str())
             );
-        }
-    }
-}
-
-#[cfg(test)]
-mod command_evidence_tests {
-    use super::*;
-    use crate::recipe_builder::{PodmanBuildDiagnostic, RecipeBuildError};
-
-    #[test]
-    fn every_nonzero_build_stage_survives_executor_classification_with_its_evidence() {
-        let logs = || {
-            Box::new(crate::failure_evidence::FailureProcessLogs {
-                exit_code: Some(125),
-                stdout: crate::failure_evidence::log_tail(b""),
-                stderr: crate::failure_evidence::log_tail(b"opaque command failure"),
-            })
-        };
-        for error in [
-            RecipeBuildError::ImageBuild {
-                diagnostic: PodmanBuildDiagnostic::Unknown,
-                logs: logs(),
-            },
-            RecipeBuildError::AdapterBuild {
-                diagnostic: PodmanBuildDiagnostic::Unknown,
-                logs: logs(),
-            },
-            RecipeBuildError::Command {
-                stage: FailureStage::ImageVerification,
-                diagnostic: PodmanBuildDiagnostic::Unknown,
-                logs: logs(),
-            },
-            RecipeBuildError::NetworkBoundary {
-                stage: FailureStage::EgressAddress,
-                diagnostic: PodmanBuildDiagnostic::Unknown,
-                logs: logs(),
-            },
-        ] {
-            let ExecutionResult::Failed(failure) = build_error_outcome(&error) else {
-                panic!("a nonzero command was collapsed into an unknown effect");
-            };
-            let evidence =
-                crate::failure_evidence::from_failure(&AgentOperation::RecipeBuildV1, &failure);
-            assert_eq!(evidence.process_exit_code, Some(125));
-            assert!(evidence.stderr.text.contains("opaque command failure"));
         }
     }
 }

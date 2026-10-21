@@ -140,7 +140,6 @@ impl Failure {
 /// cannot be built without it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UnknownEvidence {
-    pub diagnostics: Option<vonk_agent_protocol::generated::FailureDiagnostics>,
     /// The step that could not be confirmed (a short, stable word).
     pub stage: FailureStage,
     /// A bounded, non-sensitive cause: an error category or helper code.
@@ -152,7 +151,6 @@ pub struct UnknownEvidence {
 impl UnknownEvidence {
     pub fn at(stage: FailureStage) -> Self {
         Self {
-            diagnostics: None,
             stage,
             diagnostic: None,
             helper_error_code: None,
@@ -169,17 +167,9 @@ impl UnknownEvidence {
         self
     }
 
-    pub fn diagnostics(
-        mut self,
-        value: vonk_agent_protocol::generated::FailureDiagnostics,
-    ) -> Self {
-        self.diagnostics = Some(value);
-        self
-    }
-
     fn into_wire(self) -> OutcomeEvidence {
         OutcomeEvidence {
-            diagnostics: self.diagnostics,
+            diagnostics: None,
             diagnostic: self
                 .diagnostic
                 .as_deref()

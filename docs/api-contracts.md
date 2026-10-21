@@ -936,14 +936,3 @@ A fresh, complete installation-directory inventory makes an absent installed
 rank planned and its installation partial, so normal preparation can reinstall
 it. Unknown, truncated and stale listings prove no absence. This cache repair
 never proves a running workload stopped or releases its resource claims.
-
-
-### Subprocess failure evidence
-
-`FailureDiagnostics.process_exit_code` retains an observed numeric subprocess
-exit status alongside its bounded stdout/stderr tails. It is omitted when no
-numeric status was observed (including spawn failure or signal termination).
-The helper carries that status in `HostHelperProcessLogs.exit_code`; the agent
-preserves it while sanitizing and projecting the failure. Classification never
-replaces a command's retained output. Neither field changes authorization or
-turns an unsuccessful command into a successful effect.

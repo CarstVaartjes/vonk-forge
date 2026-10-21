@@ -36,7 +36,6 @@ impl FailureDiagnostics {
         };
         let valid = serde_json::to_vec(self).is_ok_and(|bytes| bytes.len() <= 16 * 1024)
             && self.collected_at.chars().count() <= 64
-            && self.process_exit_code.is_none_or(|code| code <= 255)
             && self.schema_version == 1
             && chrono::DateTime::parse_from_rfc3339(&self.collected_at).is_ok()
             && !self.phase.is_empty()

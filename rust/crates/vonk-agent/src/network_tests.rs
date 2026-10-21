@@ -174,7 +174,6 @@ impl ProcessRunner for RouteRunner<'_> {
         assert_eq!(&arguments[..3], &["-o", "route", "get"]);
         assert!(timeout <= Duration::from_millis(500));
         Ok(crate::process::ProcessOutput {
-            exit_code: None,
             success: self.success,
             stdout: self.output.as_bytes().to_vec(),
             stderr: vec![],
@@ -302,7 +301,6 @@ impl ProcessRunner for DnsRouteRunner {
             _ => panic!("unexpected probe"),
         };
         Ok(crate::process::ProcessOutput {
-            exit_code: None,
             success: true,
             stdout: text.as_bytes().to_vec(),
             stderr: vec![],

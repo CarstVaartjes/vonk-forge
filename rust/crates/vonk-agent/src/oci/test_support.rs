@@ -82,7 +82,6 @@ impl ProcessRunner for Gb10MemoryRunner {
     ) -> Result<ProcessOutput, ProcessError> {
         assert_eq!(program, Program::NvidiaSmi);
         Ok(ProcessOutput {
-            exit_code: None,
             success: true,
             stdout: b"NVIDIA GB10, [N/A], [N/A], 590.44\n".to_vec(),
             stderr: vec![],

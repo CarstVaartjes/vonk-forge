@@ -54,8 +54,6 @@ pub(crate) fn podman_storage_arguments_with_cgroup_manager(
         storage.display().to_string(),
         "--runroot".to_owned(),
         runroot.display().to_string(),
-        "--tmpdir".to_owned(),
-        runroot.join("libpod").display().to_string(),
         "--storage-opt".to_owned(),
         "overlay.ignore_chown_errors=true".to_owned(),
         "--storage-opt".to_owned(),

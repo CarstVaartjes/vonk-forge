@@ -590,7 +590,6 @@ mod tests {
             }
             self.calls.borrow_mut().push(arguments.to_vec());
             Ok(ProcessOutput {
-                exit_code: None,
                 success: self.fail.is_none(),
                 stdout: b"vonk-runtime-preflight-ok\n".to_vec(),
                 stderr: self.fail.unwrap_or("").as_bytes().to_vec(),

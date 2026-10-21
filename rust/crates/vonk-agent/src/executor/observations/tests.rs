@@ -605,7 +605,6 @@ async fn exited_serving_workload_carries_its_retained_output() {
                 response.error_code = Some(HelperErrorCode::RuntimeProcessExited);
                 response.diagnostic = Some("exit_code=1 exit_cause=unclassified".into());
                 response.process_logs = Some(HostHelperProcessLogs {
-                    exit_code: None,
                     stdout: crate::failure_evidence::log_tail(
                         b"INFO:     Application startup complete.\n",
                     ),

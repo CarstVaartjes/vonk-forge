@@ -44,7 +44,6 @@ fn no_host_path_leaves_the_agent_in_any_result_form() {
     // The class guard: whichever constructor built the result, the bytes sent
     // carry no host path in a sentence, and its core is what was built.
     let logs = FailureProcessLogs {
-        exit_code: None,
         stdout: log_tail(b"weights from /outputs/cache\n"),
         stderr: log_tail(b"FileNotFoundError: /opt/vonk/prewarm/x.json\n"),
     };

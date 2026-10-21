@@ -143,30 +143,20 @@ impl<R: ProcessRunner + ?Sized> RecipeBuilder<'_, R> {
         // longer than 50 bytes. Keep the durable, storage-accounted graphroot
         // under the build staging tree while putting only Podman's ephemeral
         // runtime metadata in the private systemd RuntimeDirectory.
-        // Podman's database binds its runroot. Reusing graph storage with a
-        // random runroot poisons the next attempt. Encode all UUID bytes to
-        // keep this operation's stable path below Podman 4.9's 50-byte limit.
-        let runroot = build_runroot(self.runtime_root, operation_id)?;
+        let runroot = Builder::new().prefix("b-").tempdir_in(self.runtime_root)?;
+        if runroot.path().as_os_str().as_bytes().len() > 50 {
+            return Err(RecipeBuildError::Evidence);
+        }
         let tag = format!("localhost/vonk/recipe-build-{}", request.build_id);
         let final_tag = format!("localhost/vonk/runtime-adapter-{}", request.build_id);
-        let retained = if storage_existed {
-            Some(self.inspect_image(&storage, &runroot, &final_tag, deadline, cancelled)?)
-        } else {
-            None
-        };
-        if retained
-            .as_ref()
-            .is_some_and(super::import::podman_database_conflict)
-        {
-            // The exact build's services have already been reconciled above.
-            // Discard only its incompatible execution cache, retaining source
-            // archives and verified base bytes. Replan once through normal build.
-            super::cleanup::remove_private_tree(&storage, deadline)?;
-            fs::create_dir_all(&storage)?;
-        }
-        let resumed = retained.as_ref().is_some_and(|output| {
-            output.success && inspect_adapted_image(&output.stdout, &request.adapter).is_ok()
-        });
+        let resumed = storage_existed
+            && self
+                .inspect_image(&storage, runroot.path(), &final_tag, deadline, cancelled)
+                .ok()
+                .filter(|output| output.success)
+                .is_some_and(|output| {
+                    inspect_adapted_image(&output.stdout, &request.adapter).is_ok()
+                });
         if !resumed {
             // Source extraction is into a fresh owned context; a previous interrupted
             // extraction is a disposable projection, never an admission gate.
@@ -181,7 +171,7 @@ impl<R: ProcessRunner + ?Sized> RecipeBuilder<'_, R> {
             self.import_base_images(
                 request,
                 &storage,
-                runroot.as_path(),
+                runroot.path(),
                 minimum_free_disk_bytes,
                 deadline,
                 cancelled,
@@ -192,7 +182,7 @@ impl<R: ProcessRunner + ?Sized> RecipeBuilder<'_, R> {
                     self.runner,
                     BuildEgressStart {
                         storage: &storage,
-                        runroot: runroot.as_path(),
+                        runroot: runroot.path(),
                         staging: staging.path(),
                         binary: self.egress_binary,
                         operation_id,
@@ -219,7 +209,7 @@ impl<R: ProcessRunner + ?Sized> RecipeBuilder<'_, R> {
                 .transpose()?;
             let mut podman_arguments = podman_build_arguments(
                 &storage,
-                runroot.as_path(),
+                runroot.path(),
                 egress
                     .as_ref()
                     .zip(proxy.as_deref())
@@ -311,7 +301,7 @@ impl<R: ProcessRunner + ?Sized> RecipeBuilder<'_, R> {
             let timeout = remaining_build_time(deadline)?;
             let mut arguments = podman_user_service_arguments(
                 &format!("vonk-recipe-build-{operation_id}"),
-                runroot.as_path(),
+                runroot.path(),
                 staging.path(),
                 timeout,
                 true,
@@ -337,7 +327,7 @@ impl<R: ProcessRunner + ?Sized> RecipeBuilder<'_, R> {
             if !output.success {
                 return Err(RecipeBuildError::ImageBuild {
                     diagnostic: podman_build_diagnostic(&output),
-                    logs: Box::new(sanitized_process_logs(&output)),
+                    logs: Some(Box::new(sanitized_process_logs(&output))),
                 });
             }
             // The recipe image is the adaptation stage's input, not the final
@@ -345,13 +335,7 @@ impl<R: ProcessRunner + ?Sized> RecipeBuilder<'_, R> {
             // platform adapter as the one reviewed, ordered step that owns the
             // interface label, the canonical launcher and the runtime user.
             let recipe_inspection =
-                self.inspect_image(&storage, runroot.as_path(), &tag, deadline, cancelled)?;
-            if !recipe_inspection.success {
-                return Err(super::diagnostics::command_failure(
-                    FailureStage::ImageVerification,
-                    &recipe_inspection,
-                ));
-            }
+                self.inspect_image(&storage, runroot.path(), &tag, deadline, cancelled)?;
             inspect_recipe_image(&recipe_inspection.stdout)
                 .map_err(|_| RecipeBuildError::ImageInspect)?;
             let adapter_context =
@@ -361,7 +345,7 @@ impl<R: ProcessRunner + ?Sized> RecipeBuilder<'_, R> {
             self.build_adaptation(
                 request,
                 &storage,
-                runroot.as_path(),
+                runroot.path(),
                 staging.path(),
                 &tag,
                 &final_tag,
@@ -373,13 +357,7 @@ impl<R: ProcessRunner + ?Sized> RecipeBuilder<'_, R> {
                 cancelled,
             )?;
             let adapted_inspection =
-                self.inspect_image(&storage, runroot.as_path(), &final_tag, deadline, cancelled)?;
-            if !adapted_inspection.success {
-                return Err(super::diagnostics::command_failure(
-                    FailureStage::ImageVerification,
-                    &adapted_inspection,
-                ));
-            }
+                self.inspect_image(&storage, runroot.path(), &final_tag, deadline, cancelled)?;
             inspect_adapted_image(&adapted_inspection.stdout, &request.adapter)
                 .map_err(|_| RecipeBuildError::AdapterInspect)?;
         }
@@ -408,7 +386,7 @@ impl<R: ProcessRunner + ?Sized> RecipeBuilder<'_, R> {
                 staging.path().join(format!(".digest-{}", Uuid::new_v4())),
             )?;
         }
-        let mut push_arguments = podman_storage_arguments(&storage, runroot.as_path());
+        let mut push_arguments = podman_storage_arguments(&storage, runroot.path());
         push_arguments.extend([
             "push".to_owned(),
             "--digestfile".to_owned(),
@@ -427,10 +405,7 @@ impl<R: ProcessRunner + ?Sized> RecipeBuilder<'_, R> {
             cancelled,
         )?;
         if !saved.success {
-            return Err(super::diagnostics::command_failure(
-                FailureStage::OutputStorage,
-                &saved,
-            ));
+            return Err(RecipeBuildError::ImageExport);
         }
         let image_digest = fs::read_to_string(&digest_file)?.trim().to_owned();
         if image_digest.strip_prefix("sha256:").is_none_or(|digest| {
@@ -460,7 +435,7 @@ impl<R: ProcessRunner + ?Sized> RecipeBuilder<'_, R> {
         File::open(&layout)?.sync_all()?;
         fs::rename(&layout, self.layout_path(operation_id))?;
         for reference in [final_tag, tag] {
-            let mut remove_arguments = podman_storage_arguments(&storage, runroot.as_path());
+            let mut remove_arguments = podman_storage_arguments(&storage, runroot.path());
             remove_arguments.extend(["image".to_owned(), "rm".to_owned(), reference]);
             let _ = self.runner.run_cancellable(
                 Program::Podman,
@@ -493,7 +468,6 @@ impl<R: ProcessRunner + ?Sized> RecipeBuilder<'_, R> {
         fs::rename(partial, receipt)?;
         File::open(&operation_root)?.sync_all()?;
         super::cleanup::remove_private_tree(staging.path(), deadline)?;
-        super::cleanup::remove_private_tree(&runroot, deadline)?;
         Ok(evidence)
     }
 
@@ -658,7 +632,7 @@ impl<R: ProcessRunner + ?Sized> RecipeBuilder<'_, R> {
         if !output.success {
             return Err(RecipeBuildError::AdapterBuild {
                 diagnostic: podman_build_diagnostic(&output),
-                logs: Box::new(sanitized_process_logs(&output)),
+                logs: Some(Box::new(sanitized_process_logs(&output))),
             });
         }
         Ok(())
@@ -722,7 +696,7 @@ impl<R: ProcessRunner + ?Sized> RecipeBuilder<'_, R> {
             if !loaded.success {
                 return Err(RecipeBuildError::BaseImageImport {
                     diagnostic: podman_import_diagnostic(&loaded),
-                    logs: Box::new(sanitized_process_logs(&loaded)),
+                    logs: Some(Box::new(sanitized_process_logs(&loaded))),
                 });
             }
             // A cached archive may have been imported under another reference.
@@ -745,10 +719,7 @@ impl<R: ProcessRunner + ?Sized> RecipeBuilder<'_, R> {
                 cancelled,
             )?;
             if !tagged.success {
-                return Err(super::diagnostics::command_failure(
-                    FailureStage::BaseImageImport,
-                    &tagged,
-                ));
+                return Err(RecipeBuildError::BaseImageInspect);
             }
             let mut inspect_arguments = podman_storage_arguments(storage, runroot);
             inspect_arguments.extend([
@@ -764,35 +735,9 @@ impl<R: ProcessRunner + ?Sized> RecipeBuilder<'_, R> {
                 phase_time(deadline, Duration::from_secs(60))?,
                 cancelled,
             )?;
-            if !inspected.success {
-                return Err(super::diagnostics::command_failure(
-                    FailureStage::ImageVerification,
-                    &inspected,
-                ));
-            }
             inspect_base_image(&inspected, &image.manifest_digest)
                 .map_err(|_| RecipeBuildError::BaseImageInspect)?;
         }
         Ok(())
     }
-}
-
-/// The full operation identity in a short, stable directory name. Both build
-/// and cleanup must use it: Podman binds runtime paths into its database.
-pub(super) fn build_runroot(
-    root: &Path,
-    operation: Uuid,
-) -> Result<std::path::PathBuf, RecipeBuildError> {
-    use base64::Engine;
-    let name = format!(
-        "b-{}",
-        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(operation.as_bytes())
-    );
-    let path = super::budget::owned_directory(root, &name)?;
-    if path.as_os_str().as_bytes().len() > 50 {
-        return Err(RecipeBuildError::CleanupBlocked(
-            "the Podman runroot exceeds 50 bytes".into(),
-        ));
-    }
-    Ok(path)
 }

@@ -38,7 +38,6 @@ impl ProcessRunner for FakeRunner {
             .unwrap()
             .push((program, arguments.to_vec(), timeout));
         Ok(ProcessOutput {
-            exit_code: None,
             success: true,
             stdout: self.output.clone(),
             stderr: Vec::new(),
@@ -271,14 +270,12 @@ impl ProcessRunner for RecoveringRunner {
                 return Err(ProcessError::Timeout);
             }
             return Ok(ProcessOutput {
-                exit_code: None,
                 success: false,
                 stdout: Vec::new(),
                 stderr: b"Failed to initialize NVML: Insufficient Permissions".to_vec(),
             });
         }
         Ok(ProcessOutput {
-            exit_code: None,
             success: true,
             stdout: include_bytes!("fixtures/telemetry/gb10.csv").to_vec(),
             stderr: Vec::new(),
