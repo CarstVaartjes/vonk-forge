@@ -37,7 +37,7 @@ use Collector::*;
 
 /// How long an unused entry stays after its last use or change: a claim that
 /// ended on a fault resumes from it within this time.
-pub const GRACE: Duration = Duration::from_secs(24 * 60 * 60);
+pub use vonk_agent_protocol::store_retention::GRACE;
 
 /// The Controller's low-space line (`STORAGE_LOW_FREE_FRACTION`) without its
 /// largest-install term; a current load can request more free space.
@@ -56,75 +56,7 @@ pub const VERDICT_MAX_AGE: Duration = Duration::from_secs(10 * 60);
 /// run scope leaves in its directory; its age is the grace.
 const UNTRACKED_MARK: &str = "untracked-since";
 
-/// How one store's entries leave.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Collector {
-    /// Only on a Controller order (uninstall, job scope cleanup).
-    ControllerOrder,
-    /// The claim that made it removes it before the claim ends.
-    Claim,
-    /// One bounded file or credential set the agent rewrites in place.
-    Bookkeeping,
-    /// Every entry, once unchanged for [`GRACE`].
-    Ended,
-    /// Model objects leave on low space; a checkpoint or isolated entry is [`Ended`].
-    ModelObjects,
-    /// A base image no build has opened for [`GRACE`], and isolated entries.
-    BaseImages,
-    /// An installation the Controller has not tracked for [`GRACE`] and no
-    /// started run names, and isolated entries; one it tracks only on its order.
-    Untracked,
-    /// A run scope no run or job of the Controller's has owned for [`GRACE`],
-    /// and isolated entries; one it tracks only on its order.
-    UntrackedRuns,
-    /// Cleanup history nothing reads again and the checkpoint of an
-    /// installation that is gone, once unchanged for [`GRACE`]; a quarantined
-    /// installation (`<id>.partial`) only on the Controller's order.
-    Reconciliation,
-    /// The lock file of an installation that is gone, once unchanged for
-    /// [`GRACE`] and not held.
-    Ownership,
-}
-
-/// One top-level name below the agent data root (a directory's ends with
-/// `/`), how its entries leave, and whose they are.
-#[derive(Debug)]
-pub struct Store(pub &'static str, pub Collector, pub &'static str);
-
-/// Every top-level name the agent, its helper or its package writes below the
-/// data root. A new store cannot be added without an owner and a collector.
-#[rustfmt::skip]
-pub const STORES: &[Store] = &[
-    // First: a removed installation's model objects are unused in the same pass.
-    Store("installations/", Untracked, "the Controller's installation record; its verdict"),
-    Store("distribution/", ModelObjects, "installations linking or naming it; its transfer"),
-    Store("installation-reconciliation/", Reconciliation, "the Controller's uninstall"),
-    Store("installation-ownership/", Ownership, "one lock file per installation"),
-    Store("runs/", UntrackedRuns, "the Controller's run or job record; its verdict"),
-    Store("run-metadata/", UntrackedRuns, "the Controller's run or job record; its verdict"),
-    Store("builds/", Ended, "the build claim, until the Controller has the image"),
-    Store("build-staging/", Claim, "the build claim"),
-    Store("base-images/", BaseImages, "the builds that open each image"),
-    Store("containers/", Claim, "Podman's default storage; builds use private storage"),
-    Store("tmp/", Claim, "the process that made each temporary file"),
-    Store("credentials/", Bookkeeping, "the agent identity"),
-    Store("state.sqlite", Bookkeeping, "the agent journal"),
-    Store("store-retention.json", Bookkeeping, "the Controller inventory verdict"),
-    Store("installation-inventory-cursor", Bookkeeping, "inventory page rotation"),
-    Store("run-inventory-cursor", Bookkeeping, "inventory page rotation"),
-    Store(".state-db-reserve", Bookkeeping, "the agent journal"),
-    Store("preflight-completion/", Bookkeeping, "one bounded fence-bound completed preflight receipt"),
-    Store("runtime-preflight-cache.json", Bookkeeping, "the host fingerprint"),
-    Store("gpu-clock-observation.json", Bookkeeping, "the helper's latest GPU clock observation"),
-    Store("registry-auth.json", Bookkeeping, "the base-image registry credential"),
-    Store(".config/", Bookkeeping, "the rootless Podman configuration"),
-    Store(".machine-evidence", Claim, "the package step publishing machine-evidence"),
-    Store("machine-evidence", Bookkeeping, "the package"),
-    // Retired: nothing writes or reads these any more.
-    Store("models/", Ended, "none: the model store before installations"),
-    Store("oci-archives/", Ended, "none: image archives before the layered store"),
-    Store("image-imports/", Ended, "none: Docker imports before the layered store"),
-];
+pub use vonk_agent_protocol::store_retention::{Collector, STORES, Store, StoreRoot};
 
 /// What one pass did.
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -230,7 +162,7 @@ pub fn installation_names(data_root: &Path) -> Option<Vec<uuid::Uuid>> {
 pub fn run_scope_names(data_root: &Path) -> Option<Vec<uuid::Uuid>> {
     let mut names = BTreeSet::new();
     for store in ["runs", "run-metadata"] {
-        scope_names(&data_root.join(store), &mut names)?;
+        scope_names(&StoreRoot::Agent.path(data_root, store)?, &mut names)?;
     }
     rotating_page(
         data_root,
@@ -248,7 +180,8 @@ fn rotating_page(
     names: BTreeSet<uuid::Uuid>,
     limit: usize,
 ) -> Option<Vec<uuid::Uuid>> {
-    let cursor = fs::read_to_string(data_root.join(cursor_file))
+    let cursor_path = StoreRoot::Agent.path(data_root, cursor_file)?;
+    let cursor = fs::read_to_string(&cursor_path)
         .ok()
         .and_then(|value| uuid::Uuid::parse_str(&value).ok());
     let after = names
@@ -262,7 +195,7 @@ fn rotating_page(
     let page: Vec<_> = after.chain(wrapped).take(limit).collect();
     if let Some(last) = page.last()
         && let Err(error) = crate::identity::atomic_private_write(
-            data_root,
+            cursor_path.parent()?,
             cursor_file,
             last.to_string().as_bytes(),
         )
@@ -355,9 +288,18 @@ pub fn sweep(
     if !owned_directory(data_root, pass.owner) {
         return pass.swept;
     }
-    for Store(name, collector, _) in STORES {
+    for store @ Store(name, collector, _, root_kind) in STORES {
+        if *root_kind != StoreRoot::Agent {
+            continue;
+        }
+        if let Some((prefix, suffix)) = name.split_once('*') {
+            pass.ended(data_root, &|name, _| {
+                name.starts_with(prefix) && name.ends_with(suffix)
+            });
+            continue;
+        }
         // Without its slash, so a store root that is a link is not resolved.
-        let root = data_root.join(name.trim_end_matches('/'));
+        let root = store.path(data_root);
         match collector {
             Ended => pass.ended(&root, &|_, _| true),
             ModelObjects => {
@@ -1039,3 +981,6 @@ fn retention_projection(
     file.take(1024 * 1024 + 1).read_to_end(&mut body).ok()?;
     serde_json::from_slice(&body).ok()
 }
+
+#[cfg(test)]
+mod source_guard;

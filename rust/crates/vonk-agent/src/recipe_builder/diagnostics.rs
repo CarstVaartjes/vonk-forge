@@ -364,62 +364,119 @@ mod tests {
     }
 
     #[test]
+    fn package_output_and_echoed_steps_cannot_invent_a_host_denial() {
+        // Wrong implementation: search the whole build transcript for unrelated
+        // AppArmor/permission words instead of Podman's actual failure cause.
+        for (stdout, stderr) in [
+            (
+                "Setting up apparmor ...\nW: download permission denied; continuing\n",
+                "curl: (22) The requested URL returned error: 403\nError: building at STEP \"RUN echo newuidmap apparmor permission denied && curl --fail https://example.org/source\": while running runtime: exit status 22",
+            ),
+            (
+                "",
+                "Error: building at STEP \"RUN cat <<EOF\nnewuidmap apparmor permission denied\nEOF\": while running runtime: exit status 22",
+            ),
+            (
+                "",
+                "application: open /app/data: permission denied\nError: building at STEP \"RUN application\": while running runtime: exit status 1",
+            ),
+            (
+                "Setting up apparmor ...\nIllegal instruction (core dumped)\ndh_install: error: debian/libnccl2.install (executable config) returned exit code 132\n",
+                "unrelated optional check denied\nError: building at STEP \"RUN make pkg.debian.build\": while running runtime: exit status 2",
+            ),
+        ] {
+            let output = ProcessOutput {
+                exit_code: Some(1),
+                success: false,
+                stdout: stdout.as_bytes().to_vec(),
+                stderr: stderr.as_bytes().to_vec(),
+            };
+            assert_eq!(
+                podman_build_diagnostic(&output),
+                PodmanBuildDiagnostic::BuildStepFailed
+            );
+        }
+    }
+
+    #[test]
+    fn a_real_runtime_denial_is_not_hidden_by_an_echoed_step_or_recipe_output() {
+        for (stderr, expected) in [
+            (
+                "Error: building at STEP \"RUN echo hello\": cannot clone: Operation not permitted",
+                PodmanBuildDiagnostic::UserNamespaceDenied,
+            ),
+            (
+                "crun: open /run/crun/fixture: permission denied\nError: building at STEP \"RUN echo hello\": while running runtime: exit status 1",
+                PodmanBuildDiagnostic::PermissionDenied,
+            ),
+        ] {
+            let output = ProcessOutput {
+                exit_code: Some(125),
+                success: false,
+                stdout: b"STEP 1/1: RUN echo apparmor permission denied\n".to_vec(),
+                stderr: stderr.as_bytes().to_vec(),
+            };
+            assert_eq!(podman_build_diagnostic(&output), expected);
+        }
+    }
+
+    #[test]
     fn podman_build_failures_have_stable_secret_free_diagnostics() {
-        for (stdout, stderr, _diagnostic) in [
-            (b"".as_slice(), b"".as_slice(), "nonzero-without-output"),
+        for (stdout, stderr, expected) in [
+            (b"".as_slice(), b"".as_slice(), PodmanBuildDiagnostic::NonzeroWithoutOutput),
             (
                 b"".as_slice(),
                 b"write /private/secret: no space left on device".as_slice(),
-                "temporary-storage-exhausted",
+                PodmanBuildDiagnostic::TemporaryStorageExhausted,
             ),
             (
                 b"".as_slice(),
                 b"fuse-overlayfs: operation failed for /private/secret".as_slice(),
-                "storage-driver-failure",
+                PodmanBuildDiagnostic::StorageDriverFailure,
             ),
             (
                 b"".as_slice(),
                 b"Failed to start transient scope unit".as_slice(),
-                "systemd-scope-failure",
+                PodmanBuildDiagnostic::SystemdScopeFailure,
             ),
             (
                 b"".as_slice(),
                 b"apparmor=\"DENIED\" operation=\"userns_create\" profile=\"podman\"".as_slice(),
-                "user-namespace-denied",
+                PodmanBuildDiagnostic::UserNamespaceDenied,
             ),
             (
                 b"".as_slice(),
                 b"mount `proc` to `proc`: Operation not permitted".as_slice(),
-                "proc-mount-denied",
+                PodmanBuildDiagnostic::ProcMountDenied,
             ),
             (
                 b"".as_slice(),
                 b"open /private/secret: permission denied".as_slice(),
-                "permission-denied",
+                PodmanBuildDiagnostic::PermissionDenied,
             ),
             (
                 b"patching file a.py\nHunk #1 FAILED at 628.\n1 out of 1 hunk FAILED -- saving rejects to file a.py.rej\n"
                     .as_slice(),
                 b"Error: building at STEP \"RUN patch -p1\": while running runtime: exit status 1"
                     .as_slice(),
-                "patch-rejected",
+                PodmanBuildDiagnostic::PatchRejected,
             ),
             (
                 b"Reversed (or previously applied) patch detected!  Assume -R? [n]\nSkipping patch.\n"
                     .as_slice(),
                 b"".as_slice(),
-                "patch-rejected",
+                PodmanBuildDiagnostic::PatchRejected,
             ),
             (
                 b"".as_slice(),
                 b"Error: building at STEP \"RUN make\": while running runtime: exit status 2"
                     .as_slice(),
-                "build-step-failed",
+                PodmanBuildDiagnostic::BuildStepFailed,
             ),
             (
                 b"opaque /private/secret".as_slice(),
                 b"".as_slice(),
-                "unclassified-podman-build-failure",
+                PodmanBuildDiagnostic::Unknown,
             ),
         ] {
             let classified = podman_build_diagnostic(&ProcessOutput {
@@ -428,6 +485,7 @@ mod tests {
                 stdout: stdout.to_vec(),
                 stderr: stderr.to_vec(),
             });
+            assert_eq!(classified, expected);
             // Classification is bounded; the actual command's separately
             // sanitized tails remain mandatory in the error type.
             assert!(!classified.to_string().contains("private"));

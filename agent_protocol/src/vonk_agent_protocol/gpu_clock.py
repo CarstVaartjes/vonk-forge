@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-from enum import StrEnum
 from typing import Annotated, Literal
 
 from pydantic import Field, field_validator, model_validator
 
-from .wire_model import MAX_RUN_GENERATION, WireModel
+from .wire_model import MAX_RUN_GENERATION, WireEnum, WireModel
 
 
 class GpuClockPolicy(WireModel):
@@ -87,14 +86,14 @@ class GpuClockIntent(WireModel):
     range: GpuClockRange
 
 
-class GpuClockApplyState(StrEnum):
+class GpuClockApplyState(WireEnum):
     APPLIED = "applied"
     WAITING = "waiting"
     EXPIRED = "expired"
     REFUSED = "refused"
 
 
-class GpuClockMetric(StrEnum):
+class GpuClockMetric(WireEnum):
     GRAPHICS = "graphics_mhz"
     SM = "sm_mhz"
     MAX_GRAPHICS = "max_graphics_mhz"
@@ -102,7 +101,7 @@ class GpuClockMetric(StrEnum):
     THROTTLE = "throttle_reasons"
 
 
-class GpuClockUnavailableReason(StrEnum):
+class GpuClockUnavailableReason(WireEnum):
     NOT_SUPPORTED = "not-supported"
     COMMAND_FAILED = "command-failed"
     INVALID_OUTPUT = "invalid-output"

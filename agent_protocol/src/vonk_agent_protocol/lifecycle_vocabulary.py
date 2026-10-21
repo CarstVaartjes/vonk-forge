@@ -769,6 +769,7 @@ class FailureCode(WireEnum):
     AGENT_UPGRADE_FAILED = "agent_upgrade_failed"
     ARTIFACT_DISTRIBUTION_FAILED = "artifact_distribution_failed"
     RECIPE_BUILD_FAILED = "recipe_build_failed"
+    RECIPE_BUILD_PLATFORM_BLOCKED = "recipe_build_platform_blocked"
     RECIPE_JOB_RUN_FAILED = "recipe_job_run_failed"
     RECIPE_INSTALL_FAILED = "recipe_install_failed"
     RECIPE_START_FAILED = "recipe_start_failed"
