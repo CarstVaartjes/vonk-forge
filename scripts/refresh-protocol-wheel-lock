@@ -8,11 +8,14 @@ import tomllib
 from pathlib import Path
 
 import sys
+
 sys.dont_write_bytecode = True  # repository tools never leave __pycache__ behind
 import os
+
 # The sibling helper, however this file is loaded.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from check_environment import prepare
+from protocol_wheel import wheel_relative
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -27,7 +30,11 @@ def main() -> None:
     ]
     if len(packages) != 1:
         raise SystemExit("Expected one canonical protocol package")
-    wheel = (lock.parent / packages[0]["source"]["path"]).resolve()
+    wheel = ROOT / wheel_relative(ROOT)
+    if packages[0]["source"]["path"] != f"../{wheel_relative(ROOT)}":
+        raise SystemExit(
+            "Protocol dependency projection is stale; regenerate from package metadata"
+        )
     pins = [pin for pin in packages[0]["wheels"] if pin["filename"] == wheel.name]
     if len(pins) != 1:
         raise SystemExit("Expected one canonical protocol wheel pin")

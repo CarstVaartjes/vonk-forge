@@ -5,6 +5,7 @@ import importlib.metadata
 import json
 import shutil
 import subprocess
+import sys
 import tomllib
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -37,12 +38,15 @@ from ..recipe_stop_fixtures import recipe_stop_payload
 from ..runtime_identity_support import claim_agent
 
 ROOT = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(ROOT / "scripts"))
+from protocol_wheel import package_version, wheel_filename, wheel_relative
+
 NODE_A = "spk_" + "a" * 32
 NODE_B = "spk_" + "b" * 32
 COMMIT = "a" * 64
 STOP_PAYLOAD = recipe_stop_payload(NODE_A, plan_digest=COMMIT)
 STOP_RESULT = RecipeStopResult()
-PROTOCOL_WHEEL = ROOT / "inventory/wheels/vonk_agent_protocol-4.1.0-py3-none-any.whl"
+PROTOCOL_WHEEL = ROOT / wheel_relative(ROOT)
 PROTOCOL_WHEEL_HASH = hashlib.sha256(PROTOCOL_WHEEL.read_bytes()).hexdigest()
 PUBLIC_CONTRACTS_WHEEL = (
     ROOT / "inventory/wheels/vonk_forge_public_contracts-2.3.0-py3-none-any.whl"
@@ -265,15 +269,11 @@ def test_control_environment_installs_the_verified_protocol_wheel() -> None:
         if package["name"] == "vonk-agent-protocol"
     )
 
-    assert direct_url["url"].endswith(
-        "/inventory/wheels/vonk_agent_protocol-4.1.0-py3-none-any.whl"
-    )
-    assert package["source"] == {
-        "path": "../inventory/wheels/vonk_agent_protocol-4.1.0-py3-none-any.whl"
-    }
+    assert direct_url["url"].endswith(f"/{wheel_relative(ROOT)}")
+    assert package["source"] == {"path": f"../{wheel_relative(ROOT)}"}
     assert package["wheels"] == [
         {
-            "filename": "vonk_agent_protocol-4.1.0-py3-none-any.whl",
+            "filename": wheel_filename(ROOT),
             "hash": f"sha256:{PROTOCOL_WHEEL_HASH}",
         }
     ]
@@ -352,7 +352,7 @@ def test_root_context_image_installs_contracts_and_protocol_from_build_inputs(
     installed = json.loads(result.stdout)
 
     assert installed == {
-        "protocol": "4.1.0",
+        "protocol": package_version(ROOT),
         "contracts": importlib.metadata.version("vonk-forge-public-contracts"),
         "model": "ModelDefinition",
         "recipe": "RecipeDefinition",

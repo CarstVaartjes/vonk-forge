@@ -15,7 +15,8 @@ if (($# != 0)); then
     exit 2
 fi
 
-wheel_name=vonk_agent_protocol-4.1.0-py3-none-any.whl
+helper="$(dirname "${BASH_SOURCE[0]}")/protocol_wheel.py"
+wheel_name="$(python3 "$helper" --root "$root" --filename)"
 wheel_path="$root/inventory/wheels/$wheel_name"
 lock_path="$root/control/uv.lock"
 

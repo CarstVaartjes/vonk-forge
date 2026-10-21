@@ -9,15 +9,13 @@ import json
 import os
 import posixpath
 import re
+import sys
 import tempfile
 from pathlib import Path
 
-import sys
-
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from image_policy import FLOATING_TAGS
-
 import yaml
+from image_policy import FLOATING_TAGS
 
 IMAGE = re.compile(
     r"^ghcr\.io/carstvaartjes/vonk-forge-(api|worker|hermes|litellm):"

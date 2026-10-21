@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import ast
-import importlib.util
 import json
 import re
 import subprocess
@@ -13,6 +12,9 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict
 
+from control.tests.parsed_sources import parse_file
+from scripts.protocol_wheel import project, projection_lines
+
 
 class Family(StrEnum):
     FLOATING_TAGS = "floating_tags"
@@ -20,42 +22,42 @@ class Family(StrEnum):
     MIRROR_INPUT = "mirror_input"
 
 
-class FixtureException(BaseModel):
+class SingleSourceFixtureException(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     file: str
     function: str
     reason: str
 
 
-class Registration(BaseModel):
+class SingleSourceRegistration(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     semantic_id: str
     owner: str
     selector: str
     family: Family
     projections: tuple[str, ...] = ()
-    exceptions: tuple[FixtureException, ...] = ()
+    exceptions: tuple[SingleSourceFixtureException, ...] = ()
 
 
-class Registry(BaseModel):
+class SingleSourceRegistry(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    values: list[Registration]
+    values: list[SingleSourceRegistration]
 
 
 def tracked_files(root: Path) -> list[str]:
     return (
-        subprocess.check_output(["git", "ls-files", "-z"], cwd=root)
+        subprocess.check_output(["git", "ls-files", "-z"], cwd=root, timeout=30)
         .decode()
         .split("\0")[:-1]
     )
 
 
-def registrations(root: Path, files: list[str]) -> list[Registration]:
+def registrations(root: Path, files: list[str]) -> list[SingleSourceRegistration]:
     values = [
         value
         for file in files
         if file.endswith("/single-source-values.toml")
-        for value in Registry.model_validate(
+        for value in SingleSourceRegistry.model_validate(
             tomllib.loads((root / file).read_text())
         ).values
     ]
@@ -69,24 +71,28 @@ def registrations(root: Path, files: list[str]) -> list[Registration]:
     return values
 
 
-def owner_value(root: Path, value: Registration) -> object:
+def _owner_assignment(root: Path, value: SingleSourceRegistration) -> ast.Assign:
+    definitions = [
+        node
+        for node in parse_file(root / value.owner).tree.body
+        if isinstance(node, ast.Assign)
+        and any(
+            isinstance(t, ast.Name) and t.id == value.selector for t in node.targets
+        )
+    ]
+    if len(definitions) != 1:
+        raise ValueError(f"missing or ambiguous owner selector: {value.selector}")
+    return definitions[0]
+
+
+def owner_value(root: Path, value: SingleSourceRegistration) -> object:
     path = root / value.owner
-    text = path.read_text()
     if value.family == Family.FLOATING_TAGS:
-        definitions = [
-            node.value
-            for node in ast.parse(text).body
-            if isinstance(node, ast.Assign)
-            and any(
-                isinstance(t, ast.Name) and t.id == value.selector for t in node.targets
-            )
-        ]
-        if len(definitions) != 1:
-            raise ValueError(f"missing or ambiguous owner selector: {value.selector}")
-        definition = definitions[0]
+        definition = _owner_assignment(root, value).value
         if isinstance(definition, ast.Call):
             definition = definition.args[0]
         return ast.literal_eval(definition)
+    text = path.read_text()
     document = json.loads(text) if path.suffix == ".json" else tomllib.loads(text)
     for key in value.selector.split("."):
         document = document[key]
@@ -108,7 +114,7 @@ def _executable_text(file: str, text: str) -> str:
     return "".join(lines)
 
 
-def _fixture_lines(root: Path, exception: FixtureException) -> range:
+def _fixture_lines(root: Path, exception: SingleSourceFixtureException) -> range:
     if (
         not exception.file.startswith(("tests/", "control/tests/"))
         or not exception.function.startswith("test_")
@@ -120,13 +126,16 @@ def _fixture_lines(root: Path, exception: FixtureException) -> range:
         )
     functions = [
         node
-        for node in ast.walk(ast.parse((root / exception.file).read_text()))
+        for node in ast.walk(parse_file(root / exception.file).tree)
         if isinstance(node, ast.FunctionDef) and node.name == exception.function
     ]
     if len(functions) != 1:
         raise ValueError(f"missing or ambiguous fixture: {exception.function}")
     function = functions[0]
-    return range(function.lineno, (function.end_lineno or function.lineno) + 1)
+    return range(
+        min([function.lineno, *[d.lineno for d in function.decorator_list]]),
+        (function.end_lineno or function.lineno) + 1,
+    )
 
 
 def violations(root: Path, files: list[str] | None = None) -> list[str]:
@@ -142,25 +151,28 @@ def violations(root: Path, files: list[str] | None = None) -> list[str]:
                 raise ValueError(
                     "only reproducible protocol projections are registered"
                 )
-            spec = importlib.util.spec_from_file_location(
-                "protocol_projection", root / "scripts/protocol_wheel.py"
-            )
-            assert spec is not None and spec.loader is not None
-            module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(module)
             for file in value.projections:
                 text = (root / file).read_text()
-                if module.project(root, file, text) != text:
+                if project(root, file, text) != text:
                     errors.append(
                         f"{value.semantic_id}: {file}:1: generated bytes differ; run python3 scripts/protocol_wheel.py --write-projections"
                     )
+        owner_lines: range = range(0)
+        if value.family == Family.FLOATING_TAGS:
+            assignment = _owner_assignment(root, value)
+            owner_lines = range(
+                assignment.lineno, (assignment.end_lineno or assignment.lineno) + 1
+            )
         for file in files:
-            if file == value.owner or file in value.projections:
-                continue
             try:
                 text = _executable_text(file, (root / file).read_text())
             except (UnicodeError, IsADirectoryError):
                 continue
+            generated_lines = (
+                projection_lines(root, file, text)
+                if file in value.projections
+                else set()
+            )
             matches: list[tuple[int, str]] = []
             if value.family == Family.PROTOCOL_WHEEL:
                 # The whole filename family, including old and future versions.
@@ -175,26 +187,33 @@ def violations(root: Path, files: list[str] | None = None) -> list[str]:
                         collection = ast.literal_eval(match.group())
                     except (ValueError, SyntaxError):
                         continue
-                    if (
-                        isinstance(collection, (set, tuple, list, dict))
-                        and len(set(collection) & owned) >= 2
+                    if isinstance(collection, (set, tuple, list, dict)) and (
+                        set(collection) == owned
+                        or bool(set(collection) & owned)
+                        and re.search(
+                            r"(?i)\b\w*float\w*\s*=",
+                            text[
+                                text.rfind("\n", 0, match.start()) + 1 : match.start()
+                            ],
+                        )
+                        is not None
                     ):
                         matches.append((match.start(), match.group()))
-            elif value.family == Family.MIRROR_INPUT:
-                # Context is the mirror operation; deployment selections are a separate class.
-                if (
-                    file == ".github/workflows/ci-image-mirror.yml"
-                    or "mirror-inputs" in file
-                ):
-                    matches = [
-                        (m.start(), m.group())
-                        for m in re.finditer(
-                            r"[\w./-]+:[\w.-]+@sha256:[0-9a-f]{64}", text
-                        )
-                    ]
+            elif value.family == Family.MIRROR_INPUT and (
+                file == ".github/workflows/ci-image-mirror.yml"
+                or "mirror-inputs" in file
+            ):
+                matches = [
+                    (m.start(), m.group())
+                    for m in re.finditer(r"[\w./-]+:[\w.-]+@sha256:[0-9a-f]{64}", text)
+                ]
             for offset, observed in matches:
                 line = text.count("\n", 0, offset) + 1
-                if any(file == path and line in lines for path, lines in exceptions):
+                if (
+                    (file == value.owner and line in owner_lines)
+                    or line in generated_lines
+                    or any(file == path and line in lines for path, lines in exceptions)
+                ):
                     continue
                 errors.append(
                     f"{value.semantic_id}: {file}:{line}: {observed!r}; owner {value.owner}:{value.selector}; derive from owner"

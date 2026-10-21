@@ -6,6 +6,8 @@ from pathlib import Path
 
 import pytest
 
+from scripts.protocol_wheel import wheel_relative
+
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts/verify-public-image-inputs"
 
@@ -100,7 +102,7 @@ def test_dockerignored_web_outputs_are_not_scanned(
 
 
 def wheel_path(repository: Path) -> Path:
-    path = repository / "inventory/wheels/vonk_agent_protocol-4.1.0-py3-none-any.whl"
+    path = repository / wheel_relative(ROOT)
     path.parent.mkdir(parents=True, exist_ok=True)
     return path
 
@@ -114,9 +116,7 @@ def test_secret_in_compressed_wheel_member_is_rejected(tmp_path: Path) -> None:
     result = run(repository)
 
     assert result.returncode == 1
-    assert (
-        "inventory/wheels/vonk_agent_protocol-4.1.0-py3-none-any.whl!/" in result.stderr
-    )
+    assert f"{wheel_relative(ROOT)}!/" in result.stderr
     assert "vonk_agent_protocol/leak.py: github-token" in result.stderr
     assert value not in result.stdout + result.stderr
 

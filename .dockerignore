@@ -102,6 +102,8 @@ deploy/compose/step-ca/**
 !control/uv.lock
 !control/openapi-python-client.yaml
 !scripts/
+!scripts/protocol_wheel.py
+!scripts/image_policy.py
 !scripts/build-control-wheel
 !scripts/check_environment.py
 !scripts/generate-control-clients

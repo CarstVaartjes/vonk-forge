@@ -285,12 +285,6 @@ def image_job_inputs() -> set[str]:
         path = path.rstrip("/")
         return f"{path}/**" if (ROOT / path).is_dir() else path
 
-    wheel = re.search(
-        r"^wheel_name=(\S+)$",
-        (ROOT / "scripts/build-control-wheel").read_text(),
-        re.MULTILINE,
-    )
-    assert wheel
     inputs: set[str] = set()
     # The Controller images read their COPY sources from the repository root.
     dockerfile = (ROOT / "control/Dockerfile").read_text()
@@ -301,7 +295,7 @@ def image_job_inputs() -> set[str]:
             continue
         for source in [word for word in words if not word.startswith("--")][:-1]:
             # The job builds the protocol wheel from agent_protocol sources.
-            if source != f"inventory/wheels/{wheel[1]}":
+            if source != "inventory/wheels/":
                 assert (ROOT / source).exists(), source
                 inputs.add(pattern(source))
     # Hermes and LiteLLM build from isolated contexts under their policy.
@@ -459,6 +453,10 @@ def named_inputs(path: str, *, text: str | None = None) -> set[str]:
             names.add(f"{directory}/**")
     for project in re.findall(r"uv build --project (\S+)", text):
         names.add(f"{project}/**")
+    for helper in re.findall(r'\$\(dirname "\$\{BASH_SOURCE\[0\]\}"\)/([\w.-]+)', text):
+        candidate = source.parent / helper
+        if candidate.is_file():
+            names.add(candidate.relative_to(ROOT).as_posix())
     return names
 
 
