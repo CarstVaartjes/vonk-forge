@@ -156,7 +156,11 @@ impl<R: ProcessRunner, F: FileSystemProvider> TelemetryCollector<R, F> {
             gpu_memory_total_bytes: dedicated.map(|value| value.0),
             gpu_memory_free_bytes: dedicated.map(|value| value.1),
             gpu_temperature_c: accelerator.as_ref().and_then(|value| value.temperature_c),
-            gpu_clock: collect_gpu_clock(&self.runner, &self.boot_id),
+            gpu_clock: Some(collect_gpu_clock(
+                &self.runner,
+                &self.boot_id,
+                Path::new("/var/lib/vonk-forge"),
+            )),
             cpu_frequency_avg_mhz: cpu_frequency.map(|value| value.avg_mhz),
             cpu_frequency_min_mhz: cpu_frequency.map(|value| value.min_mhz),
             cpu_frequency_max_mhz: cpu_frequency.and_then(|value| value.max_mhz),
@@ -167,79 +171,146 @@ impl<R: ProcessRunner, F: FileSystemProvider> TelemetryCollector<R, F> {
 fn collect_gpu_clock<R: ProcessRunner>(
     runner: &R,
     boot_id: &Uuid,
-) -> Option<vonk_agent_protocol::generated::GpuClockObservation> {
+    data_root: &Path,
+) -> vonk_agent_protocol::generated::GpuClockObservation {
     use vonk_agent_protocol::generated::{GpuClockCheckpoint, GpuClockObservation};
-    let output = match runner.run(Program::NvidiaSmi, &[
-        "--query-gpu=clocks.current.graphics,clocks.current.sm,clocks.max.graphics,clocks.max.sm,clocks_event_reasons.active".to_owned(),
-        vonk_agent_protocol::gpu_clock::CSV_FORMAT.to_owned(),
-    ], Duration::from_secs(10)) {
-        Ok(output) if output.success => Some(output),
-        Ok(output) => { eprintln!("vonk-agent: GPU clock query failed {:?}: {}", output.exit_code, String::from_utf8_lossy(&output.stderr)); None }
-        Err(error) => { eprintln!("vonk-agent: GPU clock query unavailable: {error}"); None }
-    };
     let mut observation = GpuClockObservation::default();
-    if let Some(output) = &output {
-        match std::str::from_utf8(&output.stdout) {
-            Ok(text) => {
-                let fields: Vec<_> = text
-                    .lines()
-                    .next()
-                    .into_iter()
-                    .flat_map(|line| line.split(',').map(str::trim))
-                    .collect();
-                if fields.len() == 5 {
-                    observation.graphics_mhz = gpu_clock_mhz(fields[0]);
-                    observation.sm_mhz = gpu_clock_mhz(fields[1]);
-                    observation.max_graphics_mhz = gpu_clock_mhz(fields[2]).filter(|n| *n > 0);
-                    observation.max_sm_mhz = gpu_clock_mhz(fields[3]).filter(|n| *n > 0);
-                    let mask = match fields[4].strip_prefix("0x") {
-                        Some(hex) => u64::from_str_radix(hex, 16),
-                        None => fields[4].parse(),
-                    };
-                    match mask {
-                        Ok(value) => observation.throttle_reasons = Some(value),
-                        Err(error) => {
-                            eprintln!("vonk-agent: GPU clock throttle reading unavailable: {error}")
-                        }
+    let mut unavailable = Vec::new();
+    use vonk_agent_protocol::generated::GpuClockMetric as Metric;
+    // Isolate optional driver fields: one unsupported query must not hide
+    // otherwise available clocks. The monitor samples again every two seconds.
+    for (metric, field) in [
+        (Metric::GraphicsMhz, "clocks.current.graphics"),
+        (Metric::SmMhz, "clocks.current.sm"),
+        (Metric::MaxGraphicsMhz, "clocks.max.graphics"),
+        (Metric::MaxSmMhz, "clocks.max.sm"),
+        (Metric::ThrottleReasons, "clocks_event_reasons.active"),
+    ] {
+        match gpu_clock_reading(runner, metric, field) {
+            Ok(value) => match metric {
+                Metric::GraphicsMhz => observation.graphics_mhz = Some(value as u32),
+                Metric::SmMhz => observation.sm_mhz = Some(value as u32),
+                Metric::MaxGraphicsMhz => observation.max_graphics_mhz = Some(value as u32),
+                Metric::MaxSmMhz => observation.max_sm_mhz = Some(value as u32),
+                Metric::ThrottleReasons => observation.throttle_reasons = Some(value),
+            },
+            Err(failure) => unavailable.push(failure),
+        }
+    }
+    observation.unavailable = (!unavailable.is_empty()).then_some(unavailable);
+    // A receipt proves the last successful command on this boot only. NVIDIA
+    // has no graphics-lock getter; never substitute a maximum for a lock.
+    let checkpoint_path = data_root.join("gpu-clock-observation.json");
+    let checkpoint = (|| -> std::io::Result<Vec<u8>> {
+        let file = File::open(&checkpoint_path)?;
+        let mut bytes = Vec::new();
+        file.take(SOURCE_TEXT_LIMIT + 1).read_to_end(&mut bytes)?;
+        Ok(bytes)
+    })();
+    match checkpoint {
+        Ok(bytes) if bytes.len() <= SOURCE_TEXT_LIMIT as usize => {
+            match vonk_agent_protocol::parse_strict::<GpuClockCheckpoint>(&bytes) {
+                Ok(checkpoint) => {
+                    if checkpoint.applied_boot_id.as_deref() == Some(boot_id.to_string().as_str()) {
+                        observation.locked_range = checkpoint.applied_range;
+                    } else {
+                        observation.receipt_detail = Some("No successful helper apply receipt for this boot; inventory and hourly helper reconciliation retry".to_owned());
                     }
-                } else {
-                    eprintln!(
-                        "vonk-agent: GPU clock query returned {} columns; expected five",
-                        fields.len()
-                    );
+                    observation.desired = Some(checkpoint.desired);
+                    observation.apply_state = Some(checkpoint.state);
+                    observation.detail = checkpoint.detail;
+                    observation.deadline = Some(checkpoint.deadline);
+                    observation.next_attempt_at = checkpoint.next_attempt_at;
+                }
+                Err(error) => {
+                    observation.receipt_detail = Some(format!(
+                        "Invalid helper GPU clock receipt: {error}; inspect helper reconciliation"
+                    ))
                 }
             }
-            Err(error) => eprintln!("vonk-agent: GPU clock query encoding invalid: {error}"),
+        }
+        Ok(_) => {
+            observation.receipt_detail = Some(
+                "Helper GPU clock receipt exceeds 65536 bytes; inspect helper reconciliation"
+                    .to_owned(),
+            )
+        }
+        Err(error) => {
+            observation.receipt_detail = Some(format!(
+                "Helper GPU clock receipt unavailable at {}: {error}; inventory and hourly helper reconciliation retry",
+                checkpoint_path.display()
+            ))
         }
     }
-    // A receipt proves the last successful command on this boot only. NVIDIA
-    // has no graphics-lock getter; never substitute max clocks or application
-    // clocks for that absent reading. Hourly enforcement repairs external drift.
-    if let Some(checkpoint) = read_bounded_text(Path::new(
-        "/var/lib/vonk-forge/gpu-clock-observation.json",
-    ))
-    .and_then(|text| vonk_agent_protocol::parse_strict::<GpuClockCheckpoint>(text.as_bytes()).ok())
-    {
-        if checkpoint.applied_boot_id.as_deref() == Some(boot_id.to_string().as_str()) {
-            observation.locked_range = checkpoint.applied_range;
-        }
-        observation.desired = Some(checkpoint.desired);
-        observation.apply_state = Some(checkpoint.state);
-        observation.detail = checkpoint.detail;
-        observation.deadline = Some(checkpoint.deadline);
-        observation.next_attempt_at = checkpoint.next_attempt_at;
-    }
-    (output.is_some() || observation.desired.is_some()).then_some(observation)
+    observation
 }
 
-fn gpu_clock_mhz(value: &str) -> Option<u32> {
-    match value.parse() {
-        Ok(value) => Some(value),
-        Err(error) => {
-            eprintln!("vonk-agent: GPU clock reading unavailable: {error}");
-            None
-        }
+fn gpu_clock_reading<R: ProcessRunner>(
+    runner: &R,
+    metric: vonk_agent_protocol::generated::GpuClockMetric,
+    field: &str,
+) -> Result<u64, vonk_agent_protocol::generated::GpuClockUnavailable> {
+    use vonk_agent_protocol::generated::{
+        GpuClockMetric, GpuClockUnavailable, GpuClockUnavailableReason as Reason,
+    };
+    let failure = |reason, detail| GpuClockUnavailable {
+        metric,
+        reason,
+        detail,
+    };
+    let output = runner
+        .run(
+            Program::NvidiaSmi,
+            &[
+                format!("--query-gpu={field}"),
+                vonk_agent_protocol::gpu_clock::CSV_FORMAT.to_owned(),
+            ],
+            Duration::from_secs(10),
+        )
+        .map_err(|error| failure(Reason::CommandFailed, error.to_string()))?;
+    let text = String::from_utf8_lossy(&output.stdout);
+    let value = text.lines().next().unwrap_or_default().trim();
+    if !output.success {
+        return Err(failure(
+            Reason::CommandFailed,
+            format!(
+                "nvidia-smi {field} exited {:?}: {}{}",
+                output.exit_code,
+                text,
+                String::from_utf8_lossy(&output.stderr)
+            ),
+        ));
     }
+    if matches!(value, "[N/A]" | "N/A" | "[Not Supported]" | "Not Supported") {
+        return Err(failure(
+            Reason::NotSupported,
+            format!("nvidia-smi {field}: {value}"),
+        ));
+    }
+    let parsed = match value.strip_prefix("0x") {
+        Some(hex) if metric == GpuClockMetric::ThrottleReasons => u64::from_str_radix(hex, 16),
+        _ => value.parse::<u64>(),
+    }
+    .map_err(|error| {
+        failure(
+            Reason::InvalidOutput,
+            format!("nvidia-smi {field}: {value}: {error}"),
+        )
+    })?;
+    if metric != GpuClockMetric::ThrottleReasons
+        && (parsed > u64::from(u32::MAX)
+            || parsed == 0
+                && matches!(
+                    metric,
+                    GpuClockMetric::MaxGraphicsMhz | GpuClockMetric::MaxSmMhz
+                ))
+    {
+        return Err(failure(
+            Reason::InvalidOutput,
+            format!("nvidia-smi {field}: out of range {parsed}"),
+        ));
+    }
+    Ok(parsed)
 }
 
 pub fn read_boot_id(path: &Path) -> Result<Uuid, TelemetryError> {
@@ -428,3 +499,6 @@ fn optional_mib(value: &str) -> Option<Option<u64>> {
     let value = value.parse::<u64>().ok()?.checked_mul(1024 * 1024)?;
     (value <= MAX_CAPACITY_BYTES).then_some(Some(value))
 }
+
+#[cfg(test)]
+mod tests;

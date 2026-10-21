@@ -217,3 +217,104 @@ def test_older_agent_default_start_omits_the_new_strict_wire_field() -> None:
     Base.metadata.create_all(engine)
     with Session(engine) as session:
         assert gpu_clock_start_intent(session, NODE) is None
+
+
+from .test_agent_api import NODE_A, agent_headers, make_agent_system, telemetry_payload
+from .test_agent_api import agent_system as _agent_system
+
+agent_system = _agent_system
+
+
+def test_shared_agent_observation_crosses_controller_storage_projection_and_cli(
+    tmp_path, postgres_engine, capsys
+) -> None:
+    """Catches any producer/store/projection/client dropping real clock evidence."""
+    from vonk_agent_protocol import TelemetryRequest
+    from vonk_agent_protocol.gpu_clock import GpuClockObservation
+    from vonk_control.fleet_projection import FleetProjection
+
+    from cluster_profiles.cli_render import render_payload
+
+    client, services, _, clock = make_agent_system(tmp_path, engine=postgres_engine)
+    vectors = json.loads(
+        files("vonk_agent_protocol").joinpath("vectors/gpu-clock-v1.json").read_bytes()
+    )
+    base = TelemetryRequest.model_validate_json(
+        canonical_message(telemetry_payload(clock))
+    )
+    observation = GpuClockObservation.model_validate_json(
+        json.dumps(vectors["observation"])
+    )
+    report = TelemetryRequest(
+        samples=[base.samples[0].model_copy(update={"gpu_clock": observation})]
+    )
+    response = client.post(
+        "/agent/telemetry",
+        headers=agent_headers(NODE_A, "serial-a"),
+        json=report.document(),
+    )
+    assert response.status_code == 204
+    node = next(
+        node
+        for node in FleetProjection(services.sessions, clock=lambda: clock.now)
+        .read()
+        .nodes
+        if node.id == NODE_A
+    )
+    assert node.telemetry is not None and node.telemetry.sample is not None
+    assert node.telemetry.sample.gpu_clock == report.samples[0].gpu_clock
+    render_payload(node.model_dump(mode="json"), "fleet", action="detail")
+    output = capsys.readouterr().out
+    assert "graphics 1700 / SM 1695 MHz" in output
+    assert "last applied 300–2200 MHz (helper receipt)" in output
+    assert "reported max graphics 2400 / SM 2300 MHz" in output
+    assert "throttle bits 4" in output
+
+
+def test_inventory_without_supported_levels_still_gets_a_clock_reconciliation_grant(
+    agent_system,
+) -> None:
+    """Catches the silent grant gate when GB10 supported-clock inventory is absent."""
+    from vonk_agent_protocol import InventoryVerdict
+    from vonk_agent_protocol.inventory import HostSettings, InventoryRequest
+
+    client, services, _, clock = agent_system
+    from cryptography.hazmat.primitives.asymmetric import ed25519
+    from vonk_control.host_helper_authority import (
+        HostHelperGrantIssuer,
+        HostRuntimeAuthorityService,
+    )
+
+    signer = HostHelperGrantIssuer(ed25519.Ed25519PrivateKey.generate(), clock=clock)
+    object.__setattr__(
+        services,
+        "host_runtime_authority",
+        HostRuntimeAuthorityService(services.sessions, signer, clock=clock),
+    )
+    report = InventoryRequest(
+        schema_version=1,
+        observed_at=clock.now,
+        disk_total_bytes=1000,
+        disk_free_bytes=500,
+        host_memory_total_bytes=1000,
+        host_memory_free_bytes=500,
+        gpu_memory_total_bytes=0,
+        gpu_memory_free_bytes=0,
+        gpu_count=1,
+        memory_pool="shared",
+        artifact_store_read_only=False,
+        capabilities=[],
+        nvidia_driver_version="580",
+        container_runtime_version="29",
+        host_settings=HostSettings(
+            display_manager_active=False, graphical_default_target=False
+        ),
+    )
+    response = client.post(
+        "/agent/inventory",
+        headers=agent_headers(NODE_A, "serial-a"),
+        json=json.loads(canonical_message(report)),
+    )
+    assert response.status_code == 200
+    verdict = InventoryVerdict.model_validate_json(response.content)
+    assert verdict.gpu_clock_grant is not None

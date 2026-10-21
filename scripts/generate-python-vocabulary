@@ -42,6 +42,7 @@ def cli_words() -> str:
         StopOutcome,
     )
     from vonk_agent_protocol.agent_words import ProfileEffectState
+    from vonk_agent_protocol.gpu_clock import GpuClockMetric
     from vonk_agent_protocol.lifecycle_vocabulary import ArtifactPreparation
     from vonk_agent_protocol.reason_codes.profiles import PROFILE_REFUSAL_CODES
 
@@ -84,6 +85,16 @@ def cli_words() -> str:
         'without the contract package, so it imports these instead of copying them."""',
         "",
         "from __future__ import annotations",
+        "",
+        "from enum import StrEnum",
+        "",
+        "",
+        "class GpuClockMetric(StrEnum):",
+        *(
+            f"    {member.name} = {json.dumps(member.value)}"
+            for member in GpuClockMetric
+        ),
+        "",
         "",
     ]
     lines += [f'{name} = "{member.value}"' for name, member in words.items()]
