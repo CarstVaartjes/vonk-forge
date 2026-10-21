@@ -24,6 +24,7 @@ from ..admission_locking import (
 from ..bounded_json import require_integer
 from ..content_identity import same_image
 from ..failure_classification import disposition, is_definite
+from ..lifecycle.evidence import BookkeepingReason
 from ..lifecycle.run_switch import (
     KEEP as _KEEP_REASON,
 )
@@ -93,7 +94,7 @@ from .ownership import (
     _complete_cancellation,
     _lock_current_build_parent,
 )
-from .planning_helpers import _aware, _now, _stored_job_plan
+from .planning_helpers import _aware, _now, _run_switch_payload, _stored_job_plan
 from .provider import _ADAPTER
 from .result_helpers import (
     _bound_workload_intent,
@@ -105,6 +106,7 @@ from .result_helpers import (
     _phase_result,
     _progress_damaged,
     _read_progress,
+    _recover_progress,
     _without_observation_time,
 )
 
@@ -202,12 +204,17 @@ class AdvanceMixin:
                 session.commit()
                 return True
             if _progress_damaged(read_row_column(job, "result")):
-                # The stored result is the evidence of what was issued; it is
-                # retained untouched rather than replaced with a fabricated
-                # empty progress document. The operation is retired as unknown.
-                _reject_invalid_operation(
-                    job, "run-switch persisted progress is invalid", now
-                )
+                parent = _run_switch_payload(job)
+                if parent is None:
+                    _reject_invalid_operation(
+                        job, BookkeepingReason.PERSISTED_STATE_DAMAGED, now
+                    )
+                else:
+                    progress = _recover_progress(job, parent.progress, parent.plan)
+                    job.result = _persisted_result(progress)
+                    job.status_reason = BookkeepingReason.PERSISTED_STATE_DAMAGED
+                    schedule_wait(job, now)
+                    job.updated_at = now
                 session.commit()
                 return True
             progress = _read_progress(read_row_column(job, "result"))
@@ -375,19 +382,8 @@ class AdvanceMixin:
                     service._mark_failed(job, str(error), now=now, progress=progress)
                     session.commit()
                     return True
-            if (
-                type(raw_phase_index) is not int
-                or type(raw_item_index) is not int
-                or raw_phase_index < 0
-                or raw_item_index < 0
-            ):
-                _ADAPTER.reject(job, "run-switch persisted progress is invalid", now)
-                session.commit()
-                return True
-            # Declare the validated integers so the checkpoint closure below
-            # carries their exact type rather than the raw JSON union.
-            phase_index: int = raw_phase_index
-            item_index: int = raw_item_index
+            phase_index = raw_phase_index
+            item_index = raw_item_index
             if phase_index >= len(plan.phases):
                 progress = _complete_operation_progress(plan, progress)
                 _ADAPTER.succeed(job, progress, now)

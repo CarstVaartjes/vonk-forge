@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import hashlib
-from collections.abc import Mapping, Sequence
+import re
+from collections.abc import Iterable, Mapping, Sequence
 from typing import TYPE_CHECKING, Annotated, Any, Literal
 
 from pydantic import (
@@ -36,7 +37,9 @@ _DIGEST = r"^[0-9a-f]{64}$"
 _NAME = r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
 _SLOT = r"^[A-Za-z][A-Za-z0-9_-]{0,31}$"
 _EXTENSION = r"^\.[a-z0-9][a-z0-9._-]{0,15}$"
-_MEDIA_TYPE = r"^[a-z0-9][a-z0-9!#$&^_.+-]{0,63}/[a-z0-9][a-z0-9!#$&^_.+-]{0,63}$"
+MEDIA_TYPE_PATTERN = (
+    r"^[a-z0-9][a-z0-9!#$&^_.+-]{0,63}/[a-z0-9][a-z0-9!#$&^_.+-]{0,63}$"
+)
 _UUID = (
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-"
     r"[0-9a-f]{12}$"
@@ -47,7 +50,7 @@ CanonicalUUID = Annotated[str, StringConstraints(pattern=_UUID)]
 ArtifactName = Annotated[str, StringConstraints(pattern=_NAME)]
 ArtifactSlot = Annotated[str, StringConstraints(pattern=_SLOT)]
 ArtifactExtension = Annotated[str, StringConstraints(pattern=_EXTENSION)]
-MediaType = Annotated[str, StringConstraints(pattern=_MEDIA_TYPE)]
+MediaType = Annotated[str, StringConstraints(pattern=MEDIA_TYPE_PATTERN)]
 
 
 def _as_tuple(value: object) -> object:
@@ -158,6 +161,14 @@ def manifest_sha256(
     return hashlib.sha256(canonical_message(document)).hexdigest()
 
 
+def canonical_media_types(values: Iterable[str]) -> list[str]:
+    """Validate media-type spelling and return its ordered unique set."""
+    canonical = sorted(set(values))
+    if any(re.fullmatch(MEDIA_TYPE_PATTERN, value) is None for value in canonical):
+        raise ValueError("artifact media type is invalid")
+    return canonical
+
+
 class RecipeJobOutputLimits(_RecipeJobModel):
     max_files: int = Field(ge=1, le=MAX_OUTPUT_FILES)
     max_file_bytes: int = Field(ge=1, le=MAX_OUTPUT_FILE_BYTES)
@@ -172,7 +183,7 @@ class RecipeJobOutputLimits(_RecipeJobModel):
     @field_validator("allowed_media_types")
     @classmethod
     def media_types_are_canonical(cls, value: tuple[str, ...]) -> tuple[str, ...]:
-        if len(set(value)) != len(value) or list(value) != sorted(value):
+        if list(value) != canonical_media_types(value):
             raise ValueError("allowed output media types are not canonical")
         return value
 

@@ -12,6 +12,7 @@ runtime validators are generated together from this same canonical document.
 from __future__ import annotations
 
 import argparse
+import inspect
 import json
 import os
 import re
@@ -149,6 +150,7 @@ def _generated_client_schema(
 
     schema = deepcopy(document)
     paths = schema.get("paths", {})
+    assert isinstance(paths, dict)
     for path, path_item in list(paths.items()):
         for method, operation in list(path_item.items()):
             if operation.get("x-vonk-streaming-transport") is True:
@@ -163,6 +165,7 @@ def _generated_client_schema(
         # schema is openapi-python-client's supported spelling for Any and
         # preserves scalar, array, null, and object values.
         components = schema.get("components", {})
+        assert isinstance(components, dict)
         schemas = components.get("schemas", {})
         for name in list(schemas):
             # Pydantic uses a qualified component name when a recursive JSON
@@ -291,6 +294,21 @@ def main() -> None:
                 "--overwrite",
                 "--fail-on-warning",
             ],
+        )
+        # Ship the protocol's pure canonicalizer without making the standalone
+        # CLI depend on the protocol package or Pydantic at runtime.
+        from vonk_agent_protocol.recipe_jobs import (
+            MEDIA_TYPE_PATTERN,
+            canonical_media_types,
+        )
+
+        python_output.mkdir(parents=True, exist_ok=True)
+        (python_output / "media_types.py").write_text(
+            '"""Generated from vonk_agent_protocol.recipe_jobs. Do not edit."""\n\n'
+            "import re\nfrom collections.abc import Iterable\n\n"
+            f"MEDIA_TYPE_PATTERN = {MEDIA_TYPE_PATTERN!r}\n\n\n"
+            + inspect.getsource(canonical_media_types),
+            encoding="utf-8",
         )
         _use_httpx2(python_output)
         _normalize_generated_text(python_output)

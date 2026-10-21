@@ -1640,14 +1640,25 @@ def test_recipe_download_consumes_typed_terminal_receipt() -> None:
     assert observed["result"]["model_content_digests"] == [model_digest]
 
 
-def test_recipe_download_timeout_preserves_durable_progress(monkeypatch) -> None:
+@pytest.mark.parametrize("state", [LifecycleState.RUNNING, LifecycleState.QUEUED])
+def test_recipe_download_timeout_preserves_durable_progress(monkeypatch, state) -> None:
+    """A busy wait with recovery actions must report evidence, not TypeError."""
     pytest.importorskip(
         "fastapi", reason="Controller contract tests run in the control suite"
     )
     lifecycle = _module()
-    from vonk_agent_protocol import OperationProgress
+    from vonk_agent_protocol import (
+        ArtifactLifecycleCode,
+        OperationProgress,
+        ProgressPhase,
+    )
+    from vonk_control.operation_contract import (
+        AvailabilityOperationFailure,
+        AvailabilityRecoveryAction,
+    )
     from vonk_control.recipe_availability_intent import RecipeSelectorIntent
     from vonk_control.recipe_image_availability_api import (
+        RecipeImageAvailabilityAction,
         RecipeImageAvailabilityResponse,
     )
 
@@ -1659,11 +1670,24 @@ def test_recipe_download_timeout_preserves_durable_progress(monkeypatch) -> None
             selector="acceptance/synthetic-canary", force=False
         ),
         kind="recipe.image.availability.v2",
-        state=LifecycleState.RUNNING,
+        state=state,
         attempt=2,
         recipe_revision_id="33333333-3333-4333-8333-333333333333",
         recipe_content_sha256=recipe_digest,
-        progress=OperationProgress(phase="build", completed_bytes=4),
+        progress=OperationProgress(phase=ProgressPhase.WAITING, completed_bytes=4),
+        failure=AvailabilityOperationFailure(
+            code=ArtifactLifecycleCode.REFERENCE_BUSY,
+            detail="concurrent reference owner",
+            retryable=True,
+            recovery_actions=[AvailabilityRecoveryAction.RETRY],
+            retry_time="2026-09-10T10:00:09Z",
+            retry_after_seconds=5,
+        ),
+        actions=[
+            RecipeImageAvailabilityAction(key=action)
+            for action in AvailabilityRecoveryAction
+        ],
+        next_attempt_at="2026-09-10T10:00:09Z",
         updated_at="2026-09-10T10:00:04Z",
         created_at="2026-09-10T10:00:00Z",
     )
@@ -1687,12 +1711,26 @@ def test_recipe_download_timeout_preserves_durable_progress(monkeypatch) -> None
 
     with pytest.raises(
         lifecycle.LifecycleError,
-    ):
+    ) as failure:
         run._await_recipe_download(
             pending.model_dump(mode="json"),
             fixture=fixture,
             recipe_revision_id=pending.recipe_revision_id,
         )
+
+    message = str(failure.value)
+    evidence = json.loads(message.split("did not converge: ", 1)[1])
+    assert evidence["state"] == state
+    assert evidence["attempt"] == pending.attempt
+    assert evidence["progress"]["phase"] == ProgressPhase.WAITING
+    assert evidence["progress"]["completed_bytes"] == 4
+    assert evidence["failure"]["code"] == ArtifactLifecycleCode.REFERENCE_BUSY
+    assert evidence["failure"]["retryable"] is True
+    assert evidence["actions"] == [
+        {"key": action.value} for action in AvailabilityRecoveryAction
+    ]
+    assert evidence["next_attempt_at"] == pending.next_attempt_at
+    assert evidence["updated_at"] == pending.updated_at
 
 
 def test_profile_application_poll_pins_exact_identity(monkeypatch) -> None:

@@ -47,6 +47,10 @@ GUARDS: tuple[str, ...] = (
 
 SCOPED: tuple[tuple[str, str], ...] = (
     (
+        "control/tests/test_artifact_reference_busy_recovery.py",
+        "Artifact ownership conflict classification, real PostgreSQL collection/download race and bounded restart recovery.",
+    ),
+    (
         "control/tests/test_due_waits.py",
         "PostgreSQL due-row redrive, restart, fairness and cancellation behavior; coverage scan belongs to test_wait_owner_coverage.",
     ),
