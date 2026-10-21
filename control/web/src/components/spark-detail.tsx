@@ -2,7 +2,7 @@ import {MetricsChart} from "./metrics-chart";
 import {useEffect, useState} from "react";
 import type {ControlApi, EnrollmentGrantResponse, FleetLogResponse, VisualFleetNode} from "../api/types";
 import {safeErrorText} from "../lib/error-display";
-import {nodeCpuClock, nodeDisplayName, nodeRecipeUpdates, nodeStatus} from "../lib/fleet";
+import {nodeCpuClock, nodeGpuClock, nodeDisplayName, nodeRecipeUpdates, nodeStatus} from "../lib/fleet";
 import {ConfirmDialog} from "./confirm-dialog";
 import {EnrollmentGrant} from "./enrollment-grant";
 import {InstallationReconcile} from "./installation-reconcile";
@@ -78,6 +78,7 @@ export function SparkDetail({api, id, onClose}: {api: ControlApi; id: string; on
           <div><dt>Last seen</dt><dd><Time value={node.connection.last_seen_at}/></dd></div>
           <div><dt>Host</dt><dd>{node.hostname}{node.ip_address ? ` · ${node.ip_address}` : ""}</dd></div>
           {cpu && <div><dt>CPU clock</dt><dd>{cpu.clock}{cpu.temperature ? ` · ${cpu.temperature}` : ""}{cpu.lowClock && <> <StatusPill tone="warning">low under load</StatusPill></>}</dd></div>}
+          <div><dt>GPU clock</dt><dd>{nodeGpuClock(node)}</dd></div>
           <div><dt>Recipes</dt><dd>{node.loaded.filter(item => item.healthy === true).length}{node.loaded.some(item => item.healthy == null) ? " confirmed" : ""} running · {node.installed.filter(item => item.complete === true).length}{node.installed.some(item => item.complete == null) ? " confirmed" : ""} installed{(node.loaded.some(item => item.healthy == null) || node.installed.some(item => item.complete == null)) && <> · some workload state unknown</>}</dd></div>
         </dl>
         {node.loaded.some(item => Object.keys(item.option_choices ?? {}).length > 0) && <ul className="spark-run-options" aria-label="Active recipe options">{node.loaded.filter(item => Object.keys(item.option_choices ?? {}).length > 0).map(item => <li key={`${item.run_id}:${item.rank}`}><strong>{item.title}</strong> {Object.entries(item.option_choices ?? {}).map(([name, value]) => <StatusPill key={name} tone="neutral">{name}: {value}</StatusPill>)}</li>)}</ul>}

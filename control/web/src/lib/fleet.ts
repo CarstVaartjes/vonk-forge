@@ -7,7 +7,7 @@ import {
   type WireNumber,
 } from "../api/contract-numeric";
 import type { VisualFleetNode } from "../api/types";
-import { NodeOfflineReason, ProjectionCode } from "../api/vocabulary.generated";
+import { NodeOfflineReason, OutcomeKind, ProjectionCode } from "../api/vocabulary.generated";
 
 export type TelemetryFreshness = "live" | "delayed" | "stale";
 /** The words `vonkctl fleet` uses. */
@@ -236,4 +236,16 @@ export function nodeCpuClock(
       typeof sample.gpu_temperature_c === "number" ? `${sample.gpu_temperature_c} °C` : null,
     lowClock: node.warnings.some((warning) => warning.code === ProjectionCode.CPU_LOW_CLOCK),
   };
+}
+
+/** Driver readings and explicitly labelled command receipt, never invented readback. */
+export function nodeGpuClock(node: VisualFleetNode): string {
+  const clock = node.telemetry?.sample?.gpu_clock;
+  const range = (value: NonNullable<VisualFleetNode["gpu_clock_desired"]> | null | undefined) =>
+    value ? `${value.min_mhz}–${value.max_mhz} MHz` : OutcomeKind.UNKNOWN;
+  const when = (value: WireNumber) => {
+    const date = new Date(Number(formatWire(value)) * 1000);
+    return Number.isNaN(date.getTime()) ? `${formatWire(value)} UTC epoch seconds` : date.toLocaleString();
+  };
+  return `Graphics ${clock?.graphics_mhz ?? OutcomeKind.UNKNOWN} / SM ${clock?.sm_mhz ?? OutcomeKind.UNKNOWN} MHz · last applied ${range(clock?.locked_range)} (helper receipt) · desired ${range(node.gpu_clock_desired)} · reported maximum graphics ${clock?.max_graphics_mhz ?? OutcomeKind.UNKNOWN} / SM ${clock?.max_sm_mhz ?? OutcomeKind.UNKNOWN} MHz · policy limit ${node.gpu_clock_policy?.hard_max_mhz ?? OutcomeKind.UNKNOWN} MHz · throttle bits ${clock?.throttle_reasons ?? OutcomeKind.UNKNOWN}${clock?.apply_state ? ` · enforcement ${clock.apply_state}` : ""}${clock?.next_attempt_at != null ? ` · next attempt ${when(clock.next_attempt_at)}` : ""}${clock?.deadline != null ? ` · deadline ${when(clock.deadline)}` : ""}${clock?.detail ? ` · ${clock.detail}` : ""}`;
 }

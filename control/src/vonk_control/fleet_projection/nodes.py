@@ -9,6 +9,11 @@ from typing import TYPE_CHECKING, Annotated
 from pydantic import Field, TypeAdapter
 from vonk_agent_protocol import NodeOfflineReason, ProjectionCode
 from vonk_agent_protocol.agent_words import ProfileReasonSeverity
+from vonk_agent_protocol.gpu_clock import (
+    GPU_CLOCK_POLICY,
+    GpuClockApplyState,
+    GpuClockRange,
+)
 from vonk_agent_protocol.inventory import HostSettings, NetworkInterface
 
 from ..models import (
@@ -66,6 +71,7 @@ def _node(
     slow_nas: NasTransferNotice | None = None,
     layout_notices: Sequence[ProjectionReason] = (),
     telemetry_unreadable: bool = False,
+    gpu_clock_desired: GpuClockRange | None = None,
 ) -> FleetNode:
     warnings: list[ProjectionReason] = list(layout_notices)
     connection = self._connection(agent, certificate, current)
@@ -150,7 +156,10 @@ def _node(
         )
     warnings.extend(
         _host_settings_warnings(
-            None if inventory_state is None else inventory_state.host_settings
+            None if inventory_state is None else inventory_state.host_settings,
+            clock_applied=telemetry is not None
+            and telemetry.gpu_clock is not None
+            and telemetry.gpu_clock.locked_range is not None,
         )
     )
     if telemetry_state is None:
@@ -189,6 +198,30 @@ def _node(
                     code=ProjectionCode.CPU_LOW_CLOCK,
                     detail=_low_clock_detail(low_clock),
                     severity="warning",
+                )
+            )
+    if telemetry is not None and telemetry.gpu_clock is not None:
+        clock = telemetry.gpu_clock
+        if gpu_clock_desired is not None and (
+            clock.locked_range != gpu_clock_desired
+            or clock.apply_state
+            in {
+                GpuClockApplyState.WAITING,
+                GpuClockApplyState.EXPIRED,
+                GpuClockApplyState.REFUSED,
+            }
+            or (
+                clock.graphics_mhz is not None
+                and clock.graphics_mhz > gpu_clock_desired.max_mhz
+            )
+            or (clock.sm_mhz is not None and clock.sm_mhz > gpu_clock_desired.max_mhz)
+        ):
+            warnings.append(
+                ProjectionReason(
+                    code=ProjectionCode.HOST_GPU_CLOCK_UNCAPPED,
+                    detail=f"GPU clock evidence differs from desired {gpu_clock_desired.min_mhz}-{gpu_clock_desired.max_mhz} MHz; inspect GPU enforcement state, cause and retry deadline.",
+                    severity=ProfileReasonSeverity.WARNING.value,
+                    recommendation="The helper retries through inventory and hourly host-settings reconciliation; see GPU clock deadline and next attempt.",
                 )
             )
     warnings.extend(_install_partial_warnings(installed))
@@ -249,6 +282,7 @@ def _node(
         )
         warn_unreadable_once("Fleet node labels", node_id)
     return FleetNode(
+        gpu_clock_desired=gpu_clock_desired,
         id=node_id,
         display_name=node_id if profile is None else profile.display_name,
         hostname="" if profile is None else profile.hostname,
@@ -359,7 +393,9 @@ _HELPER_CORRECTS = (
 )
 
 
-def _host_settings_warnings(host: HostSettings | None) -> list[ProjectionReason]:
+def _host_settings_warnings(
+    host: HostSettings | None, *, clock_applied: bool = False
+) -> list[ProjectionReason]:
     """Drift from the declared headless Spark; unknown (an older agent) is none."""
     warnings: list[ProjectionReason] = []
     if host is not None and host.display_manager_active:
@@ -383,19 +419,18 @@ def _host_settings_warnings(host: HostSettings | None) -> list[ProjectionReason]
                 recommendation=_HELPER_CORRECTS,
             )
         )
-    if host is not None and host.gpu_clock_cap_active is False:
+    if host is not None and host.gpu_clock_cap_active is False and not clock_applied:
         warnings.append(
             ProjectionReason(
                 code=ProjectionCode.HOST_GPU_CLOCK_UNCAPPED,
                 detail=(
-                    "The GPU clock ceiling (nvidia-smi -lgc 300,2200) is not "
+                    f"The boot GPU clock ceiling ({GPU_CLOCK_POLICY.default_min_mhz}–{GPU_CLOCK_POLICY.default_max_mhz} MHz) is not "
                     "applied this boot: sustained load can power this Spark off."
                 ),
                 severity=ProfileReasonSeverity.WARNING.value,
                 recommendation=(
-                    "The agent helper starts vonk-forge-gpu-clock-cap.service on "
-                    "its next hourly pass; if this stays, read that unit's journal "
-                    "(journalctl -u vonk-forge-gpu-clock-cap)."
+                    "The helper enforces the active desired range on its next pass; "
+                    "inspect GPU clock telemetry and the helper journal if this persists."
                 ),
             )
         )

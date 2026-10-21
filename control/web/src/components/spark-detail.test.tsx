@@ -55,3 +55,10 @@ test("the Overview omits the CPU clock when the agent does not report it", async
   await screen.findByText("Kitchen");
   expect(screen.queryByText("CPU clock")).toBeNull();
 });
+
+test("GPU readings distinguish hardware maximum, policy and the applied command receipt", async () => {
+  const measured = {...node, gpu_clock_desired: {min_mhz: 300, max_mhz: 1800}, gpu_clock_policy: {default_min_mhz: 300, default_max_mhz: 2200, hard_max_mhz: 2300}, telemetry: {freshness: "live", age_seconds: 1, sample: {gpu_clock: {graphics_mhz: 1700, sm_mhz: 1695, locked_range: {min_mhz: 300, max_mhz: 2200}, max_graphics_mhz: 2400, max_sm_mhz: 2300, throttle_reasons: 4}}}};
+  render(<SparkDetail api={{fleetNode: vi.fn().mockResolvedValue(measured)} as unknown as ControlApi} id="spk_1" onClose={vi.fn()}/>);
+  expect(await screen.findByText(/Graphics 1700 \/ SM 1695 MHz/)).toHaveTextContent("last applied 300–2200 MHz (helper receipt) · desired 300–1800 MHz");
+  expect(screen.getByText(/reported maximum graphics 2400/)).toHaveTextContent("policy limit 2300 MHz · throttle bits 4");
+});

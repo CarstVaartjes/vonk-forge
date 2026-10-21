@@ -42,7 +42,7 @@ NODE_B = "spk_" + "b" * 32
 COMMIT = "a" * 64
 STOP_PAYLOAD = recipe_stop_payload(NODE_A, plan_digest=COMMIT)
 STOP_RESULT = RecipeStopResult()
-PROTOCOL_WHEEL = ROOT / "inventory/wheels/vonk_agent_protocol-4.1.0-py3-none-any.whl"
+PROTOCOL_WHEEL = ROOT / "inventory/wheels/vonk_agent_protocol-4.2.0-py3-none-any.whl"
 PROTOCOL_WHEEL_HASH = hashlib.sha256(PROTOCOL_WHEEL.read_bytes()).hexdigest()
 PUBLIC_CONTRACTS_WHEEL = (
     ROOT / "inventory/wheels/vonk_forge_public_contracts-2.3.0-py3-none-any.whl"
@@ -266,14 +266,14 @@ def test_control_environment_installs_the_verified_protocol_wheel() -> None:
     )
 
     assert direct_url["url"].endswith(
-        "/inventory/wheels/vonk_agent_protocol-4.1.0-py3-none-any.whl"
+        "/inventory/wheels/vonk_agent_protocol-4.2.0-py3-none-any.whl"
     )
     assert package["source"] == {
-        "path": "../inventory/wheels/vonk_agent_protocol-4.1.0-py3-none-any.whl"
+        "path": "../inventory/wheels/vonk_agent_protocol-4.2.0-py3-none-any.whl"
     }
     assert package["wheels"] == [
         {
-            "filename": "vonk_agent_protocol-4.1.0-py3-none-any.whl",
+            "filename": "vonk_agent_protocol-4.2.0-py3-none-any.whl",
             "hash": f"sha256:{PROTOCOL_WHEEL_HASH}",
         }
     ]
@@ -352,7 +352,7 @@ def test_root_context_image_installs_contracts_and_protocol_from_build_inputs(
     installed = json.loads(result.stdout)
 
     assert installed == {
-        "protocol": "4.1.0",
+        "protocol": "4.2.0",
         "contracts": importlib.metadata.version("vonk-forge-public-contracts"),
         "model": "ModelDefinition",
         "recipe": "RecipeDefinition",

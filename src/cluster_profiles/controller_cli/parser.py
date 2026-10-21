@@ -445,6 +445,17 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
         metavar="NAME",
         help="Assignment whose --option choices to change (default: the only one)",
     )
+    clock = profile_configure.add_mutually_exclusive_group()
+    clock.add_argument(
+        "--gpu-clock",
+        metavar="MIN,MAX",
+        help="GPU MHz range for --assignment (hardware policy checked by Controller)",
+    )
+    clock.add_argument(
+        "--clear-gpu-clock",
+        action="store_true",
+        help="Restore the default GPU range for --assignment",
+    )
     _option_flag(profile_configure)
     _profile_edit_flags(profile_configure)
     profile_export = profile_actions.add_parser(

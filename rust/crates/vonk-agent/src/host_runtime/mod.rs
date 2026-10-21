@@ -66,6 +66,40 @@ use responses::{require_bound_response, require_executed_outcome, runtime_reject
 pub(crate) use transport::read_observed;
 use transport::{call_helper, write_request};
 
+pub fn apply_gpu_clock_grant(
+    grant: &vonk_agent_protocol::SignedHostHelperGrant,
+) -> Result<(), HostRuntimeError> {
+    let body = canonical_json(grant)
+        .map_err(|_| HostRuntimeError::HelperProtocol(HelperProtocolCause::MessageFraming))?;
+    let response = call_helper(
+        Path::new(HELPER_SOCKET),
+        &body,
+        &Inactivity::new(Duration::from_secs(30)),
+    )?;
+    require_bound_response(&response, &grant.claims.request_id.to_string())?;
+    if response.status == HostHelperResponseStatus::Rejected
+        && let Some(code) = response.error_code
+    {
+        return Err(HostRuntimeError::HelperRejected {
+            code,
+            diagnostic: response
+                .diagnostic
+                .as_deref()
+                .map(crate::failure_evidence::sanitize_exit_summary),
+            process_logs: None,
+        });
+    }
+    if response.status == HostHelperResponseStatus::GpuClockReconciled
+        && response.error_code.is_none()
+    {
+        Ok(())
+    } else {
+        Err(HostRuntimeError::HelperProtocol(
+            HelperProtocolCause::MessageFraming,
+        ))
+    }
+}
+
 pub struct HostRuntimeOutcome {
     pub exit_code: Option<i32>,
     pub stop_uncertain: bool,

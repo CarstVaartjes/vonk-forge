@@ -4,6 +4,8 @@ from ..wire_model import WireEnum
 
 
 class RunSwitchCode(WireEnum):
+    GPU_CLOCK_INVALID = "gpu-clock.invalid"
+    GPU_CLOCK_ABOVE_DEFAULT = "gpu-clock.above-default"
     """Run/Switch phase blockers, waits and failure codes."""
 
     ACTIVE_RUN_CONFLICT = "run-switch.active-run-conflict"

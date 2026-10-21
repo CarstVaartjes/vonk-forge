@@ -453,6 +453,7 @@ class RunSwitchFleetProfileAdapter(
             action=action,
             retention="retain-cached",
             option_choices=dict(assignment.option_choices),
+            gpu_clock=assignment.gpu_clock,
             plan_digest=None,
             request_key=request_key,
         )

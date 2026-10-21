@@ -106,6 +106,13 @@ pub(super) fn validate_recipe_stop(value: &RecipeStopRequest) -> bool {
 /// A start's placement, addresses and image all come from its compiled plan;
 /// the payload adds only the run identity and the distributed phase.
 pub(super) fn validate_recipe_start(value: &RecipeStartRequest) -> bool {
+    if value
+        .gpu_clock
+        .as_ref()
+        .is_some_and(|clock| !crate::gpu_clock::valid_range(&clock.range))
+    {
+        return false;
+    }
     let placement = value.placement();
     let distributed = placement.world_size > 1;
     let utc_deadline = |deadline: &str| {
