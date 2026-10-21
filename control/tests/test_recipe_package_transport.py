@@ -6,13 +6,32 @@ import io
 import json
 import os
 import tarfile
+import uuid
 from copy import deepcopy
+from datetime import timedelta
 from pathlib import Path
 
 import httpx2
 import pytest
+from sqlalchemy import select
+from sqlalchemy.engine import Engine
+from vonk_agent_protocol import CatalogSyncState, RecipeBuildCode, RecipePackageCode
 from vonk_control import recipe_packages
+from vonk_control.auth import TokenCodec
 from vonk_control.bounded_json import require_mapping
+from vonk_control.catalog_revision_contract import read_recipe_projection
+from vonk_control.catalog_service import CatalogService
+from vonk_control.catalog_sync import ManagedRecipeCatalogSyncService
+from vonk_control.catalog_sync_contract import (
+    CatalogSyncTrigger,
+    ManagedCatalogSyncRequest,
+)
+from vonk_control.inventory_repository import (
+    InventoryRepository,
+    InventorySnapshotInput,
+)
+from vonk_control.models import CatalogDocumentRevision, RecipeBuild
+from vonk_control.recipe_builds import RecipeBuildService, RecipeBuildUnknown
 from vonk_control.recipe_library_types import RecipeLibrarySnapshot, RecipePackageEntry
 from vonk_control.recipe_packages import (
     PACKAGE_MEDIA_TYPE,
@@ -23,6 +42,9 @@ from vonk_control.recipe_packages import (
 from vonk_control.recipe_release import RecipeReleaseError
 from vonk_control.source_bundles import generate_source_bundle
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
+
+from .signed_recipe_release import SignedRecipeRelease, signed_recipe_releases
+from .test_recipe_builds import setup
 
 
 def _canonical(value: object) -> bytes:
@@ -45,7 +67,9 @@ def _repack(files: dict[str, bytes]) -> bytes:
     return gzip.compress(stream.getvalue(), compresslevel=9, mtime=0)
 
 
-def _canonical_package_fixture() -> tuple[bytes, dict[str, object], bytes]:
+def _canonical_package_fixture(
+    *, adapter_source: bytes | None = None
+) -> tuple[bytes, dict[str, object], bytes]:
     """Create a tiny valid package without depending on another checkout."""
     model = ModelDefinition.model_validate(
         {
@@ -215,8 +239,15 @@ def _canonical_package_fixture() -> tuple[bytes, dict[str, object], bytes]:
         "models/tiny-model.json": _canonical(model_document) + b"\n",
         "recipe.json": _canonical(recipe_document) + b"\n",
     }
+    if adapter_source is not None:
+        files["build/adapter.py"] = adapter_source
+        files["build/Dockerfile"] += b"COPY adapter.py /adapter.py\n"
     source_digest = generate_source_bundle(
-        {"Dockerfile": files["build/Dockerfile"]}
+        {
+            path.removeprefix("build/"): content
+            for path, content in files.items()
+            if path.startswith("build/")
+        }
     ).sha256
     manifest = {
         "source_bundle_sha256": source_digest,
@@ -848,3 +879,133 @@ def test_signed_content_is_prepared_despite_different_source_provenance(
         assert not snapshot.problems
     finally:
         client.close()
+
+
+@pytest.mark.usefixtures(signed_recipe_releases.__name__)
+def test_context_publication_must_precede_controller_rollout(tmp_path: Path) -> None:
+    # Wrong implementation: silently deriving an unpublished identity lets this
+    # Controller roll out before the publisher, hiding the required deploy order.
+    index_bytes, row, package = _canonical_package_fixture()
+    index = json.loads(index_bytes)
+    del index["recipes"][0]["source_bundle_sha256"]
+    release = SignedRecipeRelease(
+        index, {str(require_mapping(row["package"], "package")["path"]): package}
+    )
+    client = release.client(tmp_path / "cache")
+    with pytest.raises(RecipePackageError) as rejected:
+        client.list()
+    assert rejected.value.code == RecipePackageCode.RESPONSE_INVALID
+
+
+@pytest.mark.usefixtures(signed_recipe_releases.__name__)
+def test_adapter_only_publication_changes_accepted_build_identity(
+    tmp_path: Path, postgres_engine: Engine
+) -> None:
+    # Wrong implementations: dropping source identity at ingress, retaining the
+    # old projection on equal recipe JSON, or accepting the reviewed old context.
+    sessions, bundles, now, node_id, _ = setup(tmp_path, engine=postgres_engine)
+    now += timedelta(microseconds=1)
+    InventoryRepository(sessions, clock=lambda: now).record(
+        InventorySnapshotInput(
+            node_id,
+            now,
+            2 * 1024**4,
+            1024**4,
+            128 * 1024**3,
+            100 * 1024**3,
+            128 * 1024**3,
+            100 * 1024**3,
+            1,
+            False,
+            ("recipe.build.v1", "recipe.build.egress-proxy.v1"),
+            memory_pool="separate",
+        )
+    )
+    catalog = CatalogService(
+        sessions,
+        clock=lambda: now,
+        cursors=TokenCodec(b"s" * 32).cursor_codec(),
+        source_bundles=bundles,
+    )
+    builds = RecipeBuildService(sessions, bundles=bundles)
+    index_bytes, _, package = _canonical_package_fixture(
+        adapter_source=b"print('old')\n"
+    )
+    index = json.loads(index_bytes)
+    location = index["recipes"][0]["package"]["path"]
+    release = SignedRecipeRelease(index, {location: package})
+    client = release.client(tmp_path / "packages")
+    sync = ManagedRecipeCatalogSyncService(
+        sessions, catalog=catalog, reader=client, clock=lambda: now
+    )
+
+    def synchronize() -> None:
+        result = sync.sync(
+            ManagedCatalogSyncRequest(
+                request_key=str(uuid.uuid4()),
+                trigger=CatalogSyncTrigger.MANUAL,
+                actor="test",
+            )
+        )
+        assert result.state == CatalogSyncState.CURRENT
+        assert not result.problems
+
+    synchronize()
+    with sessions() as session:
+        revision = session.scalar(
+            select(CatalogDocumentRevision).where(
+                CatalogDocumentRevision.publisher == "fixture",
+                CatalogDocumentRevision.slug == "tiny-recipe",
+            )
+        )
+        assert revision is not None
+        revision_id = revision.id
+        original = read_recipe_projection(revision)
+    old = builds.plan(revision_id, node_id, now=now)
+    builds.record_success(
+        old.build_id,
+        build_input_sha256=old.build_input_sha256,
+        image_digest="sha256:" + "b" * 64,
+        oci_layout_sha256="c" * 64,
+        image_bytes=500,
+        now=now,
+    )
+    reviewed = builds.prepare_plan(revision_id, node_id, now=now)
+    changed_bytes, _, changed_package = _canonical_package_fixture(
+        adapter_source=b"print('repaired')\n"
+    )
+    changed = json.loads(changed_bytes)
+    assert changed["recipes"][0]["document"] == index["recipes"][0]["document"]
+    # Keep Git provenance fixed too: the new key must follow the changed bytes.
+    release.publish(changed, {location: changed_package})
+    synchronize()
+    with sessions() as session:
+        revision = session.get(CatalogDocumentRevision, revision_id)
+        assert revision is not None
+        current = read_recipe_projection(revision)
+        assert current.source_bundle_sha256 != original.source_bundle_sha256
+        assert (
+            current.source_bundle_sha256
+            == changed["recipes"][0]["source_bundle_sha256"]
+        )
+        count_before = len(session.scalars(select(RecipeBuild)).all())
+    assert original.source_bundle_sha256 is not None
+    assert current.source_bundle_sha256 is not None
+    before = dict(bundles.get(original.source_bundle_sha256).files)
+    after = dict(bundles.get(current.source_bundle_sha256).files)
+    assert {path for path in before if before[path] != after[path]} == {"adapter.py"}
+    assert not builds.resolve(revision_id).cached
+    with pytest.raises(RecipeBuildUnknown) as stale, sessions.begin() as session:
+        builds.persist_plan_in_session(session, reviewed, now=now)
+    assert stale.value.code == RecipeBuildCode.DEPENDENCIES_STALE
+    with sessions() as session:
+        assert len(session.scalars(select(RecipeBuild)).all()) == count_before
+    fresh = builds.prepare_plan(revision_id, node_id, now=now)
+    assert fresh.source_bundle_sha256 == current.source_bundle_sha256
+    assert fresh.build_input_sha256 != old.build_input_sha256
+    with sessions.begin() as session:
+        accepted = builds.persist_plan_in_session(session, fresh, now=now)
+    assert accepted.build_id != old.build_id
+    assert (
+        accepted.agent_payload["source_bundle_sha256"] == current.source_bundle_sha256
+    )
