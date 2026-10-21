@@ -6,7 +6,7 @@ from collections.abc import Mapping, Sequence
 from enum import Enum
 
 from .. import cli_states
-from ..cli_states_generated import ENDPOINT_UNAVAILABLE, UNKNOWN
+from ..cli_states_generated import ENDPOINT_UNAVAILABLE, UNKNOWN, GpuClockMetric
 from ..cli_telemetry_render import gpu_readings
 from ..cli_telemetry_render import size as _size
 from ..generated_control.models.gpu_clock_observation import GpuClockObservation
@@ -137,13 +137,34 @@ def _gpu_clock(node: object) -> str:
     def clock_range(value: GpuClockRange | None) -> str:
         return f"{value.min_mhz}–{value.max_mhz} MHz" if value is not None else UNKNOWN
 
+    def metric(value: object, name: GpuClockMetric) -> str:
+        if (
+            (value is None or isinstance(value, Unset))
+            and not isinstance(clock.unavailable, Unset)
+            and clock.unavailable is not None
+        ):
+            for failure in clock.unavailable:
+                if failure.metric == name:
+                    return f"{failure.reason.replace('-', ' ')} ({failure.detail})"
+        return _clock_reading(value)
+
     return (
-        f"graphics {_clock_reading(clock.graphics_mhz)} / SM {_clock_reading(clock.sm_mhz)} MHz; "
+        f"graphics {metric(clock.graphics_mhz, GpuClockMetric.GRAPHICS)} / SM {metric(clock.sm_mhz, GpuClockMetric.SM)} MHz; "
         f"last applied {clock_range(applied)} (helper receipt); desired {clock_range(desired)}; "
-        f"reported max graphics {_clock_reading(clock.max_graphics_mhz)} / SM {_clock_reading(clock.max_sm_mhz)} MHz; "
-        f"policy limit {_clock_reading(policy.hard_max_mhz if policy is not None else None)} MHz; throttle bits {_clock_reading(clock.throttle_reasons)}; "
+        f"reported max graphics {metric(clock.max_graphics_mhz, GpuClockMetric.MAX_GRAPHICS)} / SM {metric(clock.max_sm_mhz, GpuClockMetric.MAX_SM)} MHz; "
+        f"policy limit {_clock_reading(policy.hard_max_mhz if policy is not None else None)} MHz; throttle bits {metric(clock.throttle_reasons, GpuClockMetric.THROTTLE)}; "
         f"{_clock_reading(clock.apply_state)}; next {_clock_reading(clock.next_attempt_at)}; deadline {_clock_reading(clock.deadline)}; "
         f"{_clock_reading(clock.detail)}"
+        + (
+            f"; receipt {clock.receipt_detail}"
+            if isinstance(clock.receipt_detail, str)
+            else ""
+        )
+        + (
+            "; No GPU clock observation received from monitor"
+            if not sample.get("gpu_clock")
+            else ""
+        )
     )
 
 

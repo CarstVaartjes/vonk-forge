@@ -34,49 +34,74 @@ async fn run(config_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
     loop {
         tokio::time::sleep_until(next_tick).await;
         let tick_started = tokio::time::Instant::now();
-        // A timed-out native sample retains its one worker until it settles;
-        // ticks never accumulate workers or invent a boot identity.
-        if sampling
-            .as_ref()
-            .is_some_and(|task: &tokio::task::JoinHandle<_>| !task.is_finished())
-        {
-            next_tick = next_tick_after(tick_started, tokio::time::Instant::now());
-            continue;
-        }
-        if let Some(task) = sampling.take() {
-            let _ = task.await;
-        }
-        let config_path = config_path.to_owned();
-        let task = tokio::task::spawn_blocking(move || {
-            // Initialization belongs to this sample, not service startup.
-            // Reload every tick so collector paths follow current config.
-            let config = match AgentConfig::load(&config_path) {
-                Ok(config) => config,
-                Err(error) => {
-                    eprintln!("vonk-monitor: configuration observation unavailable: {error}");
-                    return None;
-                }
-            };
-            let collector = collector_for(&config, Path::new("/proc/sys/kernel/random/boot_id"))?;
-            Some((config, collector.sample()))
-        });
-        sampling = Some(task);
-        if let Some(task) = sampling.as_mut() {
-            match tokio::time::timeout_at(tick_started + INTERVAL, task).await {
-                Ok(Ok(Some((config, sample)))) => {
-                    sampling = None;
-                    if let Ok(client) = AgentHttpClient::from_config(&config) {
-                        // One bounded upload; a miss ends this sample. The next
-                        // tick observes current config, credentials and paths.
-                        let _ = tokio::time::timeout(INTERVAL, client.report_telemetry(&[sample]))
-                            .await;
+        // Keep the same sample until it finishes, even after its first tick
+        // budget. Slow driver failures carry evidence that must be uploaded.
+        if sampling.is_none() {
+            let config_path = config_path.to_owned();
+            let task = tokio::task::spawn_blocking(move || {
+                // Initialization belongs to this sample, not service startup.
+                // Reload every tick so collector paths follow current config.
+                let config = match AgentConfig::load(&config_path) {
+                    Ok(config) => config,
+                    Err(error) => {
+                        eprintln!("vonk-monitor: configuration observation unavailable: {error}");
+                        return None;
                     }
-                }
-                Ok(_) => sampling = None,
-                Err(_) => eprintln!("vonk-monitor: sample observation budget elapsed"),
-            }
+                };
+                let collector =
+                    collector_for(&config, Path::new("/proc/sys/kernel/random/boot_id"))?;
+                Some((config, collector.sample()))
+            });
+            sampling = Some(task);
+        }
+        match completed_sample(&mut sampling, tick_started + INTERVAL).await {
+            Some(result) => report_sample(result).await,
+            None => eprintln!(
+                "vonk-monitor: sample observation budget elapsed; retaining current sample"
+            ),
         }
         next_tick = next_tick_after(tick_started, tokio::time::Instant::now());
+    }
+}
+
+async fn completed_sample<T>(
+    sampling: &mut Option<tokio::task::JoinHandle<T>>,
+    deadline: tokio::time::Instant,
+) -> Option<Result<T, tokio::task::JoinError>> {
+    let result = tokio::time::timeout_at(deadline, sampling.as_mut()?)
+        .await
+        .ok()?;
+    *sampling = None;
+    Some(result)
+}
+
+async fn report_sample(
+    result: Result<
+        Option<(AgentConfig, vonk_agent::telemetry::TelemetrySample)>,
+        tokio::task::JoinError,
+    >,
+) {
+    let (config, sample) = match result {
+        Ok(Some(observed)) => observed,
+        Ok(None) => return, // The collector logged its initialization cause.
+        Err(error) => {
+            eprintln!("vonk-monitor: sample worker failed: {error}");
+            return;
+        }
+    };
+    let client = match AgentHttpClient::from_config(&config) {
+        Ok(client) => client,
+        Err(error) => {
+            eprintln!("vonk-monitor: telemetry client unavailable: {error}");
+            return;
+        }
+    };
+    // Upload once, including slow observations with their failure causes.
+    // The next tick observes current config, credentials and paths.
+    match tokio::time::timeout(INTERVAL, client.report_telemetry(&[sample])).await {
+        Ok(Ok(())) => {}
+        Ok(Err(error)) => eprintln!("vonk-monitor: telemetry upload failed: {error}"),
+        Err(error) => eprintln!("vonk-monitor: telemetry upload budget elapsed: {error}"),
     }
 }
 
@@ -124,6 +149,28 @@ fn telemetry_paths(config: &AgentConfig) -> TelemetryPaths {
 mod tests {
     use super::{INTERVAL, next_tick_after};
     use std::time::Duration;
+
+    #[tokio::test]
+    async fn slow_sample_is_reportable_after_its_first_tick_budget() {
+        // Catches discarding the finished worker after a driver query times out.
+        let (release, receiver) = tokio::sync::oneshot::channel();
+        let mut sampling = Some(tokio::spawn(async move { receiver.await.unwrap() }));
+        assert!(
+            super::completed_sample(&mut sampling, tokio::time::Instant::now())
+                .await
+                .is_none()
+        );
+        assert!(sampling.is_some());
+        release.send(42).unwrap();
+        assert_eq!(
+            super::completed_sample(&mut sampling, tokio::time::Instant::now() + INTERVAL)
+                .await
+                .unwrap()
+                .unwrap(),
+            42
+        );
+        assert!(sampling.is_none());
+    }
 
     #[test]
     fn boot_projection_loss_ends_a_sample_and_the_next_tick_can_initialize() {
