@@ -127,8 +127,8 @@ class RunSwitchOperationResult(StrictModel):
     def total_bytes_state_is_consistent(self) -> RunSwitchOperationResult:
         if self.total_bytes_known != (self.total_bytes is not None):
             raise ValueError("operation total byte knowledge is inconsistent")
-        if self.total_bytes is not None and self.completed_bytes > self.total_bytes:
-            raise ValueError("operation completed bytes exceed total bytes")
+        if self.total_bytes is not None:
+            self.total_bytes = max(self.total_bytes, self.completed_bytes)
         return self
 
 

@@ -7,7 +7,6 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
-from pydantic import ValidationError
 from vonk_agent_protocol import LifecycleState
 from vonk_agent_protocol.agent_words import ProfileChildPhase, ProfileReportedPhase
 from vonk_control.models import Job
@@ -28,12 +27,12 @@ from .test_run_switch_operations import (
 )
 
 
-def test_writer_rejects_a_mutated_model_before_it_can_poison_the_reader() -> None:
-    """Catches model_dump accepting mutations that model_validate_json rejects."""
+def test_writer_normalizes_a_mutated_measurement_before_persistence() -> None:
+    """Catches an observation over an estimate failing the durable writer."""
     progress = RunSwitchOperationResult(total_bytes=0, total_bytes_known=True)
     progress.completed_bytes = 1
-    with pytest.raises(ValidationError):
-        _persisted_result(progress)
+    restored = _read_progress(_persisted_result(progress))
+    assert restored.completed_bytes == restored.total_bytes == 1
 
 
 @pytest.mark.parametrize(

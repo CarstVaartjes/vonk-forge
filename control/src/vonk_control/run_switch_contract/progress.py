@@ -32,6 +32,12 @@ class RunSwitchMemberProgress(StrictModel):
     total_bytes: int | None = Field(default=None, ge=0)
     error: Annotated[str, StringConstraints(max_length=256)] | None = None
 
+    @model_validator(mode="after")
+    def observed_bytes_fit_total(self) -> RunSwitchMemberProgress:
+        if self.total_bytes is not None:
+            self.total_bytes = max(self.total_bytes, self.completed_bytes)
+        return self
+
 
 class RunSwitchProgress(StrictModel):
     operation: OperationProgress | None = None
@@ -51,8 +57,8 @@ class RunSwitchProgress(StrictModel):
     def total_bytes_state_is_consistent(self) -> RunSwitchProgress:
         if self.total_bytes_known != (self.total_bytes is not None):
             raise ValueError("progress total byte knowledge is inconsistent")
-        if self.total_bytes is not None and self.completed_bytes > self.total_bytes:
-            raise ValueError("progress completed bytes exceed total bytes")
+        if self.total_bytes is not None:
+            self.total_bytes = max(self.total_bytes, self.completed_bytes)
         return self
 
 
@@ -90,6 +96,12 @@ class RunSwitchMemberReceipt(StrictModel):
     failure_kind: _FailureText | None = None
     error_code: _FailureText | None = None
     diagnostic: Annotated[str, StringConstraints(max_length=512)] | None = None
+
+    @model_validator(mode="after")
+    def observed_bytes_fit_total(self) -> RunSwitchMemberReceipt:
+        if self.total_bytes is not None:
+            self.total_bytes = max(self.total_bytes, self.completed_bytes)
+        return self
 
 
 class RunSwitchRankReceipt(StrictModel):
@@ -132,6 +144,6 @@ class RunSwitchChildProgress(StrictModel):
     def total_bytes_state_is_consistent(self) -> RunSwitchChildProgress:
         if self.total_bytes_known != (self.total_bytes is not None):
             raise ValueError("child progress total byte knowledge is inconsistent")
-        if self.total_bytes is not None and self.completed_bytes > self.total_bytes:
-            raise ValueError("child progress completed bytes exceed total bytes")
+        if self.total_bytes is not None:
+            self.total_bytes = max(self.total_bytes, self.completed_bytes)
         return self

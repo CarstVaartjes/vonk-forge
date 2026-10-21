@@ -1,0 +1,353 @@
+{
+  "assignment_ids": [
+    "22123810-e205-56a7-9fee-56f4ed87a206"
+  ],
+  "children": [
+    {
+      "kind": "run",
+      "operation_id": "570a61aa-7d38-48e4-872a-e309a305aa8e",
+      "queue_index": 0,
+      "result": {
+        "run_switch": {
+          "blockers": [
+            {
+              "code": "observation-unavailable",
+              "detail": "observation-unavailable",
+              "node_ids": [],
+              "operation": {
+                "id": "570a61aa-7d38-48e4-872a-e309a305aa8e",
+                "kind": "recipe.run-switch.v2"
+              },
+              "severity": "warning"
+            }
+          ],
+          "child_operation_id": "ef60448f-a341-4e7a-8f88-fd0645abd1e8",
+          "completed_bytes": 20579664308,
+          "completed_phases": [
+            "prepare"
+          ],
+          "failed_phase": "transfer",
+          "failure_code": "run-switch.advance-failed",
+          "force_replan": false,
+          "item_index": 0,
+          "members": [
+            {
+              "cached": false,
+              "completed_bytes": 20579664308,
+              "node_id": "spk_9a86fdbab116442ab6707bf4181a3c1c",
+              "phase": "transfer",
+              "state": "running",
+              "total_bytes": 20579664308
+            }
+          ],
+          "observation_deadline_at": "2026-10-21T03:49:49.624070Z",
+          "operation": {
+            "activity": "active",
+            "completed_bytes": 20579664308,
+            "members": [
+              {
+                "activity": "active",
+                "completed_bytes": 20579664308,
+                "member_id": "spk_9a86fdbab116442ab6707bf4181a3c1c",
+                "phase": "transfer",
+                "state": "running",
+                "total_bytes": 20579664308
+              }
+            ],
+            "phase": "transfer",
+            "total_bytes": 20579664308,
+            "total_bytes_known": true
+          },
+          "operation_phase_index": 1,
+          "phase": "transfer",
+          "phase_index": 1,
+          "phase_results": [
+            {
+              "compiled_plan_persisted": true,
+              "install_plan_digest": "a53efde30bd04a7c111f5f1c9c9ed9728ae7cde7f7ea7c5bd14da9b8a446ba5b",
+              "installation_id": "08afc753-6854-4977-92e4-a2acf4880a30",
+              "mapping_id": "2554d100-d2d3-43c5-ab09-640d90faab5d",
+              "model_artifact_set_bytes": 20579664308,
+              "model_artifact_set_sha256": "f215f7121264428d3948b77e249407b499a670e5889a3c576b030aec1bbe3939",
+              "phase": "prepare",
+              "subphase": "runtime-plan"
+            },
+            {
+              "assignments": {
+                "spk_9a86fdbab116442ab6707bf4181a3c1c": {
+                  "assignment_id": "b9e4d0fc-e795-4e35-b4eb-59ea5b6c92ee",
+                  "expires_at": "2026-10-21T03:49:21.318964Z",
+                  "generation": 1,
+                  "model_artifact_set_sha256": "f215f7121264428d3948b77e249407b499a670e5889a3c576b030aec1bbe3939",
+                  "node_id": "spk_9a86fdbab116442ab6707bf4181a3c1c",
+                  "objects": [
+                    {
+                      "bytes": 15698,
+                      "kind": "model",
+                      "name": "config.json",
+                      "sha256": "0b2c05e53e721307ebcb1696881cead10e01a3ca7f09db28eb0477b55cc5692c"
+                    },
+                    {
+                      "bytes": 2169,
+                      "kind": "model",
+                      "name": "VALIDATION_REPORT.json",
+                      "sha256": "16c9fd663fad49f7000a12ce32d1c0e7640c9a1061dbb90eb3c169116a44ec5f"
+                    },
+                    {
+                      "bytes": 1570,
+                      "kind": "model",
+                      "name": ".gitattributes",
+                      "sha256": "34448b82c17d60fec9b65b1f093c115ddbaadc04beb1b0140b6bfed2e012a930"
+                    },
+                    {
+                      "bytes": 19989424,
+                      "kind": "model",
+                      "name": "tokenizer.json",
+                      "sha256": "445a1c450cb82eba3dac6d4cac5d6ce9a6be0ab6e326bf919934d71e604a871f"
+                    },
+                    {
+                      "bytes": 3986,
+                      "kind": "model",
+                      "name": "BUILD_MANIFEST.json",
+                      "sha256": "4521df2d687688e154afae2166fe6cd3f3b1d52299e61637bf936fedb00ce368"
+                    },
+                    {
+                      "bytes": 4956656288,
+                      "kind": "model",
+                      "name": "model-00002-of-00004.safetensors",
+                      "sha256": "51cbd44471bce38f9cbe5cab9449662310e69c6238ed5355466c0ec5531cd4b6"
+                    },
+                    {
+                      "bytes": 256,
+                      "kind": "model",
+                      "name": "recipe.yaml",
+                      "sha256": "53030a44e901b94f524e7056cbcbc8c562b67979016288e2bffdb7141c01dab2"
+                    },
+                    {
+                      "bytes": 1782,
+                      "kind": "model",
+                      "name": "SHA256SUMS",
+                      "sha256": "652b8601b431b3f80b43c0d121d538edf8c54f2a980f393be047d69c551d9ad3"
+                    },
+                    {
+                      "bytes": 1305,
+                      "kind": "model",
+                      "name": "vllm_uuid_sitecustomize.py",
+                      "sha256": "6770bf8d72072a8484806876a0c0449a63c83dbe1e2133374b90472828261d1e"
+                    },
+                    {
+                      "bytes": 2416,
+                      "kind": "model",
+                      "name": "README.md",
+                      "sha256": "774e66b926cfaa46aa3b195093715dc07fdea23b8c62a9325dc15179808c6155"
+                    },
+                    {
+                      "bytes": 278231,
+                      "kind": "model",
+                      "name": "model.safetensors.index.json",
+                      "sha256": "7d5b403686ef104b6d1e2e6c2dec7f55981e1d1ece9ce8023992bd1a4274c916"
+                    },
+                    {
+                      "bytes": 23525,
+                      "kind": "model",
+                      "name": "build_qwen38_abliterated_nvfp4.py",
+                      "sha256": "8b18cfb668927f761dd9e590b7c36db011607824047d421dbec8549cbfc86627"
+                    },
+                    {
+                      "bytes": 849400424,
+                      "kind": "model",
+                      "name": "model-mtp-bf16.safetensors",
+                      "sha256": "90fa0e3eed5a647c035c6df9ecabc416c0f8d573ff84ac12485b085f00a7cdf2"
+                    },
+                    {
+                      "bytes": 4999186512,
+                      "kind": "model",
+                      "name": "model-00001-of-00004.safetensors",
+                      "sha256": "b031a9572ba71cc278a435722b4a76ed6f58e2309c42e3a7153e3dddc70227bc"
+                    },
+                    {
+                      "bytes": 4973006664,
+                      "kind": "model",
+                      "name": "model-00003-of-00004.safetensors",
+                      "sha256": "b5292fef77ad2b45eec1f4f3e1b8d4834ea44bc6bffcb4189209c74d278971f1"
+                    },
+                    {
+                      "bytes": 41176,
+                      "kind": "model",
+                      "name": "calibration_snapshot.json",
+                      "sha256": "b97b1caa8f9676fd7144cc12c9cde3a6d69fef9a26accdf8a4aa82ac2cb64b76"
+                    },
+                    {
+                      "bytes": 11544,
+                      "kind": "model",
+                      "name": "LICENSE",
+                      "sha256": "bbedc3fda3305820b977265f01b8619d87570a6739de3a5582c3464840f1e57a"
+                    },
+                    {
+                      "bytes": 8952,
+                      "kind": "model",
+                      "name": "chat_template.jinja",
+                      "sha256": "c3cf9e34abf4f9e36c2d72165aa9c132d3e2a725b6c2586aaa3a8af9d7a81041"
+                    },
+                    {
+                      "bytes": 214,
+                      "kind": "model",
+                      "name": "generation_config.json",
+                      "sha256": "d0d0ed2e37cdfafef4a5067d5ea2407b05f4fb50526e47c008a5b235d50240fb"
+                    },
+                    {
+                      "bytes": 1191,
+                      "kind": "model",
+                      "name": "processor_config.json",
+                      "sha256": "d89ef49ce9cd37fbf510158e13c1ef063d9286411c1ec9049932dbe0487143b1"
+                    },
+                    {
+                      "bytes": 1269,
+                      "kind": "model",
+                      "name": "tokenizer_config.json",
+                      "sha256": "dcb88c4a1dff8096b6fd919e458d987351b499f86db65d1b997ed515a90cc35c"
+                    },
+                    {
+                      "bytes": 4781029712,
+                      "kind": "model",
+                      "name": "model-00004-of-00004.safetensors",
+                      "sha256": "e9fbe4c34918fb161aa705b8a4be512025769775e5b3b7594448f04e9c288261"
+                    }
+                  ],
+                  "oci_archive_sha256": "c0bdd714fbe3b5642b58fa8d910feb488c6a160e310ba8e6ca6cacdd32993096",
+                  "oci_image_config_digest": "sha256:9a9c95fc9b4d1ed173d8dc2bd7203a6f512d0d744a0a3809ddb486a56ee7e152",
+                  "oci_image_digest": "sha256:c0bdd714fbe3b5642b58fa8d910feb488c6a160e310ba8e6ca6cacdd32993096",
+                  "plan_digest": "ccc85c097e4e8d49690ebbbe5ca028043599e05aad4c16af72297507a29a7636"
+                }
+              },
+              "cached_nodes": [],
+              "phase": "transfer",
+              "subphase": "target-copy"
+            }
+          ],
+          "phase_retry_generation": 0,
+          "preflight": {
+            "attempts": {
+              "spk_9a86fdbab116442ab6707bf4181a3c1c": 1
+            },
+            "phase_index": 1,
+            "receipts": {
+              "spk_9a86fdbab116442ab6707bf4181a3c1c": {
+                "findings": [
+                  {
+                    "capability": "architecture",
+                    "code": "preflight_finding.available",
+                    "status": "passed"
+                  },
+                  {
+                    "capability": "controller_reachable",
+                    "code": "preflight_finding.available",
+                    "status": "passed"
+                  },
+                  {
+                    "capability": "cache_writable",
+                    "code": "preflight_finding.available",
+                    "status": "passed"
+                  },
+                  {
+                    "capability": "staging_writable",
+                    "code": "preflight_finding.available",
+                    "status": "passed"
+                  },
+                  {
+                    "capability": "temporary_directory",
+                    "code": "preflight_finding.available",
+                    "status": "passed"
+                  },
+                  {
+                    "capability": "disk_reserve",
+                    "code": "preflight_finding.available",
+                    "status": "passed"
+                  },
+                  {
+                    "capability": "signed_helper_run",
+                    "code": "preflight_finding.available",
+                    "status": "passed"
+                  }
+                ],
+                "fingerprint": "1fe68699573ab05eeee0ae26a69627f2458996278e8faa21422e039f724dc31e",
+                "observed_at": 1792550955
+              }
+            }
+          },
+          "profile_application_id": "4a6901b2-6fd4-434d-8964-d6f79a27a320",
+          "recovery_deadline_at": "2026-10-21T03:49:43.548449Z",
+          "refusal": [],
+          "retryable": false,
+          "subphase": "target-copy",
+          "total_bytes": 20579664308,
+          "total_bytes_known": true,
+          "workload_intent_ordinal": 995
+        },
+        "run_switch_operation_id": "570a61aa-7d38-48e4-872a-e309a305aa8e"
+      },
+      "state": "failed"
+    },
+    {
+      "kind": "stop",
+      "operation_id": "35cb3937-20e7-44bb-a904-a00c92500339",
+      "queue_index": 1,
+      "result": {
+        "run_switch": {
+          "blockers": [],
+          "completed_bytes": 0,
+          "completed_phases": [
+            "stop",
+            "final_verify"
+          ],
+          "force_replan": false,
+          "item_index": 0,
+          "members": [
+            {
+              "cached": false,
+              "completed_bytes": 0,
+              "node_id": "spk_9a86fdbab116442ab6707bf4181a3c1c",
+              "phase": "final_verify",
+              "state": "succeeded",
+              "total_bytes": 0
+            }
+          ],
+          "phase": "final_verify",
+          "phase_index": 2,
+          "phase_results": [
+            {
+              "phase": "stop",
+              "run_id": "3e1bd673-8b31-4919-a8b6-afc51afa50c3"
+            },
+            {
+              "final_verified": true,
+              "healthy": false,
+              "phase": "final_verify",
+              "ranks": [
+                {
+                  "fresh": true,
+                  "node_id": "spk_9a86fdbab116442ab6707bf4181a3c1c",
+                  "rank": 0,
+                  "role": "entrypoint",
+                  "state": "stopped"
+                }
+              ],
+              "route_state": "withdrawn",
+              "run_id": "3e1bd673-8b31-4919-a8b6-afc51afa50c3",
+              "state": "stopped"
+            }
+          ],
+          "phase_retry_generation": 0,
+          "profile_application_id": "4a6901b2-6fd4-434d-8964-d6f79a27a320",
+          "refusal": [],
+          "retryable": false,
+          "total_bytes": 0,
+          "total_bytes_known": true,
+          "workload_intent_ordinal": 995
+        },
+        "run_switch_operation_id": "35cb3937-20e7-44bb-a904-a00c92500339"
+      },
+      "state": "succeeded"
+    }
+  ]
+}
