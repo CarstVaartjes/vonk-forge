@@ -46,7 +46,7 @@ def require_model_sets_open(
     object_digests: Iterable[str] = (),
     allow_pending_removal: bool = False,
 ) -> dict[str, tuple[str, ...]]:
-    """Lock exact set gates, validate memberships, then lock every object gate.
+    """Share exact set gates, validate memberships, then share object gates.
 
     Call this inside the same short transaction that creates or accepts the
     existing request/profile/distribution owner. Model-set gates are acquired
@@ -73,6 +73,7 @@ def require_model_sets_open(
         session,
         set_identities,
         now=now,
+        shared=True,
     )
     if not allow_pending_removal and any(
         row.removal_owner_id is not None for row in set_rows
@@ -106,7 +107,7 @@ def require_model_sets_open(
     object_identities = tuple(
         ArtifactIdentity("model-object", digest) for digest in sorted(all_objects)
     )
-    object_rows = lock_reference_gates(session, object_identities, now=now)
+    object_rows = lock_reference_gates(session, object_identities, now=now, shared=True)
     if not allow_pending_removal and any(
         row.removal_owner_id is not None for row in object_rows
     ):

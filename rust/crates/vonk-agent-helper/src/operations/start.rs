@@ -58,6 +58,21 @@ impl<R: CommandRunner> OperationExecutor<R> {
                 false,
             )?;
             self.refuse_reconciled_runtime(&installation_id)?;
+            // Current installation authority is established before any GPU
+            // effect. A delayed/cancelled start cannot change the host cap.
+            if let Some(clock) = binding.gpu_clock {
+                if !vonk_agent_protocol::gpu_clock::valid_range(&clock.range) {
+                    return Err(OperationError::InvalidOperation);
+                }
+                if let Err(error) = self.reconcile_gpu_clock(Some(clock), false) {
+                    if matches!(error, OperationError::InvalidOperation) {
+                        return Err(error);
+                    }
+                    eprintln!(
+                        "vonk-agent-helper: GPU clock waiting for storage/enforcement: {error}; workload start proceeds; next inventory retries"
+                    );
+                }
+            }
             self.update_runtime_generation_fence(&identity, RuntimeGenerationFenceUse::Start)?;
             let active_start = self.job_cancellation.begin(identity)?;
             let launch = self.runtime_start_locked(

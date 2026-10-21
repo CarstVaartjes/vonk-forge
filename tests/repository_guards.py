@@ -48,6 +48,10 @@ GUARDS: tuple[str, ...] = (
 
 SCOPED: tuple[tuple[str, str], ...] = (
     (
+        "tests/test_protocol_wheel_identity.py",
+        "Metadata-derived protocol wheel CLI behavior from outside the repository; literal ownership is guarded by test_single_source_values.",
+    ),
+    (
         "control/tests/test_artifact_reference_busy_recovery.py",
         "Artifact ownership conflict classification, real PostgreSQL collection/download race and bounded restart recovery.",
     ),

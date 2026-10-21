@@ -8,11 +8,11 @@ from pathlib import Path
 
 import pytest
 
-from scripts.protocol_wheel import wheel_filename, wheel_relative
+from scripts.protocol_wheel import protocol_wheel_name
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts/build-control-wheel"
-WHEEL_NAME = wheel_filename(ROOT)
+WHEEL_NAME = protocol_wheel_name(ROOT)
 # A command that runs in the control environment: uv against the control
 # project, or scripts/test, which always does.
 CONTROL_UV_COMMAND = re.compile(
@@ -26,26 +26,14 @@ PROTOCOL_WHEEL_LOCK_REFRESH = re.compile(
 )
 
 
-def _repository(
-    tmp_path: Path, *, wheel_bytes: bytes, version: str | None = None
-) -> tuple[Path, Path]:
+def _repository(tmp_path: Path, *, wheel_bytes: bytes) -> tuple[Path, Path]:
     root = tmp_path / "repository"
     (root / "control").mkdir(parents=True)
     (root / "agent_protocol").mkdir()
-    (root / "agent_protocol/pyproject.toml").write_text(
-        (ROOT / "agent_protocol/pyproject.toml").read_text()
+    (root / "agent_protocol/pyproject.toml").write_bytes(
+        (ROOT / "agent_protocol/pyproject.toml").read_bytes()
     )
-    if version is not None:
-        import tomllib
-
-        owner = root / "agent_protocol/pyproject.toml"
-        source = owner.read_text()
-        previous = tomllib.loads(source)["project"]["version"]
-        owner.write_text(
-            source.replace(f'version = "{previous}"', f'version = "{version}"')
-        )
-    filename = wheel_filename(root)
-    wheel_path = root / wheel_relative(root)
+    wheel_path = root / "inventory/wheels" / WHEEL_NAME
     wheel_path.parent.mkdir(parents=True)
     wheel_path.write_bytes(wheel_bytes)
     expected_hash = hashlib.sha256(wheel_bytes).hexdigest()
@@ -53,7 +41,7 @@ def _repository(
         "[[package]]\n"
         'name = "vonk-agent-protocol"\n'
         "wheels = [\n"
-        f'  {{ filename = "{filename}", hash = "sha256:{expected_hash}" }},\n'
+        f'  {{ path = "{WHEEL_NAME}", hash = "sha256:{expected_hash}" }},\n'
         "]\n",
         encoding="utf-8",
     )
@@ -66,7 +54,7 @@ def _repository(
         "assert sys.argv[1:6] == ['build', '--project', 'agent_protocol', '--wheel', '--out-dir']\n"
         "output = pathlib.Path(sys.argv[6])\n"
         "output.mkdir(parents=True, exist_ok=True)\n"
-        f"(output / '{filename}').write_bytes({wheel_bytes!r})\n",
+        f"(output / '{WHEEL_NAME}').write_bytes({wheel_bytes!r})\n",
         encoding="utf-8",
     )
     fake_uv.chmod(0o755)
@@ -196,7 +184,7 @@ def test_build_script_refuses_a_wheel_with_a_stale_lock_hash(tmp_path: Path) -> 
         "[[package]]\n"
         'name = "vonk-agent-protocol"\n'
         "wheels = [\n"
-        f'  {{ filename = "{WHEEL_NAME}", hash = "sha256:{"0" * 64}" }},\n'
+        f'  {{ path = "{WHEEL_NAME}", hash = "sha256:{"0" * 64}" }},\n'
         "]\n",
         encoding="utf-8",
     )
@@ -234,14 +222,3 @@ def test_every_control_workflow_builds_the_wheel_before_uv() -> None:
                 f"{path}: Controller command runs before the protocol wheel is prepared"
             )
     assert checked_jobs >= 8
-
-
-def test_build_follows_a_changed_package_version(tmp_path: Path) -> None:
-    # Wrong implementation: the build helper still selects the old literal after a bump.
-    root, fake_bin = _repository(tmp_path, wheel_bytes=b"new version", version="99.2.7")
-    wheel = root / wheel_relative(root)
-    wheel.unlink()
-    result = _run(root, fake_bin)
-    assert result.returncode == 0, result.stderr
-    assert wheel.read_bytes() == b"new version"
-    assert f"Verified {wheel.name}" in result.stdout

@@ -24,6 +24,7 @@ type ProcessCall = (Program, Vec<String>, Duration);
 struct FakeRunner {
     calls: Arc<Mutex<Vec<ProcessCall>>>,
     output: Vec<u8>,
+    clock_output: Option<Vec<u8>>,
 }
 
 impl ProcessRunner for FakeRunner {
@@ -37,10 +38,17 @@ impl ProcessRunner for FakeRunner {
             .lock()
             .unwrap()
             .push((program, arguments.to_vec(), timeout));
+        let output = if arguments[0].contains("clocks.current.graphics") {
+            self.clock_output
+                .clone()
+                .ok_or_else(|| ProcessError::Io(std::io::Error::other("clock query unsupported")))?
+        } else {
+            self.output.clone()
+        };
         Ok(ProcessOutput {
             exit_code: None,
             success: true,
-            stdout: self.output.clone(),
+            stdout: output,
             stderr: Vec::new(),
         })
     }
@@ -62,6 +70,7 @@ fn runner(output: &[u8]) -> FakeRunner {
     FakeRunner {
         calls: Arc::new(Mutex::new(Vec::new())),
         output: output.to_vec(),
+        clock_output: None,
     }
 }
 
@@ -105,8 +114,7 @@ fn unified_memory_accelerator_reports_host_memory_only() {
     assert_eq!(sample.gpu_memory_free_bytes, None);
     assert!(valid_report_batch(std::slice::from_ref(&sample)));
     let calls = runner.calls.lock().unwrap();
-    assert_eq!(calls.len(), 1);
-    assert_eq!(calls[0].0, Program::NvidiaSmi);
+    assert!(calls.iter().all(|call| call.0 == Program::NvidiaSmi));
 }
 
 #[test]
@@ -318,4 +326,23 @@ fn failed_query_is_typed_and_same_collector_recovers_without_latching() {
         assert_eq!(recovered.gpu_utilization_percent, Some(25.0));
         assert!(valid_report_batch(&[recovered]));
     }
+}
+
+#[test]
+fn gpu_clocks_report_actual_maxima_and_preserve_the_throttle_mask_without_policy_clamping() {
+    let directory = tempdir().unwrap();
+    let mut runner = runner(include_bytes!("fixtures/telemetry/gb10.csv"));
+    runner.clock_output = Some(b"1700, 1695, 2400, 2300, 0x0000000000000004\n".to_vec());
+    let sample = collector(directory.path(), MEMINFO, runner)
+        .sample_at(Utc.with_ymd_and_hms(2026, 8, 15, 12, 0, 0).unwrap());
+    let clock = sample.gpu_clock.unwrap();
+    assert_eq!(clock.graphics_mhz, Some(1700));
+    assert_eq!(clock.sm_mhz, Some(1695));
+    assert_eq!(clock.max_graphics_mhz, Some(2400));
+    assert_eq!(clock.max_sm_mhz, Some(2300));
+    assert_eq!(clock.throttle_reasons, Some(4));
+    assert!(
+        clock.locked_range.is_none(),
+        "a hardware maximum must never be reported as a lock"
+    );
 }

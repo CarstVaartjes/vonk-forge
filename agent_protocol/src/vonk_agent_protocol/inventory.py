@@ -9,6 +9,8 @@ from typing import Annotated, ClassVar, Literal
 from pydantic import ConfigDict, Field, field_validator, model_validator
 
 from .contracts import canonical_message
+from .gpu_clock import GpuClockSupport
+from .host_helper import SignedHostHelperGrant
 from .optional_evidence import (
     EvidenceGroup,
     OptionalEvidenceModel,
@@ -94,6 +96,7 @@ class HostSettings(WireModel):
     # The GPU clock ceiling unit (vonk-forge-gpu-clock-cap.service) is active
     # this boot. None: the agent predates it or could not observe it (unknown).
     gpu_clock_cap_active: bool | None = None
+    gpu_clock_support: GpuClockSupport | None = None
 
 
 class ModelStoreObject(WireModel):
@@ -282,6 +285,7 @@ class InventoryVerdict(WireModel):
         extra="forbid", strict=True, frozen=True, allow_inf_nan=False
     )
 
+    gpu_clock_grant: SignedHostHelperGrant | None = None
     store_retention: StoreRetentionRequest | None = None
 
     untracked_installations: list[InstallationId] = Field(

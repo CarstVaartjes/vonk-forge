@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from scripts.protocol_wheel import wheel_relative
+from scripts.protocol_wheel import protocol_wheel_name
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts/verify-public-image-inputs"
@@ -102,7 +102,7 @@ def test_dockerignored_web_outputs_are_not_scanned(
 
 
 def wheel_path(repository: Path) -> Path:
-    path = repository / wheel_relative(ROOT)
+    path = repository / "inventory/wheels" / protocol_wheel_name(ROOT)
     path.parent.mkdir(parents=True, exist_ok=True)
     return path
 
@@ -116,7 +116,7 @@ def test_secret_in_compressed_wheel_member_is_rejected(tmp_path: Path) -> None:
     result = run(repository)
 
     assert result.returncode == 1
-    assert f"{wheel_relative(ROOT)}!/" in result.stderr
+    assert f"inventory/wheels/{protocol_wheel_name(ROOT)}!/" in result.stderr
     assert "vonk_agent_protocol/leak.py: github-token" in result.stderr
     assert value not in result.stdout + result.stderr
 
@@ -153,3 +153,20 @@ def test_malformed_wheel_is_rejected(tmp_path: Path) -> None:
 
     assert result.returncode == 1
     assert "archive-invalid" in result.stderr
+
+
+def test_every_wheel_in_the_docker_copy_is_scanned(tmp_path: Path) -> None:
+    repository = tmp_path / "repository"
+    metadata = repository / "agent_protocol/pyproject.toml"
+    metadata.parent.mkdir(parents=True)
+    metadata.write_text('[project]\nversion = "9.8.7"\n')
+    extra = wheel_path(repository).with_name(protocol_wheel_name(repository))
+    value = "ghp_abcdefghijklmnopqrstuvwxyz0123456789"
+    with zipfile.ZipFile(extra, "w") as wheel:
+        wheel.writestr("vonk_agent_protocol/leak.py", f'SECRET = "{value}"\n')
+
+    result = run(repository)
+
+    assert result.returncode == 1
+    assert f"{extra.name}!/vonk_agent_protocol/leak.py: github-token" in result.stderr
+    assert value not in result.stdout + result.stderr

@@ -5,9 +5,9 @@ import importlib.metadata
 import json
 import shutil
 import subprocess
-import sys
 import tomllib
 import uuid
+import zipfile
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from textwrap import dedent
@@ -38,15 +38,18 @@ from ..recipe_stop_fixtures import recipe_stop_payload
 from ..runtime_identity_support import claim_agent
 
 ROOT = Path(__file__).resolve().parents[3]
-sys.path.insert(0, str(ROOT / "scripts"))
-from protocol_wheel import package_version, wheel_filename, wheel_relative
-
 NODE_A = "spk_" + "a" * 32
 NODE_B = "spk_" + "b" * 32
 COMMIT = "a" * 64
 STOP_PAYLOAD = recipe_stop_payload(NODE_A, plan_digest=COMMIT)
 STOP_RESULT = RecipeStopResult()
-PROTOCOL_WHEEL = ROOT / wheel_relative(ROOT)
+PROTOCOL_WHEEL = (
+    ROOT
+    / "inventory/wheels"
+    / subprocess.check_output(
+        [str(ROOT / "scripts/protocol-wheel-name")], text=True
+    ).strip()
+)
 PROTOCOL_WHEEL_HASH = hashlib.sha256(PROTOCOL_WHEEL.read_bytes()).hexdigest()
 PUBLIC_CONTRACTS_WHEEL = (
     ROOT / "inventory/wheels/vonk_forge_public_contracts-2.3.0-py3-none-any.whl"
@@ -259,9 +262,6 @@ def test_control_environment_installs_the_verified_protocol_wheel() -> None:
     # The suite runs in the synced control environment, so its installed
     # distribution is the one under test.
     installed = importlib.metadata.distribution("vonk-agent-protocol")
-    direct_url_text = installed.read_text("direct_url.json")
-    assert direct_url_text is not None
-    direct_url = json.loads(direct_url_text)
     control_lock = tomllib.loads((ROOT / "control/uv.lock").read_text())
     package = next(
         package
@@ -269,11 +269,22 @@ def test_control_environment_installs_the_verified_protocol_wheel() -> None:
         if package["name"] == "vonk-agent-protocol"
     )
 
-    assert direct_url["url"].endswith(f"/{wheel_relative(ROOT)}")
-    assert package["source"] == {"path": f"../{wheel_relative(ROOT)}"}
+    assert (
+        installed.version
+        == tomllib.loads((ROOT / "agent_protocol/pyproject.toml").read_text())[
+            "project"
+        ]["version"]
+    )
+    # A flat local index has no PEP 610 direct_url.json. Prove the installed
+    # contents came from the verified wheel, including packaged contract data.
+    with zipfile.ZipFile(PROTOCOL_WHEEL) as wheel:
+        for name in wheel.namelist():
+            if not name.endswith("/RECORD"):
+                assert installed.locate_file(name).read_bytes() == wheel.read(name)
+    assert package["source"] == {"registry": "../inventory/wheels"}
     assert package["wheels"] == [
         {
-            "filename": wheel_filename(ROOT),
+            "path": PROTOCOL_WHEEL.name,
             "hash": f"sha256:{PROTOCOL_WHEEL_HASH}",
         }
     ]
@@ -352,7 +363,7 @@ def test_root_context_image_installs_contracts_and_protocol_from_build_inputs(
     installed = json.loads(result.stdout)
 
     assert installed == {
-        "protocol": package_version(ROOT),
+        "protocol": importlib.metadata.version("vonk-agent-protocol"),
         "contracts": importlib.metadata.version("vonk-forge-public-contracts"),
         "model": "ModelDefinition",
         "recipe": "RecipeDefinition",

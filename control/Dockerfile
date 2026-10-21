@@ -85,7 +85,7 @@ COPY agent_protocol/pyproject.toml ./agent_protocol/
 # complete local editable project in this build stage; it never reaches runtime.
 COPY nas_setup/pyproject.toml nas_setup/hatch_build.py ./nas_setup/
 COPY nas_setup/src/ ./nas_setup/src/
-COPY inventory/wheels/ ./inventory/wheels/
+COPY inventory/wheels/vonk_agent_protocol-*.whl ./inventory/wheels/
 # Install the locked generator dependencies before any application source.
 RUN uv sync --project control --frozen --no-install-project --no-install-package vonk-cluster-profiles
 COPY tools/openapi-client/ ./tools/openapi-client/
@@ -98,7 +98,7 @@ COPY control/migrations/ ./control/migrations/
 COPY agent_protocol/src/ ./agent_protocol/src/
 COPY src/cluster_profiles/ ./src/cluster_profiles/
 COPY tools/hatch_build.py ./tools/hatch_build.py
-COPY scripts/protocol_wheel.py scripts/build-control-wheel scripts/check_environment.py scripts/generate-control-clients scripts/export-agent-wire-schema ./scripts/
+COPY scripts/build-control-wheel scripts/protocol-wheel-name scripts/protocol_wheel.py scripts/check_environment.py scripts/generate-control-clients scripts/export-agent-wire-schema ./scripts/
 COPY schemas/install-release-manifest.schema.json ./schemas/install-release-manifest.schema.json
 COPY install/installer-release-public.pem ./install/installer-release-public.pem
 RUN scripts/generate-control-clients \
@@ -133,9 +133,9 @@ COPY control/uv.lock ./uv.lock
 COPY control/packaging/public-contracts.lock ./packaging/public-contracts.lock
 # The repository image build runs scripts/build-control-wheel before invoking
 # Docker so this local dependency exists and has the digest pinned in uv.lock.
-COPY inventory/wheels/ /wheels/
+COPY inventory/wheels/vonk_agent_protocol-*.whl /wheels/
 COPY agent_protocol/pyproject.toml ./agent_protocol/
-COPY scripts/protocol_wheel.py ./scripts/
+COPY scripts/protocol-wheel-name scripts/protocol_wheel.py ./scripts/
 RUN apt-get update \
     && apt-get install --yes --no-install-recommends git \
     && public_contracts_revision="$(sed -n 's/^revision = "//p' packaging/public-contracts.lock | tr -d '"')" \
@@ -145,7 +145,8 @@ RUN apt-get update \
     && git -C /public-contracts checkout --detach "$public_contracts_revision" \
     && python -m pip wheel --no-cache-dir --no-deps --wheel-dir /wheels \
         /public-contracts/contracts \
-    && python -c 'import hashlib, pathlib, tomllib; [package] = [p for p in tomllib.loads(pathlib.Path("uv.lock").read_text())["package"] if p["name"] == "vonk-agent-protocol"]; [wheel] = package["wheels"]; assert wheel["hash"] == "sha256:" + hashlib.sha256((pathlib.Path("/wheels") / wheel["filename"]).read_bytes()).hexdigest()' \
+    && protocol_wheel="$(scripts/protocol-wheel-name)" \
+    && python -c 'import hashlib, pathlib, sys, tomllib; [package] = [p for p in tomllib.loads(pathlib.Path("uv.lock").read_text())["package"] if p["name"] == "vonk-agent-protocol"]; [wheel] = package["wheels"]; assert wheel["hash"] == "sha256:" + hashlib.sha256(pathlib.Path("/wheels", sys.argv[1]).read_bytes()).hexdigest()' "$protocol_wheel" \
     && test "$(sha256sum /wheels/vonk_forge_public_contracts-2.3.0-py3-none-any.whl | cut -d' ' -f1)" = "$(sed -n 's/^sha256 = "//p' packaging/public-contracts.lock | tr -d '"')" \
     && rm -rf /public-contracts /var/lib/apt/lists/*
 # Third-party dependencies resolve to the newest allowed release, so this layer
@@ -173,7 +174,7 @@ COPY --from=web /repo/control/web/dist ./src/vonk_control/web
 # path, so the dependency layer above is reused instead of downloaded again.
 RUN PYTHONPATH="$(python -c 'import sysconfig; print(sysconfig.get_path("purelib", vars={"base": "/install", "platbase": "/install"}))')" \
     python -m pip install --no-cache-dir --prefix=/install \
-    "$(python scripts/protocol_wheel.py --directory /wheels)" \
+    "/wheels/$(scripts/protocol-wheel-name)" \
     /wheels/vonk_forge_public_contracts-2.3.0-py3-none-any.whl \
     /cli-wheels/*.whl .
 
@@ -240,7 +241,7 @@ COPY deploy/compose/compose.yaml /compose/compose.yaml
 COPY deploy/compose/tailscale/compose.yaml /compose/tailscale/compose.yaml
 COPY deploy/compose/hermes-agent/compose.yaml /compose/hermes-agent/compose.yaml
 COPY deploy/compose/image-janitor/janitor.py /compose/image-janitor/janitor.py
-COPY scripts/render-dev-compose scripts/image_policy.py /compose/
+COPY scripts/render-dev-compose /compose/render-dev-compose
 RUN python -c 'import pathlib, runpy; print(runpy.run_path("/compose/render-dev-compose")["bundle_digest"](pathlib.Path("/compose/compose.yaml")))' > /compose-bundle-digest \
     && grep -Eqx '[0-9a-f]{64}' /compose-bundle-digest
 

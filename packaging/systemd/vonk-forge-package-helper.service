@@ -19,7 +19,15 @@ Group=root
 UMask=0077
 NoNewPrivileges=yes
 PrivateTmp=yes
-PrivateDevices=yes
+# The signed GPU-clock operation needs NVML's O_RDWR device opens. Keep the
+# device cgroup closed and expose only the same NVIDIA nodes as the boot cap.
+PrivateDevices=no
+DevicePolicy=closed
+DeviceAllow=/dev/nvidiactl rw
+DeviceAllow=/dev/nvidia-uvm rw
+DeviceAllow=/dev/nvidia-uvm-tools rw
+DeviceAllow=/dev/nvidia-modeset rw
+DeviceAllow=/dev/nvidia0 rw
 IPAddressDeny=any
 ProtectSystem=strict
 ProtectHome=yes
@@ -38,7 +46,9 @@ SystemCallArchitectures=native
 SystemCallFilter=@system-service
 SystemCallFilter=~@mount @raw-io @obsolete @debug
 RestrictAddressFamilies=AF_UNIX AF_NETLINK
-CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER CAP_FSETID CAP_KILL CAP_NET_ADMIN CAP_SETGID CAP_SETUID
+# NVIDIA's privileged clock ioctl checks CAP_SYS_ADMIN; argv stays compiled
+# and the unit still denies mount/raw-I/O syscalls and all other device nodes.
+CapabilityBoundingSet=CAP_SYS_ADMIN CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER CAP_FSETID CAP_KILL CAP_NET_ADMIN CAP_SETGID CAP_SETUID
 AmbientCapabilities=
 RuntimeDirectory=vonk-forge-package-candidates
 RuntimeDirectoryMode=0700

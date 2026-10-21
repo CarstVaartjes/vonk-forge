@@ -76,7 +76,7 @@ deploy/compose/hermes-agent/*
 !deploy/compose/hermes-agent/compose.yaml
 !inventory/
 !inventory/wheels/
-!inventory/wheels/vonk_agent_protocol-4.1.0-py3-none-any.whl
+!inventory/wheels/vonk_agent_protocol-*.whl
 !inventory/wheels/vonk_forge_public_contracts-2.3.0-py3-none-any.whl
 !deploy/compose/step-ca/
 deploy/compose/step-ca/**
@@ -102,9 +102,10 @@ deploy/compose/step-ca/**
 !control/uv.lock
 !control/openapi-python-client.yaml
 !scripts/
-!scripts/protocol_wheel.py
 !scripts/image_policy.py
 !scripts/build-control-wheel
+!scripts/protocol-wheel-name
+!scripts/protocol_wheel.py
 !scripts/check_environment.py
 !scripts/generate-control-clients
 !scripts/export-agent-wire-schema

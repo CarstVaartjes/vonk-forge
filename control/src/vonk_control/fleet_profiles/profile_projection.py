@@ -265,6 +265,7 @@ class FleetProfileService:
                     ),
                     resources=resources,
                     option_choices=effective_choices,
+                    gpu_clock=choice.gpu_clock,
                     observed_state=self._observed_assignment_state(
                         session,
                         loaded_assignments,

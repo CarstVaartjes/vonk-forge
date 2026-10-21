@@ -15,8 +15,7 @@ if (($# != 0)); then
     exit 2
 fi
 
-helper="$(dirname "${BASH_SOURCE[0]}")/protocol_wheel.py"
-wheel_name="$(python3 "$helper" --root "$root" --filename)"
+wheel_name="$(python3 "$(dirname "${BASH_SOURCE[0]}")/protocol-wheel-name" --root "$root")"
 wheel_path="$root/inventory/wheels/$wheel_name"
 lock_path="$root/control/uv.lock"
 
@@ -41,7 +40,7 @@ wheels = packages[0].get("wheels", [])
 expected = [
     wheel["hash"].removeprefix("sha256:")
     for wheel in wheels
-    if wheel.get("filename") == wheel_path.name
+    if wheel.get("path") == wheel_path.name
 ]
 if len(expected) != 1:
     raise SystemExit(

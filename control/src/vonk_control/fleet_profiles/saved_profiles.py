@@ -14,7 +14,12 @@ from vonk_agent_protocol.agent_words import (
     ProfileInstallationPolicy,
 )
 
-from ..admission_locking import ConstraintReplan, ConstraintReplay, admitting
+from ..admission_locking import (
+    ConstraintReplan,
+    ConstraintReplay,
+    admitting,
+    label_transaction,
+)
 from ..categorized_errors import MissingRecord
 from ..fleet_profile_contract import (
     FleetNodeView,
@@ -252,11 +257,13 @@ class FleetProfileService:
         self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
         now = _aware(self._clock())
         with self._sessions.begin() as session:
+            number = (
+                number if number is not None else self._next_profile_number(session)
+            )
+            label_transaction(session, f"profile-save:{number}")
             assignments, notes = self._validated_assignments(session, value.assignments)
             row = FleetProfile(
-                number=number
-                if number is not None
-                else self._next_profile_number(session),
+                number=number,
                 revision=1,
                 name=value.name,
                 description=value.description,
@@ -311,7 +318,16 @@ class FleetProfileService:
                     f"profile revision conflict: expected {value.expected_revision}, current {row.revision}",
                     reason=InvalidRequestReason.CONFLICT,
                 )
-            assignments, notes = self._validated_assignments(session, value.assignments)
+            label_transaction(session, f"profile-save:{row.number}")
+            assignments, notes = self._validated_assignments(
+                session,
+                value.assignments,
+                retained_selectors=frozenset(
+                    item.recipe_selector for item in previous.assignments
+                )
+                if previous is not None
+                else frozenset(),
+            )
             row.name = value.name
             row.description = value.description
             row.installation_policy = value.installation_policy

@@ -150,42 +150,51 @@ def test_guard_rejects_old_and_future_wheel_filenames(
     ), errors
 
 
-@pytest.mark.parametrize("fault", ("owner_bump", "stale_projection", "extra_copy"))
+@pytest.mark.parametrize(
+    "fault", ("owner_bump", "stale_projection", "extra_copy", "copied_projection")
+)
 def test_projections_are_reproduced_and_exempt_only_exact_sites(
     registered_tree: Path, fault: str
 ) -> None:
-    from scripts.protocol_wheel import (
-        PROJECTIONS,
-        package_version,
-        project,
-        wheel_filename,
-    )
+    import tomllib
+
+    from scripts.protocol_wheel import protocol_wheel_name
+    from tools.single_source_values import project_protocol_lock
 
     root = registered_tree
     owner = root / "agent_protocol/pyproject.toml"
-    projection = root / "control/pyproject.toml"
+    projection = root / "control/uv.lock"
+    version = tomllib.loads(owner.read_text())["project"]["version"]
     if fault == "owner_bump":
-        owner.write_text(owner.read_text().replace(package_version(root), "99.2.7"))
+        owner.write_text(owner.read_text().replace(version, "99.2.7"))
     elif fault == "stale_projection":
         projection.write_text(
             projection.read_text().replace(
-                wheel_filename(root),
-                wheel_filename(root).replace(package_version(root), "99.2.7"),
+                protocol_wheel_name(root),
+                protocol_wheel_name(root).replace(version, "99.2.7"),
             )
         )
-    else:
+    elif fault == "extra_copy":
         projection.write_text(
-            projection.read_text() + f"\n# copied filename: {wheel_filename(root)}\n"
+            projection.read_text()
+            + f"\n# copied filename: {protocol_wheel_name(root)}\n"
         )
+    else:
+        pin = next(
+            line
+            for line in projection.read_text().splitlines()
+            if protocol_wheel_name(root) in line
+        )
+        projection.write_text(projection.read_text() + "\n" + pin + "\n")
     errors = violations(root, fixture_files(root))
     assert any(
-        "agent_protocol.wheel" in error and "control/pyproject.toml:" in error
+        "agent_protocol.wheel" in error and "control/uv.lock:" in error
         for error in errors
     ), errors
-    if fault != "extra_copy":
-        for file in PROJECTIONS:
+    if fault in {"owner_bump", "stale_projection"}:
+        for file in ("control/uv.lock", "agent_protocol/uv.lock"):
             path = root / file
-            path.write_text(project(root, file, path.read_text()))
+            path.write_text(project_protocol_lock(root, file, path.read_text()))
         assert violations(root, fixture_files(root)) == []
 
 

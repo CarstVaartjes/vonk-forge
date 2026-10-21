@@ -11,6 +11,7 @@ from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_agent_protocol.gpu_clock import GpuClockObservation
 from vonk_agent_protocol.telemetry import GpuUnavailableReason
 
 from .models import AgentNode, NodeTelemetryLatest, NodeTelemetrySample
@@ -84,12 +85,17 @@ class TelemetrySampleInput:
     gpu_memory_total_bytes: int | None
     gpu_memory_free_bytes: int | None
     gpu_unavailable_reason: GpuUnavailableReason | None = None
+    gpu_clock: GpuClockObservation | None = None
     gpu_temperature_c: int | None = None
     cpu_frequency_avg_mhz: int | None = None
     cpu_frequency_min_mhz: int | None = None
     cpu_frequency_max_mhz: int | None = None
 
     def __post_init__(self) -> None:
+        if self.gpu_clock is not None:
+            if not isinstance(self.gpu_clock, GpuClockObservation):
+                raise ValueError("telemetry GPU clock observation is invalid")
+            GpuClockObservation.model_validate_json(self.gpu_clock.model_dump_json())
         if not isinstance(self.boot_id, uuid.UUID) or self.boot_id.int == 0:
             raise ValueError("telemetry boot ID is invalid")
         if not isinstance(self.observed_at, datetime):
@@ -144,6 +150,7 @@ class TelemetrySampleView:
     gpu_memory_total_bytes: int | None
     gpu_memory_free_bytes: int | None
     gpu_unavailable_reason: GpuUnavailableReason | None = None
+    gpu_clock: GpuClockObservation | None = None
     gpu_temperature_c: int | None = None
     cpu_frequency_avg_mhz: int | None = None
     cpu_frequency_min_mhz: int | None = None
@@ -173,6 +180,7 @@ _SAMPLE_FIELDS = (
     "gpu_memory_free_bytes",
     "gpu_unavailable_reason",
     "gpu_temperature_c",
+    "gpu_clock",
     "cpu_frequency_avg_mhz",
     "cpu_frequency_min_mhz",
     "cpu_frequency_max_mhz",

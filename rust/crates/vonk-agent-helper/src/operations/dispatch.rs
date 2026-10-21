@@ -60,6 +60,10 @@ impl<R: CommandRunner> OperationExecutor<R> {
             .map_err(|_| OperationError::InvalidOperation)?;
         self.require_directory(&self.roots.data)?;
         let (status, exit_code, evidence) = match operation {
+            HostOperation::ApplyGpuClockOperation(operation) => {
+                self.reconcile_gpu_clock(Some(&operation.desired), false)?;
+                (HostHelperResponseStatus::GpuClockReconciled, None, None)
+            }
             HostOperation::InstallVonkDebOperation(InstallVonkDebOperation {
                 package_sha256,
                 package_signature,
@@ -115,6 +119,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
                 let outcome = self.execute_runtime_request(
                     action,
                     RuntimeRequestGrantBinding {
+                        gpu_clock: None,
                         fence,
                         installation_intent_nonce: installation_intent_nonce.as_deref(),
                         installation_intent_ordinal: *installation_intent_ordinal,

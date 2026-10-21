@@ -20,6 +20,7 @@ from vonk_agent_protocol.contracts import (
 )
 from vonk_agent_protocol.distribution import DistributionObject
 from vonk_agent_protocol.failure_evidence import FailureDiagnostics
+from vonk_agent_protocol.gpu_clock import GpuClockObservation
 from vonk_agent_protocol.inventory import (
     Capability,
     HostSettings,
@@ -147,6 +148,7 @@ bind(
 )
 bind("node_inventory_snapshots", "model_objects", list[ModelStoreObject], nullable=True)
 bind("node_inventory_snapshots", "host_settings", HostSettings, nullable=True)
+bind("node_telemetry_samples", "gpu_clock", GpuClockObservation, nullable=True)
 bind("model_cache_sets", "protected_reasons", list[CacheReferenceReason])
 bind("run_nodes", "endpoint", StoredRunEndpoint, nullable=True)
 bind("run_nodes", "observation_failure_diagnostics", FailureDiagnostics, nullable=True)

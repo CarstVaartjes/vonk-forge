@@ -15,6 +15,7 @@ from .contracts import (
     AgentProtocolError,
     canonical_message,
 )
+from .gpu_clock import GpuClockObservation
 from .optional_evidence import (
     EvidenceGroup,
     OptionalEvidenceModel,
@@ -39,9 +40,10 @@ def _rfc3339_datetime(value: object) -> object:
         parsed = datetime.fromisoformat(value)
     except ValueError as error:
         raise ValueError("telemetry time must be an RFC 3339 string") from error
-    if parsed.tzinfo is None or parsed.utcoffset() is None:
+    offset = parsed.utcoffset()
+    if parsed.tzinfo is None or offset is None:
         raise ValueError("telemetry time must include a timezone")
-    if parsed.utcoffset().total_seconds() != 0:
+    if offset.total_seconds() != 0:
         raise ValueError("telemetry time must be UTC")
     return parsed
 
@@ -62,6 +64,7 @@ class TelemetrySample(OptionalEvidenceModel, TelemetryWireModel):
     (temperature, CPU clocks) are optional evidence dropped when invalid."""
 
     EVIDENCE_GROUPS: ClassVar[tuple[EvidenceGroup, ...]] = (
+        EvidenceGroup(AgentEvidenceCode.TELEMETRY_READING_DROPPED, (("gpu_clock",),)),
         EvidenceGroup(
             AgentEvidenceCode.TELEMETRY_READING_DROPPED,
             (("gpu_temperature_c",), ("gpu_unavailable_reason",)),
@@ -75,6 +78,8 @@ class TelemetrySample(OptionalEvidenceModel, TelemetryWireModel):
             ),
         ),
     )
+
+    gpu_clock: GpuClockObservation | None = None
 
     boot_id: str = Field(
         pattern=r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"

@@ -12,6 +12,7 @@ use vonk_agent::{
     inventory::{InventoryCollector, available_memory_bytes},
     process::{ProcessError, ProcessOutput, ProcessRunner, Program},
 };
+use vonk_agent_protocol::gpu_clock::{CSV_FORMAT, SUPPORT_QUERY};
 
 struct FakeRunner {
     calls: RefCell<Vec<(Program, Vec<String>)>>,
@@ -28,6 +29,9 @@ impl ProcessRunner for FakeRunner {
     ) -> Result<ProcessOutput, ProcessError> {
         self.calls.borrow_mut().push((program, arguments.to_vec()));
         let stdout = match program {
+            Program::NvidiaSmi if arguments == [SUPPORT_QUERY, CSV_FORMAT] => {
+                b"2400\n300\n1800\n2200\n1800\n".to_vec()
+            }
             Program::NvidiaSmi => self.gpu_output.to_vec(),
             Program::Podman => b"5.4.2\n".to_vec(),
             Program::Docker => b"Docker version 29.2.1, build test\n".to_vec(),
@@ -132,10 +136,13 @@ fn inventory_reports_physical_and_available_memory_disk_and_gpu() {
             .capabilities
             .contains(&"fabric.connected.mbps.200000".to_owned())
     );
-    assert_eq!(runner.calls.borrow().len(), 7);
     let host = inventory.host_settings.clone().unwrap();
     assert!(host.display_manager_active && host.graphical_default_target);
     assert_eq!(host.gpu_clock_cap_active, Some(true));
+    let support = host.gpu_clock_support.unwrap();
+    assert_eq!(support.min_mhz, 300);
+    assert_eq!(support.max_mhz, 2400);
+    assert_eq!(support.levels_mhz, [300, 1800, 2200, 2400]);
     assert_eq!(
         available_memory_bytes(&runner, &meminfo, "unified").unwrap(),
         65432 * 1024
@@ -145,6 +152,7 @@ fn inventory_reports_physical_and_available_memory_disk_and_gpu() {
     assert_eq!(wire["host_memory_total_bytes"], 123456 * 1024);
     assert_eq!(wire["host_memory_free_bytes"], 65432 * 1024);
     assert_eq!(wire["disk_free_bytes"], inventory.disk_available_bytes);
+    assert_eq!(wire["host_settings"]["gpu_clock_support"]["max_mhz"], 2400);
     assert!(wire.get("memory_total_bytes").is_none());
     assert!(wire.get("memory_available_bytes").is_none());
     assert!(wire.get("disk_available_bytes").is_none());

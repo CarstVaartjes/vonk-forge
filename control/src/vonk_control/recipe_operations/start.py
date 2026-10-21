@@ -19,6 +19,7 @@ from vonk_agent_protocol import (
     UnknownOutcomeError,
     canonical_message,
 )
+from vonk_agent_protocol.gpu_clock import GpuClockRange
 
 from ..admission_locking import (
     AdmissionLockBusy,
@@ -92,6 +93,7 @@ class StartMixin:
         request_id: str,
         workload_intent_ordinal: int | None = None,
         profile_application_id: str | None = None,
+        gpu_clock: GpuClockRange | None = None,
     ) -> RecipeOperationView:
         service = typing_cast("RecipeOperationService", self)
         if plan_digest != plan.plan_digest:
@@ -270,9 +272,31 @@ class StartMixin:
                         f"recipe start payload for {node_id} cannot be built: {error}",
                         reason=InvalidRequestReason.UNSUPPORTED,
                     ) from error
-                return node_id, RecipeStartPayload.model_validate_json(
+                typed = RecipeStartPayload.model_validate_json(
                     canonical_message(payload)
                 )
+                if profile_application_id is not None or gpu_clock is not None:
+                    from ..gpu_clock import gpu_clock_start_intent
+
+                    try:
+                        desired_clock = gpu_clock_start_intent(session, node_id)
+                    except ValueError as error:
+                        raise RecipeRequestInvalid(
+                            str(error), reason=InvalidRequestReason.UNSUPPORTED
+                        ) from error
+                    if gpu_clock is not None and (
+                        desired_clock is None or desired_clock.range != gpu_clock
+                    ):
+                        raise RecipeRequestInvalid(
+                            "Reviewed GPU clock range differs from the selected profile; re-plan against the latest profile assignment",
+                            reason=(
+                                InvalidRequestReason.SUPERSEDED
+                                if profile_application_id is not None
+                                else InvalidRequestReason.CONFLICT
+                            ),
+                        )
+                    typed = typed.model_copy(update={"gpu_clock": desired_clock})
+                return node_id, typed
 
             start_payloads = tuple(
                 (node_id, json.loads(canonical_message(payload)))
@@ -335,6 +359,7 @@ class StartMixin:
         request_id: str,
         workload_intent_ordinal: int | None = None,
         profile_application_id: str | None = None,
+        gpu_clock: GpuClockRange | None = None,
     ) -> RecipeOperationView:
         service = typing_cast("RecipeOperationService", self)
         refused: UnknownOutcomeError | None = None
@@ -347,6 +372,7 @@ class StartMixin:
                     request_id=request_id,
                     workload_intent_ordinal=workload_intent_ordinal,
                     profile_application_id=profile_application_id,
+                    gpu_clock=gpu_clock,
                 )
             except UnknownOutcomeError as error:
                 refused = error

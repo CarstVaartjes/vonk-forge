@@ -8,6 +8,7 @@ from sqlalchemy import select
 from vonk_agent_protocol import (
     AgentOperation,
     RecipeOperationRequest,
+    RecipeStartPayload,
     canonical_message,
 )
 from vonk_control.distributed_recovery import (
@@ -38,6 +39,11 @@ from .test_recipe_operations import (
 
 def _canonical_start_evidence(payload: dict[str, object]) -> dict[str, object]:
     return start_evidence(payload)
+
+
+def _canonical_start_payload(payload: object) -> RecipeStartPayload:
+    """Compare required content while normalizing omitted/null optional defaults."""
+    return RecipeStartPayload.model_validate_json(canonical_message(payload))
 
 
 def _recovery_phase_pair(item: object) -> tuple[object, dict[str, object]]:
@@ -157,17 +163,19 @@ def test_recovery_start_children_are_canonical_schema2_payloads(
     assert {item.node_id for item in rank_launches} == set(nodes)
 
     produced = {
-        (node_id, payload["phase"]): payload
+        (node_id, payload["phase"]): _canonical_start_payload(payload)
         for group in produced_phases
         for node_id, payload in group
     }
     assert {
-        (operation.node_id, operation.payload["phase"]): operation.payload
+        (operation.node_id, operation.payload["phase"]): _canonical_start_payload(
+            operation.payload
+        )
         for operation in rank_launches
     } == {
         key: payload
         for key, payload in produced.items()
-        if payload["phase"] == "rank-launch"
+        if payload.phase == "rank-launch"
     }
 
     for operation in rank_launches:
@@ -198,7 +206,9 @@ def test_recovery_start_children_are_canonical_schema2_payloads(
         sum(item.payload["phase"] == "collective-readiness" for item in children) == 1
     )
     assert {
-        (operation.node_id, operation.payload["phase"]): operation.payload
+        (operation.node_id, operation.payload["phase"]): _canonical_start_payload(
+            operation.payload
+        )
         for operation in children
     } == produced
 

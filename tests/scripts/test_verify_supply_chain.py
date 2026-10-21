@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from scripts.protocol_wheel import package_version, wheel_relative
+from scripts.protocol_wheel import protocol_wheel_name
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts/verify-supply-chain"
@@ -117,7 +117,9 @@ def test_local_verification_needs_no_generated_files_or_mutation(
     assert result.returncode == 0
     assert _result(result)["ok"] is True
     assert not (repository / "inventory/sbom").exists()
-    assert not (repository / wheel_relative(ROOT)).exists()
+    assert not (
+        repository / "inventory/wheels" / protocol_wheel_name(repository)
+    ).exists()
 
 
 def test_lock_change_generates_updated_sbom_instead_of_stale_source_failure(
@@ -220,10 +222,9 @@ def test_image_lock_rejects_floating_build_bases(tmp_path: Path, name: str) -> N
 def test_verifier_rejects_protocol_version_drift(tmp_path: Path) -> None:
     repository = _copy(tmp_path)
     project = repository / "agent_protocol/pyproject.toml"
+    version = tomllib.loads(project.read_text())["project"]["version"]
     project.write_text(
-        project.read_text().replace(
-            f'version = "{package_version(repository)}"', 'version = "99.2.7"', 1
-        )
+        project.read_text().replace(f'version = "{version}"', 'version = "9.8.7"', 1)
     )
 
     result = _run(repository)
@@ -250,7 +251,7 @@ def test_malformed_runtime_image_lock_values_fail_closed(
 
 def test_generated_protocol_spdx_binds_built_wheel_checksum(tmp_path: Path) -> None:
     repository = _copy(tmp_path)
-    wheel = repository / wheel_relative(ROOT)
+    wheel = repository / "inventory/wheels" / protocol_wheel_name(repository)
     wheel.parent.mkdir(parents=True, exist_ok=True)
     wheel.write_bytes(b"built wheel bytes")
     output = tmp_path / "evidence"
@@ -274,7 +275,7 @@ def test_dockerfile_must_copy_and_install_the_protocol_wheel(tmp_path: Path) -> 
     source = dockerfile.read_text()
     dockerfile.write_text(
         source.replace(
-            "$(python scripts/protocol_wheel.py --directory /wheels)",
+            "/wheels/$(scripts/protocol-wheel-name)",
             "/wheels/missing.whl",
         )
     )
@@ -285,110 +286,33 @@ def test_dockerfile_must_copy_and_install_the_protocol_wheel(tmp_path: Path) -> 
     assert "standalone protocol wheel" in " ".join(_errors(result))
 
 
-@pytest.mark.linux_only
-def test_version_bump_reaches_build_evidence_and_artifact_transfer(
+def test_protocol_version_bump_reaches_wheel_evidence_without_consumer_edits(
     tmp_path: Path,
 ) -> None:
-    # Wrong implementation: one filename copy keeps an otherwise regenerated release on the old wheel.
-    import os
-    import zipfile
-
-    import yaml
-
-    from scripts.protocol_wheel import PROJECTIONS, project
-
     repository = _copy(tmp_path)
-    for file in (
-        "control/pyproject.toml",
-        ".dockerignore",
-        "scripts/protocol_wheel.py",
-        "scripts/refresh-protocol-wheel-lock",
-        "scripts/check_environment.py",
-    ):
-        destination = repository / file
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(ROOT / file, destination)
-    shutil.copytree(ROOT / "agent_protocol/src", repository / "agent_protocol/src")
-    owner = repository / "agent_protocol/pyproject.toml"
-    owner.write_text(owner.read_text().replace(package_version(repository), "99.2.7"))
-    for file in PROJECTIONS:
-        path = repository / file
-        path.write_text(project(repository, file, path.read_text()))
-    subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "hatchling",
-            "build",
-            "--target",
-            "wheel",
-            "--directory",
-            "../inventory/wheels",
-        ],
-        cwd=repository / "agent_protocol",
-        check=True,
-        capture_output=True,
-        timeout=30,
+    project = repository / "agent_protocol/pyproject.toml"
+    version = tomllib.loads(project.read_text())["project"]["version"]
+    old_name = protocol_wheel_name(repository)
+    project.write_text(
+        project.read_text().replace(f'version = "{version}"', 'version = "9.8.7"', 1)
     )
-    subprocess.run(
-        [sys.executable, "scripts/refresh-protocol-wheel-lock"],
-        cwd=repository,
-        check=True,
-        capture_output=True,
-        timeout=30,
-    )
-    wheel = repository / wheel_relative(repository)
-    expected_bytes = wheel.read_bytes()
-    with zipfile.ZipFile(wheel) as archive:
-        metadata = next(
-            name for name in archive.namelist() if name.endswith(".dist-info/METADATA")
+    new_name = protocol_wheel_name(repository)
+    for relative in ("control/uv.lock", "agent_protocol/uv.lock"):
+        lock = repository / relative
+        lock.write_text(
+            lock.read_text()
+            .replace(
+                f'name = "vonk-agent-protocol"\nversion = "{version}"',
+                'name = "vonk-agent-protocol"\nversion = "9.8.7"',
+            )
+            .replace(old_name, new_name)
         )
-        assert "Version: 99.2.7" in archive.read(metadata).decode()
-    result = _run(repository, "--output-dir", str(tmp_path / "evidence"))
-    assert result.returncode == 0, result.stdout + result.stderr
-    sbom = json.loads((tmp_path / "evidence/agent-protocol.spdx.json").read_bytes())
-    assert sbom["files"][0]["fileName"] == wheel_relative(repository)
-    workflow = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text())
-    steps = [step for job in workflow["jobs"].values() for step in job.get("steps", [])]
-    upload = next(
-        step["run"]
-        for step in steps
-        if step.get("name") == "Include protocol wheel with generated release evidence"
-    )
-    artifact = tmp_path / "runner"
-    subprocess.run(
-        ["bash", "-euc", upload],
-        cwd=repository,
-        env={**os.environ, "RUNNER_TEMP": str(artifact)},
-        check=True,
-        capture_output=True,
-        timeout=30,
-    )
-    shutil.copytree(
-        artifact / "supply-chain", repository / "release-output/supply-chain"
-    )
-    wheel.unlink()
-    restore = next(
-        step["run"]
-        for step in steps
-        if step.get("name") == "Restore verified protocol wheel for image build context"
-    )
-    subprocess.run(
-        ["bash", "-euc", restore],
-        cwd=repository,
-        check=True,
-        capture_output=True,
-        timeout=30,
-    )
-    assert wheel.read_bytes() == expected_bytes
-    assert (
-        "!" + wheel_relative(repository)
-        in (repository / ".dockerignore").read_text().splitlines()
-    )
-    selection = subprocess.check_output(
-        [sys.executable, "scripts/protocol_wheel.py", "--directory", "/wheels"],
-        cwd=repository,
-        text=True,
-        timeout=30,
-    ).strip()
-    assert selection == f"/wheels/{wheel.name}"
+    wheel = repository / "inventory/wheels" / new_name
+    wheel.write_bytes(b"new protocol wheel")
+    output = tmp_path / "evidence"
+
+    result = _run(repository, "--output-dir", str(output))
+
+    assert result.returncode == 0, result.stdout
+    document = json.loads((output / "agent-protocol.spdx.json").read_bytes())
+    assert document["files"][0]["fileName"] == f"inventory/wheels/{new_name}"

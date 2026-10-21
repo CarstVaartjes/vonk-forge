@@ -70,11 +70,23 @@ impl AgentHttpClient {
         &self,
         plan_digest: &str,
     ) -> Result<DistributionAssignment, ClientError> {
+        self.distribution_manifest_until(
+            plan_digest,
+            tokio::time::Instant::now() + CONTROLLER_REQUEST_TIMEOUT,
+        )
+        .await
+    }
+
+    async fn distribution_manifest_until(
+        &self,
+        plan_digest: &str,
+        deadline: tokio::time::Instant,
+    ) -> Result<DistributionAssignment, ClientError> {
         if !valid_sha256(plan_digest) {
             return Err(ClientError::Protocol);
         }
-        let deadline = tokio::time::Instant::now() + CONTROLLER_REQUEST_TIMEOUT;
-        for attempt in 0..3_u32 {
+        let mut attempt = 0_u32;
+        loop {
             let result = tokio::time::timeout_at(deadline, async {
                 let mut response = self
                     .current_client()
@@ -94,27 +106,36 @@ impl AgentHttpClient {
                 "manifest request deadline elapsed",
             )));
             match result {
-                Err(ref error)
+                Err(error)
                     if error.retryable()
-                        && attempt < 2
+                        && (attempt < 2
+                            || (error.disposition() == Disposition::Wait
+                                && error.code().is_some_and(|code| vocabulary::is(
+                                    code,
+                                    vonk_agent_protocol::generated::ArtifactLifecycleCode::ArtifactReferenceBusy,
+                                ))))
                         && tokio::time::Instant::now() < deadline =>
                 {
+                    let delay = error
+                        .retry_delay(attempt, Duration::from_millis(100), Duration::from_secs(3))
+                        .max(Duration::from_millis(100));
+                    eprintln!(
+                        "vonk-agent: distribution manifest waits within the current operation: {error}; retry_after_ms={} remaining_ms={}",
+                        delay.as_millis(),
+                        deadline.saturating_duration_since(tokio::time::Instant::now()).as_millis(),
+                    );
                     tokio::time::sleep_until(deadline.min(
-                        tokio::time::Instant::now()
-                            + error.retry_delay(
-                                attempt,
-                                Duration::from_millis(100),
-                                Duration::from_secs(3),
-                            ),
+                        tokio::time::Instant::now() + delay,
                     ))
                     .await;
+                    if tokio::time::Instant::now() >= deadline {
+                        return Err(error);
+                    }
+                    attempt = attempt.saturating_add(1);
                 }
                 result => return result,
             }
         }
-        Err(ClientError::Unsettled(
-            "bounded attempts ended without a settled manifest",
-        ))
     }
 
     /// Consume a complete assignment. Every model/configuration object is
