@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 from typing import cast as _typing_cast
@@ -9,8 +10,13 @@ from typing import cast as _typing_cast
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, SessionTransaction, defer
 from vonk_agent_protocol import DesiredAssignmentState, InvalidRequestReason
-from vonk_agent_protocol.agent_words import ProfileDocumentState
+from vonk_agent_protocol.agent_words import (
+    ProfileDocumentState,
+    RunSwitchReasonScopeName,
+)
 
+from ..catalog_revision_contract import RecipeRevisionProjection, read_recipe_projection
+from ..content_identity import catalog_selector_membership
 from ..fleet_profile_contract import (
     FleetProfileAssignment,
     FleetProfileAssignmentInput,
@@ -41,6 +47,7 @@ if TYPE_CHECKING:
 @dataclass
 class _RecipeReads:
     transaction: SessionTransaction | None
+    projections: dict[str, RecipeRevisionProjection] = field(default_factory=dict)
     documents: dict[str, tuple[CatalogDocument, CatalogDocumentRevision] | Residue] = (
         field(default_factory=dict)
     )
@@ -74,7 +81,7 @@ class FleetProfileService:
             session.scalars(
                 select(CatalogDocument.id)
                 .where(
-                    CatalogDocument.kind == "recipe",
+                    CatalogDocument.kind == RunSwitchReasonScopeName.RECIPE,
                     CatalogDocument.publisher == publisher,
                     CatalogDocument.slug == slug,
                 )
@@ -93,7 +100,7 @@ class FleetProfileService:
             select(CatalogDocumentRevision.id, CatalogDocumentRevision.content_digest)
             .where(
                 CatalogDocumentRevision.document_id == document,
-                CatalogDocumentRevision.kind == "recipe",
+                CatalogDocumentRevision.kind == RunSwitchReasonScopeName.RECIPE,
                 CatalogDocumentRevision.state == ProfileDocumentState.ACTIVE.value,
             )
             .order_by(
@@ -111,6 +118,96 @@ class FleetProfileService:
                 "the recipe has no active catalog revision",
             )
         return document, revision[0]
+
+    @staticmethod
+    def _prefetch_recipe_documents(
+        session: Session, choices: Sequence[FleetProfileAssignmentInput]
+    ) -> None:
+        """Read this request's exact recipe heads in two queries, without source JSON."""
+        transaction = session.get_transaction()
+        reads = session.info.get("profile_recipe_documents")
+        if not isinstance(reads, _RecipeReads) or reads.transaction is not transaction:
+            reads = _RecipeReads(transaction)
+            session.info["profile_recipe_documents"] = reads
+        selectors = {
+            choice.recipe_selector: tuple(
+                choice.recipe_selector.strip().casefold().split("/")
+            )
+            for choice in choices
+            if choice.recipe_selector not in reads.documents
+        }
+        # Invalid or ambiguous selectors retain the existing typed refusal in
+        # _recipe_document. An absent head remains explicit unavailable evidence.
+        identities = [identity for identity in selectors.values() if len(identity) == 2]
+        if not identities:
+            return
+        documents: dict[tuple[str, str], list[CatalogDocument]] = {}
+        for document in session.scalars(
+            select(CatalogDocument).where(
+                CatalogDocument.kind == RunSwitchReasonScopeName.RECIPE,
+                catalog_selector_membership(
+                    CatalogDocument.publisher,
+                    CatalogDocument.slug,
+                    [(identity[0], identity[1]) for identity in identities],
+                ),
+            )
+        ):
+            documents.setdefault((document.publisher, document.slug), []).append(
+                document
+            )
+        ranked = (
+            select(
+                CatalogDocumentRevision.id,
+                func.row_number()
+                .over(
+                    partition_by=CatalogDocumentRevision.document_id,
+                    order_by=(
+                        CatalogDocumentRevision.revision_number.desc(),
+                        CatalogDocumentRevision.created_at.desc(),
+                        CatalogDocumentRevision.id.desc(),
+                    ),
+                )
+                .label("head_rank"),
+            )
+            .where(
+                CatalogDocumentRevision.document_id.in_(
+                    [rows[0].id for rows in documents.values() if len(rows) == 1]
+                ),
+                CatalogDocumentRevision.kind == RunSwitchReasonScopeName.RECIPE,
+                CatalogDocumentRevision.state == ProfileDocumentState.ACTIVE.value,
+            )
+            .subquery()
+        )
+        revisions = {
+            revision.document_id: revision
+            for revision in session.scalars(
+                select(CatalogDocumentRevision)
+                .join(ranked, ranked.c.id == CatalogDocumentRevision.id)
+                .where(ranked.c.head_rank == 1)
+                .options(defer(CatalogDocumentRevision.document))
+            )
+        }
+        for selector, identity in selectors.items():
+            if len(identity) != 2:
+                continue
+            rows = documents.get((identity[0], identity[1]), [])
+            if len(rows) == 1 and rows[0].id in revisions:
+                reads.documents[selector] = (rows[0], revisions[rows[0].id])
+
+    @staticmethod
+    def _recipe_projection(
+        session: Session, revision: CatalogDocumentRevision
+    ) -> RecipeRevisionProjection:
+        reads = session.info.get("profile_recipe_documents")
+        if (
+            not isinstance(reads, _RecipeReads)
+            or reads.transaction is not session.get_transaction()
+        ):
+            reads = _RecipeReads(session.get_transaction())
+            session.info["profile_recipe_documents"] = reads
+        if revision.id not in reads.projections:
+            reads.projections[revision.id] = read_recipe_projection(revision)
+        return reads.projections[revision.id]
 
     @classmethod
     def _recipe_document(

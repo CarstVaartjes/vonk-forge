@@ -1058,3 +1058,30 @@ def test_library_list_shared_vector_renders_without_documents(capsys):
     assert page.recipes[0].selector in rendered
     assert "not assessed" in rendered
     assert "Recipe library v2.3.0" in rendered
+
+
+def test_clock_unavailable_readings_name_reason_and_receipt_cause(capsys):
+    """Catches presenting driver N/A, query failure and missing helper receipt as unknown."""
+    from vonk_agent_protocol.gpu_clock import (
+        GpuClockMetric,
+        GpuClockObservation,
+        GpuClockUnavailable,
+        GpuClockUnavailableReason,
+    )
+
+    spark = _cpu_spark(low_clock=False)
+    spark["telemetry"]["sample"]["gpu_clock"] = GpuClockObservation(
+        graphics_mhz=0,
+        receipt_detail="helper receipt unavailable; inventory retries",
+        unavailable=[
+            GpuClockUnavailable(
+                metric=GpuClockMetric.SM,
+                reason=GpuClockUnavailableReason.NOT_SUPPORTED,
+                detail="driver returned [N/A]",
+            )
+        ],
+    ).model_dump(mode="json", exclude_none=True)
+    render_payload(spark, "fleet", action="detail")
+    output = capsys.readouterr().out
+    assert "graphics 0 / SM not supported (driver returned [N/A])" in output
+    assert "helper receipt unavailable; inventory retries" in output

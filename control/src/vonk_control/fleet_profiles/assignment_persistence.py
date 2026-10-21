@@ -16,7 +16,7 @@ from ..artifact_lifecycle import (
     require_reference_open,
 )
 from ..artifact_reference_scan import require_model_sets_open
-from ..catalog_revision_contract import RecipeRevisionProjection, read_recipe_projection
+from ..catalog_revision_contract import RecipeRevisionProjection
 from ..fleet_profile_contract import FleetProfileAssignmentInput, FleetProfilePreview
 from ..lifecycle.evidence import Residue
 from ..model_cache.persistence import _operation_removal
@@ -50,6 +50,7 @@ class FleetProfileService:
         """
         self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
 
+        self._prefetch_recipe_documents(session, values)
         assignments: list[FleetProfileAssignmentInput] = []
         notes: list[str] = []
         digests: set[str] = set()
@@ -67,8 +68,8 @@ class FleetProfileService:
             document, revision = resolved
             try:
                 if value.recipe_selector not in projections:
-                    projections[value.recipe_selector] = read_recipe_projection(
-                        revision
+                    projections[value.recipe_selector] = self._recipe_projection(
+                        session, revision
                     )
                 definition = projections[value.recipe_selector]
             except ValueError:

@@ -210,12 +210,10 @@ def install_observations_routes(
         request.state.inventory_acceptance = InventoryAcceptance(
             snapshot.id, snapshot.evidence_digest
         )
-        clock_supported = (
-            body.host_settings is not None
-            and body.host_settings.gpu_clock_support is not None
-            and required.host_runtime_authority is not None
+        clock_authority = (
+            required.host_runtime_authority if body.host_settings is not None else None
         )
-        if body.installations is None and body.runs is None and not clock_supported:
+        if body.installations is None and body.runs is None and clock_authority is None:
             # An older agent, or one that could not list them: no verdict.
             return Response(status_code=status.HTTP_204_NO_CONTENT)
         with required.sessions() as session:
@@ -230,15 +228,11 @@ def install_observations_routes(
                 if body.runs is None
                 else untracked_runs(session, body.runs),
             )
-        if (
-            body.host_settings is not None
-            and body.host_settings.gpu_clock_support is not None
-            and required.host_runtime_authority is not None
-        ):
+        if clock_authority is not None:
             try:
                 verdict = verdict.model_copy(
                     update={
-                        "gpu_clock_grant": required.host_runtime_authority.gpu_clock_grant(
+                        "gpu_clock_grant": clock_authority.gpu_clock_grant(
                             identity.node_id
                         )
                     }

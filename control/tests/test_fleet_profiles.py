@@ -3106,8 +3106,9 @@ def test_profile_create_is_server_owned_validated_and_digest_stable() -> None:
     loaded = service.get(created.id)
     listed = service.list()
 
-    assert created == loaded
-    assert listed.profiles == [created]
+    assert created.definition == loaded.definition
+    assert created.revision == loaded.revision
+    assert listed.profiles == [loaded]
     assert created.name == "Studio ready"
     assert created.assignments[0].recipe.name == "Synthetic Tiny build"
     assert created.assignments[0].spark_ids == [_node_id(1)]
@@ -3569,7 +3570,7 @@ def test_profile_round_trip_rejects_corrupt_stored_assignment(damage):
     _recipe_id, revision_id = _seed(sessions)
     service = FleetProfileService(sessions, clock=lambda: NOW)
     created = service.create(_input(revision_id), actor="admin")
-    assert service.get(created.id) == created
+    assert service.get(created.id).definition == created.definition
     with sessions.begin() as session:
         row = session.get(FleetProfile, created.id)
         assert row is not None

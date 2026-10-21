@@ -45,5 +45,32 @@
         "-rgc"
       ]
     }
+  ],
+  "observation": {
+    "graphics_mhz": 1700,
+    "sm_mhz": 1695,
+    "max_graphics_mhz": 2400,
+    "max_sm_mhz": 2300,
+    "throttle_reasons": 4,
+    "locked_range": {
+      "min_mhz": 300,
+      "max_mhz": 2200
+    },
+    "desired": {
+      "generation": 1,
+      "range": {
+        "min_mhz": 300,
+        "max_mhz": 2200
+      }
+    },
+    "apply_state": "applied",
+    "deadline": 1600
+  },
+  "driver_readings": [
+    "1700",
+    "1695",
+    "2400",
+    "2300",
+    "0x0000000000000004"
   ]
 }

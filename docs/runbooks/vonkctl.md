@@ -661,6 +661,13 @@ the latest verified cached compatible recipe/model and checks complete
 topology. Load requires
 the digest of that reviewed decision and a client-generated request key.
 
+A save receipt confirms the complete committed draft and revision. Its cache
+and live workload observations are unknown: saving does not walk managed model
+files, resolve runtime image presence, or assess running workloads. Read the
+profile or review a load for those observations. A lost save response may still
+commit; reconnect through the definition read before editing again. Retrying
+identical content returns the committed revision without another edit.
+
 Today a profile load creates an application; application history is not a
 standing fleet policy. The target behavior keeps one durable selected-profile
 record in PostgreSQL, pointing to the immutable accepted application snapshot

@@ -6,6 +6,17 @@ without the contract package, so it imports these instead of copying them."""
 
 from __future__ import annotations
 
+from enum import StrEnum
+
+
+class GpuClockMetric(StrEnum):
+    GRAPHICS = "graphics_mhz"
+    SM = "sm_mhz"
+    MAX_GRAPHICS = "max_graphics_mhz"
+    MAX_SM = "max_sm_mhz"
+    THROTTLE = "throttle_reasons"
+
+
 STOP_UNCONFIRMED = "unconfirmed"
 PROFILE_NOT_ISSUED = "not-issued"
 ENROLLMENT_PENDING = "pending"

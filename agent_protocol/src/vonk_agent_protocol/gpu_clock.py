@@ -94,9 +94,31 @@ class GpuClockApplyState(StrEnum):
     REFUSED = "refused"
 
 
-class GpuClockObservation(WireModel):
-    """Unknown readings stay absent; a successful write is not a readback."""
+class GpuClockMetric(StrEnum):
+    GRAPHICS = "graphics_mhz"
+    SM = "sm_mhz"
+    MAX_GRAPHICS = "max_graphics_mhz"
+    MAX_SM = "max_sm_mhz"
+    THROTTLE = "throttle_reasons"
 
+
+class GpuClockUnavailableReason(StrEnum):
+    NOT_SUPPORTED = "not-supported"
+    COMMAND_FAILED = "command-failed"
+    INVALID_OUTPUT = "invalid-output"
+
+
+class GpuClockUnavailable(WireModel):
+    metric: GpuClockMetric
+    reason: GpuClockUnavailableReason
+    detail: str
+
+
+class GpuClockObservation(WireModel):
+    """Unavailable readings name their cause; a successful write is not a readback."""
+
+    unavailable: list[GpuClockUnavailable] | None = None
+    receipt_detail: str | None = None
     graphics_mhz: int | None = Field(default=None, ge=0, le=2**32 - 1)
     sm_mhz: int | None = Field(default=None, ge=0, le=2**32 - 1)
     locked_range: GpuClockRange | None = None

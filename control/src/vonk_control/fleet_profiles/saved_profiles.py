@@ -285,7 +285,7 @@ class FleetProfileService:
                     "a Fleet profile with this name already exists",
                     reason=InvalidRequestReason.DUPLICATE,
                 ) from duplicate
-            result = self._view(session, row)
+            result = self._view(session, row, observe=False)
         return _with_save_notes(result, notes)
 
     def update(
@@ -312,7 +312,7 @@ class FleetProfileService:
             if previous == requested:
                 # Readable equal content is the existing lost-response replay:
                 # it makes no edit and reconnects to the committed revision.
-                return self._view(session, row)
+                return self._view(session, row, observe=False)
             if row.revision != value.expected_revision:
                 raise FleetProfileInvalid(
                     f"profile revision conflict: expected {value.expected_revision}, current {row.revision}",
@@ -345,7 +345,7 @@ class FleetProfileService:
                     "a Fleet profile with this name already exists",
                     reason=InvalidRequestReason.DUPLICATE,
                 ) from duplicate
-            result = self._view(session, row)
+            result = self._view(session, row, observe=False)
         return _with_save_notes(result, notes)
 
     def update_number(

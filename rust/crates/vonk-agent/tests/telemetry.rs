@@ -38,13 +38,30 @@ impl ProcessRunner for FakeRunner {
             .lock()
             .unwrap()
             .push((program, arguments.to_vec(), timeout));
-        let output = if arguments[0].contains("clocks.current.graphics") {
-            self.clock_output
-                .clone()
-                .ok_or_else(|| ProcessError::Io(std::io::Error::other("clock query unsupported")))?
-        } else {
-            self.output.clone()
-        };
+        let output =
+            if arguments[0].contains("clocks.") || arguments[0].contains("clocks_event_reasons") {
+                let fields = self.clock_output.as_ref().ok_or_else(|| {
+                    ProcessError::Io(std::io::Error::other("clock query unsupported"))
+                })?;
+                let index = match arguments[0].as_str() {
+                    "--query-gpu=clocks.current.graphics" => 0,
+                    "--query-gpu=clocks.current.sm" => 1,
+                    "--query-gpu=clocks.max.graphics" => 2,
+                    "--query-gpu=clocks.max.sm" => 3,
+                    "--query-gpu=clocks_event_reasons.active" => 4,
+                    _ => panic!("unexpected query"),
+                };
+                String::from_utf8_lossy(fields)
+                    .trim()
+                    .split(',')
+                    .nth(index)
+                    .unwrap()
+                    .trim()
+                    .as_bytes()
+                    .to_vec()
+            } else {
+                self.output.clone()
+            };
         Ok(ProcessOutput {
             exit_code: None,
             success: true,
@@ -344,5 +361,17 @@ fn gpu_clocks_report_actual_maxima_and_preserve_the_throttle_mask_without_policy
     assert!(
         clock.locked_range.is_none(),
         "a hardware maximum must never be reported as a lock"
+    );
+}
+
+#[test]
+fn failed_gpu_clock_query_still_reports_an_observation() {
+    // Catches losing the entire clock observation on command failure plus an absent receipt.
+    let directory = tempdir().unwrap();
+    let runner = runner(include_bytes!("fixtures/telemetry/gb10.csv"));
+    let sample = collector(directory.path(), MEMINFO, runner).sample();
+    assert!(
+        sample.gpu_clock.is_some(),
+        "the Controller must receive clock failure evidence even when every query fails"
     );
 }

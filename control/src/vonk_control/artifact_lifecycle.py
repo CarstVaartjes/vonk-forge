@@ -15,7 +15,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Literal, cast
 
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import BigInteger, String, and_, any_, bindparam, func, or_, select
+from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
@@ -191,12 +192,68 @@ def lock_reference_gates(
     if not ordered:
         return ()
     bind = session.get_bind()
-    if bind.dialect.name == "postgresql":
-        lock = (
-            func.pg_try_advisory_xact_lock_shared
-            if shared
-            else func.pg_try_advisory_xact_lock
+    if shared:
+        # Nonblocking admission locks exclude deletion, never other readers.
+        # Submit the ordered keys together: a model can name hundreds of files,
+        # and two round trips per file made a draft save exceed its HTTP budget.
+        if bind.dialect.name == "postgresql":
+            keys = [
+                int.from_bytes(
+                    hashlib.sha256(
+                        f"{identity.kind}:{identity.sha256}".encode("ascii")
+                    ).digest()[:8],
+                    "big",
+                    signed=True,
+                )
+                for identity in ordered
+            ]
+            lock_key = func.unnest(
+                bindparam("reference_keys", keys, type_=ARRAY(BigInteger))
+            ).column_valued("reference_key")
+            acquired_all = _reference_sql(
+                lambda: tuple(
+                    session.scalars(
+                        select(func.pg_try_advisory_xact_lock_shared(lock_key))
+                    )
+                )
+            )
+            if not all(acquired_all):
+                raise ArtifactReferenceUnsettled(
+                    ArtifactLifecycleCode.REFERENCE_BUSY,
+                    "artifact reference ownership is changing",
+                    retryable=True,
+                )
+        by_kind: dict[ArtifactKind, list[str]] = {}
+        for identity in ordered:
+            by_kind.setdefault(identity.kind, []).append(identity.sha256)
+        predicates = []
+        for kind, digests in by_kind.items():
+            named = (
+                ArtifactLifecycleGate.artifact_sha256
+                == any_(bindparam(f"reference_{kind}", digests, type_=ARRAY(String)))
+                if bind.dialect.name == "postgresql"
+                else ArtifactLifecycleGate.artifact_sha256.in_(digests)
+            )
+            predicates.append(and_(ArtifactLifecycleGate.artifact_kind == kind, named))
+        existing = _reference_sql(
+            lambda: tuple(
+                session.scalars(
+                    select(ArtifactLifecycleGate)
+                    .where(or_(*predicates))
+                    .execution_options(populate_existing=True)
+                )
+            )
         )
+        by_identity = {
+            (row.artifact_kind, row.artifact_sha256): row for row in existing
+        }
+        return tuple(
+            by_identity[(identity.kind, identity.sha256)]
+            for identity in ordered
+            if (identity.kind, identity.sha256) in by_identity
+        )
+    if bind.dialect.name == "postgresql":
+        lock = func.pg_try_advisory_xact_lock
         for identity in ordered:
             key_bytes = hashlib.sha256(
                 f"{identity.kind}:{identity.sha256}".encode("ascii")
@@ -222,10 +279,6 @@ def lock_reference_gates(
                 populate_existing=True,
             )
         )
-        if shared:
-            if row is not None:
-                rows.append(row)
-            continue
         if row is None:
             row = ArtifactLifecycleGate(
                 artifact_kind=identity.kind,
