@@ -50,7 +50,6 @@ REQUIRED_PAYLOAD = {
     "lib/systemd/system/vonk-forge-monitor.service",
     "lib/systemd/system/vonk-forge-agent.service.d/20-package-upgrade-recovery.conf",
     "lib/systemd/system/vonk-forge-docker-firewall.service",
-    "lib/systemd/system/vonk-forge-gpu-clock-cap.service",
     "lib/systemd/system/vonk-forge-package-helper.service",
     "lib/systemd/system/vonk-forge-package-helper.socket",
     "lib/systemd/system/vonk-forge-package-rollback.service",
@@ -126,9 +125,6 @@ NORMAL_SYSTEMD_PAYLOAD = {
     ),
     "lib/systemd/system/vonk-forge-docker-firewall.service": (
         "packaging/systemd/vonk-forge-docker-firewall.service"
-    ),
-    "lib/systemd/system/vonk-forge-gpu-clock-cap.service": (
-        "packaging/systemd/vonk-forge-gpu-clock-cap.service"
     ),
     "lib/systemd/system/vonk-forge-package-helper.service": (
         "packaging/systemd/vonk-forge-package-helper.service"

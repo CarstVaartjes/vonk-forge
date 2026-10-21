@@ -93,9 +93,6 @@ class HostSettings(WireModel):
     display_manager_active: bool
     # The default boot target is graphical.target, which starts the desktop.
     graphical_default_target: bool
-    # The GPU clock ceiling unit (vonk-forge-gpu-clock-cap.service) is active
-    # this boot. None: the agent predates it or could not observe it (unknown).
-    gpu_clock_cap_active: bool | None = None
     gpu_clock_support: GpuClockSupport | None = None
 
 

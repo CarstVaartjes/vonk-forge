@@ -21,6 +21,7 @@ from ..lifecycle import Outcome, Reported, State
 from ..model_cache_contract import ModelCacheTransferArtifact
 from ..model_cache_progress import cache_phase, progress_document
 from ..models import ModelCacheOperation, ModelCacheSet
+from ..profile_read_observation import observe_storage
 from .artifacts import ArtifactSetManifest, ArtifactSpec
 from .catalog_helpers import _iso, _iso_now
 from .constants import _RETRY_BASE_SECONDS, _TRANSFER_CLAIM_SECONDS
@@ -181,6 +182,7 @@ class CheckpointsMixin:
             if row is not None:
                 row.updated_at = now
 
+    @observe_storage
     def _stored_object(self, digest: str, expected_bytes: int) -> int | None:
         """Return the stored bytes when storage holds this exact object.
 

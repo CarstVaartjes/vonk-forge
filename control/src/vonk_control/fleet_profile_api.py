@@ -229,7 +229,9 @@ def install_fleet_profile_routes(
     ) -> FleetProfilePreview:
         require_mutation(actor, "POST", "/api/profile/{number}/preview")
         try:
-            profile = service().get_number(number)
+            profile = service().definition_number(number)
+            if profile.id is None:
+                raise KeyError(number)
             return service().preview(profile.id)
         except KeyError:
             raise HTTPException(status_code=404, detail="Profile not found") from None

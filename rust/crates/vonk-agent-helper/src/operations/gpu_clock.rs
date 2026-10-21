@@ -5,12 +5,11 @@ use super::*;
 use vonk_agent_protocol::generated::{
     GpuClockApplyState, GpuClockCheckpoint, GpuClockIntent, GpuClockRange,
 };
-use vonk_agent_protocol::gpu_clock::{
-    CHECKPOINT_FILE, CSV_FORMAT, SUPPORT_QUERY, default_range, supported_range, supports,
-    valid_range,
-};
+use vonk_agent_protocol::gpu_clock::{CHECKPOINT_FILE, CSV_FORMAT, default_range, valid_range};
 
 pub(super) const NVIDIA_SMI: &str = "/usr/bin/nvidia-smi";
+pub(super) const OBSERVATION_QUERY: &str =
+    "--query-gpu=clocks.current.graphics,clocks.current.sm,clocks_event_reasons.active";
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(10);
 const RETRY_SECONDS: u64 = 60;
 const ATTEMPT_SECONDS: u64 = 10 * 60;
@@ -27,7 +26,7 @@ fn lock_arguments(range: &GpuClockRange) -> Option<[String; 2]> {
 }
 
 pub(super) fn allowed_arguments(arguments: &[String]) -> bool {
-    if arguments == [SUPPORT_QUERY, CSV_FORMAT] {
+    if arguments == [OBSERVATION_QUERY, CSV_FORMAT] {
         return true;
     }
     let [_, pair] = arguments else {
@@ -180,79 +179,113 @@ impl<R: CommandRunner> OperationExecutor<R> {
             "vonk-agent-helper: GPU clock before: applied={:?} desired={:?}",
             record.applied_range, record.desired
         );
-        let support = self.runner.run_with_timeout(
-            Path::new(NVIDIA_SMI),
-            &[SUPPORT_QUERY.to_owned(), CSV_FORMAT.to_owned()],
-            COMMAND_TIMEOUT,
-        );
-        let (support, support_cause) = match support {
-            Ok(output) if output.success => (
-                supported_range(&output.stdout),
-                "driver reported no usable positive supported-clock levels".to_owned(),
-            ),
-            Ok(output) => (None, CommandFailure::exit(&output).to_string()),
-            Err(error) => (None, error),
-        };
-        if let Some(support) = support {
-            if !supports(&support, &record.desired.range) {
-                record.state = GpuClockApplyState::Refused;
-                record.next_attempt_at = None;
-                record.detail = Some(format!(
-                    "Requested GPU range is outside hardware-supported {}-{} MHz",
-                    support.min_mhz, support.max_mhz
-                ));
-            } else {
-                let range = &record.desired.range;
-                let arguments = lock_arguments(range).ok_or(OperationError::InvalidOperation)?;
-                match self.runner.run_with_timeout(
-                    Path::new(NVIDIA_SMI),
-                    &arguments,
-                    COMMAND_TIMEOUT,
-                ) {
-                    Ok(output) if output.success => {
+        let range = &record.desired.range;
+        let arguments = lock_arguments(range).ok_or(OperationError::InvalidOperation)?;
+        let applied =
+            self.runner
+                .run_with_timeout(Path::new(NVIDIA_SMI), &arguments, COMMAND_TIMEOUT);
+        match applied {
+            Ok(output) if output.success => {
+                // GB10 does not expose supported levels or a lock getter. The
+                // successful ioctl is the receipt; live clocks corroborate it.
+                // Idle clocks alone never establish that a cap was applied.
+                match self.observe_gpu_clock(range) {
+                    Ok(evidence) if boot.is_some() => {
                         record.state = GpuClockApplyState::Applied;
                         record.applied_range = Some(range.clone());
                         record.applied_boot_id = boot;
-                        record.detail = None;
+                        record.detail = Some(evidence);
                         record.next_attempt_at = None;
                     }
-                    Ok(output) if output.exit_code == Some(4) => {
-                        record.state = GpuClockApplyState::Refused;
-                        record.next_attempt_at = None;
+                    result => {
+                        let cause = result
+                            .err()
+                            .unwrap_or_else(|| "boot identity unavailable".to_owned());
                         record.detail = Some(format!(
-                            "GPU clock permission denied: {}",
-                            CommandFailure::exit(&output)
+                            "GPU clock command succeeded but observation is unconfirmed: {cause}; retry after {} (deadline {}). Workloads continue.",
+                            now + RETRY_SECONDS,
+                            record.deadline
                         ));
-                    }
-                    Ok(output) => {
-                        record.detail = Some(format!(
-                            "GPU clock command failed: {}; retry after {} (deadline {}). Workload start proceeds.",
-                            CommandFailure::exit(&output),
-                            now + RETRY_SECONDS,
-                            record.deadline
-                        ))
-                    }
-                    Err(error) => {
-                        record.detail = Some(format!(
-                            "GPU clock command unavailable: {error}; retry after {} (deadline {}). Workload start proceeds.",
-                            now + RETRY_SECONDS,
-                            record.deadline
-                        ))
                     }
                 }
             }
-        } else {
-            record.detail = Some(format!(
-                "GPU supported clocks unavailable: {support_cause}; retry after {} (deadline {}). Workload start proceeds.",
-                now + RETRY_SECONDS,
-                record.deadline
-            ));
+            Ok(output) if output.exit_code == Some(4) => {
+                record.state = GpuClockApplyState::Refused;
+                record.next_attempt_at = None;
+                record.detail = Some(format!(
+                    "GPU clock permission denied: {}",
+                    CommandFailure::exit(&output)
+                ));
+            }
+            Ok(output) if output.exit_code == Some(2) || output.exit_code == Some(3) => {
+                record.state = GpuClockApplyState::Refused;
+                record.next_attempt_at = None;
+                record.detail = Some(format!(
+                    "GPU clock request rejected by driver: {}",
+                    CommandFailure::exit(&output)
+                ));
+            }
+            result => {
+                let cause = match result {
+                    Ok(output) => CommandFailure::exit(&output).to_string(),
+                    Err(error) => error,
+                };
+                record.detail = Some(format!(
+                    "GPU clock command failed: {cause}; retry after {} (deadline {}). Workloads continue.",
+                    now + RETRY_SECONDS,
+                    record.deadline
+                ));
+            }
         }
         eprintln!(
             "vonk-agent-helper: GPU clock after: {:?}: {:?}",
             record.state, record.detail
         );
         self.write_gpu_clock(&root, &path, &record)
+    }
+
+    fn observe_gpu_clock(&self, range: &GpuClockRange) -> Result<String, String> {
+        let output = self.runner.run_with_timeout(
+            Path::new(NVIDIA_SMI),
+            &[OBSERVATION_QUERY.to_owned(), CSV_FORMAT.to_owned()],
+            COMMAND_TIMEOUT,
+        )?;
+        if !output.success {
+            return Err(CommandFailure::exit(&output).to_string());
+        }
+        // Leave room for intent and retry metadata in the bounded checkpoint.
+        if output.stdout.len() as u64 > RECORD_BYTES / 2 {
+            return Err(format!(
+                "GPU clock observation exceeds {} bytes: {} bytes",
+                RECORD_BYTES / 2,
+                output.stdout.len()
+            ));
+        }
+        let text = std::str::from_utf8(&output.stdout).map_err(|error| error.to_string())?;
+        let fields: Vec<_> = text.trim().split(',').map(str::trim).collect();
+        let [graphics, sm, reasons] = fields.as_slice() else {
+            return Err("expected one GPU's graphics, SM and event-reason readings".to_owned());
+        };
+        let graphics = graphics
+            .parse::<u32>()
+            .map_err(|error| format!("graphics reading {graphics}: {error}"))?;
+        let sm = sm
+            .parse::<u32>()
+            .map_err(|error| format!("SM reading {sm}: {error}"))?;
+        let reasons = match reasons.strip_prefix("0x") {
+            Some(hex) => u64::from_str_radix(hex, 16),
+            None => reasons.parse(),
+        }
+        .map_err(|error| format!("event reasons {reasons}: {error}"))?;
+        if graphics > range.max_mhz || sm > range.max_mhz {
+            return Err(format!(
+                "observed graphics {graphics} / SM {sm} MHz exceeds requested ceiling {} MHz; event reasons {reasons}",
+                range.max_mhz
+            ));
+        }
+        Ok(format!(
+            "Successful helper apply; observed graphics {graphics} / SM {sm} MHz, event reasons {reasons}. Current clocks corroborate the receipt; the driver exposes no lock readback."
+        ))
     }
 
     fn write_gpu_clock(
