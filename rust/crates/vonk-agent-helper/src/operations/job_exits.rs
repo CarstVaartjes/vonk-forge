@@ -17,7 +17,6 @@ use super::*;
 use vonk_agent_protocol::generated::HostHelperResponse;
 
 const DIRECTORY: &str = "job-exits";
-const RETENTION: Duration = Duration::from_secs(24 * 60 * 60);
 const MAX_RECORD_BYTES: u64 = 256 * 1024;
 
 /// The record's name: the digest of the job's whole identity.
@@ -94,7 +93,6 @@ impl<R: CommandRunner> OperationExecutor<R> {
         if written.is_err() {
             let _ = fs::remove_file(&temporary);
         }
-        prune_job_exits(&root);
         written
     }
 
@@ -143,26 +141,6 @@ impl<R: CommandRunner> OperationExecutor<R> {
             logs: record.process_logs.filter(|_| failed).map(Box::new),
             log_error: record.diagnostic.filter(|_| failed),
         })
-    }
-}
-
-/// Remove records older than the retention. Best effort: a record that
-/// cannot be read or removed is tried again at the next write.
-fn prune_job_exits(root: &Path) {
-    let Ok(entries) = fs::read_dir(root) else {
-        return;
-    };
-    for entry in entries.flatten() {
-        let expired = entry
-            .metadata()
-            .ok()
-            .filter(fs::Metadata::is_file)
-            .and_then(|metadata| metadata.modified().ok())
-            .and_then(|modified| modified.elapsed().ok())
-            .is_some_and(|age| age > RETENTION);
-        if expired {
-            let _ = fs::remove_file(entry.path());
-        }
     }
 }
 

@@ -35,6 +35,7 @@ tempfile.workspace = true
 tar.workspace = true
 
 [dev-dependencies]
+syn = { version = "=2.0.119", features = ["full", "visit"] }
 tokio = { workspace = true, features = ["test-util"] }
 vonk-agent-helper = { path = "../vonk-agent-helper" }
 

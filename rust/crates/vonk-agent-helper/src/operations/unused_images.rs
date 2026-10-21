@@ -26,6 +26,11 @@ const IMAGE_REMOVE_TIMEOUT: Duration = Duration::from_secs(120);
 impl<R: CommandRunner> OperationExecutor<R> {
     /// One bounded pass; what it cannot remove now waits for the next one.
     pub fn sweep_unused_runtime_images(&self) {
+        self.sweep_unused_runtime_images_at(std::time::SystemTime::now());
+    }
+
+    pub(super) fn sweep_unused_runtime_images_at(&self, now: std::time::SystemTime) {
+        self.collect_helper_stores(now);
         let disk = || {
             let stat = rustix::fs::statvfs(&self.roots.agent_data).ok()?;
             stat.f_bavail.checked_mul(stat.f_frsize)

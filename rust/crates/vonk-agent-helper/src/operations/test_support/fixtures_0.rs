@@ -226,6 +226,9 @@ impl CommandRunner for PullRunner {
         };
         let words = arguments.iter().map(String::as_str).collect::<Vec<_>>();
         Ok(match words.as_slice() {
+            ["container", "ls", ..] => {
+                return Err("image fixture does not provide runtime owner inventory".to_owned());
+            }
             ["pull", .., reference] if self.pull_fails => {
                 let _ = reference;
                 missing
