@@ -425,9 +425,15 @@ class FleetProfileService:
             ),
             target_nodes,
         )
+        from ..gpu_clock import profile_gpu_clock_effects
+
+        clock_effects = profile_gpu_clock_effects(
+            session, sorted(target_nodes), resolved_assignments
+        )
         return _ProfileControlEffects(
             states=states,
             effects=FleetProfileEffects(
+                gpu_clocks=clock_effects or None,
                 runs=sorted(run_effects, key=lambda effect: effect.run_id),
                 installations=sorted(
                     installation_effects, key=lambda effect: effect.installation_id

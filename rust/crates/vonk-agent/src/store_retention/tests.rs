@@ -1055,6 +1055,7 @@ fn inventory_rotates_past_protected_prefix_and_only_judges_its_observed_batch() 
                         .filter(|id| *id == tail)
                         .collect(),
                     untracked_runs: Some(runs.iter().copied().filter(|id| *id == tail).collect()),
+                    gpu_clock_grant: None,
                     store_retention: Some(retention()),
                 }),
                 &installations,

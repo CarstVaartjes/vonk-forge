@@ -602,7 +602,19 @@ test("editing a maximum canonical profile preserves its identity and revision", 
   const user = userEvent.setup();
   const number = 2147483647;
   const revision = 2147483647;
-  const exact = { ...profile, number, revision };
+  const gpu_clock = { min_mhz: 300, max_mhz: 1800 };
+  const exact = {
+    ...profile,
+    number,
+    revision,
+    definition: {
+      ...profile.definition,
+      assignments: profile.definition.assignments?.map((assignment) => ({
+        ...assignment,
+        gpu_clock,
+      })),
+    },
+  };
   const autosaveProfile = vi.fn(async () => exact);
   const api = apiFor({
     profiles: vi.fn(async () => ({ generated_at: "2026-09-10T00:00:00Z", profiles: [exact] })),
@@ -616,7 +628,11 @@ test("editing a maximum canonical profile preserves its identity and revision", 
   await user.click(screen.getByRole("button", { name: "Save profile" }));
   expect(autosaveProfile).toHaveBeenCalledWith(
     number,
-    expect.objectContaining({ expected_revision: revision, name: "Exact saved" }),
+    expect.objectContaining({
+      expected_revision: revision,
+      name: "Exact saved",
+      assignments: [expect.objectContaining({ gpu_clock })],
+    }),
   );
 });
 

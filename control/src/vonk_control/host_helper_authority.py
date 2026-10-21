@@ -27,6 +27,7 @@ from vonk_agent_protocol.contracts import AgentUpgradePayload
 from vonk_agent_protocol.host_helper import (
     HOST_HELPER_AUTHORITY,
     MAX_HOST_HELPER_GRANT_SECONDS,
+    ApplyGpuClockOperation,
     ConfirmPackageActivationOperation,
     ContainerRuntimeAction,
     ExecuteContainerRuntimeRequestOperation,
@@ -207,6 +208,7 @@ class HostHelperGrantIssuer:
         if not isinstance(
             operation,
             (
+                ApplyGpuClockOperation,
                 ExecuteContainerRuntimeRequestOperation,
                 InstallVonkDebOperation,
                 ConfirmPackageActivationOperation,
@@ -315,6 +317,17 @@ class HostRuntimeAuthorityService:
         self._sessions = sessions
         self._issuer = issuer
         self._clock = clock or (lambda: datetime.now(UTC))
+
+    def gpu_clock_grant(self, node_id: str) -> SignedHostHelperGrant:
+        from .gpu_clock import selected_gpu_clock
+
+        with self._sessions() as session:
+            desired = selected_gpu_clock(session, node_id)
+        return self._issuer.issue_grant(
+            node_id=node_id,
+            operation=ApplyGpuClockOperation(desired=desired),
+            expires_in_seconds=60,
+        )
 
     @property
     def public_key_document(self) -> dict[str, object]:

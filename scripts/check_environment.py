@@ -13,6 +13,8 @@ import tomllib
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
+from protocol_wheel import protocol_wheel_name
+
 PREPARATION_TIMEOUT = 600
 
 
@@ -96,11 +98,11 @@ def ensure_control(root: Path, environment: Path) -> None:
         package = next(
             item for item in packages if item["name"] == "vonk-agent-protocol"
         )
-        wheel = root / "control" / package["source"]["path"]
+        wheel = root / "inventory/wheels" / protocol_wheel_name(root)
         if not wheel.is_file():
             return False
         digest = "sha256:" + hashlib.sha256(wheel.read_bytes()).hexdigest()
-        if not any(pin["hash"] == digest for pin in package["wheels"]):
+        if not any(pin.get("hash") == digest for pin in package["wheels"]):
             return False
         return (
             subprocess.run(

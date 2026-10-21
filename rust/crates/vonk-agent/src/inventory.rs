@@ -538,6 +538,18 @@ fn host_settings<R: ProcessRunner>(
         graphical_default_target: default_target == "graphical.target",
         // Unknown on its own: an unreadable cap never hides the desktop evidence.
         gpu_clock_cap_active: is_active("vonk-forge-gpu-clock-cap.service"),
+        gpu_clock_support: runner
+            .run(
+                Program::NvidiaSmi,
+                &[
+                    vonk_agent_protocol::gpu_clock::SUPPORT_QUERY.to_owned(),
+                    vonk_agent_protocol::gpu_clock::CSV_FORMAT.to_owned(),
+                ],
+                Duration::from_secs(10),
+            )
+            .ok()
+            .filter(|output| output.success)
+            .and_then(|output| vonk_agent_protocol::gpu_clock::supported_range(&output.stdout)),
     })
 }
 

@@ -279,6 +279,7 @@ CASES: list[
         _SAMPLE,
         {
             "gpu_temperature_c": _SAMPLE | {"gpu_temperature_c": 900},
+            "gpu_clock": _SAMPLE | {"gpu_clock": {"graphics_mhz": -1}},
             "cpu_frequency_avg_mhz": _SAMPLE
             | {"cpu_frequency_avg_mhz": 1000, "cpu_frequency_min_mhz": 2000},
         },

@@ -15,7 +15,7 @@ if (($# != 0)); then
     exit 2
 fi
 
-wheel_name=vonk_agent_protocol-4.1.0-py3-none-any.whl
+wheel_name="$(python3 "$(dirname "${BASH_SOURCE[0]}")/protocol-wheel-name" --root "$root")"
 wheel_path="$root/inventory/wheels/$wheel_name"
 lock_path="$root/control/uv.lock"
 
@@ -40,7 +40,7 @@ wheels = packages[0].get("wheels", [])
 expected = [
     wheel["hash"].removeprefix("sha256:")
     for wheel in wheels
-    if wheel.get("filename") == wheel_path.name
+    if wheel.get("path") == wheel_path.name
 ]
 if len(expected) != 1:
     raise SystemExit(

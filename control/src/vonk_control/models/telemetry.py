@@ -28,9 +28,12 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column
 from vonk_agent_protocol import ModelFileState, machine_check
+from vonk_agent_protocol.gpu_clock import GpuClockObservation
 from vonk_agent_protocol.inventory import MemoryPool
 
+from ..lifecycle.evidence import Residue
 from ..model_primitives import Base, _lower_hex, _Utf8ByteLength, _uuid_shape
+from ..stored_json import ContractJSON
 
 
 class ModelStoreObjectDocument(TypedDict):
@@ -176,6 +179,12 @@ class NodeTelemetrySample(Base):
     gpu_memory_total_bytes: Mapped[int | None] = mapped_column(BigInteger)
     gpu_memory_free_bytes: Mapped[int | None] = mapped_column(BigInteger)
     gpu_unavailable_reason: Mapped[str | None] = mapped_column(String(64))
+    gpu_clock: Mapped[GpuClockObservation | Residue | None] = mapped_column(
+        ContractJSON[GpuClockObservation](
+            "node_telemetry_samples", "gpu_clock", none_as_null=True
+        ),
+        nullable=True,
+    )
     gpu_temperature_c: Mapped[int | None] = mapped_column(Integer)
     cpu_frequency_avg_mhz: Mapped[int | None] = mapped_column(Integer)
     cpu_frequency_min_mhz: Mapped[int | None] = mapped_column(Integer)

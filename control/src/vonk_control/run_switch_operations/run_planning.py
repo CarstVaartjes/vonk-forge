@@ -526,6 +526,14 @@ class RunPlanningMixin:
                         is None
                     ),
                 )
+            if request.gpu_clock is not None:
+                from ..gpu_clock_validation import assess_gpu_clock
+
+                clock_blockers, clock_warnings = assess_gpu_clock(
+                    session, node_ids, request.gpu_clock
+                )
+                blockers.extend(clock_blockers)
+                warnings.extend(clock_warnings)
             preparation = service._preparation(
                 revision=revision,
                 group=group,
@@ -549,6 +557,7 @@ class RunPlanningMixin:
                     "alias": request.alias,
                     "run_id": None,
                     "spark_group": group,
+                    "gpu_clock": request.gpu_clock,
                     "mapping": mapping_selection,
                     "installation_id": installation.id
                     if installation is not None

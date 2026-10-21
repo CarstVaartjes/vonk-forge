@@ -8,6 +8,8 @@ from pathlib import Path
 
 import pytest
 
+from scripts.protocol_wheel import protocol_wheel_name
+
 ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -123,7 +125,7 @@ def test_deleted_rust_file_selects_rust_family() -> None:
         "Cargo.lock",
         "control/src/vonk_control/harnesses/canonical_metadata.py",
         "src/cluster_profiles/compiler.py",
-        "inventory/wheels/vonk_agent_protocol-4.1.0-py3-none-any.whl",
+        f"inventory/wheels/{protocol_wheel_name(ROOT)}",
     ],
 )
 def test_launch_contract_inputs_select_controller_and_wire_checks(path: str) -> None:

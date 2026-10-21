@@ -12,6 +12,8 @@ import sys
 import tomllib
 from pathlib import Path
 
+from protocol_wheel import protocol_wheel_name
+
 # Images are pinned by explicit version tag, not by digest. A tag with a
 # version is reviewable and a patch release arrives through a dependency bump;
 # a digest is more precise but requires hand-editing a value the tooling owns
@@ -23,7 +25,6 @@ from pathlib import Path
 # digest reference fails this check.
 VERSIONED_IMAGE = re.compile(r"^[^\s@]+:[^\s@]+$")
 FLOATING_TAGS = frozenset({"latest", "main", "edge", "stable", "master", "dev"})
-PROTOCOL_WHEEL = "inventory/wheels/vonk_agent_protocol-4.1.0-py3-none-any.whl"
 PUBLIC_CONTRACT_LOCK = "control/packaging/public-contracts.lock"
 PUBLIC_CONTRACT_WHEEL = (
     "inventory/wheels/vonk_forge_public_contracts-2.3.0-py3-none-any.whl"
@@ -145,10 +146,7 @@ def protocol_version(lock: bytes) -> str:
         for package in uv_lock_packages(lock)
         if package["name"] == "vonk-agent-protocol"
     ]
-    expected_source = (
-        'source = { path = "../inventory/wheels/'
-        'vonk_agent_protocol-4.1.0-py3-none-any.whl" }'
-    )
+    expected_source = 'source = { registry = "../inventory/wheels" }'
     if len(packages) != 1 or expected_source not in packages[0]["record"].splitlines():
         raise ValueError("control and agent must resolve the verified protocol wheel")
     return packages[0]["version"]
@@ -160,6 +158,7 @@ def spdx(
     packages: list[tuple[str, str]],
     *,
     protocol_wheel_sha256: str | None = None,
+    protocol_wheel: str | None = None,
 ) -> bytes:
     lock_digest = digest(lock)
     described = []
@@ -209,7 +208,7 @@ def spdx(
         document["files"] = [
             {
                 "SPDXID": wheel_id,
-                "fileName": PROTOCOL_WHEEL,
+                "fileName": protocol_wheel,
                 "checksums": [
                     {"algorithm": "SHA256", "checksumValue": protocol_wheel_sha256}
                 ],
@@ -246,13 +245,8 @@ def expected(root: Path) -> tuple[dict[str, bytes], bytes | None, dict[str, obje
         raise ValueError("control must resolve the exact protocol version")
     verify_public_contract_lock(root, control_lock)
     public_contract_lock = tomllib.loads((root / PUBLIC_CONTRACT_LOCK).read_text())
-    # The protocol wheel is pinned by version, not by rebuilding it and
-    # comparing a content hash: a source edit (even formatting) must not
-    # invalidate a lock that the lockfile tool owns.
-    expected_wheel = f"vonk_agent_protocol-{version}-py3-none-any.whl"
-    if Path(PROTOCOL_WHEEL).name != expected_wheel:
-        raise ValueError("protocol wheel filename must match its version")
-    wheel_path = root / PROTOCOL_WHEEL
+    protocol_wheel = f"inventory/wheels/{protocol_wheel_name(root)}"
+    wheel_path = root / protocol_wheel
     wheel = wheel_path.read_bytes() if wheel_path.is_file() else None
     wheel_sha256 = digest(wheel) if wheel is not None else None
     sboms = {
@@ -261,6 +255,7 @@ def expected(root: Path) -> tuple[dict[str, bytes], bytes | None, dict[str, obje
             control_lock,
             packages_python(control_lock),
             protocol_wheel_sha256=wheel_sha256,
+            protocol_wheel=protocol_wheel,
         ),
         "inventory/sbom/agent-rust.spdx.json": spdx(
             "agent-rust", cargo_lock, packages_cargo(cargo_lock)
@@ -270,6 +265,7 @@ def expected(root: Path) -> tuple[dict[str, bytes], bytes | None, dict[str, obje
             protocol_lock,
             packages_python(protocol_lock),
             protocol_wheel_sha256=wheel_sha256,
+            protocol_wheel=protocol_wheel,
         ),
         "inventory/sbom/control-web.spdx.json": spdx(
             "control-web", web_lock, packages_web(web_lock)
@@ -425,7 +421,7 @@ def image_errors(root: Path) -> list[str]:
         errors.append("control API and worker image targets are not isolated")
     if (
         "COPY control/pyproject.toml ./" not in dockerfile
-        or f"COPY {PROTOCOL_WHEEL} /wheels/" not in dockerfile
+        or "COPY inventory/wheels/vonk_agent_protocol-*.whl /wheels/" not in dockerfile
         or not docker_installs_protocol_wheel(dockerfile)
     ):
         errors.append(
@@ -446,7 +442,7 @@ def image_errors(root: Path) -> list[str]:
 def docker_installs_protocol_wheel(dockerfile: str) -> bool:
     """Require the copied protocol wheel in the control pip-install RUN command."""
     logical_lines = re.sub(r"\\\r?\n\s*", " ", dockerfile).splitlines()
-    wheel = f"/wheels/{Path(PROTOCOL_WHEEL).name}"
+    wheel = "/wheels/$(scripts/protocol-wheel-name)"
     for line in logical_lines:
         stripped = line.strip()
         if not stripped.startswith("RUN "):

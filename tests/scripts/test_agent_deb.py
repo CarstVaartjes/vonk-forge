@@ -2831,13 +2831,30 @@ def test_builder_produces_reproducible_verified_arm64_deb(tmp_path: Path) -> Non
     assert "RuntimeDirectoryPreserve=restart" in helper_unit.splitlines()
     assert "RuntimeDirectory=vonk-forge-package-helper" not in helper_unit.splitlines()
     assert (
-        "CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER CAP_FSETID "
-        "CAP_KILL CAP_NET_ADMIN CAP_SETGID CAP_SETUID"
-    ) in helper_unit.splitlines()
-    assert (
         "ReadWritePaths=-/sys/fs/cgroup/system.slice -/sys/fs/cgroup/docker"
         in helper_unit.splitlines()
     )
+    # Reject broader capability sets, including a second additive directive
+    # that leaves the expected line intact (the former substring check missed it).
+    helper_path = payload / "lib/systemd/system/vonk-forge-package-helper.service"
+    for broadened in (
+        helper_unit.replace(
+            "CAP_SYS_ADMIN CAP_CHOWN", "CAP_SYS_PTRACE CAP_SYS_ADMIN CAP_CHOWN"
+        ),
+        helper_unit.replace(
+            "AmbientCapabilities=",
+            "CapabilityBoundingSet=CAP_SYS_PTRACE\nAmbientCapabilities=",
+        ),
+        helper_unit.replace(
+            "AmbientCapabilities=", "CapabilityBoundingSet=\nAmbientCapabilities="
+        ),
+    ):
+        helper_path.write_text(broadened)
+        with pytest.raises(
+            VERIFY_MODULE.VerificationError, match="helper capability boundary"
+        ):
+            VERIFY_MODULE._verify_payload(payload, control, "arm64", "0.1.1")
+    helper_path.write_text(helper_unit)
     assert "AF_INET" not in helper_unit
     assert (
         "ReadWritePaths=/usr/share/keyrings /usr/share/doc/vonk-forge-agent"

@@ -3,11 +3,16 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from enum import Enum
 
 from .. import cli_states
-from ..cli_states_generated import ENDPOINT_UNAVAILABLE
+from ..cli_states_generated import ENDPOINT_UNAVAILABLE, UNKNOWN
 from ..cli_telemetry_render import gpu_readings
 from ..cli_telemetry_render import size as _size
+from ..generated_control.models.gpu_clock_observation import GpuClockObservation
+from ..generated_control.models.gpu_clock_policy import GpuClockPolicy
+from ..generated_control.models.gpu_clock_range import GpuClockRange
+from ..generated_control.types import Unset
 from .common import (
     _bytes,
     _field,
@@ -47,6 +52,7 @@ def _node(node: Mapping[str, object], *, detail: bool) -> None:
     if telemetry.get("freshness") == "live" and type(temperature) is int:
         _field("Temperature", f"{temperature} °C")
     _field("CPU", _cpu_clock(node))
+    _field("GPU clock", _gpu_clock(node))
     _field("NAS route", _nas_route(inventory))
     _field("Wired ports", _wired_ports(inventory))
     loaded = _records(node, "loaded")
@@ -107,6 +113,44 @@ def _gpu(node: Mapping[str, object]) -> str:
         sample.get("gpu_temperature_c"),
         sample.get("gpu_unavailable_reason"),
     )
+
+
+def _gpu_clock(node: object) -> str:
+    document = _object(node, "Fleet node")
+    telemetry = _optional(document.get("telemetry"), "fleet telemetry evidence")
+    sample = _optional(telemetry.get("sample"), "sample")
+    clock = GpuClockObservation.from_dict(
+        dict(_optional(sample.get("gpu_clock"), "GPU clock"))
+    )
+    desired_document = _optional(document.get("gpu_clock_desired"), "GPU desired range")
+    desired = (
+        GpuClockRange.from_dict(dict(desired_document)) if desired_document else None
+    )
+    policy_document = _optional(document.get("gpu_clock_policy"), "GPU clock policy")
+    policy = (
+        GpuClockPolicy.from_dict(dict(policy_document)) if policy_document else None
+    )
+    applied = (
+        clock.locked_range if isinstance(clock.locked_range, GpuClockRange) else None
+    )
+
+    def clock_range(value: GpuClockRange | None) -> str:
+        return f"{value.min_mhz}–{value.max_mhz} MHz" if value is not None else UNKNOWN
+
+    return (
+        f"graphics {_clock_reading(clock.graphics_mhz)} / SM {_clock_reading(clock.sm_mhz)} MHz; "
+        f"last applied {clock_range(applied)} (helper receipt); desired {clock_range(desired)}; "
+        f"reported max graphics {_clock_reading(clock.max_graphics_mhz)} / SM {_clock_reading(clock.max_sm_mhz)} MHz; "
+        f"policy limit {_clock_reading(policy.hard_max_mhz if policy is not None else None)} MHz; throttle bits {_clock_reading(clock.throttle_reasons)}; "
+        f"{_clock_reading(clock.apply_state)}; next {_clock_reading(clock.next_attempt_at)}; deadline {_clock_reading(clock.deadline)}; "
+        f"{_clock_reading(clock.detail)}"
+    )
+
+
+def _clock_reading(value: object) -> str:
+    if value is None or isinstance(value, Unset):
+        return UNKNOWN
+    return _text(value.value if isinstance(value, Enum) else value)
 
 
 def _cpu_clock(node: Mapping[str, object]) -> str:

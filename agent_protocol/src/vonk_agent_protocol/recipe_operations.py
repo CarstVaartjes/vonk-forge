@@ -13,6 +13,7 @@ from .contracts import (
     AgentProtocolError,
     canonical_message,
 )
+from .gpu_clock import GpuClockIntent
 from .host_helper import RecipeReconciliationIdentity
 from .wire_model import MAX_RUN_GENERATION, WireModel
 
@@ -56,6 +57,7 @@ class RecipeStartPayload(_StrictPayload):
     mapping_id: CanonicalUuid
     plan_digest: Digest
     compiled_execution_plan: CompiledExecutionPlan
+    gpu_clock: GpuClockIntent | None = None
     phase: Literal["rank-launch", "collective-readiness"] | None = None
     start_deadline: str | None = Field(
         default=None, json_schema_extra={"format": "date-time"}

@@ -49,6 +49,7 @@ type AssignmentDraft = {
   desiredState: AssignmentInput["desired_state"];
   sparkIds: string[];
   optionChoices: OptionChoices;
+  gpuClock?: AssignmentInput["gpu_clock"];
 };
 type ProfileDraft = {
   number?: FleetProfileNumber;
@@ -84,6 +85,7 @@ function profileAssignments(profile: FleetProfile): AssignmentDraft[] {
     desiredState: assignment.desired_state,
     sparkIds: [...assignment.spark_ids].sort(),
     optionChoices: { ...(assignment.option_choices ?? {}) },
+    gpuClock: assignment.gpu_clock,
   }));
 }
 
@@ -184,6 +186,7 @@ function inputFromDraft(
       assignment_name: assignment.assignmentName.trim() || undefined,
       model_variant: assignment.modelVariant.trim() || undefined,
       desired_state: assignment.desiredState,
+      ...(assignment.gpuClock ? { gpu_clock: assignment.gpuClock } : {}),
       // Every option the recipe declares is sent explicitly, defaults included.
       option_choices: optionsBySelector[assignment.recipeSelector.trim()]
         ? effectiveChoices(
@@ -365,6 +368,16 @@ function ProfileReview({ preview }: { preview: FleetProfilePreview }) {
           {reason.detail}
         </p>
       ))}
+      {(preview.effects.gpu_clocks ?? []).map((effect) => (
+        <p key={effect.node_id}>
+          GPU range on {effect.node_id}: {formatWire(effect.desired.min_mhz)}–
+          {formatWire(effect.desired.max_mhz)} MHz
+          {effect.previous_desired
+            ? ` (previous desired ${formatWire(effect.previous_desired.min_mhz)}–${formatWire(effect.previous_desired.max_mhz)} MHz)`
+            : " (previous desired unknown)"}
+          . Workloads continue if enforcement waits.
+        </p>
+      ))}
       {(preview.effects.adopted ?? []).map((effect) => (
         <p key={effect.application_id} className="library-profile-plain-note">
           Existing work on {effect.node_ids.length}{" "}
@@ -380,7 +393,11 @@ function ProfileReview({ preview }: { preview: FleetProfilePreview }) {
       ) : (preview.effects.adopted ?? []).length > 0 ? (
         <p>The load completes when continuing work finishes.</p>
       ) : (
-        <p>Nothing changes: every Spark already matches this profile.</p>
+        <p>
+          {preview.effects.gpu_clocks?.length
+            ? "Every workload already matches this profile."
+            : "Nothing changes: every Spark already matches this profile."}
+        </p>
       )}
       {counts.length > 0 && <p className="library-profile-review-summary">{counts.join(" · ")}</p>}
       <details>
@@ -1056,6 +1073,12 @@ export function LibraryProfilesView({
                       <option value="installed">Installed</option>
                     </select>
                   </label>
+                  {assignment.gpuClock && (
+                    <p>
+                      GPU range {formatWire(assignment.gpuClock.min_mhz)}–
+                      {formatWire(assignment.gpuClock.max_mhz)} MHz
+                    </p>
+                  )}
                   <RecipeOptionSelects
                     idPrefix={`option-${assignment.key}`}
                     options={optionsBySelector[assignment.recipeSelector.trim()] ?? []}

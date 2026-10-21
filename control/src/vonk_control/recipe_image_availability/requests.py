@@ -649,6 +649,7 @@ def _start_request_once(
                     for archive in current_archives
                 ),
                 now=self._clock(),
+                shared=True,
             )
             payload = payload.model_copy(
                 update={"removal_archives": list(current_archives)}

@@ -804,10 +804,18 @@ def _verify_payload(
         raise VerificationError("helper cannot inspect host firewall addresses")
     if "RestrictAddressFamilies=AF_UNIX AF_NETLINK" not in helper.splitlines():
         raise VerificationError("helper address-family boundary is invalid")
-    if (
-        "CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER CAP_FSETID "
-        "CAP_KILL CAP_NET_ADMIN CAP_SETGID CAP_SETUID" not in helper.splitlines()
-    ):
+    # NVML's clock ioctl requires CAP_SYS_ADMIN. Keep the exact set explicit;
+    # a second directive can add capabilities even when the expected line exists.
+    if [
+        line.strip()
+        for line in helper.splitlines()
+        if line.strip().startswith("CapabilityBoundingSet=")
+    ] != [
+        (
+            "CapabilityBoundingSet=CAP_SYS_ADMIN CAP_CHOWN CAP_DAC_OVERRIDE "
+            "CAP_FOWNER CAP_FSETID CAP_KILL CAP_NET_ADMIN CAP_SETGID CAP_SETUID"
+        )
+    ]:
         raise VerificationError("helper capability boundary is invalid")
     for boundary in (
         "Wants=docker.service",

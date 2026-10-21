@@ -1,5 +1,13 @@
 import { execFileSync, spawnSync } from "node:child_process";
-import { copyFileSync, readFileSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  copyFileSync,
+  readFileSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { expect, test } from "vitest";
@@ -17,6 +25,7 @@ test("generated-only commit checks skip formatting and still reject invalid type
       "check-staged-code",
       "check-staged-python",
       "check_environment.py",
+      "protocol_wheel.py",
       "hook_words_generated.py",
     ]) {
       copyFileSync(join(workspace, "scripts", script), join(root, "scripts", script));
@@ -53,7 +62,7 @@ test("generated-only commit checks skip formatting and still reject invalid type
     });
     const validBytes = readFileSync(generated);
     const valid = check();
-    expect(valid.status).toBe(0);
+    expect(valid.status, valid.stdout + valid.stderr).toBe(0);
     expect(readFileSync(generated)).toEqual(validBytes);
 
     writeFileSync(generated, "export type CurrentWire = number;\n");
@@ -65,7 +74,10 @@ test("generated-only commit checks skip formatting and still reject invalid type
     expect(invalid.status).not.toBe(0);
     expect(readFileSync(generated, "utf8")).toBe("export type CurrentWire = number;\n");
     writeFileSync(generated, "export type CurrentWire = string;\n");
-    execFileSync("git", ["add", "control/web/src/api/generated.d.ts"], {cwd: root, timeout: 5000});
+    execFileSync("git", ["add", "control/web/src/api/generated.d.ts"], {
+      cwd: root,
+      timeout: 5000,
+    });
     expect(check().status).toBe(0);
   } finally {
     rmSync(root, { recursive: true, force: true });

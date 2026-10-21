@@ -14,6 +14,7 @@ from vonk_agent_protocol import (
     DesiredAssignmentState,
     ProfileReasonCode,
 )
+from vonk_agent_protocol.gpu_clock import GpuClockRange, default_gpu_clock
 
 from ..integer_domains import MAX_DATABASE_INTEGER
 from ..model_cache_contract import CachedResourceEstimate
@@ -72,6 +73,9 @@ class FleetProfileAssignmentInput(StrictModel):
     preview/load, so incomplete distributed drafts can be saved.
     """
 
+    gpu_clock: GpuClockRange | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     recipe_selector: RecipeSelector
     spark_ids: list[NodeId] = Field(min_length=1, max_length=32)
     assignment_name: Alias | None = None
@@ -96,6 +100,9 @@ class FleetProfileAssignmentInput(StrictModel):
 class StoredFleetProfileAssignment(StrictModel):
     """Resolved assignment retained in an immutable execution snapshot."""
 
+    gpu_clock: GpuClockRange | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     id: UuidId
     recipe_revision_id: UuidId
     topology_name: Annotated[str, StringConstraints(min_length=1, max_length=64)]
@@ -174,6 +181,9 @@ class FleetNodeView(StrictModel):
 class FleetProfileAssignmentView(StrictModel):
     """Canonical read projection of one logical profile assignment."""
 
+    gpu_clock: GpuClockRange | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     selector: Alias
     display_name: Name
     recipe_selector: RecipeSelector
@@ -214,6 +224,15 @@ class FleetProfileDefinition(StrictModel):
 
     @model_validator(mode="after")
     def validate_profile(self) -> FleetProfileDefinition:
+        clocks: dict[str, GpuClockRange] = {}
+        for assignment in self.assignments:
+            effective = assignment.gpu_clock or default_gpu_clock()
+            for spark in assignment.spark_ids:
+                if spark in clocks and clocks[spark] != effective:
+                    raise ValueError(
+                        f"Spark {spark} has conflicting GPU clock ranges across assignments"
+                    )
+                clocks[spark] = effective
         identities = [
             (
                 assignment.recipe_selector,

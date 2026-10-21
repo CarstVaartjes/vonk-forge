@@ -146,6 +146,7 @@ def test_configure_changes_only_explicit_fields(capsys):
 
 def test_export_and_import_roundtrip_without_loading(tmp_path: Path, capsys):
     client = ProfileClient()
+    client.definition["assignments"][0]["gpu_clock"] = {"min_mhz": 300, "max_mhz": 1800}
     destination = tmp_path / "profile.json"
     assert (
         cli.main(
@@ -474,3 +475,72 @@ def test_failed_export_removes_only_its_partial_file(tmp_path, monkeypatch):
     monkeypatch.undo()
     write_private_document(destination, {"name": "New"})
     assert read_json_document(str(destination)) == {"name": "New"}
+
+
+def test_configure_gpu_clock_then_clear_preserves_other_assignment_fields(capsys):
+    """Catches metadata-only configure silently ignoring the assignment setting."""
+    client = ProfileClient()
+    assert (
+        cli.main(
+            (
+                "--profile",
+                "2",
+                "profile",
+                "configure",
+                "--assignment",
+                "coding",
+                "--gpu-clock",
+                "300,1800",
+                "--json",
+            ),
+            control_client=client,
+        )
+        == 0
+    )
+    assert client.saved is not None
+    assert client.saved["assignments"][0] == {
+        **client.definition["assignments"][0],
+        "gpu_clock": {"min_mhz": 300, "max_mhz": 1800},
+    }
+    client.definition = {
+        key: value for key, value in client.saved.items() if key != "expected_revision"
+    }
+    assert (
+        cli.main(
+            (
+                "--profile",
+                "2",
+                "profile",
+                "configure",
+                "--assignment",
+                "coding",
+                "--clear-gpu-clock",
+                "--json",
+            ),
+            control_client=client,
+        )
+        == 0
+    )
+    assert client.saved is not None
+    assert "gpu_clock" not in client.saved["assignments"][0]
+
+
+def test_gpu_clock_above_hardware_policy_is_refused_with_owner_safety_detail(capsys):
+    client = ProfileClient()
+    assert (
+        cli.main(
+            (
+                "--profile",
+                "2",
+                "profile",
+                "configure",
+                "--gpu-clock",
+                "300,2301",
+                "--json",
+            ),
+            control_client=client,
+        )
+        != 0
+    )
+    assert client.saved is None
+    assert "hardware-safety edge" in capsys.readouterr().out
