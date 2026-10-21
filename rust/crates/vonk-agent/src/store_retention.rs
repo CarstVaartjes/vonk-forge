@@ -115,6 +115,7 @@ pub const STORES: &[Store] = &[
     Store(".state-db-reserve", Bookkeeping, "the agent journal"),
     Store("preflight-completion/", Bookkeeping, "one bounded fence-bound completed preflight receipt"),
     Store("runtime-preflight-cache.json", Bookkeeping, "the host fingerprint"),
+    Store("gpu-clock-observation.json", Bookkeeping, "the helper's latest GPU clock observation"),
     Store("registry-auth.json", Bookkeeping, "the base-image registry credential"),
     Store(".config/", Bookkeeping, "the rootless Podman configuration"),
     Store(".machine-evidence", Claim, "the package step publishing machine-evidence"),
