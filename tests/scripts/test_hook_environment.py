@@ -29,6 +29,9 @@ def clone(tmp_path: Path) -> Path:
         "nas_setup/hatch_build.py",
     ):
         (tmp_path / name).write_text("")
+    (tmp_path / "agent_protocol/pyproject.toml").write_bytes(
+        (ROOT / "agent_protocol/pyproject.toml").read_bytes()
+    )
     (tmp_path / "control/uv.lock").write_text("package = []\n")
     (tmp_path / "example.py").touch()
     return tmp_path
@@ -83,12 +86,12 @@ def test_fresh_hook_builds_then_syncs_instead_of_refusing(
 )
 def test_stale_control_inputs_trigger_preparation(tmp_path, monkeypatch, fault):
     root = clone(tmp_path)
-    wheel = root / "inventory/wheels/protocol.whl"
+    wheel = root / "inventory/wheels" / environment.protocol_wheel_name(root)
     wheel.parent.mkdir(parents=True)
     wheel.write_bytes(b"wheel")
     digest = environment.hashlib.sha256(wheel.read_bytes()).hexdigest()
     (root / "control/uv.lock").write_text(
-        f'[[package]]\nname = "vonk-agent-protocol"\nsource = {{path = "../inventory/wheels/protocol.whl"}}\nwheels = [{{hash = "sha256:{digest}"}}]\n'
+        f'[[package]]\nname = "vonk-agent-protocol"\nsource = {{registry = "../inventory/wheels"}}\nwheels = [{{hash = "sha256:{digest}"}}]\n'
     )
     venv = root / "control/.venv"
     calls = []
@@ -265,9 +268,11 @@ def test_protocol_pin_refresh_builds_missing_wheel(tmp_path, monkeypatch):
     loader.exec_module(module)
     root = clone(tmp_path)
     monkeypatch.setattr(module, "ROOT", root)
-    wheel = root / "inventory/wheels/protocol.whl"
+    wheel = root / "inventory/wheels" / environment.protocol_wheel_name(root)
     (root / "control/uv.lock").write_text(
-        '[[package]]\nname = "vonk-agent-protocol"\nsource = {path = "../inventory/wheels/protocol.whl"}\nwheels = [{filename = "protocol.whl", hash = "sha256:old"}]\n'
+        '[[package]]\nname = "vonk-agent-protocol"\n'
+        'source = {registry = "../inventory/wheels"}\nwheels = [\n'
+        f'    {{ path = "{wheel.name}", hash = "sha256:old" }},\n]\n'
     )
     calls = []
 

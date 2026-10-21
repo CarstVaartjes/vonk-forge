@@ -9,6 +9,8 @@ from pathlib import Path
 
 import pytest
 
+from scripts.protocol_wheel import protocol_wheel_name
+
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts/verify-supply-chain"
 INPUTS = (
@@ -116,7 +118,7 @@ def test_local_verification_needs_no_generated_files_or_mutation(
     assert _result(result)["ok"] is True
     assert not (repository / "inventory/sbom").exists()
     assert not (
-        repository / "inventory/wheels/vonk_agent_protocol-4.2.0-py3-none-any.whl"
+        repository / "inventory/wheels" / protocol_wheel_name(repository)
     ).exists()
 
 
@@ -220,8 +222,9 @@ def test_image_lock_rejects_floating_build_bases(tmp_path: Path, name: str) -> N
 def test_verifier_rejects_protocol_version_drift(tmp_path: Path) -> None:
     repository = _copy(tmp_path)
     project = repository / "agent_protocol/pyproject.toml"
+    version = tomllib.loads(project.read_text())["project"]["version"]
     project.write_text(
-        project.read_text().replace('version = "4.2.0"', 'version = "4.2.1"', 1)
+        project.read_text().replace(f'version = "{version}"', 'version = "9.8.7"', 1)
     )
 
     result = _run(repository)
@@ -248,7 +251,7 @@ def test_malformed_runtime_image_lock_values_fail_closed(
 
 def test_generated_protocol_spdx_binds_built_wheel_checksum(tmp_path: Path) -> None:
     repository = _copy(tmp_path)
-    wheel = repository / "inventory/wheels/vonk_agent_protocol-4.2.0-py3-none-any.whl"
+    wheel = repository / "inventory/wheels" / protocol_wheel_name(repository)
     wheel.parent.mkdir(parents=True, exist_ok=True)
     wheel.write_bytes(b"built wheel bytes")
     output = tmp_path / "evidence"
@@ -272,7 +275,7 @@ def test_dockerfile_must_copy_and_install_the_protocol_wheel(tmp_path: Path) -> 
     source = dockerfile.read_text()
     dockerfile.write_text(
         source.replace(
-            "/wheels/vonk_agent_protocol-4.2.0-py3-none-any.whl",
+            "/wheels/$(scripts/protocol-wheel-name)",
             "/wheels/missing.whl",
         )
     )
@@ -281,3 +284,35 @@ def test_dockerfile_must_copy_and_install_the_protocol_wheel(tmp_path: Path) -> 
 
     assert result.returncode != 0
     assert "standalone protocol wheel" in " ".join(_errors(result))
+
+
+def test_protocol_version_bump_reaches_wheel_evidence_without_consumer_edits(
+    tmp_path: Path,
+) -> None:
+    repository = _copy(tmp_path)
+    project = repository / "agent_protocol/pyproject.toml"
+    version = tomllib.loads(project.read_text())["project"]["version"]
+    old_name = protocol_wheel_name(repository)
+    project.write_text(
+        project.read_text().replace(f'version = "{version}"', 'version = "9.8.7"', 1)
+    )
+    new_name = protocol_wheel_name(repository)
+    for relative in ("control/uv.lock", "agent_protocol/uv.lock"):
+        lock = repository / relative
+        lock.write_text(
+            lock.read_text()
+            .replace(
+                f'name = "vonk-agent-protocol"\nversion = "{version}"',
+                'name = "vonk-agent-protocol"\nversion = "9.8.7"',
+            )
+            .replace(old_name, new_name)
+        )
+    wheel = repository / "inventory/wheels" / new_name
+    wheel.write_bytes(b"new protocol wheel")
+    output = tmp_path / "evidence"
+
+    result = _run(repository, "--output-dir", str(output))
+
+    assert result.returncode == 0, result.stdout
+    document = json.loads((output / "agent-protocol.spdx.json").read_bytes())
+    assert document["files"][0]["fileName"] == f"inventory/wheels/{new_name}"
