@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Annotated
 from pydantic import Field, TypeAdapter
 from vonk_agent_protocol import NodeOfflineReason, ProjectionCode
 from vonk_agent_protocol.agent_words import ProfileReasonSeverity
+from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.gpu_clock import (
     GPU_CLOCK_POLICY,
     GpuClockApplyState,
@@ -271,6 +272,29 @@ def _node(
             )
     labels = {} if profile is None else profile.labels
     projection_issues: list[str] = []
+    agent_runtime = None
+    if any(
+        value is not None
+        for value in (
+            agent.semantic_version,
+            agent.build_digest,
+            agent.binary_digest,
+        )
+    ):
+        try:
+            agent_runtime = AgentRuntimeIdentity.model_validate(
+                {
+                    "architecture": agent.architecture,
+                    "semantic_version": agent.semantic_version,
+                    "build_digest": agent.build_digest,
+                    "binary_digest": agent.binary_digest,
+                }
+            )
+        except ValueError:
+            projection_issues.append(
+                "Stored agent runtime identity is unreadable; running build is unknown."
+            )
+            warn_unreadable_once("Fleet agent runtime identity", node_id)
     try:
         labels = TypeAdapter(
             Annotated[dict[Text64, Text256], Field(max_length=64)]
@@ -282,6 +306,7 @@ def _node(
         )
         warn_unreadable_once("Fleet node labels", node_id)
     return FleetNode(
+        agent_runtime=agent_runtime,
         gpu_clock_desired=gpu_clock_desired,
         id=node_id,
         display_name=node_id if profile is None else profile.display_name,

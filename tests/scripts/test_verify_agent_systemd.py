@@ -172,3 +172,12 @@ def test_retry_policy_checks_packaged_services_without_adopting_host_units(
         verify(tmp_path)
     agent.write_text(valid)
     verify(tmp_path)
+    monitor = units / "vonk-forge-monitor.service"
+    valid_monitor = monitor.read_text()
+    monitor.write_text(valid_monitor.replace("PartOf=vonk-forge-agent.service\n", ""))
+    with pytest.raises(RuntimeError, match="monitor.*activation"):
+        verify(tmp_path)
+    monitor.write_text(valid_monitor)
+    agent.write_text(valid.replace("vonk-forge-monitor.service", ""))
+    with pytest.raises(RuntimeError, match="monitor.*activation"):
+        verify(tmp_path)

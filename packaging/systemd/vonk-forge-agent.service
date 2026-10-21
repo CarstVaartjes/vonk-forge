@@ -1,6 +1,6 @@
 [Unit]
 Description=Vonk Forge outbound agent
-Wants=network-online.target nvidia-persistenced.service
+Wants=network-online.target nvidia-persistenced.service vonk-forge-monitor.service
 After=network-online.target vonk-forge-package-helper.socket nvidia-persistenced.service
 # Observe the live device namespace so driver recovery is visible without
 # restarting control or rotation. DevicePolicy retains the kernel access gate.

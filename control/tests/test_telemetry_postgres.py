@@ -135,7 +135,14 @@ def test_gpu_clock_observation_roundtrips_postgres_and_old_rows_remain_null(
     """Catches untyped JSON, missing observation writes and upgrade row rewrites."""
     from dataclasses import replace
 
-    from vonk_agent_protocol.gpu_clock import GpuClockObservation, default_gpu_clock
+    from vonk_agent_protocol.gpu_clock import (
+        GpuClockApplyState,
+        GpuClockMetric,
+        GpuClockObservation,
+        GpuClockUnavailable,
+        GpuClockUnavailableReason,
+        default_gpu_clock,
+    )
 
     repository, sessions = _repository(postgres_engine)
     first = _sample(boot_id=BOOT_A, sequence=1, observed_at=NOW - timedelta(seconds=2))
@@ -147,6 +154,14 @@ def test_gpu_clock_observation_roundtrips_postgres_and_old_rows_remain_null(
         throttle_reasons=0,
         max_graphics_mhz=2400,
         max_sm_mhz=2300,
+        apply_state=GpuClockApplyState.APPLIED,
+        unavailable=[
+            GpuClockUnavailable(
+                metric=GpuClockMetric.THROTTLE,
+                reason=GpuClockUnavailableReason.NOT_SUPPORTED,
+                detail="driver does not support throttle reasons",
+            )
+        ],
     )
     second = replace(first, observed_at=NOW - timedelta(seconds=1), gpu_clock=clock)
     repository.record_batch(NODE_A, (second,))
