@@ -20,18 +20,23 @@ impl CommandRunner for ProcessCommandRunner {
         arguments: &[String],
         timeout: Duration,
     ) -> Result<CommandOutput, String> {
-        if !matches!(
-            executable.to_str(),
-            Some(
-                "/usr/bin/dpkg-deb"
-                    | "/usr/bin/dpkg"
-                    | DOCKER_FIREWALL
-                    | "/usr/bin/docker"
-                    | "/usr/bin/setfacl"
-                    | "/usr/bin/systemctl"
-                    | "/usr/bin/nvidia-smi"
+        let nvidia = executable == Path::new(gpu_clock::NVIDIA_SMI);
+        if nvidia && !gpu_clock::allowed_arguments(arguments) {
+            return Err("GPU clock command is not compiled into the helper".to_owned());
+        }
+        if !nvidia
+            && !matches!(
+                executable.to_str(),
+                Some(
+                    "/usr/bin/dpkg-deb"
+                        | "/usr/bin/dpkg"
+                        | DOCKER_FIREWALL
+                        | "/usr/bin/docker"
+                        | "/usr/bin/setfacl"
+                        | "/usr/bin/systemctl"
+                )
             )
-        ) {
+        {
             return Err("executable is not compiled into the helper".to_owned());
         }
         let capture_output = captures_stdout(executable);
@@ -92,16 +97,11 @@ impl CommandRunner for ProcessCommandRunner {
 /// executable alone: a caller that parses the output of one of these commands
 /// (a detached job's `docker run` prints its container id) always receives it.
 pub(super) fn captures_stdout(executable: &Path) -> bool {
-    matches!(
-        executable.to_str(),
-        Some(
-            "/usr/bin/dpkg-deb"
-                | "/usr/bin/docker"
-                | "/usr/bin/systemctl"
-                | "/usr/bin/nvidia-smi"
-                | DOCKER_FIREWALL
+    executable == Path::new(gpu_clock::NVIDIA_SMI)
+        || matches!(
+            executable.to_str(),
+            Some("/usr/bin/dpkg-deb" | "/usr/bin/docker" | "/usr/bin/systemctl" | DOCKER_FIREWALL)
         )
-    )
 }
 
 /// Bytes of a failed command's standard error kept as its evidence: the end of

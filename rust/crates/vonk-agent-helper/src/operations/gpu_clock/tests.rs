@@ -4,7 +4,6 @@ use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
 };
-use vonk_agent_protocol::generated::GpuClockRange;
 
 #[derive(Clone, Default)]
 struct Driver {
@@ -216,5 +215,65 @@ fn helper_receipt_remains_readable_under_service_umask() {
             .status()
             .unwrap()
             .success()
+    );
+}
+
+#[test]
+fn process_runner_rejects_broader_nvidia_commands_before_spawn() {
+    // This must refuse before looking for a real NVIDIA binary or GPU.
+    for args in [
+        vec!["-lgc", "300,2301"],
+        vec!["-lgc", "0,2200"],
+        vec!["-lgc", "2200,300"],
+        vec!["-lgc", "-1,2200"],
+        vec!["-lgc", "300.0,2200"],
+        vec!["-lgc", "300,2200", "--reset-gpu-clocks"],
+        vec!["--reset-gpu-clocks"],
+        vec!["--query-gpu=uuid", CSV_FORMAT],
+        vec!["-lgc", "300,2200;id"],
+    ] {
+        let args = args.into_iter().map(str::to_owned).collect::<Vec<_>>();
+        assert_eq!(
+            ProcessCommandRunner.run(Path::new(NVIDIA_SMI), &args),
+            Err("GPU clock command is not compiled into the helper".to_owned()),
+            "accepted broader NVIDIA arguments: {args:?}"
+        );
+    }
+}
+
+#[test]
+fn command_allowlist_accepts_only_the_fixed_query_and_canonical_safe_lock() {
+    assert!(allowed_arguments(&[
+        SUPPORT_QUERY.to_owned(),
+        CSV_FORMAT.to_owned()
+    ]));
+    for range in [
+        default_range(),
+        GpuClockRange {
+            min_mhz: 1,
+            max_mhz: 2300,
+        },
+        GpuClockRange {
+            min_mhz: 2300,
+            max_mhz: 2300,
+        },
+    ] {
+        assert!(allowed_arguments(&lock_arguments(&range).unwrap()));
+    }
+    assert!(!allowed_arguments(&[
+        "-lgc".to_owned(),
+        "0300,2200".to_owned()
+    ]));
+    assert!(!allowed_arguments(&[
+        "-lgc".to_owned(),
+        "+300,2200".to_owned()
+    ]));
+    // A caller cannot substitute a PATH lookup or another NVIDIA executable.
+    assert_eq!(
+        ProcessCommandRunner.run(
+            Path::new("nvidia-smi"),
+            &["-lgc".to_owned(), "300,2200".to_owned()]
+        ),
+        Err("executable is not compiled into the helper".to_owned())
     );
 }

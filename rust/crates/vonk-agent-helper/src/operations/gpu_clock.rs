@@ -2,17 +2,46 @@
 //! bounded and retries are scheduled by normal inventory traffic and the hourly
 //! host-settings pass, never by sleeping in a request or holding a workload slot.
 use super::*;
-use vonk_agent_protocol::generated::{GpuClockApplyState, GpuClockCheckpoint, GpuClockIntent};
+use vonk_agent_protocol::generated::{
+    GpuClockApplyState, GpuClockCheckpoint, GpuClockIntent, GpuClockRange,
+};
 use vonk_agent_protocol::gpu_clock::{
     CHECKPOINT_FILE, CSV_FORMAT, SUPPORT_QUERY, default_range, supported_range, supports,
     valid_range,
 };
 
-const NVIDIA_SMI: &str = "/usr/bin/nvidia-smi";
+pub(super) const NVIDIA_SMI: &str = "/usr/bin/nvidia-smi";
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(10);
 const RETRY_SECONDS: u64 = 60;
 const ATTEMPT_SECONDS: u64 = 10 * 60;
 const RECORD_BYTES: u64 = 16 * 1024;
+
+// One command definition serves the producer and the privileged process boundary.
+fn lock_arguments(range: &GpuClockRange) -> Option<[String; 2]> {
+    valid_range(range).then(|| {
+        [
+            "-lgc".to_owned(),
+            format!("{},{}", range.min_mhz, range.max_mhz),
+        ]
+    })
+}
+
+pub(super) fn allowed_arguments(arguments: &[String]) -> bool {
+    if arguments == [SUPPORT_QUERY, CSV_FORMAT] {
+        return true;
+    }
+    let [_, pair] = arguments else {
+        return false;
+    };
+    let Some((minimum, maximum)) = pair.split_once(',') else {
+        return false;
+    };
+    let (Ok(min_mhz), Ok(max_mhz)) = (minimum.parse::<u32>(), maximum.parse::<u32>()) else {
+        return false;
+    };
+    lock_arguments(&GpuClockRange { min_mhz, max_mhz })
+        .is_some_and(|expected| arguments == expected)
+}
 
 impl<R: CommandRunner> OperationExecutor<R> {
     pub(super) fn reconcile_gpu_clock(
@@ -174,10 +203,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
                 ));
             } else {
                 let range = &record.desired.range;
-                let arguments = vec![
-                    "-lgc".to_owned(),
-                    format!("{},{}", range.min_mhz, range.max_mhz),
-                ];
+                let arguments = lock_arguments(range).ok_or(OperationError::InvalidOperation)?;
                 match self.runner.run_with_timeout(
                     Path::new(NVIDIA_SMI),
                     &arguments,
