@@ -25,9 +25,9 @@ GPU_CLOCK_SAFETY_EDGE_DETAIL = (
 
 
 class GpuClockRange(WireModel):
-    min_mhz: int = Field(gt=0, le=GPU_CLOCK_POLICY.hard_max_mhz, strict=True)
+    min_mhz: int = Field(ge=0, le=GPU_CLOCK_POLICY.hard_max_mhz, strict=True)
     max_mhz: int = Field(
-        gt=0,
+        ge=0,
         le=GPU_CLOCK_POLICY.hard_max_mhz,
         strict=True,
         description=GPU_CLOCK_SAFETY_EDGE_DETAIL,
@@ -70,13 +70,6 @@ class GpuClockSupport(WireModel):
         ):
             raise ValueError("GPU supported clock levels and range disagree")
         return self
-
-    def validate_range(self, requested: GpuClockRange) -> None:
-        if requested.min_mhz < self.min_mhz or requested.max_mhz > self.max_mhz:
-            raise ValueError(
-                f"GPU clock range {requested.min_mhz}-{requested.max_mhz} MHz is "
-                f"outside this Spark's reported {self.min_mhz}-{self.max_mhz} MHz range"
-            )
 
 
 class GpuClockIntent(WireModel):

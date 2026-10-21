@@ -3,8 +3,8 @@ StartLimitIntervalSec=0
 Description=Vonk Forge narrow privileged agent helper
 Requires=vonk-forge-package-helper.socket
 Requires=vonk-forge-docker-firewall.service
-Wants=docker.service
-After=local-fs.target docker.service vonk-forge-docker-firewall.service
+Wants=docker.service nvidia-persistenced.service
+After=local-fs.target docker.service vonk-forge-docker-firewall.service nvidia-persistenced.service
 
 [Service]
 OOMScoreAdjust=-900
@@ -20,7 +20,7 @@ UMask=0077
 NoNewPrivileges=yes
 PrivateTmp=yes
 # The signed GPU-clock operation needs NVML's O_RDWR device opens. Keep the
-# device cgroup closed and expose only the same NVIDIA nodes as the boot cap.
+# device cgroup closed and expose only the NVIDIA control and GPU nodes.
 PrivateDevices=no
 DevicePolicy=closed
 DeviceAllow=/dev/nvidiactl rw

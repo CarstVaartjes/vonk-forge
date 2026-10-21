@@ -536,8 +536,6 @@ fn host_settings<R: ProcessRunner>(
     Some(vonk_agent_protocol::generated::HostSettings {
         display_manager_active,
         graphical_default_target: default_target == "graphical.target",
-        // Unknown on its own: an unreadable cap never hides the desktop evidence.
-        gpu_clock_cap_active: is_active("vonk-forge-gpu-clock-cap.service"),
         gpu_clock_support: runner
             .run(
                 Program::NvidiaSmi,
