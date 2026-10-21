@@ -8,6 +8,7 @@ from vonk_agent_protocol import (
     ResourceBlockerCode,
     ResourcePlanningCode,
 )
+from vonk_forge_contracts.memory_admission import evaluate_memory_admission
 
 from .reasons import _reason, _same_memory_kind
 from .types import (
@@ -88,7 +89,6 @@ def _charged_claims_detail(capacity: CapacitySnapshot, shortfall_bytes: int) -> 
 def _never_fits_detail(
     capacity: CapacitySnapshot,
     demand_bytes: int,
-    free_after_bytes: int,
     *,
     memory_floor_bytes: int,
     stopping: bool,
@@ -104,7 +104,9 @@ def _never_fits_detail(
     pool = capacity.available_bytes
     if pool is None:
         return None
-    if demand_bytes + memory_floor_bytes > pool:
+    if not evaluate_memory_admission(
+        demand_bytes, pool, memory_floor_bytes=memory_floor_bytes
+    ).admissible:
         return (
             f"The selected demand of {demand_bytes} bytes plus the "
             f"{memory_floor_bytes}-byte platform floor exceeds this Spark's "
@@ -118,13 +120,20 @@ def _never_fits_detail(
         and not capacity.releasing_bytes
         and not stopping
     )
-    best_after_bytes = free_after_bytes + capacity.free_upside_bytes
-    if holds_nothing and best_after_bytes < memory_floor_bytes:
+    best = evaluate_memory_admission(
+        demand_bytes,
+        pool,
+        occupied_bytes=max(
+            0, (capacity.occupied_bytes or 0) - capacity.free_upside_bytes
+        ),
+        memory_floor_bytes=memory_floor_bytes,
+    )
+    if holds_nothing and not best.admissible:
         return (
             f"No Vonk claim, kept run or planned stop holds memory on this Spark: "
             f"the host itself uses {capacity.occupied_bytes} of its {pool}-byte "
             f"pool, and the selected demand of {demand_bytes} bytes leaves "
-            f"{best_after_bytes} bytes before the required "
+            f"{best.free_after_bytes} bytes before the required "
             f"{memory_floor_bytes}-byte floor even at the most free memory the "
             "Spark reported recently. Nothing the platform holds can free more, "
             "so it can never fit here."
@@ -281,9 +290,6 @@ def plan_capacity(
         # Its remaining reservation is therefore a range from zero to the full
         # peak. Admission uses the safe lower-capacity bound; it never treats a
         # starting/running state as measured bytes or as a release receipt.
-        current_without_unknown = available - occupied - unmaterialized - total_bytes
-        current = current_without_unknown - unknown_upper_bytes
-        budget_after = available - reserved - total_bytes - memory_floor_bytes
         release = releases.get((node_id, capacity.memory_kind), 0)
         if not release:
             release = max(
@@ -295,15 +301,36 @@ def plan_capacity(
                 ),
                 default=0,
             )
-        after_stop = current + release
-        budget_after_stop = budget_after + release
-        current_fit = current >= memory_floor_bytes and budget_after >= 0
-        after_fit = after_stop >= memory_floor_bytes and budget_after_stop >= 0
+        current_admission = evaluate_memory_admission(
+            total_bytes,
+            available,
+            occupied_bytes=occupied,
+            reserved_bytes=reserved,
+            unmaterialized_bytes=unmaterialized,
+            unknown_residual_bytes=unknown_upper_bytes,
+            memory_floor_bytes=memory_floor_bytes,
+        )
+        after_admission = evaluate_memory_admission(
+            total_bytes,
+            available,
+            occupied_bytes=occupied,
+            reserved_bytes=reserved,
+            unmaterialized_bytes=unmaterialized,
+            unknown_residual_bytes=unknown_upper_bytes,
+            release_bytes=release,
+            memory_floor_bytes=memory_floor_bytes,
+        )
+        current = current_admission.free_after_bytes
+        current_without_unknown = current + unknown_upper_bytes
+        budget_after = current_admission.commitment_headroom_bytes
+        after_stop = after_admission.free_after_bytes
+        budget_after_stop = after_admission.commitment_headroom_bytes
+        current_fit = current_admission.admissible
+        after_fit = after_admission.admissible
         selected = after_stop if release else current
         never_fits = _never_fits_detail(
             capacity,
             total_bytes,
-            current_without_unknown,
             memory_floor_bytes=memory_floor_bytes,
             # A planned stop frees memory even when its release is unknown.
             stopping=any(

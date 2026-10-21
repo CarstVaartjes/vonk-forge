@@ -284,3 +284,74 @@ def test_owner_file_cannot_define_another_copy(registered_tree: Path) -> None:
         "images.floating_tags" in error and "scripts/image_policy.py:" in error
         for error in violations(root, fixture_files(root))
     )
+
+
+def _memory_admission_delegates(source: str) -> bool:
+    import ast
+
+    tree = ast.parse(source)
+    sites = [
+        (target.id, node.value)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Assign)
+        for target in node.targets
+        if isinstance(target, ast.Name)
+        and target.id in {"current_admission", "after_admission"}
+    ]
+    fits = dict(sites)
+    owner_imported = any(
+        isinstance(node, ast.ImportFrom)
+        and node.module == "vonk_forge_contracts.memory_admission"
+        and any(
+            alias.name == "evaluate_memory_admission" and alias.asname is None
+            for alias in node.names
+        )
+        for node in tree.body
+    )
+    owner_shadowed = any(
+        isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+        and node.name == "evaluate_memory_admission"
+        for node in ast.walk(tree)
+    )
+    never_fits = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name == "_never_fits_detail"
+    )
+    copied_floor_comparison = any(
+        isinstance(node, ast.Compare)
+        and any(
+            isinstance(term, ast.Name) and term.id == "memory_floor_bytes"
+            for term in ast.walk(node)
+        )
+        for node in ast.walk(never_fits)
+    )
+    return (
+        owner_imported
+        and not owner_shadowed
+        and len(sites) == 2
+        and not copied_floor_comparison
+        and set(fits) == {"current_admission", "after_admission"}
+        and all(
+            isinstance(value, ast.Call)
+            and isinstance(value.func, ast.Name)
+            and value.func.id == "evaluate_memory_admission"
+            for value in fits.values()
+        )
+    )
+
+
+def test_memory_admission_rejects_reimplemented_fit_predicates() -> None:
+    # Wrong implementation: a Controller-local predicate silently drifts from
+    # declaration validation, even when today's arithmetic happens to agree.
+    source = (
+        ROOT / "control/src/vonk_control/resource_planning/capacity.py"
+    ).read_text()
+    assert _memory_admission_delegates(source)
+    assert not _memory_admission_delegates(
+        source + "\ncurrent_admission = available - occupied - total_bytes\n"
+    )
+
+    assert not _memory_admission_delegates(
+        source + "\ndef evaluate_memory_admission(*args, **kwargs): return True\n"
+    )

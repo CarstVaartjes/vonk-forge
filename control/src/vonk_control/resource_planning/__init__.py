@@ -24,6 +24,9 @@ from vonk_agent_protocol import resource_term_code as resource_term_code
 from vonk_agent_protocol.inventory import MemoryPool as MemoryPool
 from vonk_forge_contracts import ModelDefinition as ModelDefinition
 from vonk_forge_contracts import RecipeDefinition as RecipeDefinition
+from vonk_forge_contracts.memory_admission import (
+    PLATFORM_MEMORY_FLOOR_BYTES as PLATFORM_MEMORY_FLOOR_BYTES,
+)
 from vonk_forge_contracts.recipe import RecipeDiskResources as RecipeDiskResources
 from vonk_forge_contracts.recipe import RecipeMemoryResources as RecipeMemoryResources
 from vonk_forge_contracts.recipe import Scalar as Scalar
@@ -59,7 +62,6 @@ from .reasons import _same_memory_kind as _same_memory_kind
 from .settings import classify_preparation_effects as classify_preparation_effects
 from .settings import resolve_effective_settings as resolve_effective_settings
 from .types import _CHANGE_EFFECTS as _CHANGE_EFFECTS
-from .types import PLATFORM_MEMORY_FLOOR_BYTES as PLATFORM_MEMORY_FLOOR_BYTES
 from .types import CapacityPlan as CapacityPlan
 from .types import CapacitySnapshot as CapacitySnapshot
 from .types import Effect as Effect

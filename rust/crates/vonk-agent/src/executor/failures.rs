@@ -220,27 +220,10 @@ pub(super) fn runtime_observation_failure(
         crate::host_runtime::HostRuntimeError::HelperRejected { code, .. }
             if *code == HelperErrorCode::RuntimeProcessExited
     );
-    let lead = if exited {
-        "the workload process exited"
+    let reason = if exited {
+        error.to_string()
     } else {
-        "exact workload runtime observation failed"
-    };
-    // The reason is a typed sentence: the lead, the helper's code and the exit
-    // facts.  The workload's own words (its exception, its paths) are evidence
-    // and travel in the diagnostic and the captured streams, never here.
-    let facts = error
-        .diagnostic()
-        .map(|detail| {
-            crate::failure_evidence::exit_facts(detail)
-                .map(|(key, value)| format!("{key}={value}"))
-                .collect::<Vec<_>>()
-                .join(" ")
-        })
-        .unwrap_or_default();
-    let reason = if facts.is_empty() {
-        format!("{lead}: {error}")
-    } else {
-        format!("{lead}: {error}: {facts}")
+        format!("exact workload runtime observation failed: {error}")
     };
     // A process-exit failure always says what it knows: its logs, or the
     // typed reason there are none.
