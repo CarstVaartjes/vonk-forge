@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import cast
 
 import pytest
-from library_route_fixtures import _recipe_projection
+from library_route_fixtures import _model_projection_fields, _recipe_projection
 from vonk_agent_protocol import LifecycleState, OperatorActionName
 from vonk_forge_contracts import ModelDefinition, document_sha256
 
@@ -4437,7 +4437,7 @@ def test_run_resolves_a_recipe_or_its_model_to_one_catalog_recipe(
         {
             ("GET", "/api/model/Qwen%2Fqwen3"): {
                 "selector": "Qwen/qwen3",
-                "document": model,
+                "projected": _model_projection_fields(model),
             },
             ("GET", "/api/recipe/library"): {
                 "recipes": [
@@ -4719,8 +4719,8 @@ def _run_responses(**overrides: object) -> dict[tuple[str, str], object]:
             "next_cursor": None,
         },
         ("GET", "/api/recipe/vonk-forge%2Fqwen-code"): {
-            "document": _recipe_projection("vonk-forge/qwen-code", "Qwen Code")[
-                "document"
+            "projected": _recipe_projection("vonk-forge/qwen-code", "Qwen Code")[
+                "projected"
             ]
         },
         ("GET", "/api/fleet"): {

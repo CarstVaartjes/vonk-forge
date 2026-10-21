@@ -2,15 +2,15 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 from typing import cast as _typing_cast
 
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, SessionTransaction, defer
 from vonk_agent_protocol import DesiredAssignmentState, InvalidRequestReason
 from vonk_agent_protocol.agent_words import ProfileDocumentState
 
-from ..catalog_revision_contract import read_catalog_document
 from ..fleet_profile_contract import (
     FleetProfileAssignment,
     FleetProfileAssignmentInput,
@@ -36,6 +36,14 @@ from .projection_support import (
 if TYPE_CHECKING:
     from .service import FleetProfileService
     from .service import FleetProfileService as _FleetProfileService
+
+
+@dataclass
+class _RecipeReads:
+    transaction: SessionTransaction | None
+    documents: dict[str, tuple[CatalogDocument, CatalogDocumentRevision] | Residue] = (
+        field(default_factory=dict)
+    )
 
 
 class FleetProfileService:
@@ -81,52 +89,56 @@ class FleetProfileService:
                 reason=InvalidRequestReason.CONFLICT,
             )
         document = candidates[0]
-        revisions = tuple(
-            session.scalars(
-                select(CatalogDocumentRevision)
-                .where(
-                    CatalogDocumentRevision.document_id == document,
-                    CatalogDocumentRevision.kind == "recipe",
-                    CatalogDocumentRevision.state == ProfileDocumentState.ACTIVE.value,
-                )
-                .order_by(
-                    CatalogDocumentRevision.revision_number.desc(),
-                    CatalogDocumentRevision.created_at.desc(),
-                    CatalogDocumentRevision.id.desc(),
-                )
-                .limit(16)
+        revision = session.execute(
+            select(CatalogDocumentRevision.id, CatalogDocumentRevision.content_digest)
+            .where(
+                CatalogDocumentRevision.document_id == document,
+                CatalogDocumentRevision.kind == "recipe",
+                CatalogDocumentRevision.state == ProfileDocumentState.ACTIVE.value,
             )
-        )
-        if not revisions:
+            .order_by(
+                CatalogDocumentRevision.revision_number.desc(),
+                CatalogDocumentRevision.created_at.desc(),
+                CatalogDocumentRevision.id.desc(),
+            )
+            .limit(1)
+        ).first()
+        if revision is None:
             return retire_as_unknown(
                 "recipe",
                 selector,
                 BookkeepingReason.EVIDENCE_UNAVAILABLE,
                 "the recipe has no active catalog revision",
             )
-        # The newest revision this Controller can read; when none is readable
-        # the newest one is kept so the choice can report what needs attention.
-        for revision in revisions:
-            try:
-                read_catalog_document(revision)
-            except ValueError:
-                continue
-            return document, revision.id
-        return document, revisions[0].id
+        return document, revision[0]
 
     @classmethod
     def _recipe_document(
         cls, session: Session, selector: str
     ) -> tuple[CatalogDocument, CatalogDocumentRevision] | Residue:
         cls = _typing_cast("type[_FleetProfileService]", cls)  # noqa: PLW0642 -- assembled mixin interface
+        transaction = session.get_transaction()
+        reads = session.info.get("profile_recipe_documents")
+        if not isinstance(reads, _RecipeReads) or reads.transaction is not transaction:
+            reads = _RecipeReads(transaction)
+            session.info["profile_recipe_documents"] = reads
+        cached = reads.documents
+        if selector in cached:
+            return cached[selector]
         for _ in range(2):
             identity = cls._recipe_identity(session, selector)
             if isinstance(identity, Residue):
+                cached[selector] = identity
                 return identity
             document_id, revision_id = identity
             document = session.get(CatalogDocument, document_id)
-            revision = session.get(CatalogDocumentRevision, revision_id)
+            revision = session.get(
+                CatalogDocumentRevision,
+                revision_id,
+                options=(defer(CatalogDocumentRevision.document),),
+            )
             if document is not None and revision is not None:
+                cached[selector] = (document, revision)
                 return document, revision
             # The catalog changed between the two reads: resolve it again.
         return retire_as_unknown(

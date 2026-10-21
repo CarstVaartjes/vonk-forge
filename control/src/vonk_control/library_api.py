@@ -178,7 +178,7 @@ def install_library_routes(
         cached: Annotated[bool, Query()] = False,
         ready: Annotated[bool | None, Query()] = None,
         fits_fleet: Annotated[bool | None, Query()] = None,
-        assess: Annotated[bool, Query()] = True,
+        assess: Annotated[bool, Query()] = False,
         usage: Annotated[list[str] | None, Query(max_length=64)] = None,
         publisher: Annotated[list[str] | None, Query(max_length=64)] = None,
         alignment: Annotated[list[str] | None, Query(max_length=64)] = None,

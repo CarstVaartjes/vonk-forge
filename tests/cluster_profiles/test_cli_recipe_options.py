@@ -51,9 +51,9 @@ class Fake:
                 "next_cursor": None,
             }
         if path.startswith("/api/recipe/vonk-forge"):
-            document = _recipe_projection(SELECTOR, "GLM")["document"]
-            document["options"] = OPTIONS
-            return {"selector": SELECTOR, "document": document}
+            projected = _recipe_projection(SELECTOR, "GLM")["projected"]
+            projected["options"] = OPTIONS
+            return {"selector": SELECTOR, "projected": projected}
         if method == "GET" and path.endswith("/definition"):
             return {
                 "id": "11111111-1111-4111-8111-111111111111",
@@ -224,7 +224,7 @@ def test_recipe_detail_lists_options_and_marks_the_default(capsys):
         "identity": {"publisher": "vonk-forge", "slug": "glm", "title": "GLM"},
         "local": {},
         "resources": {},
-        "document": {"options": OPTIONS},
+        "projected": {"options": OPTIONS},
     }
     cli_render._library_item(item, "recipe", detail=True)
     out = capsys.readouterr().out

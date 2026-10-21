@@ -1,0 +1,215 @@
+{
+  "catalog_observed_at": "2026-09-05T12:00:00Z",
+  "generated_at": "2026-09-05T12:00:00Z",
+  "library": {
+    "version": "2.3.0",
+    "updated_at": "2026-09-05T12:00:00Z",
+    "commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "recipes": [
+    {
+      "selector": "vonk-forge/synthetic-tiny-build",
+      "identity": {
+        "recipe_id": "00000000-0000-4000-8000-000000000020",
+        "recipe_revision_id": "00000000-0000-4000-8000-000000000021",
+        "publisher": "vonk-forge",
+        "slug": "synthetic-tiny-build",
+        "content_sha256": "e2e5055d9de9edfc4699fe97dd88e946d29af7c7b2d4bdd800e674dd7f7a406d",
+        "title": "Synthetic Tiny build",
+        "description": "Synthetic source-build example."
+      },
+      "projected": {
+        "identity": {
+          "publisher": "vonk-forge",
+          "slug": "synthetic-tiny-build"
+        },
+        "metadata": {
+          "title": "Synthetic Tiny build",
+          "description": "Synthetic source-build example.",
+          "tags": [
+            "synthetic",
+            "text"
+          ]
+        },
+        "provenance": {
+          "attribution": [
+            "Vonk Forge"
+          ]
+        },
+        "release": {
+          "version": "1.0.0",
+          "released_at": "2026-09-05"
+        },
+        "models": [
+          {
+            "kind": "model",
+            "publisher": "vonk-forge",
+            "slug": "synthetic-tiny-fp16",
+            "content_sha256": "05a481f76890725bfb498309a58b7464846ac4853b8e4a5db6495d40ce631ac4"
+          }
+        ],
+        "interfaces": [
+          {
+            "adapter": "openai",
+            "port": 8000,
+            "model_aliases": [
+              "synthetic-tiny"
+            ],
+            "health_path": "/v1/models"
+          }
+        ],
+        "validation": {
+          "serving": {
+            "interface": "openai",
+            "checks": [
+              {
+                "name": "chat",
+                "kind": "openai.vision",
+                "request": {
+                  "transport": "http",
+                  "method": "POST",
+                  "path": "/v1/chat/completions",
+                  "body": {
+                    "max_tokens": 16,
+                    "messages": [
+                      {
+                        "content": [
+                          {
+                            "text": "Describe this synthetic image.",
+                            "type": "text"
+                          },
+                          {
+                            "image_url": {
+                              "url": "data:image/png;base64,iVBORw0KGgo="
+                            },
+                            "type": "image_url"
+                          }
+                        ],
+                        "role": "user"
+                      }
+                    ],
+                    "model": "$MODEL"
+                  }
+                },
+                "assertions": [
+                  "chat.nonempty",
+                  "chat.output-cap"
+                ]
+              }
+            ]
+          }
+        },
+        "base_image_digest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "options": [],
+        "title": "Synthetic Tiny build",
+        "description": "Synthetic source-build example.",
+        "tags": [
+          "synthetic",
+          "text"
+        ],
+        "runtime_engine": "vllm",
+        "topology": {
+          "name": "solo",
+          "node_count": 1,
+          "roles": [
+            {
+              "name": "entrypoint",
+              "count": 1,
+              "endpoint_owner": true,
+              "resources": {
+                "memory": {
+                  "peak_bytes": 80000000,
+                  "reserve_bytes": 1000000
+                },
+                "disk": {
+                  "image_bytes": 1000,
+                  "artifact_bytes": 1024,
+                  "working_bytes": 3072,
+                  "safety_margin_bytes": 1024
+                }
+              }
+            }
+          ],
+          "parallelism": {
+            "tensor": 1,
+            "pipeline": 1,
+            "data": 1,
+            "backend": "local"
+          },
+          "start_order": [
+            "entrypoint"
+          ]
+        }
+      },
+      "model_selectors": [
+        "vonk-forge/synthetic-tiny-fp16"
+      ],
+      "usage": [
+        "image-generation",
+        "text-generation"
+      ],
+      "resources": {
+        "memory_bytes": 80000000,
+        "disk_bytes": 6120,
+        "runtime_memory_bytes": 80000000,
+        "image_bytes": 1000
+      },
+      "local": {
+        "controller": "not_cached",
+        "running_on": []
+      },
+      "updated_at": "2026-09-05T12:00:00Z",
+      "node_count": 1,
+      "engine": "vllm",
+      "creator": "Vonk Forge"
+    }
+  ],
+  "facets": {
+    "usage": [
+      "image-generation",
+      "text-generation"
+    ],
+    "family": [
+      "vonk-forge/synthetic"
+    ],
+    "version": [
+      "1.0.0"
+    ],
+    "quantization": [
+      "none"
+    ],
+    "publisher": [
+      "vonk-forge"
+    ],
+    "alignment": [],
+    "sparks": [
+      1
+    ],
+    "engine": [
+      "vllm"
+    ],
+    "creator": [
+      "Vonk Forge"
+    ]
+  },
+  "next_cursor": null,
+  "filters": {
+    "model": [],
+    "usage": [],
+    "family": [],
+    "version": [],
+    "quantization": [],
+    "publisher": [],
+    "alignment": [],
+    "sparks": [],
+    "engine": [],
+    "creator": [],
+    "sort": "updated",
+    "cached": false
+  },
+  "freshness_policy": {
+    "inventory_fresh_seconds": 300,
+    "telemetry_live_seconds": 6,
+    "telemetry_delayed_seconds": 20
+  }
+}

@@ -14,6 +14,10 @@ from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import OperationProgress
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.catalog_entities import CatalogEntityService
+from vonk_control.catalog_revision_contract import (
+    ModelRevisionProjection,
+    RecipeRevisionProjection,
+)
 from vonk_control.library_api import install_library_routes
 from vonk_control.library_contract import _MAX_PAGE_RECIPES, ModelLibraryResponse
 from vonk_control.library_projection import LibraryProjection
@@ -381,10 +385,12 @@ def test_published_corpus_projects_all_models_and_exact_recipe_bindings(
     )
     for row in payload["models"]:
         expected = expected_models[row["identity"]["content_sha256"]]
-        assert (
-            ModelDefinition.model_validate_json(json.dumps(row["document"])) == expected
+        assert "document" not in row
+        projected = ModelRevisionProjection.model_validate_json(
+            json.dumps(row["projected"])
         )
-        assert row["document"] == serialize_json_value(expected)
+        assert projected.identity == expected.identity
+        assert projected.download_bytes == expected.download_bytes
     assert all(
         "recipes" not in model and "source_kind" not in model
         for model in payload["models"]
@@ -418,29 +424,15 @@ def test_published_corpus_projects_all_models_and_exact_recipe_bindings(
     } == recipe_ids
     for row in recipe_payload["recipes"]:
         expected = expected_recipes[row["identity"]["content_sha256"]]
-        assert (
-            RecipeDefinition.model_validate_json(json.dumps(row["document"]))
-            == expected
+        assert "document" not in row
+        projected = RecipeRevisionProjection.model_validate_json(
+            json.dumps(row["projected"])
         )
-        assert row["document"] == serialize_json_value(expected)
+        assert projected.models == [selection.model for selection in expected.models]
+        assert projected.topology == expected.topology
+        assert projected.runtime_engine == expected.runtime.engine
+        assert projected.base_image_digest == expected.execution.build.base_image.digest
     first_recipe = recipe_payload["recipes"][0]
-    first_expected = expected_recipes[first_recipe["identity"]["content_sha256"]]
-    assert first_recipe["document"] == serialize_json_value(first_expected)
-    assert first_recipe["document"]["runtime"]["engine"] == (
-        first_expected.runtime.engine
-    )
-    assert first_recipe["document"]["release"]["version"] == (
-        first_expected.release.version
-    )
-    assert first_recipe["document"]["topology"]["node_count"] == (
-        first_expected.topology.node_count
-    )
-    assert first_recipe["document"]["topology"]["roles"][0]["resources"] == (
-        serialize_json_value(first_expected.topology.roles[0].resources)
-    )
-    assert first_recipe["document"]["models"] == [
-        serialize_json_value(selection) for selection in first_expected.models
-    ]
     recipe_selector = first_recipe["selector"]
     detail = client.get(f"/api/recipe/{recipe_selector}")
     assert detail.status_code == 200, detail.text
@@ -1300,7 +1292,7 @@ def test_library_item_at_one_byte_over_wire_budget_is_refused(
     assert observed == exact_wire_bytes
 
 
-def test_recipe_library_refuses_one_item_larger_than_wire_budget_actionably(
+def test_recipe_list_omits_large_executable_arguments_without_losing_the_item(
     tmp_path: Path,
 ) -> None:
     index = json.loads((ROOT / "catalog-index.json").read_text(encoding="utf-8"))
@@ -1331,13 +1323,12 @@ def test_recipe_library_refuses_one_item_larger_than_wire_budget_actionably(
 
     with TestClient(app) as client:
         response = client.get("/api/recipe/library", params={"limit": 10})
-    assert response.status_code == 422
-    detail = response.json()["detail"]
-    assert isinstance(detail, str)
-    assert "narrow filters" in detail
-    assert str(MAX_CONTROL_DOCUMENT_BYTES) in detail
-    observed = int(detail.split("requires ", 1)[1].split(" bytes", 1)[0])
-    assert observed > MAX_CONTROL_DOCUMENT_BYTES
+    assert response.status_code == 200
+    assert len(response.content) < MAX_CONTROL_DOCUMENT_BYTES
+    (item,) = response.json()["recipes"]
+    assert "document" not in item
+    assert "runtime" not in item["projected"]
+    assert item["selector"] == "test/recipe-0000"
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
@@ -1460,11 +1451,7 @@ def test_detail_and_page_scope_history_and_latest_request_by_time(
         if "FROM model_cache_operations" in statement
     ]
     assert histories and all("WHERE" in statement for statement in histories)
-    assert any(
-        "ORDER BY model_cache_operations.created_at DESC" in statement
-        and "LIMIT" in statement
-        for statement in histories
-    )
+    assert len(histories) == 2  # One latest-request batch per detail/list read.
     assert "cache progress" not in caplog.text
 
     # Optional SQL observation failure leaves readable catalog content usable.
@@ -1601,3 +1588,125 @@ def test_imported_canary_resolves_exactly_while_discovery_index_is_stale(
     with pytest.raises(lifecycle.LifecycleError, match=expected):
         run._run_synthetic_canary("spk_" + "1" * 32)
     assert calls == [("GET", f"/api/recipe/{selector}")]
+
+
+def test_list_shared_vector_preserves_sweep_inputs_without_executable_documents():
+    """The transport must carry pins and selectors without executable documents."""
+    from vonk_control.library_contract import RecipeLibraryResponse
+
+    vector = Path(__file__).resolve().parents[2] / "tests/fixtures/library-list.json"
+    raw = json.loads(vector.read_text())
+    parsed = RecipeLibraryResponse.model_validate_json(vector.read_bytes())
+    assert "document" not in raw["recipes"][0]
+    assert parsed.library is not None and parsed.library.commit == "a" * 40
+    recipe = parsed.recipes[0]
+    assert recipe.selector == "vonk-forge/synthetic-tiny-build"
+    assert recipe.model_selectors == [
+        f"{reference.publisher}/{reference.slug}"
+        for reference in recipe.projected.models
+    ]
+    assert recipe.projected.interfaces and recipe.projected.validation.serving.checks
+
+
+@pytest.mark.needs_recipe_library
+def test_connected_consumers_read_documents_only_from_detail(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Catch API/CLI acceptance readers that still expect documents in lists."""
+    import runpy
+    import subprocess
+    import time
+    from typing import Any
+
+    import httpx2
+
+    repository = Path(__file__).resolve().parents[2]
+    consumer = runpy.run_path(
+        str(repository / "tests/acceptance/test_candidate_recipe_e2e.py")
+    )["test_controller_sync_exposes_canonical_library_documents_to_api_and_cli"]
+
+    library_root = ROOT
+    index = json.loads((library_root / "catalog-index.json").read_text())
+    entry = index["recipes"][0]
+    model_digests = {
+        selection["model"]["content_sha256"]
+        for selection in entry["document"]["models"]
+    }
+    index["recipes"] = [entry]
+    index["catalog_entities"] = [
+        row
+        for row in index["catalog_entities"]
+        if row["content_sha256"] in model_digests
+    ]
+    engine = create_engine(f"sqlite:///{tmp_path / 'catalog.sqlite'}")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    clock = lambda: datetime.now(UTC)
+    codec = TokenCodec(b"a" * 32)
+    catalog = CatalogEntityService(sessions, clock=clock, cursors=codec.cursor_codec())
+    for row in [*index["catalog_entities"], entry]:
+        revision = catalog.create_draft(row["document"], actor="test")
+        catalog.resolve(revision.id, actor="test")
+    app = FastAPI()
+    app.router.route_class = ControllerAPIRoute
+    install_library_routes(
+        app,
+        actor_dependency=Depends(lambda: Actor("test", "viewer")),
+        projection=LibraryProjection(
+            sessions, clock=clock, cursors=codec.cursor_codec()
+        ),
+    )
+    token = tmp_path / "test-token"
+    token.write_text("synthetic-local-test-token")
+    monkeypatch.setenv("VONK_ACCEPTANCE_CONTROL_URL", "https://controller.invalid")
+    monkeypatch.setenv(
+        "VONK_ACCEPTANCE_PACKAGE_INDEX_URL", "https://publication.invalid/index.json"
+    )
+    monkeypatch.setenv("VONK_ACCEPTANCE_TOKEN_FILE", str(token))
+    monkeypatch.setitem(
+        consumer.__globals__, "_package_inputs", lambda: (index, entry, library_root)
+    )
+    original_client = httpx2.Client
+    cli_actions: list[str] = []
+    detail_paths: set[str] = set()
+    with TestClient(app) as api:
+
+        def respond(request: httpx2.Request) -> httpx2.Response:
+            if request.url.host == "publication.invalid":
+                return httpx2.Response(200, json=index)
+            path = request.url.path
+            if path.startswith(("/api/model/", "/api/recipe/")) and not path.endswith(
+                "/library"
+            ):
+                detail_paths.add(path)
+            response = api.get(path, params=dict(request.url.params))
+            return httpx2.Response(response.status_code, content=response.content)
+
+        def client(**kwargs: Any) -> httpx2.Client:
+            return original_client(transport=httpx2.MockTransport(respond), **kwargs)
+
+        def cli(command: list[str], **_kwargs: Any) -> subprocess.CompletedProcess[str]:
+            assert command[1:3] == ["--json", "recipe"]
+            action = command[3]
+            cli_actions.append(action)
+            path = (
+                "/api/recipe/library"
+                if action == "library"
+                else "/api/recipe/" + command[4]
+            )
+            response = api.get(path)
+            assert response.status_code == 200, response.text
+            return subprocess.CompletedProcess(command, 0, response.text, "")
+
+        monkeypatch.setattr(httpx2, "Client", client)
+        monkeypatch.setattr(subprocess, "run", cli)
+        # The seeded catalog is already current. A stale reader must fail here,
+        # rather than hiding its KeyError in the connected lane's polling loop.
+        monkeypatch.setattr(
+            time, "sleep", lambda _delay: pytest.fail("current catalog did not parse")
+        )
+        consumer()
+    assert cli_actions == ["library", "detail"]
+    assert any(path.startswith("/api/model/") for path in detail_paths)
+    assert any(path.startswith("/api/recipe/") for path in detail_paths)
+    engine.dispose()

@@ -162,7 +162,9 @@ def _resolve_run_recipe(
             }:
                 model_matches.add(selector)
     if not matches and not model_matches:
-        from ..generated_control.models.model_definition import ModelDefinition
+        from ..generated_control.models.model_revision_projection import (
+            ModelRevisionProjection,
+        )
 
         for model_selector, recipes in model_recipes.items():
 
@@ -176,8 +178,10 @@ def _resolve_run_recipe(
                     raise ControlMalformedResponse(
                         "model title observation identifies another selection"
                     )
-                return ModelDefinition.from_dict(
-                    validate_control_document("ModelDefinition", detail.get("document"))
+                return ModelRevisionProjection.from_dict(
+                    validate_control_document(
+                        "ModelRevisionProjection", detail.get("projected")
+                    )
                 ).identity.model.title
 
             title = _observe_selection(model_title, deadline=deadline)

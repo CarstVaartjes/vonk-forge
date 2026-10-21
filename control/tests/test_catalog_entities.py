@@ -102,8 +102,9 @@ def _resolve(
     return service.resolve(draft.id, actor="operator")
 
 
+@pytest.mark.parametrize("scalar_type_change", [False, True])
 def test_active_canonical_revision_is_immutable(
-    session: Session, service: CatalogEntityService
+    session: Session, service: CatalogEntityService, scalar_type_change: bool
 ) -> None:
     active = _resolve(service, _model())
     session.commit()
@@ -113,7 +114,13 @@ def test_active_canonical_revision_is_immutable(
 
     metadata = active.document["metadata"]
     assert isinstance(metadata, dict)
-    metadata["description"] = "tampered"
+    if scalar_type_change:
+        assert active.document["requires_token"] is False
+        active.document["requires_token"] = 0
+    else:
+        metadata["description"] = "tampered"
+    # Refreshing unrelated metadata must not bless an in-place document edit.
+    session.refresh(active, attribute_names=["projected"])
 
     with pytest.raises(Exception) as _ending:
         session.commit()
@@ -451,7 +458,7 @@ def test_refresh_rederives_a_projection_an_earlier_release_wrote(
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
-def test_refresh_does_not_repair_a_projection_of_a_document_that_does_not_match(
+def test_refresh_does_not_repair_a_projection_of_a_malformed_document(
     session: Session,
     service: CatalogEntityService,
     caplog: pytest.LogCaptureFixture,
@@ -462,7 +469,7 @@ def test_refresh_does_not_repair_a_projection_of_a_document_that_does_not_match(
     session.execute(
         update(CatalogDocumentRevision)
         .where(CatalogDocumentRevision.id == revision.id)
-        .values(content_digest="c" * 64)
+        .values(document={"kind": "recipe"})
     )
     session.expire(revision)
 
@@ -644,3 +651,52 @@ def test_explicit_activation_restores_only_the_named_missing_selection(
     assert service.resolve(revision.id, actor="operator").id == revision.id
     head = session.scalar(select(CatalogDocumentHead))
     assert head is not None and head.active_revision_id == revision.id
+
+
+@pytest.mark.usefixtures("damaged_json_rows")
+def test_verified_ingress_repairs_valid_json_without_conflating_false_and_zero(
+    session, service
+):
+    """A digest hit cannot reuse different stored JSON, even when Python equates it."""
+    model = _model()
+    _resolve(service, model)
+    document = _recipe(model)
+    runtime = document["runtime"]
+    assert isinstance(runtime, dict)
+    arguments = runtime["arguments"]
+    assert isinstance(arguments, list)
+    arguments.append({"name": "cache-probe", "value": False})
+    active = _resolve(service, document)
+    changed = copy.deepcopy(active.document)
+    changed_runtime = changed["runtime"]
+    assert isinstance(changed_runtime, dict)
+    changed_arguments = changed_runtime["arguments"]
+    assert isinstance(changed_arguments, list)
+    changed_argument = changed_arguments[-1]
+    assert isinstance(changed_argument, dict)
+    changed_argument["value"] = 0
+    session.execute(
+        update(CatalogDocumentRevision)
+        .where(CatalogDocumentRevision.id == active.id)
+        .values(document=changed)
+    )
+    revision_id = active.id
+    session.expunge_all()
+    session.commit()
+    sessions = sessionmaker(session.get_bind(), expire_on_commit=False)
+    catalog = CatalogService(
+        sessions, clock=lambda: NOW, cursors=CursorCodec(b"c" * 32)
+    )
+    catalog.import_recipe_library(
+        "operator",
+        library_commit="a" * 40,
+        source_path="recipe.json",
+        document=document,
+        expected_content_sha256=document_sha256(document),
+        dependency_documents=[model],
+    )
+    with sessions() as stored:
+        repaired = stored.get(CatalogDocumentRevision, revision_id)
+        assert repaired is not None
+        consumed = RecipeDefinition.model_validate_json(json.dumps(repaired.document))
+        assert consumed.runtime.arguments[-1].value is False

@@ -20,7 +20,7 @@ import threading
 import time
 import uuid
 
-from sqlalchemy import select, update
+from sqlalchemy import event, select, update
 from vonk_control.auth import TokenCodec
 from vonk_control.library_assessment import LibraryAssessment
 from vonk_control.library_image_presence import ImagePresenceIndex
@@ -86,7 +86,9 @@ def _seed_recipes_with_images(fixture, *, recipes: int, history: int) -> int:
     _insert_canonical_rows(
         sessions,
         kind="recipe",
-        template=template.document.model_dump(mode="json"),
+        template=projection.recipe_detail(template.selector).document.model_dump(
+            mode="json"
+        ),
         count=recipes,
     )
     with sessions() as session:
@@ -255,7 +257,7 @@ def test_a_blocked_placement_read_degrades_the_recipe_not_the_listing(
         ),
     )
     try:
-        listing = projection.recipe_library()
+        listing = projection.recipe_library(assess=True)
         # The listing answered while the placement read was still blocked.
         assert not answered.is_set()
     finally:
@@ -282,7 +284,7 @@ def test_assessment_reads_do_not_walk_the_stored_model_objects(
 
         monkeypatch.setattr(os, "stat", counting)
         try:
-            projection.recipe_library(limit=1)
+            projection.recipe_library(limit=1, assess=True)
         finally:
             monkeypatch.setattr(os, "stat", real)
         return count
@@ -628,3 +630,27 @@ def test_blocked_assessment_reuses_one_executor_then_fresh_read_is_assessed(
         assert fresh[0].assessment.group is not None
     finally:
         release.set()
+
+
+def test_local_state_query_count_does_not_grow_with_page_size(assessed_library):  # noqa: F811
+    """Latest-request selection must issue one batch, rather than one query per digest."""
+
+    projection, sessions, *_ = assessed_library
+    statements = []
+
+    def observe(_connection, _cursor, statement, _parameters, _context, _many):
+        statements.append(statement)
+
+    engine = sessions.kw["bind"]
+    event.listen(engine, "before_cursor_execute", observe)
+    try:
+        projection._database_local_state([_hex("one")])
+        one = len(statements)
+        statements.clear()
+        projection._database_local_state(
+            [_hex(f"digest-{index}") for index in range(50)]
+        )
+        fifty = len(statements)
+    finally:
+        event.remove(engine, "before_cursor_execute", observe)
+    assert one == fifty

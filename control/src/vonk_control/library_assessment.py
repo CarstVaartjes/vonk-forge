@@ -167,15 +167,14 @@ class LibraryAssessment:
             if (
                 image.recipe_revision_id != recipe.identity.recipe_revision_id
                 or image.content_sha256 != recipe.identity.content_sha256
-                or model.content_sha256
-                != recipe.document.models[0].model.content_sha256
+                or model.content_sha256 != recipe.projected.models[0].content_sha256
             ):
                 raise ValueError("cache resolution changed an exact identity")
             # The profile resolver supplies revision/image authority. Its
             # primary-model cache set alone cannot prove that every selected
             # file and companion dependency in this recipe is present.
             preview = self._model_cache.download_preview(
-                model_content_sha256=recipe.document.models[0].model.content_sha256,
+                model_content_sha256=recipe.projected.models[0].content_sha256,
                 recipe_revision_id=recipe.identity.recipe_revision_id,
             )
             missing_bytes = preview.get("new_bytes")

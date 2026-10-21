@@ -1007,3 +1007,23 @@ def test_gpu_partial_readings_and_typed_failure_survive_fleet_render():
             }
         }
     )
+
+
+def test_library_list_shared_vector_renders_without_documents(capsys):
+    """The list renderer and sweep consume the producer's same projected vector."""
+    import json
+    from pathlib import Path
+
+    from cluster_profiles.generated_control.models.recipe_library_response import (
+        RecipeLibraryResponse,
+    )
+
+    raw = json.loads(
+        (Path(__file__).resolve().parents[1] / "fixtures/library-list.json").read_text()
+    )
+    page = RecipeLibraryResponse.from_dict(raw)
+    render_payload(page.to_dict(), "recipe", action="library", wide=True)
+    rendered = capsys.readouterr().out
+    assert page.recipes[0].selector in rendered
+    assert "not assessed" in rendered
+    assert "Recipe library v2.3.0" in rendered

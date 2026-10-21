@@ -509,6 +509,34 @@ def check_source(
                 for site in mappings.scan_source(source, path=path)
             )
         if "identity" in modes:
+            ingress = path.startswith(
+                "control/src/vonk_control/catalog_sync"
+            ) or path in {
+                "control/src/vonk_control/catalog_entities.py",
+                "control/src/vonk_control/catalog_service.py",
+                "control/src/vonk_control/recipe_packages.py",
+            }
+            if not ingress:
+                tree = ast.parse(source)
+                aliases = {"document_sha256"} | {
+                    alias.asname or alias.name
+                    for node in ast.walk(tree)
+                    if isinstance(node, ast.ImportFrom)
+                    for alias in node.names
+                    if alias.name == "document_sha256"
+                }
+                hits.extend(
+                    (node.lineno, "document digest outside ingress")
+                    for node in ast.walk(tree)
+                    if isinstance(node, ast.Call)
+                    and (
+                        (isinstance(node.func, ast.Name) and node.func.id in aliases)
+                        or (
+                            isinstance(node.func, ast.Attribute)
+                            and node.func.attr == "document_sha256"
+                        )
+                    )
+                )
             hits.extend(
                 (site.line, "provenance comparison")
                 for site in identity.scan_source(source, path=path)

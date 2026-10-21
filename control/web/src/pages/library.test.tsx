@@ -1,10 +1,10 @@
-import {fireEvent, render, screen, waitFor} from "@testing-library/react";
-import {App} from "../app";
-import {minimalLibraryDetail, modelLibrary, recipeLibrary} from "../test-fixtures/library";
-import type {ControlApi, VisualFleetSnapshot} from "../api/types";
-import {loadLibraryView, withObservedRuns} from "./library";
-import {afterEach, vi} from "vitest";
-import {ApiClient} from "../api/client";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { App } from "../app";
+import { minimalLibraryDetail, modelLibrary, recipeLibrary } from "../test-fixtures/library";
+import type { ControlApi, VisualFleetSnapshot } from "../api/types";
+import { loadLibraryView, withObservedRuns } from "./library";
+import { afterEach, vi } from "vitest";
+import { ApiClient } from "../api/client";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -13,56 +13,98 @@ test("loads recipes for uncached models through the real API client", async () =
   // Stubbing ControlApi.recipeLibrary directly would conceal a stray flag.
   vi.stubGlobal("fetch", async (request: Request) => {
     const url = new URL(request.url);
-    const body = url.pathname === "/api/model/library" ? {...modelLibrary, models: modelLibrary.models.map(model => ({...model, local: {...model.local, controller: "not_cached"}}))}
-      : url.searchParams.has("cached") ? {...recipeLibrary, recipes: []} : recipeLibrary;
-    return new Response(JSON.stringify(body), {status: 200, headers: {"Content-Type": "application/json"}});
+    const body =
+      url.pathname === "/api/model/library"
+        ? {
+            ...modelLibrary,
+            models: modelLibrary.models.map((model) => ({
+              ...model,
+              local: { ...model.local, controller: "not_cached" },
+            })),
+          }
+        : url.searchParams.has("cached")
+          ? { ...recipeLibrary, recipes: [] }
+          : recipeLibrary;
+    return new Response(JSON.stringify(body), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
   });
   const snapshot = await loadLibraryView(new ApiClient(), new AbortController().signal);
-  expect(snapshot.models.some(model => model.recipes.length > 0)).toBe(true);
+  expect(snapshot.models.some((model) => model.recipes.length > 0)).toBe(true);
 });
 
 test("does not attach a recipe to another revision of the same model selector", async () => {
-  const original = modelLibrary.models.find(model => recipeLibrary.recipes.some(recipe => recipe.model_selectors.includes(model.selector)))!;
-  const changed = {...original, identity: {...original.identity, content_sha256: "f".repeat(64)}};
-  const api = {modelLibrary: async () => ({...modelLibrary, models: [original, changed]}), recipeLibrary: async () => recipeLibrary} as unknown as ControlApi;
+  const original = modelLibrary.models.find((model) =>
+    recipeLibrary.recipes.some((recipe) => recipe.model_selectors.includes(model.selector)),
+  )!;
+  const changed = {
+    ...original,
+    identity: { ...original.identity, content_sha256: "f".repeat(64) },
+  };
+  const api = {
+    modelLibrary: async () => ({ ...modelLibrary, models: [original, changed] }),
+    recipeLibrary: async () => recipeLibrary,
+  } as unknown as ControlApi;
   const snapshot = await loadLibraryView(api, new AbortController().signal);
   expect(snapshot.models[0]!.recipes.length).toBeGreaterThan(0);
   expect(snapshot.models[1]!.recipes).toHaveLength(0);
 });
 
-const libraryApi = {modelLibrary: async () => modelLibrary, recipeLibrary: async () => recipeLibrary};
+const libraryApi = {
+  modelLibrary: async () => modelLibrary,
+  recipeLibrary: async () => recipeLibrary,
+};
 
 test("renders the canonical model and recipe workcell", async () => {
   history.replaceState(null, "", "/library");
-  render(<App api={libraryApi as unknown as ControlApi}/>);
-  expect(await screen.findByRole("heading", {name: "Library"})).toBeVisible();
+  render(<App api={libraryApi as unknown as ControlApi} />);
+  expect(await screen.findByRole("heading", { name: "Library" })).toBeVisible();
   expect(screen.getByLabelText("Models")).toBeVisible();
   expect(screen.getByLabelText("Recipes matching selected Model")).toBeVisible();
-  expect(screen.queryByRole("button", {name: /sync|import|prepare catalog/i})).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole("button", { name: /sync|import|prepare catalog/i }),
+  ).not.toBeInTheDocument();
   expect(screen.queryByText(/sync|import|prepare catalog/i)).not.toBeInTheDocument();
 });
 test("keeps the exact model filter addressable", async () => {
   history.replaceState(null, "", "/library?view=models");
-  render(<App api={libraryApi as unknown as ControlApi}/>);
-  expect(await screen.findByRole("heading", {name: "Models"})).toBeVisible();
-  expect(screen.getByRole("combobox", {name: "Filter exact model"})).toBeVisible();
+  render(<App api={libraryApi as unknown as ControlApi} />);
+  expect(await screen.findByRole("heading", { name: "Models" })).toBeVisible();
+  expect(screen.getByRole("combobox", { name: "Filter exact model" })).toBeVisible();
 });
 test("merges paged Library responses beyond the first 100 Models", async () => {
-  const extraModels = Array.from({length: 9}, (_, index) => ({...modelLibrary.models[0]!, selector: `paged-model-${index}`, identity: {...modelLibrary.models[0]!.identity, slug: `paged-model-${index}`, content_sha256: `${index}`.repeat(64).slice(0, 64)}}));
+  const extraModels = Array.from({ length: 9 }, (_, index) => ({
+    ...modelLibrary.models[0]!,
+    selector: `paged-model-${index}`,
+    identity: {
+      ...modelLibrary.models[0]!.identity,
+      slug: `paged-model-${index}`,
+      content_sha256: `${index}`.repeat(64).slice(0, 64),
+    },
+  }));
   const calls: Array<string | undefined> = [];
-  const api = {modelLibrary: async (cursor?: string) => { calls.push(cursor); return cursor ? {...modelLibrary, models: extraModels, next_cursor: null} : {...modelLibrary, next_cursor: "page-2"}; }, recipeLibrary: async () => recipeLibrary} as unknown as ControlApi;
+  const api = {
+    modelLibrary: async (cursor?: string) => {
+      calls.push(cursor);
+      return cursor
+        ? { ...modelLibrary, models: extraModels, next_cursor: null }
+        : { ...modelLibrary, next_cursor: "page-2" };
+    },
+    recipeLibrary: async () => recipeLibrary,
+  } as unknown as ControlApi;
   const merged = await loadLibraryView(api, new AbortController().signal);
   expect(merged.models).toHaveLength(101);
   expect(calls).toEqual([undefined, "page-2"]);
 });
 
-type LibraryRequest = {cursor?: string; sort?: string; updatedSince?: string};
+type LibraryRequest = { cursor?: string; sort?: string; updatedSince?: string };
 
 function pagedLibraryApi(calls: LibraryRequest[], api: Partial<ControlApi> = {}) {
   return {
     modelLibrary: async (cursor?: string, sort?: string, updatedSince?: string) => {
-      calls.push({cursor, sort, updatedSince});
-      return {...modelLibrary, next_cursor: cursor ? null : "page-2"};
+      calls.push({ cursor, sort, updatedSince });
+      return { ...modelLibrary, next_cursor: cursor ? null : "page-2" };
     },
     recipeLibrary: async () => recipeLibrary,
     ...api,
@@ -76,12 +118,14 @@ test("restarts from the first page when the server sort changes", async () => {
   // library order.
   history.replaceState(null, "", "/library");
   const calls: LibraryRequest[] = [];
-  render(<App api={pagedLibraryApi(calls)}/>);
-  await waitFor(() => expect(calls.map(call => call.cursor)).toEqual([undefined, "page-2"]));
+  render(<App api={pagedLibraryApi(calls)} />);
+  await waitFor(() => expect(calls.map((call) => call.cursor)).toEqual([undefined, "page-2"]));
 
-  fireEvent.change(screen.getByRole("combobox", {name: "Sort Library"}), {target: {value: "name"}});
-  await waitFor(() => expect(calls.some(call => call.sort === "name")).toBe(true));
-  const reload = calls.find(call => call.sort === "name")!;
+  fireEvent.change(screen.getByRole("combobox", { name: "Sort Library" }), {
+    target: { value: "name" },
+  });
+  await waitFor(() => expect(calls.some((call) => call.sort === "name")).toBe(true));
+  const reload = calls.find((call) => call.sort === "name")!;
   expect(reload.cursor).toBeUndefined();
   expect(reload.updatedSince).toBeUndefined();
 });
@@ -92,12 +136,14 @@ test("restarts from the first page with the recency window as updated_since", as
   // stale entries the operator asked to exclude.
   history.replaceState(null, "", "/library");
   const calls: LibraryRequest[] = [];
-  render(<App api={pagedLibraryApi(calls)}/>);
-  await waitFor(() => expect(calls.map(call => call.cursor)).toEqual([undefined, "page-2"]));
+  render(<App api={pagedLibraryApi(calls)} />);
+  await waitFor(() => expect(calls.map((call) => call.cursor)).toEqual([undefined, "page-2"]));
 
-  fireEvent.change(screen.getByRole("combobox", {name: "Filter updated"}), {target: {value: "7d"}});
-  await waitFor(() => expect(calls.some(call => call.updatedSince !== undefined)).toBe(true));
-  const reload = calls.find(call => call.updatedSince !== undefined)!;
+  fireEvent.change(screen.getByRole("combobox", { name: "Filter updated" }), {
+    target: { value: "7d" },
+  });
+  await waitFor(() => expect(calls.some((call) => call.updatedSince !== undefined)).toBe(true));
+  const reload = calls.find((call) => call.updatedSince !== undefined)!;
   expect(reload.cursor).toBeUndefined();
   const age = Date.now() - Date.parse(reload.updatedSince!);
   expect(age).toBeGreaterThan(6 * 24 * 3_600_000);
@@ -110,7 +156,7 @@ test("reproduces a shared sort and recency link on the first request", async () 
   // shows the server default instead.
   history.replaceState(null, "", "/library?sort=name&updated=31d");
   const calls: LibraryRequest[] = [];
-  render(<App api={pagedLibraryApi(calls)}/>);
+  render(<App api={pagedLibraryApi(calls)} />);
   await waitFor(() => expect(calls.length).toBeGreaterThan(0));
   expect(calls[0]!.cursor).toBeUndefined();
   expect(calls[0]!.sort).toBe("name");
@@ -121,10 +167,44 @@ test("reproduces a shared sort and recency link on the first request", async () 
 
 test("offers artifact jobs the running runs of this exact recipe revision from the fleet", () => {
   const revision = minimalLibraryDetail.recipe.recipe_revision_id;
-  const presence = (run_id: string, recipe_revision_id: string, run_state: string) => ({run_id, recipe_revision_id, run_state});
-  const fleet = {nodes: [
-    {loaded: [presence("run-a", revision, "running"), presence("run-old", "other-revision", "running")]},
-    {loaded: [presence("run-a", revision, "running"), presence("run-b", revision, "stopping")]},
-  ]} as unknown as VisualFleetSnapshot;
-  expect(withObservedRuns(minimalLibraryDetail, fleet)!.operational_state.runs).toEqual([{run_id: "run-a", state: "running"}]);
+  const presence = (run_id: string, recipe_revision_id: string, run_state: string) => ({
+    run_id,
+    recipe_revision_id,
+    run_state,
+  });
+  const fleet = {
+    nodes: [
+      {
+        loaded: [
+          presence("run-a", revision, "running"),
+          presence("run-old", "other-revision", "running"),
+        ],
+      },
+      { loaded: [presence("run-a", revision, "running"), presence("run-b", revision, "stopping")] },
+    ],
+  } as unknown as VisualFleetSnapshot;
+  expect(withObservedRuns(minimalLibraryDetail, fleet)!.operational_state.runs).toEqual([
+    { run_id: "run-a", state: "running" },
+  ]);
+});
+
+test("assesses placement only when the library fleet filter is requested", async () => {
+  const seen: URL[] = [];
+  vi.stubGlobal("fetch", async (request: Request) => {
+    const url = new URL(request.url);
+    seen.push(url);
+    return new Response(
+      JSON.stringify(url.pathname === "/api/model/library" ? modelLibrary : recipeLibrary),
+      { status: 200, headers: { "Content-Type": "application/json" } },
+    );
+  });
+  await loadLibraryView(new ApiClient(), new AbortController().signal);
+  expect(
+    seen.find((url) => url.pathname === "/api/recipe/library")!.searchParams.has("fits_fleet"),
+  ).toBe(false);
+  seen.length = 0;
+  await loadLibraryView(new ApiClient(), new AbortController().signal, undefined, undefined, true);
+  expect(
+    seen.find((url) => url.pathname === "/api/recipe/library")!.searchParams.get("fits_fleet"),
+  ).toBe("true");
 });
