@@ -1,3 +1,5 @@
+#![cfg(test)]
+
 use super::*;
 use std::sync::Mutex;
 use vonk_agent_protocol::generated::{
