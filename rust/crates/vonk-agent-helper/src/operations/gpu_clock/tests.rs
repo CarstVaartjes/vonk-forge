@@ -8,15 +8,35 @@ use std::sync::{
 #[derive(Clone, Default)]
 struct Driver {
     fail: Arc<AtomicBool>,
+    no_support: Arc<AtomicBool>,
+    observation: Arc<Mutex<Option<Vec<u8>>>>,
+    reject: Arc<Mutex<Option<i32>>>,
     calls: Arc<Mutex<Vec<Vec<String>>>>,
 }
 impl CommandRunner for Driver {
     fn run(&self, executable: &Path, arguments: &[String]) -> Result<CommandOutput, String> {
         assert_eq!(executable, Path::new(NVIDIA_SMI));
-        if arguments == [SUPPORT_QUERY, CSV_FORMAT] {
+        if arguments == [vonk_agent_protocol::gpu_clock::SUPPORT_QUERY, CSV_FORMAT] {
             return Ok(CommandOutput {
                 success: true,
-                stdout: b"300\n1800\n2200\n2300\n".to_vec(),
+                stdout: if self.no_support.load(Ordering::SeqCst) {
+                    b"[N/A]\n".to_vec()
+                } else {
+                    b"300\n1800\n2200\n2300\n".to_vec()
+                },
+                stderr: vec![],
+                exit_code: Some(0),
+            });
+        }
+        if arguments == [OBSERVATION_QUERY, CSV_FORMAT] {
+            return Ok(CommandOutput {
+                success: true,
+                stdout: self
+                    .observation
+                    .lock()
+                    .unwrap()
+                    .clone()
+                    .unwrap_or_else(|| b"305, 305, 0x0\n".to_vec()),
                 stderr: vec![],
                 exit_code: Some(0),
             });
@@ -29,6 +49,14 @@ impl CommandRunner for Driver {
                 .all(|b| b.is_ascii_digit() || b == b',')
         );
         self.calls.lock().unwrap().push(arguments.to_vec());
+        if let Some(code) = *self.reject.lock().unwrap() {
+            return Ok(CommandOutput {
+                success: false,
+                stdout: vec![],
+                stderr: b"injected driver refusal".to_vec(),
+                exit_code: Some(code),
+            });
+        }
         if self.fail.load(Ordering::SeqCst) {
             return Err("injected driver outage".to_owned());
         }
@@ -223,7 +251,6 @@ fn process_runner_rejects_broader_nvidia_commands_before_spawn() {
     // This must refuse before looking for a real NVIDIA binary or GPU.
     for args in [
         vec!["-lgc", "300,2301"],
-        vec!["-lgc", "0,2200"],
         vec!["-lgc", "2200,300"],
         vec!["-lgc", "-1,2200"],
         vec!["-lgc", "300.0,2200"],
@@ -244,11 +271,15 @@ fn process_runner_rejects_broader_nvidia_commands_before_spawn() {
 #[test]
 fn command_allowlist_accepts_only_the_fixed_query_and_canonical_safe_lock() {
     assert!(allowed_arguments(&[
-        SUPPORT_QUERY.to_owned(),
+        OBSERVATION_QUERY.to_owned(),
         CSV_FORMAT.to_owned()
     ]));
     for range in [
         default_range(),
+        GpuClockRange {
+            min_mhz: 0,
+            max_mhz: 1800,
+        },
         GpuClockRange {
             min_mhz: 1,
             max_mhz: 2300,
@@ -276,4 +307,134 @@ fn command_allowlist_accepts_only_the_fixed_query_and_canonical_safe_lock() {
         ),
         Err("executable is not compiled into the helper".to_owned())
     );
+}
+
+#[test]
+fn gb10_without_supported_levels_applies_default_and_custom_without_systemd_or_workload_effects() {
+    // Fails if an empty driver capability list gates a valid clock command.
+    let temp = tempfile::tempdir().unwrap();
+    let driver = Driver::default();
+    driver.no_support.store(true, Ordering::SeqCst);
+    let executor = helper(temp.path(), &driver);
+    executor.reconcile_gpu_clock_at(None, true, 1000).unwrap();
+    assert_eq!(checkpoint(temp.path()).state, GpuClockApplyState::Applied);
+    executor
+        .reconcile_gpu_clock_at(Some(&intent(1, 1800)), false, 1001)
+        .unwrap();
+    assert_eq!(
+        checkpoint(temp.path()).applied_range,
+        Some(intent(1, 1800).range)
+    );
+    assert_eq!(
+        *driver.calls.lock().unwrap(),
+        vec![vec!["-lgc", "300,2200"], vec!["-lgc", "300,1800"]]
+    );
+}
+
+#[test]
+fn reboot_invalidates_the_receipt_and_reapplies_the_active_range() {
+    // Fails if an applied receipt from a previous boot suppresses the command.
+    let temp = tempfile::tempdir().unwrap();
+    let driver = Driver::default();
+    let executor = helper(temp.path(), &driver);
+    let desired = intent(1, 1800);
+    executor
+        .reconcile_gpu_clock_at(Some(&desired), false, 1000)
+        .unwrap();
+    let mut old = checkpoint(temp.path());
+    old.applied_boot_id = Some("previous-boot".to_owned());
+    let root = temp.path().join("gpu-clock");
+    executor
+        .write_gpu_clock(&root, &root.join(CHECKPOINT_FILE), &old)
+        .unwrap();
+    helper(temp.path(), &driver)
+        .reconcile_gpu_clock_at(Some(&desired), false, 2000)
+        .unwrap();
+    let reapplied = checkpoint(temp.path());
+    assert_eq!(reapplied.state, GpuClockApplyState::Applied);
+    assert_ne!(reapplied.applied_boot_id, old.applied_boot_id);
+    assert_eq!(reapplied.applied_range, Some(desired.range));
+    assert_eq!(driver.calls.lock().unwrap().len(), 2);
+}
+
+#[test]
+fn successful_command_with_missing_or_excessive_observation_waits_and_recovers() {
+    // A zero exit status without corroborating evidence must not become Applied.
+    for reading in [
+        b"[N/A], 305, 0x0\n".as_slice(),
+        b"2200, 2200, 0x0\n",
+        b"305, 305, [N/A]\n",
+    ] {
+        let temp = tempfile::tempdir().unwrap();
+        let driver = Driver::default();
+        *driver.observation.lock().unwrap() = Some(reading.to_vec());
+        let desired = intent(1, 1800);
+        let executor = helper(temp.path(), &driver);
+        executor
+            .reconcile_gpu_clock_at(Some(&desired), false, 1000)
+            .unwrap();
+        let waiting = checkpoint(temp.path());
+        assert_eq!(waiting.state, GpuClockApplyState::Waiting);
+        assert!(waiting.applied_range.is_none());
+        assert_eq!(waiting.next_attempt_at, Some(1060));
+        assert!(
+            waiting
+                .detail
+                .unwrap()
+                .contains("observation is unconfirmed")
+        );
+        *driver.observation.lock().unwrap() = None;
+        executor
+            .reconcile_gpu_clock_at(Some(&desired), false, 1060)
+            .unwrap();
+        assert_eq!(checkpoint(temp.path()).state, GpuClockApplyState::Applied);
+    }
+}
+
+#[test]
+fn deterministic_driver_refusals_do_not_loop_but_new_intent_can_retry() {
+    // A denied/unsupported command is not a recoverable driver outage.
+    for code in [2, 3, 4] {
+        let temp = tempfile::tempdir().unwrap();
+        let driver = Driver::default();
+        *driver.reject.lock().unwrap() = Some(code);
+        let executor = helper(temp.path(), &driver);
+        let desired = intent(1, 1800);
+        executor
+            .reconcile_gpu_clock_at(Some(&desired), false, 1000)
+            .unwrap();
+        let refused = checkpoint(temp.path());
+        assert_eq!(refused.state, GpuClockApplyState::Refused);
+        assert!(refused.next_attempt_at.is_none());
+        assert!(refused.detail.unwrap().contains("injected driver refusal"));
+        executor
+            .reconcile_gpu_clock_at(Some(&desired), false, 1100)
+            .unwrap();
+        assert_eq!(driver.calls.lock().unwrap().len(), 1);
+        *driver.reject.lock().unwrap() = None;
+        executor
+            .reconcile_gpu_clock_at(Some(&intent(2, 1800)), false, 1101)
+            .unwrap();
+        assert_eq!(checkpoint(temp.path()).state, GpuClockApplyState::Applied);
+    }
+}
+
+#[test]
+fn oversized_observation_cannot_poison_the_durable_retry_record() {
+    // Raw driver output in a parse error must not exceed the record read bound.
+    let temp = tempfile::tempdir().unwrap();
+    let driver = Driver::default();
+    *driver.observation.lock().unwrap() = Some(vec![b'9'; RECORD_BYTES as usize + 1]);
+    let desired = intent(1, 1800);
+    helper(temp.path(), &driver)
+        .reconcile_gpu_clock_at(Some(&desired), false, 1000)
+        .unwrap();
+    let waiting = checkpoint(temp.path());
+    assert_eq!(waiting.state, GpuClockApplyState::Waiting);
+    assert!(waiting.detail.unwrap().contains("observation exceeds"));
+    *driver.observation.lock().unwrap() = None;
+    helper(temp.path(), &driver)
+        .reconcile_gpu_clock_at(Some(&desired), false, 1060)
+        .unwrap();
+    assert_eq!(checkpoint(temp.path()).state, GpuClockApplyState::Applied);
 }

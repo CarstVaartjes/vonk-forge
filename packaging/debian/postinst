@@ -435,7 +435,6 @@ if ! deb-systemd-helper is-enabled vonk-forge-package-rollback.service >/dev/nul
     deb-systemd-helper enable vonk-forge-package-rollback.service >/dev/null
 fi
 deb-systemd-helper enable vonk-forge-agent.service >/dev/null || true
-deb-systemd-helper enable vonk-forge-gpu-clock-cap.service >/dev/null || true
 deb-systemd-helper enable vonk-forge-monitor.service >/dev/null || true
 if [ -f /etc/vonk-forge-agent/docker-firewall.conf ]; then
     deb-systemd-helper enable vonk-forge-docker-firewall.service >/dev/null || true

@@ -86,32 +86,6 @@ def profile_gpu_clock_effects(
     ]
 
 
-def gpu_clock_start_intent(session: Session, node_id: str) -> GpuClockIntent | None:
-    """Old agents cannot parse the new optional start field. Default starts
-    retain their packaged cap; a custom intent needs reported support."""
-    from sqlalchemy import select
-    from vonk_agent_protocol import canonical_message
-    from vonk_agent_protocol.inventory import HostSettings
-
-    from .models import NodeInventorySnapshot
-
-    desired = selected_gpu_clock(session, node_id)
-    snapshot = session.scalar(
-        select(NodeInventorySnapshot)
-        .where(NodeInventorySnapshot.node_id == node_id)
-        .order_by(NodeInventorySnapshot.observed_at.desc())
-        .limit(1)
-    )
-    host = (
-        None
-        if snapshot is None or snapshot.host_settings is None
-        else HostSettings.model_validate_json(canonical_message(snapshot.host_settings))
-    )
-    if host is None or host.gpu_clock_support is None:
-        if desired.range != default_gpu_clock():
-            raise ValueError(
-                "The Spark must report supported GPU clocks before it can accept a custom profile range; update its agent or wait for inventory"
-            )
-        return None
-    host.gpu_clock_support.validate_range(desired.range)
-    return desired
+def gpu_clock_start_intent(session: Session, node_id: str) -> GpuClockIntent:
+    """Every start binds the selected policy; GB10 need not enumerate levels."""
+    return selected_gpu_clock(session, node_id)

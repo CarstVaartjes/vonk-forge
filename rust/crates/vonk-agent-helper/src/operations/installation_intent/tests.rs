@@ -261,7 +261,7 @@ fn signed_cleanup_fences_never_executed_start_and_newer_intent_launches_after_re
         clock
             .detail
             .unwrap()
-            .contains("supported clocks unavailable")
+            .contains("injected GPU clock driver outage")
     );
     // A damaged fence requires a new authenticated current-intent challenge,
     // and never revives the outstanding old signed grant.
