@@ -30,10 +30,6 @@ _CHANGE_EFFECTS: frozenset[RunSwitchChangeEffect] = frozenset(
     get_args(RunSwitchChangeEffect)
 )
 
-# The memory the platform keeps free on every Spark beyond a workload's declared
-# peak. A recipe's own ``reserve_bytes`` is informational and is never added.
-PLATFORM_MEMORY_FLOOR_BYTES = 6_000_000_000
-
 
 @dataclass(frozen=True, slots=True)
 class ResourceReason:

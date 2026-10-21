@@ -755,3 +755,31 @@ def test_decision_context_participates_in_resource_settings_identity() -> None:
     second = resolve_effective_settings(_recipe_document(settings))
     assert second.allowed and second.settings is not None
     assert first.settings.identity_digest != second.settings.identity_digest
+
+
+def test_deepseek_deferral_uses_observed_host_not_recipe_reserve() -> None:
+    # Wrong implementation: checking only peak+floor against total, or adding
+    # recipe reserve, misses the real reason this empty-host load was refused.
+    from dataclasses import replace
+
+    from vonk_forge_contracts.memory_admission import evaluate_memory_admission
+
+    peak = 124_000_000_000
+    occupied = 4_515_061_760
+    assert evaluate_memory_admission(peak, _SPARK_POOL).admissible
+    assert not evaluate_memory_admission(
+        peak, _SPARK_POOL, occupied_bytes=occupied
+    ).admissible
+    plan = plan_capacity(
+        {"rank-0": _declared_demand(peak)},
+        [
+            replace(
+                _idle_capacity(_SPARK_POOL, _SPARK_POOL - occupied),
+                free_upside_bytes=21_598_208,
+            )
+        ],
+        memory_floor_bytes=PLATFORM_MEMORY_FLOOR_BYTES,
+    )
+    assert not plan.allowed
+    assert _blocker_codes(plan) == [ResourceBlockerCode.DEMAND_EXCEEDS_CAPACITY]
+    assert "2169772032 bytes" in plan.reasons[-1].detail
