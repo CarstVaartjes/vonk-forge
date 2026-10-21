@@ -125,27 +125,36 @@ def test_generated_run_switch_clients_accept_auto_wait_and_preserve_manual_wait(
     assert projected.progress.state == "needs-operator"
 
 
-def test_library_contract_uses_direct_canonical_model_and_recipe_facts() -> None:
+def test_library_contract_uses_typed_projections_without_full_documents() -> None:
     schema = json.loads(OPENAPI.read_text())
     components = schema["components"]["schemas"]
-    for projection, canonical in (
-        ("LibraryModelProjection", "ModelDefinition"),
-        ("LibraryRecipeProjection", "RecipeDefinition"),
-        ("RecipeDetailResponse", "RecipeDefinition"),
-    ):
-        contract = components[projection]
+    for kind in ("Model", "Recipe"):
+        contract = components[f"Library{kind}Projection"]
         assert contract["additionalProperties"] is False
-        assert contract["properties"]["document"] == {
-            "$ref": f"#/components/schemas/{canonical}"
+        assert "document" not in contract["properties"]
+        assert {
+            "selector",
+            "identity",
+            "projected",
+            "resources",
+            "local",
+            "updated_at",
+        } <= set(contract["required"])
+        for field, canonical in (
+            ("identity", f"Library{kind}Identity"),
+            ("projected", f"{kind}RevisionProjection"),
+            ("resources", "LibraryResourceProjection"),
+            ("local", "LibraryLocalState"),
+        ):
+            assert contract["properties"][field] == {
+                "$ref": f"#/components/schemas/{canonical}"
+            }
+    for kind, field in (("Model", "models"), ("Recipe", "recipes")):
+        items = components[f"{kind}LibraryResponse"]["properties"][field]
+        assert items["maxItems"] == 512
+        assert items["items"] == {
+            "$ref": f"#/components/schemas/Library{kind}Projection"
         }
-        assert contract["properties"]["local"] == {
-            "$ref": "#/components/schemas/LibraryLocalState"
-        }
-    for name, field in (
-        ("ModelLibraryResponse", "models"),
-        ("RecipeLibraryResponse", "recipes"),
-    ):
-        assert components[name]["properties"][field]["maxItems"] == 512
     assert "recipe_revision_id" in components["LibraryRecipeIdentity"]["required"]
     assert {
         "LibrarySnapshot",
@@ -437,12 +446,16 @@ def test_generated_library_schema_uses_shared_authority_documents() -> None:
         "RuntimeDistribution",
     }
     assert forbidden.isdisjoint(components)
-    assert components["LibraryModelProjection"]["properties"]["document"] == {
-        "$ref": "#/components/schemas/ModelDefinition"
-    }
-    assert components["LibraryRecipeProjection"]["properties"]["document"] == {
-        "$ref": "#/components/schemas/RecipeDefinition"
-    }
+    for kind in ("Model", "Recipe"):
+        detail = components[f"{kind}DetailResponse"]
+        assert detail["additionalProperties"] is False
+        assert "document" in detail["required"]
+        assert detail["properties"]["document"] == {
+            "$ref": f"#/components/schemas/{kind}Definition"
+        }
+        assert detail["properties"]["projected"] == {
+            "$ref": f"#/components/schemas/{kind}RevisionProjection"
+        }
 
 
 def test_generated_library_contract_drops_legacy_visual_artifact_identity() -> None:
