@@ -1,5 +1,5 @@
 [[values]]
 semantic_id = "images.floating_tags"
-owner = "scripts/verify-supply-chain"
+owner = "scripts/image_policy.py"
 selector = "FLOATING_TAGS"
 family = "floating_tags"

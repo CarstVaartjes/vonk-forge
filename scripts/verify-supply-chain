@@ -12,6 +12,9 @@ import sys
 import tomllib
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from image_policy import FLOATING_TAGS
+
 # Images are pinned by explicit version tag, not by digest. A tag with a
 # version is reviewable and a patch release arrives through a dependency bump;
 # a digest is more precise but requires hand-editing a value the tooling owns
@@ -22,7 +25,6 @@ from pathlib import Path
 # present and must not be a floating channel name. The path excludes `@`, so a
 # digest reference fails this check.
 VERSIONED_IMAGE = re.compile(r"^[^\s@]+:[^\s@]+$")
-FLOATING_TAGS = frozenset({"latest", "main", "edge", "stable", "master", "dev"})
 PROTOCOL_WHEEL = "inventory/wheels/vonk_agent_protocol-4.1.0-py3-none-any.whl"
 PUBLIC_CONTRACT_LOCK = "control/packaging/public-contracts.lock"
 PUBLIC_CONTRACT_WHEEL = (
