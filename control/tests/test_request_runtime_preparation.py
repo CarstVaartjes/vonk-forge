@@ -131,3 +131,9 @@ def test_execution_request_creates_delivery_without_an_earlier_distribution(
         ).objects
         == objects
     )
+    assert (
+        delivery.authorize(
+            node_id=operation.node_id, plan_digest=payload.plan_digest
+        ).assignment_id
+        == grant.assignment_id
+    )

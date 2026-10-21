@@ -38,6 +38,7 @@ from ..models import (
 if TYPE_CHECKING:
     from .service import DistributionService
 
+from .assignments import _may_replace
 from .constants import _AUTHORIZATION_CACHE_ENTRIES, _AUTHORIZATION_TTL_SECONDS
 from .locations import _LOCATION_CACHE_ENTRIES, ObjectLocation, _still_stored
 from .types import (
@@ -64,6 +65,7 @@ class DeliveryMixin:
             return
         now = service.clock()
         accepted = None
+        retained = None
         with service.sessions() as session:
             rows = session.execute(
                 select(AgentOperation, AgentOperationAttempt, Job, AgentNode)
@@ -112,6 +114,18 @@ class DeliveryMixin:
                 ):
                     accepted = payload.compiled_execution_plan
                     break
+            if accepted is not None:
+                row = session.scalar(
+                    select(ArtifactDistributionAssignment).where(
+                        ArtifactDistributionAssignment.node_id == node_id,
+                        ArtifactDistributionAssignment.plan_digest == plan_digest,
+                        ArtifactDistributionAssignment.state
+                        == DistributionAssignmentState.ACTIVE,
+                        ArtifactDistributionAssignment.expires_at > now,
+                    )
+                )
+                if row is not None:
+                    retained = service._from_row(row)
         if accepted is None:
             return
         # The managed cache owns object names and membership; the accepted
@@ -135,20 +149,26 @@ class DeliveryMixin:
                 "accepted model objects are not currently observable",
             )
         image = accepted.runtime_image
-        service.register(
-            NodeDistributionAssignment(
-                assignment_id=str(uuid4()),
-                plan_digest=plan_digest,
-                generation=1,
-                node_id=node_id,
-                expires_at=now + timedelta(hours=1),
-                model_artifact_set_sha256=accepted.identity.model_artifact_set_sha256,
-                objects=content_objects(objects),
-                oci_image_digest=image.image_digest,
-                oci_image_config_digest=image.local_image_config_id,
-                oci_archive_sha256=image.oci_layout_sha256,
-            )
+        assignment = NodeDistributionAssignment(
+            assignment_id=str(uuid4()),
+            plan_digest=plan_digest,
+            generation=1,
+            node_id=node_id,
+            expires_at=now + timedelta(hours=1),
+            model_artifact_set_sha256=accepted.identity.model_artifact_set_sha256,
+            objects=content_objects(objects),
+            oci_image_digest=image.image_digest,
+            oci_image_config_digest=image.local_image_config_id,
+            oci_archive_sha256=image.oci_layout_sha256,
         )
+        # A manifest observation reuses the committed grant. Changing UUIDs on
+        # every GET reacquired all reference gates despite identical content.
+        # Expired/revoked grants still go through normal fenced admission.
+        if retained is not None and _may_replace(
+            retained, assignment, active=True, now=now
+        ):
+            return
+        service.register(assignment)
 
     def authorize(
         self, *, node_id: str, plan_digest: str

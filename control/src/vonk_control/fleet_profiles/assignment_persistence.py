@@ -35,7 +35,11 @@ if TYPE_CHECKING:
 
 class FleetProfileService:
     def _validated_assignments(
-        self, session: Session, values: Sequence[FleetProfileAssignmentInput]
+        self,
+        session: Session,
+        values: Sequence[FleetProfileAssignmentInput],
+        *,
+        retained_selectors: frozenset[str] = frozenset(),
     ) -> tuple[list[FleetProfileAssignmentInput], list[str]]:
         """Canonical assignments to store, and what saving replaced.
 
@@ -48,6 +52,7 @@ class FleetProfileService:
 
         assignments: list[FleetProfileAssignmentInput] = []
         notes: list[str] = []
+        digests: set[str] = set()
         for value in values:
             resolved = self._recipe_document(session, value.recipe_selector)
             if isinstance(resolved, Residue):
@@ -67,45 +72,10 @@ class FleetProfileService:
                     f"{value.recipe_selector}: revision {revision.id} is unreadable"
                 )
                 continue
-            # Saved profiles are references too. Use the same object gates as
-            # fleet removal, even when the NAS has no artifact set for a model.
-            # A logical profile may supersede an older NAS-only removal through
-            # the existing load path; only fleet removal adds this draft guard.
-            # This short reference transaction never spans remote work.
-            digests = {
-                selection.model.content_sha256 for selection in definition.models
-            }
-            from ..model_cache.fleet_removal import _model_objects
-
-            try:
-                objects: set[str] = set()
-                for digest in sorted(digests):
-                    named, _shared = _model_objects(
-                        session, digest, include_shared=False
-                    )
-                    objects.update(named)
-                identities = tuple(
-                    ArtifactIdentity("model-object", digest)
-                    for digest in sorted(objects)
+            if value.recipe_selector not in retained_selectors:
+                digests.update(
+                    selection.model.content_sha256 for selection in definition.models
                 )
-                gates = lock_reference_gates(session, identities, now=self._clock())
-                fleet_owned: list[ArtifactIdentity] = []
-                for gate in gates:
-                    if gate.removal_owner_id is None:
-                        continue
-                    owner = session.get(ModelCacheOperation, gate.removal_owner_id)
-                    payload = None if owner is None else _operation_removal(owner)
-                    if gate.removal_authority_expires_at is not None or (
-                        payload is not None
-                        and not isinstance(payload, Residue)
-                        and payload.fleet is not None
-                    ):
-                        fleet_owned.append(
-                            ArtifactIdentity("model-object", gate.artifact_sha256)
-                        )
-                require_reference_open(session, fleet_owned, now=self._clock())
-            except ArtifactLifecycleError as error:
-                raise FleetProfileAdmissionEffectBusy(error.detail) from error
             # Every option is saved with an explicit value: the operator's
             # choice, or the recipe default where none was made or offered.
             choices, replaced = _effective_option_choices(
@@ -121,6 +91,39 @@ class FleetProfileService:
                 }
             )
             assignments.append(normalized)
+        # Finish catalog/option validation before taking any gates. Each new
+        # immutable object is admitted once, in global order; retained pins do
+        # no reference work. Shared admissions exclude deletion, not readers.
+        from ..model_cache.fleet_removal import _model_objects
+
+        try:
+            objects: set[str] = set()
+            for digest in sorted(digests):
+                named, _shared = _model_objects(session, digest, include_shared=False)
+                objects.update(named)
+            identities = tuple(
+                ArtifactIdentity("model-object", digest) for digest in sorted(objects)
+            )
+            gates = lock_reference_gates(
+                session, identities, now=self._clock(), shared=True
+            )
+            fleet_owned: list[ArtifactIdentity] = []
+            for gate in gates:
+                if gate.removal_owner_id is None:
+                    continue
+                owner = session.get(ModelCacheOperation, gate.removal_owner_id)
+                payload = None if owner is None else _operation_removal(owner)
+                if gate.removal_authority_expires_at is not None or (
+                    payload is not None
+                    and not isinstance(payload, Residue)
+                    and payload.fleet is not None
+                ):
+                    fleet_owned.append(
+                        ArtifactIdentity("model-object", gate.artifact_sha256)
+                    )
+            require_reference_open(session, fleet_owned, now=self._clock())
+        except ArtifactLifecycleError as error:
+            raise FleetProfileAdmissionEffectBusy(error.detail) from error
         return assignments, notes
 
     @staticmethod
