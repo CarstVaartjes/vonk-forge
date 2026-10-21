@@ -1,0 +1,5 @@
+[[values]]
+semantic_id = "images.mirror_inputs"
+owner = "deploy/compose/images.lock.json"
+selector = "images"
+family = "mirror_input"

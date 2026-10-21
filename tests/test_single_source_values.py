@@ -43,3 +43,27 @@ def test_missing_owner_and_duplicate_registration_fail(tmp_path: Path) -> None:
     (tmp_path / "scripts/verify-supply-chain").write_text("unrelated = 32\n")
     with pytest.raises(ValueError, match="owner selector"):
         violations(tmp_path, [registry])
+
+
+def test_mirror_matrix_follows_changed_lock(tmp_path: Path) -> None:
+    # Wrong implementation: the workflow mirrors a stale, independently pinned Tailscale.
+    import json
+    import subprocess
+    import sys
+
+    import yaml
+
+    lock_path = tmp_path / "deploy/compose/images.lock.json"
+    lock_path.parent.mkdir(parents=True)
+    lock = json.loads((ROOT / "deploy/compose/images.lock.json").read_text())
+    changed = "example.invalid/tail:changed@sha256:" + "a" * 64
+    lock["images"]["tailscale"] = changed
+    lock_path.write_text(json.dumps(lock))
+    output = subprocess.check_output([sys.executable, str(ROOT / "scripts/ci-image-mirror-inputs"), str(tmp_path)], text=True)
+    images = json.loads(output)
+    assert changed in images
+    assert set(images) == {ref for section in ("images", "build_bases", "ci_tools") for ref in lock[section].values()}
+    jobs = yaml.safe_load((ROOT / ".github/workflows/ci-image-mirror.yml").read_text())["jobs"]
+    assert jobs["mirror"]["needs"] == "inputs"
+    assert "fromJSON(needs.inputs.outputs.images)" in jobs["mirror"]["strategy"]["matrix"]["image"]
+    assert "scripts/ci-image-mirror-inputs" in jobs["inputs"]["steps"][-1]["run"]
