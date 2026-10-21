@@ -20,6 +20,7 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
     ArtifactLifecycleCode,
+    Disposition,
     InvalidRequestReason,
     LifecycleState,
     UnknownOutcomeError,
@@ -124,12 +125,14 @@ class ArtifactReferenceUnsettled(UnknownOutcomeError, ArtifactLifecycleError):
     """A gate is busy, reserved for removal, or cannot be read right now: the
     owner observes and retries, nothing is refused."""
 
+    disposition = Disposition.WAIT
+
     def __init__(
         self,
         code: str,
         detail: str,
         *,
-        retryable: bool = False,
+        retryable: bool = True,
         reason: WaitReason = WaitReason.OBSERVATION_UNAVAILABLE,
     ) -> None:
         ArtifactLifecycleError.__init__(self, code, detail, retryable=retryable)

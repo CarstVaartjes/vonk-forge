@@ -4,9 +4,6 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from datetime import datetime
-from typing import (
-    Any,
-)
 
 from pydantic import BaseModel, TypeAdapter, ValidationError
 from vonk_agent_protocol import (
@@ -17,6 +14,7 @@ from vonk_agent_protocol import (
     WaitReason,
     canonical_message,
 )
+from vonk_agent_protocol.agent_words import ProfileChildPhase
 
 from ..bounded_json import require_mapping
 from ..distribution_assignment import NodeDistributionAssignment
@@ -49,12 +47,16 @@ from ..run_switch_contract import (
     RunSwitchPhase,
     RunSwitchPhaseKind,
     RunSwitchPhaseResult,
+    RunSwitchPlan,
     RunSwitchProgressState,
     RunSwitchSubphase,
 )
 from ..run_switch_observation_contract import (
     RunSwitchObservedEvidence,
+    RunSwitchStoredLifecycle,
 )
+from ..run_switch_progress import RECOVERY_STALL_WINDOW
+from ..stall_window import stall_deadline
 from .constants import (
     _MEMBER_STATE_ADAPTER,
     _PHASES,
@@ -62,6 +64,9 @@ from .constants import (
     _SUBPHASE_ADAPTER,
 )
 from .errors import RunSwitchRetryLater, retry_later_unless_deterministic
+from .results import (
+    _persisted_result as _persisted_result,  # noqa: PLC0414 -- shared helper export
+)
 from .results import _stored_result
 
 
@@ -134,12 +139,85 @@ def _wait_blockers(
     return wait.blockers if wait else []
 
 
-def _persisted_result(value: RunSwitchOperationResult) -> Any:
-    """The single canonical result serializer at the ORM boundary."""
-    # In-place mutations of default collections do not enter model_fields_set,
-    # so persist every field's value (explicit None included): readers index
-    # keys such as ``observation_due_at`` directly.
-    return value.model_dump(mode="json")
+def _recover_progress(
+    job: Job, accepted: RunSwitchOperationResult, plan: RunSwitchPlan
+) -> RunSwitchOperationResult:
+    """Discard damaged measurements, retaining accepted intent and issued effects.
+
+    This is a worker checkpoint for re-observation, never evidence of completion.
+    Fresh planning reads current inventory; phase executors adopt their original
+    request's install/start/stop before issuing any new effect.
+    """
+    # A damaged measurement must not erase a readable issued checkpoint. Read
+    # that checkpoint through the SAME schema, with measurements explicitly
+    # unknown until the phase owner observes them again.
+    if isinstance(job.result, Mapping):
+        unmeasured = {
+            **job.result,
+            "completed_bytes": 0,
+            "total_bytes": None,
+            "total_bytes_known": False,
+            "operation": None,
+            "members": [],
+        }
+        try:
+            return RunSwitchOperationResult.model_validate_json(
+                canonical_message(unmeasured), strict=True
+            )
+        except (TypeError, ValueError):
+            pass
+        # A phase index is derived from the accepted plan. A readable phase
+        # and subphase uniquely reconnect an issued child even if its index
+        # was damaged; never discard that child and issue a second request.
+        try:
+            checkpoint = RunSwitchOperationResult.model_validate_json(
+                canonical_message({**unmeasured, "phase_index": 0}), strict=True
+            )
+        except (TypeError, ValueError):
+            try:
+                checkpoint = RunSwitchOperationResult.model_validate_json(
+                    canonical_message(
+                        {**unmeasured, "phase_index": 0, "item_index": 0}
+                    ),
+                    strict=True,
+                )
+                # Stop is the only multi-item phase. An unknown stop index
+                # requires fresh planning instead of attributing another run.
+                if checkpoint.phase == ProfileChildPhase.STOP:
+                    checkpoint = None
+            except (TypeError, ValueError):
+                checkpoint = None
+        if checkpoint is not None:
+            phases = [
+                phase
+                for phase in plan.phases
+                if (phase.kind, phase.subphase)
+                == (checkpoint.phase, checkpoint.subphase)
+            ]
+            if len(phases) == 1:
+                checkpoint.phase_index = phases[0].index
+                return checkpoint
+    try:
+        retained = RunSwitchStoredLifecycle.model_validate_json(
+            canonical_message(job.result), strict=True
+        )
+    except (TypeError, ValueError):
+        retained = RunSwitchStoredLifecycle()
+    from .planning_helpers import _aware
+
+    progress = RunSwitchOperationResult(
+        workload_intent_ordinal=accepted.workload_intent_ordinal,
+        profile_application_id=accepted.profile_application_id,
+        cancellation=retained.cancellation,
+        recovery_child_operation_id=retained.child_operation_id,
+        recovery_deadline_at=stall_deadline(
+            _aware(job.created_at), None, RECOVERY_STALL_WINDOW
+        ),
+        force_replan=True,
+    )
+    if retained.cancellation is not None:
+        progress.child_operation_id = retained.child_operation_id
+    return progress
 
 
 _PHASE_RESULT_ADAPTER = TypeAdapter(RunSwitchPhaseResult)

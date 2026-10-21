@@ -22,6 +22,7 @@ from ..run_switch_contract import (
 from ..run_switch_journal_contract import (
     RunSwitchJournalRepairPendingState,
 )
+from ..run_switch_operations.results import _persisted_result
 from ..stall_window import stall_deadline
 from .discovery import REPAIR_WAIT, _candidate
 
@@ -88,7 +89,7 @@ def record_repair_cancellation(
             )
             if progress.cancellation is None:
                 progress.cancellation = cancellation
-                job.result = progress.model_dump(mode="json")
+                job.result = _persisted_result(progress)
                 job.updated_at = cancellation.requested_at
             return
         row, state = _pending(session, job, cancellation.requested_at)

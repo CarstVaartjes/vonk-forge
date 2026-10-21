@@ -299,8 +299,8 @@ def _build_installed_vonkctl(workspace: Path) -> Path:
             "-c",
             (
                 "import importlib.util; "
-                "assert importlib.util.find_spec('vonk_control') is None; "
-                "assert importlib.util.find_spec('pydantic') is None"
+                "from cluster_profiles import cli_artifact_jobs; "
+                "assert importlib.util.find_spec('vonk_control') is None"
             ),
         ],
         env={**environment, "PYTHONPATH": ""},

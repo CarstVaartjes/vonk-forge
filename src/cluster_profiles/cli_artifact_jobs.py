@@ -37,6 +37,7 @@ from .control_client import (
 )
 from .control_client.transfers import download_destination as _download_destination
 from .control_client.transfers import verified_output as _existing_verified_file
+from .generated_control.media_types import canonical_media_types
 
 _UUID = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
@@ -866,6 +867,13 @@ def _canonical_create(
     validated = validate_control_document("ArtifactJobCreate", body)
     transport = _mapping(capabilities.get("transport"), "artifact job capabilities")
     output_limits = _mapping(validated.get("output_limits"), "artifact output limits")
+    output_limits = {
+        **output_limits,
+        "allowed_media_types": canonical_media_types(
+            cast(list[str], output_limits["allowed_media_types"])
+        ),
+    }
+    validated["output_limits"] = output_limits
     maximum_timeout = _integer(
         transport.get("max_timeout_seconds"), "job timeout limit"
     )

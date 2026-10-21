@@ -4136,26 +4136,21 @@ class SparkLifecycle:
         deadline = time.monotonic() + _CANARY_CONVERGENCE_SECONDS
         while typed.state in _LIVE_CACHE_STATES:
             if time.monotonic() >= deadline:
-                evidence = {
-                    "state": typed.state,
-                    "attempt": typed.attempt,
-                    "progress": (
-                        None
-                        if typed.progress is None
-                        else typed.progress.model_dump(mode="json", exclude_none=True)
-                    ),
-                    "failure": (
-                        None
-                        if typed.failure is None
-                        else typed.failure.model_dump(mode="json", exclude_none=True)
-                    ),
-                    "children": [
-                        child.model_dump(mode="json", exclude_none=True)
-                        for child in typed.children
-                    ],
-                    "actions": list(typed.actions),
-                    "updated_at": typed.updated_at,
-                }
+                evidence = typed.model_dump(
+                    mode="json",
+                    exclude_none=True,
+                    include={
+                        "state",
+                        "attempt",
+                        "progress",
+                        "failure",
+                        "children",
+                        "actions",
+                        "blockers",
+                        "next_attempt_at",
+                        "updated_at",
+                    },
+                )
                 raise LifecycleError(
                     "synthetic canary recipe download did not converge: "
                     + self._redact_diagnostics(

@@ -11,6 +11,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
+from packaging.requirements import Requirement
 from sqlalchemy import select
 from vonk_agent_protocol import (
     RecipeJobFile,
@@ -42,6 +43,61 @@ OUTPUT_LIMITS: dict[str, object] = {
     "max_total_bytes": 4096,
     "allowed_media_types": ["image/png"],
 }
+
+
+def test_installed_cli_canonicalizes_media_without_contract_runtime(
+    installed_vonkctl: Path, tmp_path: Path
+) -> None:
+    """Catch a producer that needs unreleased contracts or preserves author order."""
+    result = subprocess.run(
+        [
+            str(installed_vonkctl.with_name("python")),
+            "-I",
+            "-c",
+            """
+import importlib.metadata
+import importlib.util
+import json
+from cluster_profiles.cli_artifact_jobs import _canonical_create
+
+for package in ("pydantic", "vonk_agent_protocol", "vonk_forge_contracts"):
+    assert importlib.util.find_spec(package) is None, package
+limits = {
+    "max_files": 2,
+    "max_file_bytes": 1024,
+    "max_total_bytes": 2048,
+    "allowed_media_types": ["video/mp4", "application/x-ndjson", "video/mp4"],
+}
+body = _canonical_create(
+    {
+        "interface": "artifact-job", "parameters": {},
+        "output_limits": limits, "timeout_seconds": 60,
+    },
+    [],
+    {"transport": {
+        "max_timeout_seconds": 3600, "max_output_files": 32,
+        "max_output_file_bytes": 1024, "max_output_total_bytes": 2048,
+    }},
+)
+assert limits["allowed_media_types"] == ["video/mp4", "application/x-ndjson", "video/mp4"]
+print(json.dumps({
+    "media": body["output_limits"]["allowed_media_types"],
+    "requirements": importlib.metadata.requires("vonk-cluster-profiles"),
+}))
+""",
+        ],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=15,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    document = json.loads(result.stdout)
+    assert document["media"] == ["application/x-ndjson", "video/mp4"]
+    # Direct git requirements cannot be installed in the signed updater's
+    # hash-required resolver, even when a git commit is named.
+    assert all(Requirement(item).url is None for item in document["requirements"])
 
 
 def _artifact_api(tmp_path: Path, postgres_engine, *, output_min_files: int = 1):
