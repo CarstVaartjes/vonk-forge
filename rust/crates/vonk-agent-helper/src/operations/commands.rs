@@ -29,6 +29,7 @@ impl CommandRunner for ProcessCommandRunner {
                     | "/usr/bin/docker"
                     | "/usr/bin/setfacl"
                     | "/usr/bin/systemctl"
+                    | "/usr/bin/nvidia-smi"
             )
         ) {
             return Err("executable is not compiled into the helper".to_owned());
@@ -93,7 +94,13 @@ impl CommandRunner for ProcessCommandRunner {
 pub(super) fn captures_stdout(executable: &Path) -> bool {
     matches!(
         executable.to_str(),
-        Some("/usr/bin/dpkg-deb" | "/usr/bin/docker" | "/usr/bin/systemctl" | DOCKER_FIREWALL)
+        Some(
+            "/usr/bin/dpkg-deb"
+                | "/usr/bin/docker"
+                | "/usr/bin/systemctl"
+                | "/usr/bin/nvidia-smi"
+                | DOCKER_FIREWALL
+        )
     )
 }
 

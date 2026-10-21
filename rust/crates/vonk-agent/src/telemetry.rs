@@ -156,9 +156,88 @@ impl<R: ProcessRunner, F: FileSystemProvider> TelemetryCollector<R, F> {
             gpu_memory_total_bytes: dedicated.map(|value| value.0),
             gpu_memory_free_bytes: dedicated.map(|value| value.1),
             gpu_temperature_c: accelerator.as_ref().and_then(|value| value.temperature_c),
+            gpu_clock: collect_gpu_clock(&self.runner, &self.boot_id),
             cpu_frequency_avg_mhz: cpu_frequency.map(|value| value.avg_mhz),
             cpu_frequency_min_mhz: cpu_frequency.map(|value| value.min_mhz),
             cpu_frequency_max_mhz: cpu_frequency.and_then(|value| value.max_mhz),
+        }
+    }
+}
+
+fn collect_gpu_clock<R: ProcessRunner>(
+    runner: &R,
+    boot_id: &Uuid,
+) -> Option<vonk_agent_protocol::generated::GpuClockObservation> {
+    use vonk_agent_protocol::generated::{GpuClockCheckpoint, GpuClockObservation};
+    let output = match runner.run(Program::NvidiaSmi, &[
+        "--query-gpu=clocks.current.graphics,clocks.current.sm,clocks.max.graphics,clocks.max.sm,clocks_event_reasons.active".to_owned(),
+        vonk_agent_protocol::gpu_clock::CSV_FORMAT.to_owned(),
+    ], Duration::from_secs(10)) {
+        Ok(output) if output.success => Some(output),
+        Ok(output) => { eprintln!("vonk-agent: GPU clock query failed {:?}: {}", output.exit_code, String::from_utf8_lossy(&output.stderr)); None }
+        Err(error) => { eprintln!("vonk-agent: GPU clock query unavailable: {error}"); None }
+    };
+    let mut observation = GpuClockObservation::default();
+    if let Some(output) = &output {
+        match std::str::from_utf8(&output.stdout) {
+            Ok(text) => {
+                let fields: Vec<_> = text
+                    .lines()
+                    .next()
+                    .into_iter()
+                    .flat_map(|line| line.split(',').map(str::trim))
+                    .collect();
+                if fields.len() == 5 {
+                    observation.graphics_mhz = gpu_clock_mhz(fields[0]);
+                    observation.sm_mhz = gpu_clock_mhz(fields[1]);
+                    observation.max_graphics_mhz = gpu_clock_mhz(fields[2]).filter(|n| *n > 0);
+                    observation.max_sm_mhz = gpu_clock_mhz(fields[3]).filter(|n| *n > 0);
+                    let mask = match fields[4].strip_prefix("0x") {
+                        Some(hex) => u64::from_str_radix(hex, 16),
+                        None => fields[4].parse(),
+                    };
+                    match mask {
+                        Ok(value) => observation.throttle_reasons = Some(value),
+                        Err(error) => {
+                            eprintln!("vonk-agent: GPU clock throttle reading unavailable: {error}")
+                        }
+                    }
+                } else {
+                    eprintln!(
+                        "vonk-agent: GPU clock query returned {} columns; expected five",
+                        fields.len()
+                    );
+                }
+            }
+            Err(error) => eprintln!("vonk-agent: GPU clock query encoding invalid: {error}"),
+        }
+    }
+    // A receipt proves the last successful command on this boot only. NVIDIA
+    // has no graphics-lock getter; never substitute max clocks or application
+    // clocks for that absent reading. Hourly enforcement repairs external drift.
+    if let Some(checkpoint) = read_bounded_text(Path::new(
+        "/var/lib/vonk-forge/gpu-clock-observation.json",
+    ))
+    .and_then(|text| vonk_agent_protocol::parse_strict::<GpuClockCheckpoint>(text.as_bytes()).ok())
+    {
+        if checkpoint.applied_boot_id.as_deref() == Some(boot_id.to_string().as_str()) {
+            observation.locked_range = checkpoint.applied_range;
+        }
+        observation.desired = Some(checkpoint.desired);
+        observation.apply_state = Some(checkpoint.state);
+        observation.detail = checkpoint.detail;
+        observation.deadline = Some(checkpoint.deadline);
+        observation.next_attempt_at = checkpoint.next_attempt_at;
+    }
+    (output.is_some() || observation.desired.is_some()).then_some(observation)
+}
+
+fn gpu_clock_mhz(value: &str) -> Option<u32> {
+    match value.parse() {
+        Ok(value) => Some(value),
+        Err(error) => {
+            eprintln!("vonk-agent: GPU clock reading unavailable: {error}");
+            None
         }
     }
 }

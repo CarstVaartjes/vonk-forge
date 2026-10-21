@@ -10,6 +10,7 @@ from pydantic import (
     StringConstraints,
     model_validator,
 )
+from vonk_agent_protocol.gpu_clock import GpuClockRange
 
 from ..integer_domains import MAX_DATABASE_INTEGER
 from ..run_switch_identity_contract import NodeId, UuidId
@@ -128,6 +129,7 @@ class RunSwitchPreviewRequest(StrictModel):
     retention: RunSwitchRetention = "retain-cached"
     # Recipe option name -> chosen value. An option left out takes the
     # recipe's default; an unknown name or value is refused.
+    gpu_clock: GpuClockRange | None = None
     option_choices: dict[str, str] = Field(default_factory=dict, max_length=16)
     invocation: InvocationMetadata = Field(default_factory=InvocationMetadata)
 

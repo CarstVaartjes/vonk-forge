@@ -318,6 +318,7 @@ class FleetProfileService:
                     alias=alias,
                     nodes=nodes,
                     option_choices=option_choices,
+                    gpu_clock=choice.gpu_clock,
                     recipe_id=document.id,
                     recipe_title=document.title,
                     model_title=self._model_title(session, definition),

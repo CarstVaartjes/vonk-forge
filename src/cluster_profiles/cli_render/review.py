@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
+from ..generated_control.models.fleet_profile_gpu_clock_effect import (
+    FleetProfileGpuClockEffect,
+)
 from .common import (
     _actions,
     _bytes,
@@ -43,6 +46,15 @@ def _preview(payload: Mapping[str, object]) -> None:
         _field("Desired", assignment.get("desired_state"))
         _option_choices(assignment.get("option_choices"))
         _reasons(assignment.get("reasons"), subject=assignment.get("recipe_title"))
+    effects = _object(payload.get("effects"), "effects")
+    for raw in (
+        _records(effects, "gpu_clocks") if effects.get("gpu_clocks") is not None else ()
+    ):
+        effect = FleetProfileGpuClockEffect.from_dict(dict(raw))
+        _field(
+            "GPU range",
+            f"{effect.node_id}: {effect.desired.min_mhz}–{effect.desired.max_mhz} MHz; enforcement waits do not stop workloads",
+        )
     for step in (
         _records(payload, "preparation_steps") if "preparation_steps" in payload else []
     ):
@@ -51,7 +63,6 @@ def _preview(payload: Mapping[str, object]) -> None:
     for step in _records(payload, "steps"):
         print(f"{_text(step.get('index'))}. {_text(step.get('label'))}")
         _field("Affected Sparks", _words(step.get("node_ids")))
-    effects = _object(payload.get("effects"), "effects")
     for run in _records(effects, "runs"):
         _field(f"{_text(run.get('action')).title()} endpoint", run.get("alias"))
         _field("Run", run.get("run_id"))

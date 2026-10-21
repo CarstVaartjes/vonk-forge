@@ -269,6 +269,7 @@ pub struct RunInspection {
 
 #[derive(Clone, Copy)]
 struct RuntimeRequestGrantBinding<'a> {
+    gpu_clock: Option<&'a vonk_agent_protocol::generated::GpuClockIntent>,
     fence: &'a uuid::Uuid,
     installation_intent_nonce: Option<&'a str>,
     installation_intent_ordinal: Option<u64>,
@@ -431,6 +432,7 @@ mod job_progress;
 mod start;
 use access::*;
 mod exited_serving;
+mod gpu_clock;
 mod host_settings;
 mod stop;
 mod stray_jobs;

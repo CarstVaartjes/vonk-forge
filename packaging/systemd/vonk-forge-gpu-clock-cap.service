@@ -4,7 +4,7 @@ Description=Vonk Forge Spark GPU clock ceiling
 Documentation=https://vonkforge.ai/docs/operations/install-vonk-agent
 # A ceiling, not a pin: sustained load at full clock can hard power off a
 # Spark. The lock is lost with the driver, so it is set again every boot; the
-# package helper starts this unit when it is not active.
+# helper subsequently enforces the durable active profile range.
 # A host without the NVIDIA tools has no clock to cap.
 ConditionPathExists=/usr/bin/nvidia-smi
 Wants=nvidia-persistenced.service

@@ -123,7 +123,7 @@ def test_deleted_rust_file_selects_rust_family() -> None:
         "Cargo.lock",
         "control/src/vonk_control/harnesses/canonical_metadata.py",
         "src/cluster_profiles/compiler.py",
-        "inventory/wheels/vonk_agent_protocol-4.1.0-py3-none-any.whl",
+        "inventory/wheels/vonk_agent_protocol-4.2.0-py3-none-any.whl",
     ],
 )
 def test_launch_contract_inputs_select_controller_and_wire_checks(path: str) -> None:

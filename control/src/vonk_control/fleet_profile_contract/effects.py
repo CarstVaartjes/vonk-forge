@@ -12,6 +12,7 @@ from pydantic import (
 from vonk_agent_protocol import (
     OperationProgress,
 )
+from vonk_agent_protocol.gpu_clock import GpuClockRange
 
 from ..integer_domains import MAX_DATABASE_INTEGER
 from ..run_switch_contract import (
@@ -104,9 +105,18 @@ class FleetProfileAdoptedApplicationEffect(StrictModel):
         return self
 
 
+class FleetProfileGpuClockEffect(StrictModel):
+    node_id: NodeId
+    previous_desired: GpuClockRange | None = None
+    desired: GpuClockRange
+
+
 class FleetProfileEffects(StrictModel):
     """Identified live effects, including complete distributed membership."""
 
+    gpu_clocks: list[FleetProfileGpuClockEffect] | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     runs: list[FleetProfileRunEffect]
     installations: list[FleetProfileInstallationEffect]
     superseded: list[FleetProfilePendingEffect]

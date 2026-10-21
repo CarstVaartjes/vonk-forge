@@ -181,6 +181,15 @@ class FleetProjection:
             stalls = self._stalled_loads(session, node_ids)
             repeating = repeating_evidence(session, node_ids, current)
             layout_notices = model_layout_notices(session, node_ids)
+            from ..gpu_clock import selected_gpu_clocks
+
+            try:
+                clocks = selected_gpu_clocks(session, node_ids)
+                clock_desired = {
+                    node_id: intent.range for node_id, intent in clocks.items()
+                }
+            except ValueError:
+                clock_desired = {node_id: None for node_id in node_ids}
             slow_nas = slow_nas_transfers(
                 session,
                 {
@@ -205,6 +214,7 @@ class FleetProjection:
                     certificate=certificates.get(node_id),
                     inventory=inventories.get(node_id),
                     telemetry=telemetry.get(node_id),
+                    gpu_clock_desired=clock_desired[node_id],
                     telemetry_unreadable=node_id in unreadable_telemetry,
                     recent_telemetry=recent_telemetry.get(node_id, ()),
                     installed=installed.get(node_id, ()),

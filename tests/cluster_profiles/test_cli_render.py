@@ -772,6 +772,37 @@ def test_fleet_detail_shows_cpu_clock_with_temperature_and_throttle_hint(capsys)
     assert "GHz" not in capsys.readouterr().out
 
 
+def test_fleet_detail_keeps_zero_clock_and_reported_max_separate_from_policy(capsys):
+    """Catches hiding an idle zero reading or clamping hardware evidence to policy."""
+    from vonk_agent_protocol.gpu_clock import (
+        GPU_CLOCK_POLICY,
+        GpuClockObservation,
+        GpuClockRange,
+        default_gpu_clock,
+    )
+
+    spark = _cpu_spark(low_clock=False)
+    spark["gpu_clock_desired"] = GpuClockRange(min_mhz=300, max_mhz=1800).model_dump(
+        mode="json"
+    )
+    spark["gpu_clock_policy"] = GPU_CLOCK_POLICY.model_dump(mode="json")
+    spark["telemetry"]["sample"]["gpu_clock"] = GpuClockObservation(
+        graphics_mhz=0,
+        sm_mhz=1500,
+        locked_range=default_gpu_clock(),
+        max_graphics_mhz=2400,
+        max_sm_mhz=2300,
+        throttle_reasons=0,
+    ).model_dump(mode="json", exclude_none=True)
+
+    render_payload(spark, "fleet", action="detail")
+    output = capsys.readouterr().out
+    assert "graphics 0 / SM 1500 MHz" in output
+    assert "last applied 300–2200 MHz (helper receipt); desired 300–1800 MHz" in output
+    assert "reported max graphics 2400 / SM 2300 MHz; policy limit 2300 MHz" in output
+    assert "throttle bits 0" in output
+
+
 def test_fleet_overview_shows_cpu_clock_only_through_attention_and_wide(capsys):
     payload = {"nodes": [_cpu_spark(low_clock=True)]}
     render_payload(payload, "fleet")

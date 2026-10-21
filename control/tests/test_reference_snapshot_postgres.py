@@ -10,6 +10,7 @@ from uuid import uuid4
 
 from sqlalchemy import Engine, event, select
 from vonk_agent_protocol import LifecycleState
+from vonk_agent_protocol.gpu_clock import GpuClockRange
 from vonk_control.admission_locking import report_admission_locks
 from vonk_control.distribution import (
     CompositeObjectSource,
@@ -78,12 +79,14 @@ def test_profile_saves_share_references_with_distribution_and_downloads(
             for index in range(4):
                 held.clear()
                 release.clear()
+                desired_clock = GpuClockRange(min_mhz=300, max_mhz=1800 + index * 100)
                 value = FleetProfileInput.model_validate(
                     {
                         "name": f"Concurrent pins {index}",
                         "assignments": [world.assignment(SOLO, world.nodes[:1])],
                     }
                 )
+                value.assignments[0].gpu_clock = desired_clock
                 saving = pool.submit(
                     world.controller.profiles.create, value, actor="admin"
                 )
@@ -125,7 +128,15 @@ def test_profile_saves_share_references_with_distribution_and_downloads(
                     )
                 finally:
                     release.set()
-                    saving.result(timeout=20)
+                    profile = saving.result(timeout=20)
+                # The one normalization path must preserve the clock through
+                # shared gate admission and the real JSON store/load boundary.
+                with world.sessions() as session:
+                    row = session.get(FleetProfile, profile.id)
+                    assert row is not None
+                    stored = world.controller.profiles._definition(row)
+                assert stored is not None
+                assert stored.assignments[0].gpu_clock == desired_clock
     finally:
         release.set()
         event.remove(engine, "after_cursor_execute", pause_save)
@@ -179,6 +190,18 @@ def test_unchanged_profile_pins_never_reacquire_reference_gates(
                 profiles.update(profile.id, edited, actor="admin").revision
                 == updated.revision
             )
+            clock_edit = edited.model_copy(deep=True)
+            desired_clock = GpuClockRange(min_mhz=300, max_mhz=1700)
+            clock_edit.assignments[0].gpu_clock = desired_clock
+            clock_edit.expected_revision = updated.revision
+            changed = profiles.update(profile.id, clock_edit, actor="admin")
+            assert changed.revision == updated.revision + 1
+            with world.sessions() as session:
+                row = session.get(FleetProfile, profile.id)
+                assert row is not None
+                stored = profiles._definition(row)
+            assert stored is not None
+            assert stored.assignments[0].gpu_clock == desired_clock
         finally:
             event.remove(engine, "before_cursor_execute", reject_reference_change)
     finally:

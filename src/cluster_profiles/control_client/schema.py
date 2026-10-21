@@ -145,7 +145,16 @@ def _schema_violation(error: ValidationError) -> str:
     if error.validator in _VALUE_FREE_VIOLATIONS:
         reason = str(error.message)
     else:
-        reason = f"violates {error.validator} {error.validator_value!r}"
+        detail = (
+            error.schema.get("description")
+            if error.validator == "maximum" and isinstance(error.schema, Mapping)
+            else None
+        )
+        reason = (
+            detail
+            if isinstance(detail, str)
+            else f"violates {error.validator} {error.validator_value!r}"
+        )
     return f"{path}: {reason}"[:240]
 
 

@@ -50,6 +50,7 @@ fn start_authority_binds_generation_plan_identity_and_projected_arguments() {
     );
     let plan_sha256 = hex_sha256(&canonical_json(&start_plan).unwrap());
     let grant = RuntimeRequestGrantBinding {
+        gpu_clock: None,
         fence: &fence,
         installation_intent_nonce: None,
         installation_intent_ordinal: Some(1),
@@ -129,6 +130,7 @@ fn stop_authority_binds_exact_target_node_plan_and_cancellation_semantics() {
     );
     let plan_sha256 = hex_sha256(&canonical_json(&stop_plan).unwrap());
     let grant = RuntimeRequestGrantBinding {
+        gpu_clock: None,
         fence: &fence,
         installation_intent_nonce: None,
         installation_intent_ordinal: Some(1),
@@ -378,6 +380,7 @@ fn newer_generation_survives_failed_start_and_old_exact_stop_without_rewinding_f
                 &current_plan_digest,
                 &format!("sha256:{}", "c".repeat(64)),
                 &RuntimeRequestGrantBinding {
+                    gpu_clock: None,
                     fence: &uuid::Uuid::new_v4(),
                     installation_intent_nonce: Some(&nonce),
                     installation_intent_ordinal: Some(1),

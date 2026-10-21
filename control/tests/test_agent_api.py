@@ -47,7 +47,11 @@ from vonk_agent_protocol.host_helper import (
     host_helper_grant_signing_bytes,
 )
 from vonk_agent_protocol.http_failure import HttpTransient, TransientReason
-from vonk_agent_protocol.inventory import InventoryRequest, NetworkInterface
+from vonk_agent_protocol.inventory import (
+    HostSettings,
+    InventoryRequest,
+    NetworkInterface,
+)
 from vonk_control import agent_operation_states as aos
 from vonk_control.agent_api import (
     AgentApiServices,
@@ -755,7 +759,10 @@ def test_agent_posts_authenticated_runtime_and_fabric_inventory(
         assert row.fabric_address == "192.168.100.2"
         assert row.fabric_bandwidth_mbps == 200000
         assert row.nas_route_interface == "wlP9s9"
-        assert row.host_settings == payload["host_settings"]
+        assert (
+            HostSettings.model_validate_json(canonical_message(row.host_settings))
+            == expected.host_settings
+        )
         assert row.unused_model_bytes == 123
         assert row.network_interfaces is not None
         assert [

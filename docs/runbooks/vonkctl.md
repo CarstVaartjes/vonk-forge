@@ -1086,3 +1086,58 @@ Controller returns `next_after` for continuation; the CLI and web follow it
 until the complete list is read. Agent inventory rotates bounded installation
 and run-scope pages using on-disk cursors, including after restart. Retention
 judges only the exact observed batch; protected prefixes never hide the tail.
+
+
+### GPU clocks in a profile
+
+Each assignment can carry `gpu_clock: {min_mhz, max_mhz}`. Omission (or
+`null`) selects 300–2200 MHz, including Sparks with no assignment. Conflicting
+ranges on assignments sharing a Spark are refused. Save and export/import
+retain this setting; saving a draft does not change the active profile.
+
+```bash
+vonkctl --profile 2 profile configure --assignment coding --gpu-clock 300,1800
+vonkctl --profile 2 profile configure --assignment coding --clear-gpu-clock
+```
+
+Load reviews validate against each Spark's reported supported clock range.
+A ceiling above 2200 MHz is a visible warning; anything above 2300 MHz is
+refused at the hardware-safety edge. Sustained load above the cap has
+hard-powered Sparks off. No value is silently clamped. The default and hard
+limit are owned by the protocol's typed `GpuClockPolicy`. Reported hardware
+maximum SM/graphics clocks are information only, even when they differ from
+that policy limit.
+
+`fleet detail` and the Spark overview show current graphics/SM clocks next to
+CPU clocks, desired and last applied ranges, reported maxima, and the NVIDIA
+throttle-reason bitmask. A last applied range is a helper command receipt for
+this boot, not a hardware readback: NVIDIA exposes no graphics-lock getter.
+Unknown readings stay unknown. A desired/applied mismatch remains a warning.
+
+The boot-time service retains the default cap. The signed start and inventory
+response carry the active selected-profile generation; the helper persists
+that intent before effects and fences older generations. Its hourly settings
+pass reapplies the active range, never restarts the fixed-default service over
+a profile setting. Transient driver failures permit workload start and keep
+the previous cap: retaining an available workload with a visible bounded wait
+is safer than making a recoverable clock-setting failure a service outage.
+Ranges outside the safety contract and denied authority remain fail-closed.
+Commands time out after ten seconds; retries are rate-limited to at least one
+minute and carried by inventory (normally every two minutes). The ten-minute
+attempt deadline survives restart and repeated requests. Expiry is visible;
+ordinary polls do not renew it. A subsequent hourly reconciliation can start a
+fresh bounded attempt, so a cleared outage heals without reloading the profile.
+The helper journals before/after and reports the cause, next attempt and deadline.
+
+Protocol 4.2 adds optional evidence and intent without changing claim protocol
+major 4. Older agents omit clock evidence and never receive the new signed
+clock operation or the optional start field; default starts retain their packaged cap. Upgrading leaves workloads running. The only database effect
+is one nullable typed GPU-clock JSON observation on node telemetry samples;
+startup schema reconciliation adds it in place and older rows remain null.
+
+The helper's packaged sandbox grants the same closed NVIDIA device set as the
+boot cap plus the driver-required `CAP_SYS_ADMIN` bounding capability. Its
+compiled command shape, signed intent, mount/raw-I/O syscall denial and closed
+device cgroup remain enforced. The helper publishes a read-only observation
+receipt separately from its private desired checkpoint, explicitly readable by
+the agent even under the service's private umask.

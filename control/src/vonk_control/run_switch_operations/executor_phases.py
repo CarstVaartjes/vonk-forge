@@ -525,11 +525,14 @@ class ExecutorPhasesMixin:
                     plan.alias,
                     profile_application_id=profile_application_id,
                 )
-                value = (
+                from functools import partial
+
+                start = (
                     service._lifecycle.activate_job_run
                     if job_recipe
-                    else service._lifecycle.start
-                )(
+                    else partial(service._lifecycle.start, gpu_clock=plan.gpu_clock)
+                )
+                value = start(
                     low_level,
                     plan_digest=low_level.plan_digest,
                     actor=actor,

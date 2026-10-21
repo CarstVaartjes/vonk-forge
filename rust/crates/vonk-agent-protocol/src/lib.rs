@@ -47,6 +47,7 @@ pub use operation_progress::{
 };
 
 pub mod failure_evidence;
+pub mod gpu_clock;
 pub mod host_memory_guard_policy;
 
 pub mod passthrough;

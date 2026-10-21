@@ -80,6 +80,9 @@ impl HostHelperOperation {
                     && operation.rollback.source.package_sha256 != operation.package_sha256
             }
             Self::ConfirmPackageActivationOperation(_) => true,
+            Self::ApplyGpuClockOperation(operation) => {
+                operation.desired.range.min_mhz <= operation.desired.range.max_mhz
+            }
             Self::ExecuteContainerRuntimeRequestOperation(operation) => {
                 operation.fence.get_version() == Some(uuid::Version::Random)
                     && (operation.installation_id.is_some()

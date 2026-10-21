@@ -55,6 +55,9 @@ fn answer(success: bool, word: &str) -> Result<CommandOutput, String> {
 
 impl CommandRunner for Systemd {
     fn run(&self, executable: &Path, arguments: &[String]) -> Result<CommandOutput, String> {
+        if executable == Path::new("/usr/bin/nvidia-smi") {
+            return Err("driver unavailable to desktop test".to_owned());
+        }
         assert_eq!(executable, Path::new("/usr/bin/systemctl"));
         let call = arguments.join(" ");
         self.calls.lock().unwrap().push(call.clone());
@@ -166,41 +169,4 @@ fn a_refused_stop_is_retried_on_the_next_pass() {
             "stop display-manager.service"
         ]
     );
-}
-
-#[test]
-fn a_clock_cap_not_active_this_boot_is_started_once_and_a_refused_start_is_retried() {
-    // A boot where the one-shot did not run, or ran before the driver was up.
-    for before in ["inactive", "failed"] {
-        let systemd = Systemd::host(Some("multi-user.target"), Some("inactive"));
-        *systemd.clock_cap.lock().unwrap() = Some(before);
-        let (_temp, executor) = helper(&systemd);
-        executor.keep_host_settings();
-        executor.keep_host_settings();
-        assert_eq!(
-            systemd.corrections(),
-            ["start vonk-forge-gpu-clock-cap.service"]
-        );
-    }
-
-    let mut systemd = Systemd::host(Some("multi-user.target"), Some("inactive"));
-    *systemd.clock_cap.lock().unwrap() = Some("inactive");
-    systemd.start_fails = true;
-    let (_temp, executor) = helper(&systemd);
-    executor.keep_host_settings();
-    executor.keep_host_settings();
-    assert_eq!(
-        systemd.corrections(),
-        [
-            "start vonk-forge-gpu-clock-cap.service",
-            "start vonk-forge-gpu-clock-cap.service"
-        ]
-    );
-
-    // Unreadable: nothing is started, and the desktop settings are still kept.
-    let systemd = Systemd::host(Some("graphical.target"), Some("inactive"));
-    *systemd.clock_cap.lock().unwrap() = None;
-    let (_temp, executor) = helper(&systemd);
-    executor.keep_host_settings();
-    assert_eq!(systemd.corrections(), ["set-default multi-user.target"]);
 }
