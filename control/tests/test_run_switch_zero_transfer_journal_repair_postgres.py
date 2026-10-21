@@ -121,7 +121,7 @@ def faulty_install(tmp_path, postgres_engine, monkeypatch):
     with monkeypatch.context() as fault:
         fault.setattr(advance_owner, "_merge_progress_evidence", historical_merge)
         # The historical writer also skipped schema validation. Inject both
-        # obsolete defects explicitly; the current writer must reject this.
+        # obsolete defects explicitly; the current writer normalizes meters.
         fault.setattr(
             advance_owner,
             "_persisted_result",
@@ -135,7 +135,9 @@ def faulty_install(tmp_path, postgres_engine, monkeypatch):
         assert row is not None and row.result is not None and row.state == "running"
         raw = copy.deepcopy(row.result)
         assert raw["completed_bytes"] == 48 and raw["total_bytes"] == 0
-        assert isinstance(owner._stored_result(raw), Residue)
+        measured = owner._stored_result(raw)
+        assert measured is not None and not isinstance(measured, Residue)
+        assert measured.completed_bytes == measured.total_bytes == 48
         claims = [
             (item.id, item.state, item.amount_bytes)
             for item in session.scalars(select(ResourceReservation))

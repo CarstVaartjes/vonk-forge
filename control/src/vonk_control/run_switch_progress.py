@@ -10,6 +10,7 @@ from vonk_agent_protocol import (
     OperationProgress,
     canonical_message,
 )
+from vonk_agent_protocol.agent_words import ProfileChildPhase
 
 from .lifecycle.evidence import (
     BookkeepingReason,
@@ -142,14 +143,12 @@ def _merge_measured_evidence(
             )
             progress.operation = _observe_progress(prior, current, now)
             progress.operation_phase_index = phase.index
-    if (
-        phase.kind == "transfer"
-        and payload.total_bytes is not None
-        and progress.total_bytes is None
-    ):
+    if phase.kind == ProfileChildPhase.TRANSFER and payload.total_bytes is not None:
         model_download, _, _ = _planned_transfer_parts(plan)
         if phase.subphase == "target-copy" and model_download is not None:
-            progress.total_bytes = model_download + payload.total_bytes
+            progress.total_bytes = max(
+                progress.total_bytes or 0, model_download + payload.total_bytes
+            )
             progress.total_bytes_known = True
     known_nodes = set(_plan_target_node_ids(plan))
     existing = {
@@ -162,13 +161,17 @@ def _merge_measured_evidence(
         target = item.model_copy(deep=True)
         if prior is not None:
             target.completed_bytes = max(prior.completed_bytes, item.completed_bytes)
-            if target.total_bytes is None:
-                target.total_bytes = prior.total_bytes
+            if prior.total_bytes is not None:
+                target.total_bytes = max(target.total_bytes or 0, prior.total_bytes)
+            if target.total_bytes is not None:
+                target.total_bytes = max(target.total_bytes, target.completed_bytes)
             if target.phase is None:
                 target.phase = prior.phase
         if target.error is not None:
             target.error = target.error[:256]
         existing[item.node_id] = target
+    if progress.total_bytes is not None:
+        progress.total_bytes = max(progress.total_bytes, progress.completed_bytes)
     progress.members = list(existing.values())
 
 
@@ -189,8 +192,8 @@ def _complete_phase_progress(
         return
     _, member_totals = _planned_transfer_bytes(plan)
     if aggregate is not None:
-        progress.completed_bytes = aggregate
-        progress.total_bytes = aggregate
+        progress.completed_bytes = max(progress.completed_bytes, aggregate)
+        progress.total_bytes = max(progress.total_bytes or 0, progress.completed_bytes)
         progress.total_bytes_known = True
     elif target_copy is not None:
         progress.completed_bytes = max(
@@ -202,8 +205,8 @@ def _complete_phase_progress(
             node_id, RunSwitchMemberReceipt(node_id=node_id, state="pending")
         )
         if total is not None:
-            item.total_bytes = total
-            item.completed_bytes = total
+            item.completed_bytes = max(item.completed_bytes, total)
+            item.total_bytes = max(item.total_bytes or 0, item.completed_bytes)
         item.phase = phase.kind
         set_member_state(item, "succeeded")
         item.error = None
@@ -217,8 +220,8 @@ def _complete_operation_progress(
 
     total, member_totals = _planned_transfer_bytes(plan)
     if total is not None:
-        progress.completed_bytes = total
-        progress.total_bytes = total
+        progress.completed_bytes = max(progress.completed_bytes, total)
+        progress.total_bytes = max(progress.total_bytes or 0, progress.completed_bytes)
         progress.total_bytes_known = True
     entries = {item.node_id: item for item in progress.members}
     for node_id, member_total in member_totals.items():
@@ -226,8 +229,8 @@ def _complete_operation_progress(
             node_id, RunSwitchMemberReceipt(node_id=node_id, state="pending")
         )
         if member_total is not None:
-            item.total_bytes = member_total
-            item.completed_bytes = member_total
+            item.completed_bytes = max(item.completed_bytes, member_total)
+            item.total_bytes = max(item.total_bytes or 0, item.completed_bytes)
         item.phase = "final_verify"
         set_member_state(item, "succeeded")
         item.error = None
@@ -271,7 +274,10 @@ def _progress_view(
     total, member_totals = (
         _planned_transfer_bytes(plan) if plan is not None else (None, {})
     )
-    total = total if total is not None else raw.total_bytes
+    if raw.total_bytes is not None:
+        total = max(total or 0, raw.total_bytes)
+    if total is not None:
+        total = max(total, raw.completed_bytes)
     state = _progress_operation_state(operation_state)
     if state == "succeeded":
         phase, subphase = "final_verify", None
@@ -279,8 +285,6 @@ def _progress_view(
     completed = raw.completed_bytes
     if state == "succeeded" and total is not None:
         completed = total
-    elif plan is not None and total is not None:
-        completed = min(completed, total)
     raw_members = {
         item.node_id: item for item in raw.members if item.node_id in node_ids
     }
@@ -299,7 +303,7 @@ def _progress_view(
         )
         member_completed = item.completed_bytes if item is not None else 0
         if member_total is not None:
-            member_completed = min(member_completed, member_total)
+            member_total = max(member_total, member_completed)
         member_state = item.state if item is not None else None
         if member_state is None:
             member_state = (

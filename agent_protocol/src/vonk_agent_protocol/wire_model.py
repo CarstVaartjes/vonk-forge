@@ -251,8 +251,12 @@ class OperationMemberProgress(WireModel):
 
     @model_validator(mode="after")
     def totals_are_consistent(self) -> OperationMemberProgress:
-        if self.total_bytes is not None and self.completed_bytes > self.total_bytes:
-            raise ValueError("completed bytes cannot exceed total bytes")
+        # Transfer observations may outgrow an earlier estimate, including
+        # bytes accumulated across phases. They never invalidate the operation.
+        if self.total_bytes is not None:
+            object.__setattr__(
+                self, "total_bytes", max(self.total_bytes, self.completed_bytes)
+            )
         if (
             self.total_items is not None
             and (self.completed_items or 0) > self.total_items
@@ -306,8 +310,12 @@ class OperationProgress(WireModel):
             raise ValueError(
                 "total_bytes_known must be false when total_bytes is unknown and true when present"
             )
-        if self.total_bytes is not None and self.completed_bytes > self.total_bytes:
-            raise ValueError("completed bytes cannot exceed total bytes")
+        # Transfer observations may outgrow an earlier estimate, including
+        # bytes accumulated across phases. They never invalidate the operation.
+        if self.total_bytes is not None:
+            object.__setattr__(
+                self, "total_bytes", max(self.total_bytes, self.completed_bytes)
+            )
         if (
             self.total_items is not None
             and (self.completed_items or 0) > self.total_items

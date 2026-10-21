@@ -3869,7 +3869,11 @@ def test_artifact_child_checkpoint_advances_to_verify(
     assert service.get(operation.operation_id).current_phase == "verify"
 
 
-def test_child_distribution_progress_is_typed_and_restart_safe(tmp_path: Path) -> None:
+@pytest.mark.parametrize("reported_bytes", [512, 1536])
+def test_child_distribution_progress_is_typed_and_restart_safe(
+    tmp_path: Path, reported_bytes: int
+) -> None:
+    """Catches an underestimated child meter failing its parent across restart."""
     sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
     installed_recipe(
         lifecycle,
@@ -3905,14 +3909,14 @@ def test_child_distribution_progress_is_typed_and_restart_safe(tmp_path: Path) -
         child_id,
         payload={
             "progress": {
-                "completed_bytes": 512,
+                "completed_bytes": reported_bytes,
                 "total_bytes": 1024,
                 "members": [
                     {
                         "node_id": nodes[0],
                         "phase": "transfer",
                         "state": "running",
-                        "completed_bytes": 512,
+                        "completed_bytes": reported_bytes,
                         "total_bytes": 1024,
                     }
                 ],
@@ -3921,12 +3925,12 @@ def test_child_distribution_progress_is_typed_and_restart_safe(tmp_path: Path) -
     )
     assert service.tick() is True
     waiting = service.get(operation.operation_id)
-    assert waiting.progress.completed_bytes == 512
-    assert waiting.progress.total_bytes == 1024
+    assert waiting.progress.completed_bytes == reported_bytes
+    assert waiting.progress.total_bytes == max(1024, reported_bytes)
     assert waiting.progress.total_bytes_known is True
     assert waiting.progress.members[0].node_id == nodes[0]
-    assert waiting.progress.members[0].completed_bytes == 512
-    assert waiting.progress.members[0].total_bytes == 1024
+    assert waiting.progress.members[0].completed_bytes == reported_bytes
+    assert waiting.progress.members[0].total_bytes == max(1024, reported_bytes)
     assert waiting.progress.members[0].state == "running"
 
     # The parent only stores the child ID and JSON checkpoint.  A fresh
@@ -3939,8 +3943,8 @@ def test_child_distribution_progress_is_typed_and_restart_safe(tmp_path: Path) -
         artifacts=CompleteArtifactInspector(missing_spark_bytes=1024),
     )
     resumed = restarted.get(operation.operation_id)
-    assert resumed.progress.completed_bytes == 512
-    assert resumed.progress.members[0].completed_bytes == 512
+    assert resumed.progress.completed_bytes == reported_bytes
+    assert resumed.progress.members[0].completed_bytes == reported_bytes
 
     _replace_child(artifact_executor, child_id, state="succeeded")
     assert plan.preparation is not None
@@ -3961,8 +3965,10 @@ def test_child_distribution_progress_is_typed_and_restart_safe(tmp_path: Path) -
     )
     assert restarted.tick() is True
     completed_transfer = restarted.get(operation.operation_id)
-    assert completed_transfer.progress.completed_bytes == 1024
-    assert completed_transfer.progress.members[0].completed_bytes == 1024
+    assert completed_transfer.progress.completed_bytes == max(1024, reported_bytes)
+    assert completed_transfer.progress.members[0].completed_bytes == max(
+        1024, reported_bytes
+    )
     assert completed_transfer.progress.members[0].state == "succeeded"
     assert any(
         isinstance(item, RunSwitchTargetTransferEvidenceResult)
