@@ -21,6 +21,9 @@ from .test_recipe_builds import setup
 def test_prebuilt_preparation_has_no_nominal_spark_admission(tmp_path, damage):
     sessions, bundles, now, node_id, revision = setup(tmp_path)
     reference = "ghcr.io/example/runtime@sha256:" + "b" * 64
+    accepted_key = executable_build_key(
+        RecipeBuildService(sessions, bundles=bundles).resolve(revision.id).input_intent
+    )
     with sessions.begin() as session:
         row = session.get(CatalogDocumentRevision, revision.id)
         assert row is not None
@@ -29,7 +32,12 @@ def test_prebuilt_preparation_has_no_nominal_spark_admission(tmp_path, damage):
             .where(CatalogDocumentRevision.id == row.id)
             .values(
                 projected=dict(row.projected)
-                | {"prebuilt_image": {"reference": reference, "build_key": "0" * 64}}
+                | {
+                    "prebuilt_image": {
+                        "reference": reference,
+                        "build_key": accepted_key,
+                    }
+                }
             )
         )
         node = session.get(AgentNode, node_id)

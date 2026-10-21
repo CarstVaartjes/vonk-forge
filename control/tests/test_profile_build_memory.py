@@ -17,6 +17,7 @@ from vonk_control.inventory_repository import InventoryRepository
 from vonk_control.memory_reservations import memory_reservations
 from vonk_control.models import (
     AgentNode,
+    CatalogDocumentRevision,
     ClusterMapping,
     Job,
     NodeInventorySnapshot,
@@ -71,6 +72,12 @@ def _accepted_build_profile(
         node = session.get(AgentNode, nodes[0])
         build = session.scalar(select(RecipeBuild))
         assert snapshot is not None and node is not None and build is not None
+        revision = session.get(CatalogDocumentRevision, build.recipe_revision_id)
+        assert revision is not None
+        revision.projected = {
+            **revision.projected,
+            "source_bundle_sha256": bundle.sha256,
+        }
         node.binary_digest = "1" * 64
         snapshot.capabilities = [*snapshot.capabilities, "recipe.build.v1"]
         snapshot.host_memory_free_bytes = snapshot.gpu_memory_free_bytes = 275

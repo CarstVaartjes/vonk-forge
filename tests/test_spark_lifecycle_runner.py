@@ -2082,8 +2082,15 @@ def test_artifact_job_recipe_is_imported_by_the_controller_catalog(
     from vonk_forge_contracts import RecipeDefinition
 
     lifecycle = _module()
-    fixture = lifecycle._artifact_job_fixture(
-        lifecycle._canonical_canary_fixture(Path(library))
+    original = lifecycle._canonical_canary_fixture(Path(library))
+    fixture = lifecycle._artifact_job_fixture(original)
+    original_source = json.loads(original.index_bytes)["recipes"][0][
+        "source_bundle_sha256"
+    ]
+    editorial = lifecycle._editorial_successor(original)
+    assert (
+        json.loads(editorial.index_bytes)["recipes"][0]["source_bundle_sha256"]
+        == original_source
     )
     recipe = RecipeDefinition.model_validate(fixture.recipe)
     validate_runtime_policy(recipe)
@@ -2106,6 +2113,12 @@ def test_artifact_job_recipe_is_imported_by_the_controller_catalog(
     sessions = sessionmaker(engine, expire_on_commit=False)
     clock = lambda: datetime(2026, 10, 15, tzinfo=UTC)
     reader = program.FixtureReader(index, {digest: archive})
+    # Copying the original context digest after adding the job used to make
+    # candidate acceptance fail at package ingress. Editorial changes reuse it.
+    [item] = reader.snapshot.items
+    assert item.source_bundle_sha256 == index["recipes"][0]["source_bundle_sha256"]
+    assert item.source_bundle_sha256 != original_source
+    assert reader.fetch(item.uri).source_bundle_sha256 == item.source_bundle_sha256
     sync = ManagedRecipeCatalogSyncService(
         sessions,
         catalog=CatalogService(
