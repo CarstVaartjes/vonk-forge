@@ -21,7 +21,7 @@ async fn collective_readiness_retries_inspection_without_repreparing_a_launched_
         .runtime
         .placement
         .endpoint_address = Some("127.0.0.1".parse().unwrap());
-    request.compiled_execution_plan.runtime.placement.port = Some(address.port().into());
+    request.compiled_execution_plan.runtime.placement.port = Some(address.port());
     let request = request.clone();
     let mut install = claim.clone();
     install.operation = AgentOperation::RecipeInstall;
