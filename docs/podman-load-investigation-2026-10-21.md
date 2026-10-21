@@ -126,3 +126,59 @@ The unchanged `client::transport::tests::rotation_silent_activation_retries_same
 failed its `old request overlapped activation` fixture assertion, including
 with one test thread. This remains a validation gap; no CI was rerun or cancelled.
 Source tests do not establish deployment or physical Spark recovery.
+
+## Follow-up: clean-host acceptance regression
+
+The folded `ce8b9e9d` introduced a separate fresh-host fault. Replaying the
+`486f7ff1` and `ce8b9e9d` Podman arguments with Podman 4.9.3 on the local
+Ubuntu noble ARM64 OrbStack VM reproduced it without a network image pull:
+initialize private storage in the agent environment, then build a scratch image
+with a static `RUN` command through a disposable systemd user service whose
+`XDG_RUNTIME_DIR` is the operation runroot. The main arguments build successfully;
+the stable-path arguments exit 1 before the first build step:
+
+```text
+error creating temporary file: No such file or directory
+invalid internal status ... open <runroot>/libpod/tmp/pause.pid: no such file or directory
+```
+
+An explicit `--tmpdir=<runroot>/libpod` bypasses initialization of Podman's
+default rootless pause directory. Direct import starts with the agent runtime;
+the build service switches to the operation runtime, whose `libpod/tmp` was
+never created. This is not the 50-byte runroot limit, a missing systemd
+RuntimeDirectory, or an ownership mismatch. Preparing `libpod/tmp` before the
+first Podman command makes the identical real build succeed. The operation
+runroot is private (0700); stable identities and the existing one-pass private
+database conflict recovery remain in place.
+
+The real-Podman regression in `recipe_builder::builder::runtime_tests` was
+observed failing before the initialization change and passing after it. Run it
+in the Linux rootless-Podman lane with:
+
+```bash
+cargo test -p vonk-agent --lib fresh_rootless_podman_can_switch -- --ignored
+```
+
+The ordinary database-retry fixture now also exercises opening the pause file,
+so skipping fresh-runtime initialization fails the normal builder suite.
+
+The missing acceptance detail had a second owner: `_observe_build` selected
+stderr for `log_excerpt` but constructed `detail` from only category and summary.
+It now includes the captured numeric exit (when present) and the sanitized final
+output within the preparation detail's bound, and retains the final 1024
+characters in `log_excerpt`. The producer/store/projection regression failed
+without that change. It checks exit 125, the final cause after long output,
+secret redaction, and fresh-request recovery.
+
+All operations in this follow-up were local. No production login, credential
+store access, deployment, PR mutation, or CI action was performed. The complete
+signed candidate lifecycle still requires its candidate/baseline manifests and
+artifact object root; the local Podman boundary is not full release acceptance.
+
+Follow-up gates passed: frozen Controller sync; Ruff 0.16.9 format/lint; changed
+Python types; added-line scan against `origin/main`; 557 repository guards with
+`-n 0`; Linux agent fmt, Clippy (`--all-targets -D warnings`) and all-target tests;
+the explicit real-Podman regression; 176 Linux Controller tests including real
+PostgreSQL; and 85 acceptance-harness cases across macOS and the Linux VM.
+The earlier transport-test failure also passed in this full Linux agent run.
+The scoped PostgreSQL fixture container was removed by its session teardown.

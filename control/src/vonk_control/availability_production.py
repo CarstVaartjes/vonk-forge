@@ -43,6 +43,7 @@ from .catalog_revision_contract import read_catalog_document
 from .catalog_sync import CatalogSyncError
 from .categorized_errors import InvalidValue
 from .failure_classification import is_security_failure
+from .failure_evidence import safe_text
 from .job_documents import AvailabilityJobPayload, AvailabilityRuntime
 from .models import (
     AgentNode,
@@ -1425,11 +1426,19 @@ def _observe_build(
         detail = f"{category}: {summary}" if category is not None else summary
         diagnostic = failure.diagnostic
         if failure.diagnostics is not None:
-            diagnostic = (
-                failure.diagnostics.stderr.text
-                or failure.diagnostics.stdout.text
-                or diagnostic
-            )
+            diagnostics = failure.diagnostics
+            tail = safe_text(diagnostics.stderr.text or diagnostics.stdout.text)
+            # The preparation detail is what acceptance and blockers surface.
+            # Reserve room within its 512 characters for the exit and final
+            # output, including the stage prefix added by failure projection.
+            parts: list[str] = []
+            if diagnostics.process_exit_code is not None:
+                parts.append(f"exit code {diagnostics.process_exit_code}")
+            if tail:
+                parts.append(tail[-256:])
+            if parts:
+                detail = "; ".join([detail[:128], *parts])
+            diagnostic = tail[-1024:] or diagnostic
         return BuildUnsettled(
             failure.error_code or RecipeImageCode.BUILD_FAILED,
             detail,

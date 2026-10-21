@@ -203,6 +203,11 @@ impl ProcessRunner for DatabaseRunner {
                     return Ok(ProcessOutput { exit_code: Some(125), success: false, stdout: vec![], stderr: b"database run root does not match our run root: database configuration mismatch".to_vec() });
                 }
                 fs::write(db, runroot.as_os_str().as_encoded_bytes())?;
+                if program == Program::SystemdRun && path("--tmpdir").is_some() {
+                    // Podman rootless bootstrap opens this before storage.
+                    // Fail like the real process when fresh runtime setup was skipped.
+                    fs::write(runroot.join("libpod/tmp/fixture-pause.pid"), b"fixture")?;
+                }
             }
         }
         if program == Program::SystemdRun
