@@ -23,7 +23,7 @@ pub enum HostRuntimeError {
     /// malformed reply, so it keeps a state of its own.
     #[error("host runtime could not confirm the workload outcome")]
     StopUncertain,
-    #[error("host runtime helper rejected request: {code}")]
+    #[error("{}", helper_rejection_message(*code, diagnostic.as_deref()))]
     HelperRejected {
         code: HelperErrorCode,
         diagnostic: Option<String>,
@@ -31,6 +31,28 @@ pub enum HostRuntimeError {
         /// helper could read it. Absence is reported, never read as empty.
         process_logs: Option<Box<FailureProcessLogs>>,
     },
+}
+
+// An inspected exit is a workload outcome, not a helper refusal. Keep its
+// human-readable reason here so every caller uses the same typed exit facts;
+// the workload's exception and captured streams remain separate evidence.
+fn helper_rejection_message(code: HelperErrorCode, diagnostic: Option<&str>) -> String {
+    if code != HelperErrorCode::RuntimeProcessExited {
+        return format!("host runtime helper rejected request: {code}");
+    }
+    let facts = diagnostic
+        .map(|detail| {
+            crate::failure_evidence::exit_facts(detail)
+                .map(|(key, value)| format!("{key}={value}"))
+                .collect::<Vec<_>>()
+                .join(" ")
+        })
+        .unwrap_or_default();
+    if facts.is_empty() {
+        "the workload process exited".to_owned()
+    } else {
+        format!("the workload process exited: {facts}")
+    }
 }
 
 /// The distinct contracts this agent verifies while exchanging one message with

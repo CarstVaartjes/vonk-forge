@@ -349,7 +349,11 @@ fn an_exited_workload_failure_carries_the_captured_container_output() {
         Some(AgentFailureKind::TemporaryDependency)
     );
     let reason = failure.reason.as_str();
-    assert!(reason.contains("runtime_process_exited"), "{reason}");
+    assert_eq!(reason, "the workload process exited");
+    assert_eq!(
+        failure.helper_error_code,
+        Some(HelperErrorCode::RuntimeProcessExited)
+    );
     // Both streams arrive as themselves: merging them into one tail is what
     // discarded the stream that was written first.
     let logs = failure.process_logs.as_ref().expect("captured output");
@@ -379,13 +383,11 @@ fn an_uncaught_exception_is_the_evidence_an_exited_workload_reports() {
     let mut start_claim = claim();
     start_claim.operation = AgentOperation::RecipeStart;
     let failed = failed_outcome(&start_claim, runtime_observation_failure(&error));
-    assert!(
-        failed.reason.ends_with(
-            "runtime_process_exited: exit_code=1 oom_killed=false exit_cause=python_exception"
-        ),
-        "{}",
-        failed.reason
+    assert_eq!(
+        failed.reason,
+        "the workload process exited: exit_code=1 oom_killed=false exit_cause=python_exception"
     );
+    assert_eq!(error.to_string(), failed.reason);
     let diagnostic = evidence_of(&failed).diagnostic.as_deref().unwrap();
     assert!(
         diagnostic

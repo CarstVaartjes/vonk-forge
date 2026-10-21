@@ -193,8 +193,7 @@ def test_a_deterministic_advance_error_fails_once_through_the_tick_guard(
 # a failure with the helper's exit summary, no failure kind (not a wait, not an
 # uncertain effect).
 _PROCESS_EXIT = (
-    "the workload process exited: host runtime helper rejected request: "
-    "runtime_process_exited: exit_code=1 oom_killed=false exit_cause=unclassified"
+    "the workload process exited: exit_code=1 oom_killed=false exit_cause=unclassified"
 )
 
 
