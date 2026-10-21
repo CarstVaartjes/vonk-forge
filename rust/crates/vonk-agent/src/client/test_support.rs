@@ -258,6 +258,7 @@ pub(super) enum DistributionFixtureMode {
     UnavailableFirstObject,
     MalformedFirstManifest,
     MalformedFirstThreeManifests,
+    ReferenceBusyFirstFourManifests,
     InterruptFirstFiveObjects,
 }
 
@@ -294,7 +295,9 @@ pub(super) fn distribution_fixture_server(
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let address = listener.local_addr().unwrap();
     let manifest = canonical_json(&assignment).unwrap();
-    let node_id = TEST_NODE_ID.to_owned();
+    // TLS/client initialization is not peer inactivity. Construct it before
+    // the fixture's network deadline starts, including under a loaded suite.
+    let client = authenticated_test_client(&format!("http://{address}/"), TEST_NODE_ID);
     let server = spawn_peer(move || {
         let deadline = std::time::Instant::now() + PEER_BUDGET;
         let mut requests = Vec::new();
@@ -339,6 +342,18 @@ pub(super) fn distribution_fixture_server(
             }
             if target.starts_with("/agent/distribution/manifests/") {
                 served_plan = target.rsplit('/').next().map(str::to_owned);
+                if matches!(
+                    mode,
+                    DistributionFixtureMode::ReferenceBusyFirstFourManifests
+                ) && requests.len() <= 4
+                {
+                    write!(
+                        stream,
+                        "HTTP/1.1 503 Service Unavailable\r\nx-vonk-error-code: {}\r\nRetry-After: 1\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                        vonk_agent_protocol::generated::ArtifactLifecycleCode::ArtifactReferenceBusy,
+                    ).unwrap();
+                    continue;
+                }
                 if (matches!(mode, DistributionFixtureMode::MalformedFirstManifest)
                     && requests.len() == 1)
                     || (matches!(mode, DistributionFixtureMode::MalformedFirstThreeManifests)
@@ -425,10 +440,7 @@ pub(super) fn distribution_fixture_server(
         }
         requests
     });
-    (
-        authenticated_test_client(&format!("http://{address}/"), &node_id),
-        server,
-    )
+    (client, server)
 }
 
 pub(super) fn job_input_client(

@@ -4,6 +4,69 @@ use super::super::test_support::*;
 use super::*;
 
 #[tokio::test]
+async fn reference_busy_manifest_retries_in_the_original_download() {
+    // Catches the three-request cutoff interrupting recipe.start while its
+    // exact accepted manifest is merely waiting on reference bookkeeping.
+    let model = b"small model object";
+    let assignment = distribution_assignment_fixture(model);
+    let mut objects = HashMap::new();
+    objects.insert(hex_sha256(model), model.to_vec());
+    let (client, server) = distribution_fixture_server(
+        assignment,
+        objects,
+        6,
+        DistributionFixtureMode::ReferenceBusyFirstFourManifests,
+    );
+    let root = tempfile::tempdir().unwrap();
+    let evidence = client
+        .download_distribution(TEST_PLAN_DIGEST, root.path())
+        .await;
+    let requests = server.finish().unwrap();
+    let targets: Vec<_> = requests
+        .iter()
+        .map(|request| {
+            String::from_utf8_lossy(request)
+                .lines()
+                .next()
+                .unwrap_or_default()
+                .to_owned()
+        })
+        .collect();
+    assert!(evidence.is_ok(), "{evidence:?}; requests={targets:?}");
+    let evidence = evidence.unwrap();
+    assert_eq!(std::fs::read(&evidence.model_paths[0]).unwrap(), model);
+    assert_eq!(requests.len(), 6);
+    for request in &requests[..5] {
+        assert!(String::from_utf8_lossy(request).contains(TEST_PLAN_DIGEST));
+    }
+}
+
+#[tokio::test]
+async fn reference_busy_manifest_preserves_cause_at_its_deadline() {
+    // Catches resetting the budget on each wait or losing its typed cause.
+    let assignment = distribution_assignment_fixture(b"model");
+    let (client, server) = distribution_fixture_server(
+        assignment,
+        HashMap::new(),
+        1,
+        DistributionFixtureMode::ReferenceBusyFirstFourManifests,
+    );
+    let error = client
+        .distribution_manifest_until(
+            TEST_PLAN_DIGEST,
+            tokio::time::Instant::now() + Duration::from_millis(500),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(error.disposition(), Disposition::Wait);
+    assert!(error.code().is_some_and(|code| vocabulary::is(
+        code,
+        vonk_agent_protocol::generated::ArtifactLifecycleCode::ArtifactReferenceBusy,
+    )));
+    assert_eq!(server.finish().unwrap().len(), 1);
+}
+
+#[tokio::test]
 async fn distribution_acceptance_rejects_an_unauthorized_destination() {
     let model = b"small model object";
     let assignment = distribution_assignment_fixture(model);

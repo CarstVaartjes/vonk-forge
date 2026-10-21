@@ -178,12 +178,13 @@ def lock_reference_gates(
     identities: Iterable[ArtifactIdentity],
     *,
     now: datetime,
+    shared: bool = False,
 ) -> tuple[ArtifactLifecycleGate, ...]:
     """Serialize one short SQL reference transaction by sorted exact identity.
 
-    PostgreSQL's nonblocking transaction-scoped advisory locks cover first-row
-    creation as well as existing gate rows. They end with the caller's
-    transaction and are never held across storage inspection or transfer.
+    Reference admissions share a snapshot; only deletion changes the fence.
+    Shared holders neither create nor update gate rows. The advisory lock also
+    protects an absent row against a concurrent first deletion reservation.
     """
 
     ordered = tuple(sorted(set(identities), key=_identity_order))
@@ -191,16 +192,17 @@ def lock_reference_gates(
         return ()
     bind = session.get_bind()
     if bind.dialect.name == "postgresql":
+        lock = (
+            func.pg_try_advisory_xact_lock_shared
+            if shared
+            else func.pg_try_advisory_xact_lock
+        )
         for identity in ordered:
             key_bytes = hashlib.sha256(
                 f"{identity.kind}:{identity.sha256}".encode("ascii")
             ).digest()[:8]
             key = int.from_bytes(key_bytes, "big", signed=True)
-            acquired = _reference_sql(
-                lambda key=key: session.scalar(
-                    select(func.pg_try_advisory_xact_lock(key))
-                )
-            )
+            acquired = _reference_sql(lambda key=key: session.scalar(select(lock(key))))
             if acquired is not True:
                 raise ArtifactReferenceUnsettled(
                     ArtifactLifecycleCode.REFERENCE_BUSY,
@@ -220,6 +222,10 @@ def lock_reference_gates(
                 populate_existing=True,
             )
         )
+        if shared:
+            if row is not None:
+                rows.append(row)
+            continue
         if row is None:
             row = ArtifactLifecycleGate(
                 artifact_kind=identity.kind,
@@ -290,9 +296,9 @@ def require_reference_open(
     *,
     now: datetime,
 ) -> None:
-    """Take short reference gates and refuse identities reserved for deletion."""
+    """Share reference admission; refuse identities reserved for deletion."""
 
-    for row in lock_reference_gates(session, identities, now=now):
+    for row in lock_reference_gates(session, identities, now=now, shared=True):
         if row.removal_owner_id is not None:
             raise ArtifactReferenceUnsettled(
                 ArtifactLifecycleCode.DELETION_IN_PROGRESS,
