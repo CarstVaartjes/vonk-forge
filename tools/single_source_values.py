@@ -1,0 +1,167 @@
+"""Owner-adjacent registrations for handwritten literal families, without debt allowances."""
+
+from __future__ import annotations
+
+import ast
+import importlib.util
+import json
+import re
+import subprocess
+import tomllib
+from enum import StrEnum
+from pathlib import Path
+
+from pydantic import BaseModel, ConfigDict
+
+
+class Family(StrEnum):
+    FLOATING_TAGS = "floating_tags"
+    PROTOCOL_WHEEL = "protocol_wheel"
+    MIRROR_INPUT = "mirror_input"
+
+
+class FixtureException(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    file: str
+    function: str
+    reason: str
+
+
+class Registration(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    semantic_id: str
+    owner: str
+    selector: str
+    family: Family
+    projections: tuple[str, ...] = ()
+    exceptions: tuple[FixtureException, ...] = ()
+
+
+class Registry(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    values: list[Registration]
+
+
+def tracked_files(root: Path) -> list[str]:
+    return subprocess.check_output(
+        ["git", "ls-files", "-z"], cwd=root
+    ).decode().split("\0")[:-1]
+
+
+def registrations(root: Path, files: list[str]) -> list[Registration]:
+    values = [
+        value
+        for file in files
+        if file.endswith("/single-source-values.toml")
+        for value in Registry.model_validate(tomllib.loads((root / file).read_text())).values
+    ]
+    identities = [(value.owner, value.selector) for value in values]
+    if len({value.semantic_id for value in values}) != len(values):
+        raise ValueError("duplicate semantic ID")
+    if len(set(identities)) != len(values) or len({v.family for v in values}) != len(values):
+        raise ValueError("overlapping registrations or duplicate owners")
+    return values
+
+
+def owner_value(root: Path, value: Registration) -> object:
+    path = root / value.owner
+    text = path.read_text()
+    if value.family == Family.FLOATING_TAGS:
+        definitions = [
+            node.value
+            for node in ast.parse(text).body
+            if isinstance(node, ast.Assign)
+            and any(isinstance(t, ast.Name) and t.id == value.selector for t in node.targets)
+        ]
+        if len(definitions) != 1:
+            raise ValueError(f"missing or ambiguous owner selector: {value.selector}")
+        definition = definitions[0]
+        if isinstance(definition, ast.Call):
+            definition = definition.args[0]
+        return ast.literal_eval(definition)
+    document = json.loads(text) if path.suffix == ".json" else tomllib.loads(text)
+    for key in value.selector.split("."):
+        document = document[key]
+    return document
+
+
+def _executable_text(file: str, text: str) -> str:
+    if not file.endswith(".md"):
+        return text
+    # Preserve line numbers while scanning executable documentation fences.
+    inside = False
+    lines = []
+    for line in text.splitlines(keepends=True):
+        if line.lstrip().startswith("```"):
+            inside = not inside
+            lines.append("\n")
+        else:
+            lines.append(line if inside else "\n")
+    return "".join(lines)
+
+
+def _fixture_lines(root: Path, exception: FixtureException) -> range:
+    if (
+        not exception.file.startswith(("tests/", "control/tests/"))
+        or not exception.function.startswith("test_")
+        or not exception.reason.strip()
+        or any(c in exception.file + exception.function for c in "*?[")
+    ):
+        raise ValueError("fixture exceptions require an exact adversarial test function and reason")
+    functions = [
+        node for node in ast.walk(ast.parse((root / exception.file).read_text()))
+        if isinstance(node, ast.FunctionDef) and node.name == exception.function
+    ]
+    if len(functions) != 1:
+        raise ValueError(f"missing or ambiguous fixture: {exception.function}")
+    function = functions[0]
+    return range(function.lineno, (function.end_lineno or function.lineno) + 1)
+
+
+def violations(root: Path, files: list[str] | None = None) -> list[str]:
+    files = tracked_files(root) if files is None else files
+    errors: list[str] = []
+    for value in registrations(root, files):
+        owned = owner_value(root, value)  # Missing selectors must fail, never skip a class.
+        exceptions = [(e.file, _fixture_lines(root, e)) for e in value.exceptions]
+        if value.projections:
+            if value.family != Family.PROTOCOL_WHEEL:
+                raise ValueError("only reproducible protocol projections are registered")
+            spec = importlib.util.spec_from_file_location("protocol_projection", root / "scripts/protocol_wheel.py")
+            assert spec is not None and spec.loader is not None
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            for file in value.projections:
+                text = (root / file).read_text()
+                if module.project(root, file, text) != text:
+                    errors.append(f"{value.semantic_id}: {file}:1: generated bytes differ; run python3 scripts/protocol_wheel.py --write-projections")
+        for file in files:
+            if file == value.owner or file in value.projections:
+                continue
+            try:
+                text = _executable_text(file, (root / file).read_text())
+            except (UnicodeError, IsADirectoryError):
+                continue
+            matches: list[tuple[int, str]] = []
+            if value.family == Family.PROTOCOL_WHEEL:
+                # The whole filename family, including old and future versions.
+                matches = [(m.start(), m.group()) for m in re.finditer(r"vonk_agent_protocol-[\w.+!-]+\.whl", text)]
+            elif value.family == Family.FLOATING_TAGS:
+                assert isinstance(owned, (set, frozenset))
+                for match in re.finditer(r"[\[{(][^\[\]{}()]*[\]})]", text):
+                    try:
+                        collection = ast.literal_eval(match.group())
+                    except (ValueError, SyntaxError):
+                        continue
+                    if isinstance(collection, (set, tuple, list, dict)) and len(set(collection) & owned) >= 2:
+                        matches.append((match.start(), match.group()))
+            elif value.family == Family.MIRROR_INPUT:
+                # Context is the mirror operation; deployment selections are a separate class.
+                if file == ".github/workflows/ci-image-mirror.yml" or "mirror-inputs" in file:
+                    matches = [(m.start(), m.group()) for m in re.finditer(r"[\w./-]+:[\w.-]+@sha256:[0-9a-f]{64}", text)]
+            for offset, observed in matches:
+                line = text.count("\n", 0, offset) + 1
+                if any(file == path and line in lines for path, lines in exceptions):
+                    continue
+                errors.append(f"{value.semantic_id}: {file}:{line}: {observed!r}; owner {value.owner}:{value.selector}; derive from owner")
+    return errors

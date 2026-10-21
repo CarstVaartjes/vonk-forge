@@ -1,0 +1,5 @@
+[[values]]
+semantic_id = "images.floating_tags"
+owner = "scripts/verify-supply-chain"
+selector = "FLOATING_TAGS"
+family = "floating_tags"
