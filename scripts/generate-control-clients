@@ -302,6 +302,7 @@ def main() -> None:
             canonical_media_types,
         )
 
+        python_output.mkdir(parents=True, exist_ok=True)
         (python_output / "media_types.py").write_text(
             '"""Generated from vonk_agent_protocol.recipe_jobs. Do not edit."""\n\n'
             "import re\nfrom collections.abc import Iterable\n\n"
