@@ -20,6 +20,8 @@ class HostHelperProcessLogs(WireModel):
     tail, and whichever stream is written first is always the one discarded.
     """
 
+    # Command status, when these tails describe a failed helper subprocess.
+    exit_code: Annotated[int, Field(strict=True, ge=0, le=255)] | None = None
     stdout: FailureLogTail
     stderr: FailureLogTail
 

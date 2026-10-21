@@ -40,6 +40,7 @@ impl ProcessRunner for Spark {
             _ => String::new(),
         };
         Ok(ProcessOutput {
+            exit_code: None,
             success: true,
             stdout: stdout.into_bytes(),
             stderr: vec![],

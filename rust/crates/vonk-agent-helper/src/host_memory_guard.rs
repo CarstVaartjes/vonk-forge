@@ -153,6 +153,7 @@ fn evidence(sample: Sample, trigger: &str, duration: Duration) -> FailureDiagnos
     };
     FailureDiagnostics {
         model_store_layout: None,
+        process_exit_code: None,
         schema_version: 1,
         collected_at: observed_at.to_rfc3339(),
         phase: "workload.host_memory_guard".into(),

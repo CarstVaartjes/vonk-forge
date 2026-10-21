@@ -9,8 +9,12 @@ from pydantic import BaseModel, ConfigDict, Field
 from starlette.responses import StreamingResponse
 from vonk_agent_protocol import (
     AgentProtocolError,
+    InvalidRequestError,
+    InvalidRequestReason,
     RecipeJobInputFile,
     RecipeJobOutputLimits,
+    SecurityRefusalError,
+    SecurityRefusalReason,
     UnknownOutcomeError,
 )
 
@@ -264,12 +268,42 @@ def install_artifact_job_routes(
                     request_id=request_id,
                 )
             )
+        except UnknownOutcomeError:
+            raise
+        except SecurityRefusalError as error:
+            raise HTTPException(
+                status_code=403,
+                detail=str(error),
+                headers={
+                    "x-vonk-error-code": error.typed_reason
+                    or SecurityRefusalReason.FORBIDDEN
+                },
+            ) from None
+        except InvalidRequestError as error:
+            reason = error.typed_reason or InvalidRequestReason.MALFORMED
+            status_code = (
+                404
+                if reason is InvalidRequestReason.NOT_FOUND
+                else 409
+                if reason
+                in {
+                    InvalidRequestReason.CONFLICT,
+                    InvalidRequestReason.SUPERSEDED,
+                    InvalidRequestReason.NOT_READY,
+                    InvalidRequestReason.IMMUTABLE,
+                    InvalidRequestReason.DUPLICATE,
+                }
+                else 422
+            )
+            raise HTTPException(
+                status_code=status_code,
+                detail=str(error),
+                headers={"x-vonk-error-code": reason},
+            ) from None
         except KeyError:
             raise HTTPException(
                 status_code=404, detail="artifact job not found"
             ) from None
-        except UnknownOutcomeError:
-            raise
         except (ArtifactJobError, ValueError) as error:
             raise HTTPException(status_code=409, detail=str(error)) from None
 
