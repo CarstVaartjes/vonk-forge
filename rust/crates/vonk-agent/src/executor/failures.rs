@@ -436,7 +436,10 @@ pub(super) fn stop_failure(
     unconfirmed_reason: &'static str,
     error: &crate::host_runtime::HostRuntimeError,
 ) -> ExecutionResult {
-    if refused_before_effect(error) {
+    if refused_before_effect(error)
+        || matches!(error, crate::host_runtime::HostRuntimeError::Controller(refusal)
+            if refusal.disposition() == Disposition::Security)
+    {
         return runtime_failure(
             "container runtime stop was refused before any effect",
             error,
@@ -453,6 +456,17 @@ pub(super) fn runtime_failure(
     reason: &str,
     error: &crate::host_runtime::HostRuntimeError,
 ) -> ExecutionResult {
+    if let crate::host_runtime::HostRuntimeError::Controller(refusal) = error
+        && refusal.disposition() == Disposition::Security
+    {
+        return ExecutionResult::Failed(
+            Failure::new("host runtime authority denied")
+                .kind(recipe_build_client_failure_kind(refusal))
+                .stage(FailureStage::RuntimeAdapter)
+                .diagnostic(controller_denial_diagnostic(refusal))
+                .helper(HelperErrorCode::GrantUnauthorized, None),
+        );
+    }
     if runtime_helper_code(error) == HelperErrorCode::GrantTimeWindow {
         return ExecutionResult::Failed(
             Failure::new("helper grant time window elapsed; Controller will issue a fresh grant")

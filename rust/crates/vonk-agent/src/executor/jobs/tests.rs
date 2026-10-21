@@ -659,9 +659,12 @@ fn a_definitely_refused_job_start_ends_the_job_with_its_evidence() {
         refused.finish(&claim).result,
         AgentResultResult::OutcomeFailed(_)
     ));
-    // A denied grant (an older Controller) and an unavailable authority stay
-    // waits for the job's existing observation.
-    assert!(refused_job_start(&grant_answer(403, None)).is_none());
+    // A security refusal ends this exact job; unavailable authority waits.
+    let refused = refused_job_start(&grant_answer(403, None)).unwrap();
+    assert_eq!(
+        refused.failure().unwrap().failure_kind,
+        Some(AgentFailureKind::InvalidAuthority)
+    );
     assert!(refused_job_start(&grant_answer(503, None)).is_none());
 }
 

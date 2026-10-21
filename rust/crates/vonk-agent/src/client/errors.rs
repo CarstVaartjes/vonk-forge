@@ -109,12 +109,9 @@ impl ControllerError {
     }
 
     /// The shared contract's disposition of this HTTP refusal (the one status
-    /// table, `vonk_agent_protocol.disposition`). A refused exact host
-    /// operation grant is that operation's wait, never a refusal of the agent.
+    /// table, `vonk_agent_protocol.disposition`). A refused exact grant ends
+    /// its operation without stopping the agent's control lane.
     pub fn disposition(&self) -> Disposition {
-        if self.host_runtime_grant_denied() {
-            return Disposition::Wait;
-        }
         http_status_disposition(self.status)
     }
 
@@ -129,7 +126,7 @@ impl ControllerError {
     /// Whether this refusal asks its owner to re-observe the same request.
     /// Renewal and diagnostic decisions consume this classification too.
     pub(crate) fn retryable(&self) -> bool {
-        matches!(self.status, 429 | 500..=599) || self.host_runtime_grant_denied()
+        matches!(self.status, 429 | 500..=599)
     }
 }
 
@@ -283,11 +280,9 @@ impl ClientError {
         }
     }
 
-    /// Whether the Controller refused this agent's authority, or the exact host
-    /// operation's grant: the security arm plus a denied grant.
+    /// Whether the Controller refused this agent's authority or exact grant.
     pub fn authority_refused(&self) -> bool {
         self.disposition() == Disposition::Security
-            || matches!(self, Self::Controller(error) if error.host_runtime_grant_denied())
     }
 
     pub fn decision(&self) -> &'static str {

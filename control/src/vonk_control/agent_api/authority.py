@@ -53,6 +53,7 @@ from ..host_helper_authority import (
     HostRuntimeEvidenceUnavailable,
     HostRuntimeGrantUnsatisfiable,
 )
+from ..http_errors import SecurityHTTPError
 from ..logging import redact_text
 from ..models import AgentOperation, AgentOperationAttempt, Job
 from ..operator_acceptance import ReceiptPolicy, operator_acceptance
@@ -158,17 +159,19 @@ def install_authority_routes(
 
             return noted
 
-    def note_grant(node_id: str, subject: str, *, denied: bool) -> None:
+    def note_grant(
+        node_id: str, subject: str, *, denied: SecurityRefusalReason | None
+    ) -> None:
         # A grant denied on every ask is shown as repeated evidence; the
         # answer itself is unchanged, and a granted ask clears it.
         required = _require_services(services)
         with suppress(SQLAlchemyError), required.sessions.begin() as session:
-            if denied:
+            if denied is not None:
                 note_repeat(
                     session,
                     subject,
                     node_id,
-                    SecurityRefusalReason.HOST_HELPER_AUTHORITY_DENIED,
+                    denied,
                     now=required.clock(),
                 )
             else:
@@ -199,20 +202,22 @@ def install_authority_routes(
             except HostRuntimeEvidenceUnavailable:
                 # Evidence not readable yet: observe again, then retry later.
                 continue
-            except HostHelperAuthorityError:
+            except HostHelperAuthorityError as refused:
                 try:
                     if not evidence_available():
                         continue
                 except (KeyError, TypeError, ValueError, SQLAlchemyError):
                     continue
                 # The authority's denied binding remains a security refusal.
-                note_grant(node_id, subject, denied=True)
-                raise HTTPException(
+                note_grant(node_id, subject, denied=refused.denial_reason)
+                denial = SecurityHTTPError(
                     status_code=403, detail="grant authority denied"
-                ) from None
+                )
+                denial.headers = {"x-vonk-error-code": refused.denial_reason.value}
+                raise denial from None
             except (KeyError, TypeError, ValueError, SQLAlchemyError):
                 continue
-            note_grant(node_id, subject, denied=False)
+            note_grant(node_id, subject, denied=None)
             return grant
         raise UnknownOutcomeError(
             "grant authority observation is unavailable",

@@ -189,6 +189,9 @@ def test_a_runtime_grant_refused_on_every_ask_is_attention(tmp_path) -> None:
             json=body,
         )
         assert response.status_code == 403
+        assert response.headers["x-vonk-error-code"] == (
+            SecurityRefusalReason.HOST_HELPER_AUTHORITY_DENIED.value
+        )
 
     [alarm] = _repeating(services.sessions, NODE_A, clock.now)
     assert SecurityRefusalReason.HOST_HELPER_AUTHORITY_DENIED.value in alarm

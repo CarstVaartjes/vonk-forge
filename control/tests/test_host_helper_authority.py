@@ -11,7 +11,7 @@ from typing import Any, TypedDict
 import pytest
 from cryptography.hazmat.primitives.asymmetric import ed25519
 from pydantic import ValidationError
-from sqlalchemy import create_engine
+from sqlalchemy import Engine, create_engine
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import (
     CompiledExecutionPlan,
@@ -40,6 +40,7 @@ from vonk_control.host_helper_authority import (
     HostHelperAuthorityError,
     HostHelperGrantIssuer,
     HostRuntimeAuthorityService,
+    HostRuntimeEvidenceUnavailable,
 )
 from vonk_control.host_runtime_plan_authority import (
     RuntimePlanAuthorityStale,
@@ -374,8 +375,9 @@ def runtime_service(
     cancel_requested: bool = False,
     node_intent: int = 1,
     claim_as_sent: bool = False,
+    engine: Engine | None = None,
 ) -> HostRuntimeAuthorityService:
-    engine = create_engine("sqlite+pysqlite:///:memory:")
+    engine = engine or create_engine("sqlite+pysqlite:///:memory:")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
     node_id = "spk_" + "1" * 32
@@ -587,6 +589,7 @@ def runtime_service(
                     workload_intent_ordinal=node_intent,
                 )
             )
+        session.flush()
         session.add(
             AgentCertificate(
                 serial="certificate-1",
@@ -675,6 +678,7 @@ def runtime_service(
                     updated_at=NOW,
                 )
             )
+            session.flush()
             session.add(
                 CatalogDocumentRevision(
                     id=revision_id,
@@ -743,6 +747,7 @@ def runtime_service(
                     updated_at=NOW,
                 )
             )
+            session.flush()
             stored_plan_document: dict[str, object] = {
                 "schema_version": 1,
                 "observation_schema_version": 2,
@@ -778,6 +783,7 @@ def runtime_service(
                     updated_at=NOW,
                 )
             )
+            session.flush()
             for rank, target_node in enumerate(target_nodes):
                 session.add(
                     RunNode(
@@ -821,6 +827,7 @@ def runtime_service(
                 updated_at=NOW,
             )
         )
+        session.flush()
         session.add(
             AgentOperation(
                 id=operation_id,
@@ -837,6 +844,7 @@ def runtime_service(
                 updated_at=NOW,
             )
         )
+        session.flush()
         if job_run_request is not None:
             job_contract = job_run_request.compiled_execution_plan.job
             assert job_contract is not None
@@ -1198,8 +1206,9 @@ def test_collective_readiness_grant_inspects_and_never_starts() -> None:
     ).claims.operation
     assert isinstance(inspected, ExecuteContainerRuntimeRequestOperation)
     assert inspected.action == "run-inspect"
-    with pytest.raises(HostHelperAuthorityError):
-        service.issue_grant(**common, action=ContainerRuntimeAction.START)
+    for action in (ContainerRuntimeAction.START, ContainerRuntimeAction.IMAGE_PULL):
+        with pytest.raises(HostHelperAuthorityError):
+            service.issue_grant(**common, action=action)
 
 
 @pytest.mark.parametrize("phase", [None, "collective-readiness"])
@@ -1351,7 +1360,7 @@ def test_runtime_preflight_grant_is_bound_to_its_own_fenced_operation() -> None:
 
 def test_runtime_authority_never_issues_a_grant_past_the_attempt_lease() -> None:
     service = runtime_service(lease_seconds=10)
-    with pytest.raises(HostHelperAuthorityError):
+    with pytest.raises(HostRuntimeEvidenceUnavailable):
         service.issue_grant(
             node_id="spk_" + "1" * 32,
             fence="40000000-0000-4000-8000-000000000004",
@@ -1727,3 +1736,58 @@ def test_reconciliation_grant_refuses_superseded_node_intent() -> None:
     service = reconciliation_service(node_intent=2)
     with pytest.raises(HostHelperAuthorityError):
         service.issue_grant(**reconciliation_grant_arguments(reconciliation_identity()))
+
+
+@pytest.mark.parametrize("cancel_requested", [False, True])
+def test_live_grant_waits_for_lease_renewal_then_succeeds(
+    postgres_engine: Engine, cancel_requested: bool
+) -> None:
+    """A short remaining lease is a wait, including an in-flight cancellation.
+
+    Catches the security refusal of a current, exact request whose ten-second
+    grant straddles the next heartbeat. Renewal recovers without a new attempt.
+    """
+    from vonk_control.agent_api.authority import (
+        issue_host_runtime_grant as request_grant,
+    )
+    from vonk_control.agent_jobs import AgentJobService
+
+    service = runtime_service(engine=postgres_engine, cancel_requested=cancel_requested)
+    now = NOW + timedelta(seconds=55)
+    service._clock = lambda: now
+    service._issuer = HostHelperGrantIssuer(
+        ed25519.Ed25519PrivateKey.generate(), clock=lambda: now
+    )
+    with service._sessions() as session:
+        operation = session.get(AgentOperation, "30000000-0000-4000-8000-000000000003")
+        assert operation is not None
+        start = RecipeStartPayload.model_validate_json(
+            canonical_message(operation.payload)
+        )
+    body = (
+        own_stop_grant_request(start, fence=FENCE, cancel_pending_start=True)
+        if cancel_requested
+        else HostRuntimeGrantRequest(
+            fence=FENCE,
+            action=ContainerRuntimeAction.IMAGE_PULL.value,
+            request_sha256="e" * 64,
+            expires_in_seconds=10,
+        )
+    )
+    with pytest.raises(HostRuntimeEvidenceUnavailable):
+        request_grant(
+            service, body, node_id="spk_" + "1" * 32, certificate_serial="certificate-1"
+        )
+    # The real heartbeat extends the same fence; cancellation continues to win.
+    jobs = AgentJobService(service._sessions, clock=lambda: now)
+    directive = jobs.heartbeat(FENCE, None, 30)
+    assert directive.cancel_requested == cancel_requested
+    grant = request_grant(
+        service, body, node_id="spk_" + "1" * 32, certificate_serial="certificate-1"
+    )
+    assert grant.claims.expires_at <= int(directive.deadline.timestamp())
+    assert grant.claims.expires_at > int(now.timestamp())
+    with pytest.raises(HostHelperAuthorityError):
+        request_grant(
+            service, body, node_id="spk_" + "2" * 32, certificate_serial="certificate-1"
+        )
