@@ -125,16 +125,14 @@ def test_nonidentical_stored_archive_is_strictly_checked_and_recovers(
 
     monkeypatch.setattr(source_bundles, "_inspect_archive", inspect_actual)
     restored = store.put(manifest.sha256, io.BytesIO(payload))
-    assert inspected == [payload, changed]
+    assert inspected == [payload]
     assert restored.manifest == manifest
     loaded = store.get(manifest.sha256)
     assert loaded.manifest == manifest
     assert loaded.files == {"Dockerfile": b"FROM scratch\n", "x": b"1"}
     # Different tar order is valid under the same content identity. Corruption
     # is repaired atomically from the real, strictly validated ingress.
-    assert loaded.archive == (
-        changed if stored_damage == "different-valid" else payload
-    )
+    assert loaded.archive == payload
 
 
 def test_equal_unvalidated_archive_is_not_blessed(tmp_path) -> None:
@@ -199,7 +197,8 @@ def test_postgres_source_bundle_metadata_roundtrip_and_archive_owned_reads(
         stored = session.get(RecipeSourceBundle, bundle.sha256)
         assert stored is not None
         stored.manifest = {**stored.manifest, "total_bytes": None}
-    assert store.get(bundle.sha256).manifest == first.manifest
+    with pytest.raises(source_bundles.SourceBundleUnknown):
+        store.get(bundle.sha256)
     # A damaged stored manifest is re-derived from the archive verified at this
     # ingress, not a collision and not a recipe fault.
     assert store.put(bundle.sha256, io.BytesIO(bundle.archive)).manifest == (
@@ -286,3 +285,23 @@ def test_catalog_source_upload_unknown_recovers_exact_digest(tmp_path, monkeypat
     assert stored.path.stat().st_ino == inode
     with sessions() as session:
         assert len(tuple(session.scalars(select(RecipeSourceBundle)))) == 1
+
+
+@pytest.mark.parametrize("damage", [False, True])
+def test_filesystem_receipt_survives_restart_without_hashing(
+    tmp_path, monkeypatch, damage
+):
+    """Catches process-local proof and same-length corruption silently passing."""
+    bundle = generate_source_bundle({"Dockerfile": b"FROM scratch\n"})
+    stored = SourceBundleStore(tmp_path).put(bundle.sha256, io.BytesIO(bundle.archive))
+
+    def forbidden(*_args):
+        pytest.fail("reader rehashed bytes already verified at ingress")
+
+    monkeypatch.setattr(source_bundles, "_inspect_archive", forbidden)
+    for _ in range(2):
+        assert SourceBundleStore(tmp_path).get(bundle.sha256).files == bundle.files
+    if damage:
+        stored.path.write_bytes(bundle.archive.replace(b"scratch", b"changed"))
+        with pytest.raises(source_bundles.SourceBundleUnknown):
+            SourceBundleStore(tmp_path).get(bundle.sha256)

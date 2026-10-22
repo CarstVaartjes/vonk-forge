@@ -1,6 +1,7 @@
 """Preview must not wait in a PostgreSQL transaction for source resolution."""
 
 import io
+import time
 from concurrent.futures import ThreadPoolExecutor
 from threading import Event
 
@@ -13,7 +14,12 @@ from vonk_control.catalog_revision_contract import (
     read_catalog_projection,
 )
 from vonk_control.fleet_profile_contract import FleetProfilePreview
-from vonk_control.models import CatalogDocumentRevision
+from vonk_control.models import (
+    CatalogDocumentRevision,
+    RecipeBuild,
+    RecipeSourceBundle,
+    SourceBundleArchive,
+)
 from vonk_control.recipe_builds import RecipeBuildService
 from vonk_control.source_bundles import (
     DatabaseSourceBundleStore,
@@ -23,10 +29,16 @@ from vonk_control.source_bundles import (
 from .test_profile_capacity_admission import _capacity_profile
 
 
-def test_dual_preview_bounds_source_resolution_without_idle_transactions(
-    tmp_path, postgres_engine, monkeypatch
+@pytest.mark.parametrize("damage", ["unverified", "corrupt"])
+def test_slow_ingress_finishes_once_and_dual_previews_become_loadable(
+    tmp_path, postgres_engine, monkeypatch, damage
 ):
-    """Catches unbudgeted bundle reads inside the nested preview transactions."""
+    """Catches a permanent per-review timeout and request-time rehashing.
+
+    Verification exceeds the former two-second deadline on EVERY invocation.
+    Worker completion must survive later reviews and store reconstruction.
+    Same-length corruption after ingress must be a miss, not silent reuse.
+    """
     sessions, profiles, planner, profile, api, headers, _, _ = _capacity_profile(
         tmp_path, postgres_engine, node_count=2
     )
@@ -51,61 +63,98 @@ def test_dual_preview_bounds_source_resolution_without_idle_transactions(
                 ).model_dump(mode="json", exclude_none=True)
             )
         )
-    entered, release, completed = Event(), Event(), Event()
-    calls = []
-
-    observe_archive = source_bundles._observe_archive
-
-    def blocked(archive, limits, digest):
-        calls.append(digest)
-        entered.set()
-        try:
-            assert release.wait(15), "test did not release its source fault"
-            return observe_archive(archive, limits, digest)
-        finally:
-            completed.set()
-
     lifecycle = planner._lifecycle
     assert lifecycle is not None
-    lifecycle._builds = RecipeBuildService(sessions, bundles=bundles)
+    builds = RecipeBuildService(
+        sessions,
+        bundles=bundles,
+        source_rederiver=lambda _projection, _path, digest: (
+            bundle.archive if digest == bundle.sha256 else None
+        ),
+    )
+    resolution = builds.resolve(revision.id)
+    with sessions.begin() as session:
+        cached = session.scalar(select(RecipeBuild))
+        assert cached is not None
+        cached.source_bundle_sha256 = bundle.sha256
+        build_input = resolution.build_input_for_builder("a" * 64)
+        assert build_input is not None
+        cached.build_input_sha256 = build_input
+        cached.policy_report = {
+            **cached.policy_report,
+            "builder_binary_digest": "a" * 64,
+        }
+    lifecycle._builds = builds
     healthy = profiles.preview(profile.id)
-    monkeypatch.setattr(source_bundles, "_observe_archive", blocked)
+    assert healthy.allowed, healthy.reasons
+    entered, release = Event(), Event()
+    calls = []
+    inspect = source_bundles._inspect_archive
+
+    def slow_every_time(archive, limits):
+        calls.append(archive)
+        entered.set()
+        started = time.monotonic()
+        assert release.wait(15), "test did not release ingress"
+        time.sleep(max(0.0, 2.1 - (time.monotonic() - started)))
+        return inspect(archive, limits)
+
+    monkeypatch.setattr(source_bundles, "_inspect_archive", slow_every_time)
+    # Two reviews after ingress never hash, even through independent store objects.
+    for _ in range(2):
+        builds._bundles = DatabaseSourceBundleStore(sessions)
+        assert profiles.preview(profile.id).allowed
+    assert not calls
+    with sessions.begin() as session:
+        if damage == "unverified":
+            row = session.get(RecipeSourceBundle, bundle.sha256)
+            assert row is not None
+            row.storage_key = f"postgres:{bundle.sha256}"
+        else:
+            session.execute(
+                update(SourceBundleArchive)
+                .where(SourceBundleArchive.sha256 == bundle.sha256)
+                .values(archive=bundle.archive.replace(b"scratch", b"changed"))
+            )
+    # This is a read-only cache miss. It cannot initiate source rederivation.
+    pending = profiles.preview(profile.id)
+    assert not pending.allowed
+    assert not calls
     with ThreadPoolExecutor(max_workers=1) as pool:
-        response = pool.submit(
-            api.post, f"/api/profile/{profile.number}/preview", headers=headers
-        )
+        background = pool.submit(builds.reconcile_source_bundles)
         try:
-            assert entered.wait(30), "preview did not reach source resolution"
+            assert entered.wait(15)
+            for _ in range(2):
+                result = api.post(
+                    f"/api/profile/{profile.number}/preview", headers=headers
+                )
+                assert result.status_code == 200, result.text
+                preview = FleetProfilePreview.model_validate_json(result.content)
+                assert not preview.allowed
+                assert any(
+                    item.code == ProfileReasonCode.PREPARATION_UNAVAILABLE
+                    and "pending" in item.detail
+                    for item in preview.reasons
+                )
             with postgres_engine.connect() as connection:
                 idle = connection.scalar(
                     text(
                         "SELECT count(*) FROM pg_stat_activity "
-                        "WHERE datname = current_database() "
-                        "AND state = 'idle in transaction'"
+                        "WHERE datname = current_database() AND state = 'idle in transaction'"
                     )
                 )
-            print(f"Idle PostgreSQL transactions during source fault: {idle}")
-            result = response.result(
-                timeout=5
-            )  # wall-clock: preview must answer while source is blocked
-            assert idle == 0, "source I/O held a preview transaction idle"
-            assert result.status_code == 200, result.text
-            preview = FleetProfilePreview.model_validate_json(result.content)
-            assert not preview.allowed
-            assert any(
-                item.code == ProfileReasonCode.PREPARATION_UNAVAILABLE
-                and "pending" in item.detail
-                for item in preview.reasons
-            )
-            assert len(calls) == 1
-            assert not release.is_set()
+            assert idle == 0, "background ingress held a preview transaction idle"
+            assert not background.done()
         finally:
             release.set()
-            if entered.is_set():
-                assert completed.wait(30)
-        # Fault clearance uses the normal read path; no poisoned request state.
-        recovered = profiles.preview(profile.id)
-        assert recovered == healthy
+        assert background.result(timeout=15)
+    assert calls == [bundle.archive], "only fresh ingress may verify bytes"
+    # This outlives every review's memoization and a new storage instance.
+    for _ in range(2):
+        builds._bundles = DatabaseSourceBundleStore(sessions)
+        assert profiles.preview(profile.id).allowed
+    assert calls == [bundle.archive]
+    assert builds._bundles.get(bundle.sha256).archive == bundle.archive
 
 
 def test_profile_observation_cannot_turn_statement_reads_into_writes(postgres_engine):

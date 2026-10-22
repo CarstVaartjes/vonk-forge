@@ -816,10 +816,12 @@ def test_source_bundles_nothing_names_are_removed_after_the_grace_period(
 
 
 def test_storing_a_bundle_again_gives_it_a_fresh_grace_period(
-    catalog: Catalog,
+    postgres_engine: Engine,
 ) -> None:
     """Catches a re-put bundle still looking old to the sweep before its revision lands."""
 
+    Base.metadata.create_all(postgres_engine)
+    catalog = Catalog(postgres_engine)
     bundle = generate_source_bundle({"Dockerfile": b"FROM scratch\n"})
     store = DatabaseSourceBundleStore(catalog.sessions)
     store.put(bundle.sha256, io.BytesIO(bundle.archive))

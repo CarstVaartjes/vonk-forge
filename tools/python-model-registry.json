@@ -493,6 +493,11 @@
       "kind": "controller-contract"
     },
     {
+      "module": "control/src/vonk_control/source_bundle_contract.py",
+      "kind": "controller-contract",
+      "reason": "Canonical source ingress receipt bound to the managed archive file identity."
+    },
+    {
       "module": "control/src/vonk_control/step_ca.py",
       "kind": "declared",
       "reason": "API or persisted-record models colocated with their owner; named contract modules do not exist for this owner yet"

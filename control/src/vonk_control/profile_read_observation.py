@@ -53,7 +53,7 @@ _WORKER: ContextVar[bool] = ContextVar("profile_storage_worker", default=False)
 @dataclass
 class _Read:
     deadline: float
-    identity: object = field(default_factory=object)
+    selections: dict[tuple[Any, ...], Any] = field(default_factory=dict)
     results: dict[tuple[Any, ...], Future[Any]] = field(default_factory=dict)
     lock: Lock = field(default_factory=Lock)
 
@@ -118,9 +118,7 @@ def profile_read[**P, T](function: Callable[P, T]) -> Callable[P, T]:
     return wrapped
 
 
-def observe_storage[**P, T](
-    function: Callable[P, T], *, share_between_reads: bool = True
-) -> Callable[P, T]:
+def observe_storage[**P, T](function: Callable[P, T]) -> Callable[P, T]:
     """Observe a hashable immutable identity once; never share SQL sessions."""
 
     @wraps(function)
@@ -137,16 +135,12 @@ def observe_storage[**P, T](
                 _WORKER.reset(token)
 
         key = (function, *args, *sorted(kwargs.items()))
-        if not share_between_reads:
-            # SQL selection is mutable: another review must not join even an
-            # unfinished selection of this revision's previous inputs.
-            key = (*key, read.identity)
         inline = False
         with read.lock, _LOCK:
             future = read.results.get(key)
             if future is None:
                 future = _IN_FLIGHT.get(key)
-                recent = _RECENT.get(key) if share_between_reads else None
+                recent = _RECENT.get(key)
                 if (
                     future is None
                     and recent is not None
@@ -189,6 +183,21 @@ def observe_storage[**P, T](
     return wrapped
 
 
+def observing_profile() -> bool:
+    return _READ.get() is not None
+
+
 def observe_selection[**P, T](function: Callable[P, T]) -> Callable[P, T]:
-    """Bound a mutable selection, deduplicating only within the current read."""
-    return observe_storage(function, share_between_reads=False)
+    """Select current SQL facts once per review, without a background timeout."""
+
+    @wraps(function)
+    def wrapped(*args: P.args, **kwargs: P.kwargs) -> T:
+        read = _READ.get()
+        if read is None:
+            return function(*args, **kwargs)
+        key = (function, *args, *sorted(kwargs.items()))
+        if key not in read.selections:
+            read.selections[key] = function(*args, **kwargs)
+        return read.selections[key]
+
+    return wrapped

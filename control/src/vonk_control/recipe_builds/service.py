@@ -37,6 +37,7 @@ from .source import (
     _resolve_once,
     _verified_bundle,
     check_source,
+    reconcile_source_bundles,
     resolve,
 )
 
@@ -55,6 +56,7 @@ class RecipeBuildService:
     ) -> None:
         self._sessions = sessions
         self._sleep = sleep
+        self._source_check_at = 0.0
         self._bundles = bundles
         self._source_rederiver = source_rederiver
         self._inventory = InventoryRepository(sessions)
@@ -82,6 +84,7 @@ class RecipeBuildService:
         assert build.image_bytes is not None
         return self._stored_archive_present(build.oci_layout_sha256, build.image_bytes)
 
+    reconcile_source_bundles = reconcile_source_bundles
     _verified_bundle = _verified_bundle
     _heal_source_bundle = _heal_source_bundle
     check_source = check_source
