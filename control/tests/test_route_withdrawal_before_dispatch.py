@@ -310,8 +310,9 @@ def _failed_rank_world(tmp_path: Path, engine=None):
     )
     record_exact_empty_snapshot(sessions, nodes[1], NOW + timedelta(seconds=1))
     with sessions.begin() as session:
-        for presence in session.scalars(select(AgentNode)):
-            session.delete(presence)
+        for node in session.scalars(select(AgentNode)):
+            node.management_address = None
+            node.management_observed_at = None
     recovery = DistributedRecoveryCoordinator(
         sessions, routes=routes, agent_jobs=queue, clock=lambda: NOW
     )

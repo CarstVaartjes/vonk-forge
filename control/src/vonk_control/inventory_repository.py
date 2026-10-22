@@ -19,7 +19,6 @@ from vonk_agent_protocol.inventory import (
 from vonk_agent_protocol.wire_model import strict_json_datetime
 
 from .installed_bytes import reconcile_missing_installations, refresh_installed_bytes
-from .lifecycle.evidence import Residue
 from .logging import log_event
 from .models import AgentNode, NodeInventorySnapshot
 
@@ -59,8 +58,6 @@ def _validated_inventory(
             "observed_at",
         }
     }
-    if any(isinstance(item, Residue) for item in document.values()):
-        raise ValueError("persisted inventory item is unreadable")
     document.update(schema_version=1, observed_at=observed_at.isoformat())
     validated = InventoryRequest.model_validate_json(canonical_message(document))
     for warning in validated.evidence_warnings:

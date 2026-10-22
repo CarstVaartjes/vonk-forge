@@ -182,7 +182,9 @@ class Sparks:
             NodeInventoryReport.model_validate_json(
                 canonical_message(
                     {
-                        **latest.model_dump(mode="json"),
+                        **latest.model_dump(
+                            mode="json", include=set(NodeInventoryReport.model_fields)
+                        ),
                         "observed_at": now,
                         "disk_free_bytes": free,
                         "host_memory_total_bytes": memory[0],

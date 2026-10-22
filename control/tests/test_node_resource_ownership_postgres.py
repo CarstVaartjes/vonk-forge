@@ -166,3 +166,43 @@ def test_resource_reporting_rolls_back_partial_sample_and_retries(
     with sessions() as session:
         assert session.scalar(select(NodeTelemetrySample.id)) is None
         assert session.scalar(select(NodeInventoryResourceSnapshot.id)) is None
+
+
+def test_archived_measurement_lock_does_not_block_install_admission(
+    postgres_engine: Engine, tmp_path
+) -> None:
+    """Catches locking telemetry history as if it were current admission evidence."""
+    from vonk_control.models import RecipeInstallation
+
+    from .test_recipe_operations import NOW as now
+    from .test_recipe_operations import setup_services
+
+    sessions, lifecycle, _, mapping_id, build_id, nodes = setup_services(
+        tmp_path, engine=postgres_engine
+    )
+    node_id = nodes[0]
+    service = lifecycle._install_admission
+    plan = service.plan_install(mapping_id, build_id, now=now)
+    assert plan.allowed
+    sample = TelemetrySample(
+        boot_id="00000000-0000-4000-8000-000000000001",
+        observed_at=now,
+        memory_total_bytes=None,
+        memory_available_bytes=None,
+        disk_total_bytes=None,
+        disk_free_bytes=None,
+        gpu_utilization_percent=None,
+        gpu_memory_total_bytes=None,
+        gpu_memory_free_bytes=None,
+    )
+    TelemetryRepository(sessions, clock=lambda: now).record_batch(node_id, [sample])
+    with sessions.begin() as history:
+        locked = history.scalar(
+            select(NodeInventoryResourceSnapshot)
+            .where(NodeInventoryResourceSnapshot.node_id == node_id)
+            .with_for_update(of=NodeInventoryResourceSnapshot)
+        )
+        assert locked is not None
+        identifier = service.accept_install(plan, actor="admin", now=now)
+    with sessions() as session:
+        assert session.get(RecipeInstallation, identifier) is not None

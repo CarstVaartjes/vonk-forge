@@ -15,7 +15,7 @@ from vonk_agent_protocol.contracts import AgentFailureResult, AgentUpgradePayloa
 
 from . import agent_operation_states
 from .models import (
-    REPEATED_EVIDENCE_ORDINAL,
+    REPEATED_EVIDENCE_SEQUENCE,
     AgentNode,
     AgentOperation,
     AgentOperationAttempt,
@@ -66,21 +66,21 @@ def owner_evidence(row: EvidenceOwner) -> list[RepeatedEvidence] | None:
             item.node_id == row.node_id
             and is_contact_subject(item.subject)
             and item.code is not None
-            and item.ordinal == 0
+            and item.observation_sequence == 0
             for item in value
         )
     elif isinstance(row, AgentOperation):
         bound = all(
             item.node_id == row.node_id
             and item.subject == row.kind
-            and item.ordinal > 0
+            and item.observation_sequence > 0
             for item in value
         )
     else:
         bound = all(
             item.subject == load_subject(row.id)
             and item.code is not None
-            and item.ordinal == 0
+            and item.observation_sequence == 0
             for item in value
         )
     if not bound:
@@ -120,9 +120,9 @@ def _owner(
     )
 
 
-def next_ordinal(session: Session) -> int:
+def next_sequence(session: Session) -> int:
     if session.get_bind().dialect.name == "postgresql":
-        value = session.scalar(REPEATED_EVIDENCE_ORDINAL.next_value())
+        value = session.scalar(REPEATED_EVIDENCE_SEQUENCE.next_value())
         assert value is not None
         return value
     # SQLite is a test store. The caller flushes its owner before reaching
@@ -131,7 +131,7 @@ def next_ordinal(session: Session) -> int:
     return (
         max(
             (
-                item.ordinal
+                item.observation_sequence
                 for value in values
                 if isinstance(value, list)
                 for item in value
@@ -173,7 +173,7 @@ def note_repeat(
                 detail=None if detail is None else detail[:256],
             )
             if isinstance(row, AgentOperation):
-                event.ordinal = next_ordinal(session)
+                event.observation_sequence = next_sequence(session)
                 evidence = [*evidence, event]
             else:
                 previous = next(
@@ -229,7 +229,7 @@ def note_success(
                         repeats=0,
                         first_at=at,
                         last_at=at,
-                        ordinal=next_ordinal(session),
+                        observation_sequence=next_sequence(session),
                     ),
                 ]
             else:
@@ -280,14 +280,19 @@ def command_evidence_needed(session: Session, operation: AgentOperation) -> bool
     if (operation.node_id, operation.kind) in unreadable:
         return True
     cleared = max(
-        (event.ordinal for _, event in events if event.code is None), default=-1
+        (event.observation_sequence for _, event in events if event.code is None),
+        default=-1,
     )
-    if any(event.code is not None and event.ordinal > cleared for event in own):
+    if any(
+        event.code is not None and event.observation_sequence > cleared for event in own
+    ):
         return True
     return any(
-        event.code is None and event.ordinal == cleared for event in own
+        event.code is None and event.observation_sequence == cleared for event in own
     ) and any(
-        identity != operation.id and event.code is not None and event.ordinal < cleared
+        identity != operation.id
+        and event.code is not None
+        and event.observation_sequence < cleared
         for identity, event in events
     )
 
@@ -316,10 +321,10 @@ def repeating_evidence(
     for _, event in events:
         if event.code is None:
             key = (event.node_id, event.subject)
-            cleared[key] = max(cleared.get(key, -1), event.ordinal)
+            cleared[key] = max(cleared.get(key, -1), event.observation_sequence)
     grouped: dict[tuple[str, str, str], RepeatedEvidence] = {}
     for _, event in events:
-        if event.code is None or event.ordinal <= cleared.get(
+        if event.code is None or event.observation_sequence <= cleared.get(
             (event.node_id, event.subject), -1
         ):
             continue
@@ -331,8 +336,11 @@ def repeating_evidence(
             previous.repeats += event.repeats
             previous.first_at = min(_utc(previous.first_at), _utc(event.first_at))
             previous.last_at = max(_utc(previous.last_at), _utc(event.last_at))
-            if event.ordinal > previous.ordinal:
-                previous.detail, previous.ordinal = event.detail, event.ordinal
+            if event.observation_sequence > previous.observation_sequence:
+                previous.detail, previous.observation_sequence = (
+                    event.detail,
+                    event.observation_sequence,
+                )
     summaries.extend(grouped.values())
     shown = _upgrade_identity_waits(session, node_ids)
     for node_id, subject in sorted(unreadable):

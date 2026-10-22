@@ -650,7 +650,7 @@ class RunAdmissionService:
                     _session=_session,
                 )
                 snapshots[placement.node_id] = snapshot
-                capabilities[placement.node_id] = snapshot.capabilities
+                capabilities[placement.node_id] = tuple(snapshot.capabilities)
             except KeyError:
                 pass
         topology_reason: AdmissionReason | None = None

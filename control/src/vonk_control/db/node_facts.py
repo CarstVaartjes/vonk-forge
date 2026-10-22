@@ -269,7 +269,7 @@ def move_repeated_evidence(connection: Connection) -> None:
 
     from ..evidence_repeats import _utc, load_subject
     from ..models import (
-        REPEATED_EVIDENCE_ORDINAL,
+        REPEATED_EVIDENCE_SEQUENCE,
         AgentNode,
         AgentOperation,
         FleetProfileApplication,
@@ -277,7 +277,7 @@ def move_repeated_evidence(connection: Connection) -> None:
     from ..repeated_evidence_contract import RepeatedEvidence, is_contact_subject
     from .constants import _LOGGER
 
-    REPEATED_EVIDENCE_ORDINAL.create(connection, checkfirst=True)
+    REPEATED_EVIDENCE_SEQUENCE.create(connection, checkfirst=True)
     if "evidence_repeats" not in inspect(connection).get_table_names():
         return
     # No legacy writer may commit between copying and retiring these rows.
@@ -357,9 +357,11 @@ def move_repeated_evidence(connection: Connection) -> None:
             continue
         previous = stored.evidence or []
         if operation_owned:
-            ordinal = connection.scalar(REPEATED_EVIDENCE_ORDINAL.next_value())
-            assert ordinal is not None
-            evidence.ordinal = ordinal
+            observation_sequence = connection.scalar(
+                REPEATED_EVIDENCE_SEQUENCE.next_value()
+            )
+            assert observation_sequence is not None
+            evidence.observation_sequence = observation_sequence
             adopted = [*previous, evidence]
             operation = connection.execute(
                 select(AgentOperation.state, AgentOperation.updated_at).where(
@@ -369,8 +371,10 @@ def move_repeated_evidence(connection: Connection) -> None:
             if operation.state == LifecycleState.SUCCEEDED and _utc(
                 operation.updated_at
             ) >= _utc(evidence.last_at):
-                ordinal = connection.scalar(REPEATED_EVIDENCE_ORDINAL.next_value())
-                assert ordinal is not None
+                observation_sequence = connection.scalar(
+                    REPEATED_EVIDENCE_SEQUENCE.next_value()
+                )
+                assert observation_sequence is not None
                 adopted.append(
                     RepeatedEvidence(
                         node_id=evidence.node_id,
@@ -378,7 +382,7 @@ def move_repeated_evidence(connection: Connection) -> None:
                         repeats=0,
                         first_at=operation.updated_at,
                         last_at=operation.updated_at,
-                        ordinal=ordinal,
+                        observation_sequence=observation_sequence,
                     )
                 )
         else:

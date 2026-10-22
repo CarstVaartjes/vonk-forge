@@ -2742,13 +2742,17 @@ def test_fleet_api_isolates_damaged_observation_and_recovers(tmp_path, damaged) 
     healthy_inventory = nodes[NODE_B].inventory
     assert healthy_inventory is not None and healthy_inventory.disk_free_bytes == 750
     if damaged == "inventory":
-        assert nodes[NODE_A].inventory is None
+        inventory_state = nodes[NODE_A].inventory
+        assert inventory_state is not None
+        assert inventory_state.network_interfaces is None
+        assert inventory_state.disk_free_bytes == inventory.disk_free_bytes
     else:
         assert nodes[NODE_A].telemetry is None
-    assert any(
-        "unreadable" in warning.detail and "unknown" in warning.detail
-        for warning in nodes[NODE_A].warnings
-    )
+    if damaged == "telemetry":
+        assert any(
+            "unreadable" in warning.detail and "unknown" in warning.detail
+            for warning in nodes[NODE_A].warnings
+        )
     with sessions.begin() as session:
         if damaged == "inventory":
             session.execute(

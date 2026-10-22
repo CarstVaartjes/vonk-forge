@@ -8,9 +8,12 @@ from alembic.config import Config
 from alembic.script import ScriptDirectory
 from pytest import MonkeyPatch
 from sqlalchemy.engine import Connection, Engine
+from vonk_agent_protocol.inventory import InventoryRequest
 from vonk_agent_protocol.state_machines import NodeIdentityState
 from vonk_control.db import initialize_database
 from vonk_control.db import startup as startup_owner
+from vonk_control.models import NodeInventorySnapshot
+from vonk_control.stored_json import ContractJSON
 
 
 def test_concurrent_fresh_startup_migrates_once(postgres_engine: Engine) -> None:
@@ -429,3 +432,65 @@ def test_authenticated_claim_rebuilds_damaged_inventory_without_blessing_old_fac
         assert recovered.hostname == "spark-recovered"
         assert recovered.artifacts == []
         assert recovered.preflights == []
+
+
+@pytest.mark.parametrize(
+    "field",
+    sorted(
+        {
+            path[0]
+            for group in InventoryRequest.EVIDENCE_GROUPS
+            for path in group.paths
+            if len(path) == 1
+            and isinstance(
+                NodeInventorySnapshot.__table__.c[path[0]].type, ContractJSON
+            )
+        }
+    ),
+)
+def test_damaged_optional_inventory_keeps_capacity_and_fresh_report_recovers(
+    postgres_engine: Engine, tmp_path: Path, field: str
+) -> None:
+    """Catches typed JSON damage refusing core capacity or poisoning fresh reports."""
+    from datetime import timedelta
+
+    from sqlalchemy import text
+    from vonk_agent_protocol.inventory import InventoryRequest
+    from vonk_control.inventory_repository import InventoryRepository
+
+    from .test_agent_acceptance_postgres import _inventory
+    from .test_agent_api import NODE_A, agent_headers, make_agent_system
+
+    # Every injected field is optional evidence declared by the single wire
+    # contract; no parser or admission fallback is used for the damaged bytes.
+    assert any((field,) in group.paths for group in InventoryRequest.EVIDENCE_GROUPS)
+    client, services, _, clock = make_agent_system(tmp_path, engine=postgres_engine)
+    headers = agent_headers(NODE_A, "serial-a")
+    body = _inventory(clock)
+    assert (
+        client.post("/agent/inventory", headers=headers, json=body).status_code == 204
+    )
+    repository = InventoryRepository(services.sessions)
+    before = repository.latest(NODE_A, now=clock.now, maximum_age=60)
+    with services.sessions.begin() as session:
+        session.execute(
+            text(
+                f"UPDATE node_inventory_snapshots SET \"{field}\" = '42'::json WHERE id = :identity"
+            ),
+            {"identity": before.id},
+        )
+    damaged = repository.latest(NODE_A, now=clock.now, maximum_age=60)
+    assert damaged.disk_free_bytes == before.disk_free_bytes
+    assert damaged.host_memory_free_bytes == before.host_memory_free_bytes
+    assert getattr(damaged, field) is None
+    clock.now += timedelta(seconds=1)
+    assert (
+        client.post(
+            "/agent/inventory", headers=headers, json=_inventory(clock)
+        ).status_code
+        == 204
+    )
+    recovered = repository.latest(NODE_A, now=clock.now, maximum_age=60)
+    assert recovered.id != before.id
+    assert recovered.observed_at == clock.now
+    assert recovered.disk_free_bytes == before.disk_free_bytes

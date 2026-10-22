@@ -27,6 +27,7 @@ from .test_operator_acceptance_postgres import _api
 from .test_recipe_operations import canonical_example
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 @pytest.mark.parametrize("fault", ["null", "inventory", "manifest"])
 def test_review_of_shared_content_survives_partial_evidence_and_heals(
     postgres_engine, tmp_path: Path, fault: str

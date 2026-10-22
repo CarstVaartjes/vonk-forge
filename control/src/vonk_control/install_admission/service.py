@@ -29,6 +29,7 @@ from ..admission_locking import (
 from ..disk_reservations import (
     outstanding_disk_reservation_bytes,
 )
+from ..inventory_items_contract import InventorySnapshotKind
 from ..models import (
     AgentNode,
     CatalogDocumentRevision,
@@ -195,7 +196,12 @@ class InstallAdmissionService(InstallPlanningService):
                 AdmissionRowLock(
                     "node-inventory-snapshots",
                     NodeSnapshot,
-                    select(NodeSnapshot).where(NodeSnapshot.node_id.in_(node_ids)),
+                    select(NodeSnapshot).where(
+                        NodeSnapshot.node_id.in_(node_ids),
+                        NodeSnapshot.kind.in_(
+                            (InventorySnapshotKind.REPORT, InventorySnapshotKind.ITEMS)
+                        ),
+                    ),
                 ),
                 AdmissionRowLock(
                     "node-resource-reservations",

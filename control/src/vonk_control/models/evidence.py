@@ -4,6 +4,6 @@ from sqlalchemy import Sequence
 
 from ..model_primitives import Base
 
-REPEATED_EVIDENCE_ORDINAL = Sequence(
-    "repeated_evidence_ordinal", metadata=Base.metadata
+REPEATED_EVIDENCE_SEQUENCE = Sequence(
+    "repeated_evidence_sequence", metadata=Base.metadata
 )

@@ -218,7 +218,7 @@ def test_command_order_uses_database_identity_and_retains_clear_until_history_pr
     with services.sessions() as session:
         events, unreadable = command_events(session, [NODE_A])
         assert not unreadable
-        assert len({item.ordinal for _, item in events}) == 6
+        assert len({item.observation_sequence for _, item in events}) == 6
         assert any(
             "x6" in detail
             for detail in repeating_evidence(session, [NODE_A], clock.now)[NODE_A]

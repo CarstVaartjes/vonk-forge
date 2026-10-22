@@ -529,9 +529,11 @@ def test_generated_fleet_projection_vocabulary_is_finite() -> None:
         "certificate-revoked",
         "certificate-inactive",
     ]
-    assert schema["TelemetryPoint"]["properties"]["boot_id"]["pattern"] == (
-        "^(?!00000000-0000-0000-0000-000000000000$)"
-        "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    from vonk_agent_protocol.telemetry import TelemetrySample
+
+    assert (
+        schema["TelemetryPoint"]["properties"]["boot_id"]["pattern"]
+        == TelemetrySample.model_json_schema()["properties"]["boot_id"]["pattern"]
     )
     typescript = TYPESCRIPT_CLIENT.read_text()
     assert 'certificate_state: components["schemas"]["CertificateState"]' in typescript

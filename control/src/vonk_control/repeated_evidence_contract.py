@@ -43,7 +43,7 @@ class RepeatedEvidence(StrictModel):
     first_at: datetime
     last_at: datetime
     detail: str | None = Field(default=None, max_length=256)
-    ordinal: int = Field(default=0, ge=0, le=2**63 - 1)
+    observation_sequence: int = Field(default=0, ge=0, le=2**63 - 1)
 
     @model_validator(mode="after")
     def clear_has_no_repetitions(self) -> RepeatedEvidence:

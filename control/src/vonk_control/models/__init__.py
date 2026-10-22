@@ -27,7 +27,7 @@ from .catalog import (
     _catalog_document_revision_is_immutable as _catalog_document_revision_is_immutable,
 )
 from .coordinator import CoordinatorFailure as CoordinatorFailure
-from .evidence import REPEATED_EVIDENCE_ORDINAL as REPEATED_EVIDENCE_ORDINAL
+from .evidence import REPEATED_EVIDENCE_SEQUENCE as REPEATED_EVIDENCE_SEQUENCE
 from .execution import ACTIVE_RUN_STATES as ACTIVE_RUN_STATES
 from .execution import (
     STOPPABLE_NOT_RUNNING_RUN_STATES as STOPPABLE_NOT_RUNNING_RUN_STATES,
