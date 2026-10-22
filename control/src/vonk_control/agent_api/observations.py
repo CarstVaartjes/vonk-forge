@@ -34,6 +34,7 @@ from ..inventory_repository import (
     MAX_INVENTORY_FUTURE_SKEW,
     InventoryRepository,
     InventorySnapshotInput,
+    _validated_inventory,
 )
 from ..library_contract import UuidId
 from ..logging import log_event
@@ -213,20 +214,25 @@ def install_observations_routes(
         clock_authority = (
             required.host_runtime_authority if body.host_settings is not None else None
         )
-        if body.installations is None and body.runs is None and clock_authority is None:
+        stored_report = _validated_inventory(snapshot, observed_at=observed_at)
+        if (
+            stored_report.installations is None
+            and stored_report.runs is None
+            and clock_authority is None
+        ):
             # An older agent, or one that could not list them: no verdict.
             return Response(status_code=status.HTTP_204_NO_CONTENT)
         with required.sessions() as session:
             verdict = InventoryVerdict(
                 store_retention=store_retention_request(session, identity.node_id, now),
                 untracked_installations=untracked_installations(
-                    session, body.installations or ()
+                    session, stored_report.installations or ()
                 ),
                 # Absent unless the runs were named: an older agent's strict
                 # reader never sees the field.
                 untracked_runs=None
-                if body.runs is None
-                else untracked_runs(session, body.runs),
+                if stored_report.runs is None
+                else untracked_runs(session, stored_report.runs),
             )
         if clock_authority is not None:
             try:

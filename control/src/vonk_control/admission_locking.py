@@ -36,7 +36,6 @@ _ROW_LOCK_ORDER = (
     "recipe_installations",
     "cluster_mapping_nodes",
     "installation_nodes",
-    "node_artifacts",
     "node_inventory_snapshots",
     "resource_reservations",
     "fleet_profile_applications",

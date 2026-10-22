@@ -31,7 +31,6 @@ from vonk_control.models import (
     FleetProfileApplication,
     FleetProfileSelection,
     Job,
-    NodeArtifact,
     NodeInventorySnapshot,
     RecipeBuild,
     RecipeSourceBundle,
@@ -48,6 +47,9 @@ from vonk_control.runtime_image_preparation import (
 )
 from vonk_control.stored_json import read_row_column
 
+from .inventory_artifact_support import (
+    clear_inventory_artifacts,
+)
 from .runtime_identity_support import (
     PACKAGED_RUNTIME_IDENTITY,
     inventory_items_fixture,
@@ -488,7 +490,7 @@ class _ColdInspector(CompleteArtifactInspector):
 def test_run_switch_cache_miss_retries_after_storage_recovers(tmp_path: Path) -> None:
     sessions, lifecycle, _queue, _mapping, _build, nodes = setup_services(tmp_path)
     with sessions.begin() as session:
-        session.query(NodeArtifact).delete()
+        clear_inventory_artifacts(session)
     executor = _MissingRuntimeImage()
     service = RunSwitchOperationService(
         sessions,

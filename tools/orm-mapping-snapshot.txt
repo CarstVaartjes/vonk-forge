@@ -37,7 +37,6 @@ vonk_control.models.LoginSession|sessions|
 vonk_control.models.ModelCacheOperation|model_cache_operations|
 vonk_control.models.ModelCacheSetArtifact|model_cache_set_artifacts|
 vonk_control.models.ModelCacheSet|model_cache_sets|
-vonk_control.models.NodeArtifact|node_artifacts|
 vonk_control.models.NodeInventoryItemsSnapshot|node_inventory_snapshots|
 vonk_control.models.NodeInventorySnapshot|node_inventory_snapshots|
 vonk_control.models.NodeSnapshot|node_inventory_snapshots|

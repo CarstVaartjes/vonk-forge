@@ -12,13 +12,16 @@ from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import AgentEvidenceCode, canonical_message
+from vonk_agent_protocol import canonical_message
 from vonk_agent_protocol.inventory import (
     HostSettings,
+    InstallationBytes,
+    InstallationId,
     InventoryRequest,
     MemoryPool,
     ModelStoreObject,
     NetworkInterface,
+    RunScopeId,
 )
 
 from .installed_bytes import reconcile_missing_installations, refresh_installed_bytes
@@ -55,6 +58,9 @@ class InventorySnapshotInput:
     host_settings: HostSettings | None = None
     unused_model_bytes: int | None = None
     model_objects: list[ModelStoreObject] | None = None
+    installations: list[InstallationId] | None = None
+    runs: list[RunScopeId] | None = None
+    installation_bytes: list[InstallationBytes] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -86,14 +92,16 @@ class InventorySnapshotView:
     host_settings: HostSettings | None = field(kw_only=True, default=None)
     unused_model_bytes: int | None = field(kw_only=True, default=None)
     model_objects: list[ModelStoreObject] | None = field(kw_only=True, default=None)
+    installations: list[InstallationId] | None = field(kw_only=True, default=None)
+    runs: list[RunScopeId] | None = field(kw_only=True, default=None)
+    installation_bytes: list[InstallationBytes] | None = field(
+        kw_only=True, default=None
+    )
 
 
 def _validated_inventory(
     value: InventorySnapshotInput | NodeInventorySnapshot, *, observed_at: datetime
 ) -> InventoryRequest:
-    # The installations and runs are judged when reported (the inventory
-    # verdict), the installations' sizes go to their records, and none is
-    # stored here.
     document = {
         name: getattr(value, name)
         for name in InventoryRequest.model_fields
@@ -101,9 +109,6 @@ def _validated_inventory(
         not in {
             "schema_version",
             "observed_at",
-            "installations",
-            "runs",
-            "installation_bytes",
         }
     }
     interfaces = document["network_interfaces"]
@@ -122,12 +127,12 @@ def _validated_inventory(
         ]
     document.update(schema_version=1, observed_at=observed_at.isoformat())
     validated = InventoryRequest.model_validate_json(canonical_message(document))
-    if AgentEvidenceCode.INVENTORY_MODEL_OBJECTS_DROPPED in validated.evidence_warnings:
+    for warning in validated.evidence_warnings:
         log_event(
             _LOG,
             "agent.evidence_dropped",
             service="control-api",
-            code=AgentEvidenceCode.INVENTORY_MODEL_OBJECTS_DROPPED.value,
+            code=warning.value,
             endpoint="inventory",
             node_id=value.node_id,
         )
@@ -148,8 +153,7 @@ class InventoryRepository:
     ) -> NodeInventorySnapshot:
         validated = _validated_inventory(value, observed_at=value.observed_at)
         if report is not None:
-            # These already validated report facts bind the accepted effects,
-            # but are not columns of the capacity snapshot.
+            # Persist the canonical report directory items alongside capacity.
             validated = validated.model_copy(
                 update={
                     "installations": report.installations,
@@ -157,7 +161,6 @@ class InventoryRepository:
                     "installation_bytes": report.installation_bytes,
                 }
             )
-        measured = validated.installation_bytes
         document = validated.model_dump(mode="json", exclude={"schema_version"})
         document["node_id"] = value.node_id
         document["capabilities"] = sorted(validated.capabilities)
@@ -203,6 +206,9 @@ class InventoryRepository:
                 for item in validated.model_objects
             ],
             unused_model_bytes=validated.unused_model_bytes,
+            installations=validated.installations,
+            runs=validated.runs,
+            installation_bytes=validated.installation_bytes,
             evidence_digest=digest,
         )
         with self._sessions.begin() as session:
@@ -229,18 +235,21 @@ class InventoryRepository:
                 .order_by(NodeInventorySnapshot.observed_at.desc())
                 .limit(1)
             )
+            retained_report = _validated_inventory(row, observed_at=value.observed_at)
             if latest is None or value.observed_at >= (
                 latest if latest.tzinfo is not None else latest.replace(tzinfo=UTC)
             ):
                 reconcile_missing_installations(
                     session,
                     value.node_id,
-                    validated.installations,
+                    retained_report.installations,
                     observed_at=value.observed_at,
                     before=value.observed_at - MAX_INVENTORY_FUTURE_SKEW,
                 )
-                if measured is not None:
-                    refresh_installed_bytes(session, value.node_id, measured)
+                if isinstance(row.installation_bytes, list):
+                    refresh_installed_bytes(
+                        session, value.node_id, row.installation_bytes
+                    )
             session.add(row)
         return row
 
@@ -301,6 +310,9 @@ class InventoryRepository:
                 host_settings=validated.host_settings,
                 model_objects=validated.model_objects,
                 unused_model_bytes=validated.unused_model_bytes,
+                installations=validated.installations,
+                runs=validated.runs,
+                installation_bytes=validated.installation_bytes,
             )
 
     def snapshot_count(self, node_id: str) -> int:

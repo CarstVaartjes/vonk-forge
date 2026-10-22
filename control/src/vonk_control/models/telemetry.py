@@ -21,15 +21,19 @@ from sqlalchemy import (
     SmallInteger,
     String,
     Table,
-    Text,
     UniqueConstraint,
     event,
     literal_column,
 )
 from sqlalchemy.orm import Mapped, mapped_column
-from vonk_agent_protocol import ModelFileState, machine_check
 from vonk_agent_protocol.gpu_clock import GpuClockObservation
-from vonk_agent_protocol.inventory import InventoryRequest, MemoryPool
+from vonk_agent_protocol.inventory import (
+    InstallationBytes,
+    InstallationId,
+    InventoryRequest,
+    MemoryPool,
+    RunScopeId,
+)
 
 from ..inventory_items_contract import AgentInventoryItems, InventorySnapshotKind
 from ..lifecycle.evidence import Residue
@@ -134,6 +138,27 @@ class NodeInventorySnapshot(NodeSnapshot):
     # NULL: the agent did not report its unused model bytes (unknown).
     unused_model_bytes: Mapped[int | None] = mapped_column(BigInteger)
     model_objects: Mapped[list[ModelStoreObjectDocument] | None] = mapped_column(JSON)
+    installations: Mapped[list[InstallationId] | Residue | None] = mapped_column(
+        ContractJSON[list[InstallationId]](
+            "node_inventory_snapshots", "installations", none_as_null=True
+        ),
+        nullable=True,
+    )
+    runs: Mapped[list[RunScopeId] | Residue | None] = mapped_column(
+        ContractJSON[list[RunScopeId]](
+            "node_inventory_snapshots", "runs", none_as_null=True
+        ),
+        nullable=True,
+    )
+    installation_bytes: Mapped[list[InstallationBytes] | Residue | None] = (
+        mapped_column(
+            ContractJSON[list[InstallationBytes]](
+                "node_inventory_snapshots", "installation_bytes", none_as_null=True
+            ),
+            nullable=True,
+        )
+    )
+
     nvidia_driver_version: Mapped[str] = mapped_column(
         String(256), nullable=False, default="unknown", server_default="unknown"
     )
@@ -300,44 +325,5 @@ class FleetStreamEvent(Base):
         DateTime(timezone=True), nullable=False
     )
     expires_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
-
-
-class NodeArtifact(Base):
-    __tablename__ = "node_artifacts"
-    __table_args__ = (
-        UniqueConstraint("node_id", "digest", name="uq_node_artifact_digest"),
-        CheckConstraint(
-            "kind IN ('image','image-layer','model','auxiliary')",
-            name="ck_node_artifacts_kind",
-        ),
-        CheckConstraint(
-            machine_check(ModelFileState),
-            name="ck_node_artifacts_state",
-        ),
-        CheckConstraint(
-            "size_bytes>=0 AND ref_count>=0", name="ck_node_artifacts_sizes"
-        ),
-        CheckConstraint(_lower_hex("digest", 64), name="ck_node_artifacts_digest"),
-    )
-    id: Mapped[str] = mapped_column(
-        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
-    )
-    node_id: Mapped[str] = mapped_column(
-        ForeignKey("agent_nodes.node_id", ondelete="CASCADE"),
-        nullable=False,
-        index=True,
-    )
-    kind: Mapped[str] = mapped_column(String(24), nullable=False)
-    digest: Mapped[str] = mapped_column(String(64), nullable=False)
-    source: Mapped[str] = mapped_column(Text, nullable=False)
-    size_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    state: Mapped[str] = mapped_column(String(24), nullable=False)
-    ref_count: Mapped[int] = mapped_column(
-        Integer, nullable=False, default=0, server_default="0"
-    )
-    verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )

@@ -1,8 +1,10 @@
 """Typed current agent facts retained as inventory items, never command history."""
 
+from datetime import datetime
 from enum import StrEnum
 
 from pydantic import Field
+from vonk_agent_protocol import ModelFileState
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.runtime_preflight import RuntimePreflightResult
 from vonk_agent_protocol.wire_model import Digest
@@ -20,8 +22,27 @@ class PreflightInventoryItem(StrictModel):
     result: RuntimePreflightResult
 
 
+class InventoryArtifactKind(StrEnum):
+    IMAGE = "image"
+    IMAGE_LAYER = "image-layer"
+    MODEL = "model"
+    AUXILIARY = "auxiliary"
+
+
+class InventoryArtifactItem(StrictModel):
+    kind: InventoryArtifactKind
+    digest: Digest
+    source: str
+    size_bytes: int = Field(ge=0)
+    state: ModelFileState
+    ref_count: int = Field(ge=0)
+    verified_at: datetime | None = None
+    updated_at: datetime
+
+
 class AgentInventoryItems(StrictModel):
     runtime_identity: AgentRuntimeIdentity | None = None
     hostname: str | None = Field(default=None, max_length=255)
     preflight_fingerprint: Digest | None = None
     preflights: list[PreflightInventoryItem] = Field(default_factory=list)
+    artifacts: list[InventoryArtifactItem] = Field(default_factory=list)

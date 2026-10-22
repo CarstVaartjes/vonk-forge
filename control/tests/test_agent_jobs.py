@@ -47,7 +47,11 @@ from vonk_control.distribution import (
 )
 from vonk_control.distribution_assignment import NodeDistributionAssignment
 from vonk_control.install_admission import InstallAdmissionService
-from vonk_control.inventory_items import inventory_items, runtime_value
+from vonk_control.inventory_items import (
+    inventory_artifacts,
+    inventory_items,
+    runtime_value,
+)
 from vonk_control.lifecycle import Outcome, Reported
 from vonk_control.lifecycle.agent_operation import (
     AgentOperationAdapter,
@@ -60,7 +64,6 @@ from vonk_control.models import (
     AgentOperationAttempt,
     Base,
     Job,
-    NodeArtifact,
     RecipeBuild,
     RecipeRun,
     ResourceReservation,
@@ -1830,9 +1833,7 @@ def test_a_finished_distribution_records_the_pulled_image_on_the_spark(
     jobs.succeed(claim, {"downloaded_bytes": 7})
 
     with sessions() as session:
-        stored = session.scalars(
-            select(NodeArtifact).where(NodeArtifact.node_id == NODE_A)
-        ).all()
+        stored = inventory_artifacts(session, NODE_A)
     # Exactly the record admission and Run/Switch read as "image present".
     assert [
         (item.kind, item.digest, item.size_bytes, item.state) for item in stored

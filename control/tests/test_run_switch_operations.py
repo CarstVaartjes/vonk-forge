@@ -57,7 +57,6 @@ from vonk_control.models import (
     ClusterMappingNode,
     InstallationNode,
     Job,
-    NodeArtifact,
     NodeInventorySnapshot,
     RecipeBuild,
     RecipeInstallation,
@@ -136,6 +135,10 @@ from vonk_control.runtime_image_preparation import (
 )
 from vonk_control.runtime_preflight import latest_result
 
+from .inventory_artifact_support import (
+    all_inventory_artifacts,
+    clear_inventory_artifacts,
+)
 from .preflight_fixtures import record_passing_preflight
 from .runtime_identity_support import (
     PACKAGED_RUNTIME_IDENTITY,
@@ -1591,7 +1594,7 @@ def test_cold_model_and_image_plan_defers_compile_until_both_preparations(
         tmp_path
     )
     with sessions.begin() as session:
-        session.query(NodeArtifact).delete()
+        clear_inventory_artifacts(session)
     inspector = CompleteArtifactInspector(missing_spark_bytes=1024)
 
     class ColdInspector(CompleteArtifactInspector):
@@ -1654,7 +1657,7 @@ def test_cold_production_phases_prepare_receipts_before_real_install_compile(
 
     sessions, lifecycle, _queue, _mapping_id, build_id, nodes = setup_services(tmp_path)
     with sessions.begin() as session:
-        session.query(NodeArtifact).delete()
+        clear_inventory_artifacts(session)
         build = session.get(RecipeBuild, build_id)
         assert build is not None
         image_digest = build.image_digest
@@ -4759,7 +4762,7 @@ def test_cancel_intent_waits_for_transfer_receipt_and_preserves_shared_copies(tm
     assert cancelled_result.child_operation_id is None
     assert not restarted._advance(operation.operation_id)
     with sessions() as session:
-        assert len(list(session.scalars(select(NodeArtifact)))) > 0
+        assert len(list(all_inventory_artifacts(session))) > 0
         installed = session.get(RecipeInstallation, plan.installation_id)
         assert installed is not None
         assert installed.state == "installed"

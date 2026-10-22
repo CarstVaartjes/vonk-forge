@@ -35,8 +35,7 @@ from ..models import (
     ClusterMapping,
     ClusterMappingNode,
     InstallationNode,
-    NodeArtifact,
-    NodeInventorySnapshot,
+    NodeSnapshot,
     RecipeBuild,
     RecipeInstallation,
     ResourceReservation,
@@ -194,16 +193,9 @@ class InstallAdmissionService(InstallPlanningService):
         requests.extend(
             (
                 AdmissionRowLock(
-                    "node-artifacts",
-                    NodeArtifact,
-                    select(NodeArtifact).where(NodeArtifact.node_id.in_(node_ids)),
-                ),
-                AdmissionRowLock(
                     "node-inventory-snapshots",
-                    NodeInventorySnapshot,
-                    select(NodeInventorySnapshot).where(
-                        NodeInventorySnapshot.node_id.in_(node_ids)
-                    ),
+                    NodeSnapshot,
+                    select(NodeSnapshot).where(NodeSnapshot.node_id.in_(node_ids)),
                 ),
                 AdmissionRowLock(
                     "node-resource-reservations",

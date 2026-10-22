@@ -32,6 +32,7 @@ from vonk_control.availability_production import build_recipe_image_availability
 from vonk_control.bounded_json import require_integer
 from vonk_control.catalog_entities import CatalogEntityService
 from vonk_control.install_admission import InstallAdmissionService
+from vonk_control.inventory_items import inventory_artifacts
 from vonk_control.inventory_repository import (
     InventoryRepository,
     InventorySnapshotInput,
@@ -43,7 +44,6 @@ from vonk_control.models import (
     Base,
     CatalogDocumentRevision,
     Job,
-    NodeArtifact,
     RecipeBuild,
     RecipeSourceBundle,
     ResourceReservation,
@@ -2235,9 +2235,7 @@ def test_success_does_not_claim_isolated_build_image_is_installed(
 
     assert completed.image_digest == "sha256:" + "b" * 64
     with sessions() as session:
-        artifact = session.scalar(
-            select(NodeArtifact).where(NodeArtifact.node_id == node_id)
-        )
+        artifact = next(iter(inventory_artifacts(session, node_id)), None)
         assert artifact is None
 
 

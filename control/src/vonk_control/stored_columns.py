@@ -24,8 +24,11 @@ from vonk_agent_protocol.gpu_clock import GpuClockObservation
 from vonk_agent_protocol.inventory import (
     Capability,
     HostSettings,
+    InstallationBytes,
+    InstallationId,
     ModelStoreObject,
     NetworkInterface,
+    RunScopeId,
 )
 from vonk_agent_protocol.job_inputs import RecipeJobInputManifest
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunResult
@@ -364,3 +367,12 @@ bind("coordinator_failures", "failure", CoordinatorFailureEvidence)
 from .inventory_items_contract import AgentInventoryItems
 
 bind("node_inventory_snapshots", "agent_items", AgentInventoryItems, nullable=True)
+
+bind("node_inventory_snapshots", "installations", list[InstallationId], nullable=True)
+bind("node_inventory_snapshots", "runs", list[RunScopeId], nullable=True)
+bind(
+    "node_inventory_snapshots",
+    "installation_bytes",
+    list[InstallationBytes],
+    nullable=True,
+)

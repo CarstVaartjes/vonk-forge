@@ -10,9 +10,11 @@ from vonk_agent_protocol import (
     ModelFileState,
 )
 
+from ..inventory_items import record_artifact
+from ..inventory_items_contract import InventoryArtifactItem, InventoryArtifactKind
 from ..models import (
+    AgentNode,
     ArtifactDistributionAssignment,
-    NodeArtifact,
     RecipeBuild,
 )
 
@@ -44,28 +46,19 @@ def record_distributed_runtime_image(
     if build is None or build.image_bytes is None:
         return
     digest = assignment.oci_image_digest.removeprefix("sha256:")
-    artifact = session.scalar(
-        select(NodeArtifact).where(
-            NodeArtifact.node_id == node_id, NodeArtifact.digest == digest
-        )
-    )
-    if artifact is None:
-        session.add(
-            NodeArtifact(
-                node_id=node_id,
-                kind="image",
-                digest=digest,
-                source=f"oci-layout:{assignment.oci_archive_sha256}",
-                size_bytes=build.image_bytes,
-                state=ModelFileState.VERIFIED,
-                ref_count=0,
-                verified_at=now,
-                updated_at=now,
-            )
-        )
+    node = session.get(AgentNode, node_id)
+    if node is None:
         return
-    artifact.kind = "image"
-    artifact.size_bytes = build.image_bytes
-    artifact.state = ModelFileState.VERIFIED
-    artifact.verified_at = now
-    artifact.updated_at = now
+    record_artifact(
+        node,
+        InventoryArtifactItem(
+            kind=InventoryArtifactKind.IMAGE,
+            digest=digest,
+            source=f"oci-layout:{assignment.oci_archive_sha256}",
+            size_bytes=build.image_bytes,
+            state=ModelFileState.VERIFIED,
+            ref_count=0,
+            verified_at=now,
+            updated_at=now,
+        ),
+    )

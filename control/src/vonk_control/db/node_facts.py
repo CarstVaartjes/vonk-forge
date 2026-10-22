@@ -179,3 +179,83 @@ def move_runtime_facts(connection: Connection) -> None:
     ):
         connection.execute(text(f"ALTER TABLE agent_nodes DROP COLUMN {name}"))
     connection.execute(text("ALTER TABLE agent_node_profiles DROP COLUMN hostname"))
+
+
+def move_artifact_facts(connection: Connection) -> None:
+    """Fold availability receipts into the node's typed inventory before retirement."""
+    import hashlib
+    import uuid
+    from datetime import UTC, datetime
+    from itertools import groupby
+
+    from sqlalchemy import insert, select, update
+    from vonk_agent_protocol import canonical_message
+
+    from ..inventory_items_contract import (
+        AgentInventoryItems,
+        InventoryArtifactItem,
+        InventorySnapshotKind,
+    )
+    from ..models import NodeInventoryItemsSnapshot
+
+    if "node_artifacts" not in inspect(connection).get_table_names():
+        return
+    rows = connection.execute(
+        text("SELECT * FROM node_artifacts ORDER BY node_id, digest")
+    ).mappings()
+    now = datetime.now(UTC)
+    for node_id, entries in groupby(rows, key=lambda row: row["node_id"]):
+        stored = connection.execute(
+            select(
+                NodeInventoryItemsSnapshot.id,
+                NodeInventoryItemsSnapshot.agent_items,
+                NodeInventoryItemsSnapshot.observed_at,
+            ).where(NodeInventoryItemsSnapshot.node_id == node_id)
+        ).one_or_none()
+        current = AgentInventoryItems() if stored is None else stored.agent_items
+        if not isinstance(current, AgentInventoryItems):
+            raise TypeError(
+                f"cannot adopt artifacts into unreadable inventory for {node_id}"
+            )
+        artifacts = {item.digest: item for item in current.artifacts}
+        observed = None if stored is None else stored.observed_at
+        for row in entries:
+            artifact = InventoryArtifactItem.model_validate_json(
+                canonical_message(
+                    {name: row[name] for name in InventoryArtifactItem.model_fields}
+                )
+            )
+            previous = artifacts.get(artifact.digest)
+            if previous is None or previous.updated_at <= artifact.updated_at:
+                artifacts[artifact.digest] = artifact
+            if observed is None or observed < artifact.updated_at:
+                observed = artifact.updated_at
+        items = current.model_copy(
+            update={
+                "artifacts": sorted(artifacts.values(), key=lambda item: item.digest)
+            }
+        )
+        digest = hashlib.sha256(
+            canonical_message({"node_id": node_id, "agent_items": items})
+        ).hexdigest()
+        if stored is None:
+            connection.execute(
+                insert(NodeInventoryItemsSnapshot).values(
+                    id=str(uuid.uuid4()),
+                    node_id=node_id,
+                    kind=InventorySnapshotKind.ITEMS,
+                    observed_at=observed,
+                    received_at=now,
+                    evidence_digest=digest,
+                    agent_items=items,
+                )
+            )
+        else:
+            connection.execute(
+                update(NodeInventoryItemsSnapshot)
+                .where(
+                    NodeInventoryItemsSnapshot.id == stored.id,
+                )
+                .values(agent_items=items, observed_at=observed, evidence_digest=digest)
+            )
+    connection.execute(text("DROP TABLE node_artifacts"))

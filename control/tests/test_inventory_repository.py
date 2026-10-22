@@ -136,3 +136,54 @@ def test_latest_rejects_malformed_persisted_capabilities(tmp_path) -> None:
     assert repaired is not None and repaired.id == stored.id
     assert repaired.capabilities == ("runtime.vllm.v1",)
     assert repaired.host_memory_free_bytes == 300
+
+
+@pytest.mark.parametrize(
+    "reported", [None, [], ["00000000-0000-4000-8000-000000000001"]]
+)
+def test_original_directory_items_and_sizes_survive_store_load(
+    tmp_path, reported
+) -> None:
+    """Catches retaining only reconciliation effects and discarding original facts."""
+    from vonk_agent_protocol.inventory import InstallationBytes
+    from vonk_control.inventory_repository import _validated_inventory
+
+    repo, now = repository(tmp_path)
+    node_id = "spk_" + "1" * 32
+    value = InventorySnapshotInput(
+        node_id,
+        now,
+        1000,
+        700,
+        500,
+        300,
+        400,
+        250,
+        1,
+        False,
+        ("runtime.vllm.v1",),
+        memory_pool="separate",
+    )
+    measured = (
+        None
+        if reported is None
+        else [InstallationBytes(installation_id=key, bytes=0) for key in reported]
+    )
+    report = _validated_inventory(value, observed_at=now).model_copy(
+        update={
+            "installations": reported,
+            "runs": reported,
+            "installation_bytes": measured,
+        }
+    )
+    stored = repo.record(value, report=report)
+    with repo._sessions() as session:
+        loaded = session.get(NodeInventorySnapshot, stored.id)
+        assert loaded is not None
+        assert loaded.installations == reported
+        assert loaded.runs == reported
+        assert loaded.installation_bytes == measured
+    latest = repo.latest(node_id, now=now, maximum_age=300)
+    assert latest.installations == reported
+    assert latest.runs == reported
+    assert latest.installation_bytes == measured

@@ -25,7 +25,6 @@ from vonk_agent_protocol import (
     DistributionAssignmentState,
     InstallationState,
     LifecycleState,
-    ModelFileState,
     ReservationState,
     RoutePublicationState,
     RunState,
@@ -46,7 +45,6 @@ from .models import (
     Job,
     JobAttempt,
     ModelCacheOperation,
-    NodeArtifact,
     RecipeBuild,
     RecipeInstallation,
     RecipeLibrarySyncRun,
@@ -89,7 +87,6 @@ type HistoryRow = (
     | RecipeLibrarySyncRun
     | ArtifactDistributionAssignment
     | ResourceReservation
-    | NodeArtifact
     | RecipeRun
 )
 
@@ -139,14 +136,6 @@ def _history_specs() -> tuple[
             ResourceReservation,
             ResourceReservation.released_at,
             ResourceReservation.state == ReservationState.RELEASED.value,
-        ),
-        # Inventory history is removed only after an authenticated inventory
-        # said missing and there are no remaining consumers; never infer absence.
-        (
-            NodeArtifact,
-            NodeArtifact.updated_at,
-            (NodeArtifact.state == ModelFileState.MISSING.value)
-            & (NodeArtifact.ref_count == 0),
         ),
         (
             RecipeRun,
@@ -353,10 +342,6 @@ class TerminalHistoryCollector:
                                     ResourceReservation.id == identity
                                 )
                             )
-                        elif model is NodeArtifact:
-                            session.execute(
-                                delete(NodeArtifact).where(NodeArtifact.id == identity)
-                            )
                         elif model is RecipeRun:
                             session.execute(
                                 delete(RunNode).where(RunNode.run_id == identity)
@@ -468,9 +453,6 @@ class TerminalHistoryCollector:
                 )
             ):
                 return False
-        # Digest-named objects are retained while current accepted intent names them.
-        if isinstance(row, NodeArtifact) and row.digest in protected:
-            return False
         return not (
             isinstance(row, ArtifactDistributionAssignment)
             and not tokens(

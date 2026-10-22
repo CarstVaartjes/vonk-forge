@@ -58,7 +58,6 @@ from ..models import CatalogDocumentRevision as CatalogDocumentRevision
 from ..models import ClusterMapping as ClusterMapping
 from ..models import ClusterMappingNode as ClusterMappingNode
 from ..models import InstallationNode as InstallationNode
-from ..models import NodeArtifact as NodeArtifact
 from ..models import NodeInventorySnapshot as NodeInventorySnapshot
 from ..models import RecipeBuild as RecipeBuild
 from ..models import RecipeInstallation as RecipeInstallation

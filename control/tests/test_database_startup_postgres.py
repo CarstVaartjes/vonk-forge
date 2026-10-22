@@ -3,6 +3,7 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+import pytest
 from alembic.config import Config
 from alembic.script import ScriptDirectory
 from pytest import MonkeyPatch
@@ -305,3 +306,87 @@ def test_partial_runtime_evidence_waits_for_claim_then_retires_columns(
             inventory_items(session.get(AgentNode, "partial")).hostname
             == "reported.internal"
         )
+
+
+@pytest.mark.parametrize("with_receipt", [False, True])
+def test_artifact_move_preserves_runtime_items_and_restarts_after_interruption(
+    postgres_engine: Engine,
+    monkeypatch: MonkeyPatch,
+    with_receipt: bool,
+) -> None:
+    """Catches lost availability on a restart and clobbering another inventory item."""
+    from datetime import UTC, datetime
+
+    from sqlalchemy import event, inspect, text
+    from sqlalchemy.orm import sessionmaker
+    from vonk_agent_protocol import ModelFileState
+    from vonk_agent_protocol.claims import AgentRuntimeIdentity
+    from vonk_control.db import node_facts
+    from vonk_control.inventory_items import inventory_items, record_runtime
+    from vonk_control.models import AgentNode, Base
+
+    Base.metadata.create_all(postgres_engine)
+    sessions = sessionmaker(postgres_engine)
+    at = datetime(2026, 10, 22, 12, tzinfo=UTC)
+    with sessions.begin() as session:
+        node = AgentNode(node_id="artifact-owner", state=NodeIdentityState.ACTIVE)
+        session.add(node)
+        record_runtime(
+            node,
+            AgentRuntimeIdentity(
+                architecture="linux-arm64",
+                semantic_version="1.2.3",
+                build_digest="sha256:" + "b" * 64,
+                binary_digest="c" * 64,
+            ),
+            "d" * 64,
+            "preserved.internal",
+            at,
+        )
+    with postgres_engine.begin() as connection:
+        connection.exec_driver_sql("""CREATE TABLE node_artifacts (
+            id varchar(36) PRIMARY KEY, node_id varchar(36), kind varchar(24),
+            digest varchar(64), source text, size_bytes bigint, state varchar(24),
+            ref_count integer, verified_at timestamptz, updated_at timestamptz)""")
+        if with_receipt:
+            connection.execute(
+                text("""INSERT INTO node_artifacts VALUES
+                ('receipt', 'artifact-owner', 'image', :digest, 'oci-layout:receipt',
+                 123, :state, 0, :at, :at)"""),
+                {
+                    "digest": "e" * 64,
+                    "state": ModelFileState.VERIFIED.value,
+                    "at": at,
+                },
+            )
+    original = node_facts.move_artifact_facts
+
+    def interrupted(connection: Connection) -> None:
+        def stop(_conn, _cursor, statement, _parameters, _context, _many):
+            if statement == "DROP TABLE node_artifacts":
+                raise InterruptedError("Controller stopped before receipt retirement")
+
+        event.listen(connection, "before_cursor_execute", stop)
+        try:
+            original(connection)
+        finally:
+            event.remove(connection, "before_cursor_execute", stop)
+
+    url = postgres_engine.url.render_as_string(hide_password=False)
+    with monkeypatch.context() as interruption:
+        interruption.setattr(node_facts, "move_artifact_facts", interrupted)
+        with pytest.raises(InterruptedError):
+            initialize_database(url)
+    with sessions() as session:
+        assert inventory_items(session.get(AgentNode, "artifact-owner")).artifacts == []
+    initialize_database(url)
+    initialize_database(url)
+    with sessions() as session:
+        items = inventory_items(session.get(AgentNode, "artifact-owner"))
+        assert items.hostname == "preserved.internal"
+        assert items.preflight_fingerprint == "d" * 64
+        assert [item.digest for item in items.artifacts] == (
+            ["e" * 64] if with_receipt else []
+        )
+    with postgres_engine.connect() as connection:
+        assert "node_artifacts" not in inspect(connection).get_table_names()

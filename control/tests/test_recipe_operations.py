@@ -90,7 +90,6 @@ from vonk_control.models import (
     ClusterMapping,
     InstallationNode,
     Job,
-    NodeArtifact,
     RecipeBuild,
     RecipeInstallation,
     RecipeRun,
@@ -142,6 +141,9 @@ from vonk_forge_contracts import (
 
 from .agent_fences import fenced_operation
 from .canonical_recipe_fixtures import canonical_example
+from .inventory_artifact_support import (
+    seed_inventory_artifact,
+)
 from .preflight_fixtures import record_passing_preflight
 from .runtime_identity_support import (
     PACKAGED_RUNTIME_IDENTITY,
@@ -716,8 +718,9 @@ def setup_services(
         session.flush()
         build.plan = {**build.plan, "build_id": build.id}
         build_id = build.id
-        session.add_all(
-            NodeArtifact(
+        for node_id in node_ids:
+            seed_inventory_artifact(
+                session,
                 node_id=node_id,
                 kind="image",
                 digest="1" * 64,
@@ -728,8 +731,6 @@ def setup_services(
                 verified_at=NOW,
                 updated_at=NOW,
             )
-            for node_id in node_ids
-        )
     canonical_cache = _CanonicalModelCache()
 
     def prepare_canonical_runtime_image(document, runtime_spec, build):

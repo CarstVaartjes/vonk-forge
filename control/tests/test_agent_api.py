@@ -924,7 +924,7 @@ def test_an_inventory_measuring_installations_refreshes_their_recorded_size(
         "/agent/inventory", headers=agent_headers(NODE_A, "serial-a"), json=payload
     )
 
-    assert response.status_code == 204
+    assert response.status_code == 204, response.text
     with services.sessions() as session:
         assert (
             session.scalar(

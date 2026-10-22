@@ -328,21 +328,6 @@ AUDITED_OUTSIDE_COLUMNS: dict[str, frozenset[str]] = {
             "expires_at",
         ]
     ),
-    # Misplaced Spark artifact facts; proposed owner: typed inventory item.
-    "node_artifacts": frozenset(
-        [
-            "id",
-            "node_id",
-            "kind",
-            "digest",
-            "source",
-            "size_bytes",
-            "state",
-            "ref_count",
-            "verified_at",
-            "updated_at",
-        ]
-    ),
 }
 
 

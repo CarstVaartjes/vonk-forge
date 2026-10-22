@@ -2,7 +2,6 @@
 
 from .models import (
     InstallationNode,
-    NodeArtifact,
     NodeInventorySnapshot,
     RecipeInstallation,
     RecipeRun,
@@ -12,7 +11,6 @@ from .models import (
 
 __all__ = [
     "InstallationNode",
-    "NodeArtifact",
     "NodeInventorySnapshot",
     "RecipeInstallation",
     "RecipeRun",

@@ -15,11 +15,10 @@ from ..catalog_revision_contract import (
     RecipeRevisionProjection,
     read_catalog_projection,
 )
-from ..inventory_items import inventory_items
+from ..inventory_items import inventory_artifacts, inventory_items
 from ..models import (
     AgentNode,
     CatalogDocumentRevision,
-    NodeArtifact,
     RecipeBuild,
     RecipeSourceBundle,
 )
@@ -209,11 +208,13 @@ class BuildEvidenceMixin:
         )
         if image_bytes is not None and runtime_raw_digest is not None:
             for node in group.nodes:
-                artifact = session.scalar(
-                    select(NodeArtifact).where(
-                        NodeArtifact.node_id == node.node_id,
-                        NodeArtifact.digest == runtime_raw_digest,
-                    )
+                artifact = next(
+                    (
+                        item
+                        for item in inventory_artifacts(session, node.node_id)
+                        if item.digest == runtime_raw_digest
+                    ),
+                    None,
                 )
                 if (
                     artifact is not None

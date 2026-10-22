@@ -4,18 +4,15 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
     ModelFileState,
     RunSwitchCode,
 )
 
+from ..inventory_items import inventory_artifacts
 from ..model_cache import ModelCacheService
 from ..model_cache_contract import ModelCacheDownloadPreviewResponse
-from ..models import (
-    NodeArtifact,
-)
 from ..run_switch_contract import (
     RunSwitchReason,
 )
@@ -139,11 +136,7 @@ class DatabaseRunSwitchArtifactInspector:
         reclaimable_digests: set[str] = set()
         for node_id in node_ids:
             missing_by_node[node_id] = 0
-            rows = tuple(
-                session.scalars(
-                    select(NodeArtifact).where(NodeArtifact.node_id == node_id)
-                )
-            )
+            rows = inventory_artifacts(session, node_id)
             by_digest = {row.digest: row for row in rows}
             for digest, size in expected_by_digest.items():
                 row = by_digest.get(digest)

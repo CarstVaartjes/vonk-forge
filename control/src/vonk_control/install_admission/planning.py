@@ -32,14 +32,13 @@ from ..disk_reservations import (
     models_stored_on_node,
     outstanding_disk_charges,
 )
-from ..inventory_items import inventory_items
+from ..inventory_items import inventory_artifacts, inventory_items
 from ..inventory_repository import InventoryRepository, InventorySnapshotView
 from ..legal_admission import territorial_admission
 from ..models import (
     AgentNode,
     ClusterMapping,
     ClusterMappingNode,
-    NodeArtifact,
     RecipeBuild,
 )
 from ..recipe_runtime_specs import (
@@ -403,12 +402,9 @@ class InstallPlanningService:
                 nullcontext(_session) if _session is not None else self._sessions()
             ) as session:
                 present = tuple(
-                    session.scalars(
-                        select(NodeArtifact).where(
-                            NodeArtifact.node_id == mapping_node.node_id,
-                            NodeArtifact.state == ModelFileState.VERIFIED,
-                        )
-                    )
+                    item
+                    for item in inventory_artifacts(session, mapping_node.node_id)
+                    if item.state == ModelFileState.VERIFIED
                 )
                 stored_models = models_stored_on_node(session, mapping_node.node_id)
                 charges = outstanding_disk_charges(

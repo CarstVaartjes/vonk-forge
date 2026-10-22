@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_control.cluster_mappings import ClusterMappingService
 from vonk_control.fleet_profile_contract import FleetProfileApplicationProgress
+from vonk_control.inventory_items import inventory_artifacts
 from vonk_control.inventory_repository import (
     InventoryRepository,
     InventorySnapshotInput,
@@ -25,9 +26,11 @@ from vonk_control.models import (
     AgentNode,
     CatalogDocumentRevision,
     FleetProfileApplication,
-    NodeArtifact,
 )
 
+from .inventory_artifact_support import (
+    seed_inventory_artifact,
+)
 from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
 from .test_fleet_profile_api import _client, _headers
 from .test_fleet_profile_cancel import _application
@@ -76,13 +79,10 @@ def _add_disjoint_profile_node(
                 management_observed_at=NOW,
             )
         )
-        artifacts = tuple(
-            session.scalars(
-                select(NodeArtifact).where(NodeArtifact.node_id == source_node_id)
-            )
-        )
-        session.add_all(
-            NodeArtifact(
+        artifacts = tuple(inventory_artifacts(session, source_node_id))
+        for artifact in artifacts:
+            seed_inventory_artifact(
+                session,
                 node_id=node_id,
                 kind=artifact.kind,
                 digest=artifact.digest,
@@ -93,8 +93,6 @@ def _add_disjoint_profile_node(
                 verified_at=artifact.verified_at,
                 updated_at=NOW,
             )
-            for artifact in artifacts
-        )
         revision = session.scalar(
             select(CatalogDocumentRevision).where(
                 CatalogDocumentRevision.kind == "recipe",

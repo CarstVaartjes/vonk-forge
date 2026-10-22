@@ -7,13 +7,14 @@ import pytest
 from sqlalchemy import create_engine, delete, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import CompiledExecutionPlan
+from vonk_agent_protocol import CompiledExecutionPlan, ModelFileState
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_control.cluster_mappings import ClusterMappingService
 from vonk_control.install_admission import (
     InstallAdmissionService,
     installation_plan_digest_from_stored_document,
 )
+from vonk_control.inventory_items import inventory_artifacts
 from vonk_control.inventory_repository import (
     InventoryRepository,
     InventorySnapshotInput,
@@ -29,7 +30,6 @@ from vonk_control.models import (
     ClusterMapping,
     ClusterMappingNode,
     InstallationNode,
-    NodeArtifact,
     RecipeBuild,
     RecipeInstallation,
     ResourceReservation,
@@ -43,6 +43,11 @@ from vonk_forge_contracts import (
     read_recipe,
 )
 
+from .inventory_artifact_support import (
+    clear_inventory_artifacts,
+    replace_inventory_artifact,
+    seed_inventory_artifact,
+)
 from .preflight_fixtures import record_passing_preflight
 from .runtime_identity_support import (
     PACKAGED_RUNTIME_IDENTITY,
@@ -445,18 +450,17 @@ def setup(
         session.flush()
         build_id = build.id
         image_digest = "1" * 64
-        session.add(
-            NodeArtifact(
-                node_id=node_id,
-                kind="image",
-                digest=image_digest,
-                source="docker-archive:" + "2" * 64,
-                size_bytes=30,
-                state="verified",
-                ref_count=0,
-                verified_at=now,
-                updated_at=now,
-            )
+        seed_inventory_artifact(
+            session,
+            node_id=node_id,
+            kind="image",
+            digest=image_digest,
+            source="docker-archive:" + "2" * 64,
+            size_bytes=30,
+            state="verified",
+            ref_count=0,
+            verified_at=now,
+            updated_at=now,
         )
     return sessions, now, node_id, mapping_id, build_id
 
@@ -601,8 +605,7 @@ def test_cold_install_uses_actual_image_and_model_sizes_instead_of_recipe_estima
         tmp_path, free=free, disk_estimates=(1, 1)
     )
     with sessions.begin() as session:
-        for artifact in session.scalars(select(NodeArtifact)):
-            session.delete(artifact)
+        clear_inventory_artifacts(session)
     plan = _service(sessions, inventory_max_age=300, disk_floor_bytes=10).plan_install(
         mapping, build, now=now
     )
@@ -626,18 +629,17 @@ def test_territorial_license_install_admission_is_informational(tmp_path) -> Non
 def test_verified_existing_artifacts_reduce_disk_and_download(tmp_path) -> None:
     sessions, now, node, mapping, build = setup(tmp_path, free=80)
     with sessions.begin() as session:
-        session.add(
-            NodeArtifact(
-                node_id=node,
-                kind="model",
-                digest="3" * 64,
-                source=MODEL_SOURCE,
-                size_bytes=70,
-                state="verified",
-                ref_count=0,
-                verified_at=now,
-                updated_at=now,
-            )
+        seed_inventory_artifact(
+            session,
+            node_id=node,
+            kind="model",
+            digest="3" * 64,
+            source=MODEL_SOURCE,
+            size_bytes=70,
+            state="verified",
+            ref_count=0,
+            verified_at=now,
+            updated_at=now,
         )
     plan = _service(sessions, inventory_max_age=300, disk_floor_bytes=10).plan_install(
         mapping, build, now=now
@@ -733,11 +735,11 @@ def test_queue_rejects_artifact_or_reservation_mutation_after_preview(tmp_path) 
     service = _service(sessions, inventory_max_age=300, disk_floor_bytes=10)
     plan = service.plan_install(mapping, build, now=now)
     with sessions.begin() as session:
-        artifact = session.scalar(
-            select(NodeArtifact).where(NodeArtifact.node_id == node)
-        )
+        artifact = next(iter(inventory_artifacts(session, node)), None)
         assert artifact is not None
-        artifact.state = "missing"
+        replace_inventory_artifact(
+            session, node, artifact.model_copy(update={"state": ModelFileState.MISSING})
+        )
         session.add(
             ResourceReservation(
                 node_id=node,
