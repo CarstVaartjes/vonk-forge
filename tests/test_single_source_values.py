@@ -355,3 +355,186 @@ def test_memory_admission_rejects_reimplemented_fit_predicates() -> None:
     assert not _memory_admission_delegates(
         source + "\ndef evaluate_memory_admission(*args, **kwargs): return True\n"
     )
+
+
+def uv_pin_violations(root: Path, files: list[str]) -> list[str]:
+    """One owner, including stale and future literals, across executable inputs."""
+    import re
+    import tomllib
+
+    owner_file = root / ".tool-versions"
+    rows = (
+        [
+            row.split()
+            for row in owner_file.read_text().splitlines()
+            if row.split()[:1] == ["uv"]
+        ]
+        if owner_file.is_file()
+        else []
+    )
+    if (
+        len(rows) != 1
+        or len(rows[0]) != 2
+        or re.fullmatch(r"\d+\.\d+\.\d+", rows[0][1]) is None
+    ):
+        return [".tool-versions must own exactly one exact uv release"]
+    version = rows[0][1]
+    errors = []
+    for file in files:
+        if file == ".tool-versions":
+            continue
+        path = root / file
+        try:
+            text = path.read_text()
+        except UnicodeError:
+            continue
+        if Path(file).name == "pyproject.toml":
+            uv = tomllib.loads(text).get("tool", {}).get("uv", {})
+            if "required-version" in uv and uv["required-version"] != f">={version}":
+                errors.append(f"{file}: uv required-version must be >= the CI owner")
+        for number, line in enumerate(text.splitlines(), 1):
+            if re.search(
+                r"(?i)\buv(?:[_-]?version)?[\s`\"'=:@/~<>!-]*(?:==)?\d+\.\d+\.\d+", line
+            ) or re.search(
+                r"ghcr\.io/astral-sh/uv[:@][a-zA-Z0-9]|/uv/releases/download/v?\d+\.\d+\.\d+",
+                line,
+            ):
+                errors.append(f"{file}:{number}: uv version belongs in .tool-versions")
+        if file.endswith((".yml", ".yaml")) and "setup-uv@" in text:
+            import yaml
+
+            document = yaml.safe_load(text)
+            groups = (
+                [document["runs"]["steps"]]
+                if "runs" in document
+                else [job.get("steps", []) for job in document.get("jobs", {}).values()]
+            )
+            for steps in groups:
+                for step in steps:
+                    if "setup-uv@" not in step.get("uses", ""):
+                        continue
+                    options = step.get("with", {})
+                    owner = options.get("version-file", "")
+                    if (
+                        "version" in options
+                        or owner not in {".tool-versions", ".vonk-forge/.tool-versions"}
+                        or not (root / owner.removeprefix(".vonk-forge/")).is_file()
+                    ):
+                        errors.append(f"{file}: setup-uv must read the version owner")
+    return errors
+
+
+def test_uv_has_one_version_owner() -> None:
+    from tools.single_source_values import tracked_files
+
+    files = tracked_files(ROOT)
+    assert uv_pin_violations(ROOT, files) == []
+
+
+@pytest.mark.parametrize(
+    "consumer",
+    ["Dockerfile", "docs/example.md", "scripts/install", ".github/workflows/test.yml"],
+)
+def test_uv_guard_rejects_stale_and_future_pins(tmp_path: Path, consumer: str) -> None:
+    # Wrong implementation: checking only the current literal misses an older or future pin.
+    (tmp_path / ".tool-versions").write_text("uv " + "1.2.3\n")
+    for version in ("0." + "12.19", "99." + "1.2"):
+        path = tmp_path / consumer
+        path.parent.mkdir(parents=True, exist_ok=True)
+        for pin in (
+            f"uv=={version}",
+            f"uv>={version}",
+            f"ghcr.io/astral-sh/uv:{version}",
+            f'UV_VERSION="{version}"',
+            f"https://astral.sh/uv/{version}/install.sh",
+            f"https://github.com/astral-sh/uv/releases/download/{version}/uv.tar.gz",
+        ):
+            path.write_text(pin + "\n")
+            assert uv_pin_violations(tmp_path, [consumer])
+
+
+@pytest.mark.parametrize("options", ["version: latest", "enable-cache: true"])
+def test_uv_guard_rejects_unowned_workflow_versions(
+    tmp_path: Path, options: str
+) -> None:
+    # Wrong implementation: deleting the pin silently selects the action's floating default.
+    (tmp_path / ".tool-versions").write_text("uv " + "1.2.3\n")
+    consumer = ".github/workflows/test.yml"
+    path = tmp_path / consumer
+    path.parent.mkdir(parents=True)
+    path.write_text(
+        "jobs:\n  test:\n    steps:\n      - uses: astral-sh/setup-uv@"
+        + "a" * 40
+        + f"\n        with:\n          {options}\n"
+    )
+    assert uv_pin_violations(tmp_path, [consumer])
+
+
+@pytest.mark.parametrize("floor", ["==1.2.3", ">=1.2.2", ">=1.2.4", "~=1.2.3"])
+def test_uv_guard_rejects_inconsistent_or_exact_project_requirements(
+    tmp_path: Path, floor: str
+) -> None:
+    # Wrong implementation: a newer local uv is refused or CI is below the floor.
+    (tmp_path / ".tool-versions").write_text("uv " + "1.2.3\n")
+    project = tmp_path / "pyproject.toml"
+    project.write_text(f'[tool.uv]\nrequired-version = "{floor}"\n')
+    assert uv_pin_violations(tmp_path, [project.name])
+    project.write_text('[tool.uv]\nrequired-version = ">=1.2.3"\n')
+    assert uv_pin_violations(tmp_path, [project.name]) == []
+    (tmp_path / ".tool-versions").write_text("uv " + "1.2.4\n")
+    assert uv_pin_violations(tmp_path, [project.name])
+
+
+def bootstrap_pip_violations(root: Path, files: list[str]) -> list[str]:
+    """Bootstrap installs must not bypass the reviewed wheel identities."""
+    import re
+
+    errors = []
+    for file in files:
+        if Path(file).name != "Dockerfile":
+            continue
+        source = (root / file).read_text()
+        logical = re.sub(r"\\\r?\n\s*", " ", source)
+        for command in re.split(r"&&|;|\n", logical):
+            if not re.search(r"\bpip\b.*?\binstall\b", command):
+                continue
+            if not re.search(r"(?:pip|certifi|uv)==|bootstrap\.lock", command):
+                continue
+            if "--require-hashes" not in command:
+                errors.append(f"{file}: pip bootstrap must require hashes")
+    return errors
+
+
+def test_bootstrap_installs_require_hashes() -> None:
+    from tools.single_source_values import tracked_files
+
+    assert bootstrap_pip_violations(ROOT, tracked_files(ROOT)) == []
+
+
+@pytest.mark.parametrize(
+    "install",
+    [
+        "pip==99.2.7",
+        "certifi==2099.1.1",
+        "uv==" + "99.2.7",
+        "-r /tmp/python-bootstrap.lock",
+    ],
+)
+def test_bootstrap_guard_rejects_unhashed_installs(
+    tmp_path: Path, install: str
+) -> None:
+    # Wrong implementation: the bootstrap bypasses hashes after a version bump.
+    path = tmp_path / "Dockerfile"
+    path.write_text(f"RUN python -m pip install {install}\n")
+    assert bootstrap_pip_violations(tmp_path, [path.name])
+    path.write_text(f"RUN python -m pip install --require-hashes {install}\n")
+    assert bootstrap_pip_violations(tmp_path, [path.name]) == []
+
+
+@pytest.mark.parametrize(
+    "pin", ["latest", "v1.2.3", "1.2.3\nuv latest", "1.2.3\nuv 1.2.3"]
+)
+def test_uv_guard_refuses_floating_or_duplicate_owner(tmp_path: Path, pin: str) -> None:
+    # Wrong implementation: the CI owner silently contains two conflicting selections.
+    (tmp_path / ".tool-versions").write_text(f"uv {pin}\n")
+    assert uv_pin_violations(tmp_path, [".tool-versions"])

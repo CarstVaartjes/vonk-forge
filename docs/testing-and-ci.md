@@ -96,6 +96,12 @@ imports, so it is a pre-check; run the full suites before requesting review.
 
 ### Fresh checkout build and contract smoke checks
 
+The exact uv release is owned by `.tool-versions`; Actions and container builds
+read that file. Each project declares an equal `tool.uv.required-version` floor,
+so newer local installations remain usable. The single-source guard rejects
+independent pins and floors that differ from the CI release. Container bootstrap
+installs use hash-locked PyPI wheels, including uv with its owner-derived version.
+
 Install uv, Node/npm and the pinned Rust toolchain (on macOS, also prepare the
 `vonk-ci` OrbStack VM for the Linux workspace check), then run:
 

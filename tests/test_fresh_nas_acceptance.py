@@ -1246,7 +1246,7 @@ def test_candidate_overlay_checks_exact_roles_and_pinned_upstream(mutation):
     services = {
         **expected,
         "postgres": {
-            "image": "postgres:18.6@sha256:5a5a84b19854a9ffaa54082c166ff4ec27473a361e496e5ea167f298f2da9722"
+            "image": "postgres:18.6@sha256:edb0c08dc33befd0262ab3b5cf1c4f3f8cfd8b09e88c05b45adee29d6761ddb6"
         },
     }
     if mutation == "wrong_role":

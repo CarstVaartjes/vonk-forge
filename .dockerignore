@@ -1,4 +1,5 @@
 *
+!.tool-versions
 !pyproject.toml
 !agent_protocol/
 !agent_protocol/src/
@@ -48,6 +49,8 @@ deploy/*
 deploy/compose/*
 !deploy/compose/Caddyfile
 !deploy/compose/compose.yaml
+!deploy/compose/python-bootstrap.lock
+!deploy/compose/uv-bootstrap.lock
 !deploy/compose/image-janitor/
 !deploy/compose/image-janitor/janitor.py
 !deploy/compose/caddy/
@@ -72,6 +75,7 @@ deploy/compose/tailscale/*
 !deploy/compose/tailscale/compose.yaml
 !deploy/compose/hermes-agent/
 deploy/compose/hermes-agent/*
+!deploy/compose/hermes-agent/entrypoint.sh
 !deploy/compose/hermes-agent/provision-litellm-key.py
 !deploy/compose/hermes-agent/compose.yaml
 !inventory/

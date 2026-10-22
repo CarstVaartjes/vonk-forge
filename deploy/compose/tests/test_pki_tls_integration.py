@@ -9,6 +9,7 @@ import time
 import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import NoReturn
 
 import pytest
 from cryptography import x509
@@ -17,7 +18,7 @@ from cryptography.hazmat.primitives.asymmetric import ed25519
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 
 ROOT = Path(__file__).resolve().parents[3]
-CADDY_IMAGE = "caddy:2.11.7@sha256:f2a1290d0463aad60660d4ec134943f183ee2a5f6c3eb7bf32dd984f2f020772"
+CADDY_IMAGE = "caddy:2.11.7@sha256:3095ad245c353e3bdb27a38f22a095c1cfa9e295ab21c0214c3e72b0e2960525"
 HOSTNAMES = (
     "enroll.control.test.example",
     "agents.control.test.example",
@@ -26,7 +27,7 @@ HOSTNAMES = (
 CONTROL_HOSTNAME = "control.test.example"
 
 
-def _docker_failure_or_skip(message: str) -> None:
+def _docker_failure_or_skip(message: str) -> NoReturn:
     if os.environ.get("CI"):
         pytest.fail(message)
     pytest.skip(message)
@@ -56,7 +57,7 @@ def _key_bytes(key: ed25519.Ed25519PrivateKey) -> bytes:
     )
 
 
-def _write_pki(directory: Path) -> dict[str, Path | x509.Certificate]:
+def _write_pki(directory: Path) -> tuple[x509.Certificate, dict[str, Path]]:
     now = datetime.now(UTC).replace(microsecond=0)
     root_key = ed25519.Ed25519PrivateKey.generate()
     root_name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "Vonk Test Root")])
@@ -151,12 +152,12 @@ def _write_pki(directory: Path) -> dict[str, Path | x509.Certificate]:
         "client-key": _key_bytes(client_key),
         "proxy-auth": b"A" * 32 + b"\n",
     }
-    paths: dict[str, Path | x509.Certificate] = {"server": server}
+    paths: dict[str, Path] = {}
     for name, value in values.items():
         path = directory / name
         path.write_bytes(value)
         paths[name] = path
-    return paths
+    return server, paths
 
 
 def _published_port(docker: str, container: str, target: int) -> int:
@@ -200,6 +201,7 @@ def _tls_request(
         context.wrap_socket(connection, server_hostname=hostname) as tls,
     ):
         peer = tls.getpeercert(binary_form=True)
+        assert peer is not None
         tls.sendall(
             (
                 f"{method} {path} HTTP/1.1\r\n"
@@ -221,7 +223,7 @@ def test_caddy_serves_one_generated_controller_identity_on_each_pki_sni(
     tmp_path: Path,
 ) -> None:
     docker = _require_docker()
-    material = _write_pki(tmp_path)
+    server, material = _write_pki(tmp_path)
     container = "vonk-caddy-pki-" + uuid.uuid4().hex
     command = [
         docker,
@@ -295,8 +297,6 @@ def test_caddy_serves_one_generated_controller_identity_on_each_pki_sni(
             pytest.fail(f"Caddy did not become ready:\n{logs.stderr}")
 
         tls_port = _published_port(docker, container, 8443)
-        server = material["server"]
-        assert isinstance(server, x509.Certificate)
         expected_der = server.public_bytes(serialization.Encoding.DER)
 
         browser_peer, browser_response = _tls_request(
