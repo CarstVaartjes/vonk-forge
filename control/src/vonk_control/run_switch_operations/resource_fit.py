@@ -536,7 +536,14 @@ class ResourceFitMixin:
                                         RunSwitchCode.INSUFFICIENT_DISK,
                                         f"The operation needs {required_disk} bytes and would leave {disk_free_after} bytes."
                                         + (f" Disk is {holders}." if holders else "")
-                                        + f" Only {evictable} bytes of unused installations can be removed. "
+                                        + (
+                                            f" Inventory reports {snapshot.unused_model_bytes} bytes "
+                                            "of reclaimable model copies (included above). "
+                                            if snapshot.unused_model_bytes is not None
+                                            else " Model-copy reclamation is unknown. "
+                                        )
+                                        + f"Tracked unused installations can free another {evictable} bytes. "
+                                        "Local expired scratch/orphan cleanup appears in later inventory. "
                                         + kept_sentence,
                                         scope="node",
                                         node_ids=(item.node_id,),

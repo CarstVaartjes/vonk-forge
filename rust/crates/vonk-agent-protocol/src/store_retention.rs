@@ -2,7 +2,7 @@
 use Collector::*;
 use StoreRoot::*;
 
-/// Unused non-model data expires after one day.
+/// All unused Spark data, including model copies, expires after one day.
 pub const GRACE: std::time::Duration = std::time::Duration::from_secs(24 * 60 * 60);
 
 /// How one store's entries leave.
@@ -16,7 +16,7 @@ pub enum Collector {
     Bookkeeping,
     /// Unused entries, once unchanged for [`GRACE`].
     Ended,
-    /// Model objects leave on low space; a checkpoint or isolated entry is [`Ended`].
+    /// Unused model copies leave after [`GRACE`] or on low space; scratch is [`Ended`].
     ModelObjects,
     /// A base image no build has opened for [`GRACE`], and isolated entries.
     BaseImages,

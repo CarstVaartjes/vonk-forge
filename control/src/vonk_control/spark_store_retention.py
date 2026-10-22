@@ -45,7 +45,10 @@ def _store_retention_request(
     evidence = _Evidence.read(session, now)
     if evidence.pointers is None or not evidence.application_references_readable:
         return None
-    references = evidence.operations | evidence.pinned | evidence.pointed_models
+    # Saved profiles pin the NAS cache, not disposable Spark copies. Local
+    # installation plans/hard links protect installed content; this projection
+    # protects live work before its local installation exists.
+    references = evidence.operations
     objects = set(references)
     for document in session.scalars(
         select(ModelCacheSet.manifest).where(
@@ -90,7 +93,7 @@ def _store_retention_request(
             pending.update(dependencies - visited)
         if unresolved:
             raise ValueError("model dependency definition is unavailable")
-    images = set(evidence.operations | evidence.pointed_archives)
+    images = set(evidence.operations)
     # Docker receipts name manifest digests; NAS retention names layout digests.
     # Resolve that content identity, including builds reused by recipe successors.
     for digest in session.scalars(

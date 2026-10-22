@@ -79,7 +79,7 @@ fn file(path: &Path, bytes: &[u8]) -> PathBuf {
 }
 
 #[test]
-fn an_unlinked_model_object_is_a_cache_that_leaves_only_while_space_is_short() {
+fn unused_model_copies_expire_after_a_day_even_with_room_while_shared_objects_stay() {
     let root = tempfile::tempdir().unwrap();
     authorize_retention(root.path());
     let store = root.path().join("distribution/models");
@@ -95,15 +95,45 @@ fn an_unlinked_model_object_is_a_cache_that_leaves_only_while_space_is_short() {
     fs::create_dir_all(&installation).unwrap();
     fs::hard_link(&linked, installation.join("model.safetensors")).unwrap();
 
-    // Reusable content is not a leak: with room to spare it stays, however old.
-    assert_eq!(run(root.path(), after_grace(), &|| ROOMY).entries, 0);
+    // A recently unused copy survives; one unused for a day leaves even on a roomy disk.
+    assert_eq!(run(root.path(), within_grace(), &|| ROOMY).entries, 0);
     assert!(orphan.exists());
 
-    let swept = run(root.path(), SystemTime::now(), &|| SHORT);
+    let swept = run(root.path(), after_grace(), &|| ROOMY);
     assert_eq!((swept.entries, swept.bytes), (1, 10));
     assert!(!orphan.exists());
     // A linked object is an installation's file: kept whatever the space.
     assert!(linked.exists() && installation.join("model.safetensors").exists());
+}
+
+#[test]
+fn the_last_installation_link_records_last_use_and_restarts_the_model_grace() {
+    // Catches aging from download time instead of the final installation's use.
+    let root = tempfile::tempdir().unwrap();
+    let object = file(
+        &root.path().join("distribution/models").join(OBJECT),
+        b"weights",
+    );
+    let downloaded = super::changed(&fs::metadata(&object).unwrap());
+    let installations = root.path().join("installations");
+    let first = installations.join(INSTALLATION).join("models/sel");
+    let second = installations.join(ORPHAN).join("models/sel");
+    fs::create_dir_all(&first).unwrap();
+    fs::create_dir_all(&second).unwrap();
+    fs::hard_link(&object, first.join("weights")).unwrap();
+    fs::hard_link(&object, second.join("weights")).unwrap();
+    fs::remove_dir_all(installations.join(INSTALLATION)).unwrap();
+    assert_eq!(run(root.path(), after_grace(), &|| ROOMY).bytes, 0);
+    assert!(
+        object.exists(),
+        "the second installation still owns the shared object"
+    );
+    std::thread::sleep(Duration::from_millis(20));
+    fs::remove_dir_all(installations.join(ORPHAN)).unwrap();
+    assert_eq!(run(root.path(), downloaded + GRACE, &|| ROOMY).bytes, 0);
+    assert!(object.exists(), "last use was later than download");
+    assert_eq!(run(root.path(), after_grace(), &|| ROOMY).bytes, 7);
+    assert!(!object.exists());
 }
 
 #[test]

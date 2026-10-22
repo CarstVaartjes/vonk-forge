@@ -927,3 +927,48 @@ fn trusted_partial_paths_keep_same_stem_objects_distinct() {
         PathBuf::from("/tmp/config.json.partial")
     );
 }
+
+#[tokio::test]
+async fn an_expired_spark_copy_is_recopied_from_the_controller_on_the_next_load() {
+    // Catches age collection that leaves a false cache hit, or a load that
+    // treats the collected copy as a terminal missing artifact.
+    let model = b"model cached on the NAS";
+    let assignment = distribution_assignment_fixture(model);
+    let objects = HashMap::from([(hex_sha256(model), model.to_vec())]);
+    let root = tempfile::tempdir().unwrap();
+    let distribution = root.path().join("distribution");
+    let (client, server) = distribution_fixture_server(
+        assignment.clone(),
+        objects.clone(),
+        2,
+        DistributionFixtureMode::Good,
+    );
+    let first = client
+        .download_distribution(TEST_PLAN_DIGEST, &distribution)
+        .await
+        .unwrap();
+    assert_eq!(server.finish().unwrap().len(), 2);
+    let swept = crate::store_retention::sweep(
+        root.path(),
+        std::time::SystemTime::now() + crate::store_retention::GRACE + Duration::from_secs(60),
+        std::time::Instant::now() + PEER_BUDGET,
+        None,
+        &|| Some((500_000, 1_000_000)),
+        &|| {},
+    );
+    assert_eq!(swept.bytes, model.len() as u64);
+    assert!(!first.model_paths[0].exists());
+    let (client, server) =
+        distribution_fixture_server(assignment, objects, 2, DistributionFixtureMode::Good);
+    let loaded = client
+        .download_distribution(TEST_PLAN_DIGEST, &distribution)
+        .await
+        .unwrap();
+    assert_eq!(loaded.model_paths, first.model_paths);
+    assert_eq!(std::fs::read(&loaded.model_paths[0]).unwrap(), model);
+    assert_eq!(
+        server.finish().unwrap().len(),
+        2,
+        "cache miss must GET the manifest and object again"
+    );
+}

@@ -8,10 +8,11 @@
 //! time and runs this pass between claims, so no claim is live while it runs.
 //! Two kinds of entry leave here:
 //!
-//! - Model files are the one cache kept until the space is needed: a model
-//!   object no installation or Controller reference names leaves when a load
-//!   needs disk space or the platform low-space line is crossed, least recently
-//!   used first, until the demand or low-space reserve is met.
+//! - Unused Spark model copies leave after [`GRACE`], or sooner when a load
+//!   needs disk space or the low-space line is crossed. Installations' hard
+//!   links record their last reference in the inode change time, including
+//!   when the last installation drops its link. Plans and live operations
+//!   also protect the exact objects they name.
 //! - Everything else unused leaves once nothing has used or changed it for
 //!   [`GRACE`], whatever the free space: a transfer checkpoint or build export
 //!   whose claim ended, an isolated entry, a base image no build has opened, a
@@ -265,8 +266,8 @@ pub fn installation_sizes(
     )
 }
 
-/// Collect unused entries older than [`GRACE`] at `now`, then relieve low
-/// space from unused model objects. `untracked` is the Controller's fresh
+/// Collect unused entries (including model copies) older than [`GRACE`] at
+/// `now`, then relieve low space from younger unused model objects. `untracked` is the Controller's fresh
 /// verdict (`None`: there is none, and no installation or run scope leaves). `disk`
 /// observes `(free, total)`; `tick` runs after each removal (the service
 /// watchdog).
@@ -436,9 +437,18 @@ pub fn sweep(
             }
         }
     }
-    let unused_models = unused_model_objects(data_root, pass.owner, &keep);
+    let mut younger = Vec::new();
+    for (used, path, metadata) in
+        unused_model_objects(data_root, pass.owner, &keep).unwrap_or_default()
+    {
+        if now.duration_since(used).is_ok_and(|age| age > GRACE) {
+            pass.remove(&path, &metadata);
+        } else {
+            younger.push((used, path, metadata));
+        }
+    }
     pass.relieve(
-        unused_models.unwrap_or_default(),
+        younger,
         disk,
         projection.map_or(0, |request| request.required_free_bytes),
     );
@@ -449,8 +459,10 @@ pub fn sweep(
 /// The model objects no installation links or names, least recently used
 /// first, leaving out those `keep` names; `None` when a plan cannot be read
 /// (it could name any). An object is owned by every installation that links
-/// it or whose plan names it (a start prepares a private copy's installation
-/// from it too).
+/// it or whose plan names it. Adding or dropping installation hard links
+/// updates the shared inode's change time, so a newly unreferenced object
+/// receives a full grace after its final installation lets it go. Reusing an
+/// unlinked object also refreshes its timestamp in the distribution client.
 fn unused_model_objects(
     data_root: &Path,
     owner: u32,
