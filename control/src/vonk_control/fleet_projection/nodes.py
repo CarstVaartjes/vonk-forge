@@ -46,6 +46,7 @@ from .common import (
     _utc,
     telemetry_point,
 )
+from .display_memory import display_memory_advice
 
 if TYPE_CHECKING:
     from .service import FleetProjection
@@ -442,6 +443,9 @@ def _host_settings_warnings(host: HostSettings | None) -> list[ProjectionReason]
                 recommendation=_HELPER_CORRECTS,
             )
         )
+    advice = display_memory_advice(host)
+    if advice is not None:
+        warnings.append(advice)
     return warnings
 
 

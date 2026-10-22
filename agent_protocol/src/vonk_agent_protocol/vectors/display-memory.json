@@ -1,0 +1,39 @@
+[
+  {
+    "display_manager_active": false,
+    "graphical_default_target": false,
+    "display_memory": {
+      "bios_version": "5.36_0ACUM027",
+      "soc_firmware_version": 33594123,
+      "carveout_bytes": 2147483648,
+      "signal": "reserved-range",
+      "display_connected": false
+    }
+  },
+  {
+    "display_manager_active": false,
+    "graphical_default_target": false,
+    "display_memory": {
+      "soc_firmware_version": 33594895,
+      "carveout_bytes": 536870912,
+      "signal": "efi-variable"
+    }
+  },
+  {
+    "display_manager_active": false,
+    "graphical_default_target": false,
+    "display_memory": {
+      "signal": "unknown"
+    }
+  },
+  {
+    "display_manager_active": false,
+    "graphical_default_target": false,
+    "display_memory": {
+      "soc_firmware_version": 33594895,
+      "carveout_bytes": 2147483648,
+      "signal": "memory-total",
+      "display_connected": false
+    }
+  }
+]

@@ -9,6 +9,7 @@ from typing import Annotated, ClassVar, Literal
 from pydantic import ConfigDict, Field, field_validator, model_validator
 
 from .contracts import canonical_message
+from .display_memory import DisplayMemoryObservation
 from .gpu_clock import GpuClockSupport
 from .host_helper import SignedHostHelperGrant
 from .optional_evidence import (
@@ -94,6 +95,7 @@ class HostSettings(WireModel):
     # The default boot target is graphical.target, which starts the desktop.
     graphical_default_target: bool
     gpu_clock_support: GpuClockSupport | None = None
+    display_memory: DisplayMemoryObservation | None = None
 
 
 class ModelStoreObject(WireModel):

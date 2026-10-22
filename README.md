@@ -147,6 +147,19 @@ the immutable release, enrolls the native agent, writes the required agent and
 firewall configuration, and checks service health. Repeat with a new one-use
 grant for each additional Spark.
 
+For a headless Spark, use SoC firmware **0x02009e0f or newer** (the
+`DGX Spark SoC FW System Update` in `fwupdmgr get-devices`; update with
+`fwupdmgr update`). In UEFI, set **Advanced → Advanced Menu → Display Reserved
+Memory → Auto**, save, unplug the display, and reboot. Compare `free -h` before
+and after reboot: Auto without a display reserves 0.5 GB instead of the default
+2 GB, making about 1.5 GB more unified memory available. See NVIDIA's
+[UEFI guide](https://docs.nvidia.com/dgx/dgx-spark/uefi-settings.html#change-display-reserved-memory).
+Vonk observes firmware and display reservation during each inventory and shows
+non-blocking Fleet advice; it never changes firmware or UEFI. Until a measured
+platform signal is calibrated, the reservation remains **unknown**: MemTotal
+alone includes other reservations and cannot establish this setting. Neither a
+minimum reservation nor a currently unplugged display proves that Auto is set.
+
 ### Install `vonkctl`
 
 Install the latest accepted stable CLI without cloning the repository. This

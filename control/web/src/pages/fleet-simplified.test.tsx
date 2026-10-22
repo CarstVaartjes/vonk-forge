@@ -2,6 +2,7 @@ vi.mock("../components/metrics-chart", () => ({MetricsChart: () => null}));
 import {fireEvent, render, screen, waitFor, within} from "@testing-library/react";
 import {afterEach} from "vitest";
 import {FleetPage} from "./fleet-simplified";
+import {ProjectionCode, ProfileReasonSeverity} from "../api/vocabulary.generated";
 import {ToastProvider} from "../components/toast";
 import type {ControlApi, EnrollmentGrantResponse} from "../api/types";
 
@@ -101,4 +102,27 @@ test("Fleet sorts by name, status, memory and disk, and uses the CLI's status wo
   render(<FleetPage api={{} as ControlApi}/>);
   expect(screen.getByRole("region", {name: "Needs attention"})).toHaveTextContent("GPU is hot");
   attention = [];
+});
+
+test("Fleet shows the Controller headless memory recommendation without an apply action", () => {
+  // Break caught: dropping non-blocking advice from the Fleet overview.
+  const detail = "Headless Spark display reserves 2147483648 bytes; minimum is 0.5 GB.";
+  const recommendation =
+    "Update SoC firmware (fwupdmgr update), then set Advanced → Advanced Menu → Display Reserved Memory to Auto; unplug display, reboot. Verify: free -h.";
+  nodes = [
+    {
+      ...spark("Alpha", 60, 100),
+      warnings: [
+        {
+          code: ProjectionCode.HOST_DISPLAY_MEMORY,
+          detail,
+          recommendation,
+          severity: ProfileReasonSeverity.WARNING,
+        },
+      ],
+    },
+  ];
+  attention = [];
+  render(<FleetPage api={{} as ControlApi} />);
+  expect(screen.getByText(`${detail} ${recommendation}`)).toBeVisible();
 });

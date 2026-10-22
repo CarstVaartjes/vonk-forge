@@ -7,6 +7,7 @@ pub mod build_source;
 pub mod client;
 mod compose_document;
 pub mod config;
+mod display_memory;
 pub mod executor;
 pub mod failure_evidence;
 pub mod health;

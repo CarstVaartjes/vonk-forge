@@ -11,6 +11,7 @@ import { safeErrorText } from "../lib/error-display";
 import {
   nodeCpuClock,
   nodeGpuClock,
+  nodeDisplayMemory,
   nodeDisplayName,
   nodeRecipeUpdates,
   nodeStatus,
@@ -186,6 +187,10 @@ export function SparkDetail({
                       {node.hostname}
                       {node.ip_address ? ` · ${node.ip_address}` : ""}
                     </dd>
+                  </div>
+                  <div>
+                    <dt>Display memory</dt>
+                    <dd>{nodeDisplayMemory(node)}</dd>
                   </div>
                   {cpu && (
                     <div>

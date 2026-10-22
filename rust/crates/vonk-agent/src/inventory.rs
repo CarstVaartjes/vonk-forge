@@ -499,7 +499,7 @@ impl<R: ProcessRunner> InventoryCollector<'_, R> {
             fabric_bandwidth_mbps: self.fabric_bandwidth_mbps,
             network_interfaces: None,
             nas_route_interface: None,
-            host_settings: host_settings(self.runner),
+            host_settings: host_settings(self.runner, memory_total_bytes),
             installations,
             unused_model_bytes: crate::store_retention::unused_model_bytes(self.store_path),
             model_objects: crate::store_retention::model_objects(self.store_path),
@@ -514,6 +514,7 @@ impl<R: ProcessRunner> InventoryCollector<'_, R> {
 /// never fails the inventory.
 fn host_settings<R: ProcessRunner>(
     runner: &R,
+    memory_total_bytes: u64,
 ) -> Option<vonk_agent_protocol::generated::HostSettings> {
     let query = |arguments: &[&str]| {
         let arguments: Vec<String> = arguments.iter().map(|value| (*value).to_owned()).collect();
@@ -536,6 +537,10 @@ fn host_settings<R: ProcessRunner>(
     Some(vonk_agent_protocol::generated::HostSettings {
         display_manager_active,
         graphical_default_target: default_target == "graphical.target",
+        display_memory: Some(crate::display_memory::observe(
+            std::path::Path::new("/"),
+            Some(memory_total_bytes),
+        )),
         gpu_clock_support: runner
             .run(
                 Program::NvidiaSmi,
