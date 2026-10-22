@@ -201,12 +201,17 @@ def test_failed_successor_keeps_last_verified_revision(postgres_engine, tmp_path
     service, sessions = _removal_service(postgres_engine, tmp_path)
     try:
         _, old, _ = _revision(service, sessions, tmp_path / "old")
-        _, _, result = _revision(
+        _, failed, result = _revision(
             service, sessions, tmp_path / "bad", data=b"new", note="bad", fail=True
         )
         assert result.state != LifecycleState.SUCCEEDED
         assert result.last_error is not None
+        # Losing request history must not let an older verified set supersede
+        # a newer partial set; only a strictly newer verified revision can.
+        with sessions.begin() as session:
+            session.execute(delete(ModelCacheOperation))
         _next_pass(service)
+        assert _contains(sessions, failed)
         assert _contains(sessions, old)
         assert (
             service._object_path(hashlib.sha256(b"old").hexdigest()).read_bytes()

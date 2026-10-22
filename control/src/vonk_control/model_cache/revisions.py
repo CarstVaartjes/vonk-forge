@@ -329,6 +329,7 @@ class RevisionsMixin:
                 if (
                     successor is None
                     or successor[0].content_digest == revision.content_digest
+                    or successor[0].revision_number <= revision.revision_number
                 ):
                     break  # This physical set still owns a current model revision.
                 replacements.add(successor[1].artifact_set_sha256)
