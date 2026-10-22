@@ -26,7 +26,7 @@ from ..fleet_profile_contract import (
     FleetProfileView,
 )
 from ..lifecycle.evidence import BookkeepingReason, Residue, retire_as_unknown
-from ..model_cache_contract import CachedResourceEstimate, CacheResolution
+from ..model_cache_contract import CachedResourceEstimate
 from ..models import (
     AgentNode,
     AgentNodeProfile,
@@ -105,11 +105,18 @@ class FleetProfileService:
             except ValueError as error:
                 head_errors[selector] = str(error)
         model_names = self._model_titles(session, choices)
-        resolved_choices: dict[
-            tuple[str, str | None],
-            tuple[CatalogDocument, CatalogDocumentRevision, CacheResolution | None]
-            | Residue,
-        ] = {}
+        resolved_choices = (
+            self._resolve_choices(
+                session,
+                [
+                    choice
+                    for choice in choices
+                    if choice.recipe_selector not in head_errors
+                ],
+            )
+            if observe
+            else {}
+        )
         for choice in choices:
             resolved_head = self._recipe_document(session, choice.recipe_selector)
             head_error = head_errors.get(choice.recipe_selector)
@@ -140,13 +147,9 @@ class FleetProfileService:
                 continue
             assert not isinstance(resolved_head, Residue)
             choice_key = (choice.recipe_selector, choice.model_variant)
-            if choice_key not in resolved_choices:
-                resolved_choices[choice_key] = (
-                    self._resolve_choice(session, choice)
-                    if observe
-                    else (*resolved_head, None)
-                )
-            resolved_choice = resolved_choices[choice_key]
+            resolved_choice = (
+                resolved_choices[choice_key] if observe else (*resolved_head, None)
+            )
             if isinstance(resolved_choice, Residue):
                 # (Unreachable in practice: the head resolved just above.)
                 cache_unknown += 1

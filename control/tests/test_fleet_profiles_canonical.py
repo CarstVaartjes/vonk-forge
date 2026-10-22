@@ -1324,6 +1324,16 @@ def test_profile_read_observes_distinct_content_once(
         return parser(raw)
 
     monkeypatch.setattr(contract, "read_recipe", parsed)
+    from vonk_control import profile_read_observation as observation
+
+    submissions = []
+    submit = observation._POOL.submit
+
+    def submitted(*args, **kwargs):
+        submissions.append(True)
+        return submit(*args, **kwargs)
+
+    monkeypatch.setattr(observation._POOL, "submit", submitted)
     queries = []
 
     def counted(_connection, _cursor, statement, _parameters, _context, _many):
@@ -1345,9 +1355,15 @@ def test_profile_read_observes_distinct_content_once(
         elapsed = time.monotonic() - started
         event.remove(postgres_engine, "before_cursor_execute", counted)
     print(
-        f"{endpoint} selectors={selector_count}: {elapsed:.3f}s SQL={len(queries)} resolutions={len(calls)} storage={storage_calls} parses={parses}"
+        f"{endpoint} selectors={selector_count}: {elapsed:.3f}s SQL={len(queries)} resolutions={len(calls)} storage={storage_calls} parses={parses} submissions={len(submissions)}"
     )
-    assert len(calls) <= (selector_count if endpoint == "get" else 0)
+    # Distinct revision identities still resolve exactly once, but shared
+    # content must not pay an executor handoff for every assignment/selector.
+    # This catches a serial observe_storage(resolver) dispatch in the loop,
+    # even on a host where its scheduling latency stays below five seconds.
+    assert len(calls) == (selector_count if endpoint == "get" else 0)
+    assert len(set(calls)) == len(calls)
+    assert len(submissions) == (1 if endpoint == "get" else 0)
     assert storage_calls == (
         Counter(model=1, image=1) if endpoint == "get" else Counter()
     )

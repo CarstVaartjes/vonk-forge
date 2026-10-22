@@ -16,7 +16,10 @@ from vonk_agent_protocol.agent_words import (
 )
 
 from ..catalog_revision_contract import RecipeRevisionProjection, read_recipe_projection
-from ..content_identity import catalog_selector_membership
+from ..content_identity import (
+    cache_resolution_answers_revision,
+    catalog_selector_membership,
+)
 from ..fleet_profile_contract import (
     FleetProfileAssignment,
     FleetProfileAssignmentInput,
@@ -283,57 +286,93 @@ class FleetProfileService:
     def _recipe_selector(document: CatalogDocument) -> str:
         return f"{document.publisher}/{document.slug}"
 
-    def _resolve_choice(
-        self, session: Session, choice: FleetProfileAssignmentInput
-    ) -> (
+    def _resolve_choices(
+        self, session: Session, choices: Sequence[FleetProfileAssignmentInput]
+    ) -> dict[
+        tuple[str, str | None],
         tuple[CatalogDocument, CatalogDocumentRevision, CacheResolution | None]
-        | Residue
-    ):
-        """Resolve one choice once for both presentation and execution.
+        | Residue,
+    ]:
+        """Select exact heads locally, then observe all distinct choices in one slot.
 
-        The cache is evidence about what is already prepared, never a gate: when
-        the resolver fails, answers with an invalid contract, or answers for a
-        revision other than the one selected, the choice resolves without cache
-        evidence (shown as unknown) and is prepared when it is loaded.
+        Only immutable identities cross into the storage worker; the request's
+        SQL session stays on its owning thread. Shared content receipts still
+        use the enclosing read's memo and deadline.
         """
         self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
-
-        resolved = self._recipe_document(session, choice.recipe_selector)
-        if isinstance(resolved, Residue):
+        resolved: dict[
+            tuple[str, str | None],
+            tuple[CatalogDocument, CatalogDocumentRevision, CacheResolution | None]
+            | Residue,
+        ] = {}
+        identities: list[tuple[str, str | None, str]] = []
+        keys: list[tuple[str, str | None]] = []
+        for choice in choices:
+            key = (choice.recipe_selector, choice.model_variant)
+            if key in resolved:
+                continue
+            head = self._recipe_document(session, choice.recipe_selector)
+            if isinstance(head, Residue):
+                resolved[key] = head
+                continue
+            document, revision = head
+            resolved[key] = (document, revision, None)
+            identities.append((document.id, choice.model_variant, revision.id))
+            keys.append(key)
+        if self._cache_resolver is None or not identities:
             return resolved
-        document, revision = resolved
-        cache: CacheResolution | None = None
-        if self._cache_resolver is not None:
+        try:
+            caches = observe_storage(self._resolve_caches)(tuple(identities))
+        except (OSError, RuntimeError, TypeError, ValueError) as error:
+            # A pending batch supplies no evidence; a later read joins/retries
+            # it through the normal observation path, under the same deadline.
+            retire_as_unknown(
+                "profile-cache-resolution",
+                ", ".join(key[0] for key in keys),
+                BookkeepingReason.EVIDENCE_UNAVAILABLE,
+                f"{type(error).__name__}: {error}",
+            )
+            return resolved
+        for key, cache in zip(keys, caches, strict=True):
+            head = resolved[key]
+            assert not isinstance(head, Residue)
+            resolved[key] = (head[0], head[1], cache)
+        return resolved
+
+    def _resolve_caches(
+        self, identities: tuple[tuple[str, str | None, str], ...]
+    ) -> tuple[CacheResolution | None, ...]:
+        """Keep a failed or mismatched resolver scoped to its own exact choice."""
+        self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
+        assert self._cache_resolver is not None
+        caches: list[CacheResolution | None] = []
+        for document_id, variant, revision_id in identities:
             try:
                 candidate = observe_storage(self._cache_resolver)(
-                    recipe_identity=document.id,
-                    model_variant=choice.model_variant,
-                    exact_revision_id=revision.id,
+                    recipe_identity=document_id,
+                    model_variant=variant,
+                    exact_revision_id=revision_id,
                 )
             except (OSError, RuntimeError, TypeError, ValueError) as error:
                 retire_as_unknown(
                     "profile-cache-resolution",
-                    document.id,
+                    document_id,
                     BookkeepingReason.EVIDENCE_UNAVAILABLE,
                     f"{type(error).__name__}: {error}",
                 )
-                return document, revision, None
-            cache = candidate
-            chosen_id = candidate.recipe.recipe_revision_id
-            # The resolver is asked for the current head revision, so a
-            # different revision back is a resolution defect, not an older
-            # cached substitute.  Its evidence is not used (the profile is never
-            # bound to bytes the operator did not select) and the choice
-            # resolves without cache evidence.
-            if chosen_id != revision.id:
+                caches.append(None)
+                continue
+            if not cache_resolution_answers_revision(candidate, revision_id):
                 retire_as_unknown(
                     "profile-cache-resolution",
-                    document.id,
+                    document_id,
                     BookkeepingReason.EVIDENCE_MISMATCH,
                     "the cache resolver answered for another recipe revision",
                 )
-                return document, revision, None
-        return document, revision, cache
+                caches.append(None)
+                continue
+            caches.append(candidate)
+        return tuple(caches)
 
     @staticmethod
     def _assignment_selector(choice: FleetProfileAssignmentInput) -> str:
