@@ -1909,6 +1909,9 @@ def test_postgres_builder_transaction_does_not_cross_session_block(
 
     class Operations:
         def build(self, plan, **_kwargs):
+            # Keep both builds in flight: an instant completion permits the
+            # second request to legitimately reuse the first builder.
+            barrier.wait(timeout=30)
             return SimpleNamespace(
                 id=str(uuid.uuid4()),
                 state="succeeded",
