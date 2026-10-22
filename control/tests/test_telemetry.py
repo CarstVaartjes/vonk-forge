@@ -202,13 +202,20 @@ def test_resource_store_rejects_invalid_measurement_without_partial_sample(
     repository, sessions, _, _ = telemetry
     from vonk_agent_protocol.telemetry import HostResourceSample
     from vonk_control.models import NodeInventoryResourceSnapshot
+    from vonk_control.stored_json import write_guard_mode
 
     repository.record_batch(NODE_A, (sample(sequence=1),))
     with sessions() as session:
         resource = session.scalar(select(NodeInventoryResourceSnapshot))
         assert resource is not None
         identifier = resource.id
-    with pytest.raises(ValueError), sessions.begin() as session:
+    # Controller initialization selects warning mode for production writes;
+    # this rejection assertion owns its strict scope instead of test order.
+    with (
+        write_guard_mode(strict=True),
+        pytest.raises(ValueError),
+        sessions.begin() as session,
+    ):
         resource = session.get(NodeInventoryResourceSnapshot, identifier)
         assert resource is not None
         resource.host_resources = HostResourceSample.model_construct(
