@@ -120,6 +120,8 @@ pub const STORES: &[Store] = &[
     Store("runtime-ownership/", Ownership, "one runtime lock per installation", Helper),
     Store("job-exits/", Ended, "a completed job's replayable exit for one day", Helper),
     Store("host-memory-evidence/", Claim, "the host memory guard; absent containers' receipts", Helper),
+    Store("compile-cache/", Claim, "content identities; mounted containers pin entries, otherwise one day or disk pressure", Helper),
+    Store("compile-cache-fallback/", Claim, "fresh per-run compile scratch; the same mount pins, grace and pressure collector", Helper),
     Store("runtime-images/", Claim, "the existing unused runtime-image collector", Helper),
     Store("incoming/", Ended, "a completed or interrupted package transfer", Helper),
     Store("runtime-requests/", Ended, "a signed request whose five-minute grant expired", Helper),

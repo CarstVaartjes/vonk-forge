@@ -180,6 +180,25 @@ image. Every store below the agent's data root declares its owner and collector
 in `store_retention::STORES`; the Controller's orders remove installations and
 run scopes. A later claim that needs a removed entry fetches or builds it again.
 
+Compile/JIT bytes are disposable helper-owned execution caches under
+`compile-cache/<content-key>/data`, outside run scopes. The compiled plan binds
+`compile_cache_mount`; the fixed `/outputs/cache` target preserves platform
+XDG, vLLM, Triton, FlashInfer and Inductor paths without rebuilding recipe images.
+After exact launch authorization, the helper selects backing by runtime image
+manifest digest, observed GPU compute capability and NVIDIA driver version,
+runtime UID/GID, executable, engine environment and argv. Platform rendezvous,
+listen coordinates and job deadlines do not fragment compilation identity.
+GPU-free plans bind host CPU architecture without querying NVIDIA. Missing GPU
+host identity or an unusable cache directory produces a journal warning and a
+fresh per-run cache in helper-owned `compile-cache-fallback/`. Both stores share
+one collector, so private fallback trees never depend on unprivileged run cleanup.
+No unknown-host key is shared. Engine caches
+own their content keys and concurrent population; the helper never clears bytes
+beneath an active mount. The existing periodic store pass refreshes mounted
+keys' last-use time and removes unused keys after 24 hours, or earlier at the
+Controller's low-space line. Unavailable container ownership defers collection;
+launch and collection use the existing runtime-store coordination boundary.
+
 ## Artifact recovery
 
 Models and container images follow one recovery policy, with format-specific

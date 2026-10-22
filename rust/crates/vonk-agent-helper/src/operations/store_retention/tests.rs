@@ -122,16 +122,30 @@ fn unused_helper_records_leave_without_another_request_but_live_owners_stay() {
     }
     assert!(!exit.exists() && !replay.exists() && !scratch.exists() && !damaged.exists());
     // A failed inventory is unknown. Once it recovers, the same pass collects.
+    let compile_cache = file(data, "compile-cache/unused/data/kernel");
+    fs::set_permissions(
+        data.join("compile-cache"),
+        fs::Permissions::from_mode(0o700),
+    )
+    .unwrap();
     *executor.runner.inspection.lock().unwrap() = None;
     *executor.runner.unavailable.lock().unwrap() = true;
     executor.sweep_unused_runtime_images_at(later());
     assert!(identity.exists() && intent.exists() && generation.exists());
+    assert!(
+        compile_cache.exists(),
+        "unknown container ownership removed a compile cache"
+    );
     *executor.runner.unavailable.lock().unwrap() = false;
     executor.sweep_unused_runtime_images_at(later());
     for path in [&identity, &intent, &generation, &history, &lock_path] {
         assert!(!path.exists(), "{} leaked", path.display());
     }
     assert!(checkpoint.exists() && observation.exists());
+    assert!(
+        !compile_cache.exists(),
+        "unused compile key leaked after ownership recovered"
+    );
 }
 
 #[test]

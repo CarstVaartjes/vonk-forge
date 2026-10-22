@@ -599,6 +599,7 @@ pub(super) fn validate_docker_run_with_archive(
         installation_id,
         uid,
         gid: gid.unwrap_or(uid),
+        gpu,
         models,
         inputs,
         cache_root: cache_root.clone(),
