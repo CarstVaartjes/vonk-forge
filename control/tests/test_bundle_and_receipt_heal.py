@@ -9,15 +9,12 @@ Only a source that is invalid right after a fresh verification is the recipe's.
 from __future__ import annotations
 
 import io
-from dataclasses import dataclass, replace
 from pathlib import Path
 
 import pytest
-from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from vonk_control.models import (
     Base,
-    CatalogDocumentRevision,
     RecipeSourceBundle,
     SourceBundleArchive,
 )
@@ -76,12 +73,13 @@ def test_a_damaged_stored_file_is_replaced_by_the_verified_archive(
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
-def test_damaged_database_rows_are_rewritten_from_the_verified_archive() -> None:
+def test_damaged_database_rows_are_rewritten_from_the_verified_archive(
+    postgres_engine,
+) -> None:
     """Catches damaged archive or metadata rows blocking their own re-ingress."""
 
-    engine = create_engine("sqlite:///:memory:")
-    Base.metadata.create_all(engine)
-    sessions = sessionmaker(engine, expire_on_commit=False)
+    Base.metadata.create_all(postgres_engine)
+    sessions = sessionmaker(postgres_engine, expire_on_commit=False)
     store = DatabaseSourceBundleStore(sessions)
     bundle = _bundle()
     store.put(bundle.sha256, io.BytesIO(bundle.archive))
@@ -103,106 +101,60 @@ def test_damaged_database_rows_are_rewritten_from_the_verified_archive() -> None
 # ------------------------------------------------------------ build source
 
 
-@dataclass
-class _DamagedOnce:
-    """A store whose copy lacks the Dockerfile until it is stored again."""
-
-    real: SourceBundleStore
-    damaged: bool = True
-    puts: int = 0
-
-    def put(self, expected_sha256, payload):
-        self.puts += 1
-        stored = self.real.put(expected_sha256, payload)
-        self.damaged = False
-        return stored
-
-    def get(self, sha256):
-        bundle = self.real.get(sha256)
-        if not self.damaged:
-            return bundle
-        files = {
-            path: data for path, data in bundle.files.items() if path != "Dockerfile"
-        }
-        return replace(bundle, files=files)
-
-
-def test_a_bundle_lacking_the_dockerfile_is_derived_again_not_refused(
-    tmp_path: Path,
-) -> None:
-    """Catches a damaged stored bundle becoming a terminal recipe fault."""
-
+def test_a_changed_bundle_waits_for_background_reingress(tmp_path: Path) -> None:
+    """Catches a reader repairing source inline instead of observing a cache miss."""
     sessions, bundles, _now, _node, revision = setup(tmp_path)
-    with sessions() as session:
-        row = session.get(CatalogDocumentRevision, revision.id)
-        assert row is not None
-        sha = str(row.projected["source_bundle_sha256"])
+    sha = str(revision.projected["source_bundle_sha256"])
     archive = bundles.get(sha).archive
-    store = _DamagedOnce(bundles)
+    stored = bundles.put(sha, io.BytesIO(archive))
+    stored.path.write_bytes(b"damaged")
     service = RecipeBuildService(
-        sessions,
-        bundles=store,
-        source_rederiver=lambda _projected, _context, _sha: archive,
+        sessions, bundles=bundles, source_rederiver=lambda *_args: archive
     )
-
-    resolution = service.resolve(revision.id)
-
-    assert resolution is not None
-    assert store.puts == 1 and not store.damaged
+    with pytest.raises(RecipeBuildUnknown):
+        service.resolve(revision.id)
+    assert service.reconcile_source_bundles()
+    assert service.resolve(revision.id) is not None
 
 
 def test_a_bundle_that_cannot_be_derived_again_waits_instead_of_failing(
     tmp_path: Path,
 ) -> None:
-    """Catches terminal refusal of a source nobody re-verified."""
-
+    """Catches a missing closure permanently poisoning a later fresh source ingress."""
     sessions, bundles, _now, _node, revision = setup(tmp_path)
-    store = _DamagedOnce(bundles)
+    sha = str(revision.projected["source_bundle_sha256"])
+    archive = bundles.get(sha).archive
+    bundles.put(sha, io.BytesIO(archive)).path.unlink()
     service = RecipeBuildService(
-        sessions, bundles=store, source_rederiver=lambda *_args: None
+        sessions, bundles=bundles, source_rederiver=lambda *_: None
     )
-
     with pytest.raises(RecipeBuildUnknown):
         service.resolve(revision.id)
-
-    service._bundles = bundles
+    service._source_rederiver = lambda *_: archive
+    assert service.reconcile_source_bundles()
     assert service.resolve(revision.id) is not None
 
 
 def test_incomplete_local_evidence_after_reingress_remains_unknown(
     tmp_path: Path,
 ) -> None:
-    """Catches local damage after re-ingress misclassified as a recipe fault."""
-
+    """Catches damage after repair silently passing, or poisoning a restarted worker."""
     sessions, bundles, _now, _node, revision = setup(tmp_path)
-
-    @dataclass
-    class AlwaysWithout:
-        real: SourceBundleStore
-
-        def put(self, expected_sha256, payload):
-            return self.real.put(expected_sha256, payload)
-
-        def get(self, sha256):
-            bundle = self.real.get(sha256)
-            files = {p: d for p, d in bundle.files.items() if p != "Dockerfile"}
-            return replace(bundle, files=files)
-
-    with sessions() as session:
-        row = session.get(CatalogDocumentRevision, revision.id)
-        assert row is not None
-        sha = str(row.projected["source_bundle_sha256"])
+    sha = str(revision.projected["source_bundle_sha256"])
     archive = bundles.get(sha).archive
+    stored = bundles.put(sha, io.BytesIO(archive))
     service = RecipeBuildService(
-        sessions,
-        bundles=AlwaysWithout(bundles),
-        source_rederiver=lambda *_args: archive,
+        sessions, bundles=bundles, source_rederiver=lambda *_: archive
     )
-
-    with pytest.raises(RecipeBuildUnknown):
-        service.resolve(revision.id)
-    service._bundles = bundles
-    assert service.resolve(revision.id) is not None
+    for _ in range(2):
+        stored.path.write_bytes(b"damage after reingress")
+        with pytest.raises(RecipeBuildUnknown):
+            service.resolve(revision.id)
+        service = RecipeBuildService(
+            sessions, bundles=bundles, source_rederiver=lambda *_: archive
+        )
+        assert service.reconcile_source_bundles()
+        assert service.resolve(revision.id) is not None
 
 
 def test_the_closure_rederiver_returns_only_a_digest_matching_archive(
