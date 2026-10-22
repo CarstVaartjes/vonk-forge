@@ -6642,3 +6642,121 @@ def test_memory_freed_by_a_confirmed_stop_after_the_sample_is_not_charged_again(
         snapshot.host_memory_free_bytes = total
         snapshot.gpu_memory_free_bytes = total
     assert service.preview(request, actor="admin").allowed
+
+
+@pytest.mark.parametrize(
+    "database", ["sqlite", pytest.param("postgres", marks=pytest.mark.postgres)]
+)
+def test_dual_profile_disk_review_does_not_decode_unrelated_catalog_documents(
+    tmp_path, request, database
+):
+    """Catches eviction fitting each rank by fetching every catalog head's JSON."""
+    from collections import Counter
+
+    from sqlalchemy import create_engine
+    from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
+    from vonk_control.fleet_profile_contract import (
+        FleetProfileAssignmentInput,
+        FleetProfileInput,
+    )
+    from vonk_control.fleet_profiles import build_production_fleet_profile_service
+    from vonk_control.models import CatalogDocument
+    from vonk_forge_contracts import document_sha256, read_recipe
+
+    decoded = Counter()
+
+    def decode(payload):
+        value = json.loads(payload)
+        if (
+            isinstance(value, dict)
+            and value.get("kind") == RunSwitchReasonScopeName.RECIPE
+        ):
+            decoded[value["identity"]["slug"]] += 1
+        return value
+
+    url = (
+        request.getfixturevalue("postgres_engine").url
+        if database == "postgres"
+        else f"sqlite:///{tmp_path / 'preview.sqlite'}"
+    )
+    engine = create_engine(url, json_deserializer=decode)
+    try:
+        sessions, lifecycle, _queue, _mapping, _build, nodes = setup_services(
+            tmp_path, nodes=2, engine=engine
+        )
+        with sessions.begin() as session:
+            template = session.scalar(
+                select(CatalogDocumentRevision).where(
+                    CatalogDocumentRevision.kind == RunSwitchReasonScopeName.RECIPE
+                )
+            )
+            assert template is not None
+            # Model a large synced library without paying ingress's compiler
+            # work for every irrelevant recipe. These are current typed documents.
+            recipe = read_recipe(template.document)
+            for index in range(628):
+                slug = f"unrelated-{index}"
+                definition = recipe.model_copy(
+                    update={
+                        "identity": recipe.identity.model_copy(update={"slug": slug})
+                    }
+                )
+                document = definition.model_dump(mode="json", exclude_none=True)
+                root = CatalogDocument(
+                    kind=template.kind,
+                    publisher=template.publisher,
+                    slug=slug,
+                    title=template.slug,
+                    created_by="admin",
+                    created_at=NOW,
+                    updated_at=NOW,
+                )
+                session.add(root)
+                session.flush()
+                session.add(
+                    CatalogDocumentRevision(
+                        document_id=root.id,
+                        kind=template.kind,
+                        publisher=template.publisher,
+                        slug=slug,
+                        revision_number=1,
+                        schema_version=template.schema_version,
+                        state=template.state,
+                        document=document,
+                        content_digest=document_sha256(document),
+                        projected=template.projected,
+                        created_by="admin",
+                        created_at=NOW,
+                    )
+                )
+            selector = f"{template.publisher}/{template.slug}"
+            # Force the production fit into eviction assessment for both ranks.
+            for snapshot in session.scalars(select(NodeInventorySnapshot)):
+                snapshot.disk_free_bytes = 0
+                snapshot.unused_model_bytes = 0
+        switch = _service(sessions, NOW, lifecycle, RecordingArtifactExecutor())
+        profiles = build_production_fleet_profile_service(
+            sessions, clock=lambda: NOW, run_switch_operations=switch
+        )
+        profile = profiles.create(
+            FleetProfileInput(
+                name="Dual disk review",
+                assignments=[
+                    FleetProfileAssignmentInput(
+                        recipe_selector=selector, spark_ids=list(nodes)
+                    )
+                ],
+            ),
+            actor="admin",
+        )
+        decoded.clear()
+        preview = profiles.preview(profile.id)
+        assert len(preview.assessments) == 1
+        assert len(preview.assessments[0].assessment.fit_current.nodes) == 2
+        assert any(
+            reason.code == RunSwitchCode.INSUFFICIENT_DISK
+            for reason in preview.assessments[0].assessment.blockers
+        )
+        assert not any(slug.startswith("unrelated-") for slug in decoded), decoded
+    finally:
+        engine.dispose()

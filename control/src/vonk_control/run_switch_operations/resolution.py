@@ -19,6 +19,7 @@ from vonk_agent_protocol import (
 )
 from vonk_forge_contracts import ModelDefinition
 
+from ..categorized_errors import BookkeepingUnknown
 from ..cluster_mappings import (
     ClusterMappingError,
     effective_option_choices,
@@ -361,6 +362,9 @@ class ResolutionMixin:
             found_id = (
                 reusable_build_id(revision_id) if callable(reusable_build_id) else None
             )
+        except BookkeepingUnknown:
+            # A pending read is not evidence for selecting another receipt.
+            raise
         except UnknownOutcomeError:
             found_id = None
         found = session.get(RecipeBuild, found_id) if found_id else None

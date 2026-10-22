@@ -4,11 +4,9 @@ from __future__ import annotations
 
 import io
 import json
-from dataclasses import replace
 from importlib.resources import files
 
 import pytest
-from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import (
     SecurityRefusalError,
@@ -63,8 +61,11 @@ def test_damaged_bundle_is_rederived_for_build_and_fresh_request(tmp_path, damag
         store.get(bundle.sha256)
     service = _service(store, bundle.archive)
     build = {"dockerfile": "Dockerfile", "context": {"path": "."}}
+    with pytest.raises(UnknownOutcomeError):
+        service._verified_bundle(build, bundle.sha256)
+    assert service._heal_source_bundle(_projected(), ".", bundle.sha256)
     for _ in range(2):
-        loaded = service._verified_bundle(_projected(), build, bundle.sha256)
+        loaded = service._verified_bundle(build, bundle.sha256)
         assert loaded.files["Dockerfile"] == b"FROM scratch\n"
         assert loaded.sha256 == bundle.sha256
 
@@ -72,15 +73,14 @@ def test_damaged_bundle_is_rederived_for_build_and_fresh_request(tmp_path, damag
 def test_damage_after_reingress_is_unknown_and_does_not_poison_fresh_build(tmp_path):
     bundle = generate_source_bundle({"Dockerfile": b"FROM scratch\n"})
     store = SourceBundleStore(tmp_path)
-    store.put(bundle.sha256, io.BytesIO(bundle.archive))
-    real_get = store.get
-    store.get = lambda sha256: replace(real_get(sha256), files={})
+    stored = store.put(bundle.sha256, io.BytesIO(bundle.archive))
+    stored.path.write_bytes(b"damaged after ingress")
     service = _service(store, bundle.archive)
     build = {"dockerfile": "Dockerfile", "context": {"path": "."}}
     with pytest.raises(RecipeBuildUnknown):
-        service._verified_bundle(_projected(), build, bundle.sha256)
-    store.get = real_get
-    assert service._verified_bundle(_projected(), build, bundle.sha256).files
+        service._verified_bundle(build, bundle.sha256)
+    assert service._heal_source_bundle(_projected(), ".", bundle.sha256)
+    assert service._verified_bundle(build, bundle.sha256).files
 
 
 def test_wrong_rederived_identity_is_security_refusal_and_fresh_build_recovers(
@@ -92,18 +92,17 @@ def test_wrong_rederived_identity_is_security_refusal_and_fresh_build_recovers(
     service = _service(store, wrong.archive)
     build = {"dockerfile": "Dockerfile", "context": {"path": "."}}
     with pytest.raises(SecurityRefusalError):
-        service._verified_bundle(_projected(), build, bundle.sha256)
+        service._heal_source_bundle(_projected(), ".", bundle.sha256)
     service = _service(store, bundle.archive)
-    assert service._verified_bundle(_projected(), build, bundle.sha256).files
+    assert service._heal_source_bundle(_projected(), ".", bundle.sha256)
+    assert service._verified_bundle(build, bundle.sha256).files
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
 @pytest.mark.parametrize("missing", [True, False])
-def test_bundle_receipt_damage_cannot_hide_verified_archive_or_poison_ingress(missing):
-    # SQLite exercises only receipt row presence, not locks/concurrency.
-    engine = create_engine("sqlite:///:memory:")
-    Base.metadata.create_all(engine)
-    sessions = sessionmaker(engine, expire_on_commit=False)
+def test_bundle_receipt_damage_is_a_miss_and_ingress_recovers(postgres_engine, missing):
+    Base.metadata.create_all(postgres_engine)
+    sessions = sessionmaker(postgres_engine, expire_on_commit=False)
     store = DatabaseSourceBundleStore(sessions)
     bundle = generate_source_bundle({"Dockerfile": b"FROM scratch\n"})
     store.put(bundle.sha256, io.BytesIO(bundle.archive))
@@ -114,7 +113,8 @@ def test_bundle_receipt_damage_cannot_hide_verified_archive_or_poison_ingress(mi
             session.delete(row)
         else:
             row.manifest = {"damaged": True}
-    assert store.get(bundle.sha256).manifest == bundle.manifest
+    with pytest.raises(UnknownOutcomeError):
+        store.get(bundle.sha256)
     for _ in range(2):
         store.put(bundle.sha256, io.BytesIO(bundle.archive))
         assert store.get(bundle.sha256).manifest == bundle.manifest
@@ -127,7 +127,6 @@ def test_bundle_receipt_damage_cannot_hide_verified_archive_or_poison_ingress(mi
                 )
                 == bundle.manifest
             )
-    engine.dispose()
 
 
 def test_request_retries_are_bounded_and_fresh_source_check_proceeds(
@@ -149,7 +148,7 @@ def test_request_retries_are_bounded_and_fresh_source_check_proceeds(
 
     def check(revision_id):
         attempts.append(revision_id)
-        loaded = service._verified_bundle(_projected(), build, bundle.sha256)
+        loaded = service._verified_bundle(build, bundle.sha256)
         return enforce_build_source_policy({"build": build}, loaded)
 
     monkeypatch.setattr(service, "_check_source_once", check)
@@ -158,5 +157,6 @@ def test_request_retries_are_bounded_and_fresh_source_check_proceeds(
     assert attempts == ["same-revision"] * 3
     assert delays == [0.1, 0.2]
     service._source_rederiver = lambda *_: bundle.archive
+    assert service._heal_source_bundle(_projected(), ".", bundle.sha256)
     assert service.check_source("same-revision").passed
     assert store.get(bundle.sha256).sha256 == bundle.sha256

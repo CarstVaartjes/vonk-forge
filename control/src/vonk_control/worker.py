@@ -745,6 +745,7 @@ def assemble_production_worker(
     fleet_profiles.bind_storage_relief(storage_collector.relief_for_spark)
     worker_background_services += (
         storage_collector.tick,
+        recipe_builds.reconcile_source_bundles,
         CatalogRevisionCollector(sessions, clock=clock).tick,
         TerminalHistoryCollector(sessions, clock=clock).tick,
     )

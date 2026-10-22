@@ -541,7 +541,8 @@ def _rebuilt_recipe_entry(
     and the manifest names every member's new digest and size.
     """
 
-    from vonk_forge_contracts import document_sha256
+    from vonk_control.source_bundles import generate_source_bundle
+    from vonk_forge_contracts import document_sha256, read_recipe
 
     entry = copy.deepcopy(json.loads(fixture.index_bytes)["recipes"][0])
     recipe = entry["document"]
@@ -565,6 +566,14 @@ def _rebuilt_recipe_entry(
         for member, payload in members
         if member.name in files
     }
+    context = read_recipe(recipe).execution.build.context.path.rstrip("/")
+    source_digest = generate_source_bundle(
+        {
+            member.name.removeprefix(f"{context}/"): changed.get(member.name, payload)
+            for member, payload in members
+            if member.isfile() and member.name.startswith(f"{context}/")
+        }
+    ).sha256
     archive = io.BytesIO()
     with (
         gzip.GzipFile(fileobj=archive, mode="wb", mtime=0) as compressed,
@@ -575,6 +584,7 @@ def _rebuilt_recipe_entry(
             if member.name == "manifest.json":
                 manifest = json.loads(payload)
                 manifest["recipe_content_sha256"] = digest
+                manifest["source_bundle_sha256"] = source_digest
                 listed = {item["path"]: item for item in manifest["files"]}
                 for path, content in changed.items():
                     listed[path] = {
@@ -590,11 +600,13 @@ def _rebuilt_recipe_entry(
             target.addfile(member, io.BytesIO(payload) if member.isfile() else None)
     package_bytes = archive.getvalue()
     entry["content_sha256"] = digest
+    entry["source_bundle_sha256"] = source_digest
     entry["package"] = {
         **entry["package"],
         "expected_bytes": len(package_bytes),
         "recipe_content_sha256": digest,
         "sha256": hashlib.sha256(package_bytes).hexdigest(),
+        "source_bundle_sha256": source_digest,
     }
     return entry, package_bytes
 

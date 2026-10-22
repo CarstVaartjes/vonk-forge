@@ -21,10 +21,13 @@ from ..catalog_revision_contract import PrebuiltImage, RecipeRevisionProjection
 from ..disk_reservations import outstanding_disk_reservation_bytes
 from ..models import AgentNode, CatalogDocumentRevision
 from ..prebuilt_images import (
+    PREBUILT_KEY_MISMATCH,
     PREBUILT_NOT_PINNED,
     PREBUILT_USED,
     PrebuiltDecision,
+    executable_build_key,
 )
+from ..profile_read_observation import observe_selection
 from ..recipe_execution_contract import (
     RecipeExecutionContractError,
     build_plan_document,
@@ -144,16 +147,32 @@ def _usable_prebuilt(
     adapter: RuntimeAdapter,
     now: datetime,
 ) -> tuple[PrebuiltImage | None, PrebuiltDecision]:
-    """Use the authority-pinned content, independently of build provenance.
+    """Use a signed image only when its key binds these executable inputs.
 
     Historical pull failures belong to their request. A new request observes
-    the same pinned digest again; it never silently selects other content.
+    the same matching pinned digest again; changed source requires a new build.
     """
     image = projected.prebuilt_image
     if image is None:
         decision = PrebuiltDecision(
             PREBUILT_NOT_PINNED,
             "the signed catalog pins no prebuilt image for this revision",
+        )
+        _LOGGER.info("recipe revision %s: %s", recipe_revision_id, decision)
+        return None, decision
+    identity = derive_build_input_identity(
+        build,
+        source_bundle_sha256=source_sha256,
+        builder_binary_digest=None,
+        base_images=base_images,
+        runtime_adapter=adapter.document(),
+    )
+    expected_key = executable_build_key(identity)
+    if image.build_key != expected_key:
+        decision = PrebuiltDecision(
+            PREBUILT_KEY_MISMATCH,
+            f"published image build key {image.build_key} differs from "
+            f"current inputs {expected_key} (source {source_sha256})",
         )
         _LOGGER.info("recipe revision %s: %s", recipe_revision_id, decision)
         return None, decision
@@ -213,7 +232,7 @@ def _prepare_plan_once(
         adapter = _resolved_adapter(projected)
         source_sha256 = _source_bundle_handle(projected)
         public_network = _public_build_network(build)
-    bundle = self._verified_bundle(projected, build, source_sha256)
+    bundle = self._verified_bundle(build, source_sha256)
     # Inspection is diagnostic. Acceptance of declarative build policy belongs
     # to the kit compiler; managed source bytes are verified at ingress.
     policy = inspect_build_source_policy(
@@ -423,6 +442,9 @@ def plan(
     raise last_error
 
 
+# SQL selects the current receipt for a revision; unlike content-addressed
+# storage, that selection must be fresh for every review and acceptance.
+@observe_selection
 def reusable_build_id(self: RecipeBuildService, recipe_revision_id: str) -> str | None:
     """The succeeded build whose inputs this revision reproduces, whoever built it.
 

@@ -6,13 +6,15 @@ import json
 import os
 import tarfile
 import tempfile
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 from types import MappingProxyType
 from typing import IO, TYPE_CHECKING, Protocol, runtime_checkable
 
+from sqlalchemy import literal_column, select
 from vonk_agent_protocol import (
     InvalidRequestError,
     InvalidRequestReason,
@@ -28,6 +30,8 @@ from vonk_agent_protocol.source_bundles import (
     SourceBundleFile,
     SourceBundleManifest,
 )
+
+from .source_bundle_contract import SourceBundleVerification
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session, sessionmaker
@@ -153,23 +157,62 @@ def inspect_source_bundle(
     return _inspect_archive(_read_archive(payload, active), active)
 
 
+def _file_identity(path: Path) -> tuple[int, int, int, int, int]:
+    value = path.stat()
+    return (
+        value.st_dev,
+        value.st_ino,
+        value.st_size,
+        value.st_mtime_ns,
+        value.st_ctime_ns,
+    )
+
+
+def _publish_verification(path: Path, manifest: SourceBundleManifest) -> None:
+    receipt = SourceBundleVerification(manifest=manifest, identity=_file_identity(path))
+    descriptor, name = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
+    temporary = Path(name)
+    try:
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(canonical_message(receipt))
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path.with_suffix(".verified.json"))
+        descriptor = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
 class SourceBundleStore:
     def __init__(self, root: Path, *, limits: BundleLimits | None = None) -> None:
         self._root = root.resolve()
         self._limits = limits or BundleLimits()
 
-    def put(self, expected_sha256: str, payload: IO[bytes]) -> StoredBundle:
+    @staticmethod
+    @contextmanager
+    def _storage_access() -> Iterator[None]:
+        """Preserve the storage boundary's explicit denial and unavailable causes."""
         try:
-            return self._put(expected_sha256, payload)
+            yield
         except PermissionError as error:
             raise SourceBundleRefused(
                 "source bundle storage access was denied"
             ) from error
+        except FileNotFoundError as error:
+            raise _verification_pending() from error
         except OSError as error:
             raise SourceBundleUnknown(
                 SourceBundleCode.STORAGE_UNAVAILABLE,
                 "source bundle storage is temporarily unavailable",
             ) from error
+
+    def put(self, expected_sha256: str, payload: IO[bytes]) -> StoredBundle:
+        with self._storage_access():
+            return self._put(expected_sha256, payload)
 
     def _put(self, expected_sha256: str, payload: IO[bytes]) -> StoredBundle:
         if (
@@ -190,15 +233,11 @@ class SourceBundleStore:
         if destination.exists():
             try:
                 existing = destination.read_bytes()
-                # This immutable ingress was fully inspected and its digest
-                # checked above. Exact current bytes need no second inspection;
-                # a different archive still crosses the strict existing path.
-                present = existing == archive or (
-                    _inspect_archive(existing, self._limits).sha256 == expected_sha256
-                )
-            except (FileNotFoundError, SourceBundleError, tarfile.TarError):
+                present = existing == archive
+            except FileNotFoundError:
                 present = False
             if present:
+                _publish_verification(destination, manifest)
                 return StoredBundle(destination, manifest, len(existing))
             # A stored copy that no longer verifies is damaged data, and the
             # archive just verified at this ingress is its evidence: it is
@@ -222,33 +261,42 @@ class SourceBundleStore:
         finally:
             if temporary.exists():
                 temporary.unlink()
+        _publish_verification(destination, manifest)
         return StoredBundle(destination, manifest, len(archive))
 
-    def get(self, sha256: str) -> GeneratedSourceBundle:
-        if len(sha256) != 64 or any(
-            character not in "0123456789abcdef" for character in sha256
-        ):
-            raise SourceBundleError(
-                SourceBundleCode.DIGEST_INVALID, "source bundle digest is invalid"
-            )
+    def verified_manifest(self, sha256: str) -> SourceBundleManifest:
+        _validate_digest(sha256, SourceBundleCode.DIGEST_INVALID)
         path = self._root / sha256[:2] / f"{sha256}.tar"
-        try:
+        with self._storage_access():
+            try:
+                receipt = SourceBundleVerification.model_validate_json(
+                    path.with_suffix(".verified.json").read_bytes()
+                )
+                if (
+                    receipt.manifest.sha256 == sha256
+                    and receipt.identity == _file_identity(path)
+                ):
+                    return receipt.manifest
+            except ValueError:
+                pass
+        raise _verification_pending()
+
+    def get(self, sha256: str) -> GeneratedSourceBundle:
+        manifest = self.verified_manifest(sha256)
+        path = self._root / sha256[:2] / f"{sha256}.tar"
+        with self._storage_access():
+            identity = _file_identity(path)
             archive = path.read_bytes()
-        except PermissionError as error:
-            raise SourceBundleRefused(
-                "source bundle storage access was denied"
-            ) from error
-        except FileNotFoundError as error:
-            raise SourceBundleUnknown(
-                SourceBundleCode.NOT_FOUND, "source bundle is unavailable"
-            ) from error
-        except OSError as error:
-            raise SourceBundleUnknown(
-                SourceBundleCode.STORAGE_UNAVAILABLE,
-                "source bundle storage is temporarily unavailable",
-            ) from error
-        manifest = _observe_archive(archive, self._limits, sha256)
-        return _generated_bundle(archive, manifest, self._limits)
+            # A concurrent replacement invalidates this read too, without hashing.
+            if (
+                self.verified_manifest(sha256) != manifest
+                or _file_identity(path) != identity
+            ):
+                raise _verification_pending()
+            try:
+                return _generated_bundle(archive, manifest, self._limits)
+            except tarfile.TarError as error:
+                raise _verification_pending() from error
 
 
 @runtime_checkable
@@ -256,8 +304,7 @@ class SourceBundleStoreProtocol(Protocol):
     """Structural surface shared by the file and database bundle stores.
 
     Both :class:`SourceBundleStore` and :class:`DatabaseSourceBundleStore` back
-    the same content-addressed contract, and every consumer calls only ``put``
-    and ``get``.  Annotating consumers with this protocol keeps the two
+    the same content-addressed contract, and readers use the durable manifest or the verified bytes.  Annotating consumers with this protocol keeps the two
     implementations interchangeable without pretending one is a subclass of the
     other.
     """
@@ -265,6 +312,8 @@ class SourceBundleStoreProtocol(Protocol):
     def put(self, expected_sha256: str, payload: IO[bytes]) -> StoredBundle: ...
 
     def get(self, sha256: str) -> GeneratedSourceBundle: ...
+
+    def verified_manifest(self, sha256: str) -> SourceBundleManifest: ...
 
 
 class DatabaseSourceBundleStore:
@@ -289,103 +338,87 @@ class DatabaseSourceBundleStore:
 
         with self._sessions.begin() as session:
             metadata = session.get(RecipeSourceBundle, expected_sha256)
-            stored = session.get(SourceBundleArchive, expected_sha256)
-            # Stored rows that no longer verify are damaged data, and the archive
-            # just verified at this ingress is their evidence: they are rewritten
-            # from it, never trusted and never a collision.
-            if metadata is not None and not _stored_manifest_matches(
-                metadata.manifest, manifest
-            ):
-                metadata.media_type = "application/vnd.vonk-forge.source-bundle.v1+tar"
-                metadata.archive_bytes = len(archive)
-                metadata.total_bytes = manifest.total_bytes
-                metadata.file_count = len(manifest.files)
-                metadata.storage_key = f"postgres:{manifest.sha256}"
-                metadata.manifest = json.loads(canonical_message(manifest))
-            if stored is not None and not _stored_archive_verifies(
-                stored.archive, expected_sha256, self._limits
-            ):
-                stored.archive = archive
-            if stored is not None and metadata is not None:
-                # Verified again just now: a bundle a new revision is about to
-                # name must not look old to the unreferenced-bundle sweep.
-                metadata.verified_at = datetime.now(UTC)
             if metadata is None:
-                session.add(
-                    RecipeSourceBundle(
-                        sha256=manifest.sha256,
-                        media_type="application/vnd.vonk-forge.source-bundle.v1+tar",
-                        archive_bytes=len(archive),
-                        total_bytes=manifest.total_bytes,
-                        file_count=len(manifest.files),
-                        storage_key=f"postgres:{manifest.sha256}",
-                        manifest=json.loads(canonical_message(manifest)),
-                        verified_at=datetime.now(UTC),
-                    )
-                )
+                metadata = RecipeSourceBundle(sha256=expected_sha256)
+                session.add(metadata)
+            metadata.media_type = "application/vnd.vonk-forge.source-bundle.v1+tar"
+            metadata.archive_bytes = len(archive)
+            metadata.total_bytes = manifest.total_bytes
+            metadata.file_count = len(manifest.files)
+            metadata.storage_key = f"postgres:{expected_sha256}"
+            metadata.manifest = json.loads(canonical_message(manifest))
+            metadata.verified_at = datetime.now(UTC)
+            session.flush()
+            stored = session.get(
+                SourceBundleArchive, expected_sha256, with_for_update=True
+            )
             if stored is None:
                 session.add(
                     SourceBundleArchive(sha256=expected_sha256, archive=archive)
                 )
+            elif stored.archive != archive:
+                stored.archive = archive
+            session.flush()
+            # PostgreSQL changes xmin on every row update, including direct SQL.
+            # Bind the existing ingress receipt to those exact stored bytes.
+            # A subsequent archive update is a miss without scanning the archive.
+            version = session.scalar(
+                select(literal_column("xmin::text"))
+                .select_from(SourceBundleArchive)
+                .where(SourceBundleArchive.sha256 == expected_sha256)
+            )
+            metadata.storage_key = f"postgres:{expected_sha256}:{version}"
         return StoredBundle(
             Path(f"/postgresql/source-bundles/{expected_sha256}"),
             manifest,
             len(archive),
         )
 
-    def get(self, sha256: str) -> GeneratedSourceBundle:
+    def _read(
+        self, sha256: str, *, include_archive: bool
+    ) -> tuple[SourceBundleManifest, bytes]:
         _validate_digest(sha256, SourceBundleCode.DIGEST_INVALID)
-        from .models import SourceBundleArchive
+        from .models import RecipeSourceBundle, SourceBundleArchive
 
         with self._sessions() as session:
-            stored = session.get(SourceBundleArchive, sha256)
-            if stored is None:
-                raise SourceBundleUnknown(
-                    SourceBundleCode.NOT_FOUND, "source bundle is unavailable"
+            row = session.execute(
+                select(
+                    RecipeSourceBundle.manifest,
+                    RecipeSourceBundle.storage_key,
+                    literal_column("source_bundle_archives.xmin::text"),
+                    SourceBundleArchive.archive
+                    if include_archive
+                    else literal_column("NULL"),
                 )
-            archive = stored.archive
-        # The verified archive owns content availability. Metadata is a receipt
-        # derived from it; missing or damaged metadata cannot hide intact bytes.
-        manifest = _observe_archive(archive, self._limits, sha256)
+                .join(SourceBundleArchive)
+                .where(RecipeSourceBundle.sha256 == sha256)
+            ).one_or_none()
+        if row is None or row[1] != f"postgres:{sha256}:{row[2]}":
+            raise _verification_pending()
+        try:
+            manifest = parse_source_bundle_manifest(row[0])
+        except SourceBundleError as error:
+            raise _verification_pending() from error
+        if manifest.sha256 != sha256:
+            raise _verification_pending()
+        return manifest, row[3] if include_archive else b""
+
+    def verified_manifest(self, sha256: str) -> SourceBundleManifest:
+        manifest, _ = self._read(sha256, include_archive=False)
+        return manifest
+
+    def get(self, sha256: str) -> GeneratedSourceBundle:
+        manifest, archive = self._read(sha256, include_archive=True)
         return _generated_bundle(archive, manifest, self._limits)
 
 
-def _observe_archive(
-    archive: bytes, limits: BundleLimits, expected_sha256: str
-) -> SourceBundleManifest:
-    """Local bytes are evidence to reconcile, never an ingress refusal."""
-    cause: Exception | None = None
-    code = SourceBundleCode.STORAGE_COLLISION
-    try:
-        manifest = _inspect_archive(archive, limits)
-        if manifest.sha256 == expected_sha256:
-            return manifest
-    except (SourceBundleError, tarfile.TarError, OSError) as error:
-        cause = error
-        code = (
-            error.code
-            if isinstance(error, SourceBundleError)
-            else SourceBundleCode.INVALID_ARCHIVE
-        )
-    raise SourceBundleUnknown(
-        code, "stored source bundle cannot be verified"
-    ) from cause
-
-
-def _stored_manifest_matches(value: object, manifest: SourceBundleManifest) -> bool:
-    try:
-        return parse_source_bundle_manifest(value) == manifest
-    except SourceBundleError:
-        return False
-
-
-def _stored_archive_verifies(
-    archive: bytes, expected_sha256: str, limits: BundleLimits
-) -> bool:
-    try:
-        return _inspect_archive(archive, limits).sha256 == expected_sha256
-    except (SourceBundleError, tarfile.TarError):
-        return False
+def _verification_pending() -> SourceBundleUnknown:
+    return SourceBundleUnknown(
+        SourceBundleCode.NOT_FOUND,
+        "Source bundle verification is pending in the Controller worker; "
+        "the verified ingress receipt is missing or the local copy changed. "
+        "The worker restores the exact source from catalog closure on its next pass; retry preview.",
+    )
 
 
 def parse_source_bundle_manifest(value: object) -> SourceBundleManifest:
