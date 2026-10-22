@@ -36,6 +36,10 @@ impl CommandRunner for LaunchRunner {
         if executable == Path::new(gpu_clock::NVIDIA_SMI) {
             return Ok(docker_output(true, "12.1, 590.48\n", 0));
         }
+        if executable == Path::new("/usr/bin/setfacl") {
+            // Cache reuse validates the ACL actually installed at publication.
+            return ProcessCommandRunner.run(executable, args);
+        }
         let first = args.first().map(String::as_str);
         if first == Some("run") {
             for pair in args.windows(2).filter(|pair| pair[0] == "--mount") {
@@ -666,6 +670,9 @@ struct StartWithStrays {
 
 impl CommandRunner for StartWithStrays {
     fn run(&self, executable: &Path, args: &[String]) -> Result<CommandOutput, String> {
+        if executable == Path::new("/usr/bin/setfacl") {
+            return ProcessCommandRunner.run(executable, args);
+        }
         if executable == Path::new("/usr/bin/docker") {
             match args.first().map(String::as_str) {
                 Some("container" | "logs" | "inspect" | "stop" | "rm") => {

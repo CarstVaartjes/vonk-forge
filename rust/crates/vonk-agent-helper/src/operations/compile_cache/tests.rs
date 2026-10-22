@@ -1,10 +1,20 @@
 use super::*;
 use crate::operations::test_support::*;
-use std::sync::{Arc, Mutex};
+use std::sync::{
+    Arc, Mutex,
+    atomic::{AtomicBool, Ordering},
+    mpsc,
+};
 
 #[derive(Clone)]
 struct Runner {
     host: Arc<Mutex<String>>,
+    pause: Option<Arc<PopulationPause>>,
+}
+struct PopulationPause {
+    started: AtomicBool,
+    entered: mpsc::SyncSender<()>,
+    resume: Mutex<mpsc::Receiver<()>>,
 }
 impl CommandRunner for Runner {
     fn run(&self, executable: &Path, args: &[String]) -> Result<CommandOutput, String> {
@@ -12,15 +22,25 @@ impl CommandRunner for Runner {
             return Ok(docker_output(true, &self.host.lock().unwrap(), 0));
         }
         if executable == Path::new("/usr/bin/setfacl") {
-            let status = Command::new(executable)
-                .args(args)
-                .status()
-                .map_err(|e| e.to_string())?;
-            return Ok(docker_output(
-                status.success(),
-                "",
-                status.code().unwrap_or(1),
-            ));
+            if let Some(pause) = &self.pause
+                && !pause.started.swap(true, Ordering::SeqCst)
+            {
+                // Expose the mode-before-ACL window of a concurrent setfacl.
+                fs::set_permissions(args.last().unwrap(), fs::Permissions::from_mode(0o770))
+                    .unwrap();
+                pause.entered.send(()).unwrap();
+                pause
+                    .resume
+                    .lock()
+                    .unwrap()
+                    .recv_timeout(Duration::from_secs(10))
+                    .unwrap();
+                // Complete the original private mode before installing the
+                // ACL; the injected intermediate mode must not become a grant.
+                fs::set_permissions(args.last().unwrap(), fs::Permissions::from_mode(0o700))
+                    .unwrap();
+            }
+            return ProcessCommandRunner.run(executable, args);
         }
         Err("unexpected command".into())
     }
@@ -55,6 +75,7 @@ fn fixture_for_gpu(
         &[0; 32],
         Runner {
             host: Arc::new(Mutex::new("12.1, 590.48\n".into())),
+            pause: None,
         },
         None,
     )
@@ -322,4 +343,48 @@ fn fallback_scratch_is_collected_by_the_helper_even_if_the_primary_store_is_corr
         !cache.exists(),
         "unused fallback escaped its privileged collector"
     );
+}
+
+#[test]
+fn peer_population_during_acl_setup_reuses_the_winner_without_replacing_bytes() {
+    // Catches publication of a directory before its mode and ACL agree:
+    // a peer must neither fall back nor replace a completed peer's bytes.
+    let (_root, mut executor, mut first) = fixture();
+    let (_other, _, mut second) = fixture();
+    let expected = executor
+        .roots
+        .data
+        .join(STORE)
+        .join(executor.compile_cache_identity(&first).unwrap())
+        .join("data");
+    let (entered, observing) = mpsc::sync_channel(1);
+    let (resume, paused) = mpsc::sync_channel(1);
+    executor.runner.pause = Some(Arc::new(PopulationPause {
+        started: AtomicBool::new(false),
+        entered,
+        resume: Mutex::new(paused),
+    }));
+    std::thread::scope(|scope| {
+        let populating = scope.spawn(|| executor.bind_compile_cache(&mut first));
+        observing.recv_timeout(Duration::from_secs(10)).unwrap();
+        let result = executor.bind_compile_cache(&mut second);
+        let second_source = source(&second);
+        fs::write(second_source.join("compiled"), b"winner").unwrap();
+        resume.send(()).unwrap();
+        populating.join().unwrap().unwrap();
+        result.unwrap();
+        assert_eq!(second_source, expected);
+    });
+    assert_eq!(source(&first), expected);
+    assert_eq!(fs::read(expected.join("compiled")).unwrap(), b"winner");
+    assert_eq!(
+        fs::read_dir(expected.parent().unwrap())
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .collect::<Vec<_>>(),
+        vec![expected.clone()],
+        "losing population left staging behind"
+    );
+    assert!(exact_runtime_acl(&expected, first.uid));
+    assert!(exact_runtime_acl(&expected.join("home"), first.uid));
 }

@@ -132,6 +132,38 @@ impl<R: CommandRunner> OperationExecutor<R> {
         uid: u32,
     ) -> Result<PathBuf, OperationError> {
         let cache_data = entry.join("data");
+        if !cache_data.try_exists()? {
+            // setfacl can expose the new mode before the ACL. Never let a
+            // peer inspect or modify that intermediate state: publish data
+            // and HOME together, then reuse the winner without rewriting ACLs.
+            let staging = tempfile::tempdir_in(entry)?;
+            let prepared = self.populate_compile_cache_data(staging.path(), uid)?;
+            match rustix::fs::renameat_with(
+                rustix::fs::CWD,
+                &prepared,
+                rustix::fs::CWD,
+                &cache_data,
+                rustix::fs::RenameFlags::NOREPLACE,
+            ) {
+                Ok(()) | Err(rustix::io::Errno::EXIST) => {}
+                Err(error) => return Err(errno_io(error).into()),
+            }
+        }
+        for path in [&cache_data, &cache_data.join("home")] {
+            require_runtime_directory(path, Some(rustix::process::geteuid().as_raw()), uid)?;
+            if !exact_runtime_acl(path, uid) {
+                return Err(OperationError::UnsafePath);
+            }
+        }
+        Ok(cache_data)
+    }
+
+    fn populate_compile_cache_data(
+        &self,
+        entry: &Path,
+        uid: u32,
+    ) -> Result<PathBuf, OperationError> {
+        let cache_data = entry.join("data");
         create_cache_directory(&cache_data)?;
         require_runtime_directory(&cache_data, Some(rustix::process::geteuid().as_raw()), uid)?;
         if fs::symlink_metadata(&cache_data)?.mode() & 0o700 != 0o700 {

@@ -15,6 +15,9 @@ impl CommandRunner for IntentRunner {
         if executable == Path::new("/usr/bin/nvidia-smi") {
             return Err("injected GPU clock driver outage".to_owned());
         }
+        if executable == Path::new("/usr/bin/setfacl") {
+            return ProcessCommandRunner.run(executable, args);
+        }
         self.calls.lock().unwrap().push(args.to_vec());
         let image = args.first().map(String::as_str) == Some("image");
         let missing = args.get(1).map(String::as_str) == Some("inspect") && !image;
