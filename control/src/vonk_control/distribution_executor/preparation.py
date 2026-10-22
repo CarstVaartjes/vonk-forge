@@ -284,8 +284,8 @@ class CompositeDistributionPhaseExecutor(
         if preview.artifact_set_sha256 != artifact_set_sha256:
             raise RuntimeError("model-cache download preview content is unavailable")
         # Admission revalidates the decision, persists the exact manifest and
-        # handles its own blockers. A stale preview is re-fetched on the same
-        # phase checkpoint and request key under the parent's durable deadline.
+        # handles its own blockers. Content identity keeps this plan stable
+        # when another download publishes the same bytes after observation.
         view = start_method(
             actor=actor,
             request_key=cache_request_key,

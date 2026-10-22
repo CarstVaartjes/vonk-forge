@@ -23,9 +23,11 @@ from typing import Any
 import httpx2
 import pytest
 from sqlalchemy import Engine, select
+from vonk_agent_protocol import LifecycleState, ModelCacheCode
 from vonk_control.catalog_entities import CatalogEntityService
 from vonk_control.distribution_executor import CompositeDistributionPhaseExecutor
 from vonk_control.model_cache import ModelCacheService
+from vonk_control.model_cache.errors import ModelCacheConflictInvalid
 from vonk_control.models import CatalogDocumentRevision, ModelCacheSet, RecipeBuild
 from vonk_control.run_switch_contract import (
     ArtifactStorageImpact,
@@ -239,3 +241,53 @@ def test_a_model_another_download_brought_completes_the_load(
     fresh = nas.settle(nas.download_phase(again))
     _validate_artifact_execution(again, _PHASE, fresh)
     assert fresh.downloaded_bytes == 0
+
+
+@pytest.mark.parametrize("selection", ["model", "recipe", "set"])
+def test_download_plan_binds_content_across_publication(
+    nas: _Nas, selection: str
+) -> None:
+    """Catches provenance in the shared plan hash, across every download caller.
+
+    An operator accepts the model; a consumer previews it before publication
+    and submits after verification updates the persisted manifest. Neither
+    recipe provenance nor the transfer finishing changes the requested bytes.
+    """
+    operator = nas.cache.download_model_selector(
+        SELECTOR, actor="admin", request_key=str(uuid.uuid4())
+    )
+    wanted = operator.artifact_set_sha256
+    assert wanted is not None
+    before = nas.cache.manifest_for_artifact_set(wanted)
+    if selection == "model":
+        preview = nas.cache.download_preview(
+            model_content_sha256=nas.model_content_sha256
+        )
+    elif selection == "recipe":
+        preview = nas.cache.download_preview(recipe_revision_id=nas.recipe_revision_id)
+    else:
+        preview = nas.cache.download_preview(artifact_set_sha256=wanted)
+    nas.settle(operator.id)
+    published = nas.cache.manifest_for_artifact_set(wanted)
+    assert published.verified_models != before.verified_models
+    assert published.digest == before.digest == preview["artifact_set_sha256"]
+
+    admitted = nas.cache.start_download(
+        actor="admin",
+        request_key=str(uuid.uuid4()),
+        plan_digest=str(preview["plan_digest"]),
+        artifact_set_sha256=wanted,
+    )
+    assert admitted.state == LifecycleState.QUEUED
+    assert nas.settle(admitted.id).downloaded_bytes == 0
+    assert nas.upstream.served_bytes == len(WEIGHTS)
+
+    # Identity binding still rejects an unrelated plan before creating work.
+    with pytest.raises(ModelCacheConflictInvalid) as refused:
+        nas.cache.start_download(
+            actor="admin",
+            request_key=str(uuid.uuid4()),
+            plan_digest="0" * 64,
+            artifact_set_sha256=wanted,
+        )
+    assert refused.value.code == ModelCacheCode.STALE_PLAN

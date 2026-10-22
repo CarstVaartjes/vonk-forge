@@ -24,6 +24,7 @@ from ..artifact_lifecycle import (
 from ..bounded_json import require_sequence
 from ..lifecycle.model_cache import ModelCacheAdapter
 from ..model_cache_contract import (
+    CacheOperationKind,
     ModelCacheDownloadPayload,
     ModelCacheRetry,
     ModelCacheTransfer,
@@ -410,11 +411,14 @@ class DownloadAdmissionMixin:
             cache._request_storage(
                 needed, ModelCacheBlockerCode.INSUFFICIENT_RESERVED_STORAGE
             )
+        # Bind reusable content, not the first requester's provenance or the
+        # verified-model bindings publication adds to the stored manifest.
+        # Observation and live admission may see different transfer checkpoints;
+        # those change remaining work, never the authorized download identity.
         plan = {
             "schema_version": SCHEMA_VERSION,
-            "kind": "download",
+            "kind": CacheOperationKind.DOWNLOAD,
             "artifact_set_sha256": manifest.digest,
-            "manifest": manifest.document(),
             "source_policy": SOURCE_POLICY,
         }
         return {
