@@ -1367,7 +1367,9 @@ def test_profile_storage_wait_is_bounded_and_recovers(
     from threading import Event
 
     from vonk_agent_protocol import ProfileReasonCode
+    from vonk_control.categorized_errors import BookkeepingUnknown
     from vonk_control.model_cache import ModelCacheService
+    from vonk_control.profile_read_observation import profile_read
     from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
 
     from tests.test_fleet_profiles import _assessment, _exact_preparation
@@ -1436,8 +1438,12 @@ def test_profile_storage_wait_is_bounded_and_recovers(
             return service.list().profiles[0]
         return service.read_number(1)
 
-    started = time.monotonic()
     try:
+        # Establish the stalled I/O before measuring the profile projection.
+        with pytest.raises(BookkeepingUnknown):
+            profile_read(stored)()
+        assert entered.wait(30)
+        started = time.monotonic()
         result = read()
         elapsed = time.monotonic() - started
         assert entered.is_set()
