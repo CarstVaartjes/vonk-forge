@@ -2,7 +2,7 @@
 # Platform build bases bind reviewed multi-platform index digests. Refresh the
 # tag and digest together through docs/image-pin-refresh.md.
 ARG NODE_IMAGE=node:26-trixie-slim@sha256:36793bcbb160a6a16cede1e62b93f84e26b78a972a8a4c0b879c1c12f22761ec
-ARG PYTHON_IMAGE=python:3.14-slim-trixie@sha256:0b566a9f30a60730df33c26ac62dedb55393d8814645cd03543b67bf8987f3a1
+ARG PYTHON_IMAGE=python:3.14-slim-trixie@sha256:0514bc76712d64f8bb48adcb95b1ab0d88c69fee95d62fe4c18ee948bee9b1e1
 ARG SKOPEO_IMAGE=quay.io/skopeo/stable:v1.22.3-immutable@sha256:c0ee1f4edca5c01cb8d5611124f92f3cc47196ecab68aee5d0f90834e00574d5
 ARG SKOPEO_INDEX_DIGEST=sha256:c0ee1f4edca5c01cb8d5611124f92f3cc47196ecab68aee5d0f90834e00574d5
 ARG SKOPEO_AMD64_DIGEST=sha256:ab4c269c9e2bd11affe2666b860fb651a15afec121c15986b052b02e09d86239
