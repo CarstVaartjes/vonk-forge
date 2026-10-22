@@ -1,3 +1,4 @@
+import { ProfileReasonSeverity, ProjectionCode } from "../api/vocabulary.generated";
 import { parseContractJson, materialize, type WireNumber } from "../api/contract-numeric";
 import type { VisualFleetNode } from "../api/types";
 import {
@@ -88,7 +89,9 @@ test("offline is independent of telemetry and names its reason", () => {
     telemetry: telemetry("2026-08-15T11:59:59Z"),
   });
   expect(nodeStatus(offline, NOW).status).toBe("offline");
-  expect(nodeStatus(offline, NOW).reasons.join(" ")).toContain(offlineReasonLabel("certificate-expired"));
+  expect(nodeStatus(offline, NOW).reasons.join(" ")).toContain(
+    offlineReasonLabel("certificate-expired"),
+  );
 });
 
 test("an online Spark with old telemetry needs attention and says why, instead of getting its own status", () => {
@@ -114,7 +117,7 @@ test("a Controller warning on an otherwise live Spark also needs attention", () 
   });
   expect(nodeStatus(warned, NOW).status).toBe("needs attention");
   expect(nodeStatus(warned, NOW).reasons.join(" ")).toContain("Disk is nearly full");
-  expect(nodeStatus({...warned, warnings: []}, NOW).status).toBe("online");
+  expect(nodeStatus({ ...warned, warnings: [] }, NOW).status).toBe("online");
 });
 
 test("a Wi-Fi NAS route warning shows its recommendation as the next step", () => {
@@ -213,4 +216,22 @@ test("retains wide memory counters while deriving only a presentation ratio", ()
   expect(nodeMemory(observed)).toEqual({ usedPercent: 50, totalBytes: total });
   expect(formatBytes(total)).toBe("17179869184.0 GiB");
   expect(formatBytes(wireInteger("1" + "0".repeat(400)))).toBe("1" + "0".repeat(400) + " B");
+});
+
+test("GPU reset warnings retain the operator fix while a Spark remains online", () => {
+  // Catches treating fresh metrics or an online connection as GPU health.
+  const detail =
+    "GPU requires reset; Spark cannot receive work. Power-cycle: poweroff, unplug power ~30 s, power on; a warm reboot is not enough after a GPU firmware update.";
+  const spark = node({
+    warnings: [
+      {
+        code: ProjectionCode.NODE_GPU_REQUIRES_RESET,
+        detail,
+        severity: ProfileReasonSeverity.WARNING,
+      },
+    ],
+    telemetry: telemetry(NOW.toISOString()),
+  });
+  expect(nodeStatus(spark, NOW)).toEqual({ status: "needs attention", reasons: [detail] });
+  expect(nodeStatus({ ...spark, warnings: [] }, NOW)).toEqual({ status: "online", reasons: [] });
 });

@@ -187,6 +187,7 @@ def install_observations_routes(
                     gpu_memory_total_bytes=body.gpu_memory_total_bytes,
                     gpu_memory_free_bytes=body.gpu_memory_free_bytes,
                     gpu_count=body.gpu_count,
+                    gpu_health=body.gpu_health,
                     memory_pool=body.memory_pool,
                     artifact_store_read_only=body.artifact_store_read_only,
                     capabilities=tuple(body.capabilities),

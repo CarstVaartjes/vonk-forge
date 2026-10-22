@@ -8,15 +8,17 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import AgentClaim, InvalidRequestReason
+from vonk_agent_protocol import AgentClaim, InvalidRequestReason, WaitReason
 
 from .. import agent_operation_states
 from ..agent_job_contract import ClaimFacts
 from ..auth import AgentSource
 from ..categorized_errors import InvalidValue
+from ..gpu_health import GPU_HEALTH_CODES
 from ..logging import redact_text
 from ..models import AgentCertificate, AgentNode, AgentOperationAttempt, Job
 from ..models import AgentOperation as StoredOperation
+from ..persisted_waits import read_wait
 from .contracts import (
     _CLAIM_REFUSAL_PREFIX,
     _CONCLUDED_OUTCOMES,
@@ -339,6 +341,7 @@ def _excluded_work_refusal(
     )
     if operation is None:
         return None
+    wait = read_wait(operation)
     facts = ClaimFacts(kind=operation.kind, state=operation.state)
     predicate = _claim_predicate(now)
     branch = predicate.branch_for(operation.state)
@@ -359,6 +362,15 @@ def _excluded_work_refusal(
     for condition, condition_held in zip(conditions, held, strict=True):
         if condition_held:
             continue
+        if (
+            condition.check == WaitReason.OBSERVATION_UNAVAILABLE.value
+            and wait is not None
+            and wait.reason in GPU_HEALTH_CODES
+            and wait.next_check > now
+        ):
+            # Preserve the dispatch owner's exact GPU cause during its wait;
+            # authority/cancellation conditions above still take precedence.
+            return None
         return (
             operation,
             condition.check,

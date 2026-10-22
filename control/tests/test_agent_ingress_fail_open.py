@@ -57,6 +57,9 @@ STRICT_BODIES = {
 #: Optional fields no evidence group covers, each reviewed as part of the
 #: mandatory core (failure identity, plan binding, receipts), not as evidence.
 REVIEWED_CORE_DEFAULTS = {
+    # Absence means unobserved, never healthy. An explicit health observation
+    # is core admission evidence: malformed values must not be dropped.
+    "InventoryRequest.gpu_health",
     "AgentRuntimeIdentity.package_activation",
     "RecipeStartResult.endpoint",
     "RecipeJobRunResult.reason",

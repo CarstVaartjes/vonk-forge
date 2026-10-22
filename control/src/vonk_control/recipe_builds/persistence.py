@@ -25,6 +25,7 @@ from ..admission_locking import (
 )
 from ..catalog_revision_contract import read_recipe_projection
 from ..disk_reservations import outstanding_disk_reservation_bytes
+from ..gpu_health import gpu_health_reason
 from ..models import (
     AgentNode,
     CatalogDocumentRevision,
@@ -460,6 +461,9 @@ def _reserve_in_session(
             "builder runtime identity changed",
             reason=WaitReason.SCOPE_CHANGED,
         )
+    health_reason = gpu_health_reason(snapshot.gpu_health)
+    if health_reason is not None:
+        raise RecipeBuildUnknown(*health_reason)
     if snapshot.stale:
         raise RecipeBuildUnknown(
             RecipeBuildCode.INVENTORY_STALE,

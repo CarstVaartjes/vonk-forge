@@ -1188,6 +1188,7 @@ node_id = "spk_0123456789abcdef0123456789abcdef"
             disk_available_bytes: 900,
             state_database_reserve_held: true,
             gpu_count: 1,
+            gpu_health: vonk_agent_protocol::generated::GpuHealth::Healthy,
             gpu_memory_total_bytes: 100,
             gpu_memory_free_bytes: 90,
             memory_pool: vonk_agent_protocol::MemoryPool::Separate,

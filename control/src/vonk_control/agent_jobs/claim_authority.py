@@ -24,6 +24,7 @@ from vonk_agent_protocol.contracts import AgentFailureResult
 
 from .. import agent_operation_states, job_states
 from ..disk_reservations import outstanding_disk_charges
+from ..gpu_health import gpu_health_reason
 from ..inventory_repository import InventoryRepository
 from ..lifecycle import Outcome, Reported
 from ..lifecycle.agent_operation import AgentOperationAdapter, set_parent_state
@@ -412,4 +413,88 @@ def _claim_has_authority(
             parent_state=job.state,
         )
         return False
+    return True
+
+
+def gpu_health_wait(
+    service: AgentJobService,
+    session: Session,
+    operation: StoredOperation,
+    now: datetime,
+) -> bool:
+    """Recheck GPU health at dispatch; cleanup and exited output still proceed."""
+    from datetime import timedelta
+
+    from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest
+
+    from ..agent_operation_facts import (
+        AGENT_ORDER_RECOVERY_BUDGET,
+        aware,
+        operation_start_deadline,
+    )
+    from ..operation_blockers import make_blocker
+    from ..persisted_waits import schedule_wait
+    from ..recovery_policy import WAIT_STEP
+    from .predicates import _claim_refusal_reason
+
+    if operation.kind not in {
+        AgentOperation.RECIPE_START,
+        AgentOperation.RECIPE_BUILD,
+        AgentOperation.RECIPE_JOB_RUN,
+        AgentOperation.RECIPE_INSTALL,
+    }:
+        return False
+    payload = column_value(operation, "payload")
+    if isinstance(payload, RecipeJobRunRequest) and payload.output_delivery_only:
+        return False
+    try:
+        snapshot = InventoryRepository(service._sessions).latest(
+            operation.node_id, now=now, maximum_age=300, _session=session
+        )
+    except KeyError:
+        return False  # the owning admission's missing-inventory rule applies
+    reason = gpu_health_reason(snapshot.gpu_health)
+    if reason is None:
+        return False
+    code, detail = reason
+    # Use the accepted start budget where present, otherwise the existing
+    # agent-order observation window. Persist once, never extend on polling.
+    if operation.recovery_deadline is None:
+        operation.recovery_deadline = operation_start_deadline(operation) or (
+            now + AGENT_ORDER_RECOVERY_BUDGET
+        )
+    deadline = aware(operation.recovery_deadline)
+    note = f"{code}: {detail} Waiting for healthy GPU inventory from {operation.node_id}; deadline {deadline.isoformat()}"
+    if aware(now) >= deadline:
+        end_unobserved_order(
+            service,
+            session,
+            operation,
+            AgentOperationAdapter.attempt_of(session, operation),
+            session.get(Job, operation.parent_job_id),
+            now,
+            reason=WaitReason.OBSERVATION_UNAVAILABLE,
+            note=note,
+        )
+        return True
+    next_check = min(now + timedelta(seconds=WAIT_STEP), deadline)
+    schedule_wait(
+        operation,
+        next_check,
+        now=now,
+        reason=code,
+        deadline=deadline,
+        detail=detail,
+        blockers=[make_blocker(code, detail, node_ids=[operation.node_id])],
+    )
+    operation.status_reason = _claim_refusal_reason(
+        code.value,
+        detail=detail,
+        node_id=operation.node_id,
+        retry_due_at=next_check.isoformat(),
+        recovery_deadline=deadline.isoformat(),
+    )
+    parent = session.get(Job, operation.parent_job_id)
+    if parent is not None:
+        parent.status_reason = operation.status_reason
     return True

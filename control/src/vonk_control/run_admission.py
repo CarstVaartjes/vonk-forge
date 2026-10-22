@@ -18,6 +18,7 @@ from vonk_agent_protocol import (
     InstallationState,
     InvalidRequestError,
     InvalidRequestReason,
+    ProjectionCode,
     ReservationState,
     ResourceBlockerCode,
     RouteState,
@@ -40,6 +41,7 @@ from .admission_locking import (
     node_admission_key,
 )
 from .categorized_errors import InvalidType, InvalidValue, MissingRecord
+from .gpu_health import gpu_health_reason
 from .install_admission import AdmissionReason
 from .inventory_repository import InventoryRepository
 from .legal_admission import territorial_admission
@@ -378,6 +380,8 @@ RUN_ADMISSION_WAIT_CODES = (
 
 RETRYABLE_PLAN_BLOCKERS = frozenset(
     {
+        ProjectionCode.NODE_GPU_REQUIRES_RESET,
+        ProjectionCode.NODE_GPU_UNAVAILABLE,
         RunAdmissionCode.INVENTORY_MISSING,
         RunAdmissionCode.STALE_INVENTORY,
         RunAdmissionCode.INSUFFICIENT_MEMORY,
@@ -697,6 +701,9 @@ class RunAdmissionService:
             if legal_admission.warning is not None:
                 warnings.append(AdmissionReason(*legal_admission.warning))
             snapshot = snapshots.get(placement.node_id)
+            health_reason = gpu_health_reason(snapshot.gpu_health if snapshot else None)
+            if health_reason is not None:
+                blockers.append(AdmissionReason(*health_reason))
             if (
                 placement.node_id,
                 placement.rank,
@@ -856,8 +863,13 @@ class RunAdmissionService:
                 [capacity],
                 memory_floor_bytes=memory_floor,
             ).nodes[0]
-            free_after = memory_fit.selected_free_after_bytes
-            for reason in memory_fit.reasons:
+            free_after = (
+                memory_fit.selected_free_after_bytes if health_reason is None else None
+            )
+            # A GPU fault can leave discovery without any capacity reading.
+            # Wait for healthy inventory instead of blaming the recipe for
+            # a zero-byte physical pool the driver never measured.
+            for reason in memory_fit.reasons if health_reason is None else ():
                 projected = AdmissionReason(
                     RunAdmissionCode.INSUFFICIENT_MEMORY
                     if reason.code.startswith(ResourceBlockerCode.INSUFFICIENT)

@@ -145,6 +145,7 @@ pub struct Inventory {
     pub disk_available_bytes: u64,
     pub state_database_reserve_held: bool,
     pub gpu_count: u32,
+    pub gpu_health: vonk_agent_protocol::generated::GpuHealth,
     pub gpu_memory_total_bytes: u64,
     pub gpu_memory_free_bytes: u64,
     pub memory_pool: MemoryPool,
@@ -189,6 +190,7 @@ impl Inventory {
             gpu_memory_total_bytes: self.gpu_memory_total_bytes,
             gpu_memory_free_bytes: self.gpu_memory_free_bytes,
             gpu_count: self.gpu_count,
+            gpu_health: Some(self.gpu_health),
             memory_pool: self.memory_pool,
             artifact_store_read_only: self.artifact_store_read_only,
             capabilities: self.capabilities.clone(),
@@ -398,28 +400,40 @@ impl<R: ProcessRunner> InventoryCollector<'_, R> {
             .f_bavail
             .checked_mul(filesystem.f_frsize)
             .ok_or(InventoryError::Parse)?;
-        let gpu = startup_probe(
-            self.runner,
+        let mut gpu_health = crate::gpu_health::observe(self.runner);
+        let gpu = self.runner.run(
             Program::NvidiaSmi,
             &[
                 "--query-gpu=name,memory.total,memory.free,driver_version".to_owned(),
                 "--format=csv,noheader,nounits".to_owned(),
             ],
             Duration::from_secs(10),
-            "NVIDIA GPU discovery",
-        )?;
-        if gpu.stdout.iter().all(u8::is_ascii_whitespace) {
-            return Err(InventoryError::PrerequisiteUnavailable(
-                "NVIDIA GPU discovery",
-            ));
-        }
+        );
+        let parsed = gpu.as_ref().ok().and_then(|output| {
+            if crate::gpu_health::requires_reset(&output.stdout)
+                || crate::gpu_health::requires_reset(&output.stderr)
+            {
+                gpu_health = vonk_agent_protocol::generated::GpuHealth::NeedsReset;
+            }
+            output
+                .success
+                .then(|| {
+                    parse_gpus(&output.stdout, memory_total_bytes, memory_available_bytes).ok()
+                })
+                .flatten()
+        });
         let (
             gpu_count,
             gpu_memory_total_bytes,
             gpu_memory_free_bytes,
             nvidia_driver_version,
             memory_pool,
-        ) = parse_gpus(&gpu.stdout, memory_total_bytes, memory_available_bytes)?;
+        ) = parsed.unwrap_or_else(|| {
+            if gpu_health != vonk_agent_protocol::generated::GpuHealth::NeedsReset {
+                gpu_health = vonk_agent_protocol::generated::GpuHealth::Unavailable;
+            }
+            (0, 0, 0, "not observed".to_owned(), MemoryPool::Separate)
+        });
         let podman = startup_probe(
             self.runner,
             Program::Podman,
@@ -441,21 +455,24 @@ impl<R: ProcessRunner> InventoryCollector<'_, R> {
             Duration::from_secs(10),
             "Docker runtime",
         )?;
-        let cdi = startup_probe(
-            self.runner,
-            Program::NvidiaCtk,
-            &["cdi".to_owned(), "list".to_owned()],
-            Duration::from_secs(10),
-            "NVIDIA CDI device list",
-        )?;
-        let cdi_entries = std::str::from_utf8(&cdi.stdout).map_err(|_| InventoryError::Parse)?;
-        if !cdi_entries
-            .lines()
-            .any(|line| line.trim() == "nvidia.com/gpu=all")
-        {
-            return Err(InventoryError::PrerequisiteUnavailable(
+        if gpu_health == vonk_agent_protocol::generated::GpuHealth::Healthy {
+            let cdi = startup_probe(
+                self.runner,
+                Program::NvidiaCtk,
+                &["cdi".to_owned(), "list".to_owned()],
+                Duration::from_secs(10),
                 "NVIDIA CDI device list",
-            ));
+            )?;
+            let cdi_entries =
+                std::str::from_utf8(&cdi.stdout).map_err(|_| InventoryError::Parse)?;
+            if !cdi_entries
+                .lines()
+                .any(|line| line.trim() == "nvidia.com/gpu=all")
+            {
+                return Err(InventoryError::PrerequisiteUnavailable(
+                    "NVIDIA CDI device list",
+                ));
+            }
         }
         let mut capabilities = vec![
             "recipe.operations.v1".to_owned(),
@@ -486,6 +503,7 @@ impl<R: ProcessRunner> InventoryCollector<'_, R> {
             disk_available_bytes,
             state_database_reserve_held,
             gpu_count,
+            gpu_health,
             gpu_memory_total_bytes,
             gpu_memory_free_bytes,
             memory_pool,
@@ -675,7 +693,9 @@ fn parse_gpus(
         {
             // Numeric GPU-attributed allocation, when available, does not create
             // dedicated VRAM. Host readings own this single physical pool.
-            if (fields[1], fields[2]) != ("[N/A]", "[N/A]") && mib(fields[2])? > mib(fields[1])? {
+            let memory_not_reported =
+                matches!(fields[1], "[N/A]" | "N/A") && matches!(fields[2], "[N/A]" | "N/A");
+            if !memory_not_reported && mib(fields[2])? > mib(fields[1])? {
                 return Err(InventoryError::Parse);
             }
             return Ok((
@@ -807,6 +827,7 @@ mod process_tests {
             gpu_memory_total_bytes: 100,
             gpu_memory_free_bytes: 50,
             gpu_count: 1,
+            gpu_health: Some(vonk_agent_protocol::generated::GpuHealth::Healthy),
             memory_pool: MemoryPool::Shared,
             artifact_store_read_only: false,
             capabilities: vec![],

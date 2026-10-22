@@ -48,6 +48,7 @@ from vonk_agent_protocol.host_helper import (
 )
 from vonk_agent_protocol.http_failure import HttpTransient, TransientReason
 from vonk_agent_protocol.inventory import (
+    GpuHealth,
     HostSettings,
     InventoryRequest,
     NetworkInterface,
@@ -701,6 +702,7 @@ def test_agent_posts_authenticated_runtime_and_fabric_inventory(
         "gpu_memory_total_bytes": 1000,
         "gpu_memory_free_bytes": 800,
         "gpu_count": 1,
+        "gpu_health": GpuHealth.NEEDS_RESET,
         "memory_pool": "separate",
         "artifact_store_read_only": False,
         "capabilities": [
@@ -763,6 +765,7 @@ def test_agent_posts_authenticated_runtime_and_fabric_inventory(
             HostSettings.model_validate_json(canonical_message(row.host_settings))
             == expected.host_settings
         )
+        assert row.gpu_health == expected.gpu_health
         assert row.unused_model_bytes == 123
         assert row.network_interfaces is not None
         assert [

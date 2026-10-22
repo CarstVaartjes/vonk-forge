@@ -29,7 +29,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column
 from vonk_agent_protocol import ModelFileState, machine_check
 from vonk_agent_protocol.gpu_clock import GpuClockObservation
-from vonk_agent_protocol.inventory import MemoryPool
+from vonk_agent_protocol.inventory import GpuHealth, MemoryPool
 
 from ..lifecycle.evidence import Residue
 from ..model_primitives import Base, _lower_hex, _Utf8ByteLength, _uuid_shape
@@ -89,6 +89,7 @@ class NodeInventorySnapshot(Base):
     gpu_memory_total_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
     gpu_memory_free_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
     gpu_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    gpu_health: Mapped[GpuHealth | None] = mapped_column(String(16))
     memory_pool: Mapped[MemoryPool] = mapped_column(String(16), nullable=False)
     fabric_address: Mapped[str | None] = mapped_column(String(45))
     fabric_bandwidth_mbps: Mapped[int | None] = mapped_column(BigInteger)

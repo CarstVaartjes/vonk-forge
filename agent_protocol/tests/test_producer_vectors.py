@@ -58,3 +58,15 @@ def test_an_inspected_exited_workload_observation_is_accepted() -> None:
     assert "fused_moe.json" in run.failure_diagnostics.stderr.text
     facts = {item.name: item.value for item in run.failure_diagnostics.preflight}
     assert facts["exit_cause"] == "python_exception"
+
+
+def test_inventory_health_shared_vectors_survive_ingress() -> None:
+    # Catches dropping health while retaining otherwise valid GB10 inventory.
+    from vonk_agent_protocol.inventory import GpuHealth, InventoryRequest
+
+    for health in GpuHealth:
+        document = _vector("inventory-wifi-link-v1.json")
+        document["gpu_health"] = health
+        accepted = InventoryRequest.model_validate(document)
+        assert accepted.gpu_health == health
+        assert accepted.evidence_warnings == ()

@@ -14,7 +14,7 @@ from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.elements import ColumnElement
 from sqlalchemy.sql.functions import FunctionElement
-from vonk_agent_protocol import AgentOperation, canonical_message
+from vonk_agent_protocol import AgentOperation, WaitReason, canonical_message
 from vonk_agent_protocol.contracts import canonical_payload
 from vonk_agent_protocol.recipe_operations import RecipeStartPayload
 
@@ -301,6 +301,14 @@ def _claim_predicate(now: datetime) -> _ClaimPredicate:
                     _ClaimCondition(
                         "queued-attempt-not-zero",
                         StoredOperation.current_attempt == 0,
+                    ),
+                    _ClaimCondition(
+                        WaitReason.OBSERVATION_UNAVAILABLE.value,
+                        or_(
+                            StoredOperation.recovery_deadline.is_(None),
+                            StoredOperation.next_action_at.is_(None),
+                            StoredOperation.next_action_at <= now,
+                        ),
                     ),
                 ),
             ),

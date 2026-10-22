@@ -1,0 +1,9 @@
+GPU 0000000F:01:00.0
+    Product Name : NVIDIA GB10
+    Fan Speed : ERR!
+    Performance State : GPU requires reset
+    Temperature
+        GPU Current Temp : ERR!
+    Clocks
+        Graphics : N/A
+        SM : N/A

@@ -22,7 +22,7 @@ from vonk_agent_protocol.gpu_clock import (
     GpuClockPolicy,
     GpuClockRange,
 )
-from vonk_agent_protocol.inventory import HostSettings, NetworkInterface
+from vonk_agent_protocol.inventory import GpuHealth, HostSettings, NetworkInterface
 from vonk_agent_protocol.telemetry import GpuUnavailableReason
 from vonk_forge_contracts import RecipeDefinition, document_sha256, read_recipe
 
@@ -361,6 +361,7 @@ class InventoryState(StrictModel):
     gpu_memory_total_bytes: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
     gpu_memory_free_bytes: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
     gpu_count: int = Field(ge=0, le=_MAX_SIGNED_INTEGER)
+    gpu_health: GpuHealth | None = None
     artifact_store_read_only: bool
     capabilities: list[Text64] = Field(max_length=64)
     fabric_address: str | None = Field(default=None, max_length=45)

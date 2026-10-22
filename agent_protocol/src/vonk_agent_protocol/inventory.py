@@ -17,7 +17,19 @@ from .optional_evidence import (
     fail_open_on_optional_evidence,
 )
 from .reason_codes import AgentEvidenceCode
-from .wire_model import WireModel, strict_json_datetime
+from .wire_model import WireEnum, WireModel, strict_json_datetime
+
+
+class GpuHealth(WireEnum):
+    HEALTHY = "healthy"
+    NEEDS_RESET = "needs-reset"
+    UNAVAILABLE = "unavailable"
+
+
+GPU_RESET_RECOVERY = (
+    "Power-cycle: poweroff, unplug power ~30 s, power on; "
+    "a warm reboot is not enough after a GPU firmware update."
+)
 
 Capability = Annotated[str, Field(pattern=r"^[a-z0-9][a-z0-9._-]{0,127}$")]
 MemoryPool = Literal["shared", "separate"]
@@ -157,6 +169,8 @@ class InventoryRequest(OptionalEvidenceModel, WireModel):
     gpu_memory_total_bytes: int = Field(ge=0, le=16 * 1024**4)
     gpu_memory_free_bytes: int = Field(ge=0, le=16 * 1024**4)
     gpu_count: int = Field(ge=0, le=64)
+    # None means no health observation, never inferred from metric support.
+    gpu_health: GpuHealth | None = None
     memory_pool: MemoryPool
     artifact_store_read_only: bool
     capabilities: list[Capability] = Field(max_length=64)

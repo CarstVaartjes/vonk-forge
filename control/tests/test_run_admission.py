@@ -7,7 +7,8 @@ from importlib import resources
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol.inventory import MemoryPool
+from vonk_agent_protocol import ProjectionCode
+from vonk_agent_protocol.inventory import GpuHealth, MemoryPool
 from vonk_control.cluster_mappings import ClusterMappingService
 from vonk_control.inventory_repository import (
     InventoryRepository,
@@ -712,3 +713,80 @@ def test_postgres_competing_admissions_have_one_capacity_winner(
         active = session.query(ResourceReservation).filter_by(state="active").all()
         assert len(active) == 2
         assert len({row.owner_id for row in active}) == 1
+
+
+@pytest.mark.parametrize(
+    "postgres", [False, pytest.param(True, marks=pytest.mark.postgres)]
+)
+@pytest.mark.parametrize("discovery", [True, False])
+@pytest.mark.parametrize(
+    "health,code",
+    [
+        (GpuHealth.NEEDS_RESET, ProjectionCode.NODE_GPU_REQUIRES_RESET),
+        (GpuHealth.UNAVAILABLE, ProjectionCode.NODE_GPU_UNAVAILABLE),
+    ],
+)
+def test_gpu_health_refuses_work_and_fresh_healthy_inventory_recovers(
+    tmp_path, request, postgres, discovery, health, code
+) -> None:
+    # Catches unsupported-metric admission, an invented zero-byte physical
+    # capacity refusal after driver loss, and a sticky manual health flag.
+    from dataclasses import replace
+
+    from vonk_agent_protocol.inventory import GPU_RESET_RECOVERY
+    from vonk_control.fleet_projection import FleetProjection
+
+    engine = request.getfixturevalue("postgres_engine") if postgres else None
+    sessions, now, node, installation = setup(tmp_path, engine=engine)
+    repo = InventoryRepository(sessions)
+    original = repo.latest(node, now=now, maximum_age=300)
+    observation = InventorySnapshotInput(
+        node_id=node,
+        observed_at=now + timedelta(seconds=1),
+        disk_total_bytes=original.disk_total_bytes,
+        disk_free_bytes=original.disk_free_bytes,
+        host_memory_total_bytes=original.host_memory_total_bytes,
+        host_memory_free_bytes=original.host_memory_free_bytes,
+        gpu_memory_total_bytes=original.gpu_memory_total_bytes if discovery else 0,
+        gpu_memory_free_bytes=original.gpu_memory_free_bytes if discovery else 0,
+        gpu_count=original.gpu_count if discovery else 0,
+        memory_pool=original.memory_pool if discovery else "separate",
+        capabilities=original.capabilities,
+        artifact_store_read_only=False,
+        gpu_health=health,
+    )
+    repo.record(observation)
+    service = RunAdmissionService(sessions, inventory_max_age=300, memory_floor_bytes=0)
+    at = now + timedelta(seconds=2)
+    plan = service.plan_run(installation, alias="qwen", now=at)
+    assert not plan.allowed
+    reasons = [reason for rank in plan.nodes for reason in rank.blockers]
+    assert any(reason.code == code for reason in reasons)
+    if health == GpuHealth.NEEDS_RESET:
+        assert any(GPU_RESET_RECOVERY in reason.detail for reason in reasons)
+    with pytest.raises(RunAdmissionBusy) as wait:
+        require_admissible(plan)
+    assert wait.value.code == code
+    fleet = FleetProjection(sessions, clock=lambda: at).read()
+    spark = next(spark for spark in fleet.nodes if spark.id == node)
+    assert spark.inventory is not None and spark.inventory.gpu_health == health
+    assert any(w.code == code for w in spark.warnings)
+    healthy = replace(
+        observation,
+        gpu_health=GpuHealth.HEALTHY,
+        gpu_count=original.gpu_count,
+        memory_pool=original.memory_pool,
+        gpu_memory_total_bytes=original.gpu_memory_total_bytes,
+        gpu_memory_free_bytes=original.gpu_memory_free_bytes,
+    )
+    # Delayed healthy evidence cannot clear a newer fault. The next fresh
+    # healthy observation restores eligibility through the normal store.
+    repo.record(replace(healthy, observed_at=now - timedelta(seconds=1)))
+    assert not service.plan_run(installation, alias="qwen", now=at).allowed
+    repo.record(replace(healthy, observed_at=at))
+    recovered = service.plan_run(installation, alias="qwen", now=at)
+    require_admissible(recovered)
+    assert service.accept_run(recovered, actor="admin", now=at)
+    fresh = FleetProjection(sessions, clock=lambda: at).read()
+    spark = next(spark for spark in fresh.nodes if spark.id == node)
+    assert not any(w.code == code for w in spark.warnings)

@@ -14,6 +14,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import AgentEvidenceCode, canonical_message
 from vonk_agent_protocol.inventory import (
+    GpuHealth,
     HostSettings,
     InventoryRequest,
     MemoryPool,
@@ -45,6 +46,7 @@ class InventorySnapshotInput:
     gpu_count: int
     artifact_store_read_only: bool
     capabilities: tuple[str, ...]
+    gpu_health: GpuHealth | None = field(kw_only=True, default=None)
     memory_pool: MemoryPool = field(kw_only=True)
     fabric_address: str | None = None
     fabric_bandwidth_mbps: int | None = None
@@ -78,6 +80,7 @@ class InventorySnapshotView:
     fabric_bandwidth_mbps: int | None
     nvidia_driver_version: str
     container_runtime_version: str
+    gpu_health: GpuHealth | None = field(kw_only=True, default=None)
     memory_pool: MemoryPool = field(kw_only=True)
     network_interfaces: tuple[NetworkInterface, ...] | None = field(
         kw_only=True, default=None
@@ -175,6 +178,7 @@ class InventoryRepository:
             gpu_memory_total_bytes=value.gpu_memory_total_bytes,
             gpu_memory_free_bytes=value.gpu_memory_free_bytes,
             gpu_count=value.gpu_count,
+            gpu_health=validated.gpu_health,
             memory_pool=validated.memory_pool,
             artifact_store_read_only=value.artifact_store_read_only,
             capabilities=sorted(value.capabilities),
@@ -291,6 +295,7 @@ class InventoryRepository:
                 row.fabric_bandwidth_mbps,
                 row.nvidia_driver_version,
                 row.container_runtime_version,
+                gpu_health=validated.gpu_health,
                 memory_pool=validated.memory_pool,
                 network_interfaces=(
                     None

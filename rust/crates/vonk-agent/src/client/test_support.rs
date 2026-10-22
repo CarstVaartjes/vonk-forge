@@ -53,6 +53,7 @@ pub(super) fn valid_inventory() -> vonk_agent_protocol::InventoryRequest {
         gpu_memory_total_bytes: 100,
         gpu_memory_free_bytes: 50,
         gpu_count: 1,
+        gpu_health: Some(vonk_agent_protocol::generated::GpuHealth::Healthy),
         memory_pool: vonk_agent_protocol::generated::InventoryRequestMemoryPool::Separate,
         artifact_store_read_only: false,
         capabilities: vec!["runtime.oci".to_owned()],
