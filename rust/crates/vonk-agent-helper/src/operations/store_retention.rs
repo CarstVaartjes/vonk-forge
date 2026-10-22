@@ -40,6 +40,9 @@ impl<R: CommandRunner> OperationExecutor<R> {
                 None
             }
         };
+        if let Some(owners) = &owners {
+            self.collect_compile_caches(now, deadline, &owners.mounts);
+        }
         for store @ Store(name, collector, _, root_kind) in STORES {
             if *root_kind != StoreRoot::Helper || Instant::now() >= deadline {
                 continue;

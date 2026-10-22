@@ -14,7 +14,7 @@ use super::{
 const TMPFS_SPEC: &str = "/tmp:rw,nosuid,nodev,mode=1777,size=1073741824";
 /// The runtime cache mount. It nests inside the `/outputs` bind, so the
 /// container runtime leaves its mountpoint in the host output root.
-const RUNTIME_CACHE_TARGET: &str = "/outputs/cache";
+const RUNTIME_CACHE_TARGET: &str = crate::generated::CompileCacheMount::OutputsCache.as_str();
 
 /// The output-root entries that runtime mounts nested in `/outputs` leave
 /// behind. They belong to the runtime, never to a job's outputs.
@@ -103,7 +103,7 @@ pub fn project(
         return Err(CompiledOciError::Invalid("incomplete security mounts"));
     }
 
-    let cache_target = RUNTIME_CACHE_TARGET.to_owned();
+    let cache_target = plan.compile_cache_mount.as_str().to_owned();
     if !target_paths.insert(cache_target.clone()) {
         return Err(CompiledOciError::Invalid(
             "cache mount conflicts with output",

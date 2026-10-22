@@ -205,6 +205,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
         }
         self.reset_runtime_tmp_if_requested(&validated.run_id)?;
         self.prepare_runtime_access(&validated)?;
+        self.bind_compile_cache(&mut validated)?;
         // The signed wire shape includes the executable once after the image
         // as a validation marker; Docker already receives it via --entrypoint.
         let mut compiled = validated.docker_arguments()?;

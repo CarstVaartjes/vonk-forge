@@ -8,6 +8,7 @@ from sqlalchemy import create_engine, delete, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import CompiledExecutionPlan
+from vonk_agent_protocol.compiled_execution_plan import CompileCacheMount
 from vonk_control.cluster_mappings import ClusterMappingService
 from vonk_control.install_admission import (
     InstallAdmissionService,
@@ -244,6 +245,7 @@ def _compiled_plan(
     image_digest = "sha256:" + "1" * 64
     layout_digest = "2" * 64
     payload = {
+        "compile_cache_mount": CompileCacheMount.COMPILE,
         "identity": {
             "recipe_revision_sha256": recipe_digest,
             "model_artifact_set_sha256": "e" * 64,

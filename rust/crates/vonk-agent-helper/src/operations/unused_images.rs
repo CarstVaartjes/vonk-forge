@@ -132,7 +132,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
     /// age grace and all local installation, pull and container checks.
     /// This only narrows autonomous cache collection; it never authorizes a
     /// container removal or bypasses Docker's in-use image check.
-    fn store_retention_request(
+    pub(super) fn store_retention_request(
         &self,
     ) -> Option<vonk_agent_protocol::generated::StoreRetentionRequest> {
         let file = OpenOptions::new()

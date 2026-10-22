@@ -414,6 +414,7 @@ type RuntimeImageInspection = (String, String, String, String, String);
 mod arguments;
 use arguments::*;
 mod commands;
+mod compile_cache;
 pub use commands::CommandFailure;
 mod inspection;
 pub(crate) use inspection::process_exited;
