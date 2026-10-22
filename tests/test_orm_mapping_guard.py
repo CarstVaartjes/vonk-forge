@@ -173,16 +173,6 @@ AUDITED_OUTSIDE_COLUMNS: dict[str, frozenset[str]] = {
             "ca_revoked_at",
         ]
     ),
-    # Misplaced Controller contact observation; proposed owner: agent_nodes.
-    "agent_presence": frozenset(
-        [
-            "node_id",
-            "certificate_serial",
-            "certificate_fingerprint",
-            "management_address",
-            "observed_at",
-        ]
-    ),
     # Certificate rotation intent and issuance workflow.
     "agent_certificate_rotations": frozenset(
         [

@@ -31,8 +31,8 @@ from vonk_control.lifecycle import Reported
 from vonk_control.lifecycle.agent_operation import AgentOperationAdapter
 from vonk_control.memory_reservations import MEMORY_RESERVATION_KINDS
 from vonk_control.models import (
+    AgentNode,
     AgentOperation,
-    AgentPresence,
     Job,
     RecipeRun,
     ResourceReservation,
@@ -197,9 +197,9 @@ class Sparks:
             latest, observed_at=now, disk_free_bytes=free
         )
         with self.world.sessions.begin() as session:
-            presence = session.get(AgentPresence, spark.node_id)
+            presence = session.get(AgentNode, spark.node_id)
             if presence is not None:
-                presence.observed_at = now
+                presence.management_observed_at = now
 
     def _held(self, spark: Spark) -> int:
         """What the runs this Spark serves hold: a share of their declared peak."""

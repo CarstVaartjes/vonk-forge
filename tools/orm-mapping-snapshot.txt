@@ -9,7 +9,6 @@ vonk_control.models.AgentNodeProfile|agent_node_profiles|
 vonk_control.models.AgentNode|agent_nodes|
 vonk_control.models.AgentOperationAttempt|agent_operation_attempts|
 vonk_control.models.AgentOperation|agent_operations|
-vonk_control.models.AgentPresence|agent_presence|
 vonk_control.models.ArtifactDistributionAssignment|artifact_distribution_assignments|
 vonk_control.models.ArtifactJobBlob|artifact_job_blobs|
 vonk_control.models.ArtifactJobFile|artifact_job_files|

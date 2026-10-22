@@ -155,7 +155,6 @@ from ..models import STOPPABLE_RUN_STATES as STOPPABLE_RUN_STATES
 from ..models import AgentNode as AgentNode
 from ..models import AgentOperation as AgentOperation
 from ..models import AgentOperationAttempt as AgentOperationAttempt
-from ..models import AgentPresence as AgentPresence
 from ..models import ArtifactJob as ArtifactJob
 from ..models import CatalogDocumentRevision as CatalogDocumentRevision
 from ..models import ClusterMapping as ClusterMapping
@@ -414,7 +413,6 @@ __all__ = [
     "AgentOperation",
     "AgentOperationAdapter",
     "AgentOperationAttempt",
-    "AgentPresence",
     "ArtifactJob",
     "ArtifactJobAdapter",
     "ArtifactJobResultEvidence",

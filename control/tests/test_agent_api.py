@@ -74,7 +74,6 @@ from vonk_control.models import (
     AgentNode,
     AgentOperation,
     AgentOperationAttempt,
-    AgentPresence,
     Base,
     CatalogDocument,
     CatalogDocumentRevision,
@@ -2022,7 +2021,7 @@ def test_claim_requires_a_trusted_policy_bounded_source(agent_system) -> None:
     )
     assert outside.status_code == 422
     with services.sessions() as session:
-        assert session.get(AgentPresence, NODE_A) is None
+        assert session.get(AgentNode, NODE_A).management_observed_at is None
         assert session.get(AgentNode, NODE_A).last_seen_at is None
 
 
@@ -2033,12 +2032,17 @@ def test_authenticated_claim_persists_certificate_bound_source(agent_system) -> 
 
     assert response.status_code == 204
     with services.sessions() as session:
-        presence = session.get(AgentPresence, NODE_A)
+        presence = session.get(AgentNode, NODE_A)
         assert presence is not None
-        assert presence.certificate_serial == "serial-a"
-        assert presence.certificate_fingerprint == "fingerprint-serial-a"
+        assert presence.contact_certificate_serial == "serial-a"
+        assert (
+            session.get(
+                AgentCertificate, presence.contact_certificate_serial
+            ).fingerprint
+            == "fingerprint-serial-a"
+        )
         assert presence.management_address == "10.0.0.42"
-        assert presence.observed_at.replace(tzinfo=UTC) == clock.now
+        assert presence.management_observed_at.replace(tzinfo=UTC) == clock.now
 
 
 def test_claim_uses_atomic_presence_consumer_not_post_commit(
@@ -2056,7 +2060,7 @@ def test_claim_uses_atomic_presence_consumer_not_post_commit(
 
     assert response.status_code == 204
     with services.sessions() as session:
-        assert session.get(AgentPresence, NODE_A) is not None
+        assert session.get(AgentNode, NODE_A) is not None
 
 
 @pytest.mark.parametrize(
@@ -2078,7 +2082,7 @@ def test_authenticated_claim_drops_an_invalid_reported_hostname(
 
     assert response.status_code == 204
     with services.sessions() as session:
-        assert session.get(AgentPresence, NODE_A) is not None
+        assert session.get(AgentNode, NODE_A) is not None
 
 
 @pytest.mark.parametrize(
@@ -2297,10 +2301,10 @@ def test_authenticated_heartbeat_preserves_claim_advertised_protocol_after_exact
         assert node is not None
         assert node.last_seen_at.replace(tzinfo=UTC) == clock.now
         assert node.protocol_version == 4
-        presence = session.get(AgentPresence, NODE_A)
+        presence = session.get(AgentNode, NODE_A)
         assert presence is not None
         assert presence.management_address == "10.0.0.43"
-        assert presence.observed_at.replace(tzinfo=UTC) == clock.now
+        assert presence.management_observed_at.replace(tzinfo=UTC) == clock.now
 
 
 def test_authenticated_result_preserves_claim_advertised_protocol_after_exact_fence_validation(
@@ -2350,10 +2354,10 @@ def test_authenticated_result_preserves_claim_advertised_protocol_after_exact_fe
         assert node is not None
         assert node.last_seen_at.replace(tzinfo=UTC) == clock.now
         assert node.protocol_version == 4
-        presence = session.get(AgentPresence, NODE_A)
+        presence = session.get(AgentNode, NODE_A)
         assert presence is not None
         assert presence.management_address == "10.0.0.44"
-        assert presence.observed_at.replace(tzinfo=UTC) == clock.now
+        assert presence.management_observed_at.replace(tzinfo=UTC) == clock.now
 
 
 def test_failed_stop_result_never_writes_health_observation(agent_system) -> None:
@@ -2409,10 +2413,10 @@ def test_untrusted_and_stale_requests_do_not_record_agent_contact(agent_system) 
     client.post("/agent/claim", headers=agent_headers(NODE_A, "serial-a")).json()
     with services.sessions.begin() as session:
         node = session.get(AgentNode, NODE_A)
-        presence = session.get(AgentPresence, NODE_A)
+        presence = session.get(AgentNode, NODE_A)
         assert node is not None
         assert presence is not None
-        observed_at = presence.observed_at.replace(tzinfo=UTC)
+        observed_at = presence.management_observed_at.replace(tzinfo=UTC)
         node.last_seen_at = None
         node.protocol_version = None
     clock.now += timedelta(seconds=5)
@@ -2437,10 +2441,10 @@ def test_untrusted_and_stale_requests_do_not_record_agent_contact(agent_system) 
         assert node is not None
         assert node.last_seen_at is None
         assert node.protocol_version is None
-        presence = session.get(AgentPresence, NODE_A)
+        presence = session.get(AgentNode, NODE_A)
         assert presence is not None
         assert presence.management_address == "10.0.0.42"
-        assert presence.observed_at.replace(tzinfo=UTC) == observed_at
+        assert presence.management_observed_at.replace(tzinfo=UTC) == observed_at
 
 
 @pytest.mark.parametrize("version", (True, 3, 5))

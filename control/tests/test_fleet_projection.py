@@ -33,7 +33,6 @@ from vonk_control.models import (
     AgentNodeProfile,
     AgentOperation,
     AgentOperationAttempt,
-    AgentPresence,
     Base,
     CatalogDocument,
     CatalogDocumentRevision,
@@ -363,13 +362,13 @@ def test_read_uses_postgresql_registration_latest_rows_and_a_bounded_query_set()
                 _certificate(EXTRA_NODE, "bounded-external"),
             ]
         )
-        session.add(
-            AgentPresence(
-                node_id=NODE_A,
-                certificate_serial="bounded-a",
-                certificate_fingerprint="fingerprint-bounded-a",
+        session.execute(
+            update(AgentNode)
+            .where(AgentNode.node_id == NODE_A)
+            .values(
+                contact_certificate_serial="bounded-a",
                 management_address="192.168.1.211",
-                observed_at=NOW,
+                management_observed_at=NOW,
             )
         )
         session.add_all(
@@ -583,13 +582,13 @@ def test_display_name_update_preserves_identity_and_emits_projection_refresh() -
             )
         )
         session.add(_certificate(NODE_A, "profile-a"))
-        session.add(
-            AgentPresence(
-                node_id=NODE_A,
-                certificate_serial="profile-a",
-                certificate_fingerprint="fingerprint-profile-a",
+        session.execute(
+            update(AgentNode)
+            .where(AgentNode.node_id == NODE_A)
+            .values(
+                contact_certificate_serial="profile-a",
                 management_address="192.168.1.211",
-                observed_at=NOW,
+                management_observed_at=NOW,
             )
         )
 

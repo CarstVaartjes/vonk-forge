@@ -21,7 +21,7 @@ from alembic.autogenerate import compare_metadata
 from alembic.config import Config
 from alembic.migration import MigrationContext
 from cryptography.hazmat.primitives.asymmetric import ed25519
-from sqlalchemy import create_engine, event, inspect, select, text
+from sqlalchemy import create_engine, event, inspect, select, text, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
@@ -82,7 +82,6 @@ from vonk_control.models import (
     AgentNode,
     AgentOperation,
     AgentOperationAttempt,
-    AgentPresence,
     Base,
     CatalogDocument,
     CatalogDocumentRevision,
@@ -460,13 +459,13 @@ def setup_services(
                     not_after=datetime(2027, 8, 7, 12, tzinfo=UTC),
                 )
             )
-            session.add(
-                AgentPresence(
-                    node_id=node_id,
-                    certificate_serial=serial,
-                    certificate_fingerprint=f"fingerprint-{index}",
+            session.execute(
+                update(AgentNode)
+                .where(AgentNode.node_id == node_id)
+                .values(
+                    contact_certificate_serial=serial,
                     management_address=f"192.168.1.{211 + index}",
-                    observed_at=NOW,
+                    management_observed_at=NOW,
                 )
             )
     inventory = InventoryRepository(sessions, clock=lambda: NOW)
@@ -5491,7 +5490,7 @@ def test_distributed_rank_loss_waits_for_fresh_presence_when_evidence_is_missing
     failure_observed_at = NOW + timedelta(seconds=1)
     record_exact_empty_snapshot(sessions, nodes[1], failure_observed_at)
     with sessions.begin() as session:
-        for presence in session.scalars(select(AgentPresence)):
+        for presence in session.scalars(select(AgentNode)):
             session.delete(presence)
     recovery = DistributedRecoveryCoordinator(
         sessions, routes=routes, agent_jobs=queue, clock=lambda: NOW

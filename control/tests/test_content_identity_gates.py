@@ -16,9 +16,9 @@ from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, update
 from vonk_control.models import (
-    AgentPresence,
+    AgentNode,
     InstallationNode,
     NodeInventorySnapshot,
     RecipeBuild,
@@ -227,13 +227,13 @@ def test_the_same_image_loads_through_every_gate_whatever_its_provenance(
             snapshot.host_memory_free_bytes = 10**12
             snapshot.gpu_memory_total_bytes = 10**12
             snapshot.gpu_memory_free_bytes = 10**12
-        session.add(
-            AgentPresence(
-                node_id=plan.nodes[0].node_id,
-                certificate_serial="revision-reuse-preflight",
-                certificate_fingerprint="revision-reuse-preflight",
+        session.execute(
+            update(AgentNode)
+            .where(AgentNode.node_id == plan.nodes[0].node_id)
+            .values(
+                contact_certificate_serial="revision-reuse-preflight",
                 management_address="192.168.1.211",
-                observed_at=now,
+                management_observed_at=now,
             )
         )
     run_plan = service.preview_run(installed.id, "qwen")

@@ -20,7 +20,6 @@ from ..models import (
     AgentCertificate,
     AgentNode,
     AgentNodeProfile,
-    AgentPresence,
     NodeInventorySnapshot,
 )
 from ..nas_route_notice import nas_route_notice
@@ -55,7 +54,6 @@ def _node(
     self: FleetProjection,
     node_id: str,
     profile: AgentNodeProfile | None,
-    presence: AgentPresence | None,
     *,
     current: datetime,
     agent: AgentNode,
@@ -311,7 +309,7 @@ def _node(
         id=node_id,
         display_name=node_id if profile is None else profile.display_name,
         hostname="" if profile is None else profile.hostname,
-        ip_address=(None if presence is None else presence.management_address),
+        ip_address=agent.management_address,
         lifecycle="managed" if profile is None else profile.lifecycle,
         labels=labels,
         projection_issues=projection_issues or None,

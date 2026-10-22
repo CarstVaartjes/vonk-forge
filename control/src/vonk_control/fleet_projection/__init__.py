@@ -97,7 +97,6 @@ from .service import UTC as UTC
 from .service import AgentCertificate as AgentCertificate
 from .service import AgentNode as AgentNode
 from .service import AgentNodeProfile as AgentNodeProfile
-from .service import AgentPresence as AgentPresence
 from .service import Callable as Callable
 from .service import CatalogDocument as CatalogDocument
 from .service import CatalogDocumentRevision as CatalogDocumentRevision

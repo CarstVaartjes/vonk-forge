@@ -130,6 +130,10 @@ def reconcile_schema(connection: Connection) -> None:
                     error,
                 )
 
+    from .node_facts import move_contact_facts
+
+    move_contact_facts(connection)
+
     # Change types/defaults/nullability before constraint installation. A
     # PostgreSQL cast failure is scoped to that column and does not poison startup.
     for table_name, table in Base.metadata.tables.items():

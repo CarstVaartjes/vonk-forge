@@ -11,7 +11,7 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_control.cluster_mappings import ClusterMappingService
 from vonk_control.fleet_profile_contract import FleetProfileApplicationProgress
@@ -22,7 +22,6 @@ from vonk_control.inventory_repository import (
 from vonk_control.models import (
     AgentCertificate,
     AgentNode,
-    AgentPresence,
     CatalogDocumentRevision,
     FleetProfileApplication,
     NodeArtifact,
@@ -60,13 +59,13 @@ def _add_disjoint_profile_node(
             )
         )
         session.flush()
-        session.add(
-            AgentPresence(
-                node_id=node_id,
-                certificate_serial=certificate_serial,
-                certificate_fingerprint=f"fingerprint-{node_id[-1]}",
+        session.execute(
+            update(AgentNode)
+            .where(AgentNode.node_id == node_id)
+            .values(
+                contact_certificate_serial=certificate_serial,
                 management_address="192.168.1.212",
-                observed_at=NOW,
+                management_observed_at=NOW,
             )
         )
         artifacts = tuple(

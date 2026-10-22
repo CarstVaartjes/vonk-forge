@@ -8,7 +8,7 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, update
 from vonk_agent_protocol import LifecycleState, OperationProgress, canonical_message
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.execution_plan_service import (
@@ -34,7 +34,6 @@ from vonk_control.models import (
     AgentNode,
     AgentOperation,
     AgentOperationAttempt,
-    AgentPresence,
     CatalogDocumentRevision,
     FleetProfileApplication,
     Job,
@@ -547,13 +546,13 @@ def test_disjoint_child_samples_remain_distinct_after_restart(
                 not_after=NOW + timedelta(days=1),
             )
         )
-        session.add(
-            AgentPresence(
-                node_id=second,
-                certificate_serial="serial-b",
-                certificate_fingerprint="fingerprint-b",
+        session.execute(
+            update(AgentNode)
+            .where(AgentNode.node_id == second)
+            .values(
+                contact_certificate_serial="serial-b",
                 management_address="192.168.1.212",
-                observed_at=NOW,
+                management_observed_at=NOW,
             )
         )
         revision = session.scalar(

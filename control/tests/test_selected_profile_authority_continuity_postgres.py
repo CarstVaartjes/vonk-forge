@@ -6,7 +6,7 @@ from datetime import timedelta
 from types import SimpleNamespace
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, update
 from vonk_agent_protocol import (
     AgentResult,
     AgentResultState,
@@ -37,7 +37,6 @@ from vonk_control.models import (
     AgentNode,
     AgentOperation,
     AgentOperationAttempt,
-    AgentPresence,
     CatalogDocumentRevision,
     FleetProfileApplication,
     FleetProfileSelection,
@@ -184,13 +183,13 @@ def test_serving_selection_completes_stop_and_cleanup_after_author_loses_authori
                 not_after=NOW + timedelta(days=1),
             )
         )
-        session.add(
-            AgentPresence(
-                node_id=node_b,
-                certificate_serial="serial-b",
-                certificate_fingerprint="fingerprint-b",
+        session.execute(
+            update(AgentNode)
+            .where(AgentNode.node_id == node_b)
+            .values(
+                contact_certificate_serial="serial-b",
                 management_address="192.168.1.212",
-                observed_at=NOW,
+                management_observed_at=NOW,
             )
         )
         revision = session.scalar(
