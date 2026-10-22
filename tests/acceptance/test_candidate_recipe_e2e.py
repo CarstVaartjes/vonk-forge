@@ -247,6 +247,8 @@ def test_publication_fetch_does_not_forward_controller_authorization() -> None:
     assert requests[1].headers["authorization"] == "Bearer controller-token"
 
 
+# The real producer regenerates the complete catalog before byte comparison.
+@pytest.mark.slow(60)
 def test_recipe_producer_output_is_fresh_before_controller_sync(tmp_path: Path) -> None:
     index, entry, package_root = _package_inputs()
     library_root = _path("VONK_ACCEPTANCE_LIBRARY_ROOT", "/opt/vonk-forge-recipes")
