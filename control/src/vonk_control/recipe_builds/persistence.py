@@ -23,6 +23,7 @@ from ..admission_locking import (
     lock_admission_rows,
     node_admission_key,
 )
+from ..catalog_revision_contract import read_recipe_projection
 from ..disk_reservations import outstanding_disk_reservation_bytes
 from ..models import (
     AgentNode,
@@ -118,6 +119,36 @@ def persist_plan_in_session(
                 "builder runtime identity changed",
                 reason=WaitReason.SCOPE_CHANGED,
             )
+    authority_id = plan.recipe_revision_id
+    # A publication can replace source while keeping the recipe JSON unchanged.
+    # Bind acceptance to the reviewed context, under the same revision lock the
+    # importer uses; a conflict re-plans before any build row or effect is made.
+    locked = lock_admission_rows(
+        session,
+        (
+            AdmissionRowLock(
+                "build-recipe-revision",
+                CatalogDocumentRevision,
+                select(CatalogDocumentRevision).where(
+                    CatalogDocumentRevision.id == authority_id
+                ),
+            ),
+        ),
+    )
+    revision = next(iter(locked["build-recipe-revision"]), None)
+    source_digest = (
+        read_recipe_projection(revision).source_bundle_sha256 if revision else None
+    )
+    if (
+        revision is None
+        or revision.content_digest != plan.recipe_content_sha256
+        or source_digest != plan.source_bundle_sha256
+    ):
+        raise RecipeBuildUnknown(
+            RecipeBuildCode.DEPENDENCIES_STALE,
+            "recipe build source changed; prepare a fresh plan",
+            reason=WaitReason.SCOPE_CHANGED,
+        )
     existing = session.scalar(
         select(RecipeBuild).where(
             RecipeBuild.recipe_revision_id == plan.recipe_revision_id,
@@ -363,11 +394,15 @@ def _reserve_in_session(
     node = next(iter(locked["build-builder-node"]), None)
     revision = next(iter(locked["build-recipe-revision"]), None)
     build = next(iter(locked["build-recipe-build"]), None)
+    source_digest = (
+        read_recipe_projection(revision).source_bundle_sha256 if revision else None
+    )
     if (
         revision is None
         or revision.kind != "recipe"
         or revision.state != "active"
         or revision.content_digest != plan.recipe_content_sha256
+        or source_digest != plan.source_bundle_sha256
     ):
         raise RecipeBuildUnknown(
             RecipeBuildCode.DEPENDENCIES_STALE, "exact recipe dependencies changed"
