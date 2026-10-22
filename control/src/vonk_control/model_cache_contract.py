@@ -194,6 +194,26 @@ class CacheManifest(StrippedStrictModel):
     verified_models: list[ModelReference] = Field(default_factory=list)
 
 
+class ModelCacheObservedObject(StrippedStrictModel):
+    expected_bytes: int = Field(ge=0)
+    available: bool
+    baseline_bytes: int = Field(ge=0)
+    observed_at: AwareDatetime
+
+
+class ModelCacheStorageObservation(StrippedStrictModel):
+    """Resumable, disposable projection of ingress receipts and file metadata."""
+
+    schema_version: Literal[2]
+    manifest: CacheManifest
+    objects: dict[Digest, ModelCacheObservedObject] = Field(default_factory=dict)
+    started_at: AwareDatetime
+    completed_at: AwareDatetime | None = None
+    available_bytes: int | None = Field(default=None, ge=0)
+    next_check_at: AwareDatetime
+    detail: str | None = None
+
+
 class ModelCacheObjectReceipt(StrippedStrictModel):
     """Managed-storage ownership record for one verified cache object.
 

@@ -118,7 +118,9 @@ def profile_read[**P, T](function: Callable[P, T]) -> Callable[P, T]:
     return wrapped
 
 
-def observe_storage[**P, T](function: Callable[P, T]) -> Callable[P, T]:
+def observe_storage[**P, T](
+    function: Callable[P, T], *, retain_completed: bool = True
+) -> Callable[P, T]:
     """Observe a hashable immutable identity once; never share SQL sessions."""
 
     @wraps(function)
@@ -135,12 +137,24 @@ def observe_storage[**P, T](function: Callable[P, T]) -> Callable[P, T]:
                 _WORKER.reset(token)
 
         key = (function, *args, *sorted(kwargs.items()))
+
+        def completed(future: Future[T]) -> None:
+            if retain_completed:
+                _finished(key, future)
+            else:
+                # Composite projections can contain unknown choices. Keep their
+                # stable in-flight identity, but let the next read re-project
+                # newly completed durable observations immediately.
+                with _LOCK:
+                    if _IN_FLIGHT.get(key) is future:
+                        _IN_FLIGHT.pop(key)
+
         inline = False
         with read.lock, _LOCK:
             future = read.results.get(key)
             if future is None:
                 future = _IN_FLIGHT.get(key)
-                recent = _RECENT.get(key)
+                recent = _RECENT.get(key) if retain_completed else None
                 if (
                     future is None
                     and recent is not None
@@ -148,7 +162,7 @@ def observe_storage[**P, T](function: Callable[P, T]) -> Callable[P, T]:
                 ):
                     future = recent[0]
                 if future is None:
-                    if time.monotonic() >= read.deadline:
+                    if not _WORKER.get() and time.monotonic() >= read.deadline:
                         raise _pending()
                     if _WORKER.get():
                         # A nested storage read executes in its parent's slot;
@@ -168,19 +182,21 @@ def observe_storage[**P, T](function: Callable[P, T]) -> Callable[P, T]:
             except Exception as error:  # noqa: BLE001 -- preserve the original typed cause
                 future.set_exception(error)
             finally:
-                _finished(key, future)
+                completed(future)
         else:
-
-            def finished(_future: Future[T]) -> None:
-                _finished(key, _future)
-
-            future.add_done_callback(finished)
+            future.add_done_callback(completed)
         try:
             return future.result(timeout=max(0.0, read.deadline - time.monotonic()))
         except TimeoutError:
             raise _pending() from None
 
     return wrapped
+
+
+def remaining_storage_read_seconds() -> float:
+    """A cold reader may join collection, without extending its request budget."""
+    read = _READ.get()
+    return 0.0 if read is None else max(0.0, read.deadline - time.monotonic())
 
 
 def observing_profile() -> bool:

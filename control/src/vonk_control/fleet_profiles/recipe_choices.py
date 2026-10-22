@@ -291,7 +291,9 @@ class FleetProfileService:
         self, session: Session, choices: Sequence[FleetProfileAssignmentInput]
     ) -> dict[
         tuple[str, str | None],
-        tuple[CatalogDocument, CatalogDocumentRevision, CacheResolution | None]
+        tuple[
+            CatalogDocument, CatalogDocumentRevision, CacheResolution | Residue | None
+        ]
         | Residue,
     ]:
         """Select exact heads locally, then observe all distinct choices in one slot.
@@ -303,7 +305,11 @@ class FleetProfileService:
         self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
         resolved: dict[
             tuple[str, str | None],
-            tuple[CatalogDocument, CatalogDocumentRevision, CacheResolution | None]
+            tuple[
+                CatalogDocument,
+                CatalogDocumentRevision,
+                CacheResolution | Residue | None,
+            ]
             | Residue,
         ] = {}
         identities: list[tuple[str, str | None, str]] = []
@@ -326,8 +332,7 @@ class FleetProfileService:
             # Batch verdicts belong to this read: a completed unknown must not
             # hide a receipt that recovers before the next read. Individual
             # content probes still share their normal in-flight/recent results.
-            probe = partial(self._resolve_caches, tuple(identities))
-            caches = observe_storage(probe)()
+            caches = self._resolve_caches(tuple(identities))
         except (OSError, RuntimeError, TypeError, ValueError) as error:
             # A pending batch supplies no evidence; a later read joins/retries
             # it through the normal observation path, under the same deadline.
@@ -344,13 +349,14 @@ class FleetProfileService:
             resolved[key] = (head[0], head[1], cache)
         return resolved
 
+    @partial(observe_storage, retain_completed=False)
     def _resolve_caches(
         self, identities: tuple[tuple[str, str | None, str], ...]
-    ) -> tuple[CacheResolution | None, ...]:
+    ) -> tuple[CacheResolution | Residue, ...]:
         """Keep a failed or mismatched resolver scoped to its own exact choice."""
         self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
         assert self._cache_resolver is not None
-        caches: list[CacheResolution | None] = []
+        caches: list[CacheResolution | Residue] = []
         for document_id, variant, revision_id in identities:
             try:
                 candidate = observe_storage(self._cache_resolver)(
@@ -359,22 +365,24 @@ class FleetProfileService:
                     exact_revision_id=revision_id,
                 )
             except (OSError, RuntimeError, TypeError, ValueError) as error:
-                retire_as_unknown(
-                    "profile-cache-resolution",
-                    document_id,
-                    BookkeepingReason.EVIDENCE_UNAVAILABLE,
-                    f"{type(error).__name__}: {error}",
+                caches.append(
+                    retire_as_unknown(
+                        "profile-cache-resolution",
+                        document_id,
+                        BookkeepingReason.EVIDENCE_UNAVAILABLE,
+                        f"{type(error).__name__}: {error}",
+                    )
                 )
-                caches.append(None)
                 continue
             if not cache_resolution_answers_revision(candidate, revision_id):
-                retire_as_unknown(
-                    "profile-cache-resolution",
-                    document_id,
-                    BookkeepingReason.EVIDENCE_MISMATCH,
-                    "the cache resolver answered for another recipe revision",
+                caches.append(
+                    retire_as_unknown(
+                        "profile-cache-resolution",
+                        document_id,
+                        BookkeepingReason.EVIDENCE_MISMATCH,
+                        "the cache resolver answered for another recipe revision",
+                    )
                 )
-                caches.append(None)
                 continue
             caches.append(candidate)
         return tuple(caches)
