@@ -8,6 +8,7 @@ from collections.abc import Sequence
 from datetime import UTC, timedelta
 from typing import TYPE_CHECKING
 
+from sqlalchemy import update
 from vonk_agent_protocol import (
     InvalidRequestReason,
     LifecycleState,
@@ -29,6 +30,7 @@ from ..job_documents import (
 )
 from ..models import (
     Job,
+    RecipeBuild,
 )
 from ..operation_blockers import (
     OperationBlocker,
@@ -220,6 +222,28 @@ def _persist_receipt(
             (ArtifactIdentity("runtime-image", receipt.oci_archive_sha256),),
             now=self._clock(),
         )
+        # Publication already verified these exact bytes. Repair the disposable
+        # build index before reporting preparation complete, so a lost size
+        # update cannot make admission replay successful preparation forever.
+        # A failed refresh may retain this verified image; repair its index,
+        # while the failed Job keeps its own terminal outcome.
+        if receipt.build_input_sha256 is not None:
+            session.execute(
+                update(RecipeBuild)
+                .where(
+                    RecipeBuild.state.in_(
+                        (LifecycleState.SUCCEEDED, LifecycleState.FAILED)
+                    ),
+                    RecipeBuild.build_input_sha256 == receipt.build_input_sha256,
+                    RecipeBuild.oci_layout_sha256 == receipt.oci_archive_sha256,
+                )
+                .values(
+                    state=LifecycleState.SUCCEEDED,
+                    image_digest=receipt.image_digest,
+                    image_bytes=receipt.image_bytes,
+                    error=None,
+                )
+            )
         operation.payload = serialize_json_value(
             operation_payload.model_copy(
                 update={"image_result": receipt, "image_reference_intent": None}

@@ -353,17 +353,9 @@ def _resolve_once(
     receipt_pending = False
     stale_receipt = False
     for candidate in candidates:
-        # The file on disk, not the SQL row, decides availability. A
-        # present archive whose verification receipt is absent or
-        # incomplete is a metadata gap that preparation repairs by
-        # re-verifying the bytes; only missing bytes are cache loss that
-        # forces a rebuild. Trusting the SQL row here would make the row a
-        # second availability authority.
-        if not self._stored_archive_present(
-            candidate.oci_layout_sha256, candidate.image_bytes
-        ):
-            stale_receipt = True
-            continue
+        # A verified storage receipt can repair stale SQL size bookkeeping.
+        # Look it up by exact executable inputs and archive identity before
+        # asking whether the SQL size describes the current stored bytes.
         receipt = None
         if self._prepared_builds is not None:
             receipt = self._prepared_builds(
@@ -372,6 +364,12 @@ def _resolve_once(
                 expected_runtime_interface=_BUILD_RUNTIME_INTERFACE,
                 expected_archive_sha256=candidate.oci_layout_sha256,
             )
+        if not self._stored_archive_present(
+            candidate.oci_layout_sha256,
+            receipt.image_bytes if receipt is not None else candidate.image_bytes,
+        ):
+            stale_receipt = True
+            continue
         cached = candidate
         prepared = receipt
         receipt_pending = receipt is None

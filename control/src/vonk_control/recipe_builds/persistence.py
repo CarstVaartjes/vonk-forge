@@ -127,8 +127,7 @@ def persist_plan_in_session(
     )
     if (
         existing is not None
-        and existing.state == "succeeded"
-        and _valid_succeeded_receipt(existing)
+        and existing.state == LifecycleState.SUCCEEDED.value
         and not self._succeeded_build_available(existing)
     ):
         _reopen_build_attempt(existing, now=now)
