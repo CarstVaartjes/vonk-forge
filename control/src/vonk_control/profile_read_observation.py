@@ -193,6 +193,12 @@ def observe_storage[**P, T](
     return wrapped
 
 
+def remaining_storage_read_seconds() -> float:
+    """A cold reader may join collection, without extending its request budget."""
+    read = _READ.get()
+    return 0.0 if read is None else max(0.0, read.deadline - time.monotonic())
+
+
 def observing_profile() -> bool:
     return _READ.get() is not None
 

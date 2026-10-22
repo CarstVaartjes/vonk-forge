@@ -557,3 +557,76 @@ def test_capacity_observation_recovers_after_all_members_are_checkpointed(
     cache._storage_observer.schedule(manifest)
     _finish(cache, manifest)
     assert cache._storage_observer.read(manifest).completed_at is not None
+
+
+def test_cold_api_preparation_collects_worker_checkpoint_on_first_review(
+    observed_cache, monkeypatch
+):
+    """Catches a prepared model's first profile review being falsely refused."""
+    cache, sessions, manifest, now = observed_cache
+    cache._storage_observer.schedule(manifest)
+    _finish(cache, manifest)
+    api = ModelCacheService(
+        sessions,
+        cache.root,
+        reserve_bytes=0,
+        fixture_sources=True,
+        clock=lambda: now[0],
+    )
+
+    def must_collect_published_facts(*_args):
+        pytest.fail(
+            "cold API reader rescanned a prepared model instead of collecting it"
+        )
+
+    monkeypatch.setattr(api, "_stored_object", must_collect_published_facts)
+    try:
+        inspection = _inspect(api, sessions=sessions, manifest=manifest)
+        assert inspection.artifact_set_sha256 == manifest.digest
+        assert inspection.missing_nas_bytes == 0
+        assert not inspection.blockers
+    finally:
+        api.close()
+
+
+def test_cold_checkpoint_collection_outlives_a_timed_out_reader(
+    observed_cache, monkeypatch
+):
+    """Catches an unbounded cold read or restarting its collection on every retry."""
+    cache, sessions, manifest, now = observed_cache
+    cache._storage_observer.schedule(manifest)
+    _finish(cache, manifest)
+    api = ModelCacheService(
+        sessions,
+        cache.root,
+        reserve_bytes=0,
+        fixture_sources=True,
+        clock=lambda: now[0],
+    )
+    entered, release = Event(), Event()
+    calls = []
+    original = api._storage_observer._read
+
+    def slow(manifest):
+        calls.append(manifest.digest)
+        entered.set()
+        assert release.wait(30)
+        return original(manifest)
+
+    monkeypatch.setattr(api._storage_observer, "_read", slow)
+    monkeypatch.setattr(profile_read_observation, "PROFILE_READ_STORAGE_SECONDS", 0.02)
+    api._storage_observer.schedule(manifest)
+    try:
+        assert entered.wait(30)
+        with pytest.raises(BookkeepingUnknown):
+            profile_read(api._storage_observer.read)(manifest)
+        assert not release.is_set()
+        release.set()
+        _finish(api, manifest)
+        assert (
+            profile_read(api._storage_observer.read)(manifest).completed_at is not None
+        )
+        assert calls == [manifest.digest]
+    finally:
+        release.set()
+        api.close()

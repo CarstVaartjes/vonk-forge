@@ -26,6 +26,7 @@ from ..model_cache_contract import (
     ModelCacheStorageObservation,
 )
 from ..models import ModelCacheSet
+from ..profile_read_observation import remaining_storage_read_seconds
 from .artifacts import ArtifactSetManifest, _unique_artifacts
 from .constants import _LOGGER, _MAX_MANIFEST_BYTES, SCHEMA_VERSION
 from .errors import ModelCacheError
@@ -47,6 +48,7 @@ class StorageObserver:
         )
         self._lock = threading.Lock()
         self._pending: dict[str, Future[None]] = {}
+        self._collected: dict[str, threading.Event] = {}
         self._snapshots: dict[str, ModelCacheStorageObservation] = {}
         self._discovery: Future[None] | None = None
         self._next_discovery: datetime | None = None
@@ -114,6 +116,9 @@ class StorageObserver:
     ) -> None:
         with self._lock:
             self._snapshots[manifest.digest] = value.model_copy(deep=True)
+            collected = self._collected.get(manifest.digest)
+            if collected is not None:
+                collected.set()
 
     def read(self, manifest: ArtifactSetManifest) -> ModelCacheStorageObservation:
         """Requests use memory; even checkpoint reads on slow NAS run in the observer."""
@@ -121,7 +126,14 @@ class StorageObserver:
             value = self._snapshots.get(manifest.digest)
         now = self._cache._clock()
         if value is None or now >= value.next_check_at:
-            self.schedule(manifest)
+            collected = self.schedule(manifest)
+            if value is None and collected is not None:
+                # Collect an already published checkpoint on the first API
+                # read. This joins only the first publication, never the scan.
+                # A timed-out collection continues in the same background task.
+                collected.wait(remaining_storage_read_seconds())
+                with self._lock:
+                    value = self._snapshots.get(manifest.digest)
         # Age starts background refresh; it does not erase a measured fact.
         # Retain completed members while refreshing, so any polling interval
         # can collect the result instead of repeatedly landing in an expiry gap.
@@ -164,18 +176,31 @@ class StorageObserver:
             reason=WaitReason.OBSERVATION_UNAVAILABLE,
         )
 
-    def schedule(self, manifest: ArtifactSetManifest) -> None:
+    def schedule(self, manifest: ArtifactSetManifest) -> threading.Event | None:
         with self._lock:
             self._pending = {
                 key: task for key, task in self._pending.items() if not task.done()
+            }
+            self._collected = {
+                key: value
+                for key, value in self._collected.items()
+                if key in self._pending
             }
             if (
                 manifest.digest not in self._pending
                 and not self._cache._closed.is_set()
             ):
-                self._pending[manifest.digest] = self._pool.submit(
-                    self._observe, manifest
-                )
+                collected = threading.Event()
+                self._collected[manifest.digest] = collected
+
+                def observe() -> None:
+                    try:
+                        self._observe(manifest)
+                    finally:
+                        collected.set()
+
+                self._pending[manifest.digest] = self._pool.submit(observe)
+            return self._collected.get(manifest.digest)
 
     def tick(self) -> None:
         """Discover sets without blocking the Controller loop or request workers."""
