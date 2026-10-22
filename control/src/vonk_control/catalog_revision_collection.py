@@ -74,6 +74,7 @@ from vonk_agent_protocol import (
     canonical_message,
     stored_words,
 )
+from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
 
 from . import job_states
 from .agent_jobs import release_owned_reservations_in_session
@@ -541,7 +542,7 @@ class CatalogRevisionCollector:
     def _require_no_remaining_reference(session: Session, revision: _Candidate) -> None:
         """The database's own foreign keys, checked first-hand before the delete."""
 
-        if revision.kind == "model":
+        if revision.kind == RunSwitchReasonScopeName.MODEL:
             for value in session.scalars(
                 select(ModelCacheSet.manifest).execution_options(yield_per=_SCAN_BATCH)
             ):

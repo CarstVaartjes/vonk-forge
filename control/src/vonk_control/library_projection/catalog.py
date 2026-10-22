@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, cast
 
 from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import defer
+from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition
 
 from ..catalog_queries import active_head_revision
@@ -74,7 +75,9 @@ def _model_projection(
     storage: Mapping[str, ModelCacheUsage] | None = None,
 ) -> LibraryModelProjection:
     usage = storage.get(revision.content_digest) if storage is not None else None
-    local = self._local(revision.content_digest, kind="model", snapshot=snapshot)
+    local = self._local(
+        revision.content_digest, kind=RunSwitchReasonScopeName.MODEL, snapshot=snapshot
+    )
     if usage is not None:
         if usage.cached:
             local = local.model_copy(

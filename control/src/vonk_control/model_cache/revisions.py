@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, cast
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, defer
 from vonk_agent_protocol import LifecycleState
+from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
 
 from ..admission_locking import AdmissionLockBusy, AdmissionRowLock, lock_admission_rows
 from ..artifact_lifecycle import ArtifactReferenceUnsettled, ArtifactReferenceUnverified
@@ -58,7 +59,7 @@ class RevisionsMixin:
                     defer(CatalogDocumentRevision.projected),
                 )
                 .where(
-                    CatalogDocumentRevision.kind == "model",
+                    CatalogDocumentRevision.kind == RunSwitchReasonScopeName.MODEL,
                 )
                 .order_by(
                     CatalogDocumentRevision.revision_number.desc(),
@@ -144,7 +145,7 @@ class RevisionsMixin:
         for revision in session.scalars(
             select(CatalogDocumentRevision)
             .where(
-                CatalogDocumentRevision.kind == "model",
+                CatalogDocumentRevision.kind == RunSwitchReasonScopeName.MODEL,
                 CatalogDocumentRevision.content_digest.in_(contents),
             )
             .order_by(
@@ -260,7 +261,8 @@ class RevisionsMixin:
             current = list(
                 session.execute(
                     select(CatalogDocumentRevision.content_digest).where(
-                        CatalogDocumentRevision.kind == "model", active_head_revision()
+                        CatalogDocumentRevision.kind == RunSwitchReasonScopeName.MODEL,
+                        active_head_revision(),
                     )
                 ).scalars()
             )
@@ -427,7 +429,9 @@ class RevisionsMixin:
                         CatalogDocumentRevision.content_digest,
                         CatalogDocumentRevision.publisher,
                         CatalogDocumentRevision.slug,
-                    ).where(CatalogDocumentRevision.kind == "model")
+                    ).where(
+                        CatalogDocumentRevision.kind == RunSwitchReasonScopeName.MODEL
+                    )
                 )
             )
             reasons = model_set_reference_reasons(

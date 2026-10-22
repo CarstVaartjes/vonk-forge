@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import shlex
 from collections.abc import Mapping
+from enum import StrEnum
 
 from ..cli_telemetry_render import size as _size
 from ..generated_control.models.model_cache_usage import ModelCacheUsage
@@ -19,6 +20,11 @@ from .common import (
     _words,
 )
 from .progress import progress_line
+
+
+class LibraryNoun(StrEnum):
+    MODEL = "model"
+    RECIPE = "recipe"
 
 
 def _library_item(item: Mapping[str, object], noun: str, *, detail: bool) -> None:
@@ -38,7 +44,7 @@ def _library_item(item: Mapping[str, object], noun: str, *, detail: bool) -> Non
     print(f"USE {_text(selector)}")
     _field("Usage", _words(item.get("usage")))
     _field("Disk", _bytes(resources.get("disk_bytes")))
-    if noun == "model":
+    if noun == LibraryNoun.MODEL:
         raw_usage = _optional(item.get("cache_usage"), "cache_usage")
         if raw_usage:
             _model_storage_note(ModelCacheUsage.from_dict(raw_usage))
@@ -194,7 +200,7 @@ def _library_row(item: Mapping[str, object], noun: str) -> list[object]:
         if isinstance(running, list) and running
         else "no",
     ]
-    if noun == "model":
+    if noun == LibraryNoun.MODEL:
         raw_usage = _optional(item.get("cache_usage"), "cache_usage")
         usage = ModelCacheUsage.from_dict(raw_usage) if raw_usage else None
         row.extend(
@@ -256,7 +262,7 @@ def _library(
     if detail:
         _library_item(payload, noun, detail=True)
         return
-    rows = _records(payload, "models" if noun == "model" else "recipes")
+    rows = _records(payload, "models" if noun == LibraryNoun.MODEL else "recipes")
     cursor = payload.get("next_cursor")
     more = " (more available)" if isinstance(cursor, str) else ""
     library = _optional(payload.get("library"), "library")
@@ -282,10 +288,10 @@ def _library(
         if noun == "recipe":
             labels.insert(1, "SPARKS")
             labels.append("READY")
-        if noun == "model":
+        if noun == LibraryNoun.MODEL:
             labels.extend(["UNIQUE", "SHARED"])
         _table(labels, [_library_row(item, noun) for item in rows])
-        if noun == "model":
+        if noun == LibraryNoun.MODEL:
             for item in rows:
                 raw_usage = _optional(item.get("cache_usage"), "cache_usage")
                 if raw_usage:

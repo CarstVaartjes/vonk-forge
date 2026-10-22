@@ -237,7 +237,7 @@ impl CommandRunner for PullRunner {
             ["container", "ls", ..] => {
                 return Err("image fixture does not provide runtime owner inventory".to_owned());
             }
-            ["image", "ls", ..] => ok(images.iter().map(|(reference, config)| {
+            ["image", "ls", ..] | ["images", ..] => ok(images.iter().map(|(reference, config)| {
                 format!("{reference}:latest\t{config}\n")
             }).collect::<String>().into_bytes()),
             ["image", "inspect", "--format", "{{.Id}}", reference] => {
@@ -265,7 +265,7 @@ impl CommandRunner for PullRunner {
                 images.insert((*target).to_owned(), config);
                 ok(Vec::new())
             }
-            ["image", "rm", reference] if self.in_use.lock().unwrap().contains(*reference) => {
+            ["image", "rm", reference] | ["rmi", reference] if self.in_use.lock().unwrap().contains(*reference) => {
                 CommandOutput {
                     success: false,
                     stdout: Vec::new(),
@@ -273,7 +273,7 @@ impl CommandRunner for PullRunner {
                     exit_code: Some(1),
                 }
             }
-            ["image", "rm", reference] => {
+            ["image", "rm", reference] | ["rmi", reference] => {
                 images.remove(reference.strip_suffix(":latest").unwrap_or(reference));
                 ok(Vec::new())
             }

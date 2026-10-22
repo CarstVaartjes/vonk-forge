@@ -152,8 +152,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
         };
         let listing = self.run_docker_with_timeout(
             &[
-                "image",
-                "ls",
+                "images",
                 "--all",
                 "--no-trunc",
                 "--filter",
@@ -292,7 +291,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
             // without force so shared tags do not strand the entire image.
             if let Err(error) = self
                 .run_docker_with_timeout(
-                    &["image", "rm", reference].map(str::to_owned),
+                    &["rmi", reference].map(str::to_owned),
                     IMAGE_REMOVE_TIMEOUT,
                 )
                 .and_then(|output| {
