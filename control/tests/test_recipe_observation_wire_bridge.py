@@ -526,16 +526,20 @@ def test_production_start_rust_observation_and_controller_consume(
         stale_generation["runs"] = [
             {**envelope["runs"][0], "run_generation": identity["run_generation"] + 1}
         ]
-        rejected = client.post(
+        consumed = client.post(
             "/agent/recipe-runs/observations", headers=headers, json=stale_generation
         )
-        assert rejected.status_code == 422
+        # A superseded page must be consumed without effects so a durable
+        # sender can advance to fresh evidence instead of replaying forever.
+        assert consumed.status_code == 204
         with sessions() as session:
             retained = (
                 session.query(RunNode).filter_by(run_id=run_id, node_id=node_id).one()
             )
             assert retained.observed_run_generation == identity["run_generation"]
             assert retained.state == LifecycleState.RUNNING
+            assert retained.observation_observed_at is not None
+            assert retained.observation_observed_at.replace(tzinfo=UTC) == observed_at
         fresh = client.post(
             "/agent/recipe-runs/observations", headers=headers, json=envelope
         )
