@@ -1,4 +1,5 @@
 *
+!.tool-versions
 !pyproject.toml
 !agent_protocol/
 !agent_protocol/src/
@@ -72,6 +73,7 @@ deploy/compose/tailscale/*
 !deploy/compose/tailscale/compose.yaml
 !deploy/compose/hermes-agent/
 deploy/compose/hermes-agent/*
+!deploy/compose/hermes-agent/entrypoint.sh
 !deploy/compose/hermes-agent/provision-litellm-key.py
 !deploy/compose/hermes-agent/compose.yaml
 !inventory/

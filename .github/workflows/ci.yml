@@ -155,7 +155,7 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
-          version: "0.12.19"
+          version-file: .tool-versions
           python-version: "3.14"
           enable-cache: true
           cache-dependency-glob: agent_protocol/pyproject.toml
@@ -554,7 +554,8 @@ jobs:
       - name: Build the Hermes image
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
-          context: deploy/compose/hermes-agent
+          context: .
+          file: deploy/compose/hermes-agent/Dockerfile
           target: managed
           load: true
           tags: ${{ env.IMAGE_PREFIX }}-hermes:${{ env.IMAGE_TAG }}
@@ -1618,7 +1619,7 @@ jobs:
       - name: Install uv and Python
         uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
-          version: "0.12.19"
+          version-file: .tool-versions
           python-version: "3.14"
           enable-cache: true
       - name: Authenticate CI image mirror reads
@@ -1804,7 +1805,7 @@ jobs:
         if: steps.existing-hermes.outputs.exists != 'true'
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
-          context: deploy/compose/hermes-agent
+          context: .
           file: deploy/compose/hermes-agent/Dockerfile
           target: managed
           platforms: linux/amd64,linux/arm64

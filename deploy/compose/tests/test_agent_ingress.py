@@ -25,7 +25,7 @@ from cluster_profiles.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 
 ROOT = Path(__file__).resolve().parents[3]
 DEV_CADDYFILE = ROOT / "deploy/compose/Caddyfile"
-DEV_CADDY_IMAGE = "caddy:2.11.7@sha256:f2a1290d0463aad60660d4ec134943f183ee2a5f6c3eb7bf32dd984f2f020772"
+DEV_CADDY_IMAGE = "caddy:2.11.7@sha256:3095ad245c353e3bdb27a38f22a095c1cfa9e295ab21c0214c3e72b0e2960525"
 
 
 def _environment() -> dict[str, str]:

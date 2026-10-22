@@ -90,7 +90,7 @@ def build_engine(database_url: str, *, component: str = "control") -> Engine:
     install_write_guard()
     if "postgres" in database_url:
         # transaction_timeout exists only on PostgreSQL 17+; the deployed
-        # Compose service pins postgres:18.6@sha256:5a5a84b19854a9ffaa54082c166ff4ec27473a361e496e5ea167f298f2da9722, so the server accepts it.
+        # Compose service pins postgres:18.6@sha256:edb0c08dc33befd0262ab3b5cf1c4f3f8cfd8b09e88c05b45adee29d6761ddb6, so the server accepts it.
         return create_engine(
             database_url,
             pool_pre_ping=True,

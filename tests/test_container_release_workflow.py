@@ -1521,7 +1521,7 @@ def test_image_cache_inputs_are_the_actual_isolated_build_context(
     assert result.returncode == 0, result.stderr
     assert not (context / "unrelated-controller.py").exists()
     copied = (
-        "entrypoint.sh"
+        "deploy/compose/hermes-agent/entrypoint.sh"
         if role == "hermes"
         else "agent_protocol/src/vonk_agent_protocol/route_activation.py"
     )
@@ -1533,6 +1533,23 @@ def test_image_cache_inputs_are_the_actual_isolated_build_context(
     source.write_text(source.read_text() + "\n# changed input\n")
     changed = _image_commit(repo)
     assert _image_inputs(repo, "matches", role, original, changed).returncode != 0
+
+
+def test_uv_owner_change_invalidates_the_prepared_hermes_image(
+    reusable_image_repo, tmp_path
+):
+    # Wrong implementation: a uv-only upgrade reuses an image with the old embedded bundle.
+    repo = reusable_image_repo
+    owner = repo / ".tool-versions"
+    owner.write_bytes((ROOT / ".tool-versions").read_bytes())
+    original = _image_commit(repo)
+    context = tmp_path / "context"
+    prepared = _image_inputs(repo, "prepare", "hermes", original, str(context))
+    assert prepared.returncode == 0, prepared.stderr
+    assert (context / owner.name).read_bytes() == owner.read_bytes()
+    owner.write_text("uv " + "99" + ".1.2\n")
+    changed = _image_commit(repo)
+    assert _image_inputs(repo, "matches", "hermes", original, changed).returncode != 0
 
 
 @pytest.mark.parametrize(

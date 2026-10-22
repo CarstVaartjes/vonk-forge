@@ -157,7 +157,7 @@ def test_optional_huggingface_secret_handles_bind_mounted_dev_null_in_container(
             f"{source_module.parent.parent}:/tmp/module:ro",
             "-v",
             f"{tmp_path}:/tmp/normalized",
-            "python:3.14-slim-trixie@sha256:51dafde81dbdb6ebde285137a295cf18a47ca95234fe388a343719cb97305b3d",
+            "python:3.14-slim-trixie@sha256:0b566a9f30a60730df33c26ac62dedb55393d8814645cd03543b67bf8987f3a1",
             "python",
             "-c",
             command,

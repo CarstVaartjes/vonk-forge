@@ -24,7 +24,7 @@ x-control-environment: &control-environment
 services:
   image-janitor:
     # Standalone stdlib-only janitor, sharing the reviewed Python build pin.
-    image: python:3.14-slim-trixie@sha256:51dafde81dbdb6ebde285137a295cf18a47ca95234fe388a343719cb97305b3d
+    image: python:3.14-slim-trixie@sha256:0b566a9f30a60730df33c26ac62dedb55393d8814645cd03543b67bf8987f3a1
     command: [python, -u, -B, /janitor.py]
     restart: unless-stopped
     logging: *bounded-logging
@@ -50,7 +50,7 @@ services:
     # PostgreSQL 17+ is required: the Controller sets the transaction_timeout
     # connection GUC (added in 17) on every connection. The pinned image
     # satisfies that.
-    image: postgres:18.6@sha256:5a5a84b19854a9ffaa54082c166ff4ec27473a361e496e5ea167f298f2da9722
+    image: postgres:18.6@sha256:edb0c08dc33befd0262ab3b5cf1c4f3f8cfd8b09e88c05b45adee29d6761ddb6
     # The Controller image ships this entrypoint and stages it on start (see
     # control-api), so a pulled release updates it. PostgreSQL must start
     # before the Controller, so wait for the staged copy instead of depending
@@ -264,7 +264,7 @@ services:
   # the volume keeps the last release, so the gateway keeps serving while the
   # Controller is down.
   caddy:
-    image: caddy:2.11.7@sha256:f2a1290d0463aad60660d4ec134943f183ee2a5f6c3eb7bf32dd984f2f020772
+    image: caddy:2.11.7@sha256:3095ad245c353e3bdb27a38f22a095c1cfa9e295ab21c0214c3e72b0e2960525
     restart: unless-stopped
     logging: *bounded-logging
     read_only: true
@@ -307,7 +307,7 @@ services:
       retries: 12
 
   registry:
-    image: registry:3.1.2@sha256:ddf754342cfc8acc51a56d5d0ab6af06826461864460636d8bd5c546dab2a7b8
+    image: registry:3.1.2@sha256:be9a7062dd7e3316e5c0368e42740dc991a9ceb5d382317675a8738db0112af0
     restart: unless-stopped
     logging: *bounded-logging
     read_only: true

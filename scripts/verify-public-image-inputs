@@ -10,6 +10,7 @@ import zipfile
 from pathlib import Path, PurePosixPath
 
 INPUTS = (
+    ".tool-versions",
     "pyproject.toml",
     "src/cluster_profiles",
     "control/Dockerfile",

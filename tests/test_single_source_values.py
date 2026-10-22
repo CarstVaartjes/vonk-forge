@@ -355,3 +355,87 @@ def test_memory_admission_rejects_reimplemented_fit_predicates() -> None:
     assert not _memory_admission_delegates(
         source + "\ndef evaluate_memory_admission(*args, **kwargs): return True\n"
     )
+
+
+def uv_pin_violations(root: Path, files: list[str]) -> list[str]:
+    """One owner, including stale and future literals, across executable inputs."""
+    import re
+
+    errors = []
+    for file in files:
+        if file == ".tool-versions":
+            continue
+        path = root / file
+        try:
+            text = path.read_text()
+        except UnicodeError:
+            continue
+        for number, line in enumerate(text.splitlines(), 1):
+            if re.search(
+                r"(?i)\buv(?:[_-]?version)?[\s`\"'=:@/~<>!-]*(?:==)?\d+\.\d+\.\d+", line
+            ):
+                errors.append(f"{file}:{number}: uv version belongs in .tool-versions")
+        if file.endswith((".yml", ".yaml")) and "setup-uv@" in text:
+            import yaml
+
+            document = yaml.safe_load(text)
+            groups = (
+                [document["runs"]["steps"]]
+                if "runs" in document
+                else [job.get("steps", []) for job in document.get("jobs", {}).values()]
+            )
+            for steps in groups:
+                for step in steps:
+                    if "setup-uv@" not in step.get("uses", ""):
+                        continue
+                    options = step.get("with", {})
+                    owner = options.get("version-file", "")
+                    if (
+                        "version" in options
+                        or owner not in {".tool-versions", ".vonk-forge/.tool-versions"}
+                        or not (root / owner.removeprefix(".vonk-forge/")).is_file()
+                    ):
+                        errors.append(f"{file}: setup-uv must read the version owner")
+    return errors
+
+
+def test_uv_has_one_version_owner() -> None:
+    from tools.single_source_values import tracked_files
+
+    files = tracked_files(ROOT)
+    assert uv_pin_violations(ROOT, files) == []
+
+
+@pytest.mark.parametrize(
+    "consumer",
+    ["Dockerfile", "docs/example.md", "scripts/install", ".github/workflows/test.yml"],
+)
+def test_uv_guard_rejects_stale_and_future_pins(tmp_path: Path, consumer: str) -> None:
+    # Wrong implementation: checking only the current literal misses an older or future pin.
+    for version in ("0." + "12.19", "99." + "1.2"):
+        path = tmp_path / consumer
+        path.parent.mkdir(parents=True, exist_ok=True)
+        for pin in (
+            f"uv=={version}",
+            f"uv>={version}",
+            f'UV_VERSION="{version}"',
+            f"https://astral.sh/uv/{version}/install.sh",
+        ):
+            path.write_text(pin + "\n")
+            assert uv_pin_violations(tmp_path, [consumer])
+
+
+@pytest.mark.parametrize("options", ["version: latest", "enable-cache: true"])
+def test_uv_guard_rejects_unowned_workflow_versions(
+    tmp_path: Path, options: str
+) -> None:
+    # Wrong implementation: deleting the pin silently selects the action's floating default.
+    consumer = ".github/workflows/test.yml"
+    path = tmp_path / consumer
+    path.parent.mkdir(parents=True)
+    path.write_text(
+        "jobs:\n  test:\n    steps:\n      - uses: astral-sh/setup-uv@"
+        + "a" * 40
+        + f"\n        with:\n          {options}\n"
+    )
+    assert uv_pin_violations(tmp_path, [consumer])

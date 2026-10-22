@@ -27,9 +27,12 @@ def test_controller_image_pins_and_packages_the_reviewed_skopeo_transport() -> N
     # skopeo rejects a reference carrying both a tag and a digest, so the
     # in-image resolution check must use the bare repository and index digest.
     assert "docker://quay.io/skopeo/stable@${SKOPEO_INDEX_DIGEST}" in dockerfile
-    # The pinned skopeo image ships /etc/ssl/certs as a symlink, which COPY
-    # cannot place over the Python base's directory.
-    assert "rm -rf /etc/ssl/certs" in dockerfile
+    # Wrong implementation: importing Skopeo's old store overwrites fresh Debian roots.
+    assert "COPY --from=skopeo /etc/ssl /etc/ssl" not in dockerfile
+    assert (
+        "ln -sf /etc/ssl/certs/ca-certificates.crt /etc/pki/tls/certs/ca-bundle.crt"
+        in dockerfile
+    )
     assert "architecture" in dockerfile
     assert '"$TARGETARCH"' in dockerfile
     assert 'expected_child="$SKOPEO_ARM64_DIGEST"' in dockerfile
@@ -49,8 +52,7 @@ def test_controller_image_pins_and_packages_the_reviewed_skopeo_transport() -> N
     assert "patchelf" not in dockerfile
     assert "ldconfig" not in dockerfile
     assert "COPY --from=skopeo /etc/containers /etc/containers" in dockerfile
-    assert "COPY --from=skopeo /etc/pki /etc/pki" in dockerfile
-    assert "COPY --from=skopeo /etc/ssl /etc/ssl" in dockerfile
+    assert "COPY --from=skopeo /etc/pki /etc/pki" not in dockerfile
     assert (
         "COPY --from=skopeo /usr/share/containers /usr/share/containers" in dockerfile
     )
@@ -97,3 +99,23 @@ def test_controller_image_build_fails_when_the_admin_web_mount_path_is_empty() -
         "from vonk_control.api.production import admin_web_root; "
         "assert (admin_web_root() / 'index.html').is_file()"
     ) in api
+
+
+def test_python_tls_bundle_distrusts_compromised_emsign_root() -> None:
+    # Wrong implementation: the old certifi lock still accepts chains to the compromised root.
+    import ssl
+
+    import certifi
+
+    context = ssl.create_default_context(cafile=certifi.where())
+    names = {
+        value
+        for certificate in context.get_ca_certs()
+        for rdn in certificate["subject"]
+        for key, value in rdn
+        if key == "commonName"
+    }
+    assert "emSign ECC Root CA - G3" not in names
+    assert (
+        names
+    )  # An empty trust store would hide the defect while breaking ordinary TLS.
