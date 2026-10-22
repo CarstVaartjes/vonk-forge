@@ -57,6 +57,8 @@ def _publisher_fixture() -> tuple[Path, Path, dict[str, object]]:
     return fixture, index_path, descriptor
 
 
+# Verify the whole published corpus twice to exercise durable package reuse.
+@pytest.mark.slow(30)
 def test_publisher_fixture_imports_all_published_recipes_and_reuses_persistent_packages(
     tmp_path: Path,
 ) -> None:
