@@ -702,12 +702,14 @@ class RecipePackageClient:
             slug = document.identity.slug
             digest = recipe.get("content_sha256")
             package_digest = package.get("sha256")
+            source_digest = recipe.get("source_bundle_sha256")
             size = package.get("expected_bytes")
             location = package.get("path")
             source_path = recipe.get("source_path")
             if (
                 not isinstance(digest, str)
                 or not isinstance(package_digest, str)
+                or not isinstance(source_digest, str)
                 or not isinstance(location, str)
                 or not isinstance(source_path, str)
                 or not isinstance(size, int)
@@ -724,6 +726,8 @@ class RecipePackageClient:
                 or not _SLUG.fullmatch(slug)
                 or not _SHA256.fullmatch(digest)
                 or not _SHA256.fullmatch(package_digest)
+                or not _SHA256.fullmatch(source_digest)
+                or package.get("source_bundle_sha256") != source_digest
                 or not _safe_path(location)
                 or location.startswith("/")
                 or location_url.scheme
@@ -772,6 +776,7 @@ class RecipePackageClient:
                     uri=f"vonk://catalog/{publisher}/{slug}@sha256:{digest}",
                     document=dict(recipe["document"]),
                     package_sha256=package_digest,
+                    source_bundle_sha256=source_digest,
                     prebuilt_image=prebuilt_image,
                 )
             )
@@ -1172,6 +1177,14 @@ class RecipePackageClient:
                 RecipePackageCode.PACKAGE_INVALID,
                 "recipe build source closure is invalid",
             ) from error
+        if manifest.get("source_bundle_sha256") != bundle.sha256 or (
+            item.source_bundle_sha256 is not None
+            and item.source_bundle_sha256 != bundle.sha256
+        ):
+            raise RecipePackageError(
+                RecipePackageCode.PACKAGE_INVALID,
+                "recipe build source does not match its published content identity",
+            )
         source_bundle, source_bundle_sha256 = bundle.archive, bundle.sha256
         handle = RecipePackageHandle(
             publication_commit=publication_commit,

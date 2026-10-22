@@ -25,7 +25,6 @@ from vonk_agent_protocol import (
     RunState,
     SecurityRefusalError,
     SecurityRefusalReason,
-    SourceBundleCode,
     UnknownOutcomeError,
     WaitReason,
     canonical_message,
@@ -82,11 +81,6 @@ _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 
 
 BUILD_ARTIFACT_FORMAT = "docker-archive-v1"
-
-
-_UNHEALABLE_BUNDLE_CODES = frozenset(
-    {SourceBundleCode.DIGEST_INVALID, SourceBundleCode.STORAGE_UNAVAILABLE}
-)
 
 
 MINIMUM_BUILD_DISK_RESERVE_BYTES = 4 * 1024**3

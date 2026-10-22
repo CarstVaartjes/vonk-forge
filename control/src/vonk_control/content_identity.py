@@ -25,7 +25,22 @@ from __future__ import annotations
 
 from collections.abc import Collection, Mapping
 from dataclasses import dataclass
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
+
+if TYPE_CHECKING:
+    from .model_cache_contract import CacheResolution
+
+
+def cache_resolution_answers_revision(
+    resolution: CacheResolution, exact_revision_id: str
+) -> bool:
+    """Bind a resolver response to its requested catalog selection.
+
+    Shared image bytes may be reused across revisions; this checks that the
+    response describes the exact recipe requested, never another selection.
+    """
+    return resolution.recipe.recipe_revision_id == exact_revision_id
+
 
 _IMAGE_DIGEST_NAMES = (
     "image_digest",
