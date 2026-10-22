@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass, field
+from functools import partial
 from typing import TYPE_CHECKING
 from typing import cast as _typing_cast
 
@@ -322,7 +323,11 @@ class FleetProfileService:
         if self._cache_resolver is None or not identities:
             return resolved
         try:
-            caches = observe_storage(self._resolve_caches)(tuple(identities))
+            # Batch verdicts belong to this read: a completed unknown must not
+            # hide a receipt that recovers before the next read. Individual
+            # content probes still share their normal in-flight/recent results.
+            probe = partial(self._resolve_caches, tuple(identities))
+            caches = observe_storage(probe)()
         except (OSError, RuntimeError, TypeError, ValueError) as error:
             # A pending batch supplies no evidence; a later read joins/retries
             # it through the normal observation path, under the same deadline.
