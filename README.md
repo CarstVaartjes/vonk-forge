@@ -147,6 +147,24 @@ the immutable release, enrolls the native agent, writes the required agent and
 firewall configuration, and checks service health. Repeat with a new one-use
 grant for each additional Spark.
 
+For a headless Spark, use SoC firmware **0x02009e0f or newer** (the
+`DGX Spark SoC FW System Update` in `fwupdmgr get-devices`; update with
+`fwupdmgr update`). In UEFI, set **Advanced → Advanced Menu → Display Reserved
+Memory → 0.5 GB** (fixed), save, and reboot. Fixed 0.5 GB gives a deterministic
+pool independent of a monitor at boot; Auto booted headless also reserves 0.5 GB
+and counts as configured. Compared with the default 2 GB, this releases exactly
+1.5 GiB on the measured Sparks. After updating firmware, power-cycle if
+`nvidia-smi` shows `ERR!` or “GPU requires reset” after a warm reboot. See NVIDIA's
+[UEFI guide](https://docs.nvidia.com/dgx/dgx-spark/uefi-settings.html#change-display-reserved-memory).
+Vonk's root helper reads `/proc/iomem` during each inventory (unprivileged reads
+hide the addresses). The measured reserved block ending at `0x3237fffff` includes
+`0x23800000` bytes of other firmware memory: the measured `0xA3800000` and
+`0x43800000` blocks therefore identify 2 GB and 0.5 GB of display memory.
+Anything else remains **unknown**, including masked addresses and MemTotal alone.
+Fleet advice is non-blocking and appears only above 0.5 GB on a headless Spark;
+Vonk never changes firmware or UEFI. A minimum reservation does not distinguish
+fixed 0.5 GB from Auto booted headless.
+
 ### Install `vonkctl`
 
 Install the latest accepted stable CLI without cloning the repository. This

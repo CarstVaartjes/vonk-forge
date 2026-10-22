@@ -9,6 +9,9 @@ from .. import cli_states
 from ..cli_states_generated import ENDPOINT_UNAVAILABLE, UNKNOWN, GpuClockMetric
 from ..cli_telemetry_render import gpu_readings
 from ..cli_telemetry_render import size as _size
+from ..generated_control.models.display_memory_observation import (
+    DisplayMemoryObservation,
+)
 from ..generated_control.models.gpu_clock_observation import GpuClockObservation
 from ..generated_control.models.gpu_clock_policy import GpuClockPolicy
 from ..generated_control.models.gpu_clock_range import GpuClockRange
@@ -53,6 +56,16 @@ def _node(node: Mapping[str, object], *, detail: bool) -> None:
         _field("Temperature", f"{temperature} °C")
     _field("CPU", _cpu_clock(node))
     _field("GPU clock", _gpu_clock(node))
+    host = _optional(inventory.get("host_settings"), "host settings")
+    raw_memory = host.get("display_memory")
+    observation = (
+        None
+        if raw_memory is None
+        else DisplayMemoryObservation.from_dict(
+            dict(_optional(raw_memory, "display memory"))
+        )
+    )
+    _field("Display memory", _display_memory(observation))
     _field("NAS route", _nas_route(inventory))
     _field("Wired ports", _wired_ports(inventory))
     loaded = _records(node, "loaded")
@@ -87,6 +100,18 @@ def _node(node: Mapping[str, object], *, detail: bool) -> None:
     for issue in _projection_issues(node.get("projection_issues")):
         _warn(f"{_text(name)}: {_text(issue)}")
     _reasons(node.get("warnings"), subject=name)
+
+
+def _display_memory(observation: DisplayMemoryObservation | None) -> str:
+    if observation is None:
+        return UNKNOWN
+    firmware = observation.soc_firmware_version
+    version = f"0x{firmware:08x}" if type(firmware) is int else UNKNOWN
+    reserved = observation.carveout_bytes
+    amount = _bytes(reserved) if type(reserved) is int else UNKNOWN
+    connected = observation.display_connected
+    display = str(connected).lower() if type(connected) is bool else UNKNOWN
+    return f"reserved {amount} · SoC {version} · UEFI {_text(observation.bios_version) if isinstance(observation.bios_version, str) else UNKNOWN} · display connected {display}"
 
 
 def _memory(node: Mapping[str, object]) -> str:

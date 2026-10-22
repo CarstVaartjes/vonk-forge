@@ -1,0 +1,21 @@
+80000000-8007ffff : reserved
+80080000-8655ffff : System RAM
+86560000-8701ffff : reserved
+87020000-8707ffff : System RAM
+87080000-88100fff : reserved
+88200000-8a0fffff : reserved
+8b080000-8e07ffff : reserved
+90000000-933dffff : reserved
+93400000-afffffff : reserved
+b9600000-b97fffff : reserved
+c2e00000-d59fffff : reserved
+d5a00000-ddffffff : System RAM
+e0000000-e001ffff : reserved
+e0020000-f9ffffff : System RAM
+fa000000-fa001fff : reserved
+fa002000-ffcfffff : System RAM
+ffd00000-ffd1ffff : reserved
+ffd20000-27fffffff : System RAM
+280000000-3237fffff : reserved
+323800000-207df6ffff : System RAM
+207df70000-207fffffff : reserved

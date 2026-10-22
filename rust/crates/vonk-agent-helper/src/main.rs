@@ -457,6 +457,30 @@ fn handle(
     let raw = read_frame(stream).map_err(|error| {
         HelperRejection::new(HelperErrorCode::RequestInvalid, error.safe_detail())
     })?;
+    if let Some(observation) =
+        vonk_agent_helper::display_memory::inspect(&raw, verifier, &peer, Path::new("/")).map_err(
+            |error| {
+                HelperRejection::new(
+                    if matches!(error, HelperError::InvalidPeer) {
+                        HelperErrorCode::PeerIdentityInvalid
+                    } else {
+                        HelperErrorCode::RequestInvalid
+                    },
+                    error.safe_detail(),
+                )
+            },
+        )?
+    {
+        let body = vonk_agent_protocol::canonical_generated_json(&observation).map_err(|_| {
+            HelperRejection::new(
+                HelperErrorCode::OperationFailed,
+                "display observation encoding failed",
+            )
+        })?;
+        return write_frame(stream, &body).map_err(|error| {
+            HelperRejection::new(HelperErrorCode::OperationFailed, error.safe_detail())
+        });
+    }
     if let Ok(inspection) = parse_inspection_request(&raw) {
         verifier.authorize_peer(&peer).map_err(|error| {
             HelperRejection::new(HelperErrorCode::PeerIdentityInvalid, error.safe_detail())

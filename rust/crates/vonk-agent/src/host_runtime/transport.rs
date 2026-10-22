@@ -112,6 +112,14 @@ pub(super) fn call_helper(
     body: &[u8],
     reply: &Inactivity,
 ) -> Result<HelperResponse, HostRuntimeError> {
+    inspect_helper(socket, body, reply)
+}
+
+pub(crate) fn inspect_helper<T: serde::de::DeserializeOwned>(
+    socket: &Path,
+    body: &[u8],
+    reply: &Inactivity,
+) -> Result<T, HostRuntimeError> {
     if body.is_empty() || body.len() > MAX_HELPER_MESSAGE_BYTES {
         // Report the ceiling and the observed length; the body itself is
         // engine-owned content and never travels into the evidence.

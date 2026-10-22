@@ -341,6 +341,7 @@ fn inventory_with_all_evidence() -> vonk_agent_protocol::InventoryRequest {
         display_manager_active: false,
         graphical_default_target: false,
         gpu_clock_support: None,
+        display_memory: None,
     });
     request.installations = Some(vec![uuid::Uuid::nil()]);
     request.runs = Some(vec![uuid::Uuid::nil()]);
