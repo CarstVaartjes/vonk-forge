@@ -80,6 +80,10 @@ class AgentNode(Base):
     binary_digest: Mapped[str | None] = mapped_column(String(64))
     contact_certificate_serial: Mapped[str | None] = mapped_column(String(128))
     contact_observation_digest: Mapped[str | None] = mapped_column(String(64))
+    recipe_observation_http_status: Mapped[int | None] = mapped_column(Integer)
+    recipe_observation_status_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
     # Preflight proof is current only while this last-claim fingerprint matches.
     preflight_fingerprint: Mapped[str | None] = mapped_column(String(64))
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

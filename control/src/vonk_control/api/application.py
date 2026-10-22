@@ -89,6 +89,7 @@ from ..logging import current_request_id
 from ..metrics import MetricsRegistry
 from ..model_cache_api import install_model_operator_routes
 from ..model_cache_contract import UUID_PATTERN
+from ..observation_delivery import ObservationDeliveryMiddleware
 from ..observation_transfer import (
     ObservationTransferRecord,
     ObservationTransferResponse,
@@ -369,6 +370,8 @@ def create_app(
                 media_type="application/json",
             )
         return await call_next(request)
+
+    app.add_middleware(ObservationDeliveryMiddleware, services=agent)
 
     app.add_middleware(
         TrustedProxyAgentIdentityMiddleware,

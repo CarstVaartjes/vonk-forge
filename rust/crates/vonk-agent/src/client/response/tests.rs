@@ -64,8 +64,9 @@ async fn exact_worker_observation_reports_process_without_endpoint_result() {
         failure_diagnostics: None,
     }];
     let (client, server) = observation_client(204).await;
+    let report = build_exact_recipe_run_observations(Utc::now(), &observations).unwrap();
     client
-        .report_exact_recipe_run_observations(Utc::now(), &observations)
+        .report_recipe_observation_envelope(&report)
         .await
         .unwrap();
     let raw = finish_capture_peer(server).await;

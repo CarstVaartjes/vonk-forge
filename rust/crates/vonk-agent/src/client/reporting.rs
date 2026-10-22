@@ -75,13 +75,26 @@ impl AgentHttpClient {
         }
     }
 
-    pub async fn report_exact_recipe_run_observations(
+    pub(crate) async fn report_recipe_observation_envelope(
         &self,
-        observed_at: chrono::DateTime<chrono::Utc>,
-        observations: &[ExactRecipeRunObservation],
+        envelope: &RecipeRunObservationsWire,
     ) -> Result<(), ClientError> {
-        let envelope = build_exact_recipe_run_observations(observed_at, observations)?;
-        let body = canonical_generated_json(&envelope).map_err(|_| ClientError::Protocol)?;
+        let body = canonical_generated_json(envelope).map_err(|_| ClientError::Protocol)?;
+        // The edge and Controller both bound ordinary documents at 1 MiB.
+        // Refuse locally with evidence instead of resetting a partially sent body.
+        if body.len() > 1024 * 1024 {
+            eprintln!(
+                "vonk-agent: observation body exceeds 1048576 bytes: {}",
+                body.len()
+            );
+            return Err(ClientError::Protocol);
+        }
+        eprintln!(
+            "vonk-agent: sending recipe observation sha256={} bytes={} timeout_seconds={}",
+            hex_sha256(&body),
+            body.len(),
+            CONTROLLER_REQUEST_TIMEOUT.as_secs()
+        );
         let mut response = self
             .current_client()
             .await?

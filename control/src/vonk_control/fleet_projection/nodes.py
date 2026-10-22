@@ -74,6 +74,21 @@ def _node(
     gpu_clock_desired: GpuClockRange | None = None,
 ) -> FleetNode:
     warnings: list[ProjectionReason] = list(layout_notices)
+    if (
+        agent.recipe_observation_http_status is not None
+        and agent.recipe_observation_http_status >= 400
+    ):
+        warnings.append(
+            ProjectionReason(
+                code=ProjectionCode.OBSERVATION_TRANSFER_UNAVAILABLE,
+                detail=(
+                    f"Recipe observations rejected with HTTP {agent.recipe_observation_http_status} "
+                    f"since {agent.recipe_observation_status_at}; exact evidence remains pending on the agent."
+                ),
+                severity=ProfileReasonSeverity.WARNING.value,
+                recommendation="The agent retries pending content on the next observation pass; inspect Controller rejection evidence if this persists.",
+            )
+        )
     connection = self._connection(agent, certificate, current)
     inventory_unreadable = False
     try:

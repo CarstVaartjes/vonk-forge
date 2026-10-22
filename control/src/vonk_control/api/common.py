@@ -216,16 +216,31 @@ def _log_request_failure(
 
 def _log_agent_rejection(request: Request, status: int, reason: str) -> None:
     """One line for a 4xx on an agent endpoint: request id and reason, no body."""
+    from ..auth import agent_identity_from_scope
     from ..logging import log_event
 
+    identity = agent_identity_from_scope(dict(request.scope))
+
+    received = getattr(request.state, "received_body_bytes", None)
+    expected = getattr(request.state, "expected_body_bytes", None)
+    incomplete = getattr(request.state, "body_disconnected", False) or (
+        status == 400
+        and isinstance(received, int)
+        and isinstance(expected, int)
+        and received < expected
+    )
     log_event(
         _LOGGER,
         "agent.request_rejected",
         service="controller",
         endpoint=request.url.path,
+        node_id=identity.node_id if identity is not None else None,
         request_id=getattr(request.state, "request_id", None),
         http_status=status,
         reason=reason[:200],
+        level=logging.WARNING if incomplete else logging.INFO,
+        received_body_bytes=received,
+        expected_body_bytes=expected,
     )
 
 

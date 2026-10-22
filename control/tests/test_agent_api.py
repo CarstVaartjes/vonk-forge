@@ -52,6 +52,7 @@ from vonk_agent_protocol.inventory import (
     InventoryRequest,
     NetworkInterface,
 )
+from vonk_agent_protocol.recipe_observations import RecipeRunObservationsWire
 from vonk_control import agent_operation_states as aos
 from vonk_control.agent_api import (
     AgentApiServices,
@@ -1304,6 +1305,108 @@ def test_agent_posts_authenticated_complete_recipe_run_observation_snapshot(
             json=payload | {"runs": [{"run_id": "not-a-uuid", "ready": True}]},
         ).status_code
         == 422
+    )
+
+
+def test_incomplete_observation_warns_with_counts_and_recovers_in_fleet_health(
+    agent_system, caplog
+):
+    # Wrong implementation: incomplete bodies are info-only, and authenticated
+    # delivery failures disappear from fleet health while evidence is lost.
+    import logging
+
+    from vonk_agent_protocol import ProjectionCode
+    from vonk_control.fleet_projection import FleetProjection
+
+    client, services, _, clock = agent_system
+    payload = canonical_message(
+        RecipeRunObservationsWire(observed_at=clock.now, runs=[])
+    )
+
+    async def cut_off(scope, receive, send):
+        received = False
+
+        async def partial_receive():
+            nonlocal received
+            if received:
+                return {"type": "http.disconnect"}
+            received = True
+            return {"type": "http.request", "body": payload[:7], "more_body": True}
+
+        await client.app(scope, partial_receive, send)
+
+    async def attempt():
+        async with AsyncClient(
+            transport=ASGITransport(app=cut_off), base_url="http://testserver"
+        ) as peer:
+            return await peer.post(
+                "/agent/recipe-runs/observations",
+                headers={
+                    **agent_headers(NODE_A, "serial-a"),
+                    "content-type": "application/json",
+                },
+                content=payload,
+            )
+
+    caplog.set_level(logging.INFO)
+    assert asyncio.run(attempt()).status_code == 400
+    event = next(
+        r for r in caplog.records if "agent.request_rejected" in r.getMessage()
+    )
+    assert event.levelno == logging.WARNING
+    evidence = json.loads(event.getMessage())
+    assert evidence["received_body_bytes"] == 7
+    assert evidence["expected_body_bytes"] == len(payload)
+    assert evidence["level"] == "warning"
+    assert evidence["node_id"] == NODE_A
+    node = next(
+        n for n in FleetProjection(services.sessions).read().nodes if n.id == NODE_A
+    )
+    warning = next(
+        w
+        for w in node.warnings
+        if w.code == ProjectionCode.OBSERVATION_TRANSFER_UNAVAILABLE
+    )
+    assert "HTTP 400" in warning.detail
+    assert (
+        client.post(
+            "/agent/recipe-runs/observations",
+            headers={
+                **agent_headers(NODE_A, "serial-a"),
+                "content-type": "application/json",
+            },
+            content=payload,
+        ).status_code
+        == 204
+    )
+    node = next(
+        n for n in FleetProjection(services.sessions).read().nodes if n.id == NODE_A
+    )
+    assert all(
+        w.code != ProjectionCode.OBSERVATION_TRANSFER_UNAVAILABLE for w in node.warnings
+    )
+
+
+def test_old_observation_content_can_be_replayed_after_lost_ack(agent_system):
+    # Wrong implementation: the retryable pending report becomes a permanent
+    # 422 after five minutes, although its timestamp still fences newer state.
+    client, _, _, clock = agent_system
+    payload = canonical_message(
+        RecipeRunObservationsWire(observed_at=clock.now, runs=[])
+    )
+    headers = {**agent_headers(NODE_A, "serial-a"), "content-type": "application/json"}
+    assert (
+        client.post(
+            "/agent/recipe-runs/observations", headers=headers, content=payload
+        ).status_code
+        == 204
+    )
+    clock.now += timedelta(minutes=10)
+    assert (
+        client.post(
+            "/agent/recipe-runs/observations", headers=headers, content=payload
+        ).status_code
+        == 204
     )
 
 
@@ -2744,7 +2847,9 @@ def test_recipe_run_observation_report_applies_process_state_per_run(
         FailureProperty,
     )
 
-    empty = FailureLogTail(text="", truncated=False, dropped_bytes=0, dropped_lines=0)
+    empty = FailureLogTail(
+        text="", truncated=False, dropped_bytes=None, dropped_lines=None
+    )
     diagnostics = FailureDiagnostics(
         collected_at=clock.now.isoformat(),
         phase="workload.host_memory_guard",
@@ -2766,11 +2871,12 @@ def test_recipe_run_observation_report_applies_process_state_per_run(
         "run_generation": 2,
         "process_running": False,
         "endpoint_ready": None,
-        "failure_diagnostics": diagnostics.model_dump(mode="json", exclude_none=True),
+        "failure_diagnostics": json.loads(canonical_message(diagnostics)),
     }
     stale_generation = report(run | {"run_generation": 1})
-    assert stale_generation.status_code == 422
-    assert "generation is stale" in stale_generation.text
+    # Superseded content is acknowledged without effects, so a durable sender
+    # can advance to a fresh inspection instead of retrying a stale generation.
+    assert stale_generation.status_code == 204
     # A report that crossed the Controller's own change (the run left this
     # Spark, or the rank changed after the report was taken) is expected:
     # it is dropped without error and never overwrites the rank.
@@ -2794,6 +2900,12 @@ def test_recipe_run_observation_report_applies_process_state_per_run(
             json.dumps(node.observation_failure_diagnostics)
         )
         assert restored == diagnostics
+        assert (
+            FailureDiagnostics.model_validate_json(
+                json.dumps(node.last_exit_diagnostics)
+            )
+            == diagnostics
+        )
 
     # New live evidence clears the old failure; it cannot poison a recovered run.
     recovered_at = clock.now + timedelta(seconds=1)
@@ -2813,7 +2925,9 @@ def test_recipe_run_observation_report_applies_process_state_per_run(
         assert node.observation_observed_at is not None
         assert node.observation_observed_at.replace(tzinfo=UTC) == recovered_at
 
-    # A delayed replay of the failure cannot undo the newer live observation.
+    # A delayed durable replay, even beyond the old five-minute acceptance
+    # window, cannot undo the newer live observation or block the sender.
+    clock.now += timedelta(minutes=10)
     assert report(run).status_code == 204
     with services.sessions() as session:
         node = session.scalar(select(RunNode).where(RunNode.run_id == run_id))
