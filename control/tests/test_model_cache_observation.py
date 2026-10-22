@@ -441,3 +441,25 @@ def test_other_observer_reports_live_checkpoint_without_taking_writer_lock(
         release.set()
         _finish(cache, manifest)
         other.close()
+
+
+def test_checkpoint_storage_loss_is_visible_and_recovers(observed_cache, monkeypatch):
+    """Catches storage failures hidden behind an unexplained zero-progress wait."""
+    cache, _sessions, manifest, now = observed_cache
+    read = cache._storage_observer._read
+
+    def unavailable(_manifest):
+        raise OSError("injected NAS checkpoint outage")
+
+    monkeypatch.setattr(cache._storage_observer, "_read", unavailable)
+    cache._storage_observer.schedule(manifest)
+    _finish(cache, manifest)
+    with pytest.raises(BookkeepingUnknown, match="injected NAS checkpoint outage"):
+        cache._storage_observer.read(manifest)
+    monkeypatch.setattr(cache._storage_observer, "_read", read)
+    now[0] += timedelta(seconds=6)
+    cache._storage_observer.schedule(manifest)
+    _finish(cache, manifest)
+    observation = cache._storage_observer.read(manifest)
+    assert observation.completed_at is not None
+    assert all(entry.available for entry in observation.objects.values())

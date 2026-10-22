@@ -296,5 +296,24 @@ class StorageObserver:
                     )
                 )
 
-        except Exception:  # noqa: BLE001 -- observer retries the durable checkpoint
+        except OSError as error:
+            # A NAS outage may prevent reading/writing the diagnostic itself.
+            # Keep that cause visible in memory without discarding the durable
+            # prefix on storage. Ordinary discovery resumes it after recovery.
+            with self._lock:
+                previous = self._snapshots.get(manifest.digest)
+            now = self._cache._clock()
+            value = ModelCacheStorageObservation(
+                schema_version=SCHEMA_VERSION,
+                manifest=manifest.contract(),
+                objects={} if previous is None else previous.objects,
+                started_at=now if previous is None else previous.started_at,
+                next_check_at=now + timedelta(seconds=_RECHECK_SECONDS),
+                detail=f"{type(error).__name__}: {error}",
+            )
+            self._publish(manifest, value)
+            _LOGGER.exception(
+                "cache observation %s storage unavailable", manifest.digest
+            )
+        except Exception:  # noqa: BLE001 -- preserve unexpected failures in server evidence
             _LOGGER.exception("cache observation %s failed", manifest.digest)
