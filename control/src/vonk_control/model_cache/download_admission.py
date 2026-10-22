@@ -27,10 +27,11 @@ from ..model_cache_contract import (
     ModelCacheDownloadPayload,
     ModelCacheRetry,
     ModelCacheTransfer,
+    ModelCacheTransferArtifact,
 )
 from ..model_cache_progress import progress_document
 from ..models import ModelCacheOperation
-from ..profile_read_observation import observe_storage
+from ..profile_read_observation import observe_storage, observing_profile
 from ..settings import DATABASE_WAIT_BUDGETS
 from ..strict_json import serialize_json_value
 from .artifacts import (
@@ -375,15 +376,36 @@ class DownloadAdmissionMixin:
             for digest, spec in _unique_artifacts(manifest.artifacts).items()
             if digest in cached
         )
-        transfer = cache._transfer_state_for_manifest(
-            manifest, force=False, cached=cached
-        )
+        if observing_profile():
+            observation = cache._storage_observer.read(manifest)
+            assert observation.available_bytes is not None
+            available_bytes = observation.available_bytes
+            transfer = ModelCacheTransfer(
+                schema_version=SCHEMA_VERSION,
+                total_bytes=sum(
+                    entry.expected_bytes - entry.baseline_bytes
+                    for entry in observation.objects.values()
+                ),
+                artifacts={
+                    digest: ModelCacheTransferArtifact(
+                        baseline_bytes=entry.baseline_bytes,
+                        received_bytes=0,
+                        started_at=observation.started_at.isoformat(),
+                    )
+                    for digest, entry in observation.objects.items()
+                },
+            )
+        else:
+            available_bytes = cache.free_bytes()
+            transfer = cache._transfer_state_for_manifest(
+                manifest, force=False, cached=cached
+            )
         new_bytes = transfer.total_bytes
         # A split file is assembled part by part, each part deleted once
         # appended: the disk peaks at the file plus its largest part.
         needed = new_bytes + _split_transient_bytes(manifest, cached)
         blockers = []
-        if needed > cache.free_bytes():
+        if needed > available_bytes:
             blockers.append(ModelCacheBlockerCode.INSUFFICIENT_RESERVED_STORAGE)
             cache._request_storage(
                 needed, ModelCacheBlockerCode.INSUFFICIENT_RESERVED_STORAGE

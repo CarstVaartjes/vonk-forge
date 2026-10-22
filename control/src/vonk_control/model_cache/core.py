@@ -54,6 +54,7 @@ class CoreMixin:
         cache = cast("ModelCacheService", self)
 
         cache._closed.set()
+        cache._storage_observer.close()
         # Let active streams observe the shutdown signal and checkpoint before
         # releasing the service. HTTP clients have bounded read timeouts, so
         # this wait is finite while preventing post-shutdown DB/file writes.

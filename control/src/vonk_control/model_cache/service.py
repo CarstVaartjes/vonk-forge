@@ -36,6 +36,7 @@ from .fleet_removal import FleetRemovalMixin
 from .github import GithubMixin
 from .http import HttpMixin
 from .inventory import InventoryMixin
+from .observation import StorageObserver
 from .operations import OperationsMixin
 from .persistence import _read_operation_payload, _store_operation_payload
 from .removal_acceptance import RemovalAcceptanceMixin
@@ -128,7 +129,14 @@ class ModelCacheService(
         ):
             raise InvalidValue("model cache download streams must be between 1 and 32")
         root.mkdir(parents=True, exist_ok=True, mode=0o750)
-        for child in ("objects", "partials", "quarantine", "manifests", "locks"):
+        for child in (
+            "objects",
+            "partials",
+            "quarantine",
+            "manifests",
+            "locks",
+            "observations",
+        ):
             directory = root / child
             if directory.is_symlink():
                 raise InvalidValue(
@@ -162,6 +170,7 @@ class ModelCacheService(
         self._lock = threading.RLock()
         self._closed = threading.Event()
         self._claim_owner = uuid.uuid4().hex
+        self._storage_observer = StorageObserver(self)
         self._executor = ThreadPoolExecutor(
             max_workers=max_parallel_downloads,
             thread_name_prefix="vonk-model-cache",

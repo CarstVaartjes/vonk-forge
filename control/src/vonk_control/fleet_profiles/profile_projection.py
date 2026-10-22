@@ -164,6 +164,9 @@ class FleetProfileService:
                 )
                 continue
             recipe, revision, cache = resolved_choice
+            if isinstance(cache, Residue):
+                warnings.append(cache.note)
+                cache = None
             definition = projections[choice.recipe_selector]
             required = definition.topology.node_count
             if observe and self._cache_resolver is None:

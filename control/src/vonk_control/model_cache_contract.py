@@ -87,8 +87,24 @@ ModelCacheOperationPhase = Literal[
     "completed",
     "failed",
 ]
+
+
+class ModelCacheEntryStatus(StrEnum):
+    INCOMPLETE = "incomplete"
+    DOWNLOADING = "downloading"
+    VERIFYING = "verifying"
+    CACHED = "cached"
+    NEEDS_REPAIR = "needs-repair"
+    FAILED = "failed"
+
+
 ModelCacheEntryState = Literal[
-    "incomplete", "downloading", "verifying", "cached", "needs-repair", "failed"
+    ModelCacheEntryStatus.INCOMPLETE,
+    ModelCacheEntryStatus.DOWNLOADING,
+    ModelCacheEntryStatus.VERIFYING,
+    ModelCacheEntryStatus.CACHED,
+    ModelCacheEntryStatus.NEEDS_REPAIR,
+    ModelCacheEntryStatus.FAILED,
 ]
 ModelCacheCoverage = Literal["complete", "incomplete"]
 
@@ -153,6 +169,25 @@ class CacheManifest(StrippedStrictModel):
     model_definition_ref: ModelReference | None
     model_content_digests: list[str]
     artifacts: list[CacheManifestArtifact]
+
+
+class ModelCacheObservedObject(StrippedStrictModel):
+    expected_bytes: int = Field(ge=0)
+    available: bool
+    baseline_bytes: int = Field(ge=0)
+
+
+class ModelCacheStorageObservation(StrippedStrictModel):
+    """Resumable, disposable projection of ingress receipts and file metadata."""
+
+    schema_version: Literal[2]
+    manifest: CacheManifest
+    objects: dict[Digest, ModelCacheObservedObject] = Field(default_factory=dict)
+    started_at: AwareDatetime
+    completed_at: AwareDatetime | None = None
+    available_bytes: int | None = Field(default=None, ge=0)
+    next_check_at: AwareDatetime
+    detail: str | None = None
 
 
 class ModelCacheObjectReceipt(StrippedStrictModel):

@@ -1533,3 +1533,37 @@ def test_profile_observation_reuses_only_fresh_results(monkeypatch):
     now[0] = 6.0
     assert read() == 2
     assert probe() == 3
+
+
+def test_profile_read_preserves_observer_progress_and_next_check():
+    """Catches dropping the observer's progress in a generic unknown warning."""
+    from vonk_agent_protocol import WaitReason
+    from vonk_control.categorized_errors import BookkeepingUnknown
+
+    sessions = _sessions()
+    _seed(sessions)
+    detail = (
+        "Cache observation: 7/146 objects checked; Controller cache observer "
+        "resumes durable checkpoints; next check 2026-10-22T16:00:05Z."
+    )
+
+    def pending(**_kwargs):
+        raise BookkeepingUnknown(detail, reason=WaitReason.OBSERVATION_UNAVAILABLE)
+
+    service = FleetProfileService(sessions, clock=lambda: NOW, cache_resolver=pending)
+    service.update_number(
+        1,
+        FleetProfileInput(
+            name="Observing",
+            assignments=[
+                FleetProfileAssignmentInput(
+                    recipe_selector="vonk-forge/synthetic-tiny-build",
+                    spark_ids=[NODE_1],
+                )
+            ],
+        ),
+        actor="test",
+    )
+    view = service.get_number(1)
+    assert view.cache_summary.unknown == 1
+    assert any(detail in warning for warning in view.warnings)

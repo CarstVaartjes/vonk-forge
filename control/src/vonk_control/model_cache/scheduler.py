@@ -119,6 +119,7 @@ class SchedulerMixin:
         requested = cache._max_parallel_downloads if limit is None else limit
         if not 1 <= requested <= _MAX_PARALLEL_DOWNLOADS:
             raise InvalidValue("cache worker batch limit is invalid")
+        cache._storage_observer.tick()
         cache._streams.tick()
         cache._reconcile_pending_cancellations(requested_id)
         cache._resume_after_credential_change() if requested_id is None else None
