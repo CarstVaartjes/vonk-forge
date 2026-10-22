@@ -247,14 +247,14 @@ def test_publication_fetch_does_not_forward_controller_authorization() -> None:
     assert requests[1].headers["authorization"] == "Bearer controller-token"
 
 
-def test_recipe_producer_output_is_fresh_before_controller_sync() -> None:
-    _index, _entry, _package_root = _package_inputs()
+def test_recipe_producer_output_is_fresh_before_controller_sync(tmp_path: Path) -> None:
+    index, entry, package_root = _package_inputs()
     library_root = _path("VONK_ACCEPTANCE_LIBRARY_ROOT", "/opt/vonk-forge-recipes")
     producer = library_root / "tools/build-catalog-index" if library_root else None
     if producer is None or not producer.is_file():
         pytest.skip("recipe producer checkout is unavailable")
     result = subprocess.run(
-        [sys.executable, os.fspath(producer), "--check"],
+        [sys.executable, os.fspath(producer), "--output-dir", os.fspath(tmp_path)],
         check=False,
         capture_output=True,
         text=True,
@@ -262,6 +262,16 @@ def test_recipe_producer_output_is_fresh_before_controller_sync() -> None:
         timeout=120,
     )
     assert result.returncode == 0, (result.stdout[-1024:], result.stderr[-1024:])
+    rebuilt_index = json.loads((tmp_path / "catalog-index.json").read_bytes())
+    identity = read_recipe(entry["document"]).identity
+    rebuilt_entry = next(
+        row
+        for row in rebuilt_index["recipes"]
+        if read_recipe(row["document"]).identity == identity
+    )
+    _, expected_archive, _ = _candidate_package(index, entry, package_root)
+    _, rebuilt_archive, _ = _candidate_package(rebuilt_index, rebuilt_entry, tmp_path)
+    assert rebuilt_archive == expected_archive
 
 
 def test_controller_sync_exposes_canonical_library_documents_to_api_and_cli() -> None:
