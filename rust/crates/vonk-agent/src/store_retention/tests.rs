@@ -415,7 +415,7 @@ fn a_run_scope_no_record_owns_leaves_a_day_after_the_verdict_and_frees_its_insta
             .join(format!("{JOB}.{ORPHAN}.damaged/x")),
         b"bad",
     );
-    let scopes = [&run_scope, &run_record, &job_scope];
+    let scopes = [&run_scope, &job_scope];
 
     // A verdict that judged no run scope (an older Controller) removes none.
     swept_with(root.path(), after_grace(), &verdict(&[ORPHAN], None));
@@ -432,6 +432,13 @@ fn a_run_scope_no_record_owns_leaves_a_day_after_the_verdict_and_frees_its_insta
         .join("run-metadata")
         .join(RUN)
         .join("untracked-since");
+    // A Controller verdict cannot delete a lifecycle that may still own a
+    // running process. Runtime observation retires it only after proving exit.
+    assert!(!mark.exists());
+    swept_with(root.path(), after_grace(), &forgotten);
+    assert!(run_scope.exists() && run_record.exists() && orphan.exists());
+    fs::remove_file(&run_record).unwrap();
+    swept_with(root.path(), SystemTime::now(), &forgotten);
     assert!(mark.exists());
     let mut tracked_again = verdict(&[ORPHAN], Some(&[]));
     tracked_again.observed_runs = forgotten.observed_runs.clone();
@@ -446,11 +453,8 @@ fn a_run_scope_no_record_owns_leaves_a_day_after_the_verdict_and_frees_its_insta
     assert!(!root.path().join("runs").join(JOB).exists());
     assert!(!isolated.exists());
     assert!(live.exists() && tracked.exists());
-    // The orphan installation no longer has a run naming it: it is marked
-    // now and leaves a day later.
-    assert!(orphan.exists());
-    swept_with(root.path(), SystemTime::now(), &forgotten);
-    swept_with(root.path(), after_grace(), &forgotten);
+    // Its lifecycle was retired before the grace began: the installation
+    // leaves alongside the run scope, without an extra day of retention.
     assert!(!orphan.parent().unwrap().exists());
 }
 
@@ -1122,4 +1126,125 @@ fn deleted_installation_directories_are_absent_on_the_next_inventory() {
     let names = super::installation_names(root.path()).unwrap();
     assert!(names.is_empty());
     assert_eq!(super::installation_sizes(root.path(), &names), Some(vec![]));
+}
+
+#[test]
+fn abandoned_build_staging_expires_only_after_its_exact_units_are_quiescent() {
+    // Catches Claim-only retention and deleting a crashed build's still-live
+    // service. Broken Podman metadata must not be queried to prove cgroup exit.
+    use crate::process::{ProcessError, ProcessOutput, ProcessRunner, Program};
+    struct Units {
+        live: bool,
+        unavailable: bool,
+    }
+    impl ProcessRunner for Units {
+        fn run(
+            &self,
+            program: Program,
+            args: &[String],
+            _: Duration,
+        ) -> Result<ProcessOutput, ProcessError> {
+            assert_eq!(program, Program::Systemctl);
+            let listing = args.iter().any(|arg| arg == "list-units");
+            assert!(listing || args.iter().any(|arg| arg == "show"));
+            Ok(ProcessOutput {
+                success: !self.unavailable,
+                stdout: if !self.live {
+                    vec![]
+                } else if listing {
+                    format!("{} loaded active running\n", args.last().unwrap()).into_bytes()
+                } else {
+                    b"LoadState=loaded\nActiveState=active\nMainPID=7\nControlGroup=/build\n"
+                        .to_vec()
+                },
+                stderr: vec![],
+                exit_code: Some(if self.unavailable { 1 } else { 0 }),
+            })
+        }
+    }
+    let root = tempfile::tempdir().unwrap();
+    let staging = root.path().join("build-staging");
+    let failed = file(
+        &staging.join(format!("{OBJECT}-{ORPHAN}/podman-storage/broken-db")),
+        b"corrupt",
+    );
+    let orphan = file(&staging.join("source-crashed/context/input"), b"source");
+    let collect = |now, runner: Units| {
+        let mut pass = super::Pass {
+            now,
+            deadline: Instant::now() + Duration::from_secs(60),
+            tick: &|| {},
+            owner: rustix::process::geteuid().as_raw(),
+            swept: Swept::default(),
+        };
+        pass.build_staging(&staging, &runner);
+    };
+    collect(
+        within_grace(),
+        Units {
+            live: false,
+            unavailable: false,
+        },
+    );
+    assert!(failed.exists() && orphan.exists());
+    collect(
+        after_grace(),
+        Units {
+            live: true,
+            unavailable: false,
+        },
+    );
+    assert!(failed.exists() && !orphan.exists());
+    collect(
+        after_grace(),
+        Units {
+            live: false,
+            unavailable: true,
+        },
+    );
+    assert!(failed.exists());
+    collect(
+        after_grace(),
+        Units {
+            live: false,
+            unavailable: false,
+        },
+    );
+    assert!(!failed.exists());
+}
+
+#[test]
+fn a_build_staging_directory_without_any_record_is_discovered_and_expires() {
+    // Catches the periodic collector ignoring claim-owned scratch after death.
+    let root = tempfile::tempdir().unwrap();
+    let orphan = file(
+        &root
+            .path()
+            .join("build-staging/source-crashed/podman-storage/layer"),
+        b"layer",
+    );
+    run(root.path(), within_grace(), &|| ROOMY);
+    assert!(orphan.exists());
+    run(root.path(), after_grace(), &|| ROOMY);
+    assert!(!orphan.exists());
+}
+
+#[test]
+fn retained_metadata_restores_observation_but_retired_metadata_never_resurrects_scratch() {
+    // Catches a metadata-only orphan pinning an installation forever, and a
+    // repair that recreates collected scopes after the lifecycle has retired.
+    let root = tempfile::tempdir().unwrap();
+    let metadata = root.path().join("run-metadata").join(ORPHAN);
+    let lifecycle = file(&metadata.join("lifecycle.json"), b"{");
+    file(&metadata.join("runtime.json"), b"{}");
+    let scope = root.path().join("runs").join(ORPHAN);
+    run(root.path(), SystemTime::now(), &|| ROOMY);
+    assert!(scope.is_dir() && lifecycle.exists());
+    fs::remove_dir(&scope).unwrap();
+    run(root.path(), SystemTime::now(), &|| ROOMY);
+    assert!(scope.is_dir());
+    fs::remove_file(lifecycle).unwrap();
+    fs::remove_dir(&scope).unwrap();
+    run(root.path(), SystemTime::now(), &|| ROOMY);
+    assert!(!scope.exists());
 }

@@ -255,3 +255,100 @@ fn stale_or_unreadable_projection_cannot_veto_safe_image_reclamation() {
         }
     }
 }
+
+#[test]
+fn daemon_inventory_collects_images_without_receipts_but_preserves_live_content() {
+    // Catches receipt-only enumeration: old builds/imports with no receipt
+    // never left, while containers and installed content must remain usable.
+    let (_temp, runner, executor) = executor();
+    let old = "a".repeat(64);
+    let running = "b".repeat(64);
+    let installed = "d".repeat(64);
+    let desired = "e".repeat(64);
+    for manifest in [&old, &running, &installed, &desired] {
+        pull(&executor, manifest);
+        fs::remove_file(executor.roots.runtime_image_receipts.join(manifest)).unwrap();
+    }
+    // Give each content a distinct config; two unused old build aliases
+    // share one config and must both be removed without Docker force.
+    let adapter = "localhost/vonk/runtime-adapter-old".to_owned();
+    let build = "localhost/vonk/recipe-build-old".to_owned();
+    {
+        let mut images = runner.images.lock().unwrap();
+        images.insert(local(&old), format!("sha256:{old}"));
+        images.insert(adapter.clone(), format!("sha256:{old}"));
+        images.insert(build.clone(), format!("sha256:{old}"));
+        images.insert(local(&running), format!("sha256:{running}"));
+        images.insert(local(&installed), format!("sha256:{installed}"));
+        images.insert(local(&desired), format!("sha256:{desired}"));
+        images.insert(
+            "localhost/vonk/runtime-adapter-kept".into(),
+            format!("sha256:{installed}"),
+        );
+    }
+    runner
+        .in_use
+        .lock()
+        .unwrap()
+        .insert(format!("sha256:{running}"));
+    install(&executor, &installed);
+    retention(&executor, 0, vec![desired.clone()]);
+    {
+        let _pull = executor.image_pulls.read().unwrap();
+        executor.sweep_unused_runtime_images();
+        assert!(present(&runner, &old));
+    }
+    {
+        let _launch = executor.runtime_stores.read().unwrap();
+        executor.sweep_unused_runtime_images();
+        assert!(present(&runner, &old));
+    }
+    executor.sweep_unused_runtime_images();
+    assert!(
+        present(&runner, &old),
+        "an upstream build date is not local unused age"
+    );
+    let marker = executor
+        .roots
+        .runtime_image_receipts
+        .join(format!(".untracked-{old}"));
+    File::options()
+        .write(true)
+        .open(&marker)
+        .unwrap()
+        .set_modified(std::time::SystemTime::now() - Duration::from_secs(25 * 3600))
+        .unwrap();
+    *runner.container_query_fails.lock().unwrap() = true;
+    executor.sweep_unused_runtime_images();
+    assert!(present(&runner, &old) && marker.exists());
+    *runner.container_query_fails.lock().unwrap() = false;
+    // Recovery uses the same grace; the outage does not restart a day's wait.
+    executor.sweep_unused_runtime_images();
+    assert!(!present(&runner, &old));
+    assert!(!runner.images.lock().unwrap().contains_key(&adapter));
+    assert!(!runner.images.lock().unwrap().contains_key(&build));
+    assert!(
+        present(&runner, &running) && present(&runner, &installed) && present(&runner, &desired)
+    );
+    assert!(
+        runner
+            .images
+            .lock()
+            .unwrap()
+            .contains_key("localhost/vonk/runtime-adapter-kept")
+    );
+}
+
+#[test]
+fn orphan_image_grace_records_disappear_when_docker_no_longer_has_the_content() {
+    // Catches replacing leaked images with an unbounded first-seen ledger.
+    let (_temp, _runner, executor) = executor();
+    let marker = executor
+        .roots
+        .runtime_image_receipts
+        .join(format!(".untracked-{}", "a".repeat(64)));
+    fs::create_dir_all(marker.parent().unwrap()).unwrap();
+    fs::write(&marker, b"").unwrap();
+    executor.sweep_unused_runtime_images();
+    assert!(!marker.exists());
+}

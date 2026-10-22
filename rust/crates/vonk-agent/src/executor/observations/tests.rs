@@ -327,6 +327,58 @@ fn assert_fresh_run_preparation(runtime: &OciRuntime<'_, NoProcess>) {
         .expect("retired bookkeeping must not block a fresh run");
 }
 
+fn lifecycle_inspector(socket: &std::path::Path, running: bool) -> std::thread::JoinHandle<()> {
+    use std::io::{Read, Write};
+    use vonk_agent_protocol::generated::{HostHelperResponse, HostHelperResponseStatus};
+    let listener = std::os::unix::net::UnixListener::bind(socket).unwrap();
+    listener.set_nonblocking(true).unwrap();
+    std::thread::spawn(move || {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let mut stream = loop {
+            match listener.accept() {
+                Ok((stream, _)) => break stream,
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    assert!(
+                        Instant::now() < deadline,
+                        "lifecycle inspection never arrived"
+                    );
+                    std::thread::sleep(Duration::from_millis(1));
+                }
+                Err(error) => panic!("{error}"),
+            }
+        };
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        stream
+            .set_write_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let mut prefix = [0; 4];
+        stream.read_exact(&mut prefix).unwrap();
+        let mut body = vec![0; u32::from_be_bytes(prefix) as usize];
+        stream.read_exact(&mut body).unwrap();
+        let request: vonk_agent_protocol::RecipeRunInspectionRequest =
+            vonk_agent_protocol::parse_strict(&body).unwrap();
+        let response = HostHelperResponse {
+            installation_intent_nonce: None,
+            schema_version: 1,
+            request_id: Some(request.request_id),
+            status: HostHelperResponseStatus::ContainerRuntimeRequestExecuted,
+            process_running: Some(running),
+            job_progress_at: None,
+            exit_code: None,
+            error_code: None,
+            diagnostic: None,
+            process_logs: None,
+        };
+        let body = vonk_agent_protocol::canonical_generated_json(&response).unwrap();
+        stream
+            .write_all(&(body.len() as u32).to_be_bytes())
+            .unwrap();
+        stream.write_all(&body).unwrap();
+    })
+}
+
 #[tokio::test]
 async fn unparseable_lifecycle_of_an_unowned_run_is_retired_not_skipped_forever() {
     // Live regression: a lifecycle written before an agent upgrade could
@@ -341,11 +393,13 @@ async fn unparseable_lifecycle_of_an_unowned_run_is_retired_not_skipped_forever(
     fs::set_permissions(&metadata, fs::Permissions::from_mode(0o700)).unwrap();
     fs::write(metadata.join("lifecycle.json"), br#"{"installation_id":1}"#).unwrap();
     fs::write(metadata.join("runtime.json"), b"{}").unwrap();
+    let socket = runtime.path().join("helper.sock");
+    let helper = lifecycle_inspector(&socket, false);
     let runner = NoProcess;
     let server = ObservationServer::with_disposition(Some(204), Some("unowned"));
     let executor = RecipeExecutor {
         client: &server.client,
-        helper_socket: std::path::Path::new(crate::host_runtime::HELPER_SOCKET),
+        helper_socket: &socket,
         runtime: OciRuntime {
             runner: &runner,
             data_root: data.path(),
@@ -376,6 +430,7 @@ async fn unparseable_lifecycle_of_an_unowned_run_is_retired_not_skipped_forever(
         assert_eq!(report["runs"], json!([]));
     }
     // Only the unusable lifecycle is retired; the run stays as history.
+    helper.join().unwrap();
     assert!(!metadata.join("lifecycle.json").exists());
     assert!(metadata.join("runtime.json").exists());
     assert!(data.path().join("runs").join(run_id).is_dir());
@@ -393,11 +448,13 @@ async fn unreadable_lifecycle_of_an_unowned_run_is_retired_whatever_the_local_er
     fs::create_dir_all(&metadata).unwrap();
     fs::set_permissions(&metadata, fs::Permissions::from_mode(0o700)).unwrap();
     fs::write(metadata.join("lifecycle.json"), vec![b' '; 20 * 1024]).unwrap();
+    let socket = runtime.path().join("helper.sock");
+    let helper = lifecycle_inspector(&socket, false);
     let runner = NoProcess;
     let server = ObservationServer::with_disposition(Some(204), Some("unowned"));
     let executor = RecipeExecutor {
         client: &server.client,
-        helper_socket: std::path::Path::new(crate::host_runtime::HELPER_SOCKET),
+        helper_socket: &socket,
         runtime: OciRuntime {
             runner: &runner,
             data_root: data.path(),
@@ -405,6 +462,7 @@ async fn unreadable_lifecycle_of_an_unowned_run_is_retired_whatever_the_local_er
         runtime_root: runtime.path(),
     };
     assert_eq!(complete_observation_sweep(&executor).await, 0);
+    helper.join().unwrap();
     assert!(!metadata.join("lifecycle.json").exists());
     assert_fresh_run_preparation(&executor.runtime);
     server.finish();
@@ -783,4 +841,58 @@ async fn an_observation_names_the_generation_of_its_run() {
     assert_eq!(helper.join().unwrap(), Some(2));
     let reports = server.finish();
     assert_eq!(reports[0]["runs"][0]["run_generation"], 2);
+}
+
+#[tokio::test]
+async fn corrupt_unowned_lifecycle_keeps_its_disk_until_the_process_is_proven_gone() {
+    use std::os::unix::fs::PermissionsExt;
+
+    // Catches retiring corrupt metadata solely on a Controller verdict, which
+    // lets retention delete directories a live or unobservable container uses.
+    for running in [Some(true), Some(false), None] {
+        let data = tempdir().unwrap();
+        let runtime = tempdir().unwrap();
+        let run = Uuid::new_v4().to_string();
+        let metadata = data.path().join("run-metadata").join(&run);
+        fs::create_dir_all(&metadata).unwrap();
+        fs::set_permissions(&metadata, fs::Permissions::from_mode(0o700)).unwrap();
+        let lifecycle = metadata.join("lifecycle.json");
+        fs::write(&lifecycle, b"{").unwrap();
+        // Only metadata survived the crash. Retention restores the observation
+        // projection before the normal runtime observer judges the lifecycle.
+        crate::store_retention::sweep(
+            data.path(),
+            std::time::SystemTime::now(),
+            Instant::now() + Duration::from_secs(60),
+            None,
+            &|| Some((1024, 1024)),
+            &|| {},
+        );
+        assert!(data.path().join("runs").join(&run).is_dir());
+        let socket = runtime.path().join("helper.sock");
+        let helper = running.map(|running| lifecycle_inspector(&socket, running));
+        let server = ObservationServer::with_disposition(
+            Some(204),
+            Some(vonk_agent_protocol::generated::RecipeRunDispositionValue::Unowned.as_str()),
+        );
+        let executor = RecipeExecutor {
+            client: &server.client,
+            helper_socket: &socket,
+            runtime: OciRuntime {
+                runner: &NoProcess,
+                data_root: data.path(),
+            },
+            runtime_root: runtime.path(),
+        };
+        assert_eq!(complete_observation_sweep(&executor).await, 0);
+        assert_eq!(
+            lifecycle.exists(),
+            running != Some(false),
+            "only runtime proof of exit releases a retained lifecycle"
+        );
+        if let Some(helper) = helper {
+            helper.join().unwrap();
+        }
+        server.finish();
+    }
 }

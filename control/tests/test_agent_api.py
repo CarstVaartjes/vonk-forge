@@ -40,6 +40,7 @@ from vonk_agent_protocol import (
     SignedHostHelperGrant,
     canonical_message,
 )
+from vonk_agent_protocol.agent_words import RecipeRunDispositionValue
 from vonk_agent_protocol.contracts import AgentOperation as OperationKind
 from vonk_agent_protocol.host_helper import (
     HostRuntimeRequest,
@@ -2655,6 +2656,19 @@ def test_recipe_run_disposition_names_every_run_the_controller_does_not_want(
                 updated_at=clock.now,
             )
         )
+        session.flush()
+        session.add(
+            RunNode(
+                run_id=known_run_id,
+                node_id=NODE_A,
+                rank=0,
+                role="main",
+                state=RunState.FAILED,
+                port=8000,
+                reserved_memory_bytes=0,
+                updated_at=clock.now,
+            )
+        )
 
     def disposition(run_id: str, headers: dict[str, str] | None = None):
         return client.get(
@@ -2690,6 +2704,14 @@ def test_recipe_run_disposition_names_every_run_the_controller_does_not_want(
     running = in_state("running", generation=4)
     assert "x-vonk-recipe-run-disposition" not in running.headers
     assert running.headers["x-vonk-recipe-run-generation"] == "4"
+    # A run wanted on A owns no files on B after re-enrollment/placement drift.
+    foreign = disposition(known_run_id, agent_headers(NODE_B, "serial-b"))
+    assert foreign.status_code == 204
+    assert (
+        foreign.headers.get("x-vonk-recipe-run-disposition")
+        == RecipeRunDispositionValue.UNOWNED.value
+    )
+    assert "x-vonk-recipe-run-generation" not in foreign.headers
     assert disposition("E85C4710-not-a-run").status_code == 422
     assert disposition("e85c4710-e437-4d12-8191-499596aa2a4c", {}).status_code == 401
 

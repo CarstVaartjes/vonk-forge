@@ -439,7 +439,6 @@ mod stop;
 mod stray_jobs;
 pub use host_settings::HOST_SETTINGS_INTERVAL;
 mod unused_images;
-pub use exited_serving::EXITED_SERVING_SWEEP_INTERVAL;
 pub use unused_images::UNUSED_IMAGE_SWEEP_INTERVAL;
 mod validation;
 use validation::*;
