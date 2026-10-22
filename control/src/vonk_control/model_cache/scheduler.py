@@ -96,6 +96,7 @@ class SchedulerMixin:
                     and payload.force_refresh
                 )
             cache._run_download(operation_id, force=kind == "repair" or refresh)
+        cache.reconcile_model_revisions()
         return len(rows) + cache.advance_removals(limit=limit)
 
     def redrive(self, operation_id: str) -> int:
@@ -116,6 +117,8 @@ class SchedulerMixin:
         if cache._closed.is_set():
             return 0
 
+        if requested_id is None:
+            cache.reconcile_model_revisions()
         requested = cache._max_parallel_downloads if limit is None else limit
         if not 1 <= requested <= _MAX_PARALLEL_DOWNLOADS:
             raise InvalidValue("cache worker batch limit is invalid")
@@ -388,6 +391,7 @@ class SchedulerMixin:
                 with cache._session(write=True) as session:
                     row = session.get(ModelCacheSet, set_digest)
                     if row is not None:
+                        cache._remember_verified_models(session, row, manifest)
                         row.state = "cached"
                         row.verified_bytes = manifest.expected_bytes
                         row.verified_at = now

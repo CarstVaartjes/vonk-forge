@@ -427,6 +427,18 @@ function ModelRevisionsRow({
           <dt>Size</dt>
           <dd>{formatBytes(bytes)}</dd>
         </div>
+        {model.cache_usage && (
+          <>
+            <div>
+              <dt>Unique</dt>
+              <dd>{formatBytes(model.cache_usage.unique_bytes)}</dd>
+            </div>
+            <div>
+              <dt>Shared</dt>
+              <dd>{formatBytes(model.cache_usage.shared_bytes)}</dd>
+            </div>
+          </>
+        )}
         <div>
           <dt>Recipes</dt>
           <dd>{recipes.length || "None"}</dd>
@@ -438,6 +450,12 @@ function ModelRevisionsRow({
           </div>
         )}
       </dl>
+      {(model.cache_usage?.retained_revisions ?? []).map((revision) => (
+        <p key={revision.content_sha256}>
+          Previous revision retained because {revision.owners.join(", ")};{" "}
+          {formatBytes(revision.unique_bytes)} unique; rechecked every 30s
+        </p>
+      ))}
       {recipes.length > 0 && (
         <ul className="library-model-recipes" aria-label={`Recipes using ${modelTitle(model)}`}>
           {recipes.map((recipe) => (

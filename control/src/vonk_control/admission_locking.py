@@ -41,6 +41,7 @@ _ROW_LOCK_ORDER = (
     "resource_reservations",
     "fleet_profile_applications",
     "model_cache_operations",
+    "model_cache_sets",
     "jobs",
     "agent_operations",
     "agent_operation_attempts",

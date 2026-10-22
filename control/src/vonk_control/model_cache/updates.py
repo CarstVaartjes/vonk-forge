@@ -69,6 +69,11 @@ class UpdatesMixin:
         ref = manifest.model_definition_ref
         if ref is None:
             return None, []
+        verified = {
+            (reference.publisher, reference.slug): reference
+            for reference in manifest.verified_models
+        }
+        ref = verified.get((ref.publisher, ref.slug), ref)
         current_digest = ref.content_sha256
         current = None
         current = session.scalar(

@@ -26,7 +26,7 @@ from ..library_contract import (
     LibraryResourceProjection,
 )
 from ..library_image_presence import ImagePresenceIndex
-from ..model_cache_contract import ModelCacheOperationState
+from ..model_cache_contract import ModelCacheOperationState, ModelCacheUsage
 from ..models import CatalogDocumentRevision
 from .catalog import (
     _catalog_documents,
@@ -76,6 +76,7 @@ class LibraryProjection:
         telemetry_delayed_seconds: int = 20,
         local_state: Callable[[], Mapping[str, Mapping[str, object]]] | None = None,
         runtime_archive_available: Callable[[str, int], bool] | None = None,
+        model_storage: Callable[[], Mapping[str, ModelCacheUsage]] | None = None,
         assessment: Callable[..., list[LibraryRecipeProjection]] | None = None,
         request_budget_seconds: float = REQUEST_BUDGET_SECONDS,
         image_budget_seconds: float = IMAGE_BUDGET_SECONDS,
@@ -102,6 +103,7 @@ class LibraryProjection:
             telemetry_delayed_seconds=telemetry_delayed_seconds,
         )
         self._local_state = local_state
+        self._model_storage = model_storage
         self._request_budget = request_budget_seconds
         self._image_budget = image_budget_seconds
         self._image_presence = (

@@ -163,7 +163,8 @@ export type LibraryRecipeRecord = {
   modelKey: string;
   modelTitle: string;
   modelFileCount: WireNumber;
-  modelBytes: WireNumber;
+  modelBytes: WireNumber | null;
+  cacheUsage?: LibraryViewModel["cache_usage"];
   modelCached: boolean;
   capabilities: string[];
 };
@@ -303,6 +304,7 @@ export function buildLibraryRecipeRecords(snapshot: LibraryViewSnapshot): Librar
           modelTitle: title,
           modelFileCount: fileCount,
           modelBytes: bytes,
+          cacheUsage: model.cache_usage,
           modelCached,
           capabilities,
         },
@@ -318,6 +320,7 @@ export function buildLibraryRecipeRecords(snapshot: LibraryViewSnapshot): Librar
       modelTitle: title,
       modelFileCount: fileCount,
       modelBytes: bytes,
+      cacheUsage: model.cache_usage,
       modelCached,
       capabilities: [...new Set([...capabilities, ...recipe.capabilities])],
     }));
@@ -803,6 +806,18 @@ export function LibraryWorkcell({
                   {formatBytes(selectedModel.modelBytes)} ·{" "}
                   {selectedModel.capabilities.join(" · ") || "Capabilities not declared"}
                 </span>
+                {selectedModel.cacheUsage && (
+                  <span>
+                    {formatBytes(selectedModel.cacheUsage.unique_bytes)} unique ·{" "}
+                    {formatBytes(selectedModel.cacheUsage.shared_bytes)} shared
+                    {(selectedModel.cacheUsage.retained_revisions ?? []).map((revision) => (
+                      <span key={revision.content_sha256}>
+                        Previous revision retained because {revision.owners.join(", ")};{" "}
+                        {formatBytes(revision.unique_bytes)} unique; rechecked every 30s
+                      </span>
+                    ))}
+                  </span>
+                )}
               </div>
             )}
             <ul>

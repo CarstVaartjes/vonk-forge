@@ -87,10 +87,48 @@ ModelCacheOperationPhase = Literal[
     "completed",
     "failed",
 ]
+
+
+class ModelCacheSetState(StrEnum):
+    INCOMPLETE = "incomplete"
+    DOWNLOADING = "downloading"
+    VERIFYING = "verifying"
+    CACHED = "cached"
+    NEEDS_REPAIR = "needs-repair"
+    FAILED = "failed"
+
+
 ModelCacheEntryState = Literal[
-    "incomplete", "downloading", "verifying", "cached", "needs-repair", "failed"
+    ModelCacheSetState.INCOMPLETE,
+    ModelCacheSetState.DOWNLOADING,
+    ModelCacheSetState.VERIFYING,
+    ModelCacheSetState.CACHED,
+    ModelCacheSetState.NEEDS_REPAIR,
+    ModelCacheSetState.FAILED,
 ]
 ModelCacheCoverage = Literal["complete", "incomplete"]
+
+
+class RetainedModelRevision(StrictModel):
+    content_sha256: Digest
+    unique_bytes: int = Field(ge=0)
+    owners: list[str]
+
+
+class ModelCacheUsage(StrictModel):
+    """Physical object bytes for one publisher/slug across its retained sets.
+
+    disk_bytes assigns a shared object once, to the first publisher/slug in
+    lexical order, so summing rows is safe across pagination and filters.
+    unique_bytes is exclusive to this lineage; shared_bytes is held here and
+    also referenced by another lineage. No hashes or document estimates.
+    """
+
+    cached: bool = False
+    disk_bytes: int = Field(ge=0)
+    unique_bytes: int = Field(ge=0)
+    shared_bytes: int = Field(ge=0)
+    retained_revisions: list[RetainedModelRevision] = Field(default_factory=list)
 
 
 class StrippedStrictModel(StrictJSONModel):
@@ -153,6 +191,7 @@ class CacheManifest(StrippedStrictModel):
     model_definition_ref: ModelReference | None
     model_content_digests: list[str]
     artifacts: list[CacheManifestArtifact]
+    verified_models: list[ModelReference] = Field(default_factory=list)
 
 
 class ModelCacheObjectReceipt(StrippedStrictModel):

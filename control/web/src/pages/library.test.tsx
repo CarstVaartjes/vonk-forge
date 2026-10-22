@@ -208,3 +208,25 @@ test("assesses placement only when the library fleet filter is requested", async
     seen.find((url) => url.pathname === "/api/recipe/library")!.searchParams.get("fits_fleet"),
   ).toBe("true");
 });
+
+test("projects measured cache bytes and retained owners instead of document download size", async () => {
+  // Catches billing the document size after the Controller measured shared objects.
+  const usage = {
+    disk_bytes: 12,
+    unique_bytes: 3,
+    shared_bytes: 9,
+    retained_revisions: [
+      { content_sha256: "a".repeat(64), unique_bytes: 2, owners: ["installation owner-1"] },
+    ],
+  };
+  const api = {
+    modelLibrary: async () => ({
+      ...modelLibrary,
+      models: [{ ...modelLibrary.models[0]!, resources: { disk_bytes: 12 }, cache_usage: usage }],
+    }),
+    recipeLibrary: async () => ({ ...recipeLibrary, recipes: [] }),
+  } as unknown as ControlApi;
+  const snapshot = await loadLibraryView(api, new AbortController().signal);
+  expect(snapshot.models[0]!.model_bytes).toBe(12);
+  expect(snapshot.models[0]!.cache_usage).toEqual(usage);
+});

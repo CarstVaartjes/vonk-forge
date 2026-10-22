@@ -360,6 +360,7 @@ def production_app(settings: Settings | None = None) -> FastAPI:
     )
     visual_library = LibraryProjection(
         sessions,
+        model_storage=model_cache.model_storage,
         cursors=cursor_codec,
         clock=clock,
         runtime_archive_available=runtime_image_storage.build_archive_available,
