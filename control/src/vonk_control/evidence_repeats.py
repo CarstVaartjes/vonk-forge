@@ -1,24 +1,4 @@
-"""Repeated identical evidence is a platform fault: shown, never acted on.
-
-A deterministic failure ends its own work with its evidence.  When the same
-evidence comes back about the same subject on the same Spark with no success
-between (every Stop failing with one code, a runtime grant refused on every
-ask, a profile retry declined the same way on every try), retrying is not
-what is wrong: the platform is, and an operator has to look.
-
-:func:`note_repeat` records one more occurrence at the caller's own commit
-point and :func:`note_success` clears the subject.  Neither returns anything,
-so no caller can branch on the count or turn it into a cap: the work goes on
-exactly as it would without them.  Whether a repetition is an alarm is decided
-when it is read (like ``progress_stall``): the one failure limit of
-occurrences.  A repetition about lasting work (a kind of order, a grant on a
-Spark) stays shown until that work next succeeds, however long ago it began.
-Only a profile load, which ends without ever succeeding when it is superseded,
-ages out once its last occurrence is a profile stall window old.
-
-Every write and read is fail-open: an absent or unreadable table records and
-shows nothing, and never fails the caller's work.
-"""
+"""Repeated contact observations and operation history, never retry authority."""
 
 from __future__ import annotations
 
@@ -26,7 +6,7 @@ import logging
 from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import delete, or_, select
+from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import AgentOperation as OperationKind
@@ -34,24 +14,132 @@ from vonk_agent_protocol import OutcomeUnknown, WaitReason
 from vonk_agent_protocol.contracts import AgentFailureResult, AgentUpgradePayload
 
 from . import agent_operation_states
-from .models import AgentOperation, AgentOperationAttempt, EvidenceRepeat
+from .models import (
+    REPEATED_EVIDENCE_ORDINAL,
+    AgentNode,
+    AgentOperation,
+    AgentOperationAttempt,
+    FleetProfileApplication,
+)
 from .recovery_policy import RECOVERY
+from .repeated_evidence_contract import (
+    RepeatedEvidence,
+    RepeatedEvidenceSubject,
+    is_contact_subject,
+)
 from .settings import PROFILE_STALL_WINDOW_SECONDS
 from .stored_json import read_row_column
 
 _LOGGER = logging.getLogger(__name__)
 _SHOWN_FOR = timedelta(seconds=PROFILE_STALL_WINDOW_SECONDS)
-_LOAD = "profile load "
+_LOAD = RepeatedEvidenceSubject.PROFILE_LOAD.value.format(application_id="")
+type EvidenceOwner = AgentNode | AgentOperation | FleetProfileApplication
 
 
 def load_subject(application_id: str) -> str:
-    """The subject of one profile load: it may end without a success."""
-
-    return _LOAD + application_id
+    return RepeatedEvidenceSubject.PROFILE_LOAD.value.format(
+        application_id=application_id
+    )
 
 
 def _utc(value: datetime) -> datetime:
     return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
+
+
+def owner_evidence(row: EvidenceOwner) -> list[RepeatedEvidence] | None:
+    value = (
+        row.contact_repeated_evidence
+        if isinstance(row, AgentNode)
+        else row.repeated_evidence
+    )
+    if value is None:
+        return []
+    if not isinstance(value, list) or any(
+        not isinstance(item, RepeatedEvidence) for item in value
+    ):
+        _LOGGER.warning(
+            "Repeated evidence on its owner is unreadable: %s", type(row).__name__
+        )
+        return None
+    if isinstance(row, AgentNode):
+        bound = all(
+            item.node_id == row.node_id
+            and is_contact_subject(item.subject)
+            and item.code is not None
+            and item.ordinal == 0
+            for item in value
+        )
+    elif isinstance(row, AgentOperation):
+        bound = all(
+            item.node_id == row.node_id
+            and item.subject == row.kind
+            and item.ordinal > 0
+            for item in value
+        )
+    else:
+        bound = all(
+            item.subject == load_subject(row.id)
+            and item.code is not None
+            and item.ordinal == 0
+            for item in value
+        )
+    if not bound:
+        _LOGGER.warning(
+            "Repeated evidence does not bind its %s owner", type(row).__name__
+        )
+        return None
+    return value
+
+
+def _write(row: EvidenceOwner, evidence: list[RepeatedEvidence]) -> None:
+    if isinstance(row, AgentNode):
+        row.contact_repeated_evidence = evidence or None
+    else:
+        row.repeated_evidence = evidence or None
+
+
+def _owner(
+    session: Session, subject: str, node_id: str, operation: AgentOperation | None
+) -> EvidenceOwner | None:
+    if is_contact_subject(subject):
+        return session.scalar(
+            select(AgentNode)
+            .where(AgentNode.node_id == node_id)
+            .with_for_update(of=AgentNode)
+        )
+    if subject.startswith(_LOAD):
+        return session.get(
+            FleetProfileApplication, subject[len(_LOAD) :], with_for_update=True
+        )
+    if operation is None or operation.kind != subject or operation.node_id != node_id:
+        raise ValueError("command repetition requires its exact operation owner")
+    return session.scalar(
+        select(AgentOperation)
+        .where(AgentOperation.id == operation.id)
+        .with_for_update(of=AgentOperation)
+    )
+
+
+def next_ordinal(session: Session) -> int:
+    if session.get_bind().dialect.name == "postgresql":
+        value = session.scalar(REPEATED_EVIDENCE_ORDINAL.next_value())
+        assert value is not None
+        return value
+    # SQLite is a test store. The caller flushes its owner before reaching
+    # here, so its existing write transaction serializes this allocation.
+    values = session.scalars(select(AgentOperation.repeated_evidence))
+    return (
+        max(
+            (
+                item.ordinal
+                for value in values
+                if isinstance(value, list)
+                for item in value
+            ),
+            default=0,
+        )
+        + 1
+    )
 
 
 def note_repeat(
@@ -62,101 +150,211 @@ def note_repeat(
     *,
     now: datetime,
     detail: str | None = None,
+    operation: AgentOperation | None = None,
 ) -> None:
-    """Count one more occurrence of ``code`` about ``subject`` on ``node_id``."""
-
-    dialect = session.get_bind().dialect.name
-    if dialect == "postgresql":
-        from sqlalchemy.dialects.postgresql import insert
-    elif dialect == "sqlite":
-        from sqlalchemy.dialects.sqlite import insert
-    else:
-        return
-    at = _utc(now)
-    statement = insert(EvidenceRepeat).values(
-        node_id=node_id,
-        subject=subject[:128],
-        code=str(code)[:128],
-        repeats=1,
-        first_at=at,
-        last_at=at,
-        detail=None if detail is None else detail[:256],
-    )
-    table = EvidenceRepeat.__table__
-    statement = statement.on_conflict_do_update(
-        index_elements=[table.c.node_id, table.c.subject, table.c.code],
-        set_={
-            "repeats": table.c.repeats + 1,
-            "last_at": statement.excluded.last_at,
-            "detail": statement.excluded.detail,
-        },
-    ).returning(table.c.repeats)
-    # The caller's own pending writes flush (and fail) outside the savepoint.
+    """Retain an observation on its owner, with database-ordered command history."""
     session.flush()
     try:
         with session.begin_nested():
-            repeats = int(session.execute(statement).scalar_one())
+            row = _owner(session, subject, node_id, operation)
+            if row is None:
+                return
+            evidence = owner_evidence(row)
+            if evidence is None:
+                return
+            at = _utc(now)
+            event = RepeatedEvidence(
+                node_id=node_id,
+                subject=subject,
+                code=str(code),
+                repeats=1,
+                first_at=at,
+                last_at=at,
+                detail=None if detail is None else detail[:256],
+            )
+            if isinstance(row, AgentOperation):
+                event.ordinal = next_ordinal(session)
+                evidence = [*evidence, event]
+            else:
+                previous = next(
+                    (
+                        item
+                        for item in evidence
+                        if (item.node_id, item.subject, item.code)
+                        == (node_id, subject, code)
+                    ),
+                    None,
+                )
+                if previous is not None:
+                    event.repeats = previous.repeats + 1
+                    event.first_at = previous.first_at
+                evidence = [
+                    item
+                    for item in evidence
+                    if (item.node_id, item.subject, item.code)
+                    != (node_id, subject, code)
+                ] + [event]
+            _write(row, evidence)
+            session.flush()
     except SQLAlchemyError as error:
         _LOGGER.warning("repeated evidence was not recorded: %s", type(error).__name__)
-        return
-    if RECOVERY.exhausted(repeats) and not RECOVERY.exhausted(repeats - 1):
-        _LOGGER.warning(
-            "evidence repeating: %s x%d on %s on %s", code, repeats, subject, node_id
-        )
 
 
-def note_success(session: Session, subject: str, node_id: str) -> None:
-    """The subject succeeded on ``node_id``: its repetition is over."""
-
+def note_success(
+    session: Session,
+    subject: str,
+    node_id: str,
+    *,
+    operation: AgentOperation | None = None,
+    now: datetime | None = None,
+) -> None:
     session.flush()
     try:
         with session.begin_nested():
-            session.execute(
-                delete(EvidenceRepeat).where(
-                    EvidenceRepeat.node_id == node_id,
-                    EvidenceRepeat.subject == subject[:128],
-                )
-            )
+            row = _owner(session, subject, node_id, operation)
+            if row is None:
+                return
+            evidence = owner_evidence(row)
+            if evidence is None:
+                return
+            if isinstance(row, AgentOperation):
+                if evidence and evidence[-1].code is None:
+                    return
+                at = _utc(row.updated_at if now is None else now)
+                evidence = [
+                    *evidence,
+                    RepeatedEvidence(
+                        node_id=node_id,
+                        subject=subject,
+                        repeats=0,
+                        first_at=at,
+                        last_at=at,
+                        ordinal=next_ordinal(session),
+                    ),
+                ]
+            else:
+                evidence = [
+                    item
+                    for item in evidence
+                    if (item.node_id, item.subject) != (node_id, subject)
+                ]
+            _write(row, evidence)
+            session.flush()
     except SQLAlchemyError as error:
         _LOGGER.warning("repeated evidence was not cleared: %s", type(error).__name__)
+
+
+def command_events(
+    session: Session, node_ids: Sequence[str], *, subject: str | None = None
+) -> tuple[list[tuple[str, RepeatedEvidence]], set[tuple[str, str]]]:
+    result: list[tuple[str, RepeatedEvidence]] = []
+    unreadable: set[tuple[str, str]] = set()
+    rows = session.scalars(
+        select(AgentOperation).where(
+            AgentOperation.node_id.in_(node_ids),
+            AgentOperation.repeated_evidence.is_not(None),
+            *([AgentOperation.kind == subject] if subject is not None else []),
+        )
+    )
+    for row in rows:
+        evidence = owner_evidence(row)
+        if evidence is None:
+            unreadable.add((row.node_id, row.kind))
+        else:
+            result.extend((row.id, event) for event in evidence)
+    return [
+        item for item in result if (item[1].node_id, item[1].subject) not in unreadable
+    ], unreadable
+
+
+def command_evidence_needed(session: Session, operation: AgentOperation) -> bool:
+    """Retain unresolved observations, and a clear until older failures are pruned."""
+    own = owner_evidence(operation)
+    if own is None:
+        return True
+    if not own:
+        return False
+    events, unreadable = command_events(
+        session, (operation.node_id,), subject=operation.kind
+    )
+    if (operation.node_id, operation.kind) in unreadable:
+        return True
+    cleared = max(
+        (event.ordinal for _, event in events if event.code is None), default=-1
+    )
+    if any(event.code is not None and event.ordinal > cleared for event in own):
+        return True
+    return any(
+        event.code is None and event.ordinal == cleared for event in own
+    ) and any(
+        identity != operation.id and event.code is not None and event.ordinal < cleared
+        for identity, event in events
+    )
 
 
 def repeating_evidence(
     session: Session, node_ids: Sequence[str], now: datetime
 ) -> dict[str, tuple[str, ...]]:
-    """Each Spark's repeating evidence, in words, decided at read time."""
-
-    try:
-        rows = session.scalars(
-            select(EvidenceRepeat)
-            .where(
-                EvidenceRepeat.node_id.in_(node_ids),
-                or_(
-                    EvidenceRepeat.last_at >= _utc(now) - _SHOWN_FOR,
-                    EvidenceRepeat.subject.not_like(_LOAD + "%"),
-                ),
-            )
-            .order_by(
-                EvidenceRepeat.node_id, EvidenceRepeat.subject, EvidenceRepeat.code
-            )
-        ).all()
-    except SQLAlchemyError:
-        return {}
+    """Project summaries from contact and their exact operation owners; never mutate."""
+    summaries: list[RepeatedEvidence] = []
+    for node in session.scalars(
+        select(AgentNode).where(AgentNode.node_id.in_(node_ids))
+    ):
+        summaries.extend(owner_evidence(node) or [])
+    for application in session.scalars(
+        select(FleetProfileApplication).where(
+            FleetProfileApplication.repeated_evidence.is_not(None)
+        )
+    ):
+        summaries.extend(
+            item
+            for item in owner_evidence(application) or []
+            if item.node_id in node_ids and _utc(item.last_at) >= _utc(now) - _SHOWN_FOR
+        )
+    events, unreadable = command_events(session, node_ids)
+    cleared: dict[tuple[str, str], int] = {}
+    for _, event in events:
+        if event.code is None:
+            key = (event.node_id, event.subject)
+            cleared[key] = max(cleared.get(key, -1), event.ordinal)
+    grouped: dict[tuple[str, str, str], RepeatedEvidence] = {}
+    for _, event in events:
+        if event.code is None or event.ordinal <= cleared.get(
+            (event.node_id, event.subject), -1
+        ):
+            continue
+        key = (event.node_id, event.subject, event.code)
+        previous = grouped.get(key)
+        if previous is None:
+            grouped[key] = event.model_copy()
+        else:
+            previous.repeats += event.repeats
+            previous.first_at = min(_utc(previous.first_at), _utc(event.first_at))
+            previous.last_at = max(_utc(previous.last_at), _utc(event.last_at))
+            if event.ordinal > previous.ordinal:
+                previous.detail, previous.ordinal = event.detail, event.ordinal
+    summaries.extend(grouped.values())
     shown = _upgrade_identity_waits(session, node_ids)
-    for row in rows:
-        if not RECOVERY.exhausted(row.repeats):
+    for node_id, subject in sorted(unreadable):
+        shown.setdefault(node_id, []).append(
+            f"Repeated evidence for {subject} is unreadable; its current repetition is unknown."
+        )
+    for item in sorted(
+        summaries, key=lambda item: (item.node_id, item.subject, item.code or "")
+    ):
+        if item.code is None or not RECOVERY.exhausted(item.repeats):
             continue
         if (
-            row.subject == OperationKind.AGENT_UPGRADE
-            and row.code == WaitReason.UPGRADE_AWAITING_IDENTITY
+            item.subject == OperationKind.AGENT_UPGRADE
+            and item.code == WaitReason.UPGRADE_AWAITING_IDENTITY
         ):
             continue
         detail = (
-            f"{row.code} x{row.repeats} on {row.subject} since "
-            f"{_utc(row.first_at):%Y-%m-%dT%H:%MZ}, last {_utc(row.last_at):%Y-%m-%dT%H:%MZ}"
-            + ("" if row.detail is None else f": {row.detail}")
+            f"{item.code} x{item.repeats} on {item.subject} since "
+            f"{_utc(item.first_at):%Y-%m-%dT%H:%MZ}, last {_utc(item.last_at):%Y-%m-%dT%H:%MZ}"
+            + ("" if item.detail is None else f": {item.detail}")
         )
-        shown.setdefault(row.node_id, []).append(detail[:256])
+        shown.setdefault(item.node_id, []).append(detail[:256])
     return {node_id: tuple(details) for node_id, details in shown.items()}
 
 

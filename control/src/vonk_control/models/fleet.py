@@ -30,6 +30,8 @@ from ..model_primitives import (
     _lower_hex,
     _state_in,
 )
+from ..repeated_evidence_contract import RepeatedEvidence
+from ..stored_json import ContractJSON
 from .waits import Residue, WaitEvidence, wait_due_column, wait_evidence_column
 
 
@@ -82,6 +84,15 @@ class AgentNode(Base):
         lazy="selectin",
         cascade="all, delete-orphan",
         single_parent=True,
+    )
+
+    contact_repeated_evidence: Mapped[list[RepeatedEvidence] | Residue | None] = (
+        mapped_column(
+            ContractJSON[list[RepeatedEvidence]](
+                "agent_nodes", "contact_repeated_evidence", none_as_null=True
+            ),
+            nullable=True,
+        )
     )
 
 
@@ -245,6 +256,13 @@ class FleetProfileApplication(Base):
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
+    )
+
+    repeated_evidence: Mapped[list[RepeatedEvidence] | Residue | None] = mapped_column(
+        ContractJSON[list[RepeatedEvidence]](
+            "fleet_profile_applications", "repeated_evidence", none_as_null=True
+        ),
+        nullable=True,
     )
 
 

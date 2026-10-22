@@ -122,8 +122,6 @@ NOT_CLAIMS: dict[str, str] = {
     "resource_reservations",
     "run_nodes": "a run's members; its port and memory claims are "
     "resource_reservations",
-    "evidence_repeats": "attention evidence of a repeated failure; it never "
-    "holds or blocks work and clears on the next success",
     "node_inventory_snapshots": "observed inventory of a node",
     "node_telemetry_latest": "observed telemetry of a node",
     "node_telemetry_samples": "observed telemetry of a node",

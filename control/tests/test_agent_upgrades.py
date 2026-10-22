@@ -2215,8 +2215,8 @@ def test_upgrade_identity_warning_names_its_order_and_clears_on_confirmation(
         OutcomeUnknown,
         WaitReason,
     )
-    from vonk_control.evidence_repeats import note_repeat
-    from vonk_control.models import AgentOperation, EvidenceRepeat
+    from vonk_control.evidence_repeats import note_repeat, owner_evidence
+    from vonk_control.models import AgentOperation
 
     from .agent_fences import fenced_operation
     from .test_evidence_repeats import LIMIT, _repeating
@@ -2253,6 +2253,7 @@ def test_upgrade_identity_warning_names_its_order_and_clears_on_confirmation(
                 operation.kind,
                 NODE_A,
                 WaitReason.UPGRADE_AWAITING_IDENTITY,
+                operation=operation,
                 now=clock(),
             )
     with sessions() as session:
@@ -2277,12 +2278,7 @@ def test_upgrade_identity_warning_names_its_order_and_clears_on_confirmation(
     with sessions() as session:
         stored = session.get(AgentOperation, operation.id)
         assert stored is not None and stored.state == LifecycleState.SUCCEEDED
-        assert (
-            session.query(EvidenceRepeat)
-            .filter_by(node_id=NODE_A, subject=operation.kind)
-            .count()
-            == 0
-        )
+        assert any(item.code is None for item in owner_evidence(stored) or [])
 
     # A retained aggregate whose operation already resolved is not an open wait,
     # even if its old ledger entry was never cleared by the deployed version.
@@ -2293,6 +2289,7 @@ def test_upgrade_identity_warning_names_its_order_and_clears_on_confirmation(
                 operation.kind,
                 NODE_A,
                 WaitReason.UPGRADE_AWAITING_IDENTITY,
+                operation=operation,
                 now=clock(),
             )
     assert _repeating(sessions, NODE_A, clock()) == []

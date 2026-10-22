@@ -376,3 +376,14 @@ bind(
     list[InstallationBytes],
     nullable=True,
 )
+
+from .repeated_evidence_contract import RepeatedEvidence
+
+bind("agent_nodes", "contact_repeated_evidence", list[RepeatedEvidence], nullable=True)
+bind("agent_operations", "repeated_evidence", list[RepeatedEvidence], nullable=True)
+bind(
+    "fleet_profile_applications",
+    "repeated_evidence",
+    list[RepeatedEvidence],
+    nullable=True,
+)

@@ -22,7 +22,6 @@ vonk_control.models.ClusterMappingNode|cluster_mapping_nodes|
 vonk_control.models.ClusterMapping|cluster_mappings|
 vonk_control.models.ControlProcessHeartbeat|control_process_heartbeats|
 vonk_control.models.CoordinatorFailure|coordinator_failures|
-vonk_control.models.EvidenceRepeat|evidence_repeats|
 vonk_control.models.FleetEventCursor|fleet_event_cursor|
 vonk_control.models.FleetProfileApplication|fleet_profile_applications|
 vonk_control.models.FleetProfileSelection|fleet_profile_selection|

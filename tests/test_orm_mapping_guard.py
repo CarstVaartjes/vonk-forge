@@ -92,10 +92,6 @@ AUDITED_OUTSIDE_COLUMNS: dict[str, frozenset[str]] = {
             "updated_at",
         ]
     ),
-    # Misplaced per-Spark evidence summary; owner must decide contact vs operation history.
-    "evidence_repeats": frozenset(
-        ["node_id", "subject", "code", "repeats", "first_at", "last_at", "detail"]
-    ),
     # Per-installation progress/effects, not general node inventory.
     "installation_nodes": frozenset(
         [
@@ -274,6 +270,7 @@ AUDITED_OUTSIDE_COLUMNS: dict[str, frozenset[str]] = {
         [
             "wait_evidence",
             "next_action_at",
+            "repeated_evidence",
             "id",
             "parent_job_id",
             "node_id",

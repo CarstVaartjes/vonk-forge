@@ -434,6 +434,10 @@ class TerminalHistoryCollector:
             ):
                 return False
         if isinstance(row, AgentOperation):
+            from .evidence_repeats import command_evidence_needed
+
+            if command_evidence_needed(session, row):
+                return False
             # A retained artifact job still advertises this operation tree.
             # Keep the actual receipt for its owner's entire grace, even if
             # this child ended earlier than its parent.

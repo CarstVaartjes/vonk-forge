@@ -28,7 +28,7 @@ from ..agent_operation_facts import job_output_retention_expiry
 from ..agent_operation_facts import (
     start_deadline as _start_deadline,
 )
-from ..evidence_repeats import note_repeat, note_success
+from ..evidence_repeats import note_repeat
 from ..inventory_items import record_preflight
 from ..lifecycle import Effect, Outcome, Reported
 from ..lifecycle.agent_operation import cancel_requested_at
@@ -153,7 +153,6 @@ def note_report(
             node = session.get(AgentNode, operation.node_id)
             if node is not None:
                 record_preflight(node, operation.payload_digest, result, now)
-        note_success(session, operation.kind, operation.node_id)
         return
     if event.outcome is Outcome.CANCELLED or not event.consumes_retry:
         return
@@ -170,4 +169,5 @@ def note_report(
             code,
             now=now,
             detail=event.reason or f"operation {operation.id}",
+            operation=operation,
         )

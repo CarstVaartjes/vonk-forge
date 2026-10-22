@@ -259,3 +259,150 @@ def move_artifact_facts(connection: Connection) -> None:
                 .values(agent_items=items, observed_at=observed, evidence_digest=digest)
             )
     connection.execute(text("DROP TABLE node_artifacts"))
+
+
+def move_repeated_evidence(connection: Connection) -> None:
+    """Adopt each summary by its classified owner; never turn commands into contact."""
+    from sqlalchemy import select, update
+    from vonk_agent_protocol import AgentOperation as OperationKind
+    from vonk_agent_protocol import LifecycleState, canonical_message
+
+    from ..evidence_repeats import _utc, load_subject
+    from ..models import (
+        REPEATED_EVIDENCE_ORDINAL,
+        AgentNode,
+        AgentOperation,
+        FleetProfileApplication,
+    )
+    from ..repeated_evidence_contract import RepeatedEvidence, is_contact_subject
+    from .constants import _LOGGER
+
+    REPEATED_EVIDENCE_ORDINAL.create(connection, checkfirst=True)
+    if "evidence_repeats" not in inspect(connection).get_table_names():
+        return
+    # No legacy writer may commit between copying and retiring these rows.
+    connection.execute(text("LOCK TABLE evidence_repeats IN ACCESS EXCLUSIVE MODE"))
+    rows = (
+        connection.execute(
+            text("SELECT * FROM evidence_repeats ORDER BY node_id, subject, code")
+        )
+        .mappings()
+        .all()
+    )
+    profile_prefix = load_subject("")
+    for row in rows:
+        try:
+            evidence = RepeatedEvidence.model_validate_json(
+                canonical_message(dict(row))
+            )
+        except ValueError:
+            _LOGGER.warning(
+                "Retired repeated evidence is malformed and retained for node %s",
+                row["node_id"],
+            )
+            continue
+        operation_owned = False
+        if is_contact_subject(evidence.subject):
+            target, key, field = (
+                AgentNode,
+                AgentNode.node_id,
+                AgentNode.contact_repeated_evidence,
+            )
+            statement = select(key.label("identity"), field.label("evidence")).where(
+                key == evidence.node_id
+            )
+        elif evidence.subject.startswith(profile_prefix):
+            target, key, field = (
+                FleetProfileApplication,
+                FleetProfileApplication.id,
+                FleetProfileApplication.repeated_evidence,
+            )
+            statement = select(key.label("identity"), field.label("evidence")).where(
+                key == evidence.subject[len(profile_prefix) :]
+            )
+        else:
+            try:
+                kind = OperationKind(evidence.subject)
+            except ValueError:
+                _LOGGER.warning(
+                    "Retired repeated evidence has no classified owner: %s",
+                    evidence.subject,
+                )
+                continue
+            target, key, field = (
+                AgentOperation,
+                AgentOperation.id,
+                AgentOperation.repeated_evidence,
+            )
+            operation_owned = True
+            statement = (
+                select(key.label("identity"), field.label("evidence"))
+                .where(
+                    AgentOperation.node_id == evidence.node_id,
+                    AgentOperation.kind == kind,
+                    AgentOperation.created_at <= evidence.last_at,
+                )
+                .order_by(AgentOperation.updated_at.desc(), AgentOperation.id.desc())
+                .limit(1)
+            )
+        stored = connection.execute(statement).one_or_none()
+        if stored is None or (
+            stored.evidence is not None and not isinstance(stored.evidence, list)
+        ):
+            _LOGGER.warning(
+                "Retired repeated evidence has no readable owner and remains inert: %s/%s",
+                evidence.node_id,
+                evidence.subject,
+            )
+            continue
+        previous = stored.evidence or []
+        if operation_owned:
+            ordinal = connection.scalar(REPEATED_EVIDENCE_ORDINAL.next_value())
+            assert ordinal is not None
+            evidence.ordinal = ordinal
+            adopted = [*previous, evidence]
+            operation = connection.execute(
+                select(AgentOperation.state, AgentOperation.updated_at).where(
+                    AgentOperation.id == stored.identity
+                )
+            ).one()
+            if operation.state == LifecycleState.SUCCEEDED and _utc(
+                operation.updated_at
+            ) >= _utc(evidence.last_at):
+                ordinal = connection.scalar(REPEATED_EVIDENCE_ORDINAL.next_value())
+                assert ordinal is not None
+                adopted.append(
+                    RepeatedEvidence(
+                        node_id=evidence.node_id,
+                        subject=evidence.subject,
+                        repeats=0,
+                        first_at=operation.updated_at,
+                        last_at=operation.updated_at,
+                        ordinal=ordinal,
+                    )
+                )
+        else:
+            adopted = [
+                item
+                for item in previous
+                if (item.node_id, item.subject, item.code)
+                != (evidence.node_id, evidence.subject, evidence.code)
+            ] + [evidence]
+        connection.execute(
+            update(target).where(key == stored.identity).values({field.key: adopted})
+        )
+        connection.execute(
+            text(
+                "DELETE FROM evidence_repeats WHERE node_id=:node_identity AND subject=:subject AND code=:code"
+            ),
+            {
+                "node_identity": evidence.node_id,
+                "subject": evidence.subject,
+                "code": evidence.code,
+            },
+        )
+    if (
+        connection.execute(text("SELECT 1 FROM evidence_repeats LIMIT 1")).first()
+        is None
+    ):
+        connection.execute(text("DROP TABLE evidence_repeats"))
