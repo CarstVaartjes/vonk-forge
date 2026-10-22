@@ -11,3 +11,5 @@ pub mod protocol;
 pub mod package_command;
 
 pub mod host_memory_guard;
+
+pub mod display_memory;

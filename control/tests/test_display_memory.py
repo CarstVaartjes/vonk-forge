@@ -56,8 +56,9 @@ def test_firmware_changes_only_the_advice_not_admission(firmware, update):
     assert advice.recommendation is not None
     assert ("fwupdmgr update" in advice.recommendation) == update
     assert "Advanced → Advanced Menu → Display Reserved Memory" in advice.recommendation
-    assert "free -h" in advice.recommendation
-    assert "~1.5 GB" in advice.recommendation
+    assert "Display Reserved Memory to 0.5 GB (fixed)" in advice.recommendation
+    assert ("GPU requires reset" in advice.recommendation) == update
+    assert "1.5 GiB" in advice.detail
     observation = host.display_memory
     assert observation is not None
     for change in (
@@ -77,3 +78,21 @@ def test_firmware_changes_only_the_advice_not_admission(firmware, update):
         )
         is not None
     )
+
+
+@pytest.mark.parametrize("connected", [True, False, None])
+@pytest.mark.parametrize("firmware", [0x02009B0B, 0x02009E0F, None])
+def test_measured_minimum_needs_no_advice_for_fixed_or_auto(connected, firmware):
+    # Break caught: warning a correctly configured fixed 0.5 GB Spark because
+    # a monitor is attached or because its firmware is older/unknown.
+    host = HostSettings(
+        display_manager_active=False,
+        graphical_default_target=False,
+        display_memory=DisplayMemoryObservation(
+            soc_firmware_version=firmware,
+            display_connected=connected,
+            carveout_bytes=0x20000000,
+            signal=DisplayMemorySignal.RESERVED_RANGE,
+        ),
+    )
+    assert display_memory_advice(host) is None

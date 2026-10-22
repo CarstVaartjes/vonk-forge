@@ -5217,26 +5217,17 @@ def test_display_memory_agent_vectors_reobserve_through_http_store_and_cli(
         files("vonk_agent_protocol").joinpath("vectors/display-memory.json").read_text()
     )
     projection = FleetProjection(services.sessions, clock=clock)
+    baseline = InventoryRequest.model_validate_json(
+        files("vonk_agent_protocol")
+        .joinpath("vectors/inventory-wifi-link-v1.json")
+        .read_bytes()
+    )
     # Known default -> unavailable read -> firmware ready -> minimum after reboot.
     for index in (0, 2, 3, 1):
         host = HostSettings.model_validate_json(canonical_message(vectors[index]))
         clock.now += timedelta(seconds=2)
-        payload = InventoryRequest(
-            nvidia_driver_version="580.173.02",
-            container_runtime_version="29.2.1",
-            schema_version=1,
-            observed_at=clock.now,
-            disk_total_bytes=1000,
-            disk_free_bytes=700,
-            host_memory_total_bytes=2000,
-            host_memory_free_bytes=1500,
-            gpu_memory_total_bytes=2000,
-            gpu_memory_free_bytes=1400,
-            gpu_count=1,
-            memory_pool="shared",
-            artifact_store_read_only=False,
-            capabilities=["runtime.vonk.v1"],
-            host_settings=host,
+        payload = baseline.model_copy(
+            update={"observed_at": clock.now, "host_settings": host}
         )
         response = client.post(
             "/agent/inventory",
@@ -5268,5 +5259,5 @@ def test_display_memory_agent_vectors_reobserve_through_http_store_and_cli(
         if observation.soc_firmware_version is not None:
             assert f"0x{observation.soc_firmware_version:08x}" in output
         assert ("fwupdmgr update" in output) == (index == 0)
-        assert ("Display Reserved Memory to Auto" in output) == bool(advice)
-        assert ("free -h" in output) == bool(advice)
+        assert ("Display Reserved Memory to 0.5 GB" in output) == bool(advice)
+        assert ("0.5 GB (fixed)" in output) == bool(advice)

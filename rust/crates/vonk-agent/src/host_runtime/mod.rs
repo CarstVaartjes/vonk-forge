@@ -63,6 +63,7 @@ mod transport;
 pub use errors::{HelperProtocolCause, HostRuntimeError};
 pub use responses::finding_word;
 use responses::{require_bound_response, require_executed_outcome, runtime_rejection};
+pub(crate) use transport::inspect_helper;
 pub(crate) use transport::read_observed;
 use transport::{call_helper, write_request};
 

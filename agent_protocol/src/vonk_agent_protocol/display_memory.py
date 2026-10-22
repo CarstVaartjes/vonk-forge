@@ -15,7 +15,7 @@ class DisplayMemorySignal(WireEnum):
 
 
 class DisplayMemoryObservation(WireModel):
-    """Best-effort unprivileged evidence, refreshed with every inventory.
+    """Best-effort root-helper evidence, refreshed with every inventory.
 
     MemTotal includes other firmware/kernel reservations. It is not itself a
     display carveout. Only a measured, platform-specific rule may classify it.
@@ -30,3 +30,13 @@ class DisplayMemoryObservation(WireModel):
     device_tree_memory_bytes: int | None = Field(default=None, gt=0, le=16 * 1024**4)
     carveout_bytes: int | None = Field(default=None, ge=0, le=16 * 1024**4)
     signal: DisplayMemorySignal = DisplayMemorySignal.UNKNOWN
+
+
+class DisplayMemoryInspectionKind(WireEnum):
+    DISPLAY_MEMORY = "display-memory"
+
+
+class DisplayMemoryInspectionRequest(WireModel):
+    """Read-only helper request; contains no paths or mutation authority."""
+
+    kind: DisplayMemoryInspectionKind

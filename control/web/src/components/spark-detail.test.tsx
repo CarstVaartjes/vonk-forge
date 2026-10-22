@@ -167,11 +167,11 @@ test("GPU readings distinguish hardware maximum, policy and the applied command 
   );
 });
 
-test("display reservation stays unknown and Controller advice renders with its verification", async () => {
+test("display reservation stays unknown and renders Controller advice", async () => {
   // Break caught: inventing a default carveout or dropping the next action.
   const detail = "Headless Spark display reserves 2147483648 bytes; minimum is 0.5 GB.";
   const recommendation =
-    "Set Advanced → Advanced Menu → Display Reserved Memory to Auto; unplug display, reboot (~1.5 GB more memory from 2 GB). Verify: free -h before/after reboot.";
+    "Set Advanced → Advanced Menu → Display Reserved Memory to 0.5 GB (fixed); save and reboot.";
   const api = {
     fleetNode: vi
       .fn()

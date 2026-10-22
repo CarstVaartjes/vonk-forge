@@ -7,12 +7,14 @@ from vonk_agent_protocol.inventory import HostSettings
 from .common import ProjectionReason
 
 # NVIDIA October 2026 SoC release; a DMI UEFI string is not this version.
-AUTO_MINIMUM_FIRMWARE = 0x02009E0F
+MINIMUM_FIRMWARE = 0x02009E0F
 MINIMUM_CARVEOUT_BYTES = 512 * 1024**2
 UEFI_ADVICE = (
-    "Set Advanced → Advanced Menu → Display Reserved Memory to Auto; "
-    "unplug display, reboot (~1.5 GB more memory from 2 GB). "
-    "Verify: free -h before/after reboot."
+    "Set Advanced → Advanced Menu → Display Reserved Memory to 0.5 GB "
+    "(fixed); save and reboot."
+)
+FIRMWARE_RESET_ADVICE = (
+    "If nvidia-smi shows ERR! or 'GPU requires reset' after a warm reboot, power-cycle."
 )
 
 
@@ -32,16 +34,24 @@ def display_memory_advice(host: HostSettings | None) -> ProjectionReason | None:
             "Check SoC firmware: fwupdmgr get-devices (needs ≥0x02009e0f). "
             + UEFI_ADVICE
         )
-    elif firmware < AUTO_MINIMUM_FIRMWARE:
+    elif firmware < MINIMUM_FIRMWARE:
         recommendation = (
             "Update SoC firmware (fwupdmgr update), "
-            "then " + UEFI_ADVICE[0].lower() + UEFI_ADVICE[1:]
+            "then "
+            + UEFI_ADVICE[0].lower()
+            + UEFI_ADVICE[1:]
+            + " "
+            + FIRMWARE_RESET_ADVICE
         )
     else:
         recommendation = UEFI_ADVICE
     return ProjectionReason(
         code=ProjectionCode.HOST_DISPLAY_MEMORY,
-        detail=f"Headless Spark display reserves {carveout} bytes; minimum is 0.5 GB.",
+        detail=(
+            f"Headless Spark display reserves {carveout} bytes; minimum is 0.5 GB. "
+            "Fixed 0.5 GB releases 1.5 GiB from 2 GB regardless of a monitor at boot; "
+            "Auto booted headless also counts as configured."
+        ),
         severity=ProfileReasonSeverity.WARNING.value,
         recommendation=recommendation,
     )

@@ -16,7 +16,7 @@
     "display_memory": {
       "soc_firmware_version": 33594895,
       "carveout_bytes": 536870912,
-      "signal": "efi-variable"
+      "signal": "reserved-range"
     }
   },
   {
@@ -32,7 +32,7 @@
     "display_memory": {
       "soc_firmware_version": 33594895,
       "carveout_bytes": 2147483648,
-      "signal": "memory-total",
+      "signal": "reserved-range",
       "display_connected": false
     }
   }

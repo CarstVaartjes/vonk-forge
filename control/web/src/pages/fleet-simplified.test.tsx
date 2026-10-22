@@ -108,7 +108,7 @@ test("Fleet shows the Controller headless memory recommendation without an apply
   // Break caught: dropping non-blocking advice from the Fleet overview.
   const detail = "Headless Spark display reserves 2147483648 bytes; minimum is 0.5 GB.";
   const recommendation =
-    "Update SoC firmware (fwupdmgr update), then set Advanced → Advanced Menu → Display Reserved Memory to Auto; unplug display, reboot. Verify: free -h.";
+    "Update SoC firmware (fwupdmgr update), then set Advanced → Advanced Menu → Display Reserved Memory to 0.5 GB (fixed); save and reboot.";
   nodes = [
     {
       ...spark("Alpha", 60, 100),
