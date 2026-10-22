@@ -1553,6 +1553,30 @@ def test_uv_owner_change_invalidates_the_prepared_hermes_image(
 
 
 @pytest.mark.parametrize(
+    ("role", "lock"),
+    [
+        ("hermes", "python-bootstrap.lock"),
+        ("hermes", "uv-bootstrap.lock"),
+        ("litellm", "python-bootstrap.lock"),
+    ],
+)
+def test_bootstrap_lock_change_invalidates_reusable_image(
+    reusable_image_repo, tmp_path, role, lock
+):
+    # Wrong implementation: accepting a new wheel leaves a stale image reusable.
+    repo = reusable_image_repo
+    owner = repo / "deploy/compose" / lock
+    original = _image_commit(repo)
+    context = tmp_path / "context"
+    prepared = _image_inputs(repo, "prepare", role, original, str(context))
+    assert prepared.returncode == 0, prepared.stderr
+    assert (context / owner.relative_to(repo)).read_bytes() == owner.read_bytes()
+    owner.write_text(owner.read_text() + "\n# changed wheel identity\n")
+    changed = _image_commit(repo)
+    assert _image_inputs(repo, "matches", role, original, changed).returncode != 0
+
+
+@pytest.mark.parametrize(
     "change", ["mode", "delete", "rename", "dockerfile", "policy", "symlink", "sibling"]
 )
 def test_image_reuse_rejects_changed_or_unrelated_source(

@@ -74,11 +74,14 @@ FROM --platform=$BUILDPLATFORM ${PYTHON_IMAGE} AS contracts
 COPY --from=node-tools /usr/local/bin/node /usr/local/bin/node
 COPY --from=node-tools /usr/local/lib/node_modules /usr/local/lib/node_modules
 COPY .tool-versions /tmp/.tool-versions
+COPY deploy/compose/python-bootstrap.lock deploy/compose/uv-bootstrap.lock /tmp/
 RUN apt-get update \
     && apt-get install --yes --no-install-recommends ca-certificates git libatomic1 \
     && rm -rf /var/lib/apt/lists/* \
     && ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
-    && python -m pip install --no-cache-dir pip==26.2.2 certifi==2026.10.19 "uv==$(awk '$1 == "uv" {print $2}' /tmp/.tool-versions)"
+    && VONK_UV_VERSION="$(awk '$1 == "uv" {print $2}' /tmp/.tool-versions)" \
+        python -m pip install --no-cache-dir --require-hashes \
+        -r /tmp/python-bootstrap.lock -r /tmp/uv-bootstrap.lock
 WORKDIR /repo
 COPY pyproject.toml ./
 COPY control/pyproject.toml control/uv.lock control/openapi-python-client.yaml ./control/
@@ -139,9 +142,10 @@ COPY control/packaging/public-contracts.lock ./packaging/public-contracts.lock
 COPY inventory/wheels/vonk_agent_protocol-*.whl /wheels/
 COPY agent_protocol/pyproject.toml ./agent_protocol/
 COPY scripts/protocol-wheel-name scripts/protocol_wheel.py ./scripts/
+COPY deploy/compose/python-bootstrap.lock /tmp/python-bootstrap.lock
 RUN apt-get update \
     && apt-get install --yes --no-install-recommends ca-certificates git \
-    && python -m pip install --no-cache-dir pip==26.2.2 \
+    && python -m pip install --no-cache-dir --require-hashes -r /tmp/python-bootstrap.lock \
     && public_contracts_revision="$(sed -n 's/^revision = "//p' packaging/public-contracts.lock | tr -d '"')" \
     && test "$(printf '%s' "$public_contracts_revision" | wc -c)" = 40 \
     && git clone --filter=blob:none --no-checkout \
@@ -159,12 +163,12 @@ RUN apt-get update \
 # Our own vonk-* packages are installed from local files below. These are
 # transitive dependencies of the image, not requested ones, so the REQUESTED
 # markers that -r adds are removed to keep the layer identical to a one-step
-# install.
+# install. Ignore build-interpreter packages: only /install reaches runtime.
 ARG DEPENDENCY_DAY=undated
 COPY pyproject.toml /vonk-cluster-profiles/
 RUN echo "dependency day: ${DEPENDENCY_DAY}" \
     && python -c 'import pathlib, tomllib; print("\n".join(d for path in ("pyproject.toml", "/vonk-cluster-profiles/pyproject.toml") for d in tomllib.loads(pathlib.Path(path).read_text())["project"]["dependencies"] if not d.lower().startswith("vonk-")))' > /tmp/third-party.txt \
-    && python -m pip install --no-cache-dir --prefix=/install -r /tmp/third-party.txt \
+    && python -m pip install --no-cache-dir --ignore-installed --prefix=/install -r /tmp/third-party.txt \
     && find /install -name REQUESTED -delete \
     && find /install -name RECORD -exec sed -i '/\.dist-info\/REQUESTED,/d' {} +
 COPY --from=cli /cli-wheels /cli-wheels

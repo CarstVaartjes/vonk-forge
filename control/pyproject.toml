@@ -33,6 +33,7 @@ vonk-nas-setup = { path = "../nas_setup", editable = true }
 vonk-forge-public-contracts = { git = "https://github.com/CarstVaartjes/vonk-forge-recipes.git", rev = "54f3be0f21f927dae55ae12883855721be36617e", subdirectory = "contracts" }
 
 [tool.uv]
+required-version = ">=0.13.5"
 find-links = ["../inventory/wheels"]
 
 # The one locked tool environment for every suite, lint and type check, local

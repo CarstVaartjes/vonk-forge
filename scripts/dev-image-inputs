@@ -10,9 +10,15 @@ import sys
 from pathlib import Path
 
 CONTEXTS = {
-    "hermes": ("deploy/compose/hermes-agent", ".tool-versions"),
+    "hermes": (
+        "deploy/compose/hermes-agent",
+        ".tool-versions",
+        "deploy/compose/python-bootstrap.lock",
+        "deploy/compose/uv-bootstrap.lock",
+    ),
     "litellm": (
         "deploy/compose/litellm",
+        "deploy/compose/python-bootstrap.lock",
         "agent_protocol/src/vonk_agent_protocol/route_activation.py",
         "agent_protocol/src/vonk_agent_protocol/route_activation_words.py",
     ),

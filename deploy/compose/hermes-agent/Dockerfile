@@ -2,6 +2,7 @@ ARG HERMES_IMAGE=nousresearch/hermes-agent:v2026.9.24@sha256:fca358f12efd65bfaac
 FROM ${HERMES_IMAGE} AS managed
 
 COPY .tool-versions /tmp/.tool-versions
+COPY deploy/compose/python-bootstrap.lock deploy/compose/uv-bootstrap.lock /tmp/
 # Refresh system/Python bundles and keep native uv independent of venv repair.
 # Bootstrap pip against only the refreshed OS bundle; its old native-trust
 # mode would otherwise add the vendored roots back to that store.
@@ -9,8 +10,10 @@ RUN apt-get update \
     && apt-get install --yes --no-install-recommends ca-certificates \
     && rm -rf /var/lib/apt/lists/* \
     && python -m ensurepip \
-    && PIP_CERT=/etc/ssl/certs/ca-certificates.crt python -m pip --use-deprecated=legacy-certs install --no-cache-dir \
-        pip==26.2.2 certifi==2026.10.19 "uv==$(awk '$1 == "uv" {print $2}' /tmp/.tool-versions)" \
+    && PIP_CERT=/etc/ssl/certs/ca-certificates.crt \
+        VONK_UV_VERSION="$(awk '$1 == "uv" {print $2}' /tmp/.tool-versions)" \
+        python -m pip --use-deprecated=legacy-certs install --no-cache-dir --require-hashes \
+        -r /tmp/python-bootstrap.lock -r /tmp/uv-bootstrap.lock \
     && rm -f /usr/local/bin/uv /usr/local/bin/uvx \
     && install -m 0755 /opt/hermes/.venv/bin/uv /usr/local/bin/uv \
     && install -m 0755 /opt/hermes/.venv/bin/uvx /usr/local/bin/uvx \

@@ -24,13 +24,14 @@ USER 0:0
 # Bootstrap against the reviewed fresh CA store before any network operation.
 # Wolfi still ships the compromised root; the final public store is certifi.
 COPY --from=ca-bootstrap /etc/ssl/certs/ca-certificates.crt /tmp/bootstrap-ca.crt
+COPY deploy/compose/python-bootstrap.lock /tmp/python-bootstrap.lock
 # Bootstrap pip against only the refreshed OS bundle; its old native-trust
 # mode would otherwise add the vendored roots back to that store.
 RUN cp /tmp/bootstrap-ca.crt /etc/ssl/certs/ca-certificates.crt \
     && apk upgrade --no-cache ca-certificates-bundle \
     && python -m ensurepip \
-    && PIP_CERT=/tmp/bootstrap-ca.crt python -m pip --use-deprecated=legacy-certs install --no-cache-dir \
-        pip==26.2.2 certifi==2026.10.19 \
+    && PIP_CERT=/tmp/bootstrap-ca.crt python -m pip --use-deprecated=legacy-certs install --no-cache-dir --require-hashes \
+        -r /tmp/python-bootstrap.lock \
     && python -c 'import certifi, shutil; shutil.copyfile(certifi.where(), "/etc/ssl/certs/ca-certificates.crt")' \
     && rm -f /tmp/bootstrap-ca.crt \
     && python -c 'import grpc, pathlib; roots = pathlib.Path(grpc.__file__).parent / "_cython/_credentials/roots.pem"; roots.unlink(); roots.symlink_to("/etc/ssl/certs/ca-certificates.crt")' \

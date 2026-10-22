@@ -157,6 +157,8 @@ PRODUCERS = {
             "deploy/compose/hermes-agent/**",
             "deploy/compose/image-janitor/janitor.py",
             "deploy/compose/litellm/**",
+            "deploy/compose/python-bootstrap.lock",
+            "deploy/compose/uv-bootstrap.lock",
             "deploy/compose/postgres/**",
             "deploy/compose/prometheus/**",
             "deploy/compose/registry/config.yml",

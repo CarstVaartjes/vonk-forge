@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
+
+import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 DOCKERFILE = ROOT / "control/Dockerfile"
@@ -119,3 +122,30 @@ def test_python_tls_bundle_distrusts_compromised_emsign_root() -> None:
     assert (
         names
     )  # An empty trust store would hide the defect while breaking ordinary TLS.
+
+
+@pytest.mark.built_image
+@pytest.mark.parametrize("image_fixture", ["controller_image", "worker_image"])
+def test_shipped_python_trust_store_is_present_and_distrusts_compromised_root(
+    request: pytest.FixtureRequest, image_fixture: str
+) -> None:
+    # Wrong implementation: pip sees bootstrap certifi globally and omits it
+    # from the prefix copied into runtime; checking the build interpreter passes.
+    image: str = request.getfixturevalue(image_fixture)
+    probe = """
+import certifi, ssl
+context = ssl.create_default_context(cafile=certifi.where())
+roots = context.get_ca_certs()
+assert roots
+assert not any(value == "emSign ECC Root CA - G3"
+               for cert in roots for rdn in cert["subject"]
+               for key, value in rdn if key == "commonName")
+"""
+    completed = subprocess.run(
+        ["docker", "run", "--rm", "--entrypoint", "python", image, "-c", probe],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert completed.returncode == 0, completed.stdout + completed.stderr
