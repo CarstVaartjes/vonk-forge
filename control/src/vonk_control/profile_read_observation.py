@@ -17,6 +17,8 @@ from functools import wraps
 from threading import Lock
 from typing import Any
 
+from sqlalchemy import event
+from sqlalchemy.orm import ORMExecuteState, Session, SessionTransaction
 from vonk_agent_protocol import WaitReason
 
 from .categorized_errors import BookkeepingUnknown
@@ -51,11 +53,45 @@ _WORKER: ContextVar[bool] = ContextVar("profile_storage_worker", default=False)
 @dataclass
 class _Read:
     deadline: float
+    identity: object = field(default_factory=object)
     results: dict[tuple[Any, ...], Future[Any]] = field(default_factory=dict)
     lock: Lock = field(default_factory=Lock)
 
 
 _READ: ContextVar[_Read | None] = ContextVar("profile_storage_read", default=None)
+
+
+@event.listens_for(Session, "after_transaction_create")
+def _statement_only_observation(
+    session: Session, transaction: SessionTransaction
+) -> None:
+    """A profile read owns no PostgreSQL transaction between SQL statements.
+
+    Preview is revalidated at acceptance; it never held a repeatable-read
+    snapshot. Use statement transactions, including nested planner sessions,
+    so source parsing, storage probes and their bounded waits cannot idle an
+    outer SQL transaction. This context is copied into storage workers too.
+    """
+    if _READ.get() is not None and transaction.parent is None:
+        session.connection(execution_options={"isolation_level": "AUTOCOMMIT"})
+
+
+@event.listens_for(Session, "do_orm_execute")
+def _observation_select_only(execution: ORMExecuteState) -> None:
+    if _READ.get() is not None:
+        if not execution.is_select:
+            raise RuntimeError("Profile observation attempted a database write")
+        # A server-side cursor requires a transaction across Python iteration.
+        # Buffer this statement before returning to the projection instead.
+        execution.update_execution_options(yield_per=None, stream_results=False)
+
+
+@event.listens_for(Session, "before_flush")
+def _observation_no_flush(
+    session: Session, _context: object, _instances: object
+) -> None:
+    if _READ.get() is not None:
+        raise RuntimeError("Profile observation attempted a database flush")
 
 
 def _pending() -> BookkeepingUnknown:
@@ -82,7 +118,9 @@ def profile_read[**P, T](function: Callable[P, T]) -> Callable[P, T]:
     return wrapped
 
 
-def observe_storage[**P, T](function: Callable[P, T]) -> Callable[P, T]:
+def observe_storage[**P, T](
+    function: Callable[P, T], *, share_between_reads: bool = True
+) -> Callable[P, T]:
     """Observe a hashable immutable identity once; never share SQL sessions."""
 
     @wraps(function)
@@ -99,12 +137,16 @@ def observe_storage[**P, T](function: Callable[P, T]) -> Callable[P, T]:
                 _WORKER.reset(token)
 
         key = (function, *args, *sorted(kwargs.items()))
+        if not share_between_reads:
+            # SQL selection is mutable: another review must not join even an
+            # unfinished selection of this revision's previous inputs.
+            key = (*key, read.identity)
         inline = False
         with read.lock, _LOCK:
             future = read.results.get(key)
             if future is None:
                 future = _IN_FLIGHT.get(key)
-                recent = _RECENT.get(key)
+                recent = _RECENT.get(key) if share_between_reads else None
                 if (
                     future is None
                     and recent is not None
@@ -145,3 +187,8 @@ def observe_storage[**P, T](function: Callable[P, T]) -> Callable[P, T]:
             raise _pending() from None
 
     return wrapped
+
+
+def observe_selection[**P, T](function: Callable[P, T]) -> Callable[P, T]:
+    """Bound a mutable selection, deduplicating only within the current read."""
+    return observe_storage(function, share_between_reads=False)

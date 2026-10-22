@@ -25,6 +25,7 @@ from ..prebuilt_images import (
     PREBUILT_USED,
     PrebuiltDecision,
 )
+from ..profile_read_observation import observe_selection
 from ..recipe_execution_contract import (
     RecipeExecutionContractError,
     build_plan_document,
@@ -423,6 +424,9 @@ def plan(
     raise last_error
 
 
+# SQL selects the current receipt for a revision; unlike content-addressed
+# storage, that selection must be fresh for every review and acceptance.
+@observe_selection
 def reusable_build_id(self: RecipeBuildService, recipe_revision_id: str) -> str | None:
     """The succeeded build whose inputs this revision reproduces, whoever built it.
 
