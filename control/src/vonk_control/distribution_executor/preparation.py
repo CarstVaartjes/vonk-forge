@@ -29,6 +29,7 @@ from ..models import (
     CatalogDocumentRevision,
     RecipeBuild,
 )
+from ..profile_read_observation import profile_read
 from ..run_switch_contract import (
     RunSwitchChildProgress,
     RunSwitchModelDownloadPendingResult,
@@ -230,6 +231,9 @@ class CompositeDistributionPhaseExecutor(
             start_method, Callable
         ):
             raise TypeError("model-cache download provider is unavailable")
+        # Use the same bounded, durable observation as review. A pending
+        # checkpoint raises the typed wait the parent retries under its deadline.
+        preview_method = profile_read(preview_method)
         # Content pins resolve the cache authority's current decision. Recipe
         # provenance is not a second availability gate for an identical set.
         cache_request_key = str(

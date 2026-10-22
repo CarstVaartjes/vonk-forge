@@ -1578,6 +1578,150 @@ def test_model_cache_manifest_allows_planned_nas_download(tmp_path: Path) -> Non
     assert plan.storage.artifact_set_bytes == plan.preparation.model.artifact_set_bytes
 
 
+@pytest.mark.parametrize("missing", [False, True])
+def test_profile_admits_unpublished_cache_observation(tmp_path, monkeypatch, missing):
+    """A paused first receipt must wait in preparation, never refuse a load."""
+    from threading import Event
+
+    from vonk_agent_protocol import WaitReason
+    from vonk_agent_protocol.agent_words import ProfileChildPhase, ProfileReasonSeverity
+    from vonk_control.categorized_errors import BookkeepingUnknown
+    from vonk_control.distribution_executor import CompositeDistributionPhaseExecutor
+    from vonk_control.fleet_profile_contract import (
+        FleetProfileAssignmentInput,
+        FleetProfileInput,
+    )
+    from vonk_control.fleet_profiles import (
+        FleetProfileService,
+        RunSwitchFleetProfileAdapter,
+    )
+    from vonk_control.profile_read_observation import profile_read
+
+    sessions, lifecycle, _queue, _mapping, _build, nodes = setup_services(tmp_path)
+    request = _request(sessions, nodes[0])
+    manifest = ModelCacheManifestProvider().resolve_artifact_set(
+        model_content_sha256=request.model_content_sha256
+    )
+    manifest = replace(
+        manifest,
+        artifacts=tuple(
+            replace(spec, kind="huggingface.file") for spec in manifest.artifacts
+        ),
+    )
+    cache = ModelCacheService(sessions, tmp_path / "cache", reserve_bytes=0)
+    # Catalog resolution is not under test; storage and its observer are real.
+    monkeypatch.setattr(cache, "resolve_artifact_set", lambda **_kwargs: manifest)
+    entered, release = Event(), Event()
+    stored_object = cache._stored_object
+
+    def paused(digest, expected):
+        entered.set()
+        assert release.wait(30), "test did not release the first object observation"
+        return stored_object(digest, expected)
+
+    monkeypatch.setattr(cache, "_stored_object", paused)
+    if not missing:
+        spec = manifest.artifacts[0]
+        path = cache._object_path(spec.sha256)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"x" * spec.expected_bytes)
+        cache._write_object_receipt(spec, NOW)
+    service = RunSwitchOperationService(
+        sessions,
+        lifecycle=lifecycle,
+        clock=lifecycle._clock,
+        artifact_phase_executor=RecordingArtifactExecutor(),
+        model_cache=cache,
+        memory_floor_bytes=50,
+    )
+    adapter = RunSwitchFleetProfileAdapter(sessions, service)
+    profiles = FleetProfileService(
+        sessions,
+        clock=lifecycle._clock,
+        switch_adapter=adapter,
+        assessment_provider=adapter.assess,
+    )
+    with sessions() as session:
+        revision = session.get(CatalogDocumentRevision, request.recipe_revision_id)
+        assert revision is not None
+        selector = f"{revision.publisher}/{revision.slug}"
+    saved = profiles.create(
+        FleetProfileInput(
+            name="Observing",
+            assignments=[
+                FleetProfileAssignmentInput(
+                    recipe_selector=selector, spark_ids=list(nodes)
+                )
+            ],
+        ),
+        actor="admin",
+    )
+    try:
+        preview = profiles.preview(saved.id)
+        assert entered.wait(30)
+        assert preview.allowed, preview.reasons
+        assert preview.preparations
+        preparation = preview.preparations[0].preparation
+        assert preparation.model.artifact_set_sha256 == manifest.digest
+        assert not preparation.controller_ready
+        assert all(
+            reason.severity != ProfileReasonSeverity.ERROR for reason in preview.reasons
+        )
+        assessment = preview.assessments[0].assessment
+        assert not assessment.blockers
+        warning = next(
+            reason
+            for reason in assessment.warnings
+            if reason.code == RunSwitchCode.NAS_COVERAGE_UNKNOWN
+        )
+        assert "0/1 objects checked" in warning.detail
+        assert "next check" in warning.detail
+        plan = profile_read(service.preview)(request, actor="admin")
+        assert plan.allowed
+        assert plan.storage.missing_nas_bytes is None
+        phase = next(
+            phase
+            for phase in plan.phases
+            if phase.subphase == ProfileChildPhase.MODEL_DOWNLOAD
+        )
+        executor = CompositeDistributionPhaseExecutor(
+            sessions, None, None, model_cache=cache, clock=lifecycle._clock
+        )
+        phase_request = str(uuid.uuid4())
+        try:
+            with pytest.raises(BookkeepingUnknown) as waiting:
+                executor.execute(
+                    plan,
+                    phase,
+                    item_index=0,
+                    actor="admin",
+                    request_key=phase_request,
+                    progress=RunSwitchOperationResult(),
+                )
+            assert waiting.value.typed_reason is WaitReason.OBSERVATION_UNAVAILABLE
+            assert "next check" in str(waiting.value)
+            release.set()
+            cache._storage_observer._pending[manifest.digest].result(timeout=30)
+            resumed = executor.execute(
+                plan,
+                phase,
+                item_index=0,
+                actor="admin",
+                request_key=phase_request,
+                progress=RunSwitchOperationResult(),
+            )
+            assert resumed.operation_id is not None
+        finally:
+            executor.close()
+    finally:
+        release.set()
+        cache._storage_observer._pending[manifest.digest].result(timeout=30)
+        cache.close()
+    ready = profiles.preview(saved.id)
+    assert ready.allowed
+    assert ready.preparations[0].preparation.controller_ready is not missing
+
+
 def test_cold_model_and_image_plan_defers_compile_until_both_preparations(
     tmp_path: Path,
 ) -> None:
