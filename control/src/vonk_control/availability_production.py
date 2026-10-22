@@ -751,10 +751,10 @@ def build_recipe_image_availability(
                                 (node_admission_key(candidate_id),),
                                 holder="image-availability",
                             )
-                        except AdmissionLockBusy:
+                        except AdmissionLockBusy as error:
                             skipped[candidate_id] = (
                                 RecipeImageCode.BUILDER_BUSY,
-                                "another change to this Spark is in progress",
+                                str(error),
                             )
                             continue
                         locked = session.scalar(
@@ -845,10 +845,10 @@ def build_recipe_image_availability(
                         (node_admission_key(candidate_id),),
                         holder="image-availability",
                     )
-                except AdmissionLockBusy:
+                except AdmissionLockBusy as error:
                     skipped[candidate_id] = (
                         RecipeImageCode.BUILDER_BUSY,
-                        "another change to this Spark is in progress",
+                        str(error),
                     )
                     attempted_candidates.add(candidate_id)
                     selected_candidate = next(
