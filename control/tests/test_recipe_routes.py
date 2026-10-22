@@ -22,6 +22,7 @@ from vonk_agent_protocol import (
     RunState,
     UnknownError,
 )
+from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_control import recipe_routes
 from vonk_control.auth import TokenCodec
 from vonk_control.fleet_profile_contract import (
@@ -64,6 +65,7 @@ from vonk_control.route_runtime import (
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
 from .observed_actions import observe_action
+from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
 from .stored_documents_support import valid_policy_report
 
 NOW = datetime(2026, 8, 7, 12, tzinfo=UTC)
@@ -165,7 +167,13 @@ def setup(
             AgentNode(
                 node_id=node,
                 state="active",
-                architecture="linux-arm64",
+                inventory_snapshot=inventory_items_fixture(
+                    node,
+                    observed_at=None,
+                    identity=AgentRuntimeIdentity.model_validate(
+                        {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
+                    ),
+                ),
             )
             for node in nodes
         )
@@ -483,7 +491,13 @@ def add_running_run(
             AgentNode(
                 node_id=node_id,
                 state="active",
-                architecture="linux-arm64",
+                inventory_snapshot=inventory_items_fixture(
+                    node_id,
+                    observed_at=None,
+                    identity=AgentRuntimeIdentity.model_validate(
+                        {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
+                    ),
+                ),
             )
         )
         mapping = ClusterMapping(

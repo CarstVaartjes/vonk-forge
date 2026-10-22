@@ -3,12 +3,15 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_control.inventory_repository import (
     InventoryRepository,
     InventorySnapshotInput,
 )
 from vonk_control.models import AgentNode, Base, NodeInventorySnapshot
 from vonk_control.stored_json import write_guard_mode
+
+from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
 
 
 def repository(tmp_path):
@@ -21,7 +24,13 @@ def repository(tmp_path):
             AgentNode(
                 node_id="spk_" + "1" * 32,
                 state="active",
-                architecture="linux-arm64",
+                inventory_snapshot=inventory_items_fixture(
+                    "spk_" + "1" * 32,
+                    observed_at=None,
+                    identity=AgentRuntimeIdentity.model_validate(
+                        {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
+                    ),
+                ),
             )
         )
     return InventoryRepository(sessions), now

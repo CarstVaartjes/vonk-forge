@@ -23,12 +23,12 @@ from ..agent_operation_facts import aware as _aware
 from ..agent_operation_facts import lapsed_renewal_allowed as _lapsed_renewal_allowed
 from ..auth import AgentSource
 from ..categorized_errors import InvalidValue
+from ..inventory_items import record_runtime
 from ..lifecycle.evidence import BookkeepingReason, retire_as_unknown
 from ..logging import redact_text
 from ..models import (
     AgentCertificate,
     AgentNode,
-    AgentNodeProfile,
     AgentOperationAttempt,
     Job,
 )
@@ -203,23 +203,11 @@ def _record_contact(
     observed = _aware(now)
     contact_time = observed if current is None or observed > current else current
     node.last_seen_at = contact_time
-    if hostname is not None:
-        profile = session.scalar(
-            select(AgentNodeProfile)
-            .where(AgentNodeProfile.node_id == node.node_id)
-            .with_for_update(of=AgentNodeProfile)
-        )
-        if profile is not None and profile.hostname != hostname:
-            profile.hostname = hostname
     if runtime_identity is not None:
-        # A claim is the only caller with a runtime identity; it passed the
-        # single protocol gate, so the node now speaks this version.
         node.protocol_version = AGENT_PROTOCOL_VERSION
-        node.preflight_fingerprint = preflight_fingerprint
-        node.architecture = runtime_identity.architecture
-        node.semantic_version = runtime_identity.semantic_version
-        node.build_digest = runtime_identity.build_digest
-        node.binary_digest = runtime_identity.binary_digest
+        record_runtime(
+            node, runtime_identity, preflight_fingerprint, hostname, contact_time
+        )
         node.contact_certificate_serial = certificate.serial
         node.contact_observation_digest = hashlib.sha256(
             canonical_message(

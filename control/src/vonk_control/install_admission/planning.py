@@ -32,6 +32,7 @@ from ..disk_reservations import (
     models_stored_on_node,
     outstanding_disk_charges,
 )
+from ..inventory_items import inventory_items
 from ..inventory_repository import InventoryRepository, InventorySnapshotView
 from ..legal_admission import territorial_admission
 from ..models import (
@@ -168,7 +169,7 @@ class InstallPlanningService:
                         node.node_id,
                         requirements_sha256=request_digest(preflight_request),
                     ),
-                    current_fingerprint=node.preflight_fingerprint,
+                    current_fingerprint=inventory_items(node).preflight_fingerprint,
                     now=int(now.timestamp()),
                 )
                 for node in nodes

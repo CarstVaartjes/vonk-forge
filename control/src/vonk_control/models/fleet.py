@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from typing import TYPE_CHECKING
 
 from pydantic import JsonValue
 from sqlalchemy import (
@@ -17,14 +18,16 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
 )
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+if TYPE_CHECKING:
+    from .telemetry import NodeInventoryItemsSnapshot
 from vonk_agent_protocol import LifecycleState, LifecycleSubject
 
 from ..model_primitives import (
     Base,
     CertificateGenerationStorage,
     _lower_hex,
-    _nullable_lower_hex,
     _state_in,
 )
 from .waits import Residue, WaitEvidence, wait_due_column, wait_evidence_column
@@ -58,36 +61,28 @@ class LoginSession(Base):
 
 class AgentNode(Base):
     __tablename__ = "agent_nodes"
-    __table_args__ = (
-        CheckConstraint(
-            "architecture IS NULL OR architecture IN ('linux-amd64', 'linux-arm64')",
-            name="ck_agent_nodes_architecture",
-        ),
-        CheckConstraint(
-            _nullable_lower_hex("preflight_fingerprint", 64),
-            name="ck_agent_nodes_preflight_fingerprint",
-        ),
-    )
     node_id: Mapped[str] = mapped_column(String(36), primary_key=True)
     workload_intent_ordinal: Mapped[int] = mapped_column(
         Integer, nullable=False, default=0, server_default="0"
     )
     state: Mapped[str] = mapped_column(String(24), nullable=False)
     protocol_version: Mapped[int | None] = mapped_column(Integer)
-    architecture: Mapped[str | None] = mapped_column(String(16))
-    semantic_version: Mapped[str | None] = mapped_column(String(32))
-    build_digest: Mapped[str | None] = mapped_column(String(71))
-    binary_digest: Mapped[str | None] = mapped_column(String(64))
     contact_certificate_serial: Mapped[str | None] = mapped_column(String(128))
     management_address: Mapped[str | None] = mapped_column(String(45))
     management_observed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True)
     )
     contact_observation_digest: Mapped[str | None] = mapped_column(String(64))
-    # Preflight proof is current only while this last-claim fingerprint matches.
-    preflight_fingerprint: Mapped[str | None] = mapped_column(String(64))
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    inventory_snapshot: Mapped[NodeInventoryItemsSnapshot | None] = relationship(
+        "NodeInventoryItemsSnapshot",
+        uselist=False,
+        lazy="selectin",
+        cascade="all, delete-orphan",
+        single_parent=True,
+    )
 
 
 class AgentNodeProfile(Base):
@@ -100,10 +95,6 @@ class AgentNodeProfile(Base):
             name="ck_agent_node_profiles_display_name_length",
         ),
         CheckConstraint(
-            "length(hostname) <= 255",
-            name="ck_agent_node_profiles_hostname_length",
-        ),
-        CheckConstraint(
             "length(lifecycle) BETWEEN 1 AND 64",
             name="ck_agent_node_profiles_lifecycle_length",
         ),
@@ -112,7 +103,6 @@ class AgentNodeProfile(Base):
         ForeignKey("agent_nodes.node_id", ondelete="CASCADE"), primary_key=True
     )
     display_name: Mapped[str] = mapped_column(String(200), nullable=False)
-    hostname: Mapped[str] = mapped_column(String(255), nullable=False, default="")
     lifecycle: Mapped[str] = mapped_column(
         String(64), nullable=False, default="managed", server_default="managed"
     )

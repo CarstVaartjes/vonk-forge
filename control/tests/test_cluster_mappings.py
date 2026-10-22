@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
+from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_control.cluster_mappings import ClusterMappingError, ClusterMappingService
 from vonk_control.inventory_repository import (
     InventoryRepository,
@@ -26,6 +27,8 @@ from vonk_control.models import (
     ClusterMappingNode,
 )
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
+
+from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
 
 MODEL_DOCUMENT_ID = "00000000-0000-4000-8000-000000000010"
 MODEL_REVISION_ID = "00000000-0000-4000-8000-000000000011"
@@ -203,7 +206,13 @@ def setup(tmp_path: Path, *, options: bool = False):
             AgentNode(
                 node_id=node_id,
                 state="active",
-                architecture="linux-arm64",
+                inventory_snapshot=inventory_items_fixture(
+                    node_id,
+                    observed_at=None,
+                    identity=AgentRuntimeIdentity.model_validate(
+                        {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
+                    ),
+                ),
             )
             for node_id in node_ids
         )

@@ -41,6 +41,7 @@ from ..catalog_revision_contract import (
 )
 from ..categorized_errors import InvalidType
 from ..categorized_faults import security_reason
+from ..inventory_items import inventory_items
 from ..inventory_repository import InventorySnapshotView
 from ..memory_reservations import memory_reservations, memory_reserve_floor
 from ..models import (
@@ -609,12 +610,12 @@ def rederive_source_bundle_from_closure(
 
 
 def _validate_builder(node: AgentNode) -> None:
+    identity = inventory_items(node).runtime_identity
     if (
         node.state != "active"
         or node.revoked_at is not None
-        or node.architecture != "linux-arm64"
-        or not isinstance(node.binary_digest, str)
-        or _SHA256.fullmatch(node.binary_digest) is None
+        or identity is None
+        or identity.architecture != "linux-arm64"
     ):
         raise RecipeBuildUnknown(
             RecipeBuildCode.NODE_INCOMPATIBLE,

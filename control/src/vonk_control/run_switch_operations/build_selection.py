@@ -17,6 +17,7 @@ from vonk_agent_protocol import (
     UnknownOutcomeError,
 )
 
+from ..inventory_items import runtime_value
 from ..models import (
     AgentNode,
     CatalogDocumentRevision,
@@ -215,7 +216,6 @@ class BuildSelectionMixin:
                 .where(
                     AgentNode.state == "active",
                     AgentNode.revoked_at.is_(None),
-                    AgentNode.architecture == "linux-arm64",
                 )
                 .order_by(AgentNode.node_id)
             )
@@ -224,7 +224,15 @@ class BuildSelectionMixin:
         # active worker is preferred so build memory cannot contend with the
         # inference admission.  Both choices remain deterministic.
         return tuple(
-            sorted(nodes, key=lambda node: (node.node_id in group_ids, node.node_id))
+            sorted(
+                (
+                    node
+                    for node in nodes
+                    if runtime_value(node, lambda identity: identity.architecture)
+                    == "linux-arm64"
+                ),
+                key=lambda node: (node.node_id in group_ids, node.node_id),
+            )
         )
 
     def _builder_admission(
@@ -248,8 +256,11 @@ class BuildSelectionMixin:
         if (
             node.state != "active"
             or node.revoked_at is not None
-            or node.architecture != "linux-arm64"
-            or not _is_hex_digest(node.binary_digest)
+            or runtime_value(node, lambda identity: identity.architecture)
+            != "linux-arm64"
+            or not _is_hex_digest(
+                runtime_value(node, lambda identity: identity.binary_digest)
+            )
             or freshness.state != "fresh"
         ):
             return freshness, False

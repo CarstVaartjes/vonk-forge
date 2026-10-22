@@ -19,6 +19,7 @@ from ..auth import CursorError
 from ..evidence_repeats import repeating_evidence
 from ..fleet_event_contract import NodeProfilePayload
 from ..fleet_events import FleetEventDraft, FleetEventRepository
+from ..inventory_items import inventory_items
 from ..model_layout_notice import model_layout_notices
 from ..models import (
     AgentCertificate,
@@ -123,7 +124,7 @@ class FleetProjection:
             return FleetNodeIdentity(
                 id=node_id,
                 display_name=profile.display_name,
-                hostname=profile.hostname,
+                hostname=inventory_items(node).hostname or "",
                 ip_address=node.management_address,
             )
 

@@ -1,3 +1,5 @@
+from vonk_control.inventory_items import inventory_items, runtime_value
+
 """Prove confirmed profile cleanup leaves the same physical gang admissible."""
 
 from collections.abc import Callable
@@ -95,9 +97,11 @@ def start_on_released_gang(
                 assert node is not None
                 runtime_identity = {
                     **PACKAGED_RUNTIME_IDENTITY,
-                    "architecture": node.architecture,
+                    "architecture": runtime_value(
+                        node, lambda identity: identity.architecture
+                    ),
                 }
-                fingerprint = node.preflight_fingerprint
+                fingerprint = inventory_items(node).preflight_fingerprint
             claim = claim_agent(
                 jobs,
                 node_id,

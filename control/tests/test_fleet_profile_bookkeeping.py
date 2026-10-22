@@ -15,6 +15,7 @@ from __future__ import annotations
 import pytest
 from sqlalchemy import select, update
 from vonk_agent_protocol import LifecycleState
+from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_control.fleet_profile_contract import (
     FleetProfileSwitchAdapterState,
     UnavailableFleetProfileView,
@@ -36,6 +37,7 @@ from vonk_control.models import (
     FleetProfileApplication,
 )
 
+from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
 from .test_fleet_profiles import (
     NOW,
     _database,
@@ -146,8 +148,14 @@ def test_a_retry_whose_fleet_scope_changed_is_declined_not_refused() -> None:
                 node_id=_node_id(9),
                 state="active",
                 protocol_version=1,
-                architecture="linux-arm64",
                 last_seen_at=NOW,
+                inventory_snapshot=inventory_items_fixture(
+                    _node_id(9),
+                    observed_at=NOW,
+                    identity=AgentRuntimeIdentity.model_validate(
+                        {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
+                    ),
+                ),
             )
         )
     declined = service.retry(application.id, request_key=_uuid(1005), actor="admin")

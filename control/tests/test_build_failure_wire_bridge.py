@@ -25,6 +25,7 @@ from vonk_agent_protocol import (
 )
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.availability_production import build_recipe_image_availability
+from vonk_control.inventory_items import runtime_value
 from vonk_control.inventory_repository import (
     InventoryRepository,
     InventorySnapshotInput,
@@ -182,10 +183,18 @@ def test_native_source_fetch_failure_reaches_availability_owner(
         builder = session.get(AgentNode, node_id)
         assert builder is not None
         runtime_identity = PACKAGED_RUNTIME_IDENTITY | {
-            "architecture": builder.architecture,
-            "semantic_version": builder.semantic_version,
-            "build_digest": builder.build_digest,
-            "binary_digest": builder.binary_digest,
+            "architecture": runtime_value(
+                builder, lambda identity: identity.architecture
+            ),
+            "semantic_version": runtime_value(
+                builder, lambda identity: identity.semantic_version
+            ),
+            "build_digest": runtime_value(
+                builder, lambda identity: identity.build_digest
+            ),
+            "binary_digest": runtime_value(
+                builder, lambda identity: identity.binary_digest
+            ),
         }
     jobs = AgentJobService(
         sessions,

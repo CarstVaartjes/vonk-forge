@@ -26,6 +26,7 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol import (
     AgentOperation as ProtocolOperation,
 )
+from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_control.agent_jobs import AgentJobService, superseded_cancellation_deadline
 from vonk_control.availability_production import build_recipe_image_availability
 from vonk_control.bounded_json import require_integer
@@ -70,6 +71,11 @@ from vonk_control.source_bundles import SourceBundleStore, generate_source_bundl
 from vonk_forge_contracts import RecipeDefinition, document_sha256, read_recipe
 
 from .recipe_removal_review_support import remove_after_review
+from .runtime_identity_support import (
+    PACKAGED_RUNTIME_IDENTITY,
+    inventory_items_fixture,
+    set_inventory_identity,
+)
 from .runtime_image_fixtures import place_test_image, remove_test_image
 from .test_recipe_image_availability import _typed_availability_payload
 
@@ -192,17 +198,26 @@ def setup(
         builder = session.get(AgentNode, node_id) if existing_node else None
         if existing_node:
             assert builder is not None
-            builder.binary_digest = "1" * 64
+            set_inventory_identity(builder, binary_digest="1" * 64)
         else:
             session.add(
                 AgentNode(
                     node_id=node_id,
                     state="active",
-                    architecture="linux-arm64",
-                    semantic_version="1.2.3",
-                    build_digest="sha256:" + "a" * 64,
-                    binary_digest="1" * 64,
                     last_seen_at=now,
+                    inventory_snapshot=inventory_items_fixture(
+                        node_id,
+                        observed_at=now,
+                        identity=AgentRuntimeIdentity.model_validate(
+                            {
+                                **PACKAGED_RUNTIME_IDENTITY,
+                                "architecture": "linux-arm64",
+                                "semantic_version": "1.2.3",
+                                "build_digest": "sha256:" + "a" * 64,
+                                "binary_digest": "1" * 64,
+                            }
+                        ),
+                    ),
                 )
             )
         # Another recipe on an existing builder may share the same bundle.
@@ -336,7 +351,7 @@ def test_prepared_plan_failure_rolls_back_without_orphan_build(tmp_path: Path) -
     with sessions.begin() as session:
         node = session.get(AgentNode, node_id)
         assert node is not None
-        node.binary_digest = "2" * 64
+        set_inventory_identity(node, binary_digest="2" * 64)
 
     with (
         pytest.raises(RecipeBuildError),
@@ -359,7 +374,7 @@ def test_build_identity_changes_when_builder_runtime_changes(tmp_path: Path) -> 
     with sessions.begin() as session:
         node = session.get(AgentNode, node_id)
         assert node is not None
-        node.binary_digest = "2" * 64
+        set_inventory_identity(node, binary_digest="2" * 64)
     second = service.plan(revision.id, node_id, now=now)
 
     assert second.build_id != first.build_id
@@ -384,7 +399,7 @@ def test_build_resolution_reuses_exact_receipt_without_builder_admission(
         node = session.get(AgentNode, node_id)
         assert node is not None
         node.state = "revoked"
-        node.binary_digest = None
+        set_inventory_identity(node, binary_digest=None)
 
     resolution = service.resolve(revision.id)
 
@@ -918,11 +933,20 @@ def test_resolution_reuses_the_present_receipt_for_the_shared_identity(
             AgentNode(
                 node_id=second_node,
                 state="active",
-                architecture="linux-arm64",
-                semantic_version="1.2.3",
-                build_digest="sha256:" + "a" * 64,
-                binary_digest="1" * 64,
                 last_seen_at=now,
+                inventory_snapshot=inventory_items_fixture(
+                    second_node,
+                    observed_at=now,
+                    identity=AgentRuntimeIdentity.model_validate(
+                        {
+                            **PACKAGED_RUNTIME_IDENTITY,
+                            "architecture": "linux-arm64",
+                            "semantic_version": "1.2.3",
+                            "build_digest": "sha256:" + "a" * 64,
+                            "binary_digest": "1" * 64,
+                        }
+                    ),
+                ),
             )
         )
     InventoryRepository(sessions, clock=lambda: now).record(
@@ -1055,7 +1079,7 @@ def test_build_resolution_without_cache_returns_durable_intent_identity(
         node = session.get(AgentNode, node_id)
         assert node is not None
         node.state = "revoked"
-        node.binary_digest = None
+        set_inventory_identity(node, binary_digest=None)
 
     resolution = service.resolve(revision.id)
 
@@ -1214,7 +1238,7 @@ def test_build_reservation_rejects_changed_builder_runtime(tmp_path: Path) -> No
     with sessions.begin() as session:
         node = session.get(AgentNode, node_id)
         assert node is not None
-        node.binary_digest = "2" * 64
+        set_inventory_identity(node, binary_digest="2" * 64)
 
     with (
         sessions.begin() as session,
@@ -1401,7 +1425,7 @@ def test_build_rejects_builder_without_runtime_identity(tmp_path: Path) -> None:
     with sessions.begin() as session:
         node = session.get(AgentNode, node_id)
         assert node is not None
-        node.binary_digest = None
+        set_inventory_identity(node, binary_digest=None)
 
     with pytest.raises(RecipeBuildError):
         RecipeBuildService(sessions, bundles=bundles).plan(
@@ -1411,7 +1435,7 @@ def test_build_rejects_builder_without_runtime_identity(tmp_path: Path) -> None:
     with sessions.begin() as session:
         node = session.get(AgentNode, node_id)
         assert node is not None
-        node.binary_digest = "1" * 64
+        set_inventory_identity(node, binary_digest="1" * 64)
     assert (
         RecipeBuildService(sessions, bundles=bundles)
         .plan(revision.id, node_id, now=now)

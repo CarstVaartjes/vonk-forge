@@ -24,6 +24,7 @@ from vonk_agent_protocol import (
     RunSwitchCode,
     canonical_message,
 )
+from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_control.auth import CursorCodec
 from vonk_control.catalog_revision_contract import (
     read_catalog_projection,
@@ -136,6 +137,11 @@ from vonk_control.runtime_image_preparation import (
 from vonk_control.runtime_preflight import latest_result
 
 from .preflight_fixtures import record_passing_preflight
+from .runtime_identity_support import (
+    PACKAGED_RUNTIME_IDENTITY,
+    inventory_items_fixture,
+    set_inventory_identity,
+)
 from .runtime_image_fixtures import place_test_image
 
 _FIXTURE_ADAPTER = resolve_runtime_adapter("vllm", {"node_count": 1})
@@ -2596,7 +2602,7 @@ def test_uncached_build_receipt_reaches_copy_after_restart_without_replay(
         )
         node = session.get(AgentNode, nodes[0])
         assert node is not None
-        node.binary_digest = "a" * 64
+        set_inventory_identity(node, binary_digest="a" * 64)
         snapshot = session.scalar(
             select(NodeInventorySnapshot).where(
                 NodeInventorySnapshot.node_id == nodes[0]
@@ -2751,7 +2757,7 @@ def test_first_profile_preparation_preview_replans_a_missing_build_archive(
         assert revision is not None
         node = session.get(AgentNode, nodes[0])
         assert node is not None
-        node.binary_digest = "a" * 64
+        set_inventory_identity(node, binary_digest="a" * 64)
         snapshot = session.scalar(
             select(NodeInventorySnapshot).where(
                 NodeInventorySnapshot.node_id == nodes[0]
@@ -2856,7 +2862,7 @@ def test_editorial_successor_reuses_an_identity_matched_build(tmp_path: Path) ->
         assert revision is not None
         node = session.get(AgentNode, nodes[0])
         assert node is not None
-        node.binary_digest = "a" * 64
+        set_inventory_identity(node, binary_digest="a" * 64)
         snapshot = session.scalar(
             select(NodeInventorySnapshot).where(
                 NodeInventorySnapshot.node_id == nodes[0]
@@ -3086,7 +3092,7 @@ def test_republished_source_bundle_builds_a_new_image_for_the_same_revision(
             old_build.image_bytes = None
         node = session.get(AgentNode, nodes[0])
         assert node is not None
-        node.binary_digest = "a" * 64
+        set_inventory_identity(node, binary_digest="a" * 64)
         snapshot = session.scalar(
             select(NodeInventorySnapshot).where(
                 NodeInventorySnapshot.node_id == nodes[0]
@@ -3205,8 +3211,17 @@ def test_uncached_run_selects_external_fresh_builder_and_plans_container_phase(
             AgentNode(
                 node_id=builder_id,
                 state="active",
-                architecture="linux-arm64",
-                binary_digest="a" * 64,
+                inventory_snapshot=inventory_items_fixture(
+                    builder_id,
+                    observed_at=None,
+                    identity=AgentRuntimeIdentity.model_validate(
+                        {
+                            **PACKAGED_RUNTIME_IDENTITY,
+                            "architecture": "linux-arm64",
+                            "binary_digest": "a" * 64,
+                        }
+                    ),
+                ),
             )
         )
     InventoryRepository(sessions, clock=lambda: NOW).record(
@@ -3295,7 +3310,7 @@ def test_container_phase_delegates_to_existing_recipe_build_child(
         build.plan = {**build.plan, "source_bundle_sha256": source_digest}
         node = session.get(AgentNode, nodes[0])
         assert node is not None
-        node.binary_digest = "a" * 64
+        set_inventory_identity(node, binary_digest="a" * 64)
         snapshot = session.scalar(
             select(NodeInventorySnapshot).where(
                 NodeInventorySnapshot.node_id == nodes[0]

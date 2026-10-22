@@ -24,6 +24,7 @@ from vonk_agent_protocol.telemetry import TelemetryRequest
 
 from .agent_operation_facts import aware
 from .auth import agent_identity_from_scope
+from .inventory_items import inventory_items, runtime_value
 from .models import (
     AgentCertificate,
     AgentNode,
@@ -259,10 +260,14 @@ def resolve_agent_receipt(
             _require(
                 node.contact_certificate_serial == identity.certificate_serial
                 and node.last_seen_at is not None
-                and node.binary_digest == body.runtime_identity.binary_digest
-                and node.build_digest == body.runtime_identity.build_digest
-                and node.architecture == body.runtime_identity.architecture
-                and node.preflight_fingerprint == body.preflight_fingerprint
+                and runtime_value(node, lambda identity: identity.binary_digest)
+                == body.runtime_identity.binary_digest
+                and runtime_value(node, lambda identity: identity.build_digest)
+                == body.runtime_identity.build_digest
+                and runtime_value(node, lambda identity: identity.architecture)
+                == body.runtime_identity.architecture
+                and inventory_items(node).preflight_fingerprint
+                == body.preflight_fingerprint
             )
             if result.status_code == 204:
                 return AcceptanceReceipt(

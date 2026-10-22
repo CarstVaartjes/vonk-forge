@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import Any, TypedDict
+from typing import Any, ClassVar, TypedDict
 
 from sqlalchemy import (
     JSON,
@@ -29,8 +29,9 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column
 from vonk_agent_protocol import ModelFileState, machine_check
 from vonk_agent_protocol.gpu_clock import GpuClockObservation
-from vonk_agent_protocol.inventory import MemoryPool
+from vonk_agent_protocol.inventory import InventoryRequest, MemoryPool
 
+from ..inventory_items_contract import AgentInventoryItems, InventorySnapshotKind
 from ..lifecycle.evidence import Residue
 from ..model_primitives import Base, _lower_hex, _Utf8ByteLength, _uuid_shape
 from ..stored_json import ContractJSON
@@ -43,10 +44,32 @@ class ModelStoreObjectDocument(TypedDict):
     bytes: int
 
 
-class NodeInventorySnapshot(Base):
+class NodeSnapshot(Base):
     __tablename__ = "node_inventory_snapshots"
     __table_args__ = (
-        UniqueConstraint("node_id", "observed_at", name="uq_inventory_node_observed"),
+        CheckConstraint(
+            "kind IN ("
+            + ",".join(f"'{item.value}'" for item in InventorySnapshotKind)
+            + ")",
+            name="ck_inventory_snapshot_kind",
+        ),
+        CheckConstraint(
+            f"kind != '{InventorySnapshotKind.REPORT.value}' OR ("
+            + " AND ".join(
+                f"{name} IS NOT NULL"
+                for name, field in InventoryRequest.model_fields.items()
+                if field.is_required() and name != "schema_version"
+            )
+            + ")",
+            name="ck_inventory_report_required",
+        ),
+        CheckConstraint(
+            f"kind != '{InventorySnapshotKind.ITEMS.value}' OR agent_items IS NOT NULL",
+            name="ck_inventory_items_required",
+        ),
+        UniqueConstraint(
+            "node_id", "kind", "observed_at", name="uq_inventory_node_kind_observed"
+        ),
         CheckConstraint(
             "disk_total_bytes>=0 AND disk_free_bytes>=0 AND disk_free_bytes<=disk_total_bytes",
             name="ck_inventory_disk",
@@ -77,19 +100,30 @@ class NodeInventorySnapshot(Base):
         ForeignKey("agent_nodes.node_id", ondelete="CASCADE"), nullable=False
     )
     observed_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
+        DateTime(timezone=True), nullable=True
     )
     received_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )
-    disk_total_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    disk_free_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    host_memory_total_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    host_memory_free_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    gpu_memory_total_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    gpu_memory_free_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    gpu_count: Mapped[int] = mapped_column(Integer, nullable=False)
-    memory_pool: Mapped[MemoryPool] = mapped_column(String(16), nullable=False)
+    evidence_digest: Mapped[str] = mapped_column(
+        String(64), nullable=False, unique=True
+    )
+    kind: Mapped[InventorySnapshotKind] = mapped_column(
+        String(16), nullable=False, server_default=InventorySnapshotKind.REPORT.value
+    )
+    __mapper_args__: ClassVar = {"polymorphic_on": kind, "polymorphic_abstract": True}
+
+
+class NodeInventorySnapshot(NodeSnapshot):
+    __mapper_args__: ClassVar = {"polymorphic_identity": InventorySnapshotKind.REPORT}
+    disk_total_bytes: Mapped[int] = mapped_column(BigInteger, nullable=True)
+    disk_free_bytes: Mapped[int] = mapped_column(BigInteger, nullable=True)
+    host_memory_total_bytes: Mapped[int] = mapped_column(BigInteger, nullable=True)
+    host_memory_free_bytes: Mapped[int] = mapped_column(BigInteger, nullable=True)
+    gpu_memory_total_bytes: Mapped[int] = mapped_column(BigInteger, nullable=True)
+    gpu_memory_free_bytes: Mapped[int] = mapped_column(BigInteger, nullable=True)
+    gpu_count: Mapped[int] = mapped_column(Integer, nullable=True)
+    memory_pool: Mapped[MemoryPool] = mapped_column(String(16), nullable=True)
     fabric_address: Mapped[str | None] = mapped_column(String(45))
     fabric_bandwidth_mbps: Mapped[int | None] = mapped_column(BigInteger)
     # NULL: the agent did not report network evidence (unknown, not "none").
@@ -106,11 +140,25 @@ class NodeInventorySnapshot(Base):
     container_runtime_version: Mapped[str] = mapped_column(
         String(256), nullable=False, default="unknown", server_default="unknown"
     )
-    artifact_store_read_only: Mapped[bool] = mapped_column(Boolean, nullable=False)
-    capabilities: Mapped[list[str]] = mapped_column(JSON, nullable=False)
-    evidence_digest: Mapped[str] = mapped_column(
-        String(64), nullable=False, unique=True
+    artifact_store_read_only: Mapped[bool] = mapped_column(Boolean, nullable=True)
+    capabilities: Mapped[list[str]] = mapped_column(JSON, nullable=True)
+
+
+class NodeInventoryItemsSnapshot(NodeSnapshot):
+    __mapper_args__: ClassVar = {"polymorphic_identity": InventorySnapshotKind.ITEMS}
+    agent_items: Mapped[AgentInventoryItems | Residue] = mapped_column(
+        ContractJSON[AgentInventoryItems]("node_inventory_snapshots", "agent_items"),
+        nullable=True,
     )
+
+
+Index(
+    "uq_inventory_items_node",
+    NodeSnapshot.node_id,
+    unique=True,
+    postgresql_where=NodeSnapshot.kind == InventorySnapshotKind.ITEMS,
+    sqlite_where=NodeSnapshot.kind == InventorySnapshotKind.ITEMS,
+)
 
 
 class NodeTelemetrySample(Base):

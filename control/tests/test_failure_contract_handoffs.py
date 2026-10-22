@@ -8,6 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import AgentResult, AgentResultState
+from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.contracts import AgentFailureResult
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.api import create_app
@@ -22,7 +23,11 @@ from vonk_control.models import (
 from vonk_control.operation_api import durable_operation_services
 from vonk_control.strict_json import serialize_json_value
 
-from .runtime_identity_support import claim_agent
+from .runtime_identity_support import (
+    PACKAGED_RUNTIME_IDENTITY,
+    claim_agent,
+    inventory_items_fixture,
+)
 from .test_agent_jobs import COMMIT, NODE_A, STOP_PAYLOAD, Clock, parent
 from .test_operation_api import Jobs
 
@@ -73,11 +78,20 @@ def test_persisted_agent_failure_survives_activity(sessions, tmp_path, failure):
             AgentNode(
                 node_id=NODE_A,
                 state="active",
-                architecture="linux-arm64",
-                semantic_version="1.0.0",
-                build_digest="sha256:" + "f" * 64,
-                binary_digest="f" * 64,
                 workload_intent_ordinal=1,
+                inventory_snapshot=inventory_items_fixture(
+                    NODE_A,
+                    observed_at=None,
+                    identity=AgentRuntimeIdentity.model_validate(
+                        {
+                            **PACKAGED_RUNTIME_IDENTITY,
+                            "architecture": "linux-arm64",
+                            "semantic_version": "1.0.0",
+                            "build_digest": "sha256:" + "f" * 64,
+                            "binary_digest": "f" * 64,
+                        }
+                    ),
+                ),
             )
         )
         session.flush()

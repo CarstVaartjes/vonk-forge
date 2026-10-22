@@ -8,6 +8,7 @@ from sqlalchemy import create_engine, delete, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import CompiledExecutionPlan
+from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_control.cluster_mappings import ClusterMappingService
 from vonk_control.install_admission import (
     InstallAdmissionService,
@@ -43,6 +44,11 @@ from vonk_forge_contracts import (
 )
 
 from .preflight_fixtures import record_passing_preflight
+from .runtime_identity_support import (
+    PACKAGED_RUNTIME_IDENTITY,
+    inventory_items_fixture,
+    set_inventory_fingerprint,
+)
 from .stored_documents_support import valid_policy_report
 
 MODEL_SOURCE = "vonk-forge/synthetic-tiny@0123456789abcdef0123456789abcdef01234567"
@@ -373,7 +379,13 @@ def setup(
             AgentNode(
                 node_id=node_id,
                 state="active",
-                architecture="linux-arm64",
+                inventory_snapshot=inventory_items_fixture(
+                    node_id,
+                    observed_at=None,
+                    identity=AgentRuntimeIdentity.model_validate(
+                        {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
+                    ),
+                ),
             )
         )
         session.flush()
@@ -1028,7 +1040,7 @@ def test_refreshable_preflight_and_capacity_changes_wait_for_fresh_state(
         with sessions.begin() as session:
             host = session.get(AgentNode, node)
             assert host is not None
-            host.preflight_fingerprint = "b" * 64
+            set_inventory_fingerprint(host, "b" * 64)
 
     with pytest.raises(Exception) as _ending:
         service.accept_install(plan, actor="admin", now=later)
@@ -1058,7 +1070,7 @@ def test_moved_host_fingerprint_refreshes_instead_of_failing_the_identical_plan(
     with sessions.begin() as session:
         host = session.get(AgentNode, node)
         assert host is not None
-        host.preflight_fingerprint = "b" * 64
+        set_inventory_fingerprint(host, "b" * 64)
 
     with pytest.raises(Exception) as _ending:
         service.accept_install(plan, actor="admin", now=later)
@@ -1087,7 +1099,7 @@ def test_runtime_preflight_is_required_and_host_changes_invalidate_install(tmp_p
     with sessions.begin() as session:
         node = session.get(AgentNode, node_id)
         assert node is not None
-        node.preflight_fingerprint = "b" * 64
+        set_inventory_fingerprint(node, "b" * 64)
     blocked = service.plan_install(mapping, build, now=now)
     assert not blocked.allowed
 

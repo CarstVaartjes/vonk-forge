@@ -7,6 +7,7 @@ from alembic.config import Config
 from alembic.script import ScriptDirectory
 from pytest import MonkeyPatch
 from sqlalchemy.engine import Connection, Engine
+from vonk_agent_protocol.state_machines import NodeIdentityState
 from vonk_control.db import initialize_database
 from vonk_control.db import startup as startup_owner
 
@@ -72,8 +73,8 @@ def test_contact_move_rolls_back_on_interruption_and_restarts(
         connection.execute(
             insert(AgentNode),
             [
-                {"node_id": "legacy", "state": "active"},
-                {"node_id": "empty", "state": "active"},
+                {"node_id": "legacy", "state": NodeIdentityState.ACTIVE},
+                {"node_id": "empty", "state": NodeIdentityState.ACTIVE},
             ],
         )
         connection.exec_driver_sql(
@@ -125,3 +126,182 @@ def test_contact_move_rolls_back_on_interruption_and_restarts(
         assert connection.exec_driver_sql("""SELECT management_address,
             management_observed_at FROM agent_nodes WHERE node_id='empty'
         """).one() == (None, None)
+
+
+def test_runtime_items_migration_is_atomic_and_does_not_invent_capacity(
+    postgres_engine: Engine, monkeypatch: MonkeyPatch
+) -> None:
+    """Catches a lost identity/hostname on restart, or a fabricated capacity row."""
+    import pytest
+    from sqlalchemy import event, insert, inspect, select, text
+    from sqlalchemy.orm import sessionmaker
+    from vonk_agent_protocol.claims import AgentRuntimeIdentity
+    from vonk_control.db import node_facts
+    from vonk_control.inventory_items import inventory_items
+    from vonk_control.models import (
+        AgentNode,
+        AgentNodeProfile,
+        Base,
+        NodeInventoryItemsSnapshot,
+        NodeInventorySnapshot,
+    )
+
+    Base.metadata.create_all(postgres_engine)
+    with postgres_engine.begin() as connection:
+        connection.execute(
+            insert(AgentNode),
+            [
+                {"node_id": "reported", "state": NodeIdentityState.ACTIVE},
+                {"node_id": "empty", "state": NodeIdentityState.ACTIVE},
+            ],
+        )
+        connection.execute(
+            insert(AgentNodeProfile),
+            {
+                "node_id": "reported",
+                "display_name": "Spark",
+                "labels": {},
+            },
+        )
+        for column, sql_type in (
+            ("architecture", "varchar(16)"),
+            ("semantic_version", "varchar(32)"),
+            ("build_digest", "varchar(71)"),
+            ("binary_digest", "varchar(64)"),
+            ("preflight_fingerprint", "varchar(64)"),
+        ):
+            connection.exec_driver_sql(
+                f"ALTER TABLE agent_nodes ADD COLUMN {column} {sql_type}"
+            )
+        connection.exec_driver_sql(
+            "ALTER TABLE agent_node_profiles ADD COLUMN hostname varchar(255)"
+        )
+        connection.exec_driver_sql(
+            "UPDATE agent_node_profiles SET hostname='spark.internal'"
+        )
+        identity = AgentRuntimeIdentity(
+            architecture="linux-arm64",
+            semantic_version="1.2.3",
+            build_digest="sha256:" + "b" * 64,
+            binary_digest="c" * 64,
+        )
+        connection.execute(
+            text("""UPDATE agent_nodes SET
+            architecture=:architecture, semantic_version=:semantic_version,
+            build_digest=:build_digest, binary_digest=:binary_digest
+            WHERE node_id='reported'"""),
+            identity.model_dump(exclude={"package_activation"}),
+        )
+
+    original = node_facts.move_runtime_facts
+
+    def interrupted(connection: Connection) -> None:
+        def stop(_conn, _cursor, statement, _parameters, _context, _many):
+            if statement == "ALTER TABLE agent_nodes DROP COLUMN architecture":
+                raise InterruptedError(
+                    "Controller stopped before retiring source columns"
+                )
+
+        event.listen(connection, "before_cursor_execute", stop)
+        try:
+            original(connection)
+        finally:
+            event.remove(connection, "before_cursor_execute", stop)
+
+    url = postgres_engine.url.render_as_string(hide_password=False)
+    with monkeypatch.context() as interruption:
+        interruption.setattr(node_facts, "move_runtime_facts", interrupted)
+        with pytest.raises(InterruptedError):
+            initialize_database(url)
+    with postgres_engine.connect() as connection:
+        assert "architecture" in {
+            column["name"] for column in inspect(connection).get_columns("agent_nodes")
+        }
+        assert connection.scalar(select(NodeInventoryItemsSnapshot.id)) is None
+    initialize_database(url)
+    initialize_database(url)
+    with sessionmaker(postgres_engine)() as session:
+        node = session.get(AgentNode, "reported")
+        items = inventory_items(node)
+        assert items.runtime_identity == identity
+        assert items.hostname == "spark.internal"
+        assert inventory_items(session.get(AgentNode, "empty")).runtime_identity is None
+        assert session.scalar(select(NodeInventorySnapshot.id)) is None
+    with postgres_engine.connect() as connection:
+        assert "architecture" not in {
+            column["name"] for column in inspect(connection).get_columns("agent_nodes")
+        }
+        assert "hostname" not in {
+            column["name"]
+            for column in inspect(connection).get_columns("agent_node_profiles")
+        }
+
+
+def test_partial_runtime_evidence_waits_for_claim_then_retires_columns(
+    postgres_engine: Engine,
+) -> None:
+    """Catches discarding incomplete evidence or keeping it as a permanent gate."""
+    from datetime import UTC, datetime
+
+    from sqlalchemy import insert, inspect
+    from sqlalchemy.orm import sessionmaker
+    from vonk_agent_protocol.claims import AgentRuntimeIdentity
+    from vonk_control.inventory_items import inventory_items, record_runtime
+    from vonk_control.models import AgentNode, Base
+
+    Base.metadata.create_all(postgres_engine)
+    with postgres_engine.begin() as connection:
+        connection.execute(
+            insert(AgentNode), {"node_id": "partial", "state": NodeIdentityState.ACTIVE}
+        )
+        for name in (
+            "architecture",
+            "semantic_version",
+            "build_digest",
+            "binary_digest",
+            "preflight_fingerprint",
+        ):
+            connection.exec_driver_sql(
+                f"ALTER TABLE agent_nodes ADD COLUMN {name} varchar(128)"
+            )
+        connection.exec_driver_sql(
+            "ALTER TABLE agent_node_profiles ADD COLUMN hostname varchar(255)"
+        )
+        connection.exec_driver_sql("UPDATE agent_nodes SET architecture='linux-arm64'")
+    url = postgres_engine.url.render_as_string(hide_password=False)
+    initialize_database(url)
+    initialize_database(url)
+    with postgres_engine.connect() as connection:
+        assert (
+            connection.exec_driver_sql(
+                "SELECT architecture FROM agent_nodes"
+            ).scalar_one()
+            == "linux-arm64"
+        )
+    sessions = sessionmaker(postgres_engine)
+    with sessions.begin() as session:
+        node = session.get(AgentNode, "partial")
+        assert node is not None
+        assert inventory_items(node).runtime_identity is None
+        record_runtime(
+            node,
+            AgentRuntimeIdentity(
+                architecture="linux-arm64",
+                semantic_version="1.2.3",
+                build_digest="sha256:" + "b" * 64,
+                binary_digest="c" * 64,
+            ),
+            None,
+            "reported.internal",
+            datetime.now(UTC),
+        )
+    initialize_database(url)
+    with postgres_engine.connect() as connection:
+        assert "architecture" not in {
+            column["name"] for column in inspect(connection).get_columns("agent_nodes")
+        }
+    with sessions() as session:
+        assert (
+            inventory_items(session.get(AgentNode, "partial")).hostname
+            == "reported.internal"
+        )

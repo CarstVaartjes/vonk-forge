@@ -385,7 +385,7 @@ def test_grant_is_single_use_and_immediately_issues_authorized_certificate(
         assert node is not None and node.state == "active"
         assert profile is not None
         assert profile.display_name == NODE_ID
-        assert profile.hostname == ""
+        assert node.inventory_snapshot is None
         assert profile.lifecycle == "ready"
         assert profile.labels == {}
 

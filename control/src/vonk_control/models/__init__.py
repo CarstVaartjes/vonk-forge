@@ -70,7 +70,9 @@ from .routes import RoutePublicationOwner as RoutePublicationOwner
 from .telemetry import FleetEventCursor as FleetEventCursor
 from .telemetry import FleetStreamEvent as FleetStreamEvent
 from .telemetry import NodeArtifact as NodeArtifact
+from .telemetry import NodeInventoryItemsSnapshot as NodeInventoryItemsSnapshot
 from .telemetry import NodeInventorySnapshot as NodeInventorySnapshot
+from .telemetry import NodeSnapshot as NodeSnapshot
 from .telemetry import NodeTelemetryLatest as NodeTelemetryLatest
 from .telemetry import NodeTelemetrySample as NodeTelemetrySample
 from .telemetry import _seed_fleet_event_cursor as _seed_fleet_event_cursor

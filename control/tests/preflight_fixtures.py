@@ -4,6 +4,9 @@ import uuid
 from datetime import timedelta
 
 from sqlalchemy import select
+from vonk_agent_protocol import canonical_message
+from vonk_agent_protocol.runtime_preflight import RuntimePreflightResult
+from vonk_control.inventory_items import record_preflight
 from vonk_control.models import (
     AgentCertificate,
     AgentNode,
@@ -17,6 +20,8 @@ from vonk_control.runtime_preflight import (
     recipe_requirements,
     request_digest,
 )
+
+from .runtime_identity_support import set_inventory_fingerprint
 
 
 def record_passing_preflight(
@@ -35,7 +40,7 @@ def record_passing_preflight(
         for node in session.scalars(select(AgentNode)):
             if node_ids is not None and node.node_id not in node_ids:
                 continue
-            node.preflight_fingerprint = "a" * 64
+            set_inventory_fingerprint(node, "a" * 64)
             key = str(uuid.uuid4())
             job = Job(
                 id=key,
@@ -66,6 +71,22 @@ def record_passing_preflight(
             )
             session.add(operation)
             session.flush()
+            result = RuntimePreflightResult.model_validate_json(
+                canonical_message(
+                    {
+                        "fingerprint": "a" * 64,
+                        "observed_at": int(now.timestamp()),
+                        "findings": [
+                            {
+                                "capability": value,
+                                "status": "passed",
+                                "code": "available",
+                            }
+                            for value in mandatory_capabilities(request)
+                        ],
+                    }
+                )
+            )
             session.add(
                 AgentOperationAttempt(
                     operation_id=operation.id,
@@ -79,17 +100,7 @@ def record_passing_preflight(
                         )
                     ),
                     state="succeeded",
-                    result={
-                        "fingerprint": "a" * 64,
-                        "observed_at": int(now.timestamp()),
-                        "findings": [
-                            {
-                                "capability": value,
-                                "status": "passed",
-                                "code": "available",
-                            }
-                            for value in mandatory_capabilities(request)
-                        ],
-                    },
+                    result=result.model_dump(mode="json"),
                 )
             )
+            record_preflight(node, digest, result, now)

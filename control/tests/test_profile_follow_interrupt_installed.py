@@ -13,6 +13,7 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_control.cluster_mappings import ClusterMappingService
 from vonk_control.fleet_profile_contract import FleetProfileApplicationProgress
 from vonk_control.inventory_repository import (
@@ -27,6 +28,7 @@ from vonk_control.models import (
     NodeArtifact,
 )
 
+from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
 from .test_fleet_profile_api import _client, _headers
 from .test_fleet_profile_cancel import _application
 from .test_profile_load_installed_cli import _https_api_peer, _process_environment
@@ -44,7 +46,13 @@ def _add_disjoint_profile_node(
             AgentNode(
                 node_id=node_id,
                 state="active",
-                architecture="linux-arm64",
+                inventory_snapshot=inventory_items_fixture(
+                    node_id,
+                    observed_at=None,
+                    identity=AgentRuntimeIdentity.model_validate(
+                        {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
+                    ),
+                ),
             )
         )
         session.flush()

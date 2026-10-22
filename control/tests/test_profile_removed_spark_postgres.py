@@ -7,10 +7,12 @@ from uuid import uuid4
 
 from sqlalchemy import select, update
 from vonk_agent_protocol import DesiredAssignmentState
+from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_control.fleet_profile_contract import (
     FleetProfileAssignmentInput,
     FleetProfileInput,
 )
+from vonk_control.inventory_items import runtime_value
 from vonk_control.inventory_repository import (
     InventoryRepository,
     InventorySnapshotInput,
@@ -30,6 +32,7 @@ from vonk_control.models import (
 )
 
 from .profile_due_fixtures import next_profile_due
+from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
 from .test_profile_capacity_admission import _capacity_profile
 from .test_recipe_operations import (
     installed_recipe,
@@ -129,8 +132,19 @@ def test_profile_apply_stops_only_reachable_rank_and_retains_missing_claim(
                     node_id=unrelated_node,
                     state="active",
                     protocol_version=1,
-                    architecture=template.architecture,
                     last_seen_at=observed_at,
+                    inventory_snapshot=inventory_items_fixture(
+                        unrelated_node,
+                        observed_at=observed_at,
+                        identity=AgentRuntimeIdentity.model_validate(
+                            {
+                                **PACKAGED_RUNTIME_IDENTITY,
+                                "architecture": runtime_value(
+                                    template, lambda identity: identity.architecture
+                                ),
+                            }
+                        ),
+                    ),
                 )
             )
             session.flush()

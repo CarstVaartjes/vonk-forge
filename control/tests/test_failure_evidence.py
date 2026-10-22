@@ -12,6 +12,7 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import AgentOperation as ProtocolAgentOperation
 from vonk_agent_protocol import AgentResult, LifecycleState
+from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.failure_evidence import FailureDiagnostics
 from vonk_control import agent_operation_states as aos
 from vonk_control.agent_jobs import AgentJobService
@@ -36,7 +37,11 @@ from vonk_control.models import (
 from vonk_control.operation_item_contract import OperationResultFacts, operation_item
 
 from .agent_fences import fenced_attempt
-from .runtime_identity_support import claim_agent
+from .runtime_identity_support import (
+    PACKAGED_RUNTIME_IDENTITY,
+    claim_agent,
+    inventory_items_fixture,
+)
 from .test_agent_jobs import NODE_A, NODE_B, Clock, distribution_payload, parent
 
 NOW = datetime(2026, 9, 8, 12, tzinfo=UTC)
@@ -501,10 +506,19 @@ def durable_evidence(tmp_path):
                     node_id=node_id,
                     state="active",
                     workload_intent_ordinal=1,
-                    architecture="linux-arm64",
-                    semantic_version="1.0.0",
-                    build_digest="sha256:" + "f" * 64,
-                    binary_digest="f" * 64,
+                    inventory_snapshot=inventory_items_fixture(
+                        node_id,
+                        observed_at=None,
+                        identity=AgentRuntimeIdentity.model_validate(
+                            {
+                                **PACKAGED_RUNTIME_IDENTITY,
+                                "architecture": "linux-arm64",
+                                "semantic_version": "1.0.0",
+                                "build_digest": "sha256:" + "f" * 64,
+                                "binary_digest": "f" * 64,
+                            }
+                        ),
+                    ),
                 )
             )
             session.add(

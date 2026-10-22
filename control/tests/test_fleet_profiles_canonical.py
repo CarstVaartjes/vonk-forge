@@ -12,6 +12,7 @@ from sqlalchemy import create_engine, event, update
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 from vonk_agent_protocol import DesiredAssignmentState, ModelCacheBlockerCode
+from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_control.fleet_profile_contract import (
     FleetProfileAssignmentInput,
     FleetProfileDefinition,
@@ -36,6 +37,12 @@ from vonk_control.models import (
     User,
 )
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
+
+from .runtime_identity_support import (
+    PACKAGED_RUNTIME_IDENTITY,
+    inventory_items_fixture,
+    set_inventory_hostname,
+)
 
 NOW = datetime(2026, 9, 5, 12, tzinfo=UTC)
 NODE_1 = "spk_" + "1" * 32
@@ -105,26 +112,26 @@ def _seed(sessions: sessionmaker, *, options: bool = False) -> None:
                     node_id=node_id,
                     state="active",
                     protocol_version=2,
-                    architecture="linux-arm64",
                     last_seen_at=NOW,
+                    inventory_snapshot=inventory_items_fixture(
+                        node_id,
+                        observed_at=NOW,
+                        identity=AgentRuntimeIdentity.model_validate(
+                            {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
+                        ),
+                    ),
                 )
                 for node_id in (NODE_1, NODE_2)
             ]
         )
         session.add_all(
             [
-                AgentNodeProfile(
-                    node_id=NODE_1,
-                    display_name="Spark One",
-                    hostname="spark-one",
-                ),
-                AgentNodeProfile(
-                    node_id=NODE_2,
-                    display_name="Spark Two",
-                    hostname="spark-two",
-                ),
+                AgentNodeProfile(node_id=NODE_1, display_name="Spark One"),
+                AgentNodeProfile(node_id=NODE_2, display_name="Spark Two"),
             ]
         )
+        set_inventory_hostname(session, NODE_1, "spark-one")
+        set_inventory_hostname(session, NODE_2, "spark-two")
         session.add_all(
             [
                 CatalogDocument(

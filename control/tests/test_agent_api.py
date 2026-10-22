@@ -69,6 +69,7 @@ from vonk_control.host_helper_authority import (
     HostHelperGrantIssuer,
     HostRuntimeAuthorityService,
 )
+from vonk_control.inventory_items import runtime_value
 from vonk_control.models import (
     AgentCertificate,
     AgentNode,
@@ -2118,7 +2119,7 @@ def test_claim_rejects_retired_supervisor_identity_fields(
     with services.sessions() as session:
         node = session.get(AgentNode, NODE_A)
         assert node is not None
-        assert node.semantic_version is None
+        assert runtime_value(node, lambda identity: identity.semantic_version) is None
 
 
 @pytest.mark.parametrize("architecture", ("linux-amd64", "linux-arm64"))
@@ -2179,7 +2180,7 @@ def test_claim_api_rejects_noncanonical_runtime_architecture(
     with services.sessions() as session:
         node = session.get(AgentNode, NODE_A)
         assert node is not None
-        assert node.architecture is None
+        assert runtime_value(node, lambda identity: identity.architecture) is None
 
 
 def test_unauthenticated_claim_cannot_change_runtime_architecture(agent_system) -> None:
@@ -2201,7 +2202,7 @@ def test_unauthenticated_claim_cannot_change_runtime_architecture(agent_system) 
     with services.sessions() as session:
         node = session.get(AgentNode, NODE_A)
         assert node is not None
-        assert node.architecture is None
+        assert runtime_value(node, lambda identity: identity.architecture) is None
 
 
 @pytest.mark.parametrize(

@@ -44,6 +44,7 @@ from vonk_agent_protocol import (
     host_helper_grant_signing_bytes,
 )
 from vonk_agent_protocol import AgentOperation as WireAgentOperation
+from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.host_helper import HostRuntimeRequest
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.agent_operation_facts import SUPERSEDED_CANCELLATION_SECONDS
@@ -71,6 +72,7 @@ from vonk_control.install_admission import (
 from vonk_control.install_admission import (
     require_admissible as require_install_admissible,
 )
+from vonk_control.inventory_items import inventory_items
 from vonk_control.inventory_repository import (
     InventoryRepository,
     InventorySnapshotInput,
@@ -141,7 +143,11 @@ from vonk_forge_contracts import (
 from .agent_fences import fenced_operation
 from .canonical_recipe_fixtures import canonical_example
 from .preflight_fixtures import record_passing_preflight
-from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, claim_agent
+from .runtime_identity_support import (
+    PACKAGED_RUNTIME_IDENTITY,
+    claim_agent,
+    inventory_items_fixture,
+)
 from .runtime_image_fixtures import place_test_image
 
 _FIXTURE_ADAPTER = resolve_runtime_adapter("vllm", {"node_count": 1})
@@ -446,7 +452,13 @@ def setup_services(
                 AgentNode(
                     node_id=node_id,
                     state="active",
-                    architecture="linux-arm64",
+                    inventory_snapshot=inventory_items_fixture(
+                        node_id,
+                        observed_at=None,
+                        identity=AgentRuntimeIdentity.model_validate(
+                            {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
+                        ),
+                    ),
                 )
             )
             session.flush()
@@ -806,7 +818,7 @@ def _issue_exact_stop_grant(
     with sessions() as session:
         node = session.get(AgentNode, node_id)
         assert node is not None
-        fingerprint = node.preflight_fingerprint
+        fingerprint = inventory_items(node).preflight_fingerprint
     claim = claim_agent(
         queue,
         node_id,

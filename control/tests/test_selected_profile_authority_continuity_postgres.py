@@ -15,6 +15,7 @@ from vonk_agent_protocol import (
     RecipeUninstallResult,
     RuntimePreflightFindingCode,
 )
+from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.runtime_preflight import (
     RuntimePreflightFinding,
     RuntimePreflightRequest,
@@ -28,6 +29,7 @@ from vonk_control.fleet_profiles import (
     _persisted_profile_progress,
     build_production_fleet_profile_service,
 )
+from vonk_control.inventory_items import inventory_items
 from vonk_control.inventory_repository import (
     InventoryRepository,
     InventorySnapshotInput,
@@ -55,7 +57,11 @@ from vonk_control.runtime_preflight import mandatory_capabilities
 from vonk_control.terminal_history_collection import TerminalHistoryCollector
 
 from .preflight_fixtures import record_passing_preflight
-from .runtime_identity_support import claim_agent
+from .runtime_identity_support import (
+    PACKAGED_RUNTIME_IDENTITY,
+    claim_agent,
+    inventory_items_fixture,
+)
 from .test_fleet_profiles import _node_id, _uuid
 from .test_recipe_operations import (
     NOW,
@@ -168,9 +174,15 @@ def test_serving_selection_completes_stop_and_cleanup_after_author_loses_authori
             AgentNode(
                 node_id=node_b,
                 state="active",
-                architecture="linux-arm64",
                 protocol_version=2,
                 last_seen_at=NOW,
+                inventory_snapshot=inventory_items_fixture(
+                    node_b,
+                    observed_at=NOW,
+                    identity=AgentRuntimeIdentity.model_validate(
+                        {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
+                    ),
+                ),
             )
         )
         session.flush()
@@ -296,8 +308,10 @@ def test_serving_selection_completes_stop_and_cleanup_after_author_loses_authori
     # does; an omitted field truthfully invalidates old preflight evidence.
     with sessions() as session:
         host = session.get(AgentNode, node_b)
-        assert host is not None and host.preflight_fingerprint is not None
-        host_fingerprint = host.preflight_fingerprint
+        assert (
+            host is not None and inventory_items(host).preflight_fingerprint is not None
+        )
+        host_fingerprint = inventory_items(host).preflight_fingerprint
     # Drive only native coordinators until B's exact Stop has been issued.
     stop_claim = None
     due_checks = []
@@ -413,8 +427,12 @@ def test_serving_selection_completes_stop_and_cleanup_after_author_loses_authori
                         operation.parent_job_id == child.result.preflight.pending_job_id
                     )
                     node = session.get(AgentNode, node_b)
-                    assert node is not None and node.preflight_fingerprint is not None
-                    fingerprint = node.preflight_fingerprint
+                    assert (
+                        node is not None
+                        and inventory_items(node).preflight_fingerprint is not None
+                    )
+                    fingerprint = inventory_items(node).preflight_fingerprint
+                    assert fingerprint is not None
                 jobs.record_result(
                     AgentResult(
                         fence=claim.fence,

@@ -25,6 +25,7 @@ from ..admission_locking import (
 )
 from ..catalog_revision_contract import read_recipe_projection
 from ..disk_reservations import outstanding_disk_reservation_bytes
+from ..inventory_items import runtime_value
 from ..models import (
     AgentNode,
     CatalogDocumentRevision,
@@ -113,7 +114,9 @@ def persist_plan_in_session(
                 reason=WaitReason.OBSERVATION_UNAVAILABLE,
             )
         _validate_builder(node)
-        if policy.builder_binary_digest != node.binary_digest:
+        if policy.builder_binary_digest != runtime_value(
+            node, lambda identity: identity.binary_digest
+        ):
             raise RecipeBuildUnknown(
                 RecipeBuildCode.RUNTIME_CHANGED,
                 "builder runtime identity changed",
@@ -454,7 +457,10 @@ def _reserve_in_session(
             reason=WaitReason.OBSERVATION_UNAVAILABLE,
         )
     _validate_builder(node)
-    if node.binary_digest != expected_binary_digest:
+    if (
+        runtime_value(node, lambda identity: identity.binary_digest)
+        != expected_binary_digest
+    ):
         raise RecipeBuildUnknown(
             RecipeBuildCode.RUNTIME_CHANGED,
             "builder runtime identity changed",

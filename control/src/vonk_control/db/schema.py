@@ -467,6 +467,10 @@ def reconcile_schema(connection: Connection) -> None:
 
     _release_retired_table_foreign_keys(connection, ops)
 
+    from .node_facts import move_runtime_facts
+
+    move_runtime_facts(connection)
+
     remaining = _check_constraint_differences(connection)
     if remaining:
         _LOGGER.warning(

@@ -17,8 +17,10 @@ import pytest
 from sqlalchemy import JSON, Column, ForeignKey, MetaData, String, Table, inspect
 from sqlalchemy.orm import configure_mappers
 from sqlalchemy.types import TypeDecorator
+from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.inventory import HostSettings
 from vonk_control import models
+from vonk_control.inventory_items_contract import AgentInventoryItems
 from vonk_control.stored_json import (
     ContractJSON,
     JsonColumn,
@@ -150,7 +152,7 @@ AUDITED_OUTSIDE_COLUMNS: dict[str, frozenset[str]] = {
     ),
     # Desired display metadata; hostname is a misplaced agent report.
     "agent_node_profiles": frozenset(
-        ["node_id", "display_name", "hostname", "lifecycle", "labels"]
+        ["node_id", "display_name", "lifecycle", "labels"]
     ),
     # Certificate authority and issuance/revocation history.
     "agent_certificates": frozenset(
@@ -380,6 +382,18 @@ def node_fact_violations(
                         f"{key}: {path}: {why}"
                         for path, why in column_violations(binding)
                     )
+    # Claims are inventory items. Derive retired scalar identities from their
+    # canonical contracts, so adding them back on the contact owner is rejected.
+    claimed_fields = set(AgentRuntimeIdentity.model_fields) | set(
+        AgentInventoryItems.model_fields
+    )
+    for name in ("agent_nodes", "agent_node_profiles"):
+        table = metadata.tables.get(name)
+        if table is not None:
+            for field in claimed_fields.intersection(table.columns.keys()):
+                problems.append(
+                    f"{name}.{field}: agent report belongs in typed inventory"
+                )
     return sorted(problems)
 
 
@@ -442,3 +456,20 @@ def test_guard_allows_new_scalar_contact_observations_and_snapshot_items() -> No
     for name in FACT_TABLES:
         Table(name, metadata, Column("probe", String))
     assert node_fact_violations(metadata, {}) == []
+
+
+@pytest.mark.parametrize("field", sorted(AgentRuntimeIdentity.model_fields))
+def test_guard_rejects_runtime_claim_columns_on_contact_owner(field: str) -> None:
+    # Wrong implementation: allowing every scalar on agent_nodes after moving
+    # its agent claims, so a future feature silently restores the duplicate.
+    metadata = MetaData()
+    Table(
+        "agent_nodes",
+        metadata,
+        Column("node_id", String, primary_key=True),
+        Column(field, String),
+    )
+    assert any(
+        f"agent_nodes.{field}:" in problem
+        for problem in node_fact_violations(metadata, {})
+    )

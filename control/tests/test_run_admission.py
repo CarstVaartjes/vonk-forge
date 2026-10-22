@@ -7,6 +7,7 @@ from importlib import resources
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
+from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.inventory import MemoryPool
 from vonk_control.cluster_mappings import ClusterMappingService
 from vonk_control.inventory_repository import (
@@ -37,6 +38,7 @@ from vonk_control.run_admission import (
 )
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
+from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
 from .stored_documents_support import valid_policy_report
 
 
@@ -93,7 +95,13 @@ def setup(
             AgentNode(
                 node_id=node,
                 state="active",
-                architecture="linux-arm64",
+                inventory_snapshot=inventory_items_fixture(
+                    node,
+                    observed_at=None,
+                    identity=AgentRuntimeIdentity.model_validate(
+                        {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
+                    ),
+                ),
             )
         )
         model_root = CatalogDocument(

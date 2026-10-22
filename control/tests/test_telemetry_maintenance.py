@@ -292,9 +292,18 @@ def test_inventory_history_keeps_a_day_and_always_each_nodes_newest_row(
             )
         )
 
+    from vonk_control.inventory_items import inventory_items
+
+    from .runtime_identity_support import inventory_items_fixture
+
     node_b = "spk_" + "b" * 32
     with sessions.begin() as session:
         session.add(AgentNode(node_id=node_b, state="active"))
+        node = session.get(AgentNode, NODE_A)
+        assert node is not None
+        node.inventory_snapshot = inventory_items_fixture(
+            NODE_A, hostname="retained.internal", observed_at=NOW - timedelta(hours=72)
+        )
     for hours in (72, 48, 30, 2):
         record(NODE_A, NOW - timedelta(hours=hours))
     # A node that stopped reporting two days ago keeps its newest reading.
@@ -314,3 +323,7 @@ def test_inventory_history_keeps_a_day_and_always_each_nodes_newest_row(
             for row in session.scalars(select(NodeInventorySnapshot))
         )
     assert kept == [(NODE_A, 2), (node_b, 50)]
+    with sessions() as session:
+        node = session.get(AgentNode, NODE_A)
+        assert node is not None and node.inventory_snapshot is not None
+        assert inventory_items(node).hostname == "retained.internal"

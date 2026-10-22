@@ -1,3 +1,7 @@
+from vonk_agent_protocol.claims import AgentRuntimeIdentity
+
+from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
+
 """Library reads exercise real placement, cache, and authenticated route owners."""
 
 import json
@@ -307,7 +311,13 @@ def test_fit_search_continues_after_an_ineligible_first_group(assessed_library):
             AgentNode(
                 node_id=later,
                 state="active",
-                architecture="linux-arm64",
+                inventory_snapshot=inventory_items_fixture(
+                    later,
+                    observed_at=None,
+                    identity=AgentRuntimeIdentity.model_validate(
+                        {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
+                    ),
+                ),
             )
         )
         snapshot = session.scalar(select(NodeInventorySnapshot))

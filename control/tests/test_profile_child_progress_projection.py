@@ -10,6 +10,7 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import select, update
 from vonk_agent_protocol import LifecycleState, OperationProgress, canonical_message
+from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.execution_plan_service import (
     ControllerExecutionPlanService,
@@ -64,7 +65,11 @@ from vonk_control.stored_json import write_guard_mode
 from cluster_profiles.control_client import validate_control_document
 
 from .preflight_fixtures import record_passing_preflight
-from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, claim_agent
+from .runtime_identity_support import (
+    PACKAGED_RUNTIME_IDENTITY,
+    claim_agent,
+    inventory_items_fixture,
+)
 from .test_fleet_profile_api import _client, _headers
 from .test_profile_installed_execution import (
     _apply,
@@ -531,9 +536,15 @@ def test_disjoint_child_samples_remain_distinct_after_restart(
             AgentNode(
                 node_id=second,
                 state="active",
-                architecture="linux-arm64",
                 protocol_version=2,
                 last_seen_at=NOW,
+                inventory_snapshot=inventory_items_fixture(
+                    second,
+                    observed_at=NOW,
+                    identity=AgentRuntimeIdentity.model_validate(
+                        {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
+                    ),
+                ),
             )
         )
         session.flush()

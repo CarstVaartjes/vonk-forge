@@ -9,6 +9,7 @@ from sqlalchemy import create_engine, select, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import SupersedeCode
+from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_control.fleet_profile_contract import FleetProfileInput
 from vonk_control.fleet_profiles import (
     FleetProfileAdmissionEffectBusy,
@@ -27,6 +28,7 @@ from vonk_control.profile_port_promises import PortPromiseTaken
 from vonk_control.recipe_operation_worker import RecipeOperationWorker
 from vonk_forge_contracts import RecipeDefinition, document_sha256
 
+from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
 from .test_fleet_profiles import (
     _assessment,
     _exact_preparation,
@@ -212,8 +214,14 @@ def test_selected_empty_profile_keeps_new_spark_idle_after_restart_and_saved_edi
                 node_id=joined_node,
                 state="active",
                 protocol_version=1,
-                architecture="linux-arm64",
                 last_seen_at=NOW,
+                inventory_snapshot=inventory_items_fixture(
+                    joined_node,
+                    observed_at=NOW,
+                    identity=AgentRuntimeIdentity.model_validate(
+                        {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
+                    ),
+                ),
             )
         )
     # Editing a saved profile is authoring only. Even an edit that assigns the
@@ -290,8 +298,14 @@ def test_blocked_roster_preview_retries_without_advancing_selection(
                 node_id=joined_node,
                 state="active",
                 protocol_version=1,
-                architecture="linux-arm64",
                 last_seen_at=NOW,
+                inventory_snapshot=inventory_items_fixture(
+                    joined_node,
+                    observed_at=NOW,
+                    identity=AgentRuntimeIdentity.model_validate(
+                        {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
+                    ),
+                ),
             )
         )
 
@@ -355,8 +369,14 @@ def test_revoked_selected_actor_does_not_block_sibling_worker_and_roster_recover
                 node_id=joined_node,
                 state="active",
                 protocol_version=1,
-                architecture="linux-arm64",
                 last_seen_at=NOW,
+                inventory_snapshot=inventory_items_fixture(
+                    joined_node,
+                    observed_at=NOW,
+                    identity=AgentRuntimeIdentity.model_validate(
+                        {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
+                    ),
+                ),
             )
         )
         author = session.scalar(select(User).where(User.subject == "admin"))

@@ -41,7 +41,11 @@ from vonk_control.run_switch_operations import (
 from vonk_control.runtime_preflight import mandatory_capabilities
 
 from .agent_fences import fenced_operation
-from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, claim_agent
+from .runtime_identity_support import (
+    PACKAGED_RUNTIME_IDENTITY,
+    claim_agent,
+    set_inventory_fingerprint,
+)
 from .test_fleet_profiles import _uuid
 from .test_recipe_operations import installed_recipe, setup_services
 from .test_run_switch_operations import (
@@ -73,7 +77,7 @@ def test_new_profile_cancels_issued_start_then_stops_before_replacement(
         with sessions.begin() as session:
             node = session.get(AgentNode, node_id)
             assert node is not None
-            node.preflight_fingerprint = fingerprint
+            set_inventory_fingerprint(node, fingerprint)
         agent_jobs = AgentJobService(sessions, clock=lifecycle._clock)
         agent_jobs.set_result_consumer(lifecycle.consume_agent_result)
         lifecycle._agent_jobs = agent_jobs

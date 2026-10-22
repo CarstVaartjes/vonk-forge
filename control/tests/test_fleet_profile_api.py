@@ -16,6 +16,7 @@ from sqlalchemy import create_engine, select, update
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 from vonk_agent_protocol import InvalidRequestError, UnknownOutcomeError
+from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.reason_codes.profiles import PROFILE_REFUSAL_CODES
 from vonk_control.api import create_app
 from vonk_control.auth import MUTATION_ROLES, Actor, TokenCodec
@@ -27,6 +28,8 @@ from vonk_control.strict_json import route_endpoint
 
 from cluster_profiles import cli
 from cluster_profiles.control_client import ControlClient
+
+from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
 
 
 def _client(
@@ -56,8 +59,14 @@ def _client(
                     node_id="spk_" + "1" * 32,
                     state="active",
                     protocol_version=1,
-                    architecture="linux-arm64",
                     last_seen_at=datetime(2026, 9, 10, tzinfo=UTC),
+                    inventory_snapshot=inventory_items_fixture(
+                        "spk_" + "1" * 32,
+                        observed_at=datetime(2026, 9, 10, tzinfo=UTC),
+                        identity=AgentRuntimeIdentity.model_validate(
+                            {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
+                        ),
+                    ),
                 )
             )
     codec = TokenCodec(b"p" * 32)

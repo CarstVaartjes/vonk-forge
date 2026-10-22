@@ -15,6 +15,7 @@ from vonk_agent_protocol import (
     WaitReason,
     WaitResumeCondition,
 )
+from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.fleet_profile_contract import (
     FleetProfileInput,
@@ -42,7 +43,11 @@ from vonk_control.persisted_waits import read_wait
 from vonk_control.platform_ports import HOST_ENDPOINT_PORT
 from vonk_control.run_switch_operations import RunSwitchOperationService
 
-from .runtime_identity_support import claim_agent
+from .runtime_identity_support import (
+    PACKAGED_RUNTIME_IDENTITY,
+    claim_agent,
+    inventory_items_fixture,
+)
 from .test_agent_jobs import canonical_start_payload
 from .test_fleet_profiles import (
     NOW,
@@ -86,8 +91,14 @@ def test_postgres_partial_adoption_preserves_promises_and_waits_exact_issued_cle
                 node_id=_node_id(2),
                 state="active",
                 protocol_version=2,
-                architecture="linux-arm64",
                 last_seen_at=NOW,
+                inventory_snapshot=inventory_items_fixture(
+                    _node_id(2),
+                    observed_at=NOW,
+                    identity=AgentRuntimeIdentity.model_validate(
+                        {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
+                    ),
+                ),
             )
         )
         session.flush()  # Materialize the node before its certificate FK.
@@ -358,8 +369,14 @@ def test_postgres_new_profile_never_adopts_half_of_a_dual_spark_effect(postgres_
                 node_id=_node_id(3),
                 state="active",
                 protocol_version=2,
-                architecture="linux-arm64",
                 last_seen_at=NOW,
+                inventory_snapshot=inventory_items_fixture(
+                    _node_id(3),
+                    observed_at=NOW,
+                    identity=AgentRuntimeIdentity.model_validate(
+                        {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
+                    ),
+                ),
             )
         )
     boundary = _SQLCancellationAdapter()
@@ -432,8 +449,14 @@ def _waiting_continuation(postgres_engine, request_key: int) -> _WaitingContinua
                 node_id=_node_id(2),
                 state="active",
                 protocol_version=2,
-                architecture="linux-arm64",
                 last_seen_at=NOW,
+                inventory_snapshot=inventory_items_fixture(
+                    _node_id(2),
+                    observed_at=NOW,
+                    identity=AgentRuntimeIdentity.model_validate(
+                        {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
+                    ),
+                ),
             )
         )
         session.flush()  # Materialize the node before its certificate FK.

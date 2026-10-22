@@ -17,6 +17,7 @@ import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import LifecycleState, PrebuiltImageCode, RecipeBuildCode
+from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_control.auth import TokenCodec
 from vonk_control.availability_production import build_recipe_image_availability
 from vonk_control.bounded_json import require_mapping, require_sequence
@@ -67,6 +68,7 @@ from tests.runtime_image_fixtures import place_test_image
 from tests.signed_recipe_release import SignedRecipeRelease, signed_recipe_releases
 from tests.test_recipe_builds import RecordingQueue
 
+from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
 from .stored_documents_support import valid_policy_report
 
 pytestmark = pytest.mark.usefixtures(signed_recipe_releases.__name__)
@@ -154,11 +156,20 @@ def _published_library(
             AgentNode(
                 node_id=NODE,
                 state="active",
-                architecture="linux-arm64",
-                semantic_version="1.2.3",
-                build_digest="sha256:" + "a" * 64,
-                binary_digest="1" * 64,
                 last_seen_at=NOW,
+                inventory_snapshot=inventory_items_fixture(
+                    NODE,
+                    observed_at=NOW,
+                    identity=AgentRuntimeIdentity.model_validate(
+                        {
+                            **PACKAGED_RUNTIME_IDENTITY,
+                            "architecture": "linux-arm64",
+                            "semantic_version": "1.2.3",
+                            "build_digest": "sha256:" + "a" * 64,
+                            "binary_digest": "1" * 64,
+                        }
+                    ),
+                ),
             )
         )
         revision = session.scalar(

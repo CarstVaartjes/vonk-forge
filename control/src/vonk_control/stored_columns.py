@@ -139,7 +139,7 @@ bind(
 )
 bind("agent_node_profiles", "labels", ProfileLabels)
 bind("fleet_profiles", "labels", ProfileLabels)
-bind("node_inventory_snapshots", "capabilities", list[Capability])
+bind("node_inventory_snapshots", "capabilities", list[Capability], nullable=True)
 bind(
     "node_inventory_snapshots",
     "network_interfaces",
@@ -360,3 +360,7 @@ for _table in (
 from .coordinator_contract import CoordinatorFailureEvidence
 
 bind("coordinator_failures", "failure", CoordinatorFailureEvidence)
+
+from .inventory_items_contract import AgentInventoryItems
+
+bind("node_inventory_snapshots", "agent_items", AgentInventoryItems, nullable=True)
