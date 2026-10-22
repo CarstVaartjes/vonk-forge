@@ -23,6 +23,7 @@ from ..run_switch_contract import (
     RunSwitchProgress,
 )
 from ..strict_json import StrictModel
+from ..wait_contract import QueueWait
 from .definitions import FleetProfileAssignment, FleetProfileScope
 from .effects import FleetProfileChildProgress, FleetProfileRunEffect
 from .switch_state import (
@@ -195,5 +196,6 @@ class FleetProfileChildOperation(StrictModel):
     progress: FleetProfileChildProgress | None = None
     status_reason: Annotated[str, StringConstraints(max_length=512)] | None = None
     result: FleetProfileChildResult | None = None
+    wait: QueueWait | None = None
     #: A phase the child keeps retrying; empty while it makes progress.
     stalls: list[OperationBlocker] = Field(default_factory=list, max_length=16)

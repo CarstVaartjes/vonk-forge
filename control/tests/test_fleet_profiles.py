@@ -7,8 +7,7 @@ from copy import deepcopy
 from datetime import UTC, datetime, timedelta
 from importlib.resources import files
 from pathlib import Path
-from types import SimpleNamespace
-from typing import TypedDict, cast
+from typing import TypedDict
 from uuid import uuid4
 
 import pytest
@@ -4260,7 +4259,8 @@ def test_persisted_child_progress_is_read_with_json_semantics() -> None:
     )
 
     view = RunSwitchFleetProfileAdapter._view_from_state(
-        cast("FleetProfileApplication", SimpleNamespace(id=_uuid(900))), state
+        FleetProfileApplication(id=_uuid(900), wait_evidence=None, next_action_at=None),
+        state,
     )
 
     progress = view.progress

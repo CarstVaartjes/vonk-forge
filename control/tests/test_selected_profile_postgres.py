@@ -820,3 +820,100 @@ def test_gpu_clock_uses_the_selected_snapshot_after_saved_edit_and_controller_re
         assert service.application(accepted.id).progress.intended_profile is not None
     finally:
         restarted_engine.dispose()
+
+
+def test_dual_spark_loss_during_load_exposes_recovery_admission_and_heals(
+    postgres_engine: Engine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Catches silent unplaced standing intent after both targets return."""
+    from vonk_agent_protocol import LifecycleState, WaitReason
+    from vonk_agent_protocol.agent_words import ProfileReasonSeverity
+    from vonk_agent_protocol.state_machines import NodeIdentityState
+    from vonk_control.fleet_profile_contract import FleetProfileReason
+
+    from .test_fleet_profiles import _seed_dual_solo_without_runtime_state
+
+    Base.metadata.create_all(postgres_engine)
+    sessions = sessionmaker(postgres_engine, expire_on_commit=False)
+    revision, _ = _seed_dual_solo_without_runtime_state(sessions)
+    service = _service(sessions)
+    clock = [NOW]
+    service._clock = lambda: clock[0]
+    definition = _input(revision)
+    definition.assignments[0].spark_ids = [_node_id(1), _node_id(2)]
+    profile = service.create(definition, actor="admin")
+    accepted = service.apply(profile.id, request_key=str(uuid4()), actor="admin")
+    service.tick()
+    assert service.application(accepted.id).state == LifecycleState.RUNNING
+    # Both agents disappear while the load owns an unfinished child. Their
+    # return must not require another profile load or a roster change.
+    with sessions.begin() as session:
+        for node in session.scalars(select(AgentNode)):
+            node.last_seen_at = clock[0] - timedelta(minutes=10)
+    clock[0] += timedelta(minutes=2)
+    service.tick()
+    with sessions.begin() as session:
+        for node in session.scalars(select(AgentNode)):
+            node.state = NodeIdentityState.ACTIVE.value
+            node.last_seen_at = clock[0]
+    for _ in range(8):
+        if service.application(accepted.id).state == LifecycleState.SUCCEEDED:
+            break
+        clock[0] += timedelta(minutes=1)
+        service.tick()
+    assert service.application(accepted.id).state == LifecycleState.SUCCEEDED
+    # The executor's receipts survived, its placement did not. Cache admission
+    # is unavailable after the reboot, just as when its image was pruned.
+    preview = service.preview
+    blocked = [True]
+
+    def unavailable(*args, **kwargs):
+        result = preview(*args, **kwargs)
+        if blocked[0]:
+            return result.model_copy(
+                update={
+                    "allowed": False,
+                    "reasons": [
+                        FleetProfileReason(
+                            code=WaitReason.OBSERVATION_UNAVAILABLE,
+                            detail="Exact image cache observation is unavailable",
+                            severity=ProfileReasonSeverity.ERROR.value,
+                        )
+                    ],
+                }
+            )
+        return result
+
+    monkeypatch.setattr(service, "preview", unavailable)
+    # A competing selection transaction must not hold up the worker or its
+    # unrelated work. Real PostgreSQL enforces this lock, not a mock.
+    with sessions.begin() as session:
+        held = session.get(FleetProfileSelection, 1, with_for_update=True)
+        assert held is not None
+        service.tick()
+    service.tick()
+    wait = service.get(profile.id).maintenance_wait
+    assert wait is not None
+    assert wait.reason is WaitReason.OBSERVATION_UNAVAILABLE
+    assert wait.next_check > clock[0]
+    assert wait.dependency_deadline is not None
+    first_deadline = wait.dependency_deadline
+    clock[0] += timedelta(seconds=30)
+    service.tick()
+    again = service.get(profile.id).maintenance_wait
+    assert again is not None and again.dependency_deadline == first_deadline
+    blocked[0] = False
+    clock[0] = again.next_check
+    service.tick()
+    selected = _selected(postgres_engine)
+    assert selected["application_id"] != accepted.id
+    healed_id = str(selected["application_id"])
+    for _ in range(8):
+        if service.application(healed_id).state == LifecycleState.SUCCEEDED:
+            break
+        clock[0] += timedelta(minutes=1)
+        service.tick()
+    assert service.application(healed_id).state == LifecycleState.SUCCEEDED
+    # A new explicit admission also remains admissible after automatic repair.
+    fresh = service.apply(profile.id, request_key=str(uuid4()), actor="admin")
+    assert fresh.id != healed_id

@@ -388,7 +388,8 @@ class FleetProfileService:
                         [
                             make_blocker(
                                 WaitReason.RECEIPT_MISSING,
-                                "Waiting for the exact Run/Switch child receipt",
+                                child.status_reason
+                                or "Waiting for the exact Run/Switch child receipt",
                                 severity=ProfileReasonSeverity.INFO.value,
                             ).model_copy(
                                 update={
@@ -403,14 +404,22 @@ class FleetProfileService:
                         if pending is not None
                         else []
                     )
+                    child_wait = child.wait
                     schedule_wait(
                         row,
                         FleetProfileAdapter.next_retry(row.id, 1, now),
                         now=now,
-                        reason=WaitReason.RECEIPT_MISSING
+                        reason=child_wait.reason
+                        if child_wait is not None
+                        else WaitReason.RECEIPT_MISSING
                         if dependencies and not progress.blockers
                         else None,
-                        blockers=list(progress.blockers) or dependencies or None,
+                        blockers=list(child_wait.blockers)
+                        if child_wait is not None
+                        else list(progress.blockers) or dependencies or None,
+                        deadline=child_wait.dependency_deadline
+                        if child_wait is not None
+                        else None,
                     )
                     row.progress = progress.model_dump(mode="json")
                     row.updated_at = now

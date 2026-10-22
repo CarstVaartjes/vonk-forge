@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 from typing import cast as _typing_cast
 
@@ -14,6 +14,7 @@ from vonk_agent_protocol import (
     LifecycleState,
     ObservedAssignmentState,
     SupersedeCode,
+    WaitReason,
     canonical_message,
 )
 from vonk_agent_protocol.agent_words import (
@@ -31,6 +32,7 @@ from ..fleet_profile_contract import (
     FleetProfileIntendedConfiguration,
 )
 from ..lifecycle.evidence import BookkeepingReason, Residue, retire_as_unknown
+from ..lifecycle.fleet_profile import FleetProfileAdapter
 from ..lifecycle.types import Effect as _LifecycleEffect
 from ..models import (
     AgentNode,
@@ -38,10 +40,14 @@ from ..models import (
     FleetProfileApplication,
     FleetProfileSelection,
 )
-from ..persisted_waits import read_wait, schedule_wait
+from ..operation_blockers import make_blocker
+from ..persisted_waits import read_wait, schedule_wait, typed_wait_reason
+from ..settings import PROFILE_STALL_WINDOW_SECONDS
+from ..stall_window import stall_deadline
 from ..strict_json import read_stored_model
 from .assessment_support import (
     _deferral_code,
+    _preview_blockers,
     _profile_preview_is_waitable,
     _storage_wait_of,
 )
@@ -415,7 +421,10 @@ class FleetProfileService:
                         blockers=dependency.blockers,
                         deadline=dependency.dependency_deadline,
                     )
-                elif selection.wait_evidence is not None:
+                elif (
+                    selection.wait_evidence is not None
+                    and application.state != LifecycleState.SUCCEEDED.value
+                ):
                     schedule_wait(selection, None)
             if (
                 application is not None
@@ -438,6 +447,12 @@ class FleetProfileService:
                     session, selected.profile_id, selected.intended
                 )
             if not roster_changed and not drift_signature and followed is None:
+                if (
+                    selection is not None
+                    and application is not None
+                    and application.state == LifecycleState.SUCCEEDED.value
+                ):
+                    schedule_wait(selection, None)
                 return False
             if application is not None:
                 if _newer_pending_profile_load(session, application):
@@ -500,6 +515,38 @@ class FleetProfileService:
             # Missing assets are asked for now, so the recheck finds them.
             if _profile_preview_is_waitable(preview):
                 self._request_preparations(preview, actor=selected.actor)
+            # Standing desired state owns this admission wait even though no
+            # replacement application can be accepted yet. Never leave drift
+            # as a silent "Not placed" with no scheduled reconciliation.
+            with self._sessions.begin() as session:
+                selection = session.scalar(
+                    select(FleetProfileSelection)
+                    .where(FleetProfileSelection.singleton_id == 1)
+                    .with_for_update(skip_locked=True)
+                )
+                if (
+                    selection is not None
+                    and selection.application_id == selected.application_id
+                    and selection.generation == selected.generation
+                ):
+                    blockers = _preview_blockers(preview) or [
+                        make_blocker(
+                            WaitReason.OBSERVATION_UNAVAILABLE,
+                            "Standing profile admission observation is unavailable",
+                        )
+                    ]
+                    schedule_wait(
+                        selection,
+                        FleetProfileAdapter.next_retry(selected.application_id, 1, now),
+                        now=now,
+                        blockers=blockers,
+                        reason=typed_wait_reason(
+                            blockers[0].code, WaitReason.OBSERVATION_UNAVAILABLE
+                        ),
+                        deadline=stall_deadline(
+                            now, None, timedelta(seconds=PROFILE_STALL_WINDOW_SECONDS)
+                        ),
+                    )
             return False
         pending: FleetProfileApplicationView | None = None
         try:

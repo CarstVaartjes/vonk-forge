@@ -17,6 +17,7 @@ from .common import (
     _table,
     _text,
     _time,
+    _waiting,
     _words,
     terminal_text,
 )
@@ -69,6 +70,17 @@ def _profile(payload: Mapping[str, object]) -> None:
         update = match.get("recipe_update") if match is not None else None
         if isinstance(update, Mapping):
             _field("Update", update.get("detail"))
+    wait = _optional(payload.get("maintenance_wait"), "maintenance_wait")
+    if wait:
+        _field("Recovery reason", wait.get("reason"))
+        _waiting(
+            {
+                "blockers": wait.get("blockers"),
+                "next_attempt_at": wait.get("next_check"),
+            }
+        )
+        _field("Dependency deadline", _time(wait.get("dependency_deadline")))
+        _field("Resumes when", wait.get("resume_condition"))
     _reasons(payload.get("warnings"))
     _actions(payload.get("next_actions"))
 
