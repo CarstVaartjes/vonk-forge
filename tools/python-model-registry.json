@@ -552,6 +552,26 @@
       "module": "tools/single_source_values.py",
       "kind": "declared",
       "reason": "Canonical owner-registration and exact adversarial-fixture contracts for the single-source repository guard."
+    },
+    {
+      "module": "control/src/vonk_control/inventory_items_contract.py",
+      "kind": "controller-contract",
+      "reason": "Canonical typed current agent claims and reusable preflight evidence in inventory snapshots."
+    },
+    {
+      "module": "control/src/vonk_control/repeated_evidence_contract.py",
+      "kind": "controller-contract",
+      "reason": "Canonical contact summaries and ordered operation-owned repeated observations."
+    },
+    {
+      "module": "control/src/vonk_control/inventory_repository.py",
+      "kind": "controller-contract",
+      "reason": "Metadata-only node binding and read views of the canonical agent contract."
+    },
+    {
+      "module": "control/src/vonk_control/telemetry.py",
+      "kind": "controller-contract",
+      "reason": "Metadata-only node binding and read views of the canonical agent contract."
     }
   ],
   "allowed_duplicates": []

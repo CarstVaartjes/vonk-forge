@@ -6,7 +6,7 @@ from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Annotated, Literal
 
-from pydantic import ConfigDict, Field, StringConstraints, TypeAdapter
+from pydantic import Field, StringConstraints, TypeAdapter, field_validator
 from sqlalchemy import Row
 from vonk_agent_protocol import (
     CertificateState,
@@ -14,16 +14,18 @@ from vonk_agent_protocol import (
     NodeOfflineReason,
     ProjectionCode,
     RunDegradedReason,
+    canonical_message,
 )
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.failure_evidence import ModelStoreLayoutFault
 from vonk_agent_protocol.gpu_clock import (
-    GpuClockObservation,
     GpuClockPolicy,
     GpuClockRange,
 )
-from vonk_agent_protocol.inventory import GpuHealth, HostSettings, NetworkInterface
-from vonk_agent_protocol.telemetry import GpuUnavailableReason
+from vonk_agent_protocol.inventory import (
+    InventoryRequest,
+)
+from vonk_agent_protocol.wire_model import strict_json_datetime
 from vonk_forge_contracts import RecipeDefinition, document_sha256, read_recipe
 
 from ..machine_states import (
@@ -64,12 +66,6 @@ _UUID_PATTERN = (
 )
 
 
-_BOOT_UUID_PATTERN = (
-    r"^(?!00000000-0000-0000-0000-000000000000$)"
-    r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
-)
-
-
 _MAX_FLEET_NODES = 500
 
 
@@ -77,9 +73,6 @@ _MAX_SIGNED_BIGINT = 9_223_372_036_854_775_807
 
 
 _MAX_SIGNED_INTEGER = 2_147_483_647
-
-
-_MAX_TELEMETRY_BYTES = 16 * 1024**4
 
 
 def _canonical_recipe(revision: CatalogDocumentRevision) -> RecipeDefinition | None:
@@ -124,9 +117,6 @@ NodeId = Annotated[str, StringConstraints(pattern=_NODE_PATTERN)]
 
 
 UuidId = Annotated[str, StringConstraints(pattern=_UUID_PATTERN)]
-
-
-BootId = Annotated[str, StringConstraints(pattern=_BOOT_UUID_PATTERN)]
 
 
 AuthorityRevision = Annotated[str, StringConstraints(pattern=_REVISION_PATTERN)]
@@ -349,61 +339,19 @@ class NodeConnection(StrictModel):
     last_seen_age_seconds: float | None = Field(ge=0, le=float(_MAX_SIGNED_BIGINT))
 
 
-class InventoryState(StrictModel):
-    observed_at: datetime
+class InventoryState(InventoryRequest):
     received_at: datetime
     age_seconds: float = Field(ge=0, le=float(_MAX_SIGNED_BIGINT))
     freshness: Literal["fresh", "stale"]
-    disk_total_bytes: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
-    disk_free_bytes: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
-    host_memory_total_bytes: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
-    host_memory_free_bytes: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
-    gpu_memory_total_bytes: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
-    gpu_memory_free_bytes: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
-    gpu_count: int = Field(ge=0, le=_MAX_SIGNED_INTEGER)
-    gpu_health: GpuHealth | None = None
-    artifact_store_read_only: bool
-    capabilities: list[Text64] = Field(max_length=64)
-    fabric_address: str | None = Field(default=None, max_length=45)
-    fabric_bandwidth_mbps: Annotated[int, Field(ge=1, le=_MAX_SIGNED_BIGINT)] | None = (
-        None
+
+    _parse_received_at = field_validator("received_at", mode="before")(
+        strict_json_datetime
     )
-    nvidia_driver_version: Text256
-    container_runtime_version: Text256
-    network_interfaces: list[NetworkInterface] | None = Field(
-        default=None, max_length=16
-    )
-    nas_route_interface: str | None = Field(default=None, max_length=15)
-    host_settings: HostSettings | None = None
 
 
-class TelemetryPoint(StrictModel):
-    model_config = ConfigDict(regex_engine="python-re")
-
+class TelemetryPoint(TelemetrySampleView):
     id: UuidId
     node_id: NodeId
-    boot_id: BootId
-    observed_at: datetime
-    received_at: datetime
-    memory_total_bytes: int | None = Field(default=None, ge=0, le=_MAX_TELEMETRY_BYTES)
-    memory_available_bytes: int | None = Field(
-        default=None, ge=0, le=_MAX_TELEMETRY_BYTES
-    )
-    disk_total_bytes: int | None = Field(default=None, ge=0, le=_MAX_TELEMETRY_BYTES)
-    disk_free_bytes: int | None = Field(default=None, ge=0, le=_MAX_TELEMETRY_BYTES)
-    gpu_utilization_percent: float | None = Field(default=None, ge=0, le=100)
-    gpu_memory_total_bytes: int | None = Field(
-        default=None, ge=0, le=_MAX_TELEMETRY_BYTES
-    )
-    gpu_memory_free_bytes: int | None = Field(
-        default=None, ge=0, le=_MAX_TELEMETRY_BYTES
-    )
-    gpu_unavailable_reason: GpuUnavailableReason | None = None
-    gpu_temperature_c: int | None = Field(default=None, ge=0, le=150)
-    gpu_clock: GpuClockObservation | None = None
-    cpu_frequency_avg_mhz: int | None = Field(default=None, ge=1, le=20_000)
-    cpu_frequency_min_mhz: int | None = Field(default=None, ge=1, le=20_000)
-    cpu_frequency_max_mhz: int | None = Field(default=None, ge=1, le=20_000)
 
 
 class TelemetryState(StrictModel):
@@ -588,27 +536,7 @@ class FleetNodeIdentity(StrictModel):
 
 
 def telemetry_point(value: TelemetrySampleView) -> TelemetryPoint:
-    # mTLS owns node identity; the Controller owns receive time.
-    return TelemetryPoint(
-        id=value.id,
-        node_id=value.node_id,
-        boot_id=str(value.boot_id),
-        observed_at=value.observed_at,
-        received_at=value.received_at,
-        memory_total_bytes=value.memory_total_bytes,
-        memory_available_bytes=value.memory_available_bytes,
-        disk_total_bytes=value.disk_total_bytes,
-        disk_free_bytes=value.disk_free_bytes,
-        gpu_utilization_percent=value.gpu_utilization_percent,
-        gpu_memory_total_bytes=value.gpu_memory_total_bytes,
-        gpu_memory_free_bytes=value.gpu_memory_free_bytes,
-        gpu_unavailable_reason=value.gpu_unavailable_reason,
-        gpu_temperature_c=value.gpu_temperature_c,
-        gpu_clock=value.gpu_clock,
-        cpu_frequency_avg_mhz=value.cpu_frequency_avg_mhz,
-        cpu_frequency_min_mhz=value.cpu_frequency_min_mhz,
-        cpu_frequency_max_mhz=value.cpu_frequency_max_mhz,
-    )
+    return TelemetryPoint.model_validate_json(canonical_message(value))
 
 
 def _utc(value: datetime) -> datetime:

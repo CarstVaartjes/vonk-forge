@@ -1,6 +1,7 @@
+from vonk_agent_protocol import canonical_message
+
 """A reconciled stop does not turn pre-stop physical readings into free memory."""
 
-from dataclasses import fields
 from datetime import timedelta
 from uuid import uuid4
 
@@ -10,7 +11,7 @@ from vonk_agent_protocol import LifecycleState
 from vonk_control.inventory_repository import (
     MAX_INVENTORY_FUTURE_SKEW,
     InventoryRepository,
-    InventorySnapshotInput,
+    NodeInventoryReport,
 )
 from vonk_control.models import Job, NodeInventorySnapshot, RecipeRun
 from vonk_control.run_switch_contract import (
@@ -108,8 +109,9 @@ def test_switch_waits_for_new_physical_inventory_after_stop(
     with sessions() as session:
         samples = [
             {
-                field.name: getattr(snapshot, field.name)
-                for field in fields(InventorySnapshotInput)
+                name: getattr(snapshot, name)
+                for name in NodeInventoryReport.model_fields
+                if name != "schema_version"
             }
             for snapshot in session.scalars(select(NodeInventorySnapshot))
         ]
@@ -117,7 +119,18 @@ def test_switch_waits_for_new_physical_inventory_after_stop(
     now[0] += MAX_INVENTORY_FUTURE_SKEW
     for values in samples:
         values["observed_at"] = now[0]
-        repository.record(InventorySnapshotInput(**values))
+        repository.record(
+            NodeInventoryReport.model_validate_json(
+                canonical_message(
+                    {
+                        **values,
+                        "schema_version": 1,
+                        "nvidia_driver_version": "unknown",
+                        "container_runtime_version": "unknown",
+                    }
+                )
+            )
+        )
     # The wait is not looked at again before evidence that can settle it exists
     # (collected strictly after the stop plus the admitted lead): a sample at
     # the threshold itself does not wake it, before or after a restart.
@@ -133,7 +146,18 @@ def test_switch_waits_for_new_physical_inventory_after_stop(
     assert waiting.result.retry_attempt == waiting_result.retry_attempt
     now[0] += timedelta(seconds=6)
     samples[0]["observed_at"] = now[0]
-    repository.record(InventorySnapshotInput(**samples[0]))
+    repository.record(
+        NodeInventoryReport.model_validate_json(
+            canonical_message(
+                {
+                    **samples[0],
+                    "schema_version": 1,
+                    "nvidia_driver_version": "unknown",
+                    "container_runtime_version": "unknown",
+                }
+            )
+        )
+    )
     if node_count > 1:
         partial = _service(sessions, now[0], lifecycle, RecordingArtifactExecutor())
         partial.tick()
@@ -146,7 +170,18 @@ def test_switch_waits_for_new_physical_inventory_after_stop(
         now[0] += timedelta(seconds=6)
         for values in samples[1:]:
             values["observed_at"] = now[0]
-            repository.record(InventorySnapshotInput(**values))
+            repository.record(
+                NodeInventoryReport.model_validate_json(
+                    canonical_message(
+                        {
+                            **values,
+                            "schema_version": 1,
+                            "nvidia_driver_version": "unknown",
+                            "container_runtime_version": "unknown",
+                        }
+                    )
+                )
+            )
     # The wait is for that evidence, not for a retry clock: it is picked up on
     # the next ticks without the clock moving.
     pending = planner.get(accepted.operation_id)

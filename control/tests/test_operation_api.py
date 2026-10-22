@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import Table, create_engine, select
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import LifecycleState, canonical_message
+from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_control import agent_operation_states as aos
 from vonk_control import operation_api
 from vonk_control.agent_jobs import AgentJobService, OperatorRetirementRefused
@@ -64,7 +65,12 @@ from vonk_control.recovery_policy import RecoveryPolicy
 from .agent_fences import fenced_attempt, fenced_operation, park_for_operator
 from .observation_transfer_peer import fleet_authority, observation_document
 from .recipe_stop_fixtures import recipe_stop_payload
-from .runtime_identity_support import claim_agent
+from .runtime_identity_support import (
+    PACKAGED_RUNTIME_IDENTITY,
+    claim_agent,
+    inventory_items_fixture,
+    set_inventory_identity,
+)
 
 COMMIT = "a" * 64
 DIGEST = "d" * 64
@@ -1308,9 +1314,18 @@ def test_agent_upgrade_projection_keeps_raw_reason_and_exact_identity_evidence(
             AgentNode(
                 node_id=NODE_ID,
                 state="active",
-                semantic_version="0.1.0",
-                binary_digest=old_binary,
-                build_digest=old_build,
+                inventory_snapshot=inventory_items_fixture(
+                    NODE_ID,
+                    observed_at=None,
+                    identity=AgentRuntimeIdentity.model_validate(
+                        {
+                            **PACKAGED_RUNTIME_IDENTITY,
+                            "semantic_version": "0.1.0",
+                            "binary_digest": old_binary,
+                            "build_digest": old_build,
+                        }
+                    ),
+                ),
             )
         )
         session.add(
@@ -1411,8 +1426,8 @@ def test_agent_upgrade_projection_keeps_raw_reason_and_exact_identity_evidence(
         assert operation is not None and node is not None
         # Matching the two headline digests is deliberately weaker than the
         # controller's accepted success gate.
-        node.binary_digest = expected_binary
-        node.build_digest = expected_build
+        set_inventory_identity(node, binary_digest=expected_binary)
+        set_inventory_identity(node, build_digest=expected_build)
         operation.next_action_at = None
 
     matching_digests = services.job_operations(
@@ -1837,10 +1852,19 @@ def _parked_stop_services(tmp_path, *, clock: MutableClock, engine=None):
                 state="active",
                 protocol_version=3,
                 workload_intent_ordinal=1,
-                architecture="linux-arm64",
-                semantic_version="1.0.0",
-                build_digest="sha256:" + "f" * 64,
-                binary_digest="f" * 64,
+                inventory_snapshot=inventory_items_fixture(
+                    PARKED_NODE_ID,
+                    observed_at=None,
+                    identity=AgentRuntimeIdentity.model_validate(
+                        {
+                            **PACKAGED_RUNTIME_IDENTITY,
+                            "architecture": "linux-arm64",
+                            "semantic_version": "1.0.0",
+                            "build_digest": "sha256:" + "f" * 64,
+                            "binary_digest": "f" * 64,
+                        }
+                    ),
+                ),
             )
         )
         session.flush()

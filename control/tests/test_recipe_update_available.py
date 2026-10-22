@@ -8,6 +8,7 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import DesiredAssignmentState
+from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_control.fleet_profile_contract import (
     FleetProfileAssignment,
     FleetProfileNode,
@@ -40,6 +41,8 @@ from tests.test_fleet_projection import (
     _certificate,
 )
 
+from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
+
 RECIPE_ID = "00000000-0000-4000-8000-000000000201"
 REVISION_1 = "00000000-0000-4000-8000-000000000202"
 REVISION_2 = "00000000-0000-4000-8000-000000000203"
@@ -63,8 +66,14 @@ def _seed(
             AgentNode(
                 node_id=NODE_A,
                 state="active",
-                architecture="linux-arm64",
                 last_seen_at=NOW,
+                inventory_snapshot=inventory_items_fixture(
+                    NODE_A,
+                    observed_at=NOW,
+                    identity=AgentRuntimeIdentity.model_validate(
+                        {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
+                    ),
+                ),
             )
         )
         session.flush()

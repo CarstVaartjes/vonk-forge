@@ -14,6 +14,7 @@ from sqlalchemy import Table, create_engine, event, update
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 from vonk_agent_protocol import canonical_message
+from vonk_agent_protocol.telemetry import HostResourceSample
 from vonk_control.api import create_app
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.browser_auth import BrowserAuthService
@@ -56,6 +57,8 @@ from vonk_control.telemetry import (
     TelemetryRepository,
     TelemetrySampleView,
 )
+
+from .telemetry_support import telemetry_with_resources
 
 NOW = datetime(2026, 8, 15, 12, 0, tzinfo=UTC)
 COMMIT = "a" * 64
@@ -253,19 +256,23 @@ def _event(
 
 
 def _sample() -> TelemetrySampleView:
-    return TelemetrySampleView(
-        id=SAMPLE_ID,
-        node_id=NODE_ID,
-        boot_id=uuid.UUID(NON_RFC_BOOT_ID),
-        observed_at=NOW - timedelta(seconds=2),
-        received_at=NOW - timedelta(seconds=1),
-        memory_total_bytes=None,
-        memory_available_bytes=None,
-        disk_total_bytes=None,
-        disk_free_bytes=None,
-        gpu_utilization_percent=12.5,
-        gpu_memory_total_bytes=None,
-        gpu_memory_free_bytes=None,
+    return TelemetrySampleView.model_validate_json(
+        canonical_message(
+            {
+                "id": SAMPLE_ID,
+                "node_id": NODE_ID,
+                "boot_id": str(uuid.UUID(NON_RFC_BOOT_ID)),
+                "observed_at": NOW - timedelta(seconds=2),
+                "received_at": NOW - timedelta(seconds=1),
+                "memory_total_bytes": None,
+                "memory_available_bytes": None,
+                "disk_total_bytes": None,
+                "disk_free_bytes": None,
+                "gpu_utilization_percent": 12.5,
+                "gpu_memory_total_bytes": None,
+                "gpu_memory_free_bytes": None,
+            }
+        )
     )
 
 
@@ -378,18 +385,21 @@ def test_resume_replays_ordered_events_with_one_hydration_and_refresh_semantics(
         "id": "6",
         "event": "node-telemetry",
     }
-    assert telemetry_data == {
-        "event_cursor": 6,
-        "node_id": NODE_ID,
-        "sample": {
-            "boot_id": NON_RFC_BOOT_ID,
-            "gpu_utilization_percent": 12.5,
-            "id": SAMPLE_ID,
-            "node_id": NODE_ID,
-            "observed_at": "2026-08-15T11:59:58Z",
-            "received_at": "2026-08-15T11:59:59Z",
-        },
-    }
+    from vonk_control.fleet_projection import TelemetryPoint
+
+    assert isinstance(telemetry_data, dict)
+    assert telemetry_data["event_cursor"] == 6
+    assert telemetry_data["node_id"] == NODE_ID
+    projected = TelemetryPoint.model_validate_json(
+        canonical_message(telemetry_data["sample"])
+    )
+    assert projected.boot_id == str(NON_RFC_BOOT_ID)
+    assert projected.gpu_utilization_percent == 12.5
+    assert projected.id == SAMPLE_ID
+    assert projected.node_id == NODE_ID
+    assert projected.observed_at == NOW - timedelta(seconds=2)
+    assert projected.received_at == NOW - timedelta(seconds=1)
+
     assert recipe_fields == {"id": "7", "event": "recipe-state"}
     assert recipe_data == {
         "event_cursor": 7,
@@ -780,19 +790,23 @@ def test_production_repositories_bound_queries_and_release_before_orderly_close(
     with sessions.begin() as session:
         session.add(AgentNode(node_id=NODE_ID, state="active"))
         session.add_all(
-            NodeTelemetrySample(
-                id=sample_id,
-                node_id=NODE_ID,
-                boot_id=NON_RFC_BOOT_ID,
-                observed_at=NOW + timedelta(seconds=sequence),
-                received_at=NOW + timedelta(seconds=sequence),
-                memory_total_bytes=None,
-                memory_available_bytes=None,
-                disk_total_bytes=None,
-                disk_free_bytes=None,
-                gpu_utilization_percent=None,
-                gpu_memory_total_bytes=None,
-                gpu_memory_free_bytes=None,
+            telemetry_with_resources(
+                NodeTelemetrySample(
+                    id=sample_id,
+                    node_id=NODE_ID,
+                    boot_id=NON_RFC_BOOT_ID,
+                    observed_at=NOW + timedelta(seconds=sequence),
+                    received_at=NOW + timedelta(seconds=sequence),
+                    gpu_utilization_percent=None,
+                    gpu_memory_total_bytes=None,
+                    gpu_memory_free_bytes=None,
+                ),
+                HostResourceSample(
+                    memory_total_bytes=None,
+                    memory_available_bytes=None,
+                    disk_total_bytes=None,
+                    disk_free_bytes=None,
+                ),
             )
             for sequence, sample_id in enumerate(sample_ids)
         )
@@ -1295,7 +1309,6 @@ def test_oversized_canonical_frame_becomes_bounded_truthful_notice() -> None:
 
 
 def test_wrong_node_hydration_ends_then_correct_hydration_replays():
-    from dataclasses import replace
 
     event = _event(
         1,
@@ -1306,7 +1319,13 @@ def test_wrong_node_hydration_ends_then_correct_hydration_replays():
         payload={"node_id": NODE_ID, "sample_id": SAMPLE_ID},
     )
     sample = _sample()
-    telemetry = Telemetry({SAMPLE_ID: replace(sample, node_id="spk_" + "2" * 32)})
+    telemetry = Telemetry(
+        {
+            SAMPLE_ID: type(sample).model_validate(
+                {**sample.model_dump(), "node_id": "spk_" + "2" * 32}
+            )
+        }
+    )
     repository = Events(high_watermark=1, first_retained_id=1, batches=[(event,)])
     stream = FleetStream(repository, telemetry, clock=lambda: NOW)
 

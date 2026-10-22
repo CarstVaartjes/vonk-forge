@@ -21,6 +21,7 @@ from ..agent_upgrade_contract import (
     AgentUpgradeRolloutPayload,
     AgentUpgradeRolloutResult,
 )
+from ..inventory_items import runtime_value
 from ..lifecycle.agent_upgrade import AgentUpgradeAdapter
 from ..models import AgentNode, Job
 
@@ -96,7 +97,13 @@ class AcceptanceMixin:
                     # An offline Spark stays in the rollout: it is deferred and
                     # upgraded automatically when it reconnects.
                     installed.append(
-                        (node_id, node.build_digest or "", node.binary_digest or "")
+                        (
+                            node_id,
+                            runtime_value(node, lambda identity: identity.build_digest)
+                            or "",
+                            runtime_value(node, lambda identity: identity.binary_digest)
+                            or "",
+                        )
                     )
         sources: dict[str, AgentPackageSource] = {}
         for node_id, build_digest, binary_digest in installed:

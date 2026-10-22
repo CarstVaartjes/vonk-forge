@@ -12,6 +12,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import LifecycleState, ProfileReasonCode
 from vonk_agent_protocol.agent_words import ProfileOperationKind, ProfileReasonSeverity
+from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_control.fleet_profile_contract import FleetProfileInput, FleetProfileReason
 from vonk_control.fleet_profiles.contracts import _SelectedProfileSnapshot
 from vonk_control.fleet_profiles.projection_support import _digest, _roster_digest
@@ -22,6 +23,7 @@ from vonk_control.models import (
     FleetProfileSelection,
 )
 
+from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
 from .test_fleet_profiles import _input, _node_id, _seed, _uuid
 from .test_selected_profile_postgres import NOW, _service, _tick_selected_when_due
 
@@ -47,8 +49,14 @@ def test_roster_request_survives_repreview_and_worker_restart(
                 node_id=_node_id(2),
                 state=session.get_one(AgentNode, _node_id(1)).state,
                 protocol_version=1,
-                architecture="linux-arm64",
                 last_seen_at=NOW,
+                inventory_snapshot=inventory_items_fixture(
+                    _node_id(2),
+                    observed_at=NOW,
+                    identity=AgentRuntimeIdentity.model_validate(
+                        {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
+                    ),
+                ),
             )
         )
 

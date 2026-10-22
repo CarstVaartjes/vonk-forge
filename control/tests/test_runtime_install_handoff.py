@@ -1,3 +1,5 @@
+from .runtime_identity_support import set_inventory_fingerprint
+
 """Persisted preflight recovery must dispatch the accepted installation."""
 
 from pathlib import Path
@@ -41,7 +43,7 @@ def test_completed_preflight_recovers_and_dispatches_install(
     with switch.sessions.begin() as session:
         node = session.get(AgentNode, node_id)
         assert node is not None
-        node.preflight_fingerprint = "b" * 64
+        set_inventory_fingerprint(node, "b" * 64)
         if damaged_attempts:
             parent = session.get(Job, pending.operation_id)
             assert parent is not None

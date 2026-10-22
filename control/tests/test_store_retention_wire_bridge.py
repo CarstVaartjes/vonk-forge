@@ -10,10 +10,10 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
-from vonk_agent_protocol import AgentOperation, InventoryVerdict
+from vonk_agent_protocol import AgentOperation, InventoryVerdict, canonical_message
 from vonk_control.inventory_repository import (
     InventoryRepository,
-    InventorySnapshotInput,
+    NodeInventoryReport,
 )
 from vonk_control.model_cache import ModelCacheService
 from vonk_control.model_cache_contract import CacheManifest
@@ -116,21 +116,26 @@ def test_full_disk_load_evicts_unused_objects_keeps_installed_content_and_retrie
         InventoryRepository(
             world.sessions, clock=lambda: now + timedelta(seconds=1)
         ).record(
-            InventorySnapshotInput(
-                node_id=NODE,
-                observed_at=now + timedelta(seconds=1),
-                disk_total_bytes=capacity,
-                disk_free_bytes=measured_free,
-                host_memory_total_bytes=1000,
-                host_memory_free_bytes=1000,
-                gpu_memory_total_bytes=1000,
-                gpu_memory_free_bytes=1000,
-                gpu_count=1,
-                memory_pool="shared",
-                artifact_store_read_only=False,
-                capabilities=(),
-                nvidia_driver_version="580.173.02",
-                container_runtime_version="29.6.2",
+            NodeInventoryReport.model_validate_json(
+                canonical_message(
+                    {
+                        "node_id": NODE,
+                        "observed_at": now + timedelta(seconds=1),
+                        "disk_total_bytes": capacity,
+                        "disk_free_bytes": measured_free,
+                        "host_memory_total_bytes": 1000,
+                        "host_memory_free_bytes": 1000,
+                        "gpu_memory_total_bytes": 1000,
+                        "gpu_memory_free_bytes": 1000,
+                        "gpu_count": 1,
+                        "memory_pool": "shared",
+                        "artifact_store_read_only": False,
+                        "capabilities": (),
+                        "nvidia_driver_version": "580.173.02",
+                        "container_runtime_version": "29.6.2",
+                        "schema_version": 1,
+                    }
+                )
             )
         )
         world.now = now + timedelta(seconds=2)

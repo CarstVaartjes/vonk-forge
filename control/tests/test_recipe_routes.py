@@ -22,6 +22,7 @@ from vonk_agent_protocol import (
     RunState,
     UnknownError,
 )
+from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_control import recipe_routes
 from vonk_control.auth import TokenCodec
 from vonk_control.fleet_profile_contract import (
@@ -33,7 +34,6 @@ from vonk_control.litellm import LiteLlmGeneration
 from vonk_control.models import (
     AgentCertificate,
     AgentNode,
-    AgentPresence,
     Base,
     CatalogDocument,
     CatalogDocumentRevision,
@@ -65,6 +65,7 @@ from vonk_control.route_runtime import (
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
 from .observed_actions import observe_action
+from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
 from .stored_documents_support import valid_policy_report
 
 NOW = datetime(2026, 8, 7, 12, tzinfo=UTC)
@@ -166,7 +167,13 @@ def setup(
             AgentNode(
                 node_id=node,
                 state="active",
-                architecture="linux-arm64",
+                inventory_snapshot=inventory_items_fixture(
+                    node,
+                    observed_at=None,
+                    identity=AgentRuntimeIdentity.model_validate(
+                        {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
+                    ),
+                ),
             )
             for node in nodes
         )
@@ -484,7 +491,13 @@ def add_running_run(
             AgentNode(
                 node_id=node_id,
                 state="active",
-                architecture="linux-arm64",
+                inventory_snapshot=inventory_items_fixture(
+                    node_id,
+                    observed_at=None,
+                    identity=AgentRuntimeIdentity.model_validate(
+                        {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
+                    ),
+                ),
             )
         )
         mapping = ClusterMapping(
@@ -1665,8 +1678,8 @@ def test_recovered_run_rejoins_candidate_while_another_run_remains_published(
 def _agents_reached_the_controller(service, at: datetime) -> None:
     with service.sessions.begin() as session:
         for node in session.query(RunNode):
-            presence = session.get(AgentPresence, node.node_id)
-            if presence is None:
+            presence = session.get(AgentNode, node.node_id)
+            if presence.management_address is None:
                 serial = f"serial-{node.node_id[-4:]}"
                 if session.get(AgentCertificate, serial) is None:
                     session.add(
@@ -1679,14 +1692,9 @@ def _agents_reached_the_controller(service, at: datetime) -> None:
                         )
                     )
                     session.flush()
-                presence = AgentPresence(
-                    node_id=node.node_id,
-                    certificate_serial=serial,
-                    certificate_fingerprint=f"fingerprint-{serial}",
-                    management_address="192.168.1.10",
-                )
-                session.add(presence)
-            presence.observed_at = at
+                presence.contact_certificate_serial = serial
+                presence.management_address = "192.168.1.10"
+            presence.management_observed_at = at
 
 
 def test_control_channel_silence_does_not_withdraw_a_serving_route(

@@ -33,6 +33,7 @@ from vonk_control.agent_jobs import (
     StaleAgentAttempt,
     _failure_result,
 )
+from vonk_control.inventory_items import inventory_items
 from vonk_control.models import AgentNode
 from vonk_control.recipe_operations.observation_helpers import (
     prepare_exact_recipe_run_observation_nodes,
@@ -159,7 +160,9 @@ class ReachSparks(Sparks):
         orders = self.reach.reach.orders
         with self.world.sessions() as session:
             node = session.get(AgentNode, spark.node_id)
-            fingerprint = None if node is None else node.preflight_fingerprint
+            fingerprint = (
+                None if node is None else inventory_items(node).preflight_fingerprint
+            )
         # Every answer of the round fails, so which order is claimed first
         # (product ids are random) cannot change the outcome.
         failed = spark.fail_next

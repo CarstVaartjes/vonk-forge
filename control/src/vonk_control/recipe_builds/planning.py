@@ -20,6 +20,7 @@ from vonk_agent_protocol import (
 from ..catalog_revision_contract import PrebuiltImage, RecipeRevisionProjection
 from ..disk_reservations import outstanding_disk_reservation_bytes
 from ..gpu_health import gpu_health_reason
+from ..inventory_items import runtime_value
 from ..models import AgentNode, CatalogDocumentRevision
 from ..prebuilt_images import (
     PREBUILT_KEY_MISMATCH,
@@ -293,8 +294,12 @@ def _prepare_plan_once(
                     reason=WaitReason.OBSERVATION_UNAVAILABLE,
                 )
             _validate_builder(node)
-            assert node.binary_digest is not None
-            builder_binary_digest = node.binary_digest
+            assert (
+                runtime_value(node, lambda identity: identity.binary_digest) is not None
+            )
+            builder_binary_digest = runtime_value(
+                node, lambda identity: identity.binary_digest
+            )
     resources, security = _canonical_build_resources(projected)
     temporary_bytes = resources.temporary_bytes
     memory_bytes = resources.memory_bytes

@@ -61,7 +61,7 @@ from ..settings import (
 )
 from ..source_bundles import DatabaseSourceBundleStore
 from .application import create_app
-from .common import _LOGGER, SpaFiles, refresh_fleet_metrics
+from .common import _LOGGER, SpaFiles
 
 
 async def _keep_recipe_routes(
@@ -232,6 +232,7 @@ def production_app(settings: Settings | None = None) -> FastAPI:
         clock=clock,
     )
     metrics = MetricsRegistry()
+    metrics.set_fleet_source(visual_fleet.read)
     metrics.set_compose_bundle(compose_bundle())
     operational_metrics = OperationalMetricsCollector(
         metrics,
@@ -429,7 +430,6 @@ def production_app(settings: Settings | None = None) -> FastAPI:
             ),
             now,
         )
-        refresh_fleet_metrics(metrics, visual_fleet.read())
         now = datetime.now(UTC)
         with sessions() as session:
             job_counts = [

@@ -20,6 +20,7 @@ from vonk_agent_protocol import (
     RecipeStopResult,
     RunState,
     WaitReason,
+    canonical_message,
     recipe_job_manifest_document,
     recipe_job_manifest_sha256,
 )
@@ -31,7 +32,7 @@ from vonk_control.bounded_retry import REQUEST_PAUSES
 from vonk_control.failure_evidence import FailureEvidenceService
 from vonk_control.inventory_repository import (
     InventoryRepository,
-    InventorySnapshotInput,
+    NodeInventoryReport,
 )
 from vonk_control.models import (
     AgentOperation,
@@ -350,19 +351,30 @@ def recover_unknown_job_under_new_intent(tmp_path, *, malformed: bool) -> None:
         assert run is not None and run.state == RunState.STOPPED
         installation_id = run.installation_id
     InventoryRepository(sessions, clock=clock).record(
-        InventorySnapshotInput(
-            node_id,
-            clock(),
-            10_000,
-            8_000,
-            10_000,
-            8_000,
-            10_000,
-            8_000,
-            1,
-            False,
-            ("runtime.vonk.v1", "recipe.image.pull.v1", "recipe.operations.v1"),
-            memory_pool="shared",
+        NodeInventoryReport.model_validate_json(
+            canonical_message(
+                {
+                    "node_id": node_id,
+                    "observed_at": clock(),
+                    "disk_total_bytes": 10_000,
+                    "disk_free_bytes": 8_000,
+                    "host_memory_total_bytes": 10_000,
+                    "host_memory_free_bytes": 8_000,
+                    "gpu_memory_total_bytes": 10_000,
+                    "gpu_memory_free_bytes": 8_000,
+                    "gpu_count": 1,
+                    "artifact_store_read_only": False,
+                    "capabilities": (
+                        "runtime.vonk.v1",
+                        "recipe.image.pull.v1",
+                        "recipe.operations.v1",
+                    ),
+                    "memory_pool": "shared",
+                    "schema_version": 1,
+                    "nvidia_driver_version": "unknown",
+                    "container_runtime_version": "unknown",
+                }
+            )
         )
     )
     plan = operations.preview_run(installation_id, "image-job")
@@ -644,19 +656,30 @@ def test_cancelled_job_evidence_survives_uncertain_stop_and_history_collection(
             assert_no_orphaned_holds(session)
 
     InventoryRepository(sessions, clock=clock).record(
-        InventorySnapshotInput(
-            node_id,
-            clock(),
-            10_000,
-            8_000,
-            10_000,
-            8_000,
-            10_000,
-            8_000,
-            1,
-            False,
-            ("runtime.vonk.v1", "recipe.image.pull.v1", "recipe.operations.v1"),
-            memory_pool="shared",
+        NodeInventoryReport.model_validate_json(
+            canonical_message(
+                {
+                    "node_id": node_id,
+                    "observed_at": clock(),
+                    "disk_total_bytes": 10_000,
+                    "disk_free_bytes": 8_000,
+                    "host_memory_total_bytes": 10_000,
+                    "host_memory_free_bytes": 8_000,
+                    "gpu_memory_total_bytes": 10_000,
+                    "gpu_memory_free_bytes": 8_000,
+                    "gpu_count": 1,
+                    "artifact_store_read_only": False,
+                    "capabilities": (
+                        "runtime.vonk.v1",
+                        "recipe.image.pull.v1",
+                        "recipe.operations.v1",
+                    ),
+                    "memory_pool": "shared",
+                    "schema_version": 1,
+                    "nvidia_driver_version": "unknown",
+                    "container_runtime_version": "unknown",
+                }
+            )
         )
     )
     stop_id = fenced_operation(sessions, exact).parent_job_id

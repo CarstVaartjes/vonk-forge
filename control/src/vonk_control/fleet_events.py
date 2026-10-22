@@ -33,6 +33,7 @@ from .models import (
     FleetStreamEvent,
     InstallationNode,
     Job,
+    NodeInventoryItemsSnapshot,
     NodeTelemetryLatest,
     RecipeInstallation,
     RecipeRun,
@@ -467,7 +468,9 @@ class FleetEventRecorder:
     """Observe public Fleet state transitions on one session factory."""
 
     _tracked_fields: ClassVar[dict[type[object], tuple[str, ...]]] = {
-        AgentNodeProfile: ("hostname",),
+        # Creation refreshes the roster; display edits emit their own event.
+        AgentNodeProfile: (),
+        NodeInventoryItemsSnapshot: ("agent_items",),
         NodeTelemetryLatest: ("sample_id",),
         RecipeInstallation: ("state",),
         InstallationNode: ("state", "installed_bytes"),
@@ -569,7 +572,7 @@ class FleetEventRecorder:
 
     @staticmethod
     def _render(value: object) -> FleetEventDraft:
-        if isinstance(value, AgentNodeProfile):
+        if isinstance(value, AgentNodeProfile | NodeInventoryItemsSnapshot):
             return FleetEventDraft(
                 event_type="node-profile",
                 node_id=value.node_id,

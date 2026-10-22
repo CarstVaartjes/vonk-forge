@@ -21,6 +21,7 @@ from vonk_control.fleet_projection import FleetProjection
 from vonk_control.models import AgentEnrollmentGrant, AgentNodeProfile
 from vonk_control.operator_projection_api import build_fleet_operator_services
 
+from .runtime_identity_support import set_inventory_hostname
 from .test_agent_api import NODE_A, NODE_B, Jobs, make_agent_system
 from .test_profile_load_installed_cli import (
     _https_api_peer,
@@ -39,18 +40,12 @@ def _stack(postgres_engine, tmp_path: Path):
     with sessions.begin() as session:
         session.add_all(
             [
-                AgentNodeProfile(
-                    node_id=NODE_A,
-                    display_name="Atlas",
-                    hostname="atlas.example.test",
-                ),
-                AgentNodeProfile(
-                    node_id=NODE_B,
-                    display_name="Borealis",
-                    hostname="borealis.example.test",
-                ),
+                AgentNodeProfile(node_id=NODE_A, display_name="Atlas"),
+                AgentNodeProfile(node_id=NODE_B, display_name="Borealis"),
             ]
         )
+        set_inventory_hostname(session, NODE_A, "atlas.example.test")
+        set_inventory_hostname(session, NODE_B, "borealis.example.test")
     api = TestClient(
         create_app(
             jobs=Jobs(),

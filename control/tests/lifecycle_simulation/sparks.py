@@ -18,21 +18,21 @@ claim and lease path is not modelled here.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from types import SimpleNamespace
 
 from sqlalchemy import select
-from vonk_agent_protocol import AgentFailureKind
+from vonk_agent_protocol import AgentFailureKind, canonical_message
 from vonk_control.inventory_repository import (
     InventoryRepository,
-    InventorySnapshotInput,
+    NodeInventoryReport,
 )
 from vonk_control.lifecycle import Reported
 from vonk_control.lifecycle.agent_operation import AgentOperationAdapter
 from vonk_control.memory_reservations import MEMORY_RESERVATION_KINDS
 from vonk_control.models import (
+    AgentNode,
     AgentOperation,
-    AgentPresence,
     Job,
     RecipeRun,
     ResourceReservation,
@@ -179,27 +179,29 @@ class Sparks:
             memory_free = spark.memory.idle_free - self._held(spark)
             memory = (spark.memory.total, memory_free, spark.memory.total, memory_free)
         self.inventory.record(
-            InventorySnapshotInput(
-                spark.node_id,
-                now,
-                latest.disk_total_bytes,
-                free,
-                *memory,
-                latest.gpu_count,
-                latest.artifact_store_read_only,
-                latest.capabilities,
-                memory_pool=latest.memory_pool,
-                fabric_address=latest.fabric_address,
-                fabric_bandwidth_mbps=latest.fabric_bandwidth_mbps,
+            NodeInventoryReport.model_validate_json(
+                canonical_message(
+                    {
+                        **latest.model_dump(
+                            mode="json", include=set(NodeInventoryReport.model_fields)
+                        ),
+                        "observed_at": now,
+                        "disk_free_bytes": free,
+                        "host_memory_total_bytes": memory[0],
+                        "host_memory_free_bytes": memory[1],
+                        "gpu_memory_total_bytes": memory[2],
+                        "gpu_memory_free_bytes": memory[3],
+                    }
+                )
             )
         )
-        self.reported[spark.node_id] = replace(
-            latest, observed_at=now, disk_free_bytes=free
+        self.reported[spark.node_id] = latest.model_copy(
+            update={"observed_at": now, "disk_free_bytes": free}
         )
         with self.world.sessions.begin() as session:
-            presence = session.get(AgentPresence, spark.node_id)
+            presence = session.get(AgentNode, spark.node_id)
             if presence is not None:
-                presence.observed_at = now
+                presence.management_observed_at = now
 
     def _held(self, spark: Spark) -> int:
         """What the runs this Spark serves hold: a share of their declared peak."""

@@ -16,6 +16,7 @@ from vonk_agent_protocol import (
     RecipeStopResult,
     canonical_message,
 )
+from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.fleet_profile_contract import (
     FleetProfileInput,
@@ -40,6 +41,7 @@ from vonk_control.run_switch_contract import RunSwitchMemberProgress
 from vonk_control.run_switch_operations import RunSwitchOperationService
 
 from .agent_fences import fenced_operation
+from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
 from .test_fleet_profiles import (
     NOW,
     _node_id,
@@ -71,8 +73,14 @@ def _parallel_world(engine: Engine, *, gang: bool = False):
                 node_id=_node_id(3 if gang else 2),
                 state="active",
                 protocol_version=2,
-                architecture="linux-arm64",
                 last_seen_at=NOW,
+                inventory_snapshot=inventory_items_fixture(
+                    _node_id(3 if gang else 2),
+                    observed_at=NOW,
+                    identity=AgentRuntimeIdentity.model_validate(
+                        {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
+                    ),
+                ),
             )
         )
     clock = [NOW]
@@ -303,8 +311,14 @@ def test_postgres_real_pending_stop_allows_disjoint_load_and_reconnects_after_re
                 node_id=_node_id(2),
                 state="active",
                 protocol_version=2,
-                architecture="linux-arm64",
                 last_seen_at=NOW,
+                inventory_snapshot=inventory_items_fixture(
+                    _node_id(2),
+                    observed_at=NOW,
+                    identity=AgentRuntimeIdentity.model_validate(
+                        {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
+                    ),
+                ),
             )
         )
         revision = session.scalar(

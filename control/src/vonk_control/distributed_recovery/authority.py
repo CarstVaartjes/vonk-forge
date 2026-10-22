@@ -26,7 +26,6 @@ from ..lifecycle.job import JobAdapter
 from ..models import (
     AgentNode,
     AgentOperation,
-    AgentPresence,
     CatalogDocumentRevision,
     Job,
     RecipeInstallation,
@@ -233,12 +232,12 @@ def _recovery_authority(
     presences: dict[str, str] = {}
     for node in nodes:
         presence = session.scalar(
-            select(AgentPresence)
-            .where(AgentPresence.node_id == node.node_id)
-            .order_by(AgentPresence.observed_at.desc())
+            select(AgentNode)
+            .where(AgentNode.node_id == node.node_id)
+            .order_by(AgentNode.management_observed_at.desc())
             .limit(1)
         )
-        observed_at = None if presence is None else presence.observed_at
+        observed_at = None if presence is None else presence.management_observed_at
         # Stored timestamps can come back naive (SQLite); they are UTC either
         # way, matching the other stored-observation readers in this module.
         if observed_at is not None and observed_at.tzinfo is None:

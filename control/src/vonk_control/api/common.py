@@ -22,8 +22,6 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol.telemetry import MAX_TELEMETRY_REPORT_BYTES
 
 from ..catalog_api import CatalogProblem
-from ..fleet_projection import FleetSnapshot
-from ..metrics import MetricsRegistry
 from ..operation_api import (
     BoundedErrorResponse,
     ErrorContextResponse,
@@ -281,12 +279,3 @@ class JobQueue(Protocol):
         request_id: str,
     ) -> Any: ...
     def get(self, job_id: str) -> Any: ...
-
-
-def refresh_fleet_metrics(
-    metrics: MetricsRegistry,
-    fleet_snapshot: FleetSnapshot,
-) -> None:
-    """Refresh metrics from the single typed FleetProjection evidence path."""
-
-    metrics.update_fleet(fleet_snapshot)

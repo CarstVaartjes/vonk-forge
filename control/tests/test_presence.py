@@ -6,7 +6,7 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from vonk_control.auth import AgentIdentity, AgentSource
-from vonk_control.models import AgentCertificate, AgentNode, AgentPresence, Base
+from vonk_control.models import AgentCertificate, AgentNode, Base
 from vonk_control.presence import (
     AgentPresenceService,
     ManagementAddressObservation,
@@ -109,12 +109,15 @@ def test_observe_upserts_presence_bound_to_exact_active_certificate(
         observed_at=NOW,
     )
     with sessions() as session:
-        row = session.get(AgentPresence, NODE_ID)
+        row = session.get(AgentNode, NODE_ID)
         assert row is not None
-        assert row.certificate_serial == "serial-a"
-        assert row.certificate_fingerprint == "fingerprint-a"
+        assert row.contact_certificate_serial == "serial-a"
+        assert (
+            session.get(AgentCertificate, row.contact_certificate_serial).fingerprint
+            == "fingerprint-a"
+        )
         assert row.management_address == "10.0.0.42"
-        assert row.observed_at.replace(tzinfo=UTC) == NOW
+        assert row.management_observed_at.replace(tzinfo=UTC) == NOW
 
     current[0] += timedelta(seconds=30)
     updated = service.observe(
@@ -122,8 +125,8 @@ def test_observe_upserts_presence_bound_to_exact_active_certificate(
     )
     assert updated.address == "10.0.0.43"
     with sessions() as session:
-        assert session.query(AgentPresence).count() == 1
-        assert session.get(AgentPresence, NODE_ID).management_address == "10.0.0.43"
+        assert session.query(AgentNode).count() == 1
+        assert session.get(AgentNode, NODE_ID).management_address == "10.0.0.43"
 
 
 def test_latest_is_unknown_until_fresh_authenticated_contact(
@@ -145,16 +148,20 @@ def test_latest_is_unknown_until_fresh_authenticated_contact(
         certificate.state = "retired"
     assert not hasattr(service.latest(NODE_ID, maximum_age_seconds=60), "address")
     with sessions() as session:
-        row = session.get(AgentPresence, NODE_ID)
-        recorded = (row.management_address, row.observed_at, row.certificate_serial)
+        row = session.get(AgentNode, NODE_ID)
+        recorded = (
+            row.management_address,
+            row.management_observed_at,
+            row.contact_certificate_serial,
+        )
     with pytest.raises(Exception) as _ending:
         service.observe(source)
     with sessions() as session:
-        row = session.get(AgentPresence, NODE_ID)
+        row = session.get(AgentNode, NODE_ID)
         assert (
             row.management_address,
-            row.observed_at,
-            row.certificate_serial,
+            row.management_observed_at,
+            row.contact_certificate_serial,
         ) == recorded
 
 
@@ -167,7 +174,7 @@ def test_invalid_management_source_never_creates_presence(presence_system) -> No
         )
 
     with sessions() as session:
-        assert session.get(AgentPresence, NODE_ID) is None
+        assert session.get(AgentNode, NODE_ID).management_observed_at is None
     fresh = service.observe(source)
     assert service.latest(NODE_ID, maximum_age_seconds=60) == fresh
 
@@ -178,7 +185,7 @@ def test_latest_revalidates_durable_address_instead_of_trusting_the_row(
     sessions, service, source, _ = presence_system
     service.observe(source)
     with sessions.begin() as session:
-        row = session.get(AgentPresence, NODE_ID)
+        row = session.get(AgentNode, NODE_ID)
         assert row is not None
         row.management_address = "not-an-ip"
 
@@ -193,9 +200,9 @@ def test_latest_rejects_a_malformed_durable_certificate_binding(
     sessions, service, source, _ = presence_system
     service.observe(source)
     with sessions.begin() as session:
-        row = session.get(AgentPresence, NODE_ID)
+        row = session.get(AgentNode, NODE_ID)
         assert row is not None
-        row.certificate_fingerprint = ""
+        row.contact_certificate_serial = "missing"
 
     assert not hasattr(service.latest(NODE_ID, maximum_age_seconds=60), "address")
     fresh = service.observe(source)
@@ -209,7 +216,7 @@ def test_latest_in_session_reads_through_the_callers_transaction(
     service.observe(source)
 
     with sessions.begin() as session:
-        row = session.get(AgentPresence, NODE_ID)
+        row = session.get(AgentNode, NODE_ID)
         assert row is not None
         row.management_address = "10.0.0.43"
         session.flush()
@@ -232,13 +239,13 @@ def test_observe_in_session_rolls_back_with_the_callers_transaction(
     try:
         observed = service.observe_in_session(session, source)
         assert observed.address == "10.0.0.42"
-        assert session.get(AgentPresence, NODE_ID) is not None
+        assert session.get(AgentNode, NODE_ID) is not None
     finally:
         transaction.rollback()
         session.close()
 
     with sessions() as check:
-        assert check.get(AgentPresence, NODE_ID) is None
+        assert check.get(AgentNode, NODE_ID).management_observed_at is None
 
 
 def test_missing_presence_is_unknown_and_next_authenticated_contact_repairs_it(
@@ -281,4 +288,4 @@ def test_latest_observation_fault_cannot_supply_address_and_contact_repairs(
     assert fresh == recorded
     assert service.latest(NODE_ID, maximum_age_seconds=60) == fresh
     with sessions() as session:
-        assert session.query(AgentPresence).count() == 1
+        assert session.query(AgentNode).count() == 1

@@ -13,6 +13,7 @@ from sqlalchemy import event, func, select
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import LifecycleState
+from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_control.api import create_app
 from vonk_control.auth import TokenCodec
 from vonk_control.jobs import JobService
@@ -21,6 +22,7 @@ from vonk_control.models import Base, FleetProfile, FleetProfileApplication, Job
 from vonk_control.recipe_image_availability import RecipeImageAvailabilityService
 from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
 
+from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
 from .test_fleet_profile_api import _client, _headers
 from .test_model_cache_cancel_recovery import _artifact
 from .test_profile_cancel_receipt_postgres import _application
@@ -492,7 +494,17 @@ def test_fleet_rename_is_a_committed_resource_receipt(tmp_path, postgres_engine)
     now = datetime.now(UTC)
     with sessions.begin() as session:
         session.add(
-            AgentNode(node_id=node_id, state="active", architecture="linux-arm64")
+            AgentNode(
+                node_id=node_id,
+                state="active",
+                inventory_snapshot=inventory_items_fixture(
+                    node_id,
+                    observed_at=None,
+                    identity=AgentRuntimeIdentity.model_validate(
+                        {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
+                    ),
+                ),
+            )
         )
         session.flush()
         session.add(AgentNodeProfile(node_id=node_id, display_name="Original"))

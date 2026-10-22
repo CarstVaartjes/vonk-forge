@@ -100,7 +100,6 @@ def _persist_issued_enrollment(
             AgentNodeProfile(
                 node_id=enrollment.node_id,
                 display_name=grant.requested_display_name or enrollment.node_id,
-                hostname="",
                 lifecycle=EnrollmentProfileState.READY,
                 labels={},
             )

@@ -2,64 +2,30 @@
 
 from __future__ import annotations
 
-import math
-import re
-import uuid
+import hashlib
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 
+from pydantic import field_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol.gpu_clock import GpuClockObservation
-from vonk_agent_protocol.telemetry import GpuUnavailableReason
+from vonk_agent_protocol import canonical_message
+from vonk_agent_protocol.telemetry import (
+    HostResourceSample,
+    TelemetryRequest,
+    TelemetrySample,
+)
+from vonk_agent_protocol.wire_model import strict_json_datetime
 
-from .models import AgentNode, NodeTelemetryLatest, NodeTelemetrySample
+from .lifecycle.evidence import Residue
+from .models import (
+    AgentNode,
+    NodeInventoryResourceSnapshot,
+    NodeTelemetryLatest,
+    NodeTelemetrySample,
+)
 from .observed_run_memory import record_observed_run_memory
 from .strict_json import warn_unreadable_once
-
-_NODE_ID = re.compile(r"spk_[0-9a-f]{32}\Z")
-_MAX_BYTES = 16 * 1024**4
-_MAX_BATCH_SAMPLES = 16
-
-
-def _finite_number(
-    value: float | None,
-    *,
-    label: str,
-    minimum: float,
-    maximum: float,
-) -> None:
-    if value is None:
-        return
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise ValueError(f"telemetry {label} is invalid")  # noqa: TRY004
-    if not math.isfinite(value) or not minimum <= value <= maximum:
-        raise ValueError(f"telemetry {label} is invalid")
-
-
-def _bounded_bytes(value: int | None, *, label: str) -> None:
-    if value is None:
-        return
-    if type(value) is not int or not 0 <= value <= _MAX_BYTES:
-        raise ValueError(f"telemetry {label} is invalid")
-
-
-def _capacity_pair(
-    total: int | None,
-    free: int | None,
-    *,
-    label: str,
-    free_label: str,
-) -> None:
-    if (total is None) != (free is None):
-        raise ValueError(
-            f"telemetry {label} values must both be present or both be absent"
-        )
-    _bounded_bytes(total, label=f"{label} total")
-    _bounded_bytes(free, label=free_label)
-    if total is not None and free is not None and free > total:
-        raise ValueError(f"telemetry {free_label} cannot exceed total")
 
 
 def _aware_utc(value: datetime, *, label: str) -> datetime:
@@ -73,168 +39,68 @@ def _stored_utc(value: datetime) -> datetime:
     return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
 
 
-@dataclass(frozen=True, slots=True)
-class TelemetrySampleInput:
-    boot_id: uuid.UUID
-    observed_at: datetime
-    memory_total_bytes: int | None
-    memory_available_bytes: int | None
-    disk_total_bytes: int | None
-    disk_free_bytes: int | None
-    gpu_utilization_percent: float | None
-    gpu_memory_total_bytes: int | None
-    gpu_memory_free_bytes: int | None
-    gpu_unavailable_reason: GpuUnavailableReason | None = None
-    gpu_clock: GpuClockObservation | None = None
-    gpu_temperature_c: int | None = None
-    cpu_frequency_avg_mhz: int | None = None
-    cpu_frequency_min_mhz: int | None = None
-    cpu_frequency_max_mhz: int | None = None
+class TelemetrySampleView(TelemetrySample):
+    """Controller identity and receive time around the single sample contract."""
 
-    def __post_init__(self) -> None:
-        if self.gpu_clock is not None:
-            if not isinstance(self.gpu_clock, GpuClockObservation):
-                raise ValueError("telemetry GPU clock observation is invalid")
-            GpuClockObservation.model_validate_json(self.gpu_clock.model_dump_json())
-        if not isinstance(self.boot_id, uuid.UUID) or self.boot_id.int == 0:
-            raise ValueError("telemetry boot ID is invalid")
-        if not isinstance(self.observed_at, datetime):
-            raise ValueError("telemetry observation time is invalid")  # noqa: TRY004
-        _capacity_pair(
-            self.memory_total_bytes,
-            self.memory_available_bytes,
-            label="memory",
-            free_label="memory available",
-        )
-        _capacity_pair(
-            self.disk_total_bytes,
-            self.disk_free_bytes,
-            label="disk",
-            free_label="disk free",
-        )
-        _finite_number(
-            self.gpu_utilization_percent,
-            label="GPU utilization",
-            minimum=0,
-            maximum=100,
-        )
-        _capacity_pair(
-            self.gpu_memory_total_bytes,
-            self.gpu_memory_free_bytes,
-            label="GPU memory",
-            free_label="GPU memory free",
-        )
-        _finite_number(
-            self.gpu_temperature_c, label="GPU temperature", minimum=0, maximum=150
-        )
-        for label, value in (
-            ("average CPU frequency", self.cpu_frequency_avg_mhz),
-            ("minimum CPU frequency", self.cpu_frequency_min_mhz),
-            ("maximum CPU frequency", self.cpu_frequency_max_mhz),
-        ):
-            _finite_number(value, label=label, minimum=1, maximum=20_000)
-
-
-@dataclass(frozen=True, slots=True)
-class TelemetrySampleView:
     id: str
     node_id: str
-    boot_id: uuid.UUID
-    observed_at: datetime
     received_at: datetime
-    memory_total_bytes: int | None
-    memory_available_bytes: int | None
-    disk_total_bytes: int | None
-    disk_free_bytes: int | None
-    gpu_utilization_percent: float | None
-    gpu_memory_total_bytes: int | None
-    gpu_memory_free_bytes: int | None
-    gpu_unavailable_reason: GpuUnavailableReason | None = None
-    gpu_clock: GpuClockObservation | None = None
-    gpu_temperature_c: int | None = None
-    cpu_frequency_avg_mhz: int | None = None
-    cpu_frequency_min_mhz: int | None = None
-    cpu_frequency_max_mhz: int | None = None
+
+    _parse_received_at = field_validator("received_at", mode="before")(
+        strict_json_datetime
+    )
 
 
-def _canonical_sample(
-    value: TelemetrySampleInput, now: datetime
-) -> TelemetrySampleInput:
-    if not isinstance(value, TelemetrySampleInput):
-        raise ValueError("telemetry sample is invalid")  # noqa: TRY004
-    observed_at = _aware_utc(value.observed_at, label="telemetry observation time")
-    if observed_at > now + timedelta(seconds=30) or now - observed_at > timedelta(
-        minutes=5
-    ):
+def _canonical_sample(value: TelemetrySample, now: datetime) -> TelemetrySample:
+    validated = TelemetrySample.model_validate_json(canonical_message(value))
+    if validated.observed_at > now + timedelta(
+        seconds=30
+    ) or now - validated.observed_at > timedelta(minutes=5):
         raise ValueError("telemetry observation time is outside the accepted window")
-    return replace(value, observed_at=observed_at)
+    return validated
 
 
-_SAMPLE_FIELDS = (
-    "memory_total_bytes",
-    "memory_available_bytes",
-    "disk_total_bytes",
-    "disk_free_bytes",
-    "gpu_utilization_percent",
-    "gpu_memory_total_bytes",
-    "gpu_memory_free_bytes",
-    "gpu_unavailable_reason",
-    "gpu_temperature_c",
-    "gpu_clock",
-    "cpu_frequency_avg_mhz",
-    "cpu_frequency_min_mhz",
-    "cpu_frequency_max_mhz",
+_SAMPLE_FIELDS = tuple(
+    name
+    for name in TelemetrySample.model_fields
+    if name not in HostResourceSample.model_fields
 )
 
 
-def _row_values(value: TelemetrySampleInput) -> dict[str, object]:
-    return {
-        "boot_id": str(value.boot_id),
-        "observed_at": value.observed_at,
-        **{name: getattr(value, name) for name in _SAMPLE_FIELDS},
-    }
-
-
-def _same_sample(row: NodeTelemetrySample, value: TelemetrySampleInput) -> bool:
-    for field_name, expected in _row_values(value).items():
-        actual = getattr(row, field_name)
-        if field_name == "observed_at":
-            actual = _stored_utc(actual)
-        if actual != expected:
-            return False
-    return True
-
-
 def _view(row: NodeTelemetrySample) -> TelemetrySampleView:
-    return TelemetrySampleView(
-        id=row.id,
-        node_id=row.node_id,
-        boot_id=uuid.UUID(row.boot_id),
-        observed_at=_stored_utc(row.observed_at),
-        received_at=_stored_utc(row.received_at),
-        gpu_unavailable_reason=(
-            GpuUnavailableReason(row.gpu_unavailable_reason)
-            if row.gpu_unavailable_reason is not None
-            else None
-        ),
-        **{
-            name: getattr(row, name)
-            for name in _SAMPLE_FIELDS
-            if name != "gpu_unavailable_reason"
-        },
+    resources = row.resource_snapshot
+    if resources is None or isinstance(resources.host_resources, Residue):
+        raise ValueError("telemetry resource evidence is unreadable")
+    return TelemetrySampleView.model_validate_json(
+        canonical_message(
+            {
+                **resources.host_resources.model_dump(mode="json"),
+                **{name: getattr(row, name) for name in _SAMPLE_FIELDS},
+                "observed_at": _stored_utc(row.observed_at),
+                "id": row.id,
+                "node_id": row.node_id,
+                "received_at": _stored_utc(row.received_at),
+            }
+        )
+    )
+
+
+def _same_sample(row: NodeTelemetrySample, value: TelemetrySample) -> bool:
+    return (
+        TelemetrySample.model_validate_json(
+            canonical_message(
+                _view(row).model_dump(
+                    mode="json", include=set(TelemetrySample.model_fields)
+                )
+            )
+        )
+        == value
     )
 
 
 def _read_view(row: NodeTelemetrySample) -> TelemetrySampleView | None:
-    """Validate stored values without reapplying the ingestion time window."""
     try:
-        view = _view(row)
-        TelemetrySampleInput(
-            boot_id=view.boot_id,
-            observed_at=view.observed_at,
-            **{name: getattr(view, name) for name in _SAMPLE_FIELDS},
-        )
-        return view
+        return _view(row)
     except (AttributeError, TypeError, ValueError):
         warn_unreadable_once("telemetry sample", row.id)
         return None
@@ -251,13 +117,13 @@ class TelemetryRepository:
         self._clock = clock
 
     def record_batch(
-        self, node_id: str, samples: Sequence[TelemetrySampleInput]
+        self, node_id: str, samples: Sequence[TelemetrySample]
     ) -> tuple[TelemetrySampleView, ...]:
-        if not isinstance(node_id, str) or _NODE_ID.fullmatch(node_id) is None:
-            raise ValueError("telemetry node ID is invalid")
-        values = tuple(samples)
-        if not 1 <= len(values) <= _MAX_BATCH_SAMPLES:
-            raise ValueError("telemetry batch must contain between 1 and 16 samples")
+        # Node identity is authenticated before this boundary; existence is
+        # checked while locking its owner. The wire owns batch bounds/order.
+        values = TelemetryRequest.model_validate_json(
+            canonical_message({"samples": list(samples)})
+        ).samples
         now = _aware_utc(self._clock(), label="telemetry receive time")
         canonical = tuple(_canonical_sample(value, now) for value in values)
         keys = [(value.boot_id, value.observed_at) for value in canonical]
@@ -284,7 +150,7 @@ class TelemetryRepository:
                 if pointer is None
                 else session.get(NodeTelemetrySample, pointer.sample_id)
             )
-            boot_heads: dict[uuid.UUID, NodeTelemetrySample | None] = {}
+            boot_heads: dict[str, NodeTelemetrySample | None] = {}
             for value in canonical:
                 boot_id = str(value.boot_id)
                 existing = session.scalar(
@@ -322,10 +188,35 @@ class TelemetryRepository:
                 row = NodeTelemetrySample(
                     node_id=node_id,
                     received_at=now,
-                    **_row_values(value),
+                    **{name: getattr(value, name) for name in _SAMPLE_FIELDS},
                 )
                 session.add(row)
                 session.flush()
+                resources = HostResourceSample.model_validate_json(
+                    canonical_message(
+                        value.model_dump(
+                            mode="json", include=set(HostResourceSample.model_fields)
+                        )
+                    )
+                )
+                snapshot = NodeInventoryResourceSnapshot(
+                    node_id=node_id,
+                    observed_at=value.observed_at,
+                    received_at=now,
+                    source_sample_id=row.id,
+                    host_resources=resources,
+                    evidence_digest=hashlib.sha256(
+                        canonical_message(
+                            {
+                                "node_id": node_id,
+                                "source_sample_id": row.id,
+                                "host_resources": resources,
+                            }
+                        )
+                    ).hexdigest(),
+                )
+                session.add(snapshot)
+                row.resource_snapshot = snapshot
                 stored.append(row)
                 boot_heads[value.boot_id] = row
                 if latest is None:

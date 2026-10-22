@@ -31,6 +31,7 @@ from vonk_agent_protocol.state_machines import NodeIdentityState
 from .. import agent_operation_states as aos
 from ..agent_operation_facts import aware, job_output_retention_expiry
 from ..agent_outcome import agent_outcome
+from ..inventory_items import runtime_value
 from ..lifecycle.agent_operation import AgentOperationAdapter
 from ..models import AgentNode, AgentOperationAttempt, Job
 from ..models import AgentOperation as StoredOperation
@@ -271,5 +272,6 @@ def _upgrade_receipt_current(
         and receipt.package_activation is not None
         and receipt.package_activation.phase == PackageActivationPhase.ROLLED_BACK
         and matches_receipt(receipt.package_activation, payload, node.node_id)
-        and node.binary_digest == payload.rollback.source.binary_sha256
+        and runtime_value(node, lambda identity: identity.binary_digest)
+        == payload.rollback.source.binary_sha256
     )

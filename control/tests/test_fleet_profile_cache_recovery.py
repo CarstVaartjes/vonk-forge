@@ -12,6 +12,7 @@ import pytest
 from sqlalchemy import select
 from vonk_agent_protocol import LifecycleState, RuntimeImageCode, canonical_message
 from vonk_agent_protocol.agent_words import ProfileChildPhase
+from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_control.bounded_json import require_mapping, require_sequence
 from vonk_control.fleet_profile_contract import (
     FleetProfileInput,
@@ -30,7 +31,6 @@ from vonk_control.models import (
     FleetProfileApplication,
     FleetProfileSelection,
     Job,
-    NodeArtifact,
     NodeInventorySnapshot,
     RecipeBuild,
     RecipeSourceBundle,
@@ -47,6 +47,14 @@ from vonk_control.runtime_image_preparation import (
 )
 from vonk_control.stored_json import read_row_column
 
+from .inventory_artifact_support import (
+    clear_inventory_artifacts,
+)
+from .runtime_identity_support import (
+    PACKAGED_RUNTIME_IDENTITY,
+    inventory_items_fixture,
+    set_inventory_identity,
+)
 from .runtime_image_fixtures import remove_test_image
 from .test_fleet_profile_recovery_current import _failed_profile
 from .test_fleet_profiles import NOW, _node_id
@@ -186,8 +194,14 @@ def test_selected_profile_reconciles_a_newly_enrolled_spark(
                 node_id=_node_id(99),
                 state="active",
                 protocol_version=1,
-                architecture="linux-arm64",
                 last_seen_at=NOW,
+                inventory_snapshot=inventory_items_fixture(
+                    _node_id(99),
+                    observed_at=NOW,
+                    identity=AgentRuntimeIdentity.model_validate(
+                        {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
+                    ),
+                ),
             )
         )
     with sessions.begin() as session:
@@ -264,7 +278,7 @@ def test_cache_recovery_replans_an_actually_missing_build_archive(
         assert revision is not None
         builder = session.get(AgentNode, build.builder_node_id)
         assert builder is not None
-        builder.binary_digest = "a" * 64
+        set_inventory_identity(builder, binary_digest="a" * 64)
         snapshot = session.scalar(
             select(NodeInventorySnapshot).where(
                 NodeInventorySnapshot.node_id == build.builder_node_id
@@ -476,7 +490,7 @@ class _ColdInspector(CompleteArtifactInspector):
 def test_run_switch_cache_miss_retries_after_storage_recovers(tmp_path: Path) -> None:
     sessions, lifecycle, _queue, _mapping, _build, nodes = setup_services(tmp_path)
     with sessions.begin() as session:
-        session.query(NodeArtifact).delete()
+        clear_inventory_artifacts(session)
     executor = _MissingRuntimeImage()
     service = RunSwitchOperationService(
         sessions,
