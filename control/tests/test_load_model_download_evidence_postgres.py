@@ -150,6 +150,14 @@ class _Nas:
     def download_phase(self, plan: RunSwitchPlan) -> str:
         """The load's model-download phase: the cache operation it waits on."""
 
+        # In production the Controller's cache observer runs continuously; the
+        # phase waits on its checkpoint. Let it publish before the phase asks.
+        manifest = self.cache.resolve_artifact_set(
+            model_content_sha256=self.model_content_sha256,
+            recipe_revision_id=self.recipe_revision_id,
+        )
+        self.cache._storage_observer.schedule(manifest)
+        self.cache._storage_observer._pending[manifest.digest].result(timeout=30)
         started = self.executor.execute(
             plan,
             _PHASE,
