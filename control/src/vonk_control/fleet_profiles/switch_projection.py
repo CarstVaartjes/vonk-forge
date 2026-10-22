@@ -28,6 +28,7 @@ from ..fleet_profile_contract import (
 from ..lifecycle.fleet_profile import doc_state
 from ..models import FleetProfileApplication
 from ..operation_blockers import PHASE_RETRY_CODE, STALL_RETRY_ATTEMPT
+from ..persisted_waits import read_wait
 from ..preparation_contract import RuntimeImageIdentity
 from ..run_switch_contract import RunSwitchOperation
 from .assessment_support import (
@@ -272,6 +273,7 @@ class RunSwitchFleetProfileAdapter:
             state=child_state,
             progress=progress,
             status_reason=child.status_reason,
+            wait=child.wait,
             result=result,
             # A phase the child keeps failing is the stall an operator must see;
             # a first retry or a short contention hold is not.
@@ -298,5 +300,6 @@ class RunSwitchFleetProfileAdapter:
                 node_ids=state.scope_node_ids,
             ),
             status_reason=state.status_reason,
+            wait=read_wait(application),
             result=_state_receipt(state),
         )

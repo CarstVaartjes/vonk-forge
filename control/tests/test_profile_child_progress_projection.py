@@ -774,3 +774,125 @@ def test_damaged_membership_is_unknown_and_does_not_mutate_execution(
         assert (
             job is not None and job.payload == damaged and job.state == original_state
         )
+
+
+def test_dual_agent_loss_mid_load_keeps_bounded_wait_visible_after_return(
+    tmp_path: Path, postgres_engine
+) -> None:
+    """Reject losing the native recovery clock at the profile adapter seam."""
+    from vonk_agent_protocol import DesiredAssignmentState
+    from vonk_agent_protocol.contracts import AgentOperation as OperationKind
+
+    sessions, lifecycle, _queue, _mapping, _build, nodes = setup_services(
+        tmp_path, nodes=2, engine=postgres_engine
+    )
+    clock = [lifecycle._clock()]
+    lifecycle._clock = lambda: clock[0]
+    jobs = AgentJobService(sessions, clock=lambda: clock[0])
+    lifecycle._agent_jobs = jobs
+    service, planner = _measured_profile_service(sessions, lifecycle)
+    draft = _installed_profile(service, sessions, nodes)
+    definition = draft.definition
+    assert definition is not None
+    definition.assignments[0].desired_state = DesiredAssignmentState.RUNNING
+    profile = service.update(
+        draft.id,
+        FleetProfileInput(**definition.model_dump(), expected_revision=draft.revision),
+        actor="admin",
+    )
+    application = _apply(service, profile)
+    _drive_install(sessions, service, planner, application.id, clock, 1)
+    claims = [
+        claim_agent(
+            jobs,
+            node,
+            f"serial-{index}",
+            30,
+            runtime_identity={
+                **PACKAGED_RUNTIME_IDENTITY,
+                "architecture": "linux-arm64",
+            },
+        )
+        for index, node in enumerate(nodes)
+    ]
+    assert all(claim is not None for claim in claims)
+    with sessions.begin() as session:
+        for node in session.scalars(select(AgentNode)):
+            node.last_seen_at = clock[0] - timedelta(minutes=10)
+    # No completion/heartbeat from either agent: let the real order reconciler
+    # fence their lapsed attempts, then restart the Controller services.
+    clock[0] += timedelta(minutes=3)
+    jobs.reconcile_orders()
+    service, planner = _measured_profile_service(sessions, lifecycle)
+    with sessions.begin() as session:
+        for node in session.scalars(select(AgentNode)):
+            node.last_seen_at = clock[0]
+    for _ in range(6):
+        _follow_saved_due(sessions, service, application.id, clock)
+        planner.tick()
+        service.tick()
+    observed = service.application(application.id)
+    adapter = observed.progress.switch_adapter
+    assert adapter is not None and adapter.pending_children
+    child = planner.get(adapter.pending_children[0].operation_id)
+    assert child.wait is not None and child.wait.dependency_deadline is not None
+    assert observed.wait is not None
+    assert observed.wait.reason == child.wait.reason
+    assert observed.wait.blockers == child.wait.blockers
+    assert observed.wait.dependency_deadline == child.wait.dependency_deadline
+    # The profile GET consumes the same owner evidence, without advancing it.
+    service.tick()
+    view = service.get(profile.id)
+    assert view.maintenance_wait is not None
+    assert view.maintenance_wait.dependency_deadline == child.wait.dependency_deadline
+    assert view.maintenance_wait.next_check >= clock[0]
+    with sessions() as session:
+        assert session.scalar(
+            select(Job.id).where(Job.kind == OperationKind.RECIPE_INSTALL)
+        )
+
+
+def test_profile_renders_typed_recovery_wait_and_its_clock(capsys):
+    """Catches a loaded profile hiding the Controller's recovery explanation."""
+    from datetime import UTC, datetime, timedelta
+
+    from vonk_agent_protocol import WaitOwnerKind, WaitReason, WaitResumeCondition
+    from vonk_agent_protocol.agent_words import ProfileDocumentState
+    from vonk_control.operation_blockers import BlockingOperation, make_blocker
+    from vonk_control.wait_contract import QueueWait
+
+    from cluster_profiles.cli_render import render_payload
+
+    now = datetime(2026, 10, 22, 12, 55, tzinfo=UTC)
+    wait = QueueWait(
+        owner=BlockingOperation(id="1", kind=WaitOwnerKind.SELECTED_PROFILE),
+        owner_kind=WaitOwnerKind.SELECTED_PROFILE,
+        reason=WaitReason.RECEIPT_MISSING,
+        blockers=[
+            make_blocker(
+                WaitReason.RECEIPT_MISSING, "Waiting for the exact image receipt"
+            )
+        ],
+        first_blocked_at=now,
+        last_progress_at=None,
+        dependency_deadline=now + timedelta(minutes=5),
+        next_check=now + timedelta(seconds=30),
+        resume_condition=WaitResumeCondition.EFFECT_OBSERVED,
+    )
+    render_payload(
+        {
+            "number": 10,
+            "name": "Hardware sweep",
+            "status": ProfileDocumentState.LOADED,
+            "definition": {"assignments": []},
+            "assignments": [],
+            "maintenance_wait": wait.model_dump(mode="json"),
+        },
+        "profile",
+    )
+    output = capsys.readouterr().out
+    assert WaitReason.RECEIPT_MISSING.value in output
+    assert "Waiting for the exact image receipt" in output
+    assert "12:55:30" in output
+    assert "13:00:00" in output
+    assert WaitResumeCondition.EFFECT_OBSERVED.value in output
