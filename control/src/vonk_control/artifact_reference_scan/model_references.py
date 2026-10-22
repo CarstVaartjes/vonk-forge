@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 
 from pydantic import TypeAdapter
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
     ArtifactLifecycleCode,
@@ -18,7 +18,7 @@ from ..artifact_lifecycle import (
     ArtifactReferenceUnverified,
 )
 from ..catalog_revision_contract import read_catalog_document
-from ..machine_states import DISTRIBUTION_HELD
+from ..machine_states import DISTRIBUTION_HELD, RUN_LIVE
 from ..model_cache_contract import CacheManifest
 from ..models import (
     ArtifactDistributionAssignment,
@@ -30,6 +30,7 @@ from ..models import (
     ModelCacheOperation,
     ModelCacheSet,
     RecipeInstallation,
+    RecipeRun,
 )
 from .intents import (
     _installation_plan,
@@ -231,7 +232,17 @@ def model_set_reference_findings(
 
     for installation in session.scalars(
         select(RecipeInstallation)
-        .where(RecipeInstallation.state.in_(_ACTIVE_INSTALLATIONS))
+        .where(
+            or_(
+                RecipeInstallation.state.in_(_ACTIVE_INSTALLATIONS),
+                select(RecipeRun.id)
+                .where(
+                    RecipeRun.installation_id == RecipeInstallation.id,
+                    RecipeRun.state.in_(RUN_LIVE),
+                )
+                .exists(),
+            )
+        )
         .order_by(RecipeInstallation.id)
         .execution_options(yield_per=64)
     ):

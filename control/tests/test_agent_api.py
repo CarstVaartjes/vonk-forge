@@ -40,6 +40,7 @@ from vonk_agent_protocol import (
     SignedHostHelperGrant,
     canonical_message,
 )
+from vonk_agent_protocol.agent_words import RecipeRunDispositionValue
 from vonk_agent_protocol.contracts import AgentOperation as OperationKind
 from vonk_agent_protocol.host_helper import (
     HostRuntimeRequest,
@@ -48,10 +49,12 @@ from vonk_agent_protocol.host_helper import (
 )
 from vonk_agent_protocol.http_failure import HttpTransient, TransientReason
 from vonk_agent_protocol.inventory import (
+    GpuHealth,
     HostSettings,
     InventoryRequest,
     NetworkInterface,
 )
+from vonk_agent_protocol.recipe_observations import RecipeRunObservationsWire
 from vonk_control import agent_operation_states as aos
 from vonk_control.agent_api import (
     AgentApiServices,
@@ -69,12 +72,12 @@ from vonk_control.host_helper_authority import (
     HostHelperGrantIssuer,
     HostRuntimeAuthorityService,
 )
+from vonk_control.inventory_items import runtime_value
 from vonk_control.models import (
     AgentCertificate,
     AgentNode,
     AgentOperation,
     AgentOperationAttempt,
-    AgentPresence,
     Base,
     CatalogDocument,
     CatalogDocumentRevision,
@@ -449,7 +452,7 @@ def telemetry_payload(
     return {
         "samples": [
             {
-                "boot_id": boot_id,
+                "boot_id": str(boot_id),
                 "observed_at": (observed_at or clock.now).isoformat(),
                 "memory_total_bytes": 128_000_000_000,
                 "memory_available_bytes": 64_000_000_000,
@@ -700,6 +703,7 @@ def test_agent_posts_authenticated_runtime_and_fabric_inventory(
         "gpu_memory_total_bytes": 1000,
         "gpu_memory_free_bytes": 800,
         "gpu_count": 1,
+        "gpu_health": GpuHealth.NEEDS_RESET,
         "memory_pool": "separate",
         "artifact_store_read_only": False,
         "capabilities": [
@@ -762,6 +766,7 @@ def test_agent_posts_authenticated_runtime_and_fabric_inventory(
             HostSettings.model_validate_json(canonical_message(row.host_settings))
             == expected.host_settings
         )
+        assert row.gpu_health == expected.gpu_health
         assert row.unused_model_bytes == 123
         assert row.network_interfaces is not None
         assert [
@@ -924,7 +929,7 @@ def test_an_inventory_measuring_installations_refreshes_their_recorded_size(
         "/agent/inventory", headers=agent_headers(NODE_A, "serial-a"), json=payload
     )
 
-    assert response.status_code == 204
+    assert response.status_code == 204, response.text
     with services.sessions() as session:
         assert (
             session.scalar(
@@ -1304,6 +1309,108 @@ def test_agent_posts_authenticated_complete_recipe_run_observation_snapshot(
             json=payload | {"runs": [{"run_id": "not-a-uuid", "ready": True}]},
         ).status_code
         == 422
+    )
+
+
+def test_incomplete_observation_warns_with_counts_and_recovers_in_fleet_health(
+    agent_system, caplog
+):
+    # Wrong implementation: incomplete bodies are info-only, and authenticated
+    # delivery failures disappear from fleet health while evidence is lost.
+    import logging
+
+    from vonk_agent_protocol import ProjectionCode
+    from vonk_control.fleet_projection import FleetProjection
+
+    client, services, _, clock = agent_system
+    payload = canonical_message(
+        RecipeRunObservationsWire(observed_at=clock.now, runs=[])
+    )
+
+    async def cut_off(scope, receive, send):
+        received = False
+
+        async def partial_receive():
+            nonlocal received
+            if received:
+                return {"type": "http.disconnect"}
+            received = True
+            return {"type": "http.request", "body": payload[:7], "more_body": True}
+
+        await client.app(scope, partial_receive, send)
+
+    async def attempt():
+        async with AsyncClient(
+            transport=ASGITransport(app=cut_off), base_url="http://testserver"
+        ) as peer:
+            return await peer.post(
+                "/agent/recipe-runs/observations",
+                headers={
+                    **agent_headers(NODE_A, "serial-a"),
+                    "content-type": "application/json",
+                },
+                content=payload,
+            )
+
+    caplog.set_level(logging.INFO)
+    assert asyncio.run(attempt()).status_code == 400
+    event = next(
+        r for r in caplog.records if "agent.request_rejected" in r.getMessage()
+    )
+    assert event.levelno == logging.WARNING
+    evidence = json.loads(event.getMessage())
+    assert evidence["received_body_bytes"] == 7
+    assert evidence["expected_body_bytes"] == len(payload)
+    assert evidence["level"] == "warning"
+    assert evidence["node_id"] == NODE_A
+    node = next(
+        n for n in FleetProjection(services.sessions).read().nodes if n.id == NODE_A
+    )
+    warning = next(
+        w
+        for w in node.warnings
+        if w.code == ProjectionCode.OBSERVATION_TRANSFER_UNAVAILABLE
+    )
+    assert "HTTP 400" in warning.detail
+    assert (
+        client.post(
+            "/agent/recipe-runs/observations",
+            headers={
+                **agent_headers(NODE_A, "serial-a"),
+                "content-type": "application/json",
+            },
+            content=payload,
+        ).status_code
+        == 204
+    )
+    node = next(
+        n for n in FleetProjection(services.sessions).read().nodes if n.id == NODE_A
+    )
+    assert all(
+        w.code != ProjectionCode.OBSERVATION_TRANSFER_UNAVAILABLE for w in node.warnings
+    )
+
+
+def test_old_observation_content_can_be_replayed_after_lost_ack(agent_system):
+    # Wrong implementation: the retryable pending report becomes a permanent
+    # 422 after five minutes, although its timestamp still fences newer state.
+    client, _, _, clock = agent_system
+    payload = canonical_message(
+        RecipeRunObservationsWire(observed_at=clock.now, runs=[])
+    )
+    headers = {**agent_headers(NODE_A, "serial-a"), "content-type": "application/json"}
+    assert (
+        client.post(
+            "/agent/recipe-runs/observations", headers=headers, content=payload
+        ).status_code
+        == 204
+    )
+    clock.now += timedelta(minutes=10)
+    assert (
+        client.post(
+            "/agent/recipe-runs/observations", headers=headers, content=payload
+        ).status_code
+        == 204
     )
 
 
@@ -2022,7 +2129,7 @@ def test_claim_requires_a_trusted_policy_bounded_source(agent_system) -> None:
     )
     assert outside.status_code == 422
     with services.sessions() as session:
-        assert session.get(AgentPresence, NODE_A) is None
+        assert session.get(AgentNode, NODE_A).management_observed_at is None
         assert session.get(AgentNode, NODE_A).last_seen_at is None
 
 
@@ -2033,12 +2140,17 @@ def test_authenticated_claim_persists_certificate_bound_source(agent_system) -> 
 
     assert response.status_code == 204
     with services.sessions() as session:
-        presence = session.get(AgentPresence, NODE_A)
+        presence = session.get(AgentNode, NODE_A)
         assert presence is not None
-        assert presence.certificate_serial == "serial-a"
-        assert presence.certificate_fingerprint == "fingerprint-serial-a"
+        assert presence.contact_certificate_serial == "serial-a"
+        assert (
+            session.get(
+                AgentCertificate, presence.contact_certificate_serial
+            ).fingerprint
+            == "fingerprint-serial-a"
+        )
         assert presence.management_address == "10.0.0.42"
-        assert presence.observed_at.replace(tzinfo=UTC) == clock.now
+        assert presence.management_observed_at.replace(tzinfo=UTC) == clock.now
 
 
 def test_claim_uses_atomic_presence_consumer_not_post_commit(
@@ -2056,7 +2168,7 @@ def test_claim_uses_atomic_presence_consumer_not_post_commit(
 
     assert response.status_code == 204
     with services.sessions() as session:
-        assert session.get(AgentPresence, NODE_A) is not None
+        assert session.get(AgentNode, NODE_A) is not None
 
 
 @pytest.mark.parametrize(
@@ -2078,7 +2190,7 @@ def test_authenticated_claim_drops_an_invalid_reported_hostname(
 
     assert response.status_code == 204
     with services.sessions() as session:
-        assert session.get(AgentPresence, NODE_A) is not None
+        assert session.get(AgentNode, NODE_A) is not None
 
 
 @pytest.mark.parametrize(
@@ -2114,7 +2226,7 @@ def test_claim_rejects_retired_supervisor_identity_fields(
     with services.sessions() as session:
         node = session.get(AgentNode, NODE_A)
         assert node is not None
-        assert node.semantic_version is None
+        assert runtime_value(node, lambda identity: identity.semantic_version) is None
 
 
 @pytest.mark.parametrize("architecture", ("linux-amd64", "linux-arm64"))
@@ -2175,7 +2287,7 @@ def test_claim_api_rejects_noncanonical_runtime_architecture(
     with services.sessions() as session:
         node = session.get(AgentNode, NODE_A)
         assert node is not None
-        assert node.architecture is None
+        assert runtime_value(node, lambda identity: identity.architecture) is None
 
 
 def test_unauthenticated_claim_cannot_change_runtime_architecture(agent_system) -> None:
@@ -2197,7 +2309,7 @@ def test_unauthenticated_claim_cannot_change_runtime_architecture(agent_system) 
     with services.sessions() as session:
         node = session.get(AgentNode, NODE_A)
         assert node is not None
-        assert node.architecture is None
+        assert runtime_value(node, lambda identity: identity.architecture) is None
 
 
 @pytest.mark.parametrize(
@@ -2297,10 +2409,10 @@ def test_authenticated_heartbeat_preserves_claim_advertised_protocol_after_exact
         assert node is not None
         assert node.last_seen_at.replace(tzinfo=UTC) == clock.now
         assert node.protocol_version == 4
-        presence = session.get(AgentPresence, NODE_A)
+        presence = session.get(AgentNode, NODE_A)
         assert presence is not None
         assert presence.management_address == "10.0.0.43"
-        assert presence.observed_at.replace(tzinfo=UTC) == clock.now
+        assert presence.management_observed_at.replace(tzinfo=UTC) == clock.now
 
 
 def test_authenticated_result_preserves_claim_advertised_protocol_after_exact_fence_validation(
@@ -2350,10 +2462,10 @@ def test_authenticated_result_preserves_claim_advertised_protocol_after_exact_fe
         assert node is not None
         assert node.last_seen_at.replace(tzinfo=UTC) == clock.now
         assert node.protocol_version == 4
-        presence = session.get(AgentPresence, NODE_A)
+        presence = session.get(AgentNode, NODE_A)
         assert presence is not None
         assert presence.management_address == "10.0.0.44"
-        assert presence.observed_at.replace(tzinfo=UTC) == clock.now
+        assert presence.management_observed_at.replace(tzinfo=UTC) == clock.now
 
 
 def test_failed_stop_result_never_writes_health_observation(agent_system) -> None:
@@ -2409,10 +2521,10 @@ def test_untrusted_and_stale_requests_do_not_record_agent_contact(agent_system) 
     client.post("/agent/claim", headers=agent_headers(NODE_A, "serial-a")).json()
     with services.sessions.begin() as session:
         node = session.get(AgentNode, NODE_A)
-        presence = session.get(AgentPresence, NODE_A)
+        presence = session.get(AgentNode, NODE_A)
         assert node is not None
         assert presence is not None
-        observed_at = presence.observed_at.replace(tzinfo=UTC)
+        observed_at = presence.management_observed_at.replace(tzinfo=UTC)
         node.last_seen_at = None
         node.protocol_version = None
     clock.now += timedelta(seconds=5)
@@ -2437,10 +2549,10 @@ def test_untrusted_and_stale_requests_do_not_record_agent_contact(agent_system) 
         assert node is not None
         assert node.last_seen_at is None
         assert node.protocol_version is None
-        presence = session.get(AgentPresence, NODE_A)
+        presence = session.get(AgentNode, NODE_A)
         assert presence is not None
         assert presence.management_address == "10.0.0.42"
-        assert presence.observed_at.replace(tzinfo=UTC) == observed_at
+        assert presence.management_observed_at.replace(tzinfo=UTC) == observed_at
 
 
 @pytest.mark.parametrize("version", (True, 3, 5))
@@ -2655,6 +2767,19 @@ def test_recipe_run_disposition_names_every_run_the_controller_does_not_want(
                 updated_at=clock.now,
             )
         )
+        session.flush()
+        session.add(
+            RunNode(
+                run_id=known_run_id,
+                node_id=NODE_A,
+                rank=0,
+                role="main",
+                state=RunState.FAILED,
+                port=8000,
+                reserved_memory_bytes=0,
+                updated_at=clock.now,
+            )
+        )
 
     def disposition(run_id: str, headers: dict[str, str] | None = None):
         return client.get(
@@ -2690,6 +2815,14 @@ def test_recipe_run_disposition_names_every_run_the_controller_does_not_want(
     running = in_state("running", generation=4)
     assert "x-vonk-recipe-run-disposition" not in running.headers
     assert running.headers["x-vonk-recipe-run-generation"] == "4"
+    # A run wanted on A owns no files on B after re-enrollment/placement drift.
+    foreign = disposition(known_run_id, agent_headers(NODE_B, "serial-b"))
+    assert foreign.status_code == 204
+    assert (
+        foreign.headers.get("x-vonk-recipe-run-disposition")
+        == RecipeRunDispositionValue.UNOWNED.value
+    )
+    assert "x-vonk-recipe-run-generation" not in foreign.headers
     assert disposition("E85C4710-not-a-run").status_code == 422
     assert disposition("e85c4710-e437-4d12-8191-499596aa2a4c", {}).status_code == 401
 
@@ -2744,7 +2877,9 @@ def test_recipe_run_observation_report_applies_process_state_per_run(
         FailureProperty,
     )
 
-    empty = FailureLogTail(text="", truncated=False, dropped_bytes=0, dropped_lines=0)
+    empty = FailureLogTail(
+        text="", truncated=False, dropped_bytes=None, dropped_lines=None
+    )
     diagnostics = FailureDiagnostics(
         collected_at=clock.now.isoformat(),
         phase="workload.host_memory_guard",
@@ -2766,11 +2901,12 @@ def test_recipe_run_observation_report_applies_process_state_per_run(
         "run_generation": 2,
         "process_running": False,
         "endpoint_ready": None,
-        "failure_diagnostics": diagnostics.model_dump(mode="json", exclude_none=True),
+        "failure_diagnostics": json.loads(canonical_message(diagnostics)),
     }
     stale_generation = report(run | {"run_generation": 1})
-    assert stale_generation.status_code == 422
-    assert "generation is stale" in stale_generation.text
+    # Superseded content is acknowledged without effects, so a durable sender
+    # can advance to a fresh inspection instead of retrying a stale generation.
+    assert stale_generation.status_code == 204
     # A report that crossed the Controller's own change (the run left this
     # Spark, or the rank changed after the report was taken) is expected:
     # it is dropped without error and never overwrites the rank.
@@ -2794,6 +2930,12 @@ def test_recipe_run_observation_report_applies_process_state_per_run(
             json.dumps(node.observation_failure_diagnostics)
         )
         assert restored == diagnostics
+        assert (
+            FailureDiagnostics.model_validate_json(
+                json.dumps(node.last_exit_diagnostics)
+            )
+            == diagnostics
+        )
 
     # New live evidence clears the old failure; it cannot poison a recovered run.
     recovered_at = clock.now + timedelta(seconds=1)
@@ -2813,7 +2955,9 @@ def test_recipe_run_observation_report_applies_process_state_per_run(
         assert node.observation_observed_at is not None
         assert node.observation_observed_at.replace(tzinfo=UTC) == recovered_at
 
-    # A delayed replay of the failure cannot undo the newer live observation.
+    # A delayed durable replay, even beyond the old five-minute acceptance
+    # window, cannot undo the newer live observation or block the sender.
+    clock.now += timedelta(minutes=10)
     assert report(run).status_code == 204
     with services.sessions() as session:
         node = session.scalar(select(RunNode).where(RunNode.run_id == run_id))
@@ -5201,3 +5345,63 @@ def test_artifact_permission_failure_retries_after_storage_recovers(
         ).status_code
         == 200
     )
+
+
+def test_display_memory_agent_vectors_reobserve_through_http_store_and_cli(
+    agent_system, capsys
+):
+    """Catches lost JSON enum evidence, sticky advice, or inventing unknown bytes."""
+    from vonk_agent_protocol import ProjectionCode
+    from vonk_control.fleet_projection import FleetProjection
+
+    from cluster_profiles.cli_render import render_payload
+
+    client, services, _, clock = agent_system
+    vectors = json.loads(
+        files("vonk_agent_protocol").joinpath("vectors/display-memory.json").read_text()
+    )
+    projection = FleetProjection(services.sessions, clock=clock)
+    baseline = InventoryRequest.model_validate_json(
+        files("vonk_agent_protocol")
+        .joinpath("vectors/inventory-wifi-link-v1.json")
+        .read_bytes()
+    )
+    # Known default -> unavailable read -> firmware ready -> minimum after reboot.
+    for index in (0, 2, 3, 1):
+        host = HostSettings.model_validate_json(canonical_message(vectors[index]))
+        clock.now += timedelta(seconds=2)
+        payload = baseline.model_copy(
+            update={"observed_at": clock.now, "host_settings": host}
+        )
+        response = client.post(
+            "/agent/inventory",
+            headers={
+                **agent_headers(NODE_A, "serial-a"),
+                "content-type": "application/json",
+            },
+            content=canonical_message(payload),
+        )
+        assert response.status_code == 204, response.text
+        node = next(node for node in projection.read().nodes if node.id == NODE_A)
+        assert node.inventory is not None
+        assert node.inventory.host_settings == host
+        advice = [
+            warning
+            for warning in node.warnings
+            if warning.code == ProjectionCode.HOST_DISPLAY_MEMORY
+        ]
+        assert bool(advice) == (index in (0, 3))
+        render_payload(
+            node.model_dump(mode="json", exclude_none=True), "fleet", action="detail"
+        )
+        captured = capsys.readouterr()
+        output = captured.out + captured.err
+        observation = host.display_memory
+        assert observation is not None
+        if observation.carveout_bytes is None:
+            assert "Display memory: reserved unknown" in output
+        if observation.soc_firmware_version is not None:
+            assert f"0x{observation.soc_firmware_version:08x}" in output
+        assert ("fwupdmgr update" in output) == (index == 0)
+        assert ("Display Reserved Memory to 0.5 GB" in output) == bool(advice)
+        assert ("0.5 GB (fixed)" in output) == bool(advice)

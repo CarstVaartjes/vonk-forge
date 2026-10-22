@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import Any, TypedDict
+from typing import ClassVar
 
 from sqlalchemy import (
     JSON,
@@ -21,32 +21,54 @@ from sqlalchemy import (
     SmallInteger,
     String,
     Table,
-    Text,
     UniqueConstraint,
     event,
     literal_column,
 )
-from sqlalchemy.orm import Mapped, mapped_column
-from vonk_agent_protocol import ModelFileState, machine_check
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 from vonk_agent_protocol.gpu_clock import GpuClockObservation
-from vonk_agent_protocol.inventory import MemoryPool
+from vonk_agent_protocol.inventory import (
+    GpuHealth,
+    HostSettings,
+    InstallationBytes,
+    InstallationId,
+    InventoryRequest,
+    MemoryPool,
+    ModelStoreObject,
+    NetworkInterface,
+    RunScopeId,
+)
+from vonk_agent_protocol.telemetry import HostResourceSample
 
+from ..inventory_items_contract import AgentInventoryItems, InventorySnapshotKind
 from ..lifecycle.evidence import Residue
 from ..model_primitives import Base, _lower_hex, _Utf8ByteLength, _uuid_shape
 from ..stored_json import ContractJSON
 
 
-class ModelStoreObjectDocument(TypedDict):
-    """JSON encoding of the inventory contract, validated by stored_columns."""
-
-    sha256: str
-    bytes: int
-
-
-class NodeInventorySnapshot(Base):
+class NodeSnapshot(Base):
     __tablename__ = "node_inventory_snapshots"
     __table_args__ = (
-        UniqueConstraint("node_id", "observed_at", name="uq_inventory_node_observed"),
+        CheckConstraint(
+            "kind IN ("
+            + ",".join(f"'{item.value}'" for item in InventorySnapshotKind)
+            + ")",
+            name="ck_inventory_snapshot_kind",
+        ),
+        CheckConstraint(
+            f"kind != '{InventorySnapshotKind.REPORT.value}' OR ("
+            + " AND ".join(
+                f"{name} IS NOT NULL"
+                for name, field in InventoryRequest.model_fields.items()
+                if field.is_required() and name != "schema_version"
+            )
+            + ")",
+            name="ck_inventory_report_required",
+        ),
+        CheckConstraint(
+            f"kind != '{InventorySnapshotKind.ITEMS.value}' OR agent_items IS NOT NULL",
+            name="ck_inventory_items_required",
+        ),
         CheckConstraint(
             "disk_total_bytes>=0 AND disk_free_bytes>=0 AND disk_free_bytes<=disk_total_bytes",
             name="ck_inventory_disk",
@@ -63,6 +85,10 @@ class NodeInventorySnapshot(Base):
             "(fabric_address IS NULL AND fabric_bandwidth_mbps IS NULL) OR (fabric_address IS NOT NULL AND fabric_bandwidth_mbps>0)",
             name="ck_inventory_fabric",
         ),
+        CheckConstraint(
+            f"kind != '{InventorySnapshotKind.MEASUREMENTS.value}' OR (host_resources IS NOT NULL AND source_sample_id IS NOT NULL)",
+            name="ck_inventory_measurements_required",
+        ),
         CheckConstraint(_lower_hex("evidence_digest", 64), name="ck_inventory_digest"),
         CheckConstraint(
             "memory_pool IN ('shared','separate') AND (memory_pool!='shared' OR gpu_count>0)",
@@ -77,40 +103,136 @@ class NodeInventorySnapshot(Base):
         ForeignKey("agent_nodes.node_id", ondelete="CASCADE"), nullable=False
     )
     observed_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
+        DateTime(timezone=True), nullable=True
     )
     received_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )
-    disk_total_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    disk_free_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    host_memory_total_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    host_memory_free_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    gpu_memory_total_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    gpu_memory_free_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    gpu_count: Mapped[int] = mapped_column(Integer, nullable=False)
-    memory_pool: Mapped[MemoryPool] = mapped_column(String(16), nullable=False)
+    evidence_digest: Mapped[str] = mapped_column(
+        String(64), nullable=False, unique=True
+    )
+    kind: Mapped[InventorySnapshotKind] = mapped_column(
+        String(16), nullable=False, server_default=InventorySnapshotKind.REPORT.value
+    )
+    __mapper_args__: ClassVar = {"polymorphic_on": kind, "polymorphic_abstract": True}
+
+
+class NodeInventorySnapshot(NodeSnapshot):
+    __mapper_args__: ClassVar = {"polymorphic_identity": InventorySnapshotKind.REPORT}
+    disk_total_bytes: Mapped[int] = mapped_column(BigInteger, nullable=True)
+    disk_free_bytes: Mapped[int] = mapped_column(BigInteger, nullable=True)
+    host_memory_total_bytes: Mapped[int] = mapped_column(BigInteger, nullable=True)
+    host_memory_free_bytes: Mapped[int] = mapped_column(BigInteger, nullable=True)
+    gpu_memory_total_bytes: Mapped[int] = mapped_column(BigInteger, nullable=True)
+    gpu_memory_free_bytes: Mapped[int] = mapped_column(BigInteger, nullable=True)
+    gpu_count: Mapped[int] = mapped_column(Integer, nullable=True)
+    gpu_health: Mapped[GpuHealth | None] = mapped_column(String(16), nullable=True)
+    memory_pool: Mapped[MemoryPool] = mapped_column(String(16), nullable=True)
     fabric_address: Mapped[str | None] = mapped_column(String(45))
     fabric_bandwidth_mbps: Mapped[int | None] = mapped_column(BigInteger)
     # NULL: the agent did not report network evidence (unknown, not "none").
-    network_interfaces: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON)
+    network_interfaces: Mapped[list[NetworkInterface] | Residue | None] = mapped_column(
+        ContractJSON[list[NetworkInterface]](
+            "node_inventory_snapshots", "network_interfaces", none_as_null=True
+        )
+    )
     nas_route_interface: Mapped[str | None] = mapped_column(String(15))
     # NULL: the agent did not report host settings (unknown).
-    host_settings: Mapped[dict[str, bool | None] | None] = mapped_column(JSON)
+    host_settings: Mapped[HostSettings | Residue | None] = mapped_column(
+        ContractJSON[HostSettings](
+            "node_inventory_snapshots", "host_settings", none_as_null=True
+        )
+    )
     # NULL: the agent did not report its unused model bytes (unknown).
     unused_model_bytes: Mapped[int | None] = mapped_column(BigInteger)
-    model_objects: Mapped[list[ModelStoreObjectDocument] | None] = mapped_column(JSON)
+    model_objects: Mapped[list[ModelStoreObject] | Residue | None] = mapped_column(
+        ContractJSON[list[ModelStoreObject]](
+            "node_inventory_snapshots", "model_objects", none_as_null=True
+        )
+    )
+    installations: Mapped[list[InstallationId] | Residue | None] = mapped_column(
+        ContractJSON[list[InstallationId]](
+            "node_inventory_snapshots", "installations", none_as_null=True
+        ),
+        nullable=True,
+    )
+    runs: Mapped[list[RunScopeId] | Residue | None] = mapped_column(
+        ContractJSON[list[RunScopeId]](
+            "node_inventory_snapshots", "runs", none_as_null=True
+        ),
+        nullable=True,
+    )
+    installation_bytes: Mapped[list[InstallationBytes] | Residue | None] = (
+        mapped_column(
+            ContractJSON[list[InstallationBytes]](
+                "node_inventory_snapshots", "installation_bytes", none_as_null=True
+            ),
+            nullable=True,
+        )
+    )
+
     nvidia_driver_version: Mapped[str] = mapped_column(
         String(256), nullable=False, default="unknown", server_default="unknown"
     )
     container_runtime_version: Mapped[str] = mapped_column(
         String(256), nullable=False, default="unknown", server_default="unknown"
     )
-    artifact_store_read_only: Mapped[bool] = mapped_column(Boolean, nullable=False)
-    capabilities: Mapped[list[str]] = mapped_column(JSON, nullable=False)
-    evidence_digest: Mapped[str] = mapped_column(
-        String(64), nullable=False, unique=True
+    artifact_store_read_only: Mapped[bool] = mapped_column(Boolean, nullable=True)
+    capabilities: Mapped[list[str]] = mapped_column(JSON, nullable=True)
+
+
+class NodeInventoryItemsSnapshot(NodeSnapshot):
+    __mapper_args__: ClassVar = {"polymorphic_identity": InventorySnapshotKind.ITEMS}
+    agent_items: Mapped[AgentInventoryItems | Residue] = mapped_column(
+        ContractJSON[AgentInventoryItems]("node_inventory_snapshots", "agent_items"),
+        nullable=True,
     )
+
+
+Index(
+    "uq_inventory_items_node",
+    NodeSnapshot.node_id,
+    unique=True,
+    postgresql_where=NodeSnapshot.kind == InventorySnapshotKind.ITEMS,
+    sqlite_where=NodeSnapshot.kind == InventorySnapshotKind.ITEMS,
+)
+
+
+Index(
+    "uq_inventory_report_node_observed",
+    NodeSnapshot.node_id,
+    NodeSnapshot.observed_at,
+    unique=True,
+    postgresql_where=NodeSnapshot.kind == InventorySnapshotKind.REPORT,
+    sqlite_where=NodeSnapshot.kind == InventorySnapshotKind.REPORT,
+)
+
+
+class NodeInventoryResourceSnapshot(NodeSnapshot):
+    __mapper_args__: ClassVar = {
+        "polymorphic_identity": InventorySnapshotKind.MEASUREMENTS
+    }
+    source_sample_id: Mapped[str] = mapped_column(
+        String(36),
+        nullable=True,
+        unique=True,
+    )
+    host_resources: Mapped[HostResourceSample | Residue] = mapped_column(
+        ContractJSON[HostResourceSample]("node_inventory_snapshots", "host_resources"),
+        nullable=True,
+    )
+
+
+inventory_table = NodeSnapshot.__table__
+assert isinstance(inventory_table, Table)
+inventory_table.append_constraint(
+    ForeignKeyConstraint(
+        ("node_id", "source_sample_id"),
+        ("node_telemetry_samples.node_id", "node_telemetry_samples.id"),
+        name="fk_inventory_resource_sample",
+        ondelete="CASCADE",
+    )
+)
 
 
 class NodeTelemetrySample(Base):
@@ -128,24 +250,6 @@ class NodeTelemetrySample(Base):
             "gpu_utilization_percent IS NULL OR "
             "gpu_utilization_percent BETWEEN 0 AND 100",
             name="ck_telemetry_utilization",
-        ),
-        CheckConstraint(
-            "(memory_total_bytes IS NULL AND memory_available_bytes IS NULL) OR "
-            "(memory_total_bytes IS NOT NULL AND memory_available_bytes IS NOT NULL AND "
-            "memory_total_bytes >= 0 AND memory_available_bytes >= 0 AND "
-            "memory_total_bytes <= 17592186044416 AND "
-            "memory_available_bytes <= 17592186044416 AND "
-            "memory_available_bytes <= memory_total_bytes)",
-            name="ck_telemetry_memory",
-        ),
-        CheckConstraint(
-            "(disk_total_bytes IS NULL AND disk_free_bytes IS NULL) OR "
-            "(disk_total_bytes IS NOT NULL AND disk_free_bytes IS NOT NULL AND "
-            "disk_total_bytes >= 0 AND disk_free_bytes >= 0 AND "
-            "disk_total_bytes <= 17592186044416 AND "
-            "disk_free_bytes <= 17592186044416 AND "
-            "disk_free_bytes <= disk_total_bytes)",
-            name="ck_telemetry_disk",
         ),
         CheckConstraint(
             "(gpu_memory_total_bytes IS NULL AND gpu_memory_free_bytes IS NULL) OR "
@@ -171,10 +275,6 @@ class NodeTelemetrySample(Base):
     received_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )
-    memory_total_bytes: Mapped[int | None] = mapped_column(BigInteger)
-    memory_available_bytes: Mapped[int | None] = mapped_column(BigInteger)
-    disk_total_bytes: Mapped[int | None] = mapped_column(BigInteger)
-    disk_free_bytes: Mapped[int | None] = mapped_column(BigInteger)
     gpu_utilization_percent: Mapped[float | None] = mapped_column(Float)
     gpu_memory_total_bytes: Mapped[int | None] = mapped_column(BigInteger)
     gpu_memory_free_bytes: Mapped[int | None] = mapped_column(BigInteger)
@@ -189,6 +289,15 @@ class NodeTelemetrySample(Base):
     cpu_frequency_avg_mhz: Mapped[int | None] = mapped_column(Integer)
     cpu_frequency_min_mhz: Mapped[int | None] = mapped_column(Integer)
     cpu_frequency_max_mhz: Mapped[int | None] = mapped_column(Integer)
+
+    resource_snapshot: Mapped[NodeInventoryResourceSnapshot] = relationship(
+        foreign_keys=[
+            NodeInventoryResourceSnapshot.node_id,
+            NodeInventoryResourceSnapshot.source_sample_id,
+        ],
+        lazy="joined",
+        uselist=False,
+    )
 
 
 class NodeTelemetryLatest(Base):
@@ -252,44 +361,5 @@ class FleetStreamEvent(Base):
         DateTime(timezone=True), nullable=False
     )
     expires_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
-
-
-class NodeArtifact(Base):
-    __tablename__ = "node_artifacts"
-    __table_args__ = (
-        UniqueConstraint("node_id", "digest", name="uq_node_artifact_digest"),
-        CheckConstraint(
-            "kind IN ('image','image-layer','model','auxiliary')",
-            name="ck_node_artifacts_kind",
-        ),
-        CheckConstraint(
-            machine_check(ModelFileState),
-            name="ck_node_artifacts_state",
-        ),
-        CheckConstraint(
-            "size_bytes>=0 AND ref_count>=0", name="ck_node_artifacts_sizes"
-        ),
-        CheckConstraint(_lower_hex("digest", 64), name="ck_node_artifacts_digest"),
-    )
-    id: Mapped[str] = mapped_column(
-        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
-    )
-    node_id: Mapped[str] = mapped_column(
-        ForeignKey("agent_nodes.node_id", ondelete="CASCADE"),
-        nullable=False,
-        index=True,
-    )
-    kind: Mapped[str] = mapped_column(String(24), nullable=False)
-    digest: Mapped[str] = mapped_column(String(64), nullable=False)
-    source: Mapped[str] = mapped_column(Text, nullable=False)
-    size_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    state: Mapped[str] = mapped_column(String(24), nullable=False)
-    ref_count: Mapped[int] = mapped_column(
-        Integer, nullable=False, default=0, server_default="0"
-    )
-    verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )

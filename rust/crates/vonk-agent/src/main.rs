@@ -8,11 +8,6 @@ use std::{
 };
 
 use clap::{Parser, Subcommand};
-use futures_util::{
-    StreamExt,
-    future::{self, Either},
-    stream,
-};
 use url::Url;
 use vonk_agent::{
     agent_upgrade::AgentUpgradeExecutor,
@@ -880,28 +875,40 @@ async fn report_runs(
     let result = recipes.report_recipe_run_observation_page(checkpoint).await;
     if let Err(error) = &result {
         // A stop/recovery operation may already be waiting for us.
-        eprintln!("vonk-agent: exact recipe observation failed: {error}");
+        eprintln!(
+            "vonk-agent: exact recipe observation failed: {error}; unacknowledged content stays in custody; next observation pass retries after at least {}s",
+            RUN_OBSERVATION_INTERVAL.as_secs()
+        );
+        // A busy claim queue must not turn a fast rejection into a hot loop.
+        tokio::time::sleep(RUN_OBSERVATION_INTERVAL).await;
     }
     result
 }
 
-/// Run evidence never waits behind a claim: while `work` executes, `observe`
-/// repeats every `interval`, and `work` is polled throughout. The passes end
-/// with `work`; one still in flight is dropped, as reports are idempotent.
+/// Poll work throughout each observation. Once started, a bounded pass owns
+/// its HTTP body until acknowledgement/failure; completing work must not reset
+/// that stream. No extra pass or cadence sleep delays a completed claim.
 async fn observing_during<W: Future>(
     work: W,
     interval: Duration,
-    observe: impl AsyncFnMut(),
+    mut observe: impl AsyncFnMut(),
 ) -> W::Output {
-    let passes = stream::unfold(observe, |mut observe| async move {
-        tokio::time::sleep(interval).await;
-        observe().await;
-        Some(((), observe))
-    })
-    .for_each(|()| future::ready(()));
-    match future::select(std::pin::pin!(work), std::pin::pin!(passes)).await {
-        Either::Left((output, _)) => output,
-        Either::Right(((), work)) => work.await,
+    tokio::pin!(work);
+    loop {
+        let next_observation_deadline = tokio::time::Instant::now() + interval;
+        tokio::select! {
+            output = &mut work => return output,
+            () = tokio::time::sleep_until(next_observation_deadline) => {},
+        }
+        let pass = observe();
+        tokio::pin!(pass);
+        tokio::select! {
+            output = &mut work => {
+                pass.await;
+                return output;
+            },
+            () = &mut pass => {},
+        }
     }
 }
 
@@ -1012,20 +1019,24 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
-    async fn a_slow_observation_never_holds_back_the_claim() {
-        // Wrong implementation: the claim's work is not polled while a pass
-        // is in flight, or finishes only when the pass does.
-        let started = tokio::time::Instant::now();
+    async fn claim_completion_does_not_disconnect_an_inflight_observation() {
+        // Wrong implementation: dropping the observer at claim completion
+        // resets its HTTP stream before the Controller can parse/acknowledge it.
+        let acknowledged = Cell::new(false);
         let output = super::observing_during(
             async {
                 tokio::time::sleep(Duration::from_secs(15)).await;
-                started.elapsed()
+                42
             },
             super::RUN_OBSERVATION_INTERVAL,
-            async || tokio::time::sleep(Duration::from_secs(3600)).await,
+            async || {
+                tokio::time::sleep(Duration::from_secs(10)).await;
+                acknowledged.set(true);
+            },
         )
         .await;
-        assert_eq!(output, Duration::from_secs(15));
+        assert_eq!(output, 42);
+        assert!(acknowledged.get(), "claim completion cancelled the upload");
     }
 
     use super::{
@@ -1177,6 +1188,7 @@ node_id = "spk_0123456789abcdef0123456789abcdef"
             disk_available_bytes: 900,
             state_database_reserve_held: true,
             gpu_count: 1,
+            gpu_health: vonk_agent_protocol::generated::GpuHealth::Healthy,
             gpu_memory_total_bytes: 100,
             gpu_memory_free_bytes: 90,
             memory_pool: vonk_agent_protocol::MemoryPool::Separate,

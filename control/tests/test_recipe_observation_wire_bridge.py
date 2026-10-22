@@ -39,7 +39,6 @@ from vonk_control.job_documents import RecipeStartParent, RecipeStopParent
 from vonk_control.models import (
     AgentNode,
     AgentOperation,
-    AgentPresence,
     Job,
     RecipeInstallation,
     RecipeRun,
@@ -526,16 +525,20 @@ def test_production_start_rust_observation_and_controller_consume(
         stale_generation["runs"] = [
             {**envelope["runs"][0], "run_generation": identity["run_generation"] + 1}
         ]
-        rejected = client.post(
+        consumed = client.post(
             "/agent/recipe-runs/observations", headers=headers, json=stale_generation
         )
-        assert rejected.status_code == 422
+        # A superseded page must be consumed without effects so a durable
+        # sender can advance to fresh evidence instead of replaying forever.
+        assert consumed.status_code == 204
         with sessions() as session:
             retained = (
                 session.query(RunNode).filter_by(run_id=run_id, node_id=node_id).one()
             )
             assert retained.observed_run_generation == identity["run_generation"]
             assert retained.state == LifecycleState.RUNNING
+            assert retained.observation_observed_at is not None
+            assert retained.observation_observed_at.replace(tzinfo=UTC) == observed_at
         fresh = client.post(
             "/agent/recipe-runs/observations", headers=headers, json=envelope
         )
@@ -1167,9 +1170,9 @@ def test_stale_singleton_absence_can_be_refreshed_read_only_and_recovered(
         endpoint_ready=False,
     )
     with sessions.begin() as session:
-        presence = session.get(AgentPresence, node_id)
+        presence = session.get(AgentNode, node_id)
         assert presence is not None
-        presence.observed_at = now[0]
+        presence.management_observed_at = now[0]
     now[0] = NOW + timedelta(seconds=126)
 
     assert recovery.tick() is True
@@ -1216,9 +1219,9 @@ def test_stale_presence_waits_then_recovery_resumes_without_new_run(
         engine=postgres_engine,
     )
     with sessions.begin() as session:
-        presence = session.get(AgentPresence, node_id)
+        presence = session.get(AgentNode, node_id)
         assert presence is not None
-        presence.observed_at = NOW - timedelta(minutes=10)
+        presence.management_observed_at = NOW - timedelta(minutes=10)
     now[0] = NOW + timedelta(seconds=4)
     recovery = DistributedRecoveryCoordinator(
         sessions,
@@ -1252,9 +1255,9 @@ def test_stale_presence_waits_then_recovery_resumes_without_new_run(
         assert run is not None and run.next_action_at is not None
         now[0] = max(NOW + timedelta(seconds=10), run.next_action_at)
     with sessions.begin() as session:
-        presence = session.get(AgentPresence, node_id)
+        presence = session.get(AgentNode, node_id)
         assert presence is not None
-        presence.observed_at = now[0]
+        presence.management_observed_at = now[0]
 
     assert recovery.tick() is True
 

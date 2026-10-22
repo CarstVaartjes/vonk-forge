@@ -11,7 +11,9 @@ from pydantic import ValidationError
 from sqlalchemy import Table, create_engine, event, literal, select, text, update
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import canonical_message
+from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.inventory import InventoryRequest
+from vonk_agent_protocol.telemetry import HostResourceSample
 from vonk_control.fleet_events import FleetEventRepository
 from vonk_control.fleet_projection import (
     _AUTHORITY_REVISION,
@@ -25,7 +27,7 @@ from vonk_control.fleet_projection import (
 from vonk_control.fleet_stream_contract import FleetChangeEvent
 from vonk_control.inventory_repository import (
     InventoryRepository,
-    InventorySnapshotInput,
+    NodeInventoryReport,
 )
 from vonk_control.models import (
     AgentCertificate,
@@ -33,7 +35,6 @@ from vonk_control.models import (
     AgentNodeProfile,
     AgentOperation,
     AgentOperationAttempt,
-    AgentPresence,
     Base,
     CatalogDocument,
     CatalogDocumentRevision,
@@ -56,6 +57,13 @@ from vonk_control.recipe_execution_contract import installation_plan_document
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
 from tests.observation_transfer_peer import observation_document
+
+from .runtime_identity_support import (
+    PACKAGED_RUNTIME_IDENTITY,
+    inventory_items_fixture,
+    set_inventory_hostname,
+)
+from .telemetry_support import telemetry_with_resources
 
 NOW = datetime(2026, 8, 15, 12, 0, tzinfo=UTC)
 COMMIT = "a" * 64
@@ -193,19 +201,23 @@ def _telemetry(
     cpu: float,
     boot_id: str = "00000000-0000-4000-8000-000000000001",
 ) -> NodeTelemetrySample:
-    return NodeTelemetrySample(
-        id=sample_id,
-        node_id=node_id,
-        boot_id=boot_id,
-        observed_at=observed_at,
-        received_at=observed_at + timedelta(milliseconds=250),
-        gpu_utilization_percent=cpu,
-        memory_total_bytes=2_000,
-        memory_available_bytes=1_400,
-        disk_total_bytes=1_000,
-        disk_free_bytes=700,
-        gpu_memory_total_bytes=2_000,
-        gpu_memory_free_bytes=1_300,
+    return telemetry_with_resources(
+        NodeTelemetrySample(
+            id=sample_id,
+            node_id=node_id,
+            boot_id=boot_id,
+            observed_at=observed_at,
+            received_at=observed_at + timedelta(milliseconds=250),
+            gpu_utilization_percent=cpu,
+            gpu_memory_total_bytes=2_000,
+            gpu_memory_free_bytes=1_300,
+        ),
+        HostResourceSample(
+            memory_total_bytes=2_000,
+            memory_available_bytes=1_400,
+            disk_total_bytes=1_000,
+            disk_free_bytes=700,
+        ),
     )
 
 
@@ -237,14 +249,12 @@ def _profile(
     node_id: str,
     *,
     display_name: str,
-    hostname: str,
     lifecycle: str = "managed",
     labels: dict[str, str] | None = None,
 ) -> AgentNodeProfile:
     return AgentNodeProfile(
         node_id=node_id,
         display_name=display_name,
-        hostname=hostname,
         lifecycle=lifecycle,
         labels={} if labels is None else labels,
     )
@@ -321,41 +331,51 @@ def test_read_uses_postgresql_registration_latest_rows_and_a_bounded_query_set()
                 AgentNode(
                     node_id=NODE_A,
                     state="active",
-                    architecture="linux-arm64",
                     last_seen_at=NOW - timedelta(seconds=5),
+                    inventory_snapshot=inventory_items_fixture(
+                        NODE_A,
+                        observed_at=NOW - timedelta(seconds=5),
+                        identity=AgentRuntimeIdentity.model_validate(
+                            {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
+                        ),
+                    ),
                 ),
                 AgentNode(
                     node_id=NODE_B,
                     state="active",
-                    architecture="linux-arm64",
                     last_seen_at=NOW - timedelta(seconds=7),
+                    inventory_snapshot=inventory_items_fixture(
+                        NODE_B,
+                        observed_at=NOW - timedelta(seconds=7),
+                        identity=AgentRuntimeIdentity.model_validate(
+                            {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
+                        ),
+                    ),
                 ),
                 AgentNode(
                     node_id=EXTRA_NODE,
                     state="revoked",
-                    architecture="linux-arm64",
                     last_seen_at=NOW,
                     revoked_at=NOW,
+                    inventory_snapshot=inventory_items_fixture(
+                        EXTRA_NODE,
+                        observed_at=NOW,
+                        identity=AgentRuntimeIdentity.model_validate(
+                            {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
+                        ),
+                    ),
                 ),
             ]
         )
         session.flush()
         session.add_all(
             [
-                _profile(
-                    NODE_A,
-                    display_name="Alpha",
-                    hostname="alpha.internal",
-                    labels={"rack": "left"},
-                ),
-                _profile(
-                    NODE_B,
-                    display_name="Beta",
-                    hostname="beta.internal",
-                    labels={"rack": "right"},
-                ),
+                _profile(NODE_A, display_name="Alpha", labels={"rack": "left"}),
+                _profile(NODE_B, display_name="Beta", labels={"rack": "right"}),
             ]
         )
+        set_inventory_hostname(session, NODE_A, "alpha.internal")
+        set_inventory_hostname(session, NODE_B, "beta.internal")
         session.add_all(
             [
                 _certificate(NODE_A, "bounded-a"),
@@ -363,13 +383,13 @@ def test_read_uses_postgresql_registration_latest_rows_and_a_bounded_query_set()
                 _certificate(EXTRA_NODE, "bounded-external"),
             ]
         )
-        session.add(
-            AgentPresence(
-                node_id=NODE_A,
-                certificate_serial="bounded-a",
-                certificate_fingerprint="fingerprint-bounded-a",
+        session.execute(
+            update(AgentNode)
+            .where(AgentNode.node_id == NODE_A)
+            .values(
+                contact_certificate_serial="bounded-a",
                 management_address="192.168.1.211",
-                observed_at=NOW,
+                management_observed_at=NOW,
             )
         )
         session.add_all(
@@ -441,6 +461,8 @@ def test_read_uses_postgresql_registration_latest_rows_and_a_bounded_query_set()
                     "last_seen_age_seconds": 5.0,
                 },
                 "inventory": {
+                    "schema_version": 1,
+                    "memory_pool": "separate",
                     "observed_at": "2026-08-15T11:59:50Z",
                     "received_at": "2026-08-15T11:59:51Z",
                     "age_seconds": 10.0,
@@ -512,6 +534,8 @@ def test_read_uses_postgresql_registration_latest_rows_and_a_bounded_query_set()
                     "last_seen_age_seconds": 7.0,
                 },
                 "inventory": {
+                    "schema_version": 1,
+                    "memory_pool": "separate",
                     "observed_at": "2026-08-15T11:59:48Z",
                     "received_at": "2026-08-15T11:59:49Z",
                     "age_seconds": 12.0,
@@ -559,6 +583,9 @@ def test_read_uses_postgresql_registration_latest_rows_and_a_bounded_query_set()
     expected = FleetSnapshot.model_validate_json(json.dumps(expected_document))
     for node in expected.nodes:
         node.gpu_clock_desired = default_gpu_clock()
+        node.agent_runtime = AgentRuntimeIdentity.model_validate(
+            {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
+        )
     assert snapshot == expected
     assert EXTRA_NODE not in {node.id for node in snapshot.nodes}
     # A fresh read consumes the same committed observations without mutating
@@ -575,21 +602,16 @@ def test_display_name_update_preserves_identity_and_emits_projection_refresh() -
         node = AgentNode(node_id=NODE_A, state="active")
         session.add(node)
         session.flush()
-        session.add(
-            _profile(
-                NODE_A,
-                display_name=NODE_A,
-                hostname="spark-3542.internal",
-            )
-        )
+        session.add(_profile(NODE_A, display_name=NODE_A))
+        set_inventory_hostname(session, NODE_A, "spark-3542.internal")
         session.add(_certificate(NODE_A, "profile-a"))
-        session.add(
-            AgentPresence(
-                node_id=NODE_A,
-                certificate_serial="profile-a",
-                certificate_fingerprint="fingerprint-profile-a",
+        session.execute(
+            update(AgentNode)
+            .where(AgentNode.node_id == NODE_A)
+            .values(
+                contact_certificate_serial="profile-a",
                 management_address="192.168.1.211",
-                observed_at=NOW,
+                management_observed_at=NOW,
             )
         )
 
@@ -726,6 +748,13 @@ def test_fleet_telemetry_dto_rejects_nil_and_noncanonical_boot_ids(
 ) -> None:
     with pytest.raises(ValidationError):
         TelemetryPoint(
+            memory_total_bytes=None,
+            memory_available_bytes=None,
+            disk_total_bytes=None,
+            disk_free_bytes=None,
+            gpu_utilization_percent=None,
+            gpu_memory_total_bytes=None,
+            gpu_memory_free_bytes=None,
             id="00000000-0000-4000-8000-000000000004",
             node_id=NODE_A,
             boot_id=boot_id,
@@ -772,10 +801,13 @@ def test_projection_schema_is_finite_for_states_items_and_task3_numbers() -> Non
         == "^spk_[0-9a-f]{32}$"
     )
     telemetry = definitions["TelemetryPoint"]["properties"]
-    assert telemetry["boot_id"]["pattern"] == (
-        "^(?!00000000-0000-0000-0000-000000000000$)"
-        "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    from vonk_agent_protocol.telemetry import TelemetrySample
+
+    assert (
+        telemetry["boot_id"]["pattern"]
+        == TelemetrySample.model_json_schema()["properties"]["boot_id"]["pattern"]
     )
+
     assert telemetry["memory_total_bytes"]["anyOf"][0]["maximum"] == (16 * 1024**4)
 
 
@@ -938,9 +970,16 @@ def test_freshness_boundaries_keep_telemetry_agent_and_inventory_independent() -
                 AgentNode(
                     node_id=node_id,
                     state="active",
-                    architecture="linux-arm64",
                     last_seen_at=NOW
                     - timedelta(seconds=150 if node_id != NODE_D else 151),
+                    inventory_snapshot=inventory_items_fixture(
+                        node_id,
+                        observed_at=NOW
+                        - timedelta(seconds=150 if node_id != NODE_D else 151),
+                        identity=AgentRuntimeIdentity.model_validate(
+                            {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
+                        ),
+                    ),
                 )
             )
             session.flush()
@@ -1013,14 +1052,26 @@ def test_installed_and_loaded_groups_require_every_exact_current_rank(capsys) ->
                 AgentNode(
                     node_id=NODE_A,
                     state="active",
-                    architecture="linux-arm64",
                     last_seen_at=NOW,
+                    inventory_snapshot=inventory_items_fixture(
+                        NODE_A,
+                        observed_at=NOW,
+                        identity=AgentRuntimeIdentity.model_validate(
+                            {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
+                        ),
+                    ),
                 ),
                 AgentNode(
                     node_id=NODE_B,
                     state="active",
-                    architecture="linux-arm64",
                     last_seen_at=NOW,
+                    inventory_snapshot=inventory_items_fixture(
+                        NODE_B,
+                        observed_at=NOW,
+                        identity=AgentRuntimeIdentity.model_validate(
+                            {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
+                        ),
+                    ),
                 ),
             ]
         )
@@ -1481,8 +1532,14 @@ def test_a_damaged_active_revision_preserves_known_presence_and_recovers(
             AgentNode(
                 node_id=NODE_A,
                 state="active",
-                architecture="linux-arm64",
                 last_seen_at=NOW,
+                inventory_snapshot=inventory_items_fixture(
+                    NODE_A,
+                    observed_at=NOW,
+                    identity=AgentRuntimeIdentity.model_validate(
+                        {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
+                    ),
+                ),
             )
         )
         session.flush()
@@ -1604,7 +1661,8 @@ def test_a_damaged_active_revision_preserves_known_presence_and_recovers(
     healthy_installation_id = "00000000-0000-4000-8000-000000000907"
     healthy_run_id = "00000000-0000-4000-8000-000000000908"
     with sessions.begin() as session:
-        session.add(_profile(NODE_A, display_name="Spark A", hostname="spark-a"))
+        session.add(_profile(NODE_A, display_name="Spark A"))
+        set_inventory_hostname(session, NODE_A, "spark-a")
         for model, source_id, replacements in (
             (
                 ClusterMapping,
@@ -1875,8 +1933,14 @@ def test_projection_preserves_all_current_installation_groups_beyond_512() -> No
             AgentNode(
                 node_id=NODE_A,
                 state="active",
-                architecture="linux-arm64",
                 last_seen_at=NOW,
+                inventory_snapshot=inventory_items_fixture(
+                    NODE_A,
+                    observed_at=NOW,
+                    identity=AgentRuntimeIdentity.model_validate(
+                        {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
+                    ),
+                ),
             )
         )
         documents, revisions = _canonical_catalog_documents(
@@ -2085,8 +2149,14 @@ def _installed_byte_group(
             AgentNode(
                 node_id=NODE_A,
                 state="active",
-                architecture="linux-arm64",
                 last_seen_at=NOW,
+                inventory_snapshot=inventory_items_fixture(
+                    NODE_A,
+                    observed_at=NOW,
+                    identity=AgentRuntimeIdentity.model_validate(
+                        {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
+                    ),
+                ),
             )
         )
         session.add(_certificate(NODE_A, "byte-recipe"))
@@ -2362,8 +2432,14 @@ def _cpu_clock_codes(
             AgentNode(
                 node_id=NODE_A,
                 state="active",
-                architecture="linux-arm64",
                 last_seen_at=NOW - timedelta(seconds=1),
+                inventory_snapshot=inventory_items_fixture(
+                    NODE_A,
+                    observed_at=NOW - timedelta(seconds=1),
+                    identity=AgentRuntimeIdentity.model_validate(
+                        {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
+                    ),
+                ),
             )
         )
         session.flush()
@@ -2422,8 +2498,14 @@ def _route_warnings(interfaces, route):
             AgentNode(
                 node_id=NODE_A,
                 state="active",
-                architecture="linux-arm64",
                 last_seen_at=NOW - timedelta(seconds=1),
+                inventory_snapshot=inventory_items_fixture(
+                    NODE_A,
+                    observed_at=NOW - timedelta(seconds=1),
+                    identity=AgentRuntimeIdentity.model_validate(
+                        {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
+                    ),
+                ),
             )
         )
         session.flush()
@@ -2514,13 +2596,20 @@ def test_fleet_names_the_spark_that_copies_from_the_nas_far_slower(
                 AgentNode(
                     node_id=node_id,
                     state="active",
-                    architecture="linux-arm64",
                     last_seen_at=NOW - timedelta(seconds=1),
+                    inventory_snapshot=inventory_items_fixture(
+                        node_id,
+                        observed_at=NOW - timedelta(seconds=1),
+                        identity=AgentRuntimeIdentity.model_validate(
+                            {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
+                        ),
+                    ),
                 )
             )
             session.flush()
             session.add(_certificate(node_id, f"nas-rate-{node_id}"))
-            session.add(_profile(node_id, display_name=name, hostname=name))
+            session.add(_profile(node_id, display_name=name))
+            set_inventory_hostname(session, node_id, name)
             size, seconds = transfers[node_id]
             session.add(
                 AgentOperation(
@@ -2561,10 +2650,7 @@ def test_fleet_names_the_spark_that_copies_from_the_nas_far_slower(
         request = InventoryRequest.model_validate_json(vector.read_bytes())
         with sessions.begin() as session:
             inventory = _inventory(NODE_B, NOW, free_bytes=100)
-            inventory.network_interfaces = [
-                item.model_dump(mode="json")
-                for item in request.network_interfaces or []
-            ]
+            inventory.network_interfaces = request.network_interfaces
             inventory.nas_route_interface = request.nas_route_interface
             session.add(inventory)
     nodes = {
@@ -2656,13 +2742,17 @@ def test_fleet_api_isolates_damaged_observation_and_recovers(tmp_path, damaged) 
     healthy_inventory = nodes[NODE_B].inventory
     assert healthy_inventory is not None and healthy_inventory.disk_free_bytes == 750
     if damaged == "inventory":
-        assert nodes[NODE_A].inventory is None
+        inventory_state = nodes[NODE_A].inventory
+        assert inventory_state is not None
+        assert inventory_state.network_interfaces is None
+        assert inventory_state.disk_free_bytes == inventory.disk_free_bytes
     else:
         assert nodes[NODE_A].telemetry is None
-    assert any(
-        "unreadable" in warning.detail and "unknown" in warning.detail
-        for warning in nodes[NODE_A].warnings
-    )
+    if damaged == "telemetry":
+        assert any(
+            "unreadable" in warning.detail and "unknown" in warning.detail
+            for warning in nodes[NODE_A].warnings
+        )
     with sessions.begin() as session:
         if damaged == "inventory":
             session.execute(
@@ -2700,8 +2790,14 @@ def test_expired_certificate_attention_preserves_security_and_names_enrollment_a
             AgentNode(
                 node_id=NODE_A,
                 state="active",
-                architecture="linux-arm64",
                 last_seen_at=NOW - timedelta(seconds=1),
+                inventory_snapshot=inventory_items_fixture(
+                    NODE_A,
+                    observed_at=NOW - timedelta(seconds=1),
+                    identity=AgentRuntimeIdentity.model_validate(
+                        {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
+                    ),
+                ),
             )
         )
         session.flush()
@@ -2731,8 +2827,14 @@ def _host_codes(host_settings: dict[str, object] | None) -> list[str]:
             AgentNode(
                 node_id=NODE_A,
                 state="active",
-                architecture="linux-arm64",
                 last_seen_at=NOW - timedelta(seconds=1),
+                inventory_snapshot=inventory_items_fixture(
+                    NODE_A,
+                    observed_at=NOW - timedelta(seconds=1),
+                    identity=AgentRuntimeIdentity.model_validate(
+                        {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
+                    ),
+                ),
             )
         )
         session.flush()
@@ -2759,20 +2861,27 @@ def _host_codes(host_settings: dict[str, object] | None) -> list[str]:
         )
     )
     InventoryRepository(sessions, clock=lambda: NOW).record(
-        InventorySnapshotInput(
-            node_id=NODE_A,
-            observed_at=report.observed_at,
-            disk_total_bytes=report.disk_total_bytes,
-            disk_free_bytes=report.disk_free_bytes,
-            host_memory_total_bytes=report.host_memory_total_bytes,
-            host_memory_free_bytes=report.host_memory_free_bytes,
-            gpu_memory_total_bytes=report.gpu_memory_total_bytes,
-            gpu_memory_free_bytes=report.gpu_memory_free_bytes,
-            gpu_count=report.gpu_count,
-            artifact_store_read_only=report.artifact_store_read_only,
-            capabilities=tuple(report.capabilities),
-            memory_pool=report.memory_pool,
-            host_settings=report.host_settings,
+        NodeInventoryReport.model_validate_json(
+            canonical_message(
+                {
+                    "node_id": NODE_A,
+                    "observed_at": report.observed_at,
+                    "disk_total_bytes": report.disk_total_bytes,
+                    "disk_free_bytes": report.disk_free_bytes,
+                    "host_memory_total_bytes": report.host_memory_total_bytes,
+                    "host_memory_free_bytes": report.host_memory_free_bytes,
+                    "gpu_memory_total_bytes": report.gpu_memory_total_bytes,
+                    "gpu_memory_free_bytes": report.gpu_memory_free_bytes,
+                    "gpu_count": report.gpu_count,
+                    "artifact_store_read_only": report.artifact_store_read_only,
+                    "capabilities": tuple(report.capabilities),
+                    "memory_pool": report.memory_pool,
+                    "host_settings": report.host_settings,
+                    "schema_version": 1,
+                    "nvidia_driver_version": "unknown",
+                    "container_runtime_version": "unknown",
+                }
+            )
         )
     )
     node = FleetProjection(sessions, clock=lambda: NOW).read().nodes[0]

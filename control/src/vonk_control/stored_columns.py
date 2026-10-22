@@ -24,14 +24,18 @@ from vonk_agent_protocol.gpu_clock import GpuClockObservation
 from vonk_agent_protocol.inventory import (
     Capability,
     HostSettings,
+    InstallationBytes,
+    InstallationId,
     ModelStoreObject,
     NetworkInterface,
+    RunScopeId,
 )
 from vonk_agent_protocol.job_inputs import RecipeJobInputManifest
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunResult
 from vonk_agent_protocol.route_activation import ActivationMarker
 from vonk_agent_protocol.runtime_preflight import RuntimePreflightRequest
 from vonk_agent_protocol.source_bundles import SourceBundleManifest
+from vonk_agent_protocol.telemetry import HostResourceSample
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition
 
 from .agent_upgrade_contract import (
@@ -139,7 +143,7 @@ bind(
 )
 bind("agent_node_profiles", "labels", ProfileLabels)
 bind("fleet_profiles", "labels", ProfileLabels)
-bind("node_inventory_snapshots", "capabilities", list[Capability])
+bind("node_inventory_snapshots", "capabilities", list[Capability], nullable=True)
 bind(
     "node_inventory_snapshots",
     "network_interfaces",
@@ -360,3 +364,29 @@ for _table in (
 from .coordinator_contract import CoordinatorFailureEvidence
 
 bind("coordinator_failures", "failure", CoordinatorFailureEvidence)
+
+from .inventory_items_contract import AgentInventoryItems
+
+bind("node_inventory_snapshots", "agent_items", AgentInventoryItems, nullable=True)
+
+bind("node_inventory_snapshots", "installations", list[InstallationId], nullable=True)
+bind("node_inventory_snapshots", "runs", list[RunScopeId], nullable=True)
+bind(
+    "node_inventory_snapshots",
+    "installation_bytes",
+    list[InstallationBytes],
+    nullable=True,
+)
+
+from .repeated_evidence_contract import RepeatedEvidence
+
+bind("agent_nodes", "contact_repeated_evidence", list[RepeatedEvidence], nullable=True)
+bind("agent_operations", "repeated_evidence", list[RepeatedEvidence], nullable=True)
+bind(
+    "fleet_profile_applications",
+    "repeated_evidence",
+    list[RepeatedEvidence],
+    nullable=True,
+)
+
+bind("node_inventory_snapshots", "host_resources", HostResourceSample, nullable=True)

@@ -9,6 +9,7 @@ from vonk_agent_protocol import (
     Disposition,
     InstallAdmissionCode,
     InvalidRequestError,
+    ProjectionCode,
     RuntimePreflightCode,
     UnknownOutcomeError,
     WaitReason,
@@ -158,6 +159,8 @@ class InstallPreflightExpired(InstallAdmissionBusy):
 UNSETTLED_PLAN_PREFIX = "Waiting for evidence: "
 
 _RETRYABLE_INSTALL_BLOCKERS = {
+    ProjectionCode.NODE_GPU_REQUIRES_RESET,
+    ProjectionCode.NODE_GPU_UNAVAILABLE,
     InstallAdmissionCode.INVENTORY_MISSING,
     InstallAdmissionCode.STALE_INVENTORY,
     InstallAdmissionCode.INSUFFICIENT_DISK,

@@ -130,3 +130,18 @@ fn helper_response_uses_required_nulls_and_strict_optional_diagnostics() {
         assert!(serde_json::from_value::<HostHelperResponse>(invalid_response).is_err());
     }
 }
+
+#[test]
+fn display_memory_shared_vectors_preserve_unknown_and_exact_observations() {
+    // Break caught: the agent drops new fields or invents a reservation for null.
+    use vonk_agent_protocol::{canonical_generated_json, generated::HostSettings, parse_strict};
+    let vectors: Vec<HostSettings> = parse_strict(include_bytes!(
+        "../../../../agent_protocol/src/vonk_agent_protocol/vectors/display-memory.json"
+    ))
+    .unwrap();
+    for host in vectors {
+        let bytes = canonical_generated_json(&host).unwrap();
+        let decoded: HostSettings = parse_strict(&bytes).unwrap();
+        assert_eq!(decoded, host);
+    }
+}

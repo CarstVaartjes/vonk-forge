@@ -7,7 +7,12 @@ from datetime import timedelta
 
 import pytest
 from vonk_agent_protocol import AgentOperation as WireOperation
-from vonk_agent_protocol import LifecycleState, ProgressPhase, ReservationState
+from vonk_agent_protocol import (
+    LifecycleState,
+    ProgressPhase,
+    ReservationState,
+    canonical_message,
+)
 from vonk_control.job_documents import RecipeBuildParent
 from vonk_control.models import AgentOperation, Job, RecipeBuild, ResourceReservation
 from vonk_control.owner_liveness import OwnerKind
@@ -157,7 +162,7 @@ def test_retry_reacquires_disk_before_dispatch_and_resumes_when_space_returns(
     from vonk_control.disk_reservations import outstanding_disk_reservation_bytes
     from vonk_control.inventory_repository import (
         InventoryRepository,
-        InventorySnapshotInput,
+        NodeInventoryReport,
     )
     from vonk_control.lifecycle_preflight import LifecyclePreflight
     from vonk_control.models import AgentCertificate
@@ -232,19 +237,26 @@ def test_retry_reacquires_disk_before_dispatch_and_resumes_when_space_returns(
 
     def inventory(free):
         InventoryRepository(sessions, clock=lambda: clock[0]).record(
-            InventorySnapshotInput(
-                node_id,
-                clock[0],
-                2 * 1024**4,
-                free,
-                100_000,
-                80_000,
-                100_000,
-                80_000,
-                1,
-                False,
-                (WireOperation.RECIPE_BUILD, "runtime.vonk.v1"),
-                memory_pool="separate",
+            NodeInventoryReport.model_validate_json(
+                canonical_message(
+                    {
+                        "node_id": node_id,
+                        "observed_at": clock[0],
+                        "disk_total_bytes": 2 * 1024**4,
+                        "disk_free_bytes": free,
+                        "host_memory_total_bytes": 100_000,
+                        "host_memory_free_bytes": 80_000,
+                        "gpu_memory_total_bytes": 100_000,
+                        "gpu_memory_free_bytes": 80_000,
+                        "gpu_count": 1,
+                        "artifact_store_read_only": False,
+                        "capabilities": (WireOperation.RECIPE_BUILD, "runtime.vonk.v1"),
+                        "memory_pool": "separate",
+                        "schema_version": 1,
+                        "nvidia_driver_version": "unknown",
+                        "container_runtime_version": "unknown",
+                    }
+                )
             )
         )
 

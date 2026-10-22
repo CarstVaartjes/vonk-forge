@@ -9,6 +9,7 @@ import pytest
 from sqlalchemy import select
 from vonk_agent_protocol import InvalidRequestReason, LifecycleState
 from vonk_agent_protocol.agent_words import ProfileOperationKind
+from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.state_machines import NodeIdentityState
 from vonk_control.coordinator_failures import CoordinatorFailures
 from vonk_control.fleet_profile_contract import (
@@ -26,6 +27,7 @@ from vonk_control.models import (
 from vonk_control.recipe_operation_worker import RecipeOperationWorker
 from vonk_control.worker import Worker
 
+from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
 from .test_profile_capacity_admission import _capacity_profile
 from .test_profile_installed_execution import _profile_service
 from .test_selected_profile_postgres import _NoopRoutes
@@ -119,7 +121,13 @@ def test_roster_repair_cannot_starve_due_admission(
             AgentNode(
                 node_id=joined,
                 state=NodeIdentityState.ACTIVE,
-                architecture="linux-arm64",
+                inventory_snapshot=inventory_items_fixture(
+                    joined,
+                    observed_at=None,
+                    identity=AgentRuntimeIdentity.model_validate(
+                        {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
+                    ),
+                ),
             )
         )
     newer = (
@@ -191,7 +199,13 @@ def test_load_accepted_during_roster_preview_keeps_precedence(
             AgentNode(
                 node_id="spk_" + "2" * 32,
                 state=NodeIdentityState.ACTIVE,
-                architecture="linux-arm64",
+                inventory_snapshot=inventory_items_fixture(
+                    "spk_" + "2" * 32,
+                    observed_at=None,
+                    identity=AgentRuntimeIdentity.model_validate(
+                        {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
+                    ),
+                ),
             )
         )
     preview = profiles.preview

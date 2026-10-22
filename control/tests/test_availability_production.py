@@ -23,6 +23,7 @@ from vonk_agent_protocol import (
     LifecycleState,
     canonical_message,
 )
+from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_control import availability_production
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.availability_production import (
@@ -64,6 +65,7 @@ from vonk_control.runtime_image_preparation import (
 from vonk_control.source_policy import SourcePolicyFinding, SourcePolicyReport
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
+from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
 from .runtime_image_fixtures import place_test_image
 from .test_recipe_builds import _write_controller_build_receipt
 from .test_recipe_builds import setup as _build_setup
@@ -259,31 +261,38 @@ def test_recipe_download_api_reuses_verified_cached_source_build(
         reobserver.calls = 0
         from vonk_control.inventory_repository import (
             InventoryRepository,
-            InventorySnapshotInput,
+            NodeInventoryReport,
         )
 
         now += timedelta(seconds=1)
         inventory = InventoryRepository(sessions, clock=lambda: now)
         inventory.record(
-            InventorySnapshotInput(
-                node_id,
-                now,
-                2 * 1024**4,
-                1024**4,
-                1024**4,
-                1024**4,
-                1024**4,
-                1024**4,
-                1,
-                False,
-                (
-                    "recipe.build.v1",
-                    "recipe.build.egress-proxy.v1",
-                    "recipe.image.import.v1",
-                    "runtime.vonk.v1",
-                    "recipe.image.pull.v1",
-                ),
-                memory_pool="separate",
+            NodeInventoryReport.model_validate_json(
+                canonical_message(
+                    {
+                        "node_id": node_id,
+                        "observed_at": now,
+                        "disk_total_bytes": 2 * 1024**4,
+                        "disk_free_bytes": 1024**4,
+                        "host_memory_total_bytes": 1024**4,
+                        "host_memory_free_bytes": 1024**4,
+                        "gpu_memory_total_bytes": 1024**4,
+                        "gpu_memory_free_bytes": 1024**4,
+                        "gpu_count": 1,
+                        "artifact_store_read_only": False,
+                        "capabilities": (
+                            "recipe.build.v1",
+                            "recipe.build.egress-proxy.v1",
+                            "recipe.image.import.v1",
+                            "runtime.vonk.v1",
+                            "recipe.image.pull.v1",
+                        ),
+                        "memory_pool": "separate",
+                        "schema_version": 1,
+                        "nvidia_driver_version": "unknown",
+                        "container_runtime_version": "unknown",
+                    }
+                )
             )
         )
     plan = builds.plan(revision.id, node_id, now=now)
@@ -732,7 +741,13 @@ def test_builder_reuses_selected_plan_without_a_second_capacity_admission(
             AgentNode(
                 node_id="builder-node-000000000000000000000000000000",
                 state="active",
-                architecture="linux-arm64",
+                inventory_snapshot=inventory_items_fixture(
+                    "builder-node-000000000000000000000000000000",
+                    observed_at=None,
+                    identity=AgentRuntimeIdentity.model_validate(
+                        {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
+                    ),
+                ),
             )
         )
         session.add(
@@ -905,7 +920,17 @@ def test_busy_spark_makes_build_wait_until_it_is_idle(tmp_path) -> None:
 
     with sessions.begin() as session:
         session.add(
-            AgentNode(node_id=node_id, state="active", architecture="linux-arm64")
+            AgentNode(
+                node_id=node_id,
+                state="active",
+                inventory_snapshot=inventory_items_fixture(
+                    node_id,
+                    observed_at=None,
+                    identity=AgentRuntimeIdentity.model_validate(
+                        {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
+                    ),
+                ),
+            )
         )
         session.add(
             availability_job(
@@ -1094,7 +1119,17 @@ def test_a_prebuilt_pull_does_not_wait_for_a_free_builder_and_holds_none(
 
     with sessions.begin() as session:
         session.add(
-            AgentNode(node_id=node_id, state="active", architecture="linux-arm64")
+            AgentNode(
+                node_id=node_id,
+                state="active",
+                inventory_snapshot=inventory_items_fixture(
+                    node_id,
+                    observed_at=None,
+                    identity=AgentRuntimeIdentity.model_validate(
+                        {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
+                    ),
+                ),
+            )
         )
         # Another preparation holds the only builder (it is waiting for its
         # model, no image yet).
@@ -1255,7 +1290,17 @@ def test_a_prebuilt_pull_does_not_occupy_the_builder_a_spark_build_needs(
 
     with sessions.begin() as session:
         session.add(
-            AgentNode(node_id=node_id, state="active", architecture="linux-arm64")
+            AgentNode(
+                node_id=node_id,
+                state="active",
+                inventory_snapshot=inventory_items_fixture(
+                    node_id,
+                    observed_at=None,
+                    identity=AgentRuntimeIdentity.model_validate(
+                        {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
+                    ),
+                ),
+            )
         )
         # A preparation pulling a prebuilt image on this nominal builder, and a
         # prebuilt build job the Controller executes: neither holds the Spark.
@@ -1468,7 +1513,13 @@ def test_builder_parent_preserves_typed_failure_and_retry_policy(
             AgentNode(
                 node_id=builder_node_id,
                 state="active",
-                architecture="linux-arm64",
+                inventory_snapshot=inventory_items_fixture(
+                    builder_node_id,
+                    observed_at=None,
+                    identity=AgentRuntimeIdentity.model_validate(
+                        {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
+                    ),
+                ),
             )
         )
 
@@ -1793,7 +1844,13 @@ def test_postgres_builder_transaction_does_not_cross_session_block(
                 AgentNode(
                     node_id=node_id,
                     state="active",
-                    architecture="linux-arm64",
+                    inventory_snapshot=inventory_items_fixture(
+                        node_id,
+                        observed_at=None,
+                        identity=AgentRuntimeIdentity.model_validate(
+                            {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
+                        ),
+                    ),
                 )
                 for node_id in node_ids
             ]
@@ -2172,7 +2229,13 @@ def test_postgres_connected_source_build_queues_model_child_until_builder_eligib
             AgentNode(
                 node_id="spk_" + "7" * 32,
                 state="active",
-                architecture="linux-arm64",
+                inventory_snapshot=inventory_items_fixture(
+                    "spk_" + "7" * 32,
+                    observed_at=None,
+                    identity=AgentRuntimeIdentity.model_validate(
+                        {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
+                    ),
+                ),
             )
         )
         session.commit()

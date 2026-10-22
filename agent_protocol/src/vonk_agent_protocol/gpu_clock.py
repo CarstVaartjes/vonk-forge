@@ -95,6 +95,7 @@ class GpuClockMetric(WireEnum):
 
 
 class GpuClockUnavailableReason(WireEnum):
+    REQUIRES_RESET = "requires-reset"
     NOT_SUPPORTED = "not-supported"
     COMMAND_FAILED = "command-failed"
     INVALID_OUTPUT = "invalid-output"

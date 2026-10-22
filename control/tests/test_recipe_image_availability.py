@@ -45,6 +45,7 @@ from vonk_control.model_cache_contract import (
     ModelCacheDownloadPreviewResponse,
     ModelCacheOperationProgress,
     ModelCacheRepairPreviewResponse,
+    ModelCacheSetState,
 )
 from vonk_control.model_cache_progress import cache_progress, progress_document
 from vonk_control.models import (
@@ -142,7 +143,7 @@ def _repair_preview(*, artifact_set_sha256: str, plan_digest: str):
         artifact_set_sha256=artifact_set_sha256,
         plan_digest=plan_digest,
         artifact_count=0,
-        current_state="failed",
+        current_state=ModelCacheSetState.FAILED,
         expected_bytes=0,
         verified_bytes=0,
     ).model_dump(mode="json")

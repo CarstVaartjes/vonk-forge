@@ -1085,3 +1085,64 @@ def test_clock_unavailable_readings_name_reason_and_receipt_cause(capsys):
     output = capsys.readouterr().out
     assert "graphics 0 / SM not supported (driver returned [N/A])" in output
     assert "helper receipt unavailable; inventory retries" in output
+
+
+def test_fleet_shows_gpu_reset_warning_and_physical_recovery(capsys):
+    # Catches rendering a broken GPU as ordinary online/idle metrics absence.
+    from vonk_agent_protocol import ProjectionCode
+    from vonk_agent_protocol.agent_words import ProfileReasonSeverity
+    from vonk_agent_protocol.inventory import GPU_RESET_RECOVERY
+
+    spark = _wifi_spark()
+    spark["warnings"] = [
+        {
+            "code": ProjectionCode.NODE_GPU_REQUIRES_RESET,
+            "detail": f"GPU requires reset. {GPU_RESET_RECOVERY}",
+            "severity": ProfileReasonSeverity.WARNING.value,
+        }
+    ]
+    render_payload(spark, "fleet", action="detail")
+    captured = capsys.readouterr()
+    assert "GPU requires reset" in captured.err
+    assert GPU_RESET_RECOVERY in captured.err
+
+
+def test_model_listing_explains_measured_unique_bytes_and_retained_owner(capsys):
+    """Catches a JSON-only accounting fix that hides the retained owner in the CLI."""
+    from cluster_profiles.generated_control.models.model_cache_usage import (
+        ModelCacheUsage,
+    )
+    from cluster_profiles.generated_control.models.retained_model_revision import (
+        RetainedModelRevision,
+    )
+
+    usage = ModelCacheUsage(
+        disk_bytes=12,
+        unique_bytes=3,
+        shared_bytes=9,
+        retained_revisions=[
+            RetainedModelRevision(
+                content_sha256="a" * 64, unique_bytes=2, owners=["installation owner-1"]
+            )
+        ],
+    )
+    render_payload(
+        {
+            "models": [
+                {
+                    "selector": "test/model",
+                    "identity": {"slug": "model"},
+                    "local": {"controller": "cached", "running_on": []},
+                    "resources": {"disk_bytes": 12},
+                    "cache_usage": usage.to_dict(),
+                }
+            ],
+            "next_cursor": None,
+        },
+        "model",
+        action="library",
+    )
+    output = capsys.readouterr().out
+    assert "12 B" in output and "3 B" in output and "9 B" in output
+    assert "Previous revision retained because installation owner-1" in output
+    assert "2 B unique" in output

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import time
 import uuid
@@ -33,7 +34,8 @@ from ..download_contract import download_responses
 from ..inventory_repository import (
     MAX_INVENTORY_FUTURE_SKEW,
     InventoryRepository,
-    InventorySnapshotInput,
+    NodeInventoryReport,
+    _validated_inventory,
 )
 from ..library_contract import UuidId
 from ..logging import log_event
@@ -52,13 +54,16 @@ from ..presence import PresenceError
 from ..recipe_operations import prepare_exact_recipe_run_observation_nodes
 from ..source_bundles import SourceBundleError
 from ..spark_store_retention import store_retention_request
-from ..telemetry import TelemetryRepository, TelemetrySampleInput
-from ..untracked_installations import untracked_installations, untracked_runs
+from ..telemetry import TelemetryRepository
+from ..untracked_installations import (
+    node_run_ids,
+    untracked_installations,
+    untracked_runs,
+)
 from .common import (
     _CANONICAL_UUID,
     _DIGEST,
     _LOGGER,
-    _TELEMETRY_FIELDS,
     RANK_UNREADY_GRACE,
     RECIPE_RUN_DISPOSITION_HEADER,
     RECIPE_RUN_GENERATION_HEADER,
@@ -176,34 +181,17 @@ def install_observations_routes(
             snapshot = InventoryRepository(
                 required.sessions, clock=required.clock
             ).record(
-                InventorySnapshotInput(
-                    node_id=identity.node_id,
-                    observed_at=observed_at,
-                    disk_total_bytes=body.disk_total_bytes,
-                    disk_free_bytes=body.disk_free_bytes,
-                    host_memory_total_bytes=body.host_memory_total_bytes,
-                    host_memory_free_bytes=body.host_memory_free_bytes,
-                    gpu_memory_total_bytes=body.gpu_memory_total_bytes,
-                    gpu_memory_free_bytes=body.gpu_memory_free_bytes,
-                    gpu_count=body.gpu_count,
-                    memory_pool=body.memory_pool,
-                    artifact_store_read_only=body.artifact_store_read_only,
-                    capabilities=tuple(body.capabilities),
-                    fabric_address=fabric_address,
-                    fabric_bandwidth_mbps=fabric_bandwidth_mbps,
-                    nvidia_driver_version=body.nvidia_driver_version,
-                    container_runtime_version=body.container_runtime_version,
-                    network_interfaces=(
-                        None
-                        if body.network_interfaces is None
-                        else tuple(body.network_interfaces)
-                    ),
-                    nas_route_interface=body.nas_route_interface,
-                    host_settings=body.host_settings,
-                    unused_model_bytes=body.unused_model_bytes,
-                    model_objects=body.model_objects,
+                NodeInventoryReport.model_validate_json(
+                    canonical_message(
+                        {
+                            **body.model_dump(mode="json"),
+                            "node_id": identity.node_id,
+                            "observed_at": observed_at,
+                            "fabric_address": fabric_address,
+                            "fabric_bandwidth_mbps": fabric_bandwidth_mbps,
+                        }
+                    )
                 ),
-                report=body,
             )
         except ValueError as error:
             raise HTTPException(status_code=422, detail=str(error)) from None
@@ -213,20 +201,25 @@ def install_observations_routes(
         clock_authority = (
             required.host_runtime_authority if body.host_settings is not None else None
         )
-        if body.installations is None and body.runs is None and clock_authority is None:
+        stored_report = _validated_inventory(snapshot, observed_at=observed_at)
+        if (
+            stored_report.installations is None
+            and stored_report.runs is None
+            and clock_authority is None
+        ):
             # An older agent, or one that could not list them: no verdict.
             return Response(status_code=status.HTTP_204_NO_CONTENT)
         with required.sessions() as session:
             verdict = InventoryVerdict(
                 store_retention=store_retention_request(session, identity.node_id, now),
                 untracked_installations=untracked_installations(
-                    session, body.installations or ()
+                    session, identity.node_id, stored_report.installations or ()
                 ),
                 # Absent unless the runs were named: an older agent's strict
                 # reader never sees the field.
                 untracked_runs=None
-                if body.runs is None
-                else untracked_runs(session, body.runs),
+                if stored_report.runs is None
+                else untracked_runs(session, identity.node_id, stored_report.runs),
             )
         if clock_authority is not None:
             try:
@@ -258,13 +251,7 @@ def install_observations_routes(
         try:
             TelemetryRepository(required.sessions, clock=required.clock).record_batch(
                 identity.node_id,
-                tuple(
-                    TelemetrySampleInput(
-                        boot_id=uuid.UUID(sample.boot_id),
-                        **{name: getattr(sample, name) for name in _TELEMETRY_FIELDS},
-                    )
-                    for sample in body.samples
-                ),
+                body.samples,
             )
         except ValueError as error:
             raise HTTPException(status_code=422, detail=str(error)) from None
@@ -280,12 +267,13 @@ def install_observations_routes(
         identity = _authenticated_identity(request, required)
         observed_at = body.observed_at.astimezone(UTC)
         now = _now(required.clock()).astimezone(UTC)
-        if observed_at > now + timedelta(seconds=30) or now - observed_at > timedelta(
-            minutes=5
-        ):
+        # Old content may be a durable replay after a lost acknowledgement.
+        # Per-rank generation and observed_at comparisons below fence it from
+        # newer intent/evidence. Its original time must never be refreshed.
+        if observed_at > now + timedelta(seconds=30):
             raise HTTPException(
                 status_code=422,
-                detail="recipe run observation time is outside the accepted window",
+                detail="recipe run observation time is in the future",
             )
         # One stale or no-longer-assigned run must not discard the evidence
         # for every other run in the report: each run is judged on its own.
@@ -369,10 +357,8 @@ def install_observations_routes(
                             and evidence.failure_diagnostics
                         ):
                             # The exit's cause outlives the settle it allows.
-                            node.last_exit_diagnostics = (
-                                evidence.failure_diagnostics.model_dump(
-                                    mode="json", exclude_none=True
-                                )
+                            node.last_exit_diagnostics = json.loads(
+                                canonical_message(evidence.failure_diagnostics)
                             )
                         continue
                     if node.state not in {RunState.RUNNING, RunState.FAILED} or (
@@ -467,9 +453,7 @@ def install_observations_routes(
                     node.observed_run_generation = run.run_generation
                     node.observation_process_running = evidence.process_running
                     node.observation_failure_diagnostics = (
-                        evidence.failure_diagnostics.model_dump(
-                            mode="json", exclude_none=True
-                        )
+                        json.loads(canonical_message(evidence.failure_diagnostics))
                         if not evidence.process_running and evidence.failure_diagnostics
                         else None
                     )
@@ -489,17 +473,10 @@ def install_observations_routes(
                     ):
                         schedule_wait(run, None)
                         run.updated_at = max(_now(run.updated_at).astimezone(UTC), now)
-                if (
-                    rejected
-                    and not accepted
-                    and not all(
-                        reason.endswith(("is not assigned", "observation is stale"))
-                        for reason in rejected
-                    )
-                ):
-                    # Nothing in this report was usable; report the cause so
-                    # the agent's log names it.  No state changed.
-                    raise ValueError("; ".join(rejected[:4]))
+                # Obsolete generations/assignments are consumed without effects.
+                # A durable replay must not become a permanent rejection after
+                # newer authorized intent supersedes it; the next page replans.
+
         except ValueError as error:
             raise HTTPException(status_code=422, detail=str(error)) from None
         request.state.observation_acceptance = ObservationAcceptance(
@@ -545,20 +522,26 @@ def install_observations_routes(
     def recipe_run_disposition(run_id: str, request: Request) -> Response:
         """Say whether this Controller still wants one local run.
 
-        Only a run the Controller can still stop is wanted (planned, starting,
-        running, stopping, lost). Any other run, including one this Controller
-        never owned (for example after its database was rebuilt) or one it
+        Only a run assigned to this Spark that the Controller can still stop is
+        wanted (planned, starting, running, stopping, lost). Any other run,
+        including one this Controller never owned (for example after its
+        database was rebuilt) or one it
         failed or stopped, is named ``unowned``: it holds no capacity here, so
         the agent retires its local lifecycle instead of keeping it forever.
-        The agent asks only once the process is gone: a process still running
-        for an ended run is reported, and that report reopens the run as lost.
+        The agent retires only after proving the process gone. A process still
+        running for an ended run is reported, reopening it as lost.
         """
 
-        helper_identity(request)
+        identity = helper_identity(request)
         if _CANONICAL_UUID.fullmatch(run_id) is None:
             raise HTTPException(status_code=422, detail="recipe run id is invalid")
         with _require_services(services).sessions() as session:
-            run = session.get(RecipeRun, run_id)
+            run = session.scalar(
+                select(RecipeRun).where(
+                    RecipeRun.id == run_id,
+                    RecipeRun.id.in_(node_run_ids(identity.node_id)),
+                )
+            )
             wanted = run is not None and run.state in STOPPABLE_RUN_STATES
             # A lost run (a cancelled start left it so) is reported on too: the
             # agent's word that its process is gone releases its claims.

@@ -152,21 +152,25 @@ paths, and retries failed removals on later passes. Running workloads, the loade
 profile and live operations retain their exact assets. Terminal artifact jobs
 and their unreferenced evidence also use a 24-hour grace.
 
-Model files are different: NAS model files and shared Spark model objects stay
-until disk pressure requires least-recently-used eviction. Automatic installation
-removal retains the shared model files, even when it removes the last installation
-link. Pressure can also remove younger unused installations or runtime images.
+Spark model copies also expire after 24 hours without an installation, run or
+live operation using them. Shared files stay while any installation links or
+names them. The inode change time records the last installation link added or
+removed, so dropping the final link starts a full 24-hour grace. A later load
+copies a collected object from the NAS through the normal cache-miss path.
+NAS model files stay until disk pressure requires least-recently-used eviction.
+Pressure can also remove younger unused Spark copies, installations or runtime images.
 
 The inventory response carries the current waiting load's disk target and the
-model objects and image addresses protected by profiles and live operations.
+model objects and image addresses protected by live operations.
 The agent publishes this expiring reference scan for its LRU and the helper's
 image collector. Both check at least once a minute between claims. The model
 LRU frees objects up to the load's target even above the low-space line; the
 helper also removes younger unused images while that target remains unmet.
 Local installation plans, hard links, active pulls and Docker's container
 references continue to protect content. An image pulled after the reference
-scan waits for a later scan before pressure can remove it. Missing, unreadable
-or expired reference evidence defers collection; it never means no references.
+scan waits for a later scan before pressure can remove it. Local ownership and the last readable Controller protection set protect content
+when fresh reference evidence is unavailable. Only a current projection
+authorizes explicit identity-selected removal.
 
 A Spark or the NAS counts as low when its free space is below the larger of 10 %
 of its capacity and the largest install (Spark) or model set (NAS) it has held,

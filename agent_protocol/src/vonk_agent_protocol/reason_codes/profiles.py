@@ -79,6 +79,8 @@ class ProjectionCode(WireEnum):
     HOST_DESKTOP_RUNNING = "host.desktop-running"
     #: The Spark boots to the desktop.
     HOST_DESKTOP_AT_BOOT = "host.desktop-at-boot"
+    #: Informational display reservation recommendation; never admission policy.
+    HOST_DISPLAY_MEMORY = "host.display-memory"
     #: The GPU clock ceiling is not applied: sustained load can power it off.
     HOST_GPU_CLOCK_UNCAPPED = "host.gpu-clock-uncapped"
     MODEL_STORE_LAYOUT = "model.store_layout"
@@ -92,6 +94,8 @@ class ProjectionCode(WireEnum):
     )
     #: Measured: this Spark's recent copies from the NAS are far slower than another's.
     NETWORK_NAS_TRANSFER_SLOW = "network.nas-transfer-slow"
+    NODE_GPU_REQUIRES_RESET = "node.gpu_requires_reset"
+    NODE_GPU_UNAVAILABLE = "node.gpu_unavailable"
     NODE_OFFLINE = "node.offline"
     PROFILE_RETRYING = "profile.retrying"
     RECIPE_UPDATE_AVAILABLE = "recipe.update_available"

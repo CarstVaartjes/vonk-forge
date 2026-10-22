@@ -17,6 +17,7 @@ from ..agent_upgrade_status import (
     operator_agent_upgrade_reason,
 )
 from ..bounded_json import mapping
+from ..inventory_items import runtime_value
 from ..lifecycle.agent_operation import retry_scheduled
 from ..logging import redact_text
 from ..models import AgentNode, AgentOperation, AgentOperationAttempt, Job
@@ -125,10 +126,18 @@ def _agent_upgrade_diagnostics(
                 attempt_count=(0 if operation is None else operation.current_attempt),
                 package=package.model_dump(mode="json"),
                 observed_semantic_version=(
-                    None if node is None else node.semantic_version
+                    None
+                    if node is None
+                    else runtime_value(node, lambda identity: identity.semantic_version)
                 ),
-                observed_binary_digest=(None if node is None else node.binary_digest),
-                observed_build_digest=None if node is None else node.build_digest,
+                observed_binary_digest=(
+                    None
+                    if node is None
+                    else runtime_value(node, lambda identity: identity.binary_digest)
+                ),
+                observed_build_digest=None
+                if node is None
+                else runtime_value(node, lambda identity: identity.build_digest),
                 raw_reason=raw_reason,
                 retry_queued=retry_queued,
             )
@@ -139,9 +148,17 @@ def _agent_upgrade_diagnostics(
                 attempts=0 if operation is None else operation.current_attempt,
                 target_proven=target_proven,
                 observed_identity=AgentUpgradeIdentityResponse(
-                    version=None if node is None else node.semantic_version,
-                    binary_digest=None if node is None else node.binary_digest,
-                    build_digest=None if node is None else node.build_digest,
+                    version=None
+                    if node is None
+                    else runtime_value(
+                        node, lambda identity: identity.semantic_version
+                    ),
+                    binary_digest=None
+                    if node is None
+                    else runtime_value(node, lambda identity: identity.binary_digest),
+                    build_digest=None
+                    if node is None
+                    else runtime_value(node, lambda identity: identity.build_digest),
                 ),
                 raw_reason=raw_reason,
                 retry_not_before=retry_not_before,

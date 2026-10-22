@@ -125,7 +125,7 @@ impl<R: ProcessRunner, F: FileSystemProvider> TelemetryCollector<R, F> {
                 parse_first_accelerator(&output.stdout)
                     .ok_or(GpuUnavailableReason::GpuInvalidOutput)
             });
-        let gpu_unavailable_reason = match &accelerator_result {
+        let mut gpu_unavailable_reason = match &accelerator_result {
             Err(reason) => Some(*reason),
             Ok(value)
                 if value.utilization.is_none()
@@ -144,6 +144,29 @@ impl<R: ProcessRunner, F: FileSystemProvider> TelemetryCollector<R, F> {
             .as_ref()
             .filter(|value| !shared_memory_pool(Some(value.name.as_str())))
             .and_then(|value| value.memory);
+        let mut gpu_clock = collect_gpu_clock(
+            &self.runner,
+            &self.boot_id,
+            Path::new("/var/lib/vonk-forge"),
+        );
+        // Available sensor values do not prove device health when clock
+        // readings fail. N/A alone is not a reset; the shared NVML probe decides.
+        if (gpu_unavailable_reason.is_some()
+            || gpu_clock
+                .unavailable
+                .as_ref()
+                .is_some_and(|readings| !readings.is_empty()))
+            && crate::gpu_health::observe(&self.runner)
+                == vonk_agent_protocol::generated::GpuHealth::NeedsReset
+        {
+            gpu_unavailable_reason = Some(GpuUnavailableReason::GpuRequiresReset);
+            for reading in gpu_clock.unavailable.iter_mut().flatten() {
+                reading.reason =
+                    vonk_agent_protocol::generated::GpuClockUnavailableReason::RequiresReset;
+                reading.detail =
+                    "GPU requires reset; see the fleet health warning for recovery.".to_owned();
+            }
+        }
         TelemetrySample {
             boot_id: self.boot_id,
             observed_at: observed_at.fixed_offset(),
@@ -156,11 +179,7 @@ impl<R: ProcessRunner, F: FileSystemProvider> TelemetryCollector<R, F> {
             gpu_memory_total_bytes: dedicated.map(|value| value.0),
             gpu_memory_free_bytes: dedicated.map(|value| value.1),
             gpu_temperature_c: accelerator.as_ref().and_then(|value| value.temperature_c),
-            gpu_clock: Some(collect_gpu_clock(
-                &self.runner,
-                &self.boot_id,
-                Path::new("/var/lib/vonk-forge"),
-            )),
+            gpu_clock: Some(gpu_clock),
             cpu_frequency_avg_mhz: cpu_frequency.map(|value| value.avg_mhz),
             cpu_frequency_min_mhz: cpu_frequency.map(|value| value.min_mhz),
             cpu_frequency_max_mhz: cpu_frequency.and_then(|value| value.max_mhz),

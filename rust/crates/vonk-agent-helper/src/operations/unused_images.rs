@@ -12,20 +12,24 @@
 //!
 //! Docker refuses to remove an image a container still uses, a stopped one
 //! included, so such an image stays with that container. A pass that cannot
-//! read what the installations name removes nothing.
+//! read what the installations name removes nothing. Receiptless Docker
+//! images in the managed namespace get a durable local discovery grace too.
 
 use super::*;
 
 /// How long an image no installation names stays after its last pull.
-pub const UNUSED_IMAGE_GRACE: Duration = Duration::from_secs(24 * 60 * 60);
+pub const UNUSED_IMAGE_GRACE: Duration = vonk_agent_protocol::store_retention::GRACE;
 /// How often the helper looks for unused images.
 pub const UNUSED_IMAGE_SWEEP_INTERVAL: Duration = Duration::from_secs(60);
 /// One `docker image rm` of a large image.
 const IMAGE_REMOVE_TIMEOUT: Duration = Duration::from_secs(120);
 
 impl<R: CommandRunner> OperationExecutor<R> {
-    /// One bounded pass; what it cannot remove now waits for the next one.
+    /// Retire unowned exited containers before collecting their images.
+    /// What this periodic pass cannot remove waits for the next one.
     pub fn sweep_unused_runtime_images(&self) {
+        self.sweep_stray_jobs();
+        self.sweep_exited_serving();
         self.sweep_unused_runtime_images_at(std::time::SystemTime::now());
     }
 
@@ -53,6 +57,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
                 return;
             }
         };
+        self.collect_unreceipted_images(&named, retention.as_ref(), grace);
         let entries = match fs::read_dir(&self.roots.runtime_image_receipts) {
             Ok(entries) => entries,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return,
@@ -127,12 +132,209 @@ impl<R: CommandRunner> OperationExecutor<R> {
         }
     }
 
+    /// Discover images from Docker itself, including leftovers with no receipt.
+    /// Keep aliases of any protected content, and every image a container names.
+    fn collect_unreceipted_images(
+        &self,
+        named: &HashSet<String>,
+        retention: Option<&vonk_agent_protocol::generated::StoreRetentionRequest>,
+        grace: Duration,
+    ) {
+        let _pulls = match self.image_pulls.try_write() {
+            Ok(guard) => guard,
+            Err(std::sync::TryLockError::Poisoned(guard)) => guard.into_inner(),
+            Err(std::sync::TryLockError::WouldBlock) => return,
+        };
+        let _launches = match self.runtime_stores.try_write() {
+            Ok(guard) => guard,
+            Err(std::sync::TryLockError::Poisoned(guard)) => guard.into_inner(),
+            Err(std::sync::TryLockError::WouldBlock) => return,
+        };
+        let listing = self.run_docker_with_timeout(
+            &[
+                "images",
+                "--all",
+                "--no-trunc",
+                "--filter",
+                "reference=localhost/vonk/*",
+                "--format",
+                "{{.Repository}}:{{.Tag}}\t{{.ID}}",
+            ]
+            .map(str::to_owned),
+            Duration::from_secs(15),
+        );
+        let listing = match listing {
+            Ok(output) if output.success => output,
+            other => {
+                eprintln!(
+                    "vonk-agent-helper: Docker image inventory unavailable: {other:?}; retried next pass"
+                );
+                return;
+            }
+        };
+        let Ok(text) = std::str::from_utf8(&listing.stdout) else {
+            return;
+        };
+        let images: Vec<_> = text
+            .lines()
+            .filter_map(|line| line.split_once('\t'))
+            .collect();
+        let protected = |reference: &str| {
+            let name = reference.split(':').next().unwrap_or_default();
+            let address = name.rsplit('-').next().unwrap_or_default();
+            named.contains(address)
+                || retention.is_some_and(|request| {
+                    request
+                        .protected_image_addresses
+                        .iter()
+                        .any(|kept| kept == address)
+                })
+                || self.read_image_receipt(address).is_ok()
+        };
+        let kept: HashSet<_> = images
+            .iter()
+            .filter(|(reference, _)| protected(reference))
+            .map(|(_, id)| *id)
+            .collect();
+        if fs::create_dir_all(&self.roots.runtime_image_receipts).is_err() {
+            return;
+        }
+        let configs: HashSet<_> = images.iter().map(|(_, id)| *id).collect();
+        if let Ok(markers) = fs::read_dir(&self.roots.runtime_image_receipts) {
+            for entry in markers.flatten() {
+                if let Some(config) = entry
+                    .file_name()
+                    .to_str()
+                    .and_then(|name| name.strip_prefix(".untracked-"))
+                    .filter(|config| lower_hex(config, 64))
+                    && !configs.contains(format!("sha256:{config}").as_str())
+                {
+                    let _ = fs::remove_file(entry.path());
+                }
+            }
+        }
+        let deadline = Instant::now() + Duration::from_secs(60);
+        for (reference, id) in images {
+            if Instant::now() >= deadline {
+                break;
+            }
+            let repository = reference.split(':').next().unwrap_or_default();
+            if ![
+                "localhost/vonk/compiled-runtime-",
+                "localhost/vonk/runtime-adapter-",
+                "localhost/vonk/recipe-build-",
+            ]
+            .iter()
+            .any(|prefix| repository.starts_with(prefix))
+                || !id
+                    .strip_prefix("sha256:")
+                    .is_some_and(|id| lower_hex(id, 64))
+            {
+                continue;
+            }
+            let marker = self
+                .roots
+                .runtime_image_receipts
+                .join(format!(".untracked-{}", &id[7..]));
+            if kept.contains(id) {
+                let _ = fs::remove_file(&marker);
+                continue;
+            }
+            match self.image_has_no_containers(id) {
+                Some(true) => {}
+                Some(false) => {
+                    let _ = fs::remove_file(&marker);
+                    continue;
+                }
+                None => continue,
+            }
+            // Docker's Created is the upstream build time, not the local pull
+            // time. A receiptless image starts a local grace when discovered;
+            // a crash between tagging and receipt publication cannot shorten it.
+            match OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .mode(0o600)
+                .open(&marker)
+            {
+                Ok(_) => continue,
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+                Err(error) => {
+                    eprintln!("vonk-agent-helper: orphan image {id} grace unavailable: {error}");
+                    continue;
+                }
+            }
+            if !fs::symlink_metadata(&marker).is_ok_and(|metadata| {
+                metadata.is_file()
+                    && metadata.uid() == rustix::process::geteuid().as_raw()
+                    && metadata
+                        .modified()
+                        .is_ok_and(|time| time.elapsed().is_ok_and(|age| age >= grace))
+            }) {
+                continue;
+            }
+            let inspected = self.run_docker_with_timeout(
+                &Self::image_inspection_arguments(reference, "{{.Id}}"),
+                Duration::from_secs(15),
+            );
+            let Ok(output) = inspected else { continue };
+            if !output.success {
+                continue;
+            }
+            let Ok(fields) = std::str::from_utf8(&output.stdout) else {
+                continue;
+            };
+            if fields.trim() != id {
+                continue;
+            }
+            // Pulls and launches are fenced above. Remove each owned alias
+            // without force so shared tags do not strand the entire image.
+            if let Err(error) = self
+                .run_docker_with_timeout(
+                    &["rmi", reference].map(str::to_owned),
+                    IMAGE_REMOVE_TIMEOUT,
+                )
+                .and_then(|output| {
+                    if output.success {
+                        Ok(())
+                    } else {
+                        Err(CommandFailure::exit(&output).into())
+                    }
+                })
+            {
+                eprintln!("vonk-agent-helper: orphan image {id} kept: {error}; retried next pass");
+            }
+        }
+    }
+
+    fn image_has_no_containers(&self, image: &str) -> Option<bool> {
+        match self.run_docker_with_timeout(
+            &[
+                "container".to_owned(),
+                "ls".to_owned(),
+                "--all".to_owned(),
+                "--quiet".to_owned(),
+                "--filter".to_owned(),
+                format!("ancestor={image}"),
+            ],
+            Duration::from_secs(15),
+        ) {
+            Ok(output) if output.success => Some(output.stdout.iter().all(u8::is_ascii_whitespace)),
+            other => {
+                eprintln!(
+                    "vonk-agent-helper: container references for image {image} unavailable: {other:?}; retried next pass"
+                );
+                None
+            }
+        }
+    }
+
     /// An agent-owned projection of the Controller's reference scan. Stale
     /// protections still narrow collection; unreadable evidence retains the
     /// age grace and all local installation, pull and container checks.
     /// This only narrows autonomous cache collection; it never authorizes a
     /// container removal or bypasses Docker's in-use image check.
-    fn store_retention_request(
+    pub(super) fn store_retention_request(
         &self,
     ) -> Option<vonk_agent_protocol::generated::StoreRetentionRequest> {
         let file = OpenOptions::new()
@@ -167,6 +369,14 @@ impl<R: CommandRunner> OperationExecutor<R> {
             Err(std::sync::TryLockError::Poisoned(guard)) => guard.into_inner(),
             Err(std::sync::TryLockError::WouldBlock) => return,
         };
+        let _launches = match self.runtime_stores.try_write() {
+            Ok(guard) => guard,
+            Err(std::sync::TryLockError::Poisoned(guard)) => guard.into_inner(),
+            Err(std::sync::TryLockError::WouldBlock) => return,
+        };
+        if self.image_has_no_containers(image) != Some(true) {
+            return;
+        }
         let receipt = self.roots.runtime_image_receipts.join(address);
         // A receipt dated ahead of the clock reads as just pulled.
         let Some(unused_for) = fs::symlink_metadata(&receipt)

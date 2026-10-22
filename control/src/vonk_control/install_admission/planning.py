@@ -32,13 +32,14 @@ from ..disk_reservations import (
     models_stored_on_node,
     outstanding_disk_charges,
 )
+from ..gpu_health import gpu_health_reason
+from ..inventory_items import inventory_artifacts, inventory_items
 from ..inventory_repository import InventoryRepository, InventorySnapshotView
 from ..legal_admission import territorial_admission
 from ..models import (
     AgentNode,
     ClusterMapping,
     ClusterMappingNode,
-    NodeArtifact,
     RecipeBuild,
 )
 from ..recipe_runtime_specs import (
@@ -168,7 +169,7 @@ class InstallPlanningService:
                         node.node_id,
                         requirements_sha256=request_digest(preflight_request),
                     ),
-                    current_fingerprint=node.preflight_fingerprint,
+                    current_fingerprint=inventory_items(node).preflight_fingerprint,
                     now=int(now.timestamp()),
                 )
                 for node in nodes
@@ -377,6 +378,9 @@ class InstallPlanningService:
                     )
                 )
             snapshot = inventory_by_node.get(mapping_node.node_id)
+            health_reason = gpu_health_reason(snapshot.gpu_health if snapshot else None)
+            if health_reason is not None:
+                blockers.append(AdmissionReason(*health_reason))
             if snapshot is None:
                 blockers.append(
                     AdmissionReason(
@@ -402,12 +406,9 @@ class InstallPlanningService:
                 nullcontext(_session) if _session is not None else self._sessions()
             ) as session:
                 present = tuple(
-                    session.scalars(
-                        select(NodeArtifact).where(
-                            NodeArtifact.node_id == mapping_node.node_id,
-                            NodeArtifact.state == ModelFileState.VERIFIED,
-                        )
-                    )
+                    item
+                    for item in inventory_artifacts(session, mapping_node.node_id)
+                    if item.state == ModelFileState.VERIFIED
                 )
                 stored_models = models_stored_on_node(session, mapping_node.node_id)
                 charges = outstanding_disk_charges(

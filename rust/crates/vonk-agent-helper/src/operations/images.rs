@@ -159,17 +159,24 @@ impl<R: CommandRunner> OperationExecutor<R> {
 }
 
 impl<R: CommandRunner> OperationExecutor<R> {
+    pub(super) fn image_inspection_arguments(image: &str, format: &str) -> Vec<String> {
+        vec![
+            "image".to_owned(),
+            "inspect".to_owned(),
+            "--format".to_owned(),
+            format.to_owned(),
+            image.to_owned(),
+        ]
+    }
+
     pub(super) fn inspect_runtime_image_if_present(
         &self,
         image: &str,
     ) -> Result<Option<RuntimeImageInspection>, OperationError> {
-        let output = self.run_docker(&[
-            "image".to_owned(),
-            "inspect".to_owned(),
-            "--format".to_owned(),
-            "{{.Id}}\t{{.Os}}\t{{.Architecture}}\t{{index .Config.Labels \"ai.vonkforge.runtime-interface\"}}\t{{.Config.User}}".to_owned(),
-            image.to_owned(),
-        ])?;
+        let output = self.run_docker(&Self::image_inspection_arguments(
+            image,
+            "{{.Id}}\t{{.Os}}\t{{.Architecture}}\t{{index .Config.Labels \"ai.vonkforge.runtime-interface\"}}\t{{.Config.User}}",
+        ))?;
         if !output.success {
             // Docker writes a newline to stdout for some missing image
             // references. A miss remains provisional here: receipt reuse

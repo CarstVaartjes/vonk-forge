@@ -26,6 +26,7 @@ from ..model_cache_contract import (
 from ..model_cache_progress import PHASES, cache_progress
 from ..model_cache_ranges import range_partial_bytes
 from ..models import ModelCacheOperation, ModelCacheSet, ModelCacheSetArtifact
+from ..profile_read_observation import observing_profile
 from . import constants
 from .artifacts import (
     ArtifactPart,
@@ -58,6 +59,13 @@ class TransferMixin:
         Transfers and explicit verification retain their content checks.
         """
         cache = cast("ModelCacheService", self)
+        if observing_profile():
+            observation = cache._storage_observer.read(manifest)
+            return frozenset(
+                digest
+                for digest, entry in observation.objects.items()
+                if entry.available
+            )
         specs = _unique_artifacts(manifest.artifacts)
         # Managed storage owns per-object availability: a verified object is
         # available exactly when its receipt is beside its bytes. SQL is not
@@ -437,6 +445,7 @@ class TransferMixin:
             with cache._session(write=True) as session:
                 row = session.get(ModelCacheSet, set_digest)
                 if row is not None:
+                    cache._remember_verified_models(session, row, manifest)
                     row.state = "cached"
                     row.verified_bytes = manifest.expected_bytes
                     row.verified_at = cache._clock()

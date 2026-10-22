@@ -15,6 +15,7 @@ from vonk_agent_protocol import (
     ReservationState,
     RunSwitchCode,
 )
+from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
 from vonk_forge_contracts import ModelDefinition
 
 from ..attempt_residues import unowned_never_installed
@@ -23,6 +24,7 @@ from ..disk_reservations import (
     models_stored_on_node,
     outstanding_disk_charges,
 )
+from ..gpu_health import gpu_health_reason
 from ..install_admission import (
     AGENT_UPGRADE_REQUIRED_DETAIL,
     IMAGE_PULL_CAPABILITY,
@@ -192,6 +194,15 @@ class ResourceFitMixin:
                             planned_ports=node_planned_ports,
                         )
                     )
+            health_reason = gpu_health_reason(snapshot.gpu_health if snapshot else None)
+            if health_reason is not None:
+                node_blockers.append(
+                    _as_reason(
+                        *health_reason,
+                        scope=RunSwitchReasonScopeName.NODE.value,
+                        node_ids=(item.node_id,),
+                    )
+                )
             if snapshot is None:
                 node_blockers.append(
                     _as_reason(
@@ -353,7 +364,11 @@ class ResourceFitMixin:
                             memory_floor_bytes=memory_need.floor_bytes,
                         )
                         fit_node = fit_capacity.nodes[0]
-                        memory_free_after = fit_node.selected_free_after_bytes
+                        memory_free_after = (
+                            fit_node.selected_free_after_bytes
+                            if health_reason is None
+                            else None
+                        )
                         if fit_node.unknown_run_residuals:
                             if (
                                 snapshot is not None
@@ -402,7 +417,7 @@ class ResourceFitMixin:
                             # per-run usage. The typed range and fit decision
                             # carry the conservative bound instead.
                             memory_free_after = None
-                        if fit_node.insufficient_components:
+                        if health_reason is None and fit_node.insufficient_components:
                             insufficient_components_by_node[item.node_id] = frozenset(
                                 "shared"
                                 if snapshot is not None
@@ -410,7 +425,9 @@ class ResourceFitMixin:
                                 else component
                                 for component in fit_node.insufficient_components
                             )
-                        for reason in fit_node.reasons:
+                        # A failed GPU discovery is a platform wait, not proof
+                        # that this recipe exceeds the physical memory pool.
+                        for reason in fit_node.reasons if health_reason is None else ():
                             projected = _resource_reason(
                                 reason, node_ids=(item.node_id,)
                             )
@@ -536,7 +553,14 @@ class ResourceFitMixin:
                                         RunSwitchCode.INSUFFICIENT_DISK,
                                         f"The operation needs {required_disk} bytes and would leave {disk_free_after} bytes."
                                         + (f" Disk is {holders}." if holders else "")
-                                        + f" Only {evictable} bytes of unused installations can be removed. "
+                                        + (
+                                            f" Inventory reports {snapshot.unused_model_bytes} bytes "
+                                            "of reclaimable model copies (included above). "
+                                            if snapshot.unused_model_bytes is not None
+                                            else " Model-copy reclamation is unknown. "
+                                        )
+                                        + f"Tracked unused installations can free another {evictable} bytes. "
+                                        "Local expired scratch/orphan cleanup appears in later inventory. "
                                         + kept_sentence,
                                         scope="node",
                                         node_ids=(item.node_id,),

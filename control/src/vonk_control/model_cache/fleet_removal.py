@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import uuid
 from datetime import datetime, timedelta
 from functools import partial
@@ -18,6 +17,7 @@ from vonk_agent_protocol import (
     InvalidRequestReason,
     LifecycleState,
     ModelCacheCode,
+    canonical_message,
 )
 from vonk_agent_protocol.inventory import ModelStoreObject
 from vonk_forge_contracts import ModelDefinition
@@ -322,7 +322,7 @@ class FleetRemovalMixin:
                     subject=node_id,
                     read=partial(
                         TypeAdapter(list[ModelStoreObject]).validate_json,
-                        json.dumps(snapshot_objects),
+                        canonical_message(snapshot_objects),
                         strict=True,
                     ),
                 )
@@ -762,7 +762,7 @@ class FleetRemovalMixin:
                         pending = f"Waiting for fresh model-store evidence from Spark {target.node_id}; next inventory resumes removal."
                         continue
                     observed = TypeAdapter(list[ModelStoreObject]).validate_json(
-                        json.dumps(snapshot.model_objects), strict=True
+                        canonical_message(snapshot.model_objects), strict=True
                     )
                     if wanted & {item.sha256 for item in observed}:
                         pending = f"Waiting for Spark {target.node_id} store retention to evict the reviewed objects; next inventory confirms removal."

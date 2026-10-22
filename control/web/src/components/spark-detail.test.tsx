@@ -1,6 +1,7 @@
 vi.mock("./metrics-chart", () => ({ MetricsChart: () => null }));
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { SparkDetail } from "./spark-detail";
+import { ProjectionCode, ProfileReasonSeverity } from "../api/vocabulary.generated";
 import type { ControlApi } from "../api/types";
 
 const node = {
@@ -164,4 +165,28 @@ test("GPU readings distinguish hardware maximum, policy and the applied command 
   expect(screen.getByText(/reported maximum graphics 2400/)).toHaveTextContent(
     "policy limit 2300 MHz · throttle bits 4",
   );
+});
+
+test("display reservation stays unknown and renders Controller advice", async () => {
+  // Break caught: inventing a default carveout or dropping the next action.
+  const detail = "Headless Spark display reserves 2147483648 bytes; minimum is 0.5 GB.";
+  const recommendation =
+    "Set Advanced → Advanced Menu → Display Reserved Memory to 0.5 GB (fixed); save and reboot.";
+  const api = {
+    fleetNode: vi.fn().mockResolvedValue({
+      ...node,
+      warnings: [
+        {
+          code: ProjectionCode.HOST_DISPLAY_MEMORY,
+          detail,
+          recommendation,
+          severity: ProfileReasonSeverity.WARNING,
+        },
+      ],
+    }),
+  } as unknown as ControlApi;
+  render(<SparkDetail api={api} id="spk_1" onClose={vi.fn()} />);
+  expect(await screen.findByText(`${detail} ${recommendation}`)).toBeVisible();
+  expect(screen.getByText(/Reserved unknown · SoC unknown/)).toBeVisible();
+  expect(api.fleetNode).toHaveBeenCalledTimes(1);
 });

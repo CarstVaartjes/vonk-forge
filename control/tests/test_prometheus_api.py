@@ -281,11 +281,17 @@ def test_exporter_publishes_memory_and_temperature_without_inventing_missing_val
     snapshot = _fleet_snapshot()
     assert snapshot.nodes[0].telemetry is not None
     sample = snapshot.nodes[0].telemetry.sample
-    sample.gpu_memory_total_bytes, sample.gpu_memory_free_bytes = 100, 30
-    sample.memory_total_bytes, sample.memory_available_bytes = 200, 40
-    sample.gpu_temperature_c = 65
+    snapshot.nodes[0].telemetry.sample = sample.model_copy(
+        update={
+            "gpu_memory_total_bytes": 100,
+            "gpu_memory_free_bytes": 30,
+            "memory_total_bytes": 200,
+            "memory_available_bytes": 40,
+            "gpu_temperature_c": 65,
+        }
+    )
     registry = MetricsRegistry()
-    registry.update_fleet(snapshot)
+    registry.set_fleet_source(lambda: snapshot)
     for suffix, value in (
         ("gpu_memory_used_bytes", 70),
         ("host_memory_used_bytes", 160),
@@ -295,7 +301,7 @@ def test_exporter_publishes_memory_and_temperature_without_inventing_missing_val
             f'vonk_node_telemetry_{suffix}{{node_id="{NODE}"}} {value}'
             in registry.render()
         )
-    registry.update_fleet(_fleet_snapshot(telemetry=None))
+    registry.set_fleet_source(lambda: _fleet_snapshot(telemetry=None))
     assert (
         f'vonk_node_telemetry_gpu_memory_used_bytes{{node_id="{NODE}"}}'
         not in registry.render()

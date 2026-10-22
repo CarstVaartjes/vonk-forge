@@ -36,6 +36,7 @@ from .fleet_removal import FleetRemovalMixin
 from .github import GithubMixin
 from .http import HttpMixin
 from .inventory import InventoryMixin
+from .observation import StorageObserver
 from .operations import OperationsMixin
 from .persistence import _read_operation_payload, _store_operation_payload
 from .removal_acceptance import RemovalAcceptanceMixin
@@ -46,6 +47,7 @@ from .removal_scope import RemovalScopeMixin
 from .repair import RepairMixin
 from .resolution import ResolutionMixin
 from .retry import RetryMixin
+from .revisions import RevisionsMixin
 from .scheduler import SchedulerMixin
 from .split_transfer import SplitTransferMixin
 from .storage import StorageMixin
@@ -81,6 +83,7 @@ class ModelCacheService(
     InventoryMixin,
     UpdatesMixin,
     StorageMixin,
+    RevisionsMixin,
 ):
     """Resolve, download, verify, repair and remove NAS model artifacts."""
 
@@ -128,7 +131,14 @@ class ModelCacheService(
         ):
             raise InvalidValue("model cache download streams must be between 1 and 32")
         root.mkdir(parents=True, exist_ok=True, mode=0o750)
-        for child in ("objects", "partials", "quarantine", "manifests", "locks"):
+        for child in (
+            "objects",
+            "partials",
+            "quarantine",
+            "manifests",
+            "locks",
+            "observations",
+        ):
             directory = root / child
             if directory.is_symlink():
                 raise InvalidValue(
@@ -161,7 +171,9 @@ class ModelCacheService(
         self._runtime_archive_available = runtime_archive_available
         self._lock = threading.RLock()
         self._closed = threading.Event()
+        self._revision_scan_at: datetime | None = None
         self._claim_owner = uuid.uuid4().hex
+        self._storage_observer = StorageObserver(self)
         self._executor = ThreadPoolExecutor(
             max_workers=max_parallel_downloads,
             thread_name_prefix="vonk-model-cache",

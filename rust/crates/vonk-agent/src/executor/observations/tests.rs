@@ -327,6 +327,58 @@ fn assert_fresh_run_preparation(runtime: &OciRuntime<'_, NoProcess>) {
         .expect("retired bookkeeping must not block a fresh run");
 }
 
+fn lifecycle_inspector(socket: &std::path::Path, running: bool) -> std::thread::JoinHandle<()> {
+    use std::io::{Read, Write};
+    use vonk_agent_protocol::generated::{HostHelperResponse, HostHelperResponseStatus};
+    let listener = std::os::unix::net::UnixListener::bind(socket).unwrap();
+    listener.set_nonblocking(true).unwrap();
+    std::thread::spawn(move || {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let mut stream = loop {
+            match listener.accept() {
+                Ok((stream, _)) => break stream,
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    assert!(
+                        Instant::now() < deadline,
+                        "lifecycle inspection never arrived"
+                    );
+                    std::thread::sleep(Duration::from_millis(1));
+                }
+                Err(error) => panic!("{error}"),
+            }
+        };
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        stream
+            .set_write_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let mut prefix = [0; 4];
+        stream.read_exact(&mut prefix).unwrap();
+        let mut body = vec![0; u32::from_be_bytes(prefix) as usize];
+        stream.read_exact(&mut body).unwrap();
+        let request: vonk_agent_protocol::RecipeRunInspectionRequest =
+            vonk_agent_protocol::parse_strict(&body).unwrap();
+        let response = HostHelperResponse {
+            installation_intent_nonce: None,
+            schema_version: 1,
+            request_id: Some(request.request_id),
+            status: HostHelperResponseStatus::ContainerRuntimeRequestExecuted,
+            process_running: Some(running),
+            job_progress_at: None,
+            exit_code: None,
+            error_code: None,
+            diagnostic: None,
+            process_logs: None,
+        };
+        let body = vonk_agent_protocol::canonical_generated_json(&response).unwrap();
+        stream
+            .write_all(&(body.len() as u32).to_be_bytes())
+            .unwrap();
+        stream.write_all(&body).unwrap();
+    })
+}
+
 #[tokio::test]
 async fn unparseable_lifecycle_of_an_unowned_run_is_retired_not_skipped_forever() {
     // Live regression: a lifecycle written before an agent upgrade could
@@ -341,11 +393,13 @@ async fn unparseable_lifecycle_of_an_unowned_run_is_retired_not_skipped_forever(
     fs::set_permissions(&metadata, fs::Permissions::from_mode(0o700)).unwrap();
     fs::write(metadata.join("lifecycle.json"), br#"{"installation_id":1}"#).unwrap();
     fs::write(metadata.join("runtime.json"), b"{}").unwrap();
+    let socket = runtime.path().join("helper.sock");
+    let helper = lifecycle_inspector(&socket, false);
     let runner = NoProcess;
     let server = ObservationServer::with_disposition(Some(204), Some("unowned"));
     let executor = RecipeExecutor {
         client: &server.client,
-        helper_socket: std::path::Path::new(crate::host_runtime::HELPER_SOCKET),
+        helper_socket: &socket,
         runtime: OciRuntime {
             runner: &runner,
             data_root: data.path(),
@@ -376,6 +430,7 @@ async fn unparseable_lifecycle_of_an_unowned_run_is_retired_not_skipped_forever(
         assert_eq!(report["runs"], json!([]));
     }
     // Only the unusable lifecycle is retired; the run stays as history.
+    helper.join().unwrap();
     assert!(!metadata.join("lifecycle.json").exists());
     assert!(metadata.join("runtime.json").exists());
     assert!(data.path().join("runs").join(run_id).is_dir());
@@ -393,11 +448,13 @@ async fn unreadable_lifecycle_of_an_unowned_run_is_retired_whatever_the_local_er
     fs::create_dir_all(&metadata).unwrap();
     fs::set_permissions(&metadata, fs::Permissions::from_mode(0o700)).unwrap();
     fs::write(metadata.join("lifecycle.json"), vec![b' '; 20 * 1024]).unwrap();
+    let socket = runtime.path().join("helper.sock");
+    let helper = lifecycle_inspector(&socket, false);
     let runner = NoProcess;
     let server = ObservationServer::with_disposition(Some(204), Some("unowned"));
     let executor = RecipeExecutor {
         client: &server.client,
-        helper_socket: std::path::Path::new(crate::host_runtime::HELPER_SOCKET),
+        helper_socket: &socket,
         runtime: OciRuntime {
             runner: &runner,
             data_root: data.path(),
@@ -405,6 +462,7 @@ async fn unreadable_lifecycle_of_an_unowned_run_is_retired_whatever_the_local_er
         runtime_root: runtime.path(),
     };
     assert_eq!(complete_observation_sweep(&executor).await, 0);
+    helper.join().unwrap();
     assert!(!metadata.join("lifecycle.json").exists());
     assert_fresh_run_preparation(&executor.runtime);
     server.finish();
@@ -783,4 +841,139 @@ async fn an_observation_names_the_generation_of_its_run() {
     assert_eq!(helper.join().unwrap(), Some(2));
     let reports = server.finish();
     assert_eq!(reports[0]["runs"][0]["run_generation"], 2);
+}
+
+#[tokio::test]
+async fn corrupt_unowned_lifecycle_keeps_its_disk_until_the_process_is_proven_gone() {
+    use std::os::unix::fs::PermissionsExt;
+
+    // Catches retiring corrupt metadata solely on a Controller verdict, which
+    // lets retention delete directories a live or unobservable container uses.
+    for running in [Some(true), Some(false), None] {
+        let data = tempdir().unwrap();
+        let runtime = tempdir().unwrap();
+        let run = Uuid::new_v4().to_string();
+        let metadata = data.path().join("run-metadata").join(&run);
+        fs::create_dir_all(&metadata).unwrap();
+        fs::set_permissions(&metadata, fs::Permissions::from_mode(0o700)).unwrap();
+        let lifecycle = metadata.join("lifecycle.json");
+        fs::write(&lifecycle, b"{").unwrap();
+        // Only metadata survived the crash. Retention restores the observation
+        // projection before the normal runtime observer judges the lifecycle.
+        crate::store_retention::sweep(
+            data.path(),
+            std::time::SystemTime::now(),
+            Instant::now() + Duration::from_secs(60),
+            None,
+            &|| Some((1024, 1024)),
+            &|| {},
+        );
+        assert!(data.path().join("runs").join(&run).is_dir());
+        let socket = runtime.path().join("helper.sock");
+        let helper = running.map(|running| lifecycle_inspector(&socket, running));
+        let server = ObservationServer::with_disposition(
+            Some(204),
+            Some(vonk_agent_protocol::generated::RecipeRunDispositionValue::Unowned.as_str()),
+        );
+        let executor = RecipeExecutor {
+            client: &server.client,
+            helper_socket: &socket,
+            runtime: OciRuntime {
+                runner: &NoProcess,
+                data_root: data.path(),
+            },
+            runtime_root: runtime.path(),
+        };
+        assert_eq!(complete_observation_sweep(&executor).await, 0);
+        assert_eq!(
+            lifecycle.exists(),
+            running != Some(false),
+            "only runtime proof of exit releases a retained lifecycle"
+        );
+        if let Some(helper) = helper {
+            helper.join().unwrap();
+        }
+        server.finish();
+    }
+}
+
+#[tokio::test]
+async fn lost_observation_ack_replays_identical_content_after_restart() {
+    // Wrong implementation: re-inspecting after a lost reply replaces terminal
+    // evidence, or acknowledges it before the Controller actually replies.
+    let root = tempdir().unwrap();
+    let database = root.path().join("state.sqlite");
+    let failed = ObservationServer::new(None);
+    let observed_at = Utc::now();
+    let observation = exact_observation(Uuid::new_v4());
+    let mut state = StateStore::open(&database, failed.client.node_id()).unwrap();
+    assert!(
+        deliver_recipe_observation(&failed.client, observed_at, &[observation], &mut state,)
+            .await
+            .is_err()
+    );
+    let attempted = failed.finish();
+    assert_eq!(attempted.len(), 1);
+    drop(state);
+    let recovered = ObservationServer::new(Some(204));
+    let mut state = StateStore::open(&database, recovered.client.node_id()).unwrap();
+    let pending = state.pending_recipe_observation().unwrap().unwrap();
+    assert_eq!(serde_json::to_value(&pending).unwrap(), attempted[0]);
+    recovered
+        .client
+        .report_recipe_observation_envelope(&pending)
+        .await
+        .unwrap();
+    // Death here replays again; only the exact acknowledged content is removed.
+    let mut different = pending.clone();
+    different.runs[0].process_running = !different.runs[0].process_running;
+    assert!(state.acknowledge_recipe_observation(&different).is_err());
+    assert!(state.retain_recipe_observation(&different).is_err());
+    assert_eq!(
+        state.pending_recipe_observation().unwrap().unwrap(),
+        pending
+    );
+    state.acknowledge_recipe_observation(&pending).unwrap();
+    assert!(state.pending_recipe_observation().unwrap().is_none());
+    assert_eq!(recovered.finish(), attempted);
+}
+
+#[test]
+fn largest_inspection_wave_fits_the_edge_document_limit() {
+    // Wrong implementation: increasing inspection concurrency or diagnostic
+    // bounds silently creates bodies Caddy cuts off at one MiB.
+    let mut report: vonk_agent_protocol::RecipeRunObservationsWire = serde_json::from_str(
+        include_str!("../../../../../../agent_protocol/src/vonk_agent_protocol/vectors/recipe-run-observation-exited-v1.json")
+    ).unwrap();
+    let mut run = report.runs.pop().unwrap();
+    let diagnostic = run.failure_diagnostics.as_mut().unwrap();
+    diagnostic.stdout.text = "\u{0000}".repeat(2048);
+    diagnostic.stderr.text = "\u{0000}".repeat(2048);
+    // Maximal escaping is larger than ordinary logs. Fill every property too.
+    for (properties, count) in [
+        (&mut diagnostic.versions, 8),
+        (&mut diagnostic.sandbox, 12),
+        (&mut diagnostic.storage, 8),
+        (&mut diagnostic.preflight, 8),
+    ] {
+        let mut property = properties[0].clone();
+        property.name = "n".repeat(64);
+        property.value = "\u{0000}".repeat(256);
+        *properties = vec![property; count];
+    }
+    diagnostic.collector_errors = vec!["\u{0000}".repeat(256); 8];
+    report.runs = (0..BACKGROUND_RUN_INSPECTION_CONCURRENCY)
+        .map(|_| {
+            let mut run = run.clone();
+            run.run_id = Uuid::new_v4();
+            run
+        })
+        .collect();
+    let bytes = vonk_agent_protocol::canonical_generated_json(&report).unwrap();
+    eprintln!("maximal escaped observation wave bytes={}", bytes.len());
+    assert!(
+        bytes.len() <= 1024 * 1024,
+        "observation wave exceeds edge/Controller bound: {}",
+        bytes.len()
+    );
 }

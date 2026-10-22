@@ -13,7 +13,6 @@ from __future__ import annotations
 import contextlib
 import hashlib
 import uuid
-from dataclasses import fields
 from datetime import timedelta
 
 import pytest
@@ -28,7 +27,7 @@ from vonk_control.distributed_recovery import DistributedRecoveryCoordinator
 from vonk_control.inventory_repository import (
     MAX_INVENTORY_FUTURE_SKEW,
     InventoryRepository,
-    InventorySnapshotInput,
+    NodeInventoryReport,
 )
 from vonk_control.models import (
     AgentNode,
@@ -251,15 +250,28 @@ def test_a_pair_run_that_lost_a_rank_is_stopped_by_the_newer_load(
     with sessions() as session:
         samples = [
             {
-                field.name: getattr(snapshot, field.name)
-                for field in fields(InventorySnapshotInput)
+                field: getattr(snapshot, field)
+                for field in NodeInventoryReport.model_fields
+                if field != "schema_version"
             }
             for snapshot in session.scalars(select(NodeInventorySnapshot))
         ]
     clock[0] += MAX_INVENTORY_FUTURE_SKEW + timedelta(seconds=6)
     repository = InventoryRepository(sessions, clock=lambda: clock[0])
     for values in samples:
-        repository.record(InventorySnapshotInput(**{**values, "observed_at": clock[0]}))
+        repository.record(
+            NodeInventoryReport.model_validate_json(
+                canonical_message(
+                    {
+                        **values,
+                        "observed_at": clock[0],
+                        "schema_version": 1,
+                        "nvidia_driver_version": "unknown",
+                        "container_runtime_version": "unknown",
+                    }
+                )
+            )
+        )
     replacement = None
     for _ in range(10):
         due = planner.get(accepted.operation_id).next_attempt_at

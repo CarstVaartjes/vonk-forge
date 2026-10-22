@@ -40,9 +40,9 @@ if TYPE_CHECKING:
 """Unused non-model assets expire after 24 hours, independent of disk pressure.
 
 The existing exact uninstall and image-removal paths revalidate live references.
-Installation removal retains shared model files; the Spark store evicts those
-only under pressure, least recently used first. NAS model files likewise stay
-until pressure requires their fenced removal. Pressure may also evict younger
+Installation removal retains shared model files; unused Spark copies expire
+24 hours after their last use or leave sooner under pressure. NAS model files
+stay until pressure requires their fenced removal. Pressure may also evict younger
 unused runtime assets to admit work. Partial installations, orphaned directories,
 build workspaces and coordination history have their existing age collectors.
 

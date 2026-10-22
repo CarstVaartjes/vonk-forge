@@ -95,7 +95,10 @@ fn a_run_the_agent_still_claims_keeps_its_container() {
 fn unreadable_claims_or_listing_remove_nothing() {
     let host = Host::with(&[job(ENDED, ENDED, "exited")]);
     let (_temp, executor) = host_executor(&host);
-    // No claim directory: unknown is not none.
+    // A malformed/symlinked claims directory is unknown, never absence.
+    fs::create_dir_all(&executor.roots.agent_data).unwrap();
+    std::os::unix::fs::symlink(_temp.path(), executor.roots.agent_data.join("run-metadata"))
+        .unwrap();
     executor.sweep_exited_serving_at(after(24 * 14));
     assert!(host.present(ENDED));
 
@@ -168,4 +171,29 @@ fn protected_serving_front_page_does_not_starve_ended_tail() {
     executor.sweep_exited_serving_at(after(25));
     assert!(!host.present(ENDED));
     assert_eq!(host.containers.lock().unwrap().len(), MAX_LISTED);
+}
+
+#[test]
+fn periodic_storage_collection_reaches_exited_containers_without_a_helper_request() {
+    // Catches scheduling exited-container cleanup only in listener.incoming().
+    let host = Host::with(&[
+        job(ENDED, ENDED, "exited"),
+        job(JOB_RUN, JOB, "exited"),
+        job(LIVE, LIVE, "running"),
+    ]);
+    let (_temp, executor) = host_executor(&host);
+    executor.sweep_unused_runtime_images();
+    assert!(!host.present(ENDED) && !host.present(JOB));
+    assert!(host.present(LIVE));
+}
+
+#[test]
+fn a_missing_claims_directory_does_not_own_an_orphan_exited_container() {
+    // Catches retaining containers forever after local records disappear.
+    let host = Host::with(&[job(ENDED, ENDED, "exited"), job(LIVE, LIVE, "running")]);
+    let (_temp, executor) = host_executor(&host);
+    assert!(!executor.roots.agent_data.join("run-metadata").exists());
+    executor.sweep_exited_serving_at(after(25));
+    assert!(!host.present(ENDED));
+    assert!(host.present(LIVE));
 }

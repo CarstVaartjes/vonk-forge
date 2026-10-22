@@ -8,10 +8,11 @@
 //! time and runs this pass between claims, so no claim is live while it runs.
 //! Two kinds of entry leave here:
 //!
-//! - Model files are the one cache kept until the space is needed: a model
-//!   object no installation or Controller reference names leaves when a load
-//!   needs disk space or the platform low-space line is crossed, least recently
-//!   used first, until the demand or low-space reserve is met.
+//! - Unused Spark model copies leave after [`GRACE`], or sooner when a load
+//!   needs disk space or the low-space line is crossed. Installations' hard
+//!   links record their last reference in the inode change time, including
+//!   when the last installation drops its link. Plans and live operations
+//!   also protect the exact objects they name.
 //! - Everything else unused leaves once nothing has used or changed it for
 //!   [`GRACE`], whatever the free space: a transfer checkpoint or build export
 //!   whose claim ended, an isolated entry, a base image no build has opened, a
@@ -26,7 +27,7 @@
 use std::{
     collections::BTreeSet,
     fs,
-    os::unix::fs::{MetadataExt, OpenOptionsExt},
+    os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt},
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
     time::{Duration, Instant, SystemTime},
@@ -265,8 +266,8 @@ pub fn installation_sizes(
     )
 }
 
-/// Collect unused entries older than [`GRACE`] at `now`, then relieve low
-/// space from unused model objects. `untracked` is the Controller's fresh
+/// Collect unused entries (including model copies) older than [`GRACE`] at
+/// `now`, then relieve low space from younger unused model objects. `untracked` is the Controller's fresh
 /// verdict (`None`: there is none, and no installation or run scope leaves). `disk`
 /// observes `(free, total)`; `tick` runs after each removal (the service
 /// watchdog).
@@ -307,6 +308,7 @@ pub fn sweep(
                 pass.ended(&root, &|name, _| name != "models");
                 pass.ended(&objects, &|name, metadata| !model_object(name, metadata));
             }
+            BuildStaging => pass.build_staging(&root, &crate::process::SystemProcessRunner),
             BaseImages => {
                 let images = root.join("sha256");
                 pass.ended(&images, &|name, _| name.starts_with(".damaged-"));
@@ -332,10 +334,13 @@ pub fn sweep(
                 }
             }
             UntrackedRuns => {
+                if *name == "run-metadata/" {
+                    pass.restore_run_scopes(&root, data_root);
+                }
                 // A name that is no scope's was isolated (`.damaged`).
                 pass.ended(&root, &|name, _| !installation_name(name));
-                // A stopped or forgotten run's lifecycle record leaves too, so
-                // it no longer keeps its installation (that leaves a day later).
+                // Runtime observation retires a stopped or forgotten run's
+                // lifecycle before its scope and installation can expire.
                 if let Some(untracked) = untracked
                     && let Some(runs) = untracked.runs.as_ref()
                 {
@@ -343,7 +348,18 @@ pub fn sweep(
                         &root,
                         "run scope",
                         &|name| untracked.observed_runs.contains(name),
-                        &|name| runs.contains(name),
+                        &|name| {
+                            runs.contains(name)
+                                && matches!(
+                                    crate::oci::read_run_lifecycle(
+                                        &data_root
+                                            .join("run-metadata")
+                                            .join(name)
+                                            .join("lifecycle.json")
+                                    ),
+                                    Ok(None)
+                                )
+                        },
                     );
                 }
             }
@@ -421,9 +437,18 @@ pub fn sweep(
             }
         }
     }
-    let unused_models = unused_model_objects(data_root, pass.owner, &keep);
+    let mut younger = Vec::new();
+    for (used, path, metadata) in
+        unused_model_objects(data_root, pass.owner, &keep).unwrap_or_default()
+    {
+        if now.duration_since(used).is_ok_and(|age| age > GRACE) {
+            pass.remove(&path, &metadata);
+        } else {
+            younger.push((used, path, metadata));
+        }
+    }
     pass.relieve(
-        unused_models.unwrap_or_default(),
+        younger,
         disk,
         projection.map_or(0, |request| request.required_free_bytes),
     );
@@ -434,8 +459,10 @@ pub fn sweep(
 /// The model objects no installation links or names, least recently used
 /// first, leaving out those `keep` names; `None` when a plan cannot be read
 /// (it could name any). An object is owned by every installation that links
-/// it or whose plan names it (a start prepares a private copy's installation
-/// from it too).
+/// it or whose plan names it. Adding or dropping installation hard links
+/// updates the shared inode's change time, so a newly unreferenced object
+/// receives a full grace after its final installation lets it go. Reusing an
+/// unlinked object also refreshes its timestamp in the distribution client.
 fn unused_model_objects(
     data_root: &Path,
     owner: u32,
@@ -616,6 +643,84 @@ impl Pass<'_> {
             if scratch(&name, &metadata) && aged {
                 self.remove(&root.join(name), &metadata);
             }
+        }
+    }
+
+    /// Retained lifecycle records need a disposable run directory so the normal
+    /// runtime observer can ask the helper and Controller about their owner.
+    /// A crash between scope cleanup steps can leave only the metadata behind.
+    fn restore_run_scopes(&mut self, metadata_root: &Path, data_root: &Path) {
+        let runs = data_root.join("runs");
+        for (name, metadata) in self.list(metadata_root).into_iter().flatten() {
+            if Instant::now() >= self.deadline {
+                self.swept.pending = true;
+                return;
+            }
+            if !metadata.is_dir()
+                || !installation_name(&name)
+                || fs::symlink_metadata(metadata_root.join(&name).join("lifecycle.json")).is_err()
+                || !fs::symlink_metadata(runs.join(&name))
+                    .is_err_and(|error| error.kind() == std::io::ErrorKind::NotFound)
+            {
+                continue;
+            }
+            if let Err(error) = fs::DirBuilder::new().mode(0o700).create(&runs)
+                && error.kind() != std::io::ErrorKind::AlreadyExists
+            {
+                eprintln!("vonk-agent: cannot restore runs directory: {error}; retried next pass");
+                continue;
+            }
+            if !owned_directory(&runs, self.owner) {
+                eprintln!(
+                    "vonk-agent: run observation scope {name} waits for a readable owned runs directory; retried next pass"
+                );
+                continue;
+            }
+            match fs::DirBuilder::new().mode(0o700).create(runs.join(&name)) {
+                Ok(()) => {
+                    eprintln!("vonk-agent: restored observation directory for retained run {name}")
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+                Err(error) => eprintln!(
+                    "vonk-agent: cannot restore observation directory for run {name}: {error}; retried next pass"
+                ),
+            }
+        }
+    }
+
+    /// A crashed build can leave private Podman databases that no longer open.
+    /// Their contents are not liveness: only the exact owning cgroups are.
+    /// This pass runs between claims; unknown systemd evidence keeps the tree.
+    fn build_staging(&mut self, root: &Path, runner: &impl crate::process::ProcessRunner) {
+        for (name, metadata) in self.list(root).into_iter().flatten() {
+            if !self
+                .now
+                .duration_since(changed(&metadata))
+                .is_ok_and(|age| age > GRACE)
+            {
+                continue;
+            }
+            if let Some(build_id) = name
+                .get(name.len().saturating_sub(36)..)
+                .and_then(|id| uuid::Uuid::parse_str(id).ok())
+            {
+                let request = vonk_agent_protocol::RecipeBuildCleanupRequest {
+                    build_id,
+                    operation_id: build_id,
+                };
+                match crate::recipe_builder::observe_build_running(runner, &request, self.deadline)
+                {
+                    Ok(false) => {}
+                    Ok(true) => continue,
+                    Err(error) => {
+                        eprintln!(
+                            "vonk-agent: build staging {name} kept: {error}; retried next pass"
+                        );
+                        continue;
+                    }
+                }
+            }
+            self.remove(&root.join(name), &metadata);
         }
     }
 

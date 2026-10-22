@@ -33,6 +33,13 @@ enum RunAnswer {
 impl CommandRunner for LaunchRunner {
     fn run(&self, executable: &Path, args: &[String]) -> Result<CommandOutput, String> {
         self.calls.lock().unwrap().push(args.to_vec());
+        if executable == Path::new(gpu_clock::NVIDIA_SMI) {
+            return Ok(docker_output(true, "12.1, 590.48\n", 0));
+        }
+        if executable == Path::new("/usr/bin/setfacl") {
+            // Cache reuse validates the ACL actually installed at publication.
+            return ProcessCommandRunner.run(executable, args);
+        }
         let first = args.first().map(String::as_str);
         if first == Some("run") {
             for pair in args.windows(2).filter(|pair| pair[0] == "--mount") {
@@ -141,7 +148,7 @@ fn launch(
     Result<RuntimeStartLaunch, OperationError>,
     Vec<Vec<String>>,
 ) {
-    launch_answered(plan, earlier_job, RunAnswer::Id, None)
+    launch_answered(plan, earlier_job, RunAnswer::Id, None, false)
 }
 
 /// The agent-side tree an accepted `plan` launches from, with its image
@@ -193,12 +200,20 @@ fn launch_answered(
     earlier_job: Option<uuid::Uuid>,
     answer: RunAnswer,
     launched: Option<&str>,
+    broken_cache: bool,
 ) -> (
     Vec<String>,
     Result<RuntimeStartLaunch, OperationError>,
     Vec<Vec<String>>,
 ) {
     let (_temp, roots) = start_fixture(&mut plan);
+    if broken_cache {
+        fs::write(
+            roots.data.join("compile-cache"),
+            b"injected corrupt directory",
+        )
+        .unwrap();
+    }
     let image = &plan.compiled_execution_plan.runtime_image;
     let runner = LaunchRunner {
         calls: Arc::default(),
@@ -317,6 +332,7 @@ fn an_unread_launch_adopts_the_container_it_created() {
             None,
             answer,
             Some("true"),
+            false,
         );
         assert!(matches!(launched, Ok(RuntimeStartLaunch::Job { .. })));
     }
@@ -325,6 +341,7 @@ fn an_unread_launch_adopts_the_container_it_created() {
         None,
         RunAnswer::Deadline,
         Some("true"),
+        false,
     );
     assert!(matches!(launched, Ok(RuntimeStartLaunch::Service)));
 }
@@ -337,6 +354,7 @@ fn an_unread_launch_with_no_container_reports_its_own_cause() {
         None,
         RunAnswer::NoId,
         None,
+        false,
     );
     assert!(matches!(
         launched,
@@ -349,6 +367,7 @@ fn an_unread_launch_with_no_container_reports_its_own_cause() {
         None,
         RunAnswer::Deadline,
         None,
+        false,
     );
     assert!(matches!(
         launched,
@@ -651,6 +670,9 @@ struct StartWithStrays {
 
 impl CommandRunner for StartWithStrays {
     fn run(&self, executable: &Path, args: &[String]) -> Result<CommandOutput, String> {
+        if executable == Path::new("/usr/bin/setfacl") {
+            return ProcessCommandRunner.run(executable, args);
+        }
         if executable == Path::new("/usr/bin/docker") {
             match args.first().map(String::as_str) {
                 Some("container" | "logs" | "inspect" | "stop" | "rm") => {
@@ -734,4 +756,40 @@ fn a_start_cleans_full_pages_before_launch_without_a_helper_restart() {
                 .any(|call| call.first().map(String::as_str) == Some("run"))
         );
     }
+}
+
+#[test]
+fn authorized_launch_uses_a_host_keyed_compile_cache_instead_of_installation_bytes() {
+    // Regression: main launches directly from installations/<id>/runtime-cache.
+    // This exercises the authorized launch seam, not just a key calculator.
+    let run = launched_run(recipe_start_plan_for_authority(1));
+    let mount = run
+        .iter()
+        .find(|arg| arg.ends_with(",dst=/outputs/cache"))
+        .unwrap();
+    assert!(mount.contains("/compile-cache/"), "{mount}");
+    assert!(!mount.contains("/installations/"), "{mount}");
+}
+
+#[test]
+fn corrupt_persistent_cache_still_reaches_docker_with_fresh_run_backing() {
+    // Fault injection at the real launch boundary: cache storage is a file,
+    // yet the authorized workload still reaches docker run with a fresh mount.
+    let (_, result, calls) = launch_answered(
+        recipe_start_plan_for_authority(1),
+        None,
+        RunAnswer::Id,
+        None,
+        true,
+    );
+    assert!(matches!(result, Ok(RuntimeStartLaunch::Service)));
+    let launch = calls
+        .iter()
+        .find(|args| args.first().is_some_and(|a| a == "run"))
+        .unwrap();
+    let mount = launch
+        .iter()
+        .find(|arg| arg.ends_with(",dst=/outputs/cache"))
+        .unwrap();
+    assert!(mount.contains("/compile-cache-fallback/"), "{mount}");
 }

@@ -300,7 +300,15 @@ def test_fleet_snapshot_validates_the_decoded_response_as_json() -> None:
     assert run._fleet_snapshot() == expected.model_dump(mode="json")
 
 
-def test_agent_identity_wait_requires_recipe_builder_capability(monkeypatch) -> None:
+@pytest.mark.parametrize("initial_runtime_matches", [True, False])
+def test_agent_identity_wait_requires_current_identity_and_builder_capability(
+    monkeypatch, initial_runtime_matches: bool
+) -> None:
+    from sqlalchemy import create_engine, insert, text
+    from vonk_agent_protocol.claims import AgentRuntimeIdentity
+    from vonk_agent_protocol.state_machines import NodeIdentityState
+    from vonk_control.models import AgentNode, Base
+
     lifecycle = _module()
     node_id = "spk_" + "1" * 32
     self_test = {
@@ -309,17 +317,29 @@ def test_agent_identity_wait_requires_recipe_builder_capability(monkeypatch) -> 
         "build_digest": "sha256:" + "a" * 64,
         "binary_digest": "b" * 64,
     }
+    runtime_identity = AgentRuntimeIdentity.model_validate_json(json.dumps(self_test))
     responses = iter(
         [
             {
                 "id": node_id,
                 "display_name": "Spark",
+                "agent_runtime": (
+                    runtime_identity
+                    if initial_runtime_matches
+                    else runtime_identity.model_copy(update={"binary_digest": "c" * 64})
+                ).model_dump(mode="json"),
                 "connection": {"agent_state": "active", "online_state": "online"},
-                "inventory": {"freshness": "fresh", "capabilities": []},
+                "inventory": {
+                    "freshness": "fresh",
+                    "capabilities": []
+                    if initial_runtime_matches
+                    else ["recipe.build.v1"],
+                },
             },
             {
                 "id": node_id,
                 "display_name": "Spark",
+                "agent_runtime": runtime_identity.model_dump(mode="json"),
                 "connection": {"agent_state": "active", "online_state": "online"},
                 "inventory": {
                     "freshness": "fresh",
@@ -344,12 +364,28 @@ def test_agent_identity_wait_requires_recipe_builder_capability(monkeypatch) -> 
     }
     run._self_test = lambda: self_test
     run._installed_package_version = lambda: "1.2.3"
-    run._psql = lambda _query: [
-        ["linux-arm64", "1.2.3", "sha256:" + "a" * 64, "b" * 64, "1234567890"]
-    ]
     monkeypatch.setattr(lifecycle.time, "sleep", lambda _seconds: None)
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    with engine.begin() as connection:
+        connection.execute(
+            insert(AgentNode).values(
+                node_id=node_id,
+                state=NodeIdentityState.ACTIVE,
+                contact_certificate_serial="1234567890",
+            )
+        )
 
-    identity = run._wait_for_agent_identity(package_version="1.2.3", timeout=1)
+        def psql(query: str) -> list[list[str]]:
+            # Exercise the actual current schema: a canned row concealed the
+            # acceptance harness's reads of retired runtime identity columns.
+            return [
+                [str(value) for value in row] for row in connection.execute(text(query))
+            ]
+
+        run._psql = psql
+        identity = run._wait_for_agent_identity(package_version="1.2.3", timeout=1)
+    engine.dispose()
 
     assert identity["node_id"] == node_id
     assert identity["package_sha256"] == "d" * 64
@@ -1527,7 +1563,6 @@ def test_preflight_failure_reports_only_projected_receipt_comparison_fields() ->
     run.control = object()
     evidence = {
         "node_id": "spk_" + "a" * 32,
-        "current_fingerprint": "b" * 64,
         "receipt_fingerprint": "c" * 64,
         "request_sha256": "d" * 64,
         "payload_sha256": "d" * 64,
@@ -1548,7 +1583,6 @@ def test_preflight_failure_reports_only_projected_receipt_comparison_fields() ->
             operation, label="canary", node_id=evidence["node_id"]
         )
     message = str(failure.value)
-    assert evidence["current_fingerprint"] in message
     assert evidence["receipt_fingerprint"] in message
     assert '"observed_at": 100' in message
     assert '"controller_now": 102' in message

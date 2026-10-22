@@ -144,9 +144,6 @@ from ..models import (
     Job as Job,
 )
 from ..models import (
-    NodeArtifact as NodeArtifact,
-)
-from ..models import (
     RecipeBuild as RecipeBuild,
 )
 from ..runtime_image_preparation import (

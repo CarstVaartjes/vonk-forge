@@ -422,7 +422,13 @@ class FleetProfileService:
                             reasons.append(
                                 FleetProfileReason(
                                     code=ProfileReasonCode.PREPARATION_UNAVAILABLE,
-                                    detail="The exact model and runtime image are not in the Controller cache yet; the Controller prepares them and continues the load when they are ready.",
+                                    detail=next(
+                                        (
+                                            blocker.detail
+                                            for blocker in assessment.blockers
+                                        ),
+                                        "The exact model and runtime image are not in the Controller cache yet; the Controller prepares them and continues the load when they are ready.",
+                                    ),
                                     severity=ProfileReasonSeverity.ERROR.value,
                                 )
                             )

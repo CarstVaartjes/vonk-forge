@@ -203,6 +203,7 @@ pub(in crate::operations) struct PullRunner {
     pub(in crate::operations) calls: Arc<Mutex<Vec<Vec<String>>>>,
     pub(in crate::operations) pulled_config: String,
     pub(in crate::operations) pull_fails: bool,
+    pub(in crate::operations) container_query_fails: Arc<Mutex<bool>>,
     /// References a container uses: Docker refuses to remove them.
     pub(in crate::operations) in_use: Arc<Mutex<std::collections::BTreeSet<String>>>,
 }
@@ -226,8 +227,24 @@ impl CommandRunner for PullRunner {
         };
         let words = arguments.iter().map(String::as_str).collect::<Vec<_>>();
         Ok(match words.as_slice() {
+            ["container", "ls", ..] if words.iter().any(|word| word.starts_with("ancestor=")) => {
+                if *self.container_query_fails.lock().unwrap() {
+                    return Err("injected container inventory outage".into());
+                }
+                let image = words.last().unwrap().strip_prefix("ancestor=").unwrap();
+                ok(if self.in_use.lock().unwrap().contains(image) { b"container\n".to_vec() } else { vec![] })
+            }
             ["container", "ls", ..] => {
                 return Err("image fixture does not provide runtime owner inventory".to_owned());
+            }
+            ["image", "ls", ..] | ["images", ..] => ok(images.iter().map(|(reference, config)| {
+                format!("{reference}:latest\t{config}\n")
+            }).collect::<String>().into_bytes()),
+            ["image", "inspect", "--format", "{{.Id}}", reference] => {
+                match images.get(reference.strip_suffix(":latest").unwrap_or(reference)) {
+                    Some(config) => ok(config.as_bytes().to_vec()),
+                    None => missing,
+                }
             }
             ["pull", .., reference] if self.pull_fails => {
                 let _ = reference;
@@ -248,7 +265,7 @@ impl CommandRunner for PullRunner {
                 images.insert((*target).to_owned(), config);
                 ok(Vec::new())
             }
-            ["image", "rm", reference] if self.in_use.lock().unwrap().contains(*reference) => {
+            ["image", "rm", reference] | ["rmi", reference] if self.in_use.lock().unwrap().contains(*reference) => {
                 CommandOutput {
                     success: false,
                     stdout: Vec::new(),
@@ -256,8 +273,8 @@ impl CommandRunner for PullRunner {
                     exit_code: Some(1),
                 }
             }
-            ["image", "rm", reference] => {
-                images.remove(*reference);
+            ["image", "rm", reference] | ["rmi", reference] => {
+                images.remove(reference.strip_suffix(":latest").unwrap_or(reference));
                 ok(Vec::new())
             }
             other => panic!("unexpected docker call {other:?}"),

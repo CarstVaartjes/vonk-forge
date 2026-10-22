@@ -33,6 +33,7 @@ from ..agent_operation_facts import attempt_holds_order as _attempt_holds_order
 from ..agent_operation_facts import aware as _aware
 from ..auth import AgentSource
 from ..categorized_errors import InvalidValue
+from ..inventory_items import inventory_items, runtime_value
 from ..lifecycle import CancelRequested, Outcome, Reported
 from ..lifecycle.agent_operation import AgentOperationAdapter
 from ..lifecycle.evidence import Residue
@@ -42,7 +43,7 @@ from ..operation_progress import stored_progress
 from ..own_cleanup import CLEANUP_KINDS
 from ..persisted_waits import schedule_wait
 from ..recovery_policy import WAIT_STEP
-from .claim_authority import recipe_build_disk_wait
+from .claim_authority import gpu_health_wait, recipe_build_disk_wait
 from .contracts import _MUTATING_OPERATIONS, CLAIM_LEASE_SECONDS
 from .endings import end_unobserved_order
 from .evidence import (
@@ -92,11 +93,15 @@ def _claim_once(
                 node is None
                 or operation.node_id != node_id
                 or attempt.agent_certificate_serial != certificate_serial
-                or node.binary_digest != runtime_identity.binary_digest
-                or node.build_digest != runtime_identity.build_digest
-                or node.architecture != runtime_identity.architecture
-                or node.semantic_version != runtime_identity.semantic_version
-                or node.preflight_fingerprint != preflight_fingerprint
+                or runtime_value(node, lambda identity: identity.binary_digest)
+                != runtime_identity.binary_digest
+                or runtime_value(node, lambda identity: identity.build_digest)
+                != runtime_identity.build_digest
+                or runtime_value(node, lambda identity: identity.architecture)
+                != runtime_identity.architecture
+                or runtime_value(node, lambda identity: identity.semantic_version)
+                != runtime_identity.semantic_version
+                or inventory_items(node).preflight_fingerprint != preflight_fingerprint
             ):
                 raise InvalidValue(
                     "claim request identity changed",
@@ -658,6 +663,8 @@ def _claim_once(
             and operation.current_attempt == 0
         ):
             _anchor_start_budget(session, operation, now)
+        if gpu_health_wait(self, session, operation, now):
+            return None
         fence = claim_fence or str(uuid.uuid4())
         deadline = now + timedelta(seconds=CLAIM_LEASE_SECONDS)
         # The claim consumes the schedule the previous attempt carried

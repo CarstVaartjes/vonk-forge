@@ -1,0 +1,10 @@
+GPU 0000000F:01:00.0
+    Product Name : NVIDIA GB10
+    Fan Speed : N/A
+    Performance State : P8
+    FB Memory Usage
+        Total : N/A
+        Free : N/A
+    Clocks
+        Graphics : 180 MHz
+    GPU Recovery Action : None

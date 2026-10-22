@@ -6,16 +6,14 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import select
 from vonk_agent_protocol import LifecycleState, ProfileReasonCode, SupersedeCode
-from vonk_control.evidence_repeats import load_subject
+from vonk_control.evidence_repeats import owner_evidence
 from vonk_control.fleet_profile_contract import (
     FleetProfileApplicationView,
     FleetProfileAssignmentInput,
     FleetProfileInput,
 )
 from vonk_control.models import (
-    EvidenceRepeat,
     FleetProfileApplication,
     FleetProfileSelection,
     Job,
@@ -103,12 +101,13 @@ def test_superseded_replay_ends_and_selected_load_replans(
         assert ended.progress.supersede_code == SupersedeCode.SUPERSEDED_BY_INTENT
         assert ended.next_attempt_at is None
         with world.sessions() as session:
-            repeats = session.scalars(
-                select(EvidenceRepeat.repeats).where(
-                    EvidenceRepeat.subject == load_subject(older.id),
-                    EvidenceRepeat.code == ProfileReasonCode.RETRY_CONFLICT,
-                )
-            ).all()
+            owner = session.get(FleetProfileApplication, older.id)
+            assert owner is not None
+            repeats = [
+                item.repeats
+                for item in owner_evidence(owner) or []
+                if item.code == ProfileReasonCode.RETRY_CONFLICT
+            ]
         assert all(count <= 1 for count in repeats)
 
         for _ in range(60):

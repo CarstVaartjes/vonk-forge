@@ -26,7 +26,9 @@ fn lock_arguments(range: &GpuClockRange) -> Option<[String; 2]> {
 }
 
 pub(super) fn allowed_arguments(arguments: &[String]) -> bool {
-    if arguments == [OBSERVATION_QUERY, CSV_FORMAT] {
+    if arguments == [OBSERVATION_QUERY, CSV_FORMAT]
+        || arguments == [super::compile_cache::GPU_QUERY, CSV_FORMAT]
+    {
         return true;
     }
     let [_, pair] = arguments else {

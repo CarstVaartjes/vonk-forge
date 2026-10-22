@@ -147,6 +147,8 @@ pub struct RecipeExecutor<'a, R> {
 
 #[derive(Debug, thiserror::Error)]
 pub enum RecipeObservationError {
+    #[error("recipe observation custody unavailable: {0}")]
+    State(#[from] StateError),
     #[error("retained recipe run was skipped because its metadata is invalid")]
     SkippedRun,
     /// The Controller has no record of this run, so it is never reported.

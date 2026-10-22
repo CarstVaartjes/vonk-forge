@@ -3733,7 +3733,22 @@ def test_detach_returns_acceptance_without_observing_operation() -> None:
     assert [call[1] for call in client.calls] == ["/api/recipe/qwen-code/download"]
 
 
-def test_watch_shows_updated_resource_and_retains_final_snapshot(capsys) -> None:
+def test_watch_shows_updated_resource_and_retains_final_snapshot(
+    capsys, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The watch must retain the last observed snapshot at its deadline; renderer
+    # and scheduler latency must not decide whether the second snapshot is read.
+    class WatchClock:
+        now = 0.0
+
+        def monotonic(self) -> float:
+            return self.now
+
+        def sleep(self, delay: float) -> None:
+            self.now += delay
+
+    clock = WatchClock()
+    monkeypatch.setattr(controller_cli.observation, "time", clock)
     common = {
         "identity": {"slug": "Qwen"},
         "selector": "qwen",
@@ -3763,6 +3778,7 @@ def test_watch_shows_updated_resource_and_retains_final_snapshot(capsys) -> None
     )
     captured = capsys.readouterr()
     assert status == 2  # A resource watch has a deadline, not an execution outcome.
+    assert clock.now == pytest.approx(0.04)
     assert len(client.calls) >= 2
     assert "preparing" in captured.err and "cached" in captured.err
     assert "preparing" not in captured.out and "cached" in captured.out

@@ -9,6 +9,7 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import event, func, select
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import sessionmaker
+from vonk_agent_protocol import canonical_message
 from vonk_control.models import (
     AgentNode,
     Base,
@@ -16,7 +17,7 @@ from vonk_control.models import (
 )
 from vonk_control.telemetry import (
     TelemetryRepository,
-    TelemetrySampleInput,
+    TelemetrySample,
 )
 
 NODE_A = "spk_" + "a" * 32
@@ -36,17 +37,21 @@ def _repository(engine: Engine) -> tuple[TelemetryRepository, sessionmaker]:
 
 def _sample(
     *, boot_id: uuid.UUID, sequence: int, observed_at: datetime
-) -> TelemetrySampleInput:
-    return TelemetrySampleInput(
-        boot_id=boot_id,
-        observed_at=observed_at,
-        memory_total_bytes=None,
-        memory_available_bytes=None,
-        disk_total_bytes=None,
-        disk_free_bytes=None,
-        gpu_utilization_percent=None,
-        gpu_memory_total_bytes=None,
-        gpu_memory_free_bytes=None,
+) -> TelemetrySample:
+    return TelemetrySample.model_validate_json(
+        canonical_message(
+            {
+                "boot_id": str(boot_id),
+                "observed_at": observed_at,
+                "memory_total_bytes": None,
+                "memory_available_bytes": None,
+                "disk_total_bytes": None,
+                "disk_free_bytes": None,
+                "gpu_utilization_percent": None,
+                "gpu_memory_total_bytes": None,
+                "gpu_memory_free_bytes": None,
+            }
+        )
     )
 
 
@@ -110,7 +115,7 @@ def test_postgres_out_of_order_commits_cannot_regress_latest(
     )
     inserted, role, delay = _delay_first_insert(postgres_engine)
 
-    def record(name: str, value: TelemetrySampleInput):
+    def record(name: str, value: TelemetrySample):
         role.value = name
         return repository.record_batch(NODE_A, (value,))
 
@@ -125,7 +130,7 @@ def test_postgres_out_of_order_commits_cannot_regress_latest(
         event.remove(postgres_engine, "after_cursor_execute", delay)
 
     latest = repository.latest((NODE_A,))[NODE_A]
-    assert latest.boot_id == BOOT_B
+    assert latest.boot_id == str(BOOT_B)
     assert latest.observed_at == newer.observed_at
 
 
@@ -133,7 +138,6 @@ def test_gpu_clock_observation_roundtrips_postgres_and_old_rows_remain_null(
     postgres_engine: Engine,
 ) -> None:
     """Catches untyped JSON, missing observation writes and upgrade row rewrites."""
-    from dataclasses import replace
 
     from vonk_agent_protocol.gpu_clock import (
         GpuClockApplyState,
@@ -163,7 +167,13 @@ def test_gpu_clock_observation_roundtrips_postgres_and_old_rows_remain_null(
             )
         ],
     )
-    second = replace(first, observed_at=NOW - timedelta(seconds=1), gpu_clock=clock)
+    second = type(first).model_validate(
+        {
+            **first.model_dump(),
+            "observed_at": NOW - timedelta(seconds=1),
+            "gpu_clock": clock,
+        }
+    )
     repository.record_batch(NODE_A, (second,))
     with sessions() as session:
         rows = list(

@@ -949,7 +949,7 @@ jobs:
             enforce=(--test-budget-enforce "$RUNNER_TEMP/changed-tests.txt")
           fi
           scripts/test control --shard "$((SHARD_INDEX + 1))/$SHARD_TOTAL" \
-            --durations "$timing_file" -- -n 4 "${enforce[@]}" \
+            --durations "$timing_file" -- -vv -n 4 "${enforce[@]}" \
             -o junit_family=xunit1 --junitxml="$RUNNER_TEMP/control-junit.xml"
 
       - name: Collect measured file durations

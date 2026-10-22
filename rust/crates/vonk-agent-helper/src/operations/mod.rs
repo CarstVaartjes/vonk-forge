@@ -386,6 +386,7 @@ struct ValidatedDockerRun {
     installation_id: String,
     uid: u32,
     gid: u32,
+    gpu: bool,
     models: Vec<PathBuf>,
     inputs: Option<PathBuf>,
     outputs: PathBuf,
@@ -414,6 +415,7 @@ type RuntimeImageInspection = (String, String, String, String, String);
 mod arguments;
 use arguments::*;
 mod commands;
+mod compile_cache;
 pub use commands::CommandFailure;
 mod inspection;
 pub(crate) use inspection::process_exited;
@@ -439,7 +441,6 @@ mod stop;
 mod stray_jobs;
 pub use host_settings::HOST_SETTINGS_INTERVAL;
 mod unused_images;
-pub use exited_serving::EXITED_SERVING_SWEEP_INTERVAL;
 pub use unused_images::UNUSED_IMAGE_SWEEP_INTERVAL;
 mod validation;
 use validation::*;

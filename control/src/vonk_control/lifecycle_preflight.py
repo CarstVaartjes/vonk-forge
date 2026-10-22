@@ -19,6 +19,7 @@ from vonk_agent_protocol import RuntimePreflightCode
 from vonk_agent_protocol.runtime_preflight import RuntimePreflightResult
 
 from .failure_classification import is_security_failure
+from .inventory_items import inventory_items
 from .lifecycle.job import JobAdapter
 from .models import AgentNode, AgentOperation, AgentOperationAttempt, Job
 from .recovery_policy import RECOVERY
@@ -167,7 +168,7 @@ class LifecyclePreflight:
                     source_build=source_build,
                     minimum_free_bytes=self._minimum_free_bytes,
                 )
-                fingerprint = node.preflight_fingerprint
+                fingerprint = inventory_items(node).preflight_fingerprint
                 result = checkpoint.receipts.get(node_id) or latest_result(
                     session, node_id, requirements_sha256=request_digest(request)
                 )

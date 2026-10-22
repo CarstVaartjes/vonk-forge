@@ -29,6 +29,9 @@ impl ProcessRunner for FakeRunner {
     ) -> Result<ProcessOutput, ProcessError> {
         self.calls.borrow_mut().push((program, arguments.to_vec()));
         let stdout = match program {
+            Program::NvidiaSmi if arguments == ["-q"] => {
+                include_bytes!("fixtures/gpu-health-healthy.txt").to_vec()
+            }
             Program::NvidiaSmi if arguments == [SUPPORT_QUERY, CSV_FORMAT] => {
                 b"2400\n300\n1800\n2200\n1800\n".to_vec()
             }
@@ -63,7 +66,7 @@ impl ProcessRunner for DelayedReadyRunner {
         timeout: Duration,
     ) -> Result<ProcessOutput, ProcessError> {
         let failures = self.failures_remaining.get();
-        if failures > 0 {
+        if failures > 0 && program == Program::Podman {
             self.failures_remaining.set(failures - 1);
             return Ok(ProcessOutput {
                 exit_code: None,
@@ -294,18 +297,21 @@ fn unavailable_memory_on_an_unknown_gpu_fails_closed() {
         cdi_output: b"nvidia.com/gpu=all\n",
     };
 
-    assert!(
-        InventoryCollector {
-            runner: &runner,
-            meminfo_path: &meminfo,
-            store_path: directory.path(),
-            egress_binary_path: Path::new("/bin/true"),
-            fabric_address: None,
-            fabric_bandwidth_mbps: None,
-        }
-        .collect()
-        .is_err()
+    let inventory = InventoryCollector {
+        runner: &runner,
+        meminfo_path: &meminfo,
+        store_path: directory.path(),
+        egress_binary_path: Path::new("/bin/true"),
+        fabric_address: None,
+        fabric_bandwidth_mbps: None,
+    }
+    .collect()
+    .unwrap();
+    assert_eq!(
+        inventory.gpu_health,
+        vonk_agent_protocol::generated::GpuHealth::Unavailable
     );
+    assert_eq!(inventory.gpu_count, 0);
 }
 
 #[test]
@@ -465,4 +471,176 @@ fn host_settings_are_observed_and_an_unreadable_systemd_leaves_them_unknown() {
     );
     assert_eq!(observe(None, "active"), None);
     assert_eq!(observe(Some("graphical.target"), ""), None);
+}
+
+#[test]
+fn reset_inventory_reaches_the_wire_and_recovers_without_a_flag() {
+    // Catches retaining stale healthy inventory when GPU discovery fails.
+    struct HealthRunner {
+        health: Cell<vonk_agent_protocol::generated::GpuHealth>,
+    }
+    impl ProcessRunner for HealthRunner {
+        fn run(
+            &self,
+            program: Program,
+            arguments: &[String],
+            timeout: Duration,
+        ) -> Result<ProcessOutput, ProcessError> {
+            use vonk_agent_protocol::generated::GpuHealth;
+            if program == Program::NvidiaSmi && arguments == ["-q"] {
+                return Ok(ProcessOutput {
+                    exit_code: Some(0),
+                    success: true,
+                    stderr: vec![],
+                    stdout: match self.health.get() {
+                        GpuHealth::Healthy => {
+                            include_bytes!("fixtures/gpu-health-healthy.txt").to_vec()
+                        }
+                        GpuHealth::NeedsReset => {
+                            include_bytes!("fixtures/gpu-health-needs-reset.txt").to_vec()
+                        }
+                        GpuHealth::Unavailable => {
+                            return Err(ProcessError::Io(std::io::Error::from(
+                                std::io::ErrorKind::NotFound,
+                            )));
+                        }
+                    },
+                });
+            }
+            if program == Program::NvidiaSmi && self.health.get() != GpuHealth::Healthy {
+                return Ok(ProcessOutput {
+                    exit_code: Some(1),
+                    success: false,
+                    stdout: vec![],
+                    stderr: b"GPU discovery failed".to_vec(),
+                });
+            }
+            FakeRunner {
+                calls: RefCell::new(vec![]),
+                gpu_output: b"NVIDIA GB10, N/A, N/A, 580.173.02\n",
+                cdi_output: b"nvidia.com/gpu=all\n",
+            }
+            .run(program, arguments, timeout)
+        }
+    }
+    use vonk_agent_protocol::generated::GpuHealth;
+    let directory = tempdir().unwrap();
+    let meminfo = directory.path().join("meminfo");
+    fs::write(&meminfo, "MemTotal: 123456 kB\nMemAvailable: 65432 kB\n").unwrap();
+    let runner = HealthRunner {
+        health: Cell::new(GpuHealth::NeedsReset),
+    };
+    let collector = InventoryCollector {
+        runner: &runner,
+        meminfo_path: &meminfo,
+        store_path: directory.path(),
+        egress_binary_path: Path::new("/bin/true"),
+        fabric_address: None,
+        fabric_bandwidth_mbps: None,
+    };
+    for health in [
+        GpuHealth::NeedsReset,
+        GpuHealth::Unavailable,
+        GpuHealth::Healthy,
+    ] {
+        runner.health.set(health);
+        let inventory = collector.collect().unwrap();
+        let request = inventory.to_request(chrono::Utc::now().into());
+        assert_eq!(request.gpu_health, Some(health));
+        request.validate().unwrap();
+        let bytes = vonk_agent_protocol::canonical_json(&request).unwrap();
+        let parsed: vonk_agent_protocol::InventoryRequest =
+            vonk_agent_protocol::parse_strict(&bytes).unwrap();
+        assert_eq!(parsed.gpu_health, Some(health));
+    }
+}
+
+#[tokio::test]
+async fn acceptance_device_uses_the_real_inventory_health_contract() {
+    // Catches a synthetic device that returns inventory CSV for the health query,
+    // so normal admission waits forever for a GPU the fixture says is absent.
+    let script = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../../tests/acceptance/fixtures/nvidia-smi.sh");
+    async fn query(script: &Path, arguments: &[&str]) -> Vec<u8> {
+        let output = tokio::time::timeout(
+            Duration::from_secs(10),
+            tokio::process::Command::new("/bin/sh")
+                .arg(script)
+                .args(arguments)
+                .output(),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert!(output.status.success(), "{:?}", output);
+        output.stdout
+    }
+    struct SyntheticRunner {
+        health: Vec<u8>,
+        inventory: Vec<u8>,
+    }
+    impl ProcessRunner for SyntheticRunner {
+        fn run(
+            &self,
+            program: Program,
+            arguments: &[String],
+            timeout: Duration,
+        ) -> Result<ProcessOutput, ProcessError> {
+            if program == Program::NvidiaSmi {
+                return Ok(ProcessOutput {
+                    exit_code: Some(0),
+                    success: true,
+                    stdout: if arguments == ["-q"] {
+                        self.health.clone()
+                    } else {
+                        self.inventory.clone()
+                    },
+                    stderr: vec![],
+                });
+            }
+            FakeRunner {
+                calls: RefCell::new(vec![]),
+                gpu_output: b"",
+                cdi_output: b"nvidia.com/gpu=all\n",
+            }
+            .run(program, arguments, timeout)
+        }
+    }
+    let runner = SyntheticRunner {
+        health: query(&script, &["-q"]).await,
+        inventory: query(
+            &script,
+            &[
+                "--query-gpu=name,memory.total,memory.free,driver_version",
+                CSV_FORMAT,
+            ],
+        )
+        .await,
+    };
+    let directory = tempdir().unwrap();
+    let meminfo = directory.path().join("meminfo");
+    fs::write(&meminfo, "MemTotal: 123456 kB\nMemAvailable: 65432 kB\n").unwrap();
+    let inventory = InventoryCollector {
+        runner: &runner,
+        meminfo_path: &meminfo,
+        store_path: directory.path(),
+        egress_binary_path: Path::new("/bin/true"),
+        fabric_address: None,
+        fabric_bandwidth_mbps: None,
+    }
+    .collect()
+    .unwrap();
+    assert_eq!(
+        inventory.gpu_health,
+        vonk_agent_protocol::generated::GpuHealth::Healthy
+    );
+    assert_eq!(inventory.gpu_count, 1);
+    assert_eq!(
+        inventory.memory_pool,
+        vonk_agent_protocol::MemoryPool::Shared
+    );
+    assert_eq!(
+        inventory.gpu_memory_free_bytes,
+        inventory.memory_available_bytes
+    );
 }

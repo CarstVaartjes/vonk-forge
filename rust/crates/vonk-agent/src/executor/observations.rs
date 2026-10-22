@@ -24,11 +24,25 @@ pub(super) async fn report_complete_recipe_run_observations(
 /// A collection failure is unknown evidence for its run, not for another
 /// successfully inspected run. Nonempty partial reports preserve omitted ranks
 /// on the Controller. Only a successfully collected empty set reports absence.
+#[cfg(test)]
 pub(super) async fn report_recipe_run_observation_page(
     client: &AgentHttpClient,
     observed_at: DateTime<Utc>,
     results: Vec<Result<ExactRecipeRunObservation, RecipeObservationError>>,
     allow_empty: bool,
+) -> Result<usize, RecipeObservationError> {
+    let root = tempfile::tempdir().unwrap();
+    let mut outbox = StateStore::open(&root.path().join("state.sqlite"), client.node_id())?;
+    deliver_recipe_run_observation_page(client, observed_at, results, allow_empty, &mut outbox)
+        .await
+}
+
+async fn deliver_recipe_run_observation_page(
+    client: &AgentHttpClient,
+    observed_at: DateTime<Utc>,
+    results: Vec<Result<ExactRecipeRunObservation, RecipeObservationError>>,
+    allow_empty: bool,
+    outbox: &mut StateStore,
 ) -> Result<usize, RecipeObservationError> {
     let mut observations = Vec::with_capacity(results.len());
     let mut failure = None;
@@ -47,19 +61,28 @@ pub(super) async fn report_recipe_run_observation_page(
         }
     }
     for batch in observations.chunks(MAX_RECIPE_RUN_OBSERVATIONS_PER_BATCH) {
-        client
-            .report_exact_recipe_run_observations(observed_at, batch)
-            .await?;
+        deliver_recipe_observation(client, observed_at, batch, outbox).await?;
     }
     if observations.is_empty() && allow_empty && failure.is_none() && !skipped_run {
-        client
-            .report_exact_recipe_run_observations(observed_at, &[])
-            .await?;
+        deliver_recipe_observation(client, observed_at, &[], outbox).await?;
     }
     match failure {
         Some(error) => Err(error),
         None => Ok(observations.len()),
     }
+}
+
+async fn deliver_recipe_observation(
+    client: &AgentHttpClient,
+    observed_at: DateTime<Utc>,
+    runs: &[ExactRecipeRunObservation],
+    outbox: &mut StateStore,
+) -> Result<(), RecipeObservationError> {
+    let report = crate::client::build_exact_recipe_run_observations(observed_at, runs)?;
+    outbox.retain_recipe_observation(&report)?;
+    client.report_recipe_observation_envelope(&report).await?;
+    outbox.acknowledge_recipe_observation(&report)?;
+    Ok(())
 }
 
 /// The account of a workload whose process exited, from the helper's answer to
@@ -185,7 +208,33 @@ impl<R> RecipeExecutor<'_, R> {
         };
         match disposition {
             RecipeRunDisposition::Unowned => {
-                if self.retire_claim(run_id, "unreadable managed metadata") {
+                let request_root = self.runtime_root.join("runtime-requests");
+                let boundary = HostRuntimeBoundary {
+                    client: self.client,
+                    request_root: &request_root,
+                    helper_socket: self.helper_socket,
+                };
+                match boundary
+                    .inspect_recipe_run_evidence_for_observation(
+                        vec![run_id.to_owned()],
+                        false,
+                        None,
+                    )
+                    .await
+                {
+                    Ok(report) if !report.running => {}
+                    Ok(_) => return Err(skip("the container is running")),
+                    Err(inspection) => {
+                        return Err(skip_because(
+                            &inspection.preflight_code(),
+                            &format!(
+                                "the container could not be inspected: {}",
+                                inspection.cause()
+                            ),
+                        ));
+                    }
+                }
+                if self.retire_claim(run_id, "unreadable managed metadata; process gone") {
                     Err(RecipeObservationError::UnownedRun)
                 } else {
                     Err(skip("retirement failed"))
@@ -257,6 +306,16 @@ impl<R> RecipeExecutor<'_, R> {
     where
         R: ProcessRunner,
     {
+        let mut outbox = StateStore::open(
+            &self.runtime.data_root.join("state.sqlite"),
+            self.client.node_id(),
+        )?;
+        if let Some(report) = outbox.pending_recipe_observation()? {
+            self.client
+                .report_recipe_observation_envelope(&report)
+                .await?;
+            outbox.acknowledge_recipe_observation(&report)?;
+        }
         let mut page = self.runtime.recipe_run_inspection_page(checkpoint)?;
         let prepared: Vec<_> = page
             .plans
@@ -388,11 +447,12 @@ impl<R> RecipeExecutor<'_, R> {
                 other => other,
             })
             .collect();
-        let reported = report_recipe_run_observation_page(
+        let reported = deliver_recipe_run_observation_page(
             self.client,
             page.observed_at,
             results,
             page.empty_snapshot_safe,
+            &mut outbox,
         )
         .await?;
         Ok(RecipeObservationSweep {

@@ -1,3 +1,7 @@
+from vonk_control.inventory_items import runtime_value
+
+from .runtime_identity_support import set_inventory_identity
+
 """A bound preparation build may borrow its future runtime's memory promise."""
 
 import io
@@ -89,7 +93,7 @@ def _accepted_build_profile(
                 )
             )
         )
-        node.binary_digest = "1" * 64
+        set_inventory_identity(node, binary_digest="1" * 64)
         snapshot.capabilities = [*snapshot.capabilities, "recipe.build.v1"]
         snapshot.host_memory_free_bytes = snapshot.gpu_memory_free_bytes = 275
         snapshot.disk_total_bytes = 100_000
@@ -117,7 +121,9 @@ def _accepted_build_profile(
         build.plan = payload
         build.policy_report = {
             **build.policy_report,
-            "builder_binary_digest": node.binary_digest,
+            "builder_binary_digest": runtime_value(
+                node, lambda identity: identity.binary_digest
+            ),
             "source_bundle_sha256": bundle.sha256,
         }
         selected = RecipeBuildPlan(

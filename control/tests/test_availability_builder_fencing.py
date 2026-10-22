@@ -4,7 +4,7 @@ import threading
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 import pytest
 from sqlalchemy import select
@@ -265,3 +265,50 @@ def test_parent_claim_is_held_until_child_admission_commits(
     service.reconcile_cancellations()
     assert service.get(parent.id).state == "cancelled"
     assert operations.get(child.id).state == "cancelled"
+
+
+def test_builder_contention_names_its_owner_and_replans_after_release(
+    tmp_path, postgres_engine
+):
+    # Catches replacing the admission owner's evidence with an anonymous busy
+    # message, and retaining the failed selection after the lock is released.
+    from vonk_agent_protocol import AgentOperation, RecipeImageCode
+    from vonk_control.admission_locking import (
+        acquire_admission_keys,
+        node_admission_key,
+    )
+
+    sessions, builds, operations, _storage, now, node, revision, _plan = _services(
+        tmp_path, postgres_engine
+    )
+    clock = [now]
+    service = build_recipe_image_availability(
+        sessions,
+        artifact_root=tmp_path / "images",
+        managed_catalog_sync=None,
+        recipe_builds=builds,
+        recipe_operations=operations,
+        clock=lambda: clock[0],
+    ).service
+    with sessions.begin() as session:
+        session.add(User(subject="operator", role="operator"))
+    parent = service.start(revision.id, actor="operator", request_id=str(uuid.uuid4()))
+    with sessions.begin() as holder:
+        acquire_admission_keys(
+            holder, (node_admission_key(node),), holder="fixture-owner"
+        )
+        assert service.run_pending(limit=1) == 1
+        waiting = service.get(parent.id)
+        assert waiting.state == LifecycleState.QUEUED
+        assert waiting.next_attempt_at is not None
+        blocker = next(
+            b for b in waiting.blockers if b.code == RecipeImageCode.BUILDER_BUSY
+        )
+        assert "fixture-owner" in blocker.detail
+    clock[0] = datetime.fromisoformat(waiting.next_attempt_at)
+    assert service.run_pending(limit=1) == 1
+    with sessions() as session:
+        child = session.scalars(
+            select(Job).where(Job.kind == AgentOperation.RECIPE_BUILD)
+        ).one()
+        assert child.targets == [node]

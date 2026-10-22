@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import math
 import uuid
-from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -10,13 +9,14 @@ from sqlalchemy import Select, create_engine, event, func, select
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
+from vonk_agent_protocol import canonical_message
 from vonk_control.models import (
     AgentNode,
     Base,
     NodeTelemetryLatest,
     NodeTelemetrySample,
 )
-from vonk_control.telemetry import TelemetryRepository, TelemetrySampleInput
+from vonk_control.telemetry import TelemetryRepository, TelemetrySample
 
 NODE_A = "spk_" + "a" * 32
 NODE_B = "spk_" + "b" * 32
@@ -56,17 +56,21 @@ def sample(
     sequence: int = 1,
     observed_at: datetime | None = None,
     boot_id: uuid.UUID = BOOT_A,
-) -> TelemetrySampleInput:
-    return TelemetrySampleInput(
-        boot_id=boot_id,
-        observed_at=observed_at or START + timedelta(seconds=sequence),
-        memory_total_bytes=128_000_000_000,
-        memory_available_bytes=64_000_000_000,
-        disk_total_bytes=1_000_000_000_000,
-        disk_free_bytes=750_000_000_000,
-        gpu_utilization_percent=25.0,
-        gpu_memory_total_bytes=128_000_000_000,
-        gpu_memory_free_bytes=63_000_000_000,
+) -> TelemetrySample:
+    return TelemetrySample.model_validate_json(
+        canonical_message(
+            {
+                "boot_id": str(boot_id),
+                "observed_at": observed_at or START + timedelta(seconds=sequence),
+                "memory_total_bytes": 128_000_000_000,
+                "memory_available_bytes": 64_000_000_000,
+                "disk_total_bytes": 1_000_000_000_000,
+                "disk_free_bytes": 750_000_000_000,
+                "gpu_utilization_percent": 25.0,
+                "gpu_memory_total_bytes": 128_000_000_000,
+                "gpu_memory_free_bytes": 63_000_000_000,
+            }
+        )
     )
 
 
@@ -124,7 +128,7 @@ def test_new_boot_only_newer_observation_advances_latest(
     )
 
     latest = repository.latest((NODE_A, NODE_B))
-    assert latest[NODE_A].boot_id == BOOT_B
+    assert latest[NODE_A].boot_id == str(BOOT_B)
     assert latest[NODE_A].observed_at == START + timedelta(seconds=10)
     assert NODE_B not in latest
     assert [observed_at for observed_at in _stored(sessions)] == [
@@ -160,8 +164,8 @@ def test_sample_rejects_non_finite_negative_and_out_of_range_values(
 ) -> None:
     original = sample(sequence=1)
     with pytest.raises(Exception):  # noqa: B017 -- invalid sample produces no value; valid sample remains usable
-        replace(original, **changes)
-    assert replace(original) == original
+        type(original).model_validate({**original.model_dump(), **changes})
+    assert type(original).model_validate({**original.model_dump()}) == original
 
 
 @pytest.mark.parametrize(
@@ -180,62 +184,47 @@ def test_capacity_pairs_are_both_known_or_both_unknown(
 ) -> None:
     original = sample(sequence=1)
     with pytest.raises(Exception):  # noqa: B017 -- invalid sample produces no value; valid sample remains usable
-        replace(original, **changes)
-    assert replace(original) == original
+        type(original).model_validate({**original.model_dump(), **changes})
+    assert type(original).model_validate({**original.model_dump()}) == original
 
 
 def test_sample_rejects_nil_boot_id() -> None:
     with pytest.raises(Exception):  # noqa: B017 -- invalid identity produces no value; valid sample remains usable
-        replace(sample(sequence=1), boot_id=uuid.UUID(int=0))
-    assert sample(sequence=1).boot_id == BOOT_A
-
-
-def test_database_rejects_half_present_capacity_pair(telemetry) -> None:
-    _, sessions, _, _ = telemetry
-    with pytest.raises(IntegrityError), sessions.begin() as session:
-        session.add(
-            NodeTelemetrySample(
-                node_id=NODE_A,
-                boot_id=str(BOOT_A),
-                observed_at=NOW,
-                received_at=NOW,
-                memory_total_bytes=1,
-                memory_available_bytes=None,
-            )
+        type(sample(sequence=1)).model_validate(
+            {**sample(sequence=1).model_dump(), "boot_id": uuid.UUID(int=0)}
         )
+    assert sample(sequence=1).boot_id == str(BOOT_A)
 
 
-@pytest.mark.parametrize(
-    "values",
-    [
-        {
-            "memory_total_bytes": MAX_CAPACITY_BYTES + 1,
-            "memory_available_bytes": MAX_CAPACITY_BYTES + 1,
-        },
-        {
-            "disk_total_bytes": MAX_CAPACITY_BYTES + 1,
-            "disk_free_bytes": MAX_CAPACITY_BYTES + 1,
-        },
-        {
-            "gpu_memory_total_bytes": MAX_CAPACITY_BYTES + 1,
-            "gpu_memory_free_bytes": MAX_CAPACITY_BYTES + 1,
-        },
-    ],
-)
-def test_database_rejects_metrics_above_wire_maximums(
-    telemetry, values: dict[str, object]
+def test_resource_store_rejects_invalid_measurement_without_partial_sample(
+    telemetry,
 ) -> None:
-    _, sessions, _, _ = telemetry
-    with pytest.raises(IntegrityError), sessions.begin() as session:
-        session.add(
-            NodeTelemetrySample(
-                node_id=NODE_A,
-                boot_id=str(BOOT_A),
-                observed_at=NOW,
-                received_at=NOW,
-                **values,
-            )
+    repository, sessions, _, _ = telemetry
+    from vonk_agent_protocol.telemetry import HostResourceSample
+    from vonk_control.models import NodeInventoryResourceSnapshot
+    from vonk_control.stored_json import write_guard_mode
+
+    repository.record_batch(NODE_A, (sample(sequence=1),))
+    with sessions() as session:
+        resource = session.scalar(select(NodeInventoryResourceSnapshot))
+        assert resource is not None
+        identifier = resource.id
+    # Controller initialization selects warning mode for production writes;
+    # this rejection assertion owns its strict scope instead of test order.
+    with (
+        write_guard_mode(strict=True),
+        pytest.raises(ValueError),
+        sessions.begin() as session,
+    ):
+        resource = session.get(NodeInventoryResourceSnapshot, identifier)
+        assert resource is not None
+        resource.host_resources = HostResourceSample.model_construct(
+            memory_total_bytes=1,
+            memory_available_bytes=2,
+            disk_total_bytes=None,
+            disk_free_bytes=None,
         )
+    assert repository.latest((NODE_A,))[NODE_A].memory_available_bytes == 64_000_000_000
 
 
 def test_latest_pointer_cannot_reference_a_sample_from_another_node() -> None:
@@ -371,7 +360,11 @@ def test_conflicting_replay_is_rejected(telemetry) -> None:
     with pytest.raises(ValueError):
         repository.record_batch(
             NODE_A,
-            (replace(sample(sequence=4), gpu_utilization_percent=99.0),),
+            (
+                type(sample(sequence=4)).model_validate(
+                    {**sample(sequence=4).model_dump(), "gpu_utilization_percent": 99.0}
+                ),
+            ),
         )
 
     assert _stored(sessions) == [START + timedelta(seconds=4)]
@@ -428,22 +421,26 @@ def test_gpu_failure_round_trips_and_next_sample_recovers(telemetry):
         gpu_unavailable_reason=GpuUnavailableReason.COMMAND_FAILED,
     )
     decoded = TelemetrySample.model_validate_json(wire.model_dump_json())
-    failed = replace(
-        sample(),
-        gpu_utilization_percent=None,
-        gpu_memory_total_bytes=None,
-        gpu_memory_free_bytes=None,
-        gpu_unavailable_reason=decoded.gpu_unavailable_reason,
+    failed = type(sample()).model_validate(
+        {
+            **sample().model_dump(),
+            "gpu_utilization_percent": None,
+            "gpu_memory_total_bytes": None,
+            "gpu_memory_free_bytes": None,
+            "gpu_unavailable_reason": decoded.gpu_unavailable_reason,
+        }
     )
     repository.record_batch(NODE_A, (failed,))
     point = telemetry_point(repository.latest((NODE_A,))[NODE_A])
     assert point.gpu_unavailable_reason is GpuUnavailableReason.COMMAND_FAILED
     assert point.gpu_utilization_percent is None
-    recovered = replace(
-        sample(sequence=2),
-        gpu_memory_total_bytes=None,
-        gpu_memory_free_bytes=None,
-        gpu_temperature_c=61,
+    recovered = type(sample(sequence=2)).model_validate(
+        {
+            **sample(sequence=2).model_dump(),
+            "gpu_memory_total_bytes": None,
+            "gpu_memory_free_bytes": None,
+            "gpu_temperature_c": 61,
+        }
     )
     repository.record_batch(NODE_A, (recovered,))
     point = telemetry_point(repository.latest((NODE_A,))[NODE_A])

@@ -263,6 +263,58 @@ impl StateStore {
         }
     }
 
+    /// One page in custody until its exact canonical content is acknowledged.
+    /// Reopening the journal after a restart must replay it before collecting
+    /// newer evidence (including output which a stop may already have removed).
+    pub fn pending_recipe_observation(
+        &self,
+    ) -> Result<Option<vonk_agent_protocol::RecipeRunObservationsWire>, StateError> {
+        let body: Option<String> = self
+            .connection
+            .query_row(
+                "SELECT value FROM metadata WHERE key='pending_recipe_observation'",
+                [],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if body.as_ref().is_some_and(|body| body.len() > 1024 * 1024) {
+            return Err(StateError::Identity);
+        }
+        body.map(|body| parse_strict(body.as_bytes()).map_err(StateError::from))
+            .transpose()
+    }
+
+    pub fn retain_recipe_observation(
+        &mut self,
+        report: &vonk_agent_protocol::RecipeRunObservationsWire,
+    ) -> Result<(), StateError> {
+        let body = vonk_agent_protocol::canonical_generated_json(report)?;
+        if body.len() > 1024 * 1024 {
+            return Err(StateError::Identity);
+        }
+        // Never overwrite unacknowledged content, even with a newer sample.
+        self.connection.execute(
+            "INSERT INTO metadata(key,value) VALUES ('pending_recipe_observation',?1)",
+            [String::from_utf8(body).map_err(|_| StateError::Identity)?],
+        )?;
+        Ok(())
+    }
+
+    pub fn acknowledge_recipe_observation(
+        &mut self,
+        report: &vonk_agent_protocol::RecipeRunObservationsWire,
+    ) -> Result<(), StateError> {
+        let body = vonk_agent_protocol::canonical_generated_json(report)?;
+        if self.connection.execute(
+            "DELETE FROM metadata WHERE key='pending_recipe_observation' AND value=?1",
+            [String::from_utf8(body).map_err(|_| StateError::Identity)?],
+        )? != 1
+        {
+            return Err(StateError::Identity);
+        }
+        Ok(())
+    }
+
     /// Scan progress shares the node-bound, FULL-synchronous journal with
     /// effects. Saving follows delivery, so a refused report replays its page.
     pub fn observation_checkpoint(

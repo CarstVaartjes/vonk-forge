@@ -2541,9 +2541,8 @@ class SparkLifecycle:
         smi = self.temporary_root / "synthetic-nvidia-smi"
         ctk = self.temporary_root / "synthetic-nvidia-ctk"
         cdi.write_bytes(raw)
-        smi.write_text(
-            "#!/bin/sh\nprintf '%s\\n' 'NVIDIA GB10, [N/A], [N/A], synthetic-ci'\n",
-            encoding="ascii",
+        smi.write_bytes(
+            Path(__file__).with_name("fixtures").joinpath("nvidia-smi.sh").read_bytes()
         )
         ctk.write_text(
             "#!/bin/sh\n"
@@ -4064,7 +4063,6 @@ class SparkLifecycle:
         # serialize complete operation results, signed grants, or credentials.
         query = (
             "SELECT json_build_object('node_id',r.key,"
-            "'current_fingerprint',n.preflight_fingerprint,"
             "'receipt_fingerprint',r.value->>'fingerprint',"
             "'payload_sha256',a.payload_digest,"
             "'observed_at',r.value->'observed_at',"
@@ -4074,7 +4072,6 @@ class SparkLifecycle:
             "jsonb_array_elements(r.value->'findings') f WHERE f->>'status'!='passed')) "
             "FROM jobs j CROSS JOIN LATERAL "
             "jsonb_each(j.result::jsonb->'preflight'->'receipts') r "
-            "LEFT JOIN agent_nodes n ON n.node_id=r.key "
             "LEFT JOIN LATERAL (SELECT o.payload_digest FROM agent_operations o "
             "JOIN agent_operation_attempts t ON t.operation_id=o.id "
             "AND t.attempt=o.current_attempt WHERE o.node_id=r.key "
@@ -5139,37 +5136,48 @@ class SparkLifecycle:
                         "controller direct-agent identity is invalid: "
                         + ",".join(agent_mismatches)
                     )
+                # The Fleet contract projects identity from its current owner
+                # on both the baseline and candidate Controller. SQL storage
+                # layout is not an acceptance contract across an upgrade.
+                try:
+                    runtime_identity = AgentRuntimeIdentity.model_validate_json(
+                        canonical_message(agent.get("agent_runtime"))
+                    )
+                    expected_identity = AgentRuntimeIdentity.model_validate_json(
+                        canonical_message(
+                            {
+                                name: self_test[name]
+                                for name, field in AgentRuntimeIdentity.model_fields.items()
+                                if field.is_required()
+                            }
+                        )
+                    )
+                except (TypeError, ValueError) as error:
+                    raise LifecycleError(
+                        "controller runtime identity is unreadable"
+                    ) from error
+                identity_mismatches = [
+                    name
+                    for name, field in AgentRuntimeIdentity.model_fields.items()
+                    if field.is_required()
+                    and getattr(runtime_identity, name)
+                    != getattr(expected_identity, name)
+                ]
+                if identity_mismatches:
+                    raise LifecycleError(
+                        "controller runtime identity differs: "
+                        + ",".join(identity_mismatches)
+                    )
                 rows = self._psql(
-                    "SELECT architecture,semantic_version,build_digest,binary_digest,"
-                    "contact_certificate_serial "
+                    "SELECT contact_certificate_serial "
                     f"FROM agent_nodes WHERE node_id='{node_id}'"
                 )
-                expected_row = [
-                    expected_architecture,
-                    expected_semantic,
-                    str(self_test["build_digest"]),
-                    str(self_test["binary_digest"]),
-                ]
                 row_mismatches = []
                 if len(rows) != 1:
                     row_mismatches.append("row_count")
-                elif rows[0][:4] != expected_row:
-                    row_mismatches.extend(
-                        field
-                        for index, field in enumerate(
-                            (
-                                "architecture",
-                                "semantic_version",
-                                "build_digest",
-                                "binary_digest",
-                            )
-                        )
-                        if len(rows[0]) <= index
-                        or rows[0][index] != expected_row[index]
-                    )
-                if len(rows) == 1 and len(rows[0]) != 5:
+                elif len(rows[0]) != 1:
                     row_mismatches.append("column_count")
-                elif len(rows) == 1 and SERIAL.fullmatch(rows[0][4]) is None:
+                elif SERIAL.fullmatch(rows[0][0]) is None:
                     row_mismatches.append("contact_certificate_serial")
                 if row_mismatches:
                     raise LifecycleError(
@@ -5187,7 +5195,7 @@ class SparkLifecycle:
                         if package_version == self.graph.get("baseline_version")
                         else self.graph.get("candidate_package_sha256")
                     ),
-                    "serial": rows[0][4],
+                    "serial": rows[0][0],
                     "version": package_version,
                 }
             except (LifecycleError, SliceError, TypeError) as error:

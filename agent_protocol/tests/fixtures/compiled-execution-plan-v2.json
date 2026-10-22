@@ -1,4 +1,5 @@
 {
+  "compile_cache_mount": "/outputs/cache",
   "artifacts": [
     {
       "file_id": "fixture",

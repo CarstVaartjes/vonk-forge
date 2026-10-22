@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import ErrorCategory, UnknownError, WaitReason
 
 from .auth import AgentIdentity, AgentSource, AuthError
-from .models import AgentCertificate, AgentNode, AgentPresence
+from .models import AgentCertificate, AgentNode
 
 type _Network = ipaddress.IPv4Network | ipaddress.IPv6Network
 type _Address = ipaddress.IPv4Address | ipaddress.IPv6Address
@@ -231,18 +231,10 @@ class AgentPresenceService:
         certificate = self._lock_active_certificate(session, source.identity, now)
         if certificate is None:
             raise PresenceError("agent certificate is not active")
-        row = session.scalar(
-            select(AgentPresence)
-            .where(AgentPresence.node_id == source.identity.node_id)
-            .with_for_update(of=AgentPresence)
-        )
-        if row is None:
-            row = AgentPresence(node_id=source.identity.node_id)
-            session.add(row)
-        row.certificate_serial = certificate.serial
-        row.certificate_fingerprint = certificate.fingerprint
+        row = node
+        row.contact_certificate_serial = certificate.serial
         row.management_address = address
-        row.observed_at = now
+        row.management_observed_at = now
         certificate_serial = certificate.serial
         return ManagementAddressObservation(
             node_id=source.identity.node_id,
@@ -287,8 +279,21 @@ class AgentPresenceService:
             # A failed nonblocking lookup rolls back only this observation.
             with session.begin_nested():
                 now = _utc(self._clock(), label="presence clock")
-                row = session.get(AgentPresence, node_id)
-                if row is None:
+                row = session.get(AgentNode, node_id)
+                if (
+                    row is None
+                    or row.contact_certificate_serial is None
+                    or row.management_address is None
+                    or row.management_observed_at is None
+                ):
+                    return UnknownError(
+                        category=ErrorCategory.UNKNOWN,
+                        reason=WaitReason.OBSERVATION_UNAVAILABLE,
+                    )
+                certificate = session.get(
+                    AgentCertificate, row.contact_certificate_serial
+                )
+                if certificate is None:
                     return UnknownError(
                         category=ErrorCategory.UNKNOWN,
                         reason=WaitReason.OBSERVATION_UNAVAILABLE,
@@ -296,8 +301,8 @@ class AgentPresenceService:
                 try:
                     identity = AgentIdentity(
                         node_id=row.node_id,
-                        certificate_serial=row.certificate_serial,
-                        certificate_fingerprint=row.certificate_fingerprint,
+                        certificate_serial=row.contact_certificate_serial,
+                        certificate_fingerprint=certificate.fingerprint,
                         verified=True,
                     )
                 except AuthError:
@@ -317,19 +322,19 @@ class AgentPresenceService:
                         reason=WaitReason.OBSERVATION_UNAVAILABLE,
                     )
                 original_binding = (
-                    row.certificate_serial,
-                    row.certificate_fingerprint,
+                    row.contact_certificate_serial,
+                    row.management_observed_at,
                 )
                 session.refresh(row, with_for_update={"nowait": True})
                 if original_binding != (
-                    row.certificate_serial,
-                    row.certificate_fingerprint,
+                    row.contact_certificate_serial,
+                    row.management_observed_at,
                 ):
                     return UnknownError(
                         category=ErrorCategory.UNKNOWN,
                         reason=WaitReason.OBSERVATION_UNAVAILABLE,
                     )
-                observed_at = _stored_utc(row.observed_at)
+                observed_at = _stored_utc(row.management_observed_at)
                 try:
                     address = self._policy.validate(row.management_address)
                 except PresenceError:
@@ -337,7 +342,7 @@ class AgentPresenceService:
                         category=ErrorCategory.UNKNOWN,
                         reason=WaitReason.OBSERVATION_UNAVAILABLE,
                     )
-                certificate_serial = row.certificate_serial
+                certificate_serial = row.contact_certificate_serial
                 if observed_at > now:
                     return UnknownError(
                         category=ErrorCategory.UNKNOWN,

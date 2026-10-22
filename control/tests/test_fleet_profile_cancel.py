@@ -38,6 +38,7 @@ from vonk_control.fleet_profiles import (
     build_production_fleet_profile_service,
 )
 from vonk_control.install_admission import InstallAdmissionService
+from vonk_control.inventory_items import inventory_items, runtime_value
 from vonk_control.models import (
     AgentNode,
     AgentOperation,
@@ -547,8 +548,11 @@ def _agent_service_and_target_claim(
     with sessions() as session:
         node = session.get(AgentNode, node_id)
         assert node is not None
-        identity = {**PACKAGED_RUNTIME_IDENTITY, "architecture": node.architecture}
-        fingerprint = node.preflight_fingerprint
+        identity = {
+            **PACKAGED_RUNTIME_IDENTITY,
+            "architecture": runtime_value(node, lambda identity: identity.architecture),
+        }
+        fingerprint = inventory_items(node).preflight_fingerprint
     claim = claim_agent(
         jobs,
         node_id,

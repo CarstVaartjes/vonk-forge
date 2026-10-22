@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 from typing import cast as typing_cast
 
 from sqlalchemy import select
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import AgentOperation as WireAgentOperation
 from vonk_agent_protocol import (
@@ -23,10 +24,12 @@ from vonk_agent_protocol import (
 )
 
 from ..admission_locking import (
+    AdmissionLockBusy,
     ConstraintReplay,
     admission_attempts,
     admission_wait_exhausted,
     admitting,
+    is_admission_contention,
 )
 from ..bounded_json import require_mapping
 from ..failure_classification import disposition
@@ -205,6 +208,27 @@ class StopMixin:
             # A duplicate of this request was accepted first (only SQLite has
             # no advisory request key to serialize them); replay it.
             accepted = duplicate.replay(accept)
+        except (AdmissionLockBusy, OperationalError) as error:
+            if isinstance(error, OperationalError) and not is_admission_contention(
+                error
+            ):
+                raise
+            # Acceptance or dispatch may still own this request's locks. Once
+            # its receipt is committed, a bounded lock wait only stops this
+            # caller's observation; the accepted Stop continues under its owner.
+            replay = service._idempotent(
+                request_id,
+                WireAgentOperation.RECIPE_STOP.value,
+                plan_digest,
+                owner_kind="run",
+                owner_id=run_id,
+            )
+            if replay is None:
+                raise
+            service._service_stop_pending(
+                request_id, plan_digest, profile_target_node_ids, profile_application_id
+            )
+            return replay
         workload_intent_ordinal = _bound_workload_intent(accepted)
         assert type(workload_intent_ordinal) is int
 

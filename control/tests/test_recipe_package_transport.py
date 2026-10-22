@@ -15,7 +15,12 @@ import httpx2
 import pytest
 from sqlalchemy import select
 from sqlalchemy.engine import Engine
-from vonk_agent_protocol import CatalogSyncState, RecipeBuildCode, RecipePackageCode
+from vonk_agent_protocol import (
+    CatalogSyncState,
+    RecipeBuildCode,
+    RecipePackageCode,
+    canonical_message,
+)
 from vonk_control import recipe_packages
 from vonk_control.auth import TokenCodec
 from vonk_control.bounded_json import require_mapping
@@ -28,7 +33,7 @@ from vonk_control.catalog_sync_contract import (
 )
 from vonk_control.inventory_repository import (
     InventoryRepository,
-    InventorySnapshotInput,
+    NodeInventoryReport,
 )
 from vonk_control.models import CatalogDocumentRevision, RecipeBuild
 from vonk_control.recipe_builds import RecipeBuildService, RecipeBuildUnknown
@@ -906,19 +911,26 @@ def test_adapter_only_publication_changes_accepted_build_identity(
     sessions, bundles, now, node_id, _ = setup(tmp_path, engine=postgres_engine)
     now += timedelta(microseconds=1)
     InventoryRepository(sessions, clock=lambda: now).record(
-        InventorySnapshotInput(
-            node_id,
-            now,
-            2 * 1024**4,
-            1024**4,
-            128 * 1024**3,
-            100 * 1024**3,
-            128 * 1024**3,
-            100 * 1024**3,
-            1,
-            False,
-            ("recipe.build.v1", "recipe.build.egress-proxy.v1"),
-            memory_pool="separate",
+        NodeInventoryReport.model_validate_json(
+            canonical_message(
+                {
+                    "node_id": node_id,
+                    "observed_at": now,
+                    "disk_total_bytes": 2 * 1024**4,
+                    "disk_free_bytes": 1024**4,
+                    "host_memory_total_bytes": 128 * 1024**3,
+                    "host_memory_free_bytes": 100 * 1024**3,
+                    "gpu_memory_total_bytes": 128 * 1024**3,
+                    "gpu_memory_free_bytes": 100 * 1024**3,
+                    "gpu_count": 1,
+                    "artifact_store_read_only": False,
+                    "capabilities": ("recipe.build.v1", "recipe.build.egress-proxy.v1"),
+                    "memory_pool": "separate",
+                    "schema_version": 1,
+                    "nvidia_driver_version": "unknown",
+                    "container_runtime_version": "unknown",
+                }
+            )
         )
     )
     catalog = CatalogService(

@@ -19,6 +19,7 @@ from ..agent_jobs.contracts import CLAIM_LEASE_SECONDS
 from ..agent_jobs.retry import agent_upgrade_in_flight
 from ..agent_jobs.stored import column_field
 from ..agent_operation_facts import attempt_is_live, aware
+from ..gpu_health import GPU_HEALTH_CODES
 from ..models import AgentOperation, AgentOperationAttempt
 from ..operation_blockers import (
     BlockingOperation,
@@ -89,6 +90,12 @@ def record_queue_waits(
     waits: dict[str, QueueWait] = {}
     for operation in operations:
         if operation.state != agent_operation_states.QUEUED:
+            continue
+        previous = read_wait(operation)
+        if previous is not None and previous.reason in GPU_HEALTH_CODES:
+            # The dispatch owner named this dependency and its immutable
+            # deadline. A queue observation must not erase it or postpone it.
+            waits[operation.id] = previous
             continue
         holder = holders.get(operation.node_id)
         progressed_at = aware(operation.created_at)

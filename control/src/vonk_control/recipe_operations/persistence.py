@@ -371,7 +371,13 @@ class PersistenceMixin:
             acquire_admission_keys(
                 session,
                 (
-                    job_request_key(request_id),
+                    # An accepted Stop already owns its row; dispatch creates
+                    # no request and must not refuse its own duplicate replay.
+                    *(
+                        (job_request_key(request_id),)
+                        if adopt_stop_parent is None
+                        else ()
+                    ),
                     *(node_admission_key(node_id) for node_id in targets),
                 ),
                 holder="recipe-operation",

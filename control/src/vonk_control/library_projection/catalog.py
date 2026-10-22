@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, cast
 
 from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import defer
+from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition
 
 from ..catalog_queries import active_head_revision
@@ -16,6 +17,7 @@ from ..catalog_revision_contract import (
     read_catalog_projection,
 )
 from ..library_contract import (
+    LibraryCacheState,
     LibraryFacetValues,
     LibraryLocalState,
     LibraryModelProjection,
@@ -25,8 +27,10 @@ from ..library_contract import (
     LibraryResourceProjection,
     _utc,
 )
+from ..model_cache_contract import CacheManifest, ModelCacheUsage
 from ..models import CatalogDocumentRevision, ModelCacheSet, RecipeLibrarySyncRun
 from ..operator_receipt_contract import ReceiptOwner
+from ..stored_json import read_row_column
 from .common import (
     _model_identity,
     _readable_document,
@@ -68,7 +72,23 @@ def _model_projection(
     document: ModelDefinition | ModelRevisionProjection,
     snapshot: Mapping[str, LibraryLocalState] | None,
     alignment: Sequence[str] = (),
+    storage: Mapping[str, ModelCacheUsage] | None = None,
 ) -> LibraryModelProjection:
+    usage = storage.get(revision.content_digest) if storage is not None else None
+    local = self._local(
+        revision.content_digest, kind=RunSwitchReasonScopeName.MODEL, snapshot=snapshot
+    )
+    if usage is not None:
+        if usage.cached:
+            local = local.model_copy(
+                update={"controller": LibraryCacheState.CACHED.value}
+            )
+        elif local.controller == LibraryCacheState.CACHED:
+            local = local.model_copy(
+                update={"controller": LibraryCacheState.NOT_CACHED.value}
+            )
+    elif storage is not None and local.controller == LibraryCacheState.CACHED:
+        local = local.model_copy(update={"controller": LibraryCacheState.UNKNOWN.value})
     return LibraryModelProjection(
         selector=self.selector(document.identity.publisher, document.identity.slug),
         identity=_model_identity(revision, document),
@@ -82,8 +102,11 @@ def _model_projection(
         variant=document.identity.variant,
         quantization=document.format.quantization,
         usage=self._model_usage(document),
-        resources=LibraryResourceProjection(disk_bytes=document.download_bytes),
-        local=self._local(revision.content_digest, kind="model", snapshot=snapshot),
+        resources=LibraryResourceProjection(
+            disk_bytes=None if usage is None else usage.disk_bytes
+        ),
+        cache_usage=usage,
+        local=local,
         updated_at=_utc(revision.created_at),
         alignment=sorted(set(alignment)),
     )
@@ -220,10 +243,20 @@ def _recipe_revision_projection(
 
 
 def refresh_catalog(self: LibraryProjection) -> None:
+    # Cached bindings keep exact metadata discoverable after its catalog head
+    # changes. This background index refresh never advances cache work.
+    cached_models: set[str] = set()
+    with self._sessions() as session:
+        for row in session.scalars(select(ModelCacheSet)):
+            manifest = read_row_column(row, "manifest")
+            if isinstance(manifest, CacheManifest):
+                cached_models.update(
+                    reference.content_sha256 for reference in manifest.verified_models
+                )
     snapshot = (
         self._catalog_documents(
             kind="model",
-            local_digests=(),
+            local_digests=tuple(cached_models),
             reader=_model_revision_projection,
             projection_only=True,
         ),

@@ -27,6 +27,7 @@ from pydantic import (
 
 from .contracts import AgentProtocolError
 from .host_helper import MAX_ARGV_BYTES
+from .wire_model import WireEnum
 
 Digest = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
 ImageDigest = Annotated[str, StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$")]
@@ -447,7 +448,14 @@ class CompiledJob(_Strict):
     timeout_seconds: int = Field(ge=1, le=3600)
 
 
+class CompileCacheMount(WireEnum):
+    """Fixed writable cache target; host backing is selected by the helper."""
+
+    COMPILE = "/outputs/cache"
+
+
 class CompiledExecutionPlan(_Strict):
+    compile_cache_mount: CompileCacheMount
     identity: CompiledIdentity
     runtime: CompiledRuntime
     artifacts: list[CompiledArtifact] = Field(

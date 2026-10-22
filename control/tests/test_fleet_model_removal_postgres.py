@@ -1,3 +1,5 @@
+from vonk_agent_protocol import canonical_message
+
 """Fleet removal reuses its owners and proves exact effects after restart."""
 
 from datetime import UTC, datetime, timedelta
@@ -17,7 +19,7 @@ from vonk_agent_protocol.state_machines import NodeIdentityState
 from vonk_control.fleet_model_removal_contract import FleetRemovalDisposition
 from vonk_control.inventory_repository import (
     InventoryRepository,
-    InventorySnapshotInput,
+    NodeInventoryReport,
 )
 from vonk_control.model_cache import ModelCacheService
 from vonk_control.models import (
@@ -57,20 +59,27 @@ def inventory(
     sessions, node_id: str, now: datetime, objects: list[ModelStoreObject] | None
 ) -> None:
     InventoryRepository(sessions, clock=lambda: now).record(
-        InventorySnapshotInput(
-            node_id=node_id,
-            observed_at=now,
-            disk_total_bytes=1000,
-            disk_free_bytes=900,
-            host_memory_total_bytes=1000,
-            host_memory_free_bytes=900,
-            gpu_memory_total_bytes=1000,
-            gpu_memory_free_bytes=900,
-            gpu_count=1,
-            memory_pool="shared",
-            artifact_store_read_only=False,
-            capabilities=(),
-            model_objects=objects,
+        NodeInventoryReport.model_validate_json(
+            canonical_message(
+                {
+                    "node_id": node_id,
+                    "observed_at": now,
+                    "disk_total_bytes": 1000,
+                    "disk_free_bytes": 900,
+                    "host_memory_total_bytes": 1000,
+                    "host_memory_free_bytes": 900,
+                    "gpu_memory_total_bytes": 1000,
+                    "gpu_memory_free_bytes": 900,
+                    "gpu_count": 1,
+                    "memory_pool": "shared",
+                    "artifact_store_read_only": False,
+                    "capabilities": (),
+                    "model_objects": objects,
+                    "schema_version": 1,
+                    "nvidia_driver_version": "unknown",
+                    "container_runtime_version": "unknown",
+                }
+            )
         )
     )
 

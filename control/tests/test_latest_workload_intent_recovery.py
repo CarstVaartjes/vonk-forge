@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from dataclasses import fields
 from datetime import timedelta
 from pathlib import Path
 
@@ -15,6 +14,7 @@ from vonk_agent_protocol import (
     RecipeStopResult,
     ReservationState,
     RunState,
+    canonical_message,
 )
 from vonk_agent_protocol.recipe_operations import RecipeStopPayload
 from vonk_agent_protocol.runtime_preflight import RuntimePreflightRequest
@@ -24,7 +24,7 @@ from vonk_control.fleet_profiles import build_production_fleet_profile_service
 from vonk_control.inventory_repository import (
     MAX_INVENTORY_FUTURE_SKEW,
     InventoryRepository,
-    InventorySnapshotInput,
+    NodeInventoryReport,
 )
 from vonk_control.models import (
     AgentNode,
@@ -41,7 +41,11 @@ from vonk_control.run_switch_operations import (
 from vonk_control.runtime_preflight import mandatory_capabilities
 
 from .agent_fences import fenced_operation
-from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, claim_agent
+from .runtime_identity_support import (
+    PACKAGED_RUNTIME_IDENTITY,
+    claim_agent,
+    set_inventory_fingerprint,
+)
 from .test_fleet_profiles import _uuid
 from .test_recipe_operations import installed_recipe, setup_services
 from .test_run_switch_operations import (
@@ -73,7 +77,7 @@ def test_new_profile_cancels_issued_start_then_stops_before_replacement(
         with sessions.begin() as session:
             node = session.get(AgentNode, node_id)
             assert node is not None
-            node.preflight_fingerprint = fingerprint
+            set_inventory_fingerprint(node, fingerprint)
         agent_jobs = AgentJobService(sessions, clock=lifecycle._clock)
         agent_jobs.set_result_consumer(lifecycle.consume_agent_result)
         lifecycle._agent_jobs = agent_jobs
@@ -238,11 +242,23 @@ def test_new_profile_cancels_issued_start_then_stops_before_replacement(
         phase_executor._clock = fresh_clock
         inventory = InventoryRepository(sessions, clock=fresh_clock)
         inventory_values = {
-            item.name: getattr(snapshot, item.name)
-            for item in fields(InventorySnapshotInput)
+            name: getattr(snapshot, name)
+            for name in NodeInventoryReport.model_fields
+            if name != "schema_version"
         }
         inventory_values["observed_at"] = fresh_at
-        inventory.record(InventorySnapshotInput(**inventory_values))
+        inventory.record(
+            NodeInventoryReport.model_validate_json(
+                canonical_message(
+                    {
+                        **inventory_values,
+                        "schema_version": 1,
+                        "nvidia_driver_version": "unknown",
+                        "container_runtime_version": "unknown",
+                    }
+                )
+            )
+        )
 
         # A fresh start can now be claimed. No old job is replayed to the node.
         replacement = None

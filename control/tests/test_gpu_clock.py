@@ -94,7 +94,7 @@ def test_run_switch_warns_above_default_without_requiring_supported_levels() -> 
     from vonk_control.gpu_clock_validation import assess_gpu_clock
     from vonk_control.inventory_repository import (
         InventoryRepository,
-        InventorySnapshotInput,
+        NodeInventoryReport,
     )
     from vonk_control.models import AgentNode, Base
 
@@ -105,28 +105,35 @@ def test_run_switch_warns_above_default_without_requiring_supported_levels() -> 
     with sessions.begin() as session:
         session.add(AgentNode(node_id=NODE, state="active"))
     repository = InventoryRepository(sessions, clock=lambda: now)
-    observation = InventorySnapshotInput(
-        node_id=NODE,
-        observed_at=now,
-        disk_total_bytes=1000,
-        disk_free_bytes=500,
-        host_memory_total_bytes=1000,
-        host_memory_free_bytes=500,
-        gpu_memory_total_bytes=0,
-        gpu_memory_free_bytes=0,
-        gpu_count=1,
-        memory_pool="shared",
-        artifact_store_read_only=False,
-        capabilities=(),
-        nvidia_driver_version="580",
-        container_runtime_version="29",
-        host_settings=HostSettings(
-            display_manager_active=False,
-            graphical_default_target=False,
-            gpu_clock_support=GpuClockSupport(
-                min_mhz=300, max_mhz=2400, levels_mhz=[300, 1800, 2200, 2300, 2400]
-            ),
-        ),
+    observation = NodeInventoryReport.model_validate_json(
+        canonical_message(
+            {
+                "node_id": NODE,
+                "observed_at": now,
+                "disk_total_bytes": 1000,
+                "disk_free_bytes": 500,
+                "host_memory_total_bytes": 1000,
+                "host_memory_free_bytes": 500,
+                "gpu_memory_total_bytes": 0,
+                "gpu_memory_free_bytes": 0,
+                "gpu_count": 1,
+                "memory_pool": "shared",
+                "artifact_store_read_only": False,
+                "capabilities": (),
+                "nvidia_driver_version": "580",
+                "container_runtime_version": "29",
+                "host_settings": HostSettings(
+                    display_manager_active=False,
+                    graphical_default_target=False,
+                    gpu_clock_support=GpuClockSupport(
+                        min_mhz=300,
+                        max_mhz=2400,
+                        levels_mhz=[300, 1800, 2200, 2300, 2400],
+                    ),
+                ),
+                "schema_version": 1,
+            }
+        )
     )
     repository.record(observation)
     with sessions() as session:
@@ -171,7 +178,7 @@ def test_uncapped_attention_requires_receipt_and_current_evidence(
     from vonk_agent_protocol.gpu_clock import GpuClockObservation
     from vonk_control.fleet_projection import FleetProjection
     from vonk_control.models import AgentNode, Base
-    from vonk_control.telemetry import TelemetryRepository, TelemetrySampleInput
+    from vonk_control.telemetry import TelemetryRepository, TelemetrySample
 
     engine = create_engine("sqlite://")
     Base.metadata.create_all(engine)
@@ -183,28 +190,34 @@ def test_uncapped_attention_requires_receipt_and_current_evidence(
     TelemetryRepository(sessions, clock=lambda: now).record_batch(
         NODE,
         (
-            TelemetrySampleInput(
-                boot_id=uuid.uuid4(),
-                observed_at=now,
-                memory_total_bytes=None,
-                memory_available_bytes=None,
-                disk_total_bytes=None,
-                disk_free_bytes=None,
-                gpu_utilization_percent=None,
-                gpu_memory_total_bytes=None,
-                gpu_memory_free_bytes=None,
-                gpu_clock=GpuClockObservation(
-                    locked_range=default_gpu_clock() if receipt else None,
-                    apply_state=state,
-                    graphics_mhz=graphics,
-                    sm_mhz=sm,
-                    max_graphics_mhz=3003,
-                    max_sm_mhz=3003,
-                    throttle_reasons=throttle,
-                    detail=cause if state == GpuClockApplyState.WAITING else None,
-                    next_attempt_at=1060,
-                    deadline=1600,
-                ),
+            TelemetrySample.model_validate_json(
+                canonical_message(
+                    {
+                        "boot_id": str(uuid.uuid4()),
+                        "observed_at": now,
+                        "memory_total_bytes": None,
+                        "memory_available_bytes": None,
+                        "disk_total_bytes": None,
+                        "disk_free_bytes": None,
+                        "gpu_utilization_percent": None,
+                        "gpu_memory_total_bytes": None,
+                        "gpu_memory_free_bytes": None,
+                        "gpu_clock": GpuClockObservation(
+                            locked_range=default_gpu_clock() if receipt else None,
+                            apply_state=state,
+                            graphics_mhz=graphics,
+                            sm_mhz=sm,
+                            max_graphics_mhz=3003,
+                            max_sm_mhz=3003,
+                            throttle_reasons=throttle,
+                            detail=cause
+                            if state == GpuClockApplyState.WAITING
+                            else None,
+                            next_attempt_at=1060,
+                            deadline=1600,
+                        ),
+                    }
+                )
             ),
         ),
     )

@@ -13,11 +13,13 @@ from sqlalchemy.orm import Session, sessionmaker
 from .admission_locking import is_admission_contention, label_transaction
 from .fleet_event_contract import NodeTelemetryPayload
 from .fleet_events import FleetEventDraft, FleetEventRepository
+from .inventory_items_contract import InventorySnapshotKind
 from .models import (
     AgentCertificate,
     AgentNode,
     FleetStreamEvent,
     NodeInventorySnapshot,
+    NodeSnapshot,
     NodeTelemetryLatest,
     NodeTelemetrySample,
 )
@@ -251,8 +253,11 @@ class TelemetryMaintenance:
         )
         for chunk in TelemetryMaintenance._chunks(stale):
             session.execute(
-                delete(NodeInventorySnapshot)
-                .where(NodeInventorySnapshot.id.in_(chunk))
+                delete(NodeSnapshot)
+                .where(
+                    NodeSnapshot.id.in_(chunk),
+                    NodeSnapshot.kind == InventorySnapshotKind.REPORT,
+                )
                 .execution_options(synchronize_session=False)
             )
 

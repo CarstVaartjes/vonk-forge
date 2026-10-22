@@ -12,7 +12,6 @@ import os
 import subprocess
 import sys
 from collections.abc import Callable
-from dataclasses import fields
 from datetime import datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -28,7 +27,7 @@ from vonk_control.fleet_profiles import build_production_fleet_profile_service
 from vonk_control.install_admission import InstallAdmissionService
 from vonk_control.inventory_repository import (
     InventoryRepository,
-    InventorySnapshotInput,
+    NodeInventoryReport,
 )
 from vonk_control.models import (
     AgentOperation,
@@ -315,8 +314,9 @@ def _worker_process(config: dict, crash: str) -> None:
                 with sessions() as session:
                     samples = [
                         {
-                            field.name: getattr(snapshot, field.name)
-                            for field in fields(InventorySnapshotInput)
+                            field: getattr(snapshot, field)
+                            for field in NodeInventoryReport.model_fields
+                            if field != "schema_version"
                         }
                         for snapshot in {
                             row.node_id: row
@@ -332,7 +332,18 @@ def _worker_process(config: dict, crash: str) -> None:
                     if sample["observed_at"] >= now[0]:
                         continue
                     sample["observed_at"] = now[0]
-                    inventory.record(InventorySnapshotInput(**sample))
+                    inventory.record(
+                        NodeInventoryReport.model_validate_json(
+                            canonical_message(
+                                {
+                                    **sample,
+                                    "schema_version": 1,
+                                    "nvidia_driver_version": "unknown",
+                                    "container_runtime_version": "unknown",
+                                }
+                            )
+                        )
+                    )
             worker.tick()
             _complete_agent_work(sessions, lifecycle, root)
             application = profiles.application(config["application"])

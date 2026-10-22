@@ -25,6 +25,7 @@ struct FakeRunner {
     calls: Arc<Mutex<Vec<ProcessCall>>>,
     output: Vec<u8>,
     clock_output: Option<Vec<u8>>,
+    health_output: Option<Vec<u8>>,
 }
 
 impl ProcessRunner for FakeRunner {
@@ -59,6 +60,10 @@ impl ProcessRunner for FakeRunner {
                     .trim()
                     .as_bytes()
                     .to_vec()
+            } else if arguments == ["-q"] {
+                self.health_output
+                    .clone()
+                    .unwrap_or_else(|| self.output.clone())
             } else {
                 self.output.clone()
             };
@@ -88,6 +93,7 @@ fn runner(output: &[u8]) -> FakeRunner {
         calls: Arc::new(Mutex::new(Vec::new())),
         output: output.to_vec(),
         clock_output: None,
+        health_output: None,
     }
 }
 
@@ -373,5 +379,50 @@ fn failed_gpu_clock_query_still_reports_an_observation() {
     assert!(
         sample.gpu_clock.is_some(),
         "the Controller must receive clock failure evidence even when every query fails"
+    );
+}
+
+#[test]
+fn reset_signature_is_not_unsupported_metrics() {
+    // Catches both ERR! metrics and partial sensor values masking reset clocks.
+    let directory = tempdir().unwrap();
+    let missing_clocks = b"[N/A], [N/A], [N/A], [N/A], [N/A]\n";
+    for sensors in [
+        include_bytes!("fixtures/telemetry/unsupported.csv").as_slice(),
+        include_bytes!("fixtures/telemetry/gb10.csv").as_slice(),
+    ] {
+        let mut driver = runner(sensors);
+        driver.health_output = Some(include_bytes!("fixtures/gpu-health-needs-reset.txt").to_vec());
+        driver.clock_output = Some(missing_clocks.to_vec());
+        let sample = collector(directory.path(), MEMINFO, driver).sample();
+        assert_eq!(
+            sample.gpu_unavailable_reason,
+            Some(GpuUnavailableReason::GpuRequiresReset)
+        );
+        assert!(
+            sample
+                .gpu_clock
+                .unwrap()
+                .unavailable
+                .unwrap()
+                .iter()
+                .all(|metric| metric.reason
+                    == vonk_agent_protocol::generated::GpuClockUnavailableReason::RequiresReset)
+        );
+    }
+    let mut healthy = runner(include_bytes!("fixtures/telemetry/gb10.csv"));
+    healthy.health_output = Some(include_bytes!("fixtures/gpu-health-healthy.txt").to_vec());
+    healthy.clock_output = Some(missing_clocks.to_vec());
+    let recovered = collector(directory.path(), MEMINFO, healthy).sample();
+    assert_eq!(recovered.gpu_unavailable_reason, None);
+    assert!(
+        recovered
+            .gpu_clock
+            .unwrap()
+            .unavailable
+            .unwrap()
+            .iter()
+            .all(|metric| metric.reason
+                == vonk_agent_protocol::generated::GpuClockUnavailableReason::NotSupported)
     );
 }

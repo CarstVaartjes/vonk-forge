@@ -19,7 +19,7 @@ import pytest
 from sqlalchemy import select
 from vonk_agent_protocol import LifecycleState, ProjectionCode, RouteState, RunState
 from vonk_control.distributed_recovery import DistributedRecoveryCoordinator
-from vonk_control.models import AgentOperation, AgentPresence, Job, RecipeRun, RunNode
+from vonk_control.models import AgentNode, AgentOperation, Job, RecipeRun, RunNode
 from vonk_control.offline_stops import deferred_stop_nodes
 from vonk_control.presence import ManagementAddressPolicy
 from vonk_control.recipe_operation_worker import RecipeOperationWorker
@@ -310,8 +310,9 @@ def _failed_rank_world(tmp_path: Path, engine=None):
     )
     record_exact_empty_snapshot(sessions, nodes[1], NOW + timedelta(seconds=1))
     with sessions.begin() as session:
-        for presence in session.scalars(select(AgentPresence)):
-            session.delete(presence)
+        for node in session.scalars(select(AgentNode)):
+            node.management_address = None
+            node.management_observed_at = None
     recovery = DistributedRecoveryCoordinator(
         sessions, routes=routes, agent_jobs=queue, clock=lambda: NOW
     )

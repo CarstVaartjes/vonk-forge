@@ -4,18 +4,22 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
     ModelFileState,
     RunSwitchCode,
+    WaitReason,
 )
+from vonk_agent_protocol.agent_words import (
+    ProfileReasonSeverity,
+    RunSwitchReasonScopeName,
+)
+from vonk_agent_protocol.state_machines import PlacementInstallState
 
+from ..categorized_errors import BookkeepingUnknown
+from ..inventory_items import inventory_artifacts
 from ..model_cache import ModelCacheService
 from ..model_cache_contract import ModelCacheDownloadPreviewResponse
-from ..models import (
-    NodeArtifact,
-)
 from ..run_switch_contract import (
     RunSwitchReason,
 )
@@ -87,6 +91,13 @@ class DatabaseRunSwitchArtifactInspector:
                 model_content_sha256=model_content_sha256,
                 recipe_revision_id=recipe_revision_id,
             )
+        except (OSError, RuntimeError, TypeError, ValueError, KeyError) as error:
+            return _inspection_unavailable(
+                f"model-cache exact manifest is unavailable: {error}"
+            )
+        warnings: list[RunSwitchReason] = []
+        preview: ModelCacheDownloadPreviewResponse | None = None
+        try:
             preview_document = model_cache.download_preview(
                 model_content_sha256=model_content_sha256,
                 recipe_revision_id=recipe_revision_id,
@@ -98,12 +109,26 @@ class DatabaseRunSwitchArtifactInspector:
                     if not key.startswith("_")
                 }
             )
+        except BookkeepingUnknown as error:
+            if error.typed_reason is not WaitReason.OBSERVATION_UNAVAILABLE:
+                raise
+            # Identity is resolved; only availability is pending. Preserve the
+            # exact set so the ordinary preparation phase can observe it.
+            warnings.append(
+                _as_reason(
+                    RunSwitchCode.NAS_COVERAGE_UNKNOWN,
+                    str(error),
+                    scope=RunSwitchReasonScopeName.ARTIFACT.value,
+                    severity=ProfileReasonSeverity.WARNING.value,
+                    node_ids=node_ids,
+                )
+            )
         except (OSError, RuntimeError, TypeError, ValueError, KeyError) as error:
             return _inspection_unavailable(
-                f"model-cache exact manifest is unavailable: {error}"
+                f"model-cache download preview is unavailable: {error}"
             )
         artifact_set_sha256 = manifest.digest
-        if preview.artifact_set_sha256 != artifact_set_sha256:
+        if preview is not None and preview.artifact_set_sha256 != artifact_set_sha256:
             return _inspection_unavailable(
                 "model-cache download preview does not match its manifest"
             )
@@ -121,7 +146,9 @@ class DatabaseRunSwitchArtifactInspector:
         # Transfer checkpoints reduce the bytes left to download, but do not
         # make an object verified or available for profile admission.
         missing_nas_bytes = (
-            sum(expected_by_digest.values()) - preview.already_cached_bytes
+            None
+            if preview is None
+            else sum(expected_by_digest.values()) - preview.already_cached_bytes
         )
         blockers = [
             _as_reason(
@@ -130,7 +157,7 @@ class DatabaseRunSwitchArtifactInspector:
                 scope="artifact",
                 node_ids=node_ids,
             )
-            for detail in preview.blockers
+            for detail in (() if preview is None else preview.blockers)
         ]
         reused = 0
         missing_spark = 0
@@ -139,11 +166,7 @@ class DatabaseRunSwitchArtifactInspector:
         reclaimable_digests: set[str] = set()
         for node_id in node_ids:
             missing_by_node[node_id] = 0
-            rows = tuple(
-                session.scalars(
-                    select(NodeArtifact).where(NodeArtifact.node_id == node_id)
-                )
-            )
+            rows = inventory_artifacts(session, node_id)
             by_digest = {row.digest: row for row in rows}
             for digest, size in expected_by_digest.items():
                 row = by_digest.get(digest)
@@ -165,7 +188,6 @@ class DatabaseRunSwitchArtifactInspector:
                     ):
                         reclaimable += row.size_bytes
                         reclaimable_digests.add(row.digest)
-        warnings: list[RunSwitchReason] = []
         if missing_nas_bytes:
             warnings.append(
                 _as_reason(
@@ -187,7 +209,13 @@ class DatabaseRunSwitchArtifactInspector:
             missing_spark_bytes=missing_spark,
             missing_spark_bytes_by_node=missing_by_node,
             reclaimable_bytes=reclaimable,
-            nas_coverage="complete" if missing_nas_bytes == 0 else "partial",
+            nas_coverage=(
+                PlacementInstallState.UNKNOWN.value
+                if preview is None
+                else PlacementInstallState.COMPLETE.value
+                if missing_nas_bytes == 0
+                else PlacementInstallState.PARTIAL.value
+            ),
             spark_coverage="complete" if missing_spark == 0 else "partial",
             artifact_digests=tuple(model_digests),
             reclaimable_digests=tuple(sorted(reclaimable_digests)),

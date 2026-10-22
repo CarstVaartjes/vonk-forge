@@ -66,7 +66,6 @@ __all__ = [
 ]
 
 
-from .authority import AgentPresence as AgentPresence
 from .authority import JobAdapter as JobAdapter
 from .authority import RecipeInstallation as RecipeInstallation
 from .authority import RecipeStartPayloadError as RecipeStartPayloadError

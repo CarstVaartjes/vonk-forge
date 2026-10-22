@@ -46,7 +46,6 @@ from .common import (
 from .common import _MAX_RANGE_BYTES as _MAX_RANGE_BYTES
 from .common import _SERVED_FILE as _SERVED_FILE
 from .common import _SERVED_ROOT as _SERVED_ROOT
-from .common import _TELEMETRY_FIELDS as _TELEMETRY_FIELDS
 from .common import _UUID4_TEXT as _UUID4_TEXT
 from .common import MAX_DATABASE_BIGINT as MAX_DATABASE_BIGINT
 from .common import MAX_RECIPE_IMAGE_BYTES as MAX_RECIPE_IMAGE_BYTES
@@ -129,7 +128,6 @@ from .common import active_agent_identity as active_agent_identity
 from .common import agent_identity_from_scope as agent_identity_from_scope
 from .common import agent_source_from_scope as agent_source_from_scope
 from .common import dataclass as dataclass
-from .common import dataclasses as dataclasses
 from .common import datetime as datetime
 from .common import deque as deque
 from .common import fcntl as fcntl
@@ -160,7 +158,7 @@ from .observations import ClaimRequest as ClaimRequest
 from .observations import ClusterMapping as ClusterMapping
 from .observations import HTTPException as HTTPException
 from .observations import InventoryRepository as InventoryRepository
-from .observations import InventorySnapshotInput as InventorySnapshotInput
+from .observations import NodeInventoryReport as NodeInventoryReport
 from .observations import PresenceError as PresenceError
 from .observations import RecipeBuild as RecipeBuild
 from .observations import RecipeRun as RecipeRun
@@ -174,7 +172,6 @@ from .observations import SecurityRefusalError as SecurityRefusalError
 from .observations import SourceBundleError as SourceBundleError
 from .observations import TelemetryRepository as TelemetryRepository
 from .observations import TelemetryRequest as TelemetryRequest
-from .observations import TelemetrySampleInput as TelemetrySampleInput
 from .observations import canonical_message as canonical_message
 from .observations import download_responses as download_responses
 from .observations import log_event as log_event

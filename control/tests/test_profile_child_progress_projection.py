@@ -8,8 +8,9 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, update
 from vonk_agent_protocol import LifecycleState, OperationProgress, canonical_message
+from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.execution_plan_service import (
     ControllerExecutionPlanService,
@@ -25,7 +26,7 @@ from vonk_control.fleet_profiles import (
 )
 from vonk_control.inventory_repository import (
     InventoryRepository,
-    InventorySnapshotInput,
+    NodeInventoryReport,
 )
 from vonk_control.job_documents import RecipeStartParent
 from vonk_control.lifecycle.evidence import Residue
@@ -34,7 +35,6 @@ from vonk_control.models import (
     AgentNode,
     AgentOperation,
     AgentOperationAttempt,
-    AgentPresence,
     CatalogDocumentRevision,
     FleetProfileApplication,
     Job,
@@ -65,7 +65,11 @@ from vonk_control.stored_json import write_guard_mode
 from cluster_profiles.control_client import validate_control_document
 
 from .preflight_fixtures import record_passing_preflight
-from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, claim_agent
+from .runtime_identity_support import (
+    PACKAGED_RUNTIME_IDENTITY,
+    claim_agent,
+    inventory_items_fixture,
+)
 from .test_fleet_profile_api import _client, _headers
 from .test_profile_installed_execution import (
     _apply,
@@ -532,9 +536,15 @@ def test_disjoint_child_samples_remain_distinct_after_restart(
             AgentNode(
                 node_id=second,
                 state="active",
-                architecture="linux-arm64",
                 protocol_version=2,
                 last_seen_at=NOW,
+                inventory_snapshot=inventory_items_fixture(
+                    second,
+                    observed_at=NOW,
+                    identity=AgentRuntimeIdentity.model_validate(
+                        {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
+                    ),
+                ),
             )
         )
         session.flush()
@@ -547,13 +557,13 @@ def test_disjoint_child_samples_remain_distinct_after_restart(
                 not_after=NOW + timedelta(days=1),
             )
         )
-        session.add(
-            AgentPresence(
-                node_id=second,
-                certificate_serial="serial-b",
-                certificate_fingerprint="fingerprint-b",
+        session.execute(
+            update(AgentNode)
+            .where(AgentNode.node_id == second)
+            .values(
+                contact_certificate_serial="serial-b",
                 management_address="192.168.1.212",
-                observed_at=NOW,
+                management_observed_at=NOW,
             )
         )
         revision = session.scalar(
@@ -565,19 +575,30 @@ def test_disjoint_child_samples_remain_distinct_after_restart(
         assert revision is not None
         selector = f"{revision.publisher}/{revision.slug}"
     InventoryRepository(sessions, clock=lambda: NOW).record(
-        InventorySnapshotInput(
-            second,
-            NOW,
-            10_000,
-            8_000,
-            10_000,
-            8_000,
-            10_000,
-            8_000,
-            1,
-            False,
-            ("runtime.vonk.v1", "recipe.image.pull.v1", "recipe.operations.v1"),
-            memory_pool="shared",
+        NodeInventoryReport.model_validate_json(
+            canonical_message(
+                {
+                    "node_id": second,
+                    "observed_at": NOW,
+                    "disk_total_bytes": 10_000,
+                    "disk_free_bytes": 8_000,
+                    "host_memory_total_bytes": 10_000,
+                    "host_memory_free_bytes": 8_000,
+                    "gpu_memory_total_bytes": 10_000,
+                    "gpu_memory_free_bytes": 8_000,
+                    "gpu_count": 1,
+                    "artifact_store_read_only": False,
+                    "capabilities": (
+                        "runtime.vonk.v1",
+                        "recipe.image.pull.v1",
+                        "recipe.operations.v1",
+                    ),
+                    "memory_pool": "shared",
+                    "schema_version": 1,
+                    "nvidia_driver_version": "unknown",
+                    "container_runtime_version": "unknown",
+                }
+            )
         )
     )
     record_passing_preflight(sessions, NOW)
@@ -774,3 +795,125 @@ def test_damaged_membership_is_unknown_and_does_not_mutate_execution(
         assert (
             job is not None and job.payload == damaged and job.state == original_state
         )
+
+
+def test_dual_agent_loss_mid_load_keeps_bounded_wait_visible_after_return(
+    tmp_path: Path, postgres_engine
+) -> None:
+    """Reject losing the native recovery clock at the profile adapter seam."""
+    from vonk_agent_protocol import DesiredAssignmentState
+    from vonk_agent_protocol.contracts import AgentOperation as OperationKind
+
+    sessions, lifecycle, _queue, _mapping, _build, nodes = setup_services(
+        tmp_path, nodes=2, engine=postgres_engine
+    )
+    clock = [lifecycle._clock()]
+    lifecycle._clock = lambda: clock[0]
+    jobs = AgentJobService(sessions, clock=lambda: clock[0])
+    lifecycle._agent_jobs = jobs
+    service, planner = _measured_profile_service(sessions, lifecycle)
+    draft = _installed_profile(service, sessions, nodes)
+    definition = draft.definition
+    assert definition is not None
+    definition.assignments[0].desired_state = DesiredAssignmentState.RUNNING
+    profile = service.update(
+        draft.id,
+        FleetProfileInput(**definition.model_dump(), expected_revision=draft.revision),
+        actor="admin",
+    )
+    application = _apply(service, profile)
+    _drive_install(sessions, service, planner, application.id, clock, 1)
+    claims = [
+        claim_agent(
+            jobs,
+            node,
+            f"serial-{index}",
+            30,
+            runtime_identity={
+                **PACKAGED_RUNTIME_IDENTITY,
+                "architecture": "linux-arm64",
+            },
+        )
+        for index, node in enumerate(nodes)
+    ]
+    assert all(claim is not None for claim in claims)
+    with sessions.begin() as session:
+        for node in session.scalars(select(AgentNode)):
+            node.last_seen_at = clock[0] - timedelta(minutes=10)
+    # No completion/heartbeat from either agent: let the real order reconciler
+    # fence their lapsed attempts, then restart the Controller services.
+    clock[0] += timedelta(minutes=3)
+    jobs.reconcile_orders()
+    service, planner = _measured_profile_service(sessions, lifecycle)
+    with sessions.begin() as session:
+        for node in session.scalars(select(AgentNode)):
+            node.last_seen_at = clock[0]
+    for _ in range(6):
+        _follow_saved_due(sessions, service, application.id, clock)
+        planner.tick()
+        service.tick()
+    observed = service.application(application.id)
+    adapter = observed.progress.switch_adapter
+    assert adapter is not None and adapter.pending_children
+    child = planner.get(adapter.pending_children[0].operation_id)
+    assert child.wait is not None and child.wait.dependency_deadline is not None
+    assert observed.wait is not None
+    assert observed.wait.reason == child.wait.reason
+    assert observed.wait.blockers == child.wait.blockers
+    assert observed.wait.dependency_deadline == child.wait.dependency_deadline
+    # The profile GET consumes the same owner evidence, without advancing it.
+    service.tick()
+    view = service.get(profile.id)
+    assert view.maintenance_wait is not None
+    assert view.maintenance_wait.dependency_deadline == child.wait.dependency_deadline
+    assert view.maintenance_wait.next_check >= clock[0]
+    with sessions() as session:
+        assert session.scalar(
+            select(Job.id).where(Job.kind == OperationKind.RECIPE_INSTALL)
+        )
+
+
+def test_profile_renders_typed_recovery_wait_and_its_clock(capsys):
+    """Catches a loaded profile hiding the Controller's recovery explanation."""
+    from datetime import UTC, datetime, timedelta
+
+    from vonk_agent_protocol import WaitOwnerKind, WaitReason, WaitResumeCondition
+    from vonk_agent_protocol.agent_words import ProfileDocumentState
+    from vonk_control.operation_blockers import BlockingOperation, make_blocker
+    from vonk_control.wait_contract import QueueWait
+
+    from cluster_profiles.cli_render import render_payload
+
+    now = datetime(2026, 10, 22, 12, 55, tzinfo=UTC)
+    wait = QueueWait(
+        owner=BlockingOperation(id="1", kind=WaitOwnerKind.SELECTED_PROFILE),
+        owner_kind=WaitOwnerKind.SELECTED_PROFILE,
+        reason=WaitReason.RECEIPT_MISSING,
+        blockers=[
+            make_blocker(
+                WaitReason.RECEIPT_MISSING, "Waiting for the exact image receipt"
+            )
+        ],
+        first_blocked_at=now,
+        last_progress_at=None,
+        dependency_deadline=now + timedelta(minutes=5),
+        next_check=now + timedelta(seconds=30),
+        resume_condition=WaitResumeCondition.EFFECT_OBSERVED,
+    )
+    render_payload(
+        {
+            "number": 10,
+            "name": "Hardware sweep",
+            "status": ProfileDocumentState.LOADED,
+            "definition": {"assignments": []},
+            "assignments": [],
+            "maintenance_wait": wait.model_dump(mode="json"),
+        },
+        "profile",
+    )
+    output = capsys.readouterr().out
+    assert WaitReason.RECEIPT_MISSING.value in output
+    assert "Waiting for the exact image receipt" in output
+    assert "12:55:30" in output
+    assert "13:00:00" in output
+    assert WaitResumeCondition.EFFECT_OBSERVED.value in output

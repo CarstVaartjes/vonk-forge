@@ -44,6 +44,7 @@ from .catalog_sync import CatalogSyncError
 from .categorized_errors import InvalidValue
 from .failure_classification import disposition, is_security_failure
 from .failure_evidence import safe_text
+from .inventory_items import runtime_value
 from .job_documents import AvailabilityJobPayload, AvailabilityRuntime
 from .models import (
     AgentNode,
@@ -668,7 +669,10 @@ def build_recipe_image_availability(
                             .where(AgentNode.state == "active")
                             .order_by(AgentNode.node_id)
                         )
-                        if candidate.architecture == "linux-arm64"
+                        if runtime_value(
+                            candidate, lambda identity: identity.architecture
+                        )
+                        == "linux-arm64"
                     )
                     candidate_ids = tuple(candidate.node_id for candidate in candidates)
                     occupied: list[str] = []
@@ -751,10 +755,10 @@ def build_recipe_image_availability(
                                 (node_admission_key(candidate_id),),
                                 holder="image-availability",
                             )
-                        except AdmissionLockBusy:
+                        except AdmissionLockBusy as error:
                             skipped[candidate_id] = (
                                 RecipeImageCode.BUILDER_BUSY,
-                                "another change to this Spark is in progress",
+                                str(error),
                             )
                             continue
                         locked = session.scalar(
@@ -845,10 +849,10 @@ def build_recipe_image_availability(
                         (node_admission_key(candidate_id),),
                         holder="image-availability",
                     )
-                except AdmissionLockBusy:
+                except AdmissionLockBusy as error:
                     skipped[candidate_id] = (
                         RecipeImageCode.BUILDER_BUSY,
-                        "another change to this Spark is in progress",
+                        str(error),
                     )
                     attempted_candidates.add(candidate_id)
                     selected_candidate = next(

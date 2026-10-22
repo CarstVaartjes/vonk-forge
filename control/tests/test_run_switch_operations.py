@@ -24,6 +24,7 @@ from vonk_agent_protocol import (
     RunSwitchCode,
     canonical_message,
 )
+from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_control.auth import CursorCodec
 from vonk_control.catalog_revision_contract import (
     read_catalog_projection,
@@ -40,7 +41,7 @@ from vonk_control.install_admission import (
 )
 from vonk_control.inventory_repository import (
     InventoryRepository,
-    InventorySnapshotInput,
+    NodeInventoryReport,
 )
 from vonk_control.model_cache import (
     ArtifactSetManifest,
@@ -56,7 +57,6 @@ from vonk_control.models import (
     ClusterMappingNode,
     InstallationNode,
     Job,
-    NodeArtifact,
     NodeInventorySnapshot,
     RecipeBuild,
     RecipeInstallation,
@@ -135,7 +135,16 @@ from vonk_control.runtime_image_preparation import (
 )
 from vonk_control.runtime_preflight import latest_result
 
+from .inventory_artifact_support import (
+    all_inventory_artifacts,
+    clear_inventory_artifacts,
+)
 from .preflight_fixtures import record_passing_preflight
+from .runtime_identity_support import (
+    PACKAGED_RUNTIME_IDENTITY,
+    inventory_items_fixture,
+    set_inventory_identity,
+)
 from .runtime_image_fixtures import place_test_image
 
 _FIXTURE_ADAPTER = resolve_runtime_adapter("vllm", {"node_count": 1})
@@ -1578,6 +1587,150 @@ def test_model_cache_manifest_allows_planned_nas_download(tmp_path: Path) -> Non
     assert plan.storage.artifact_set_bytes == plan.preparation.model.artifact_set_bytes
 
 
+@pytest.mark.parametrize("missing", [False, True])
+def test_profile_admits_unpublished_cache_observation(tmp_path, monkeypatch, missing):
+    """A paused first receipt must wait in preparation, never refuse a load."""
+    from threading import Event
+
+    from vonk_agent_protocol import WaitReason
+    from vonk_agent_protocol.agent_words import ProfileChildPhase, ProfileReasonSeverity
+    from vonk_control.categorized_errors import BookkeepingUnknown
+    from vonk_control.distribution_executor import CompositeDistributionPhaseExecutor
+    from vonk_control.fleet_profile_contract import (
+        FleetProfileAssignmentInput,
+        FleetProfileInput,
+    )
+    from vonk_control.fleet_profiles import (
+        FleetProfileService,
+        RunSwitchFleetProfileAdapter,
+    )
+    from vonk_control.profile_read_observation import profile_read
+
+    sessions, lifecycle, _queue, _mapping, _build, nodes = setup_services(tmp_path)
+    request = _request(sessions, nodes[0])
+    manifest = ModelCacheManifestProvider().resolve_artifact_set(
+        model_content_sha256=request.model_content_sha256
+    )
+    manifest = replace(
+        manifest,
+        artifacts=tuple(
+            replace(spec, kind="huggingface.file") for spec in manifest.artifacts
+        ),
+    )
+    cache = ModelCacheService(sessions, tmp_path / "cache", reserve_bytes=0)
+    # Catalog resolution is not under test; storage and its observer are real.
+    monkeypatch.setattr(cache, "resolve_artifact_set", lambda **_kwargs: manifest)
+    entered, release = Event(), Event()
+    stored_object = cache._stored_object
+
+    def paused(digest, expected):
+        entered.set()
+        assert release.wait(30), "test did not release the first object observation"
+        return stored_object(digest, expected)
+
+    monkeypatch.setattr(cache, "_stored_object", paused)
+    if not missing:
+        spec = manifest.artifacts[0]
+        path = cache._object_path(spec.sha256)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"x" * spec.expected_bytes)
+        cache._write_object_receipt(spec, NOW)
+    service = RunSwitchOperationService(
+        sessions,
+        lifecycle=lifecycle,
+        clock=lifecycle._clock,
+        artifact_phase_executor=RecordingArtifactExecutor(),
+        model_cache=cache,
+        memory_floor_bytes=50,
+    )
+    adapter = RunSwitchFleetProfileAdapter(sessions, service)
+    profiles = FleetProfileService(
+        sessions,
+        clock=lifecycle._clock,
+        switch_adapter=adapter,
+        assessment_provider=adapter.assess,
+    )
+    with sessions() as session:
+        revision = session.get(CatalogDocumentRevision, request.recipe_revision_id)
+        assert revision is not None
+        selector = f"{revision.publisher}/{revision.slug}"
+    saved = profiles.create(
+        FleetProfileInput(
+            name="Observing",
+            assignments=[
+                FleetProfileAssignmentInput(
+                    recipe_selector=selector, spark_ids=list(nodes)
+                )
+            ],
+        ),
+        actor="admin",
+    )
+    try:
+        preview = profiles.preview(saved.id)
+        assert entered.wait(30)
+        assert preview.allowed, preview.reasons
+        assert preview.preparations
+        preparation = preview.preparations[0].preparation
+        assert preparation.model.artifact_set_sha256 == manifest.digest
+        assert not preparation.controller_ready
+        assert all(
+            reason.severity != ProfileReasonSeverity.ERROR for reason in preview.reasons
+        )
+        assessment = preview.assessments[0].assessment
+        assert not assessment.blockers
+        warning = next(
+            reason
+            for reason in assessment.warnings
+            if reason.code == RunSwitchCode.NAS_COVERAGE_UNKNOWN
+        )
+        assert "0/1 objects checked" in warning.detail
+        assert "next check" in warning.detail
+        plan = profile_read(service.preview)(request, actor="admin")
+        assert plan.allowed
+        assert plan.storage.missing_nas_bytes is None
+        phase = next(
+            phase
+            for phase in plan.phases
+            if phase.subphase == ProfileChildPhase.MODEL_DOWNLOAD
+        )
+        executor = CompositeDistributionPhaseExecutor(
+            sessions, None, None, model_cache=cache, clock=lifecycle._clock
+        )
+        phase_request = str(uuid.uuid4())
+        try:
+            with pytest.raises(BookkeepingUnknown) as waiting:
+                executor.execute(
+                    plan,
+                    phase,
+                    item_index=0,
+                    actor="admin",
+                    request_key=phase_request,
+                    progress=RunSwitchOperationResult(),
+                )
+            assert waiting.value.typed_reason is WaitReason.OBSERVATION_UNAVAILABLE
+            assert "next check" in str(waiting.value)
+            release.set()
+            cache._storage_observer._pending[manifest.digest].result(timeout=30)
+            resumed = executor.execute(
+                plan,
+                phase,
+                item_index=0,
+                actor="admin",
+                request_key=phase_request,
+                progress=RunSwitchOperationResult(),
+            )
+            assert resumed.operation_id is not None
+        finally:
+            executor.close()
+    finally:
+        release.set()
+        cache._storage_observer._pending[manifest.digest].result(timeout=30)
+        cache.close()
+    ready = profiles.preview(saved.id)
+    assert ready.allowed
+    assert ready.preparations[0].preparation.controller_ready is not missing
+
+
 def test_cold_model_and_image_plan_defers_compile_until_both_preparations(
     tmp_path: Path,
 ) -> None:
@@ -1585,7 +1738,7 @@ def test_cold_model_and_image_plan_defers_compile_until_both_preparations(
         tmp_path
     )
     with sessions.begin() as session:
-        session.query(NodeArtifact).delete()
+        clear_inventory_artifacts(session)
     inspector = CompleteArtifactInspector(missing_spark_bytes=1024)
 
     class ColdInspector(CompleteArtifactInspector):
@@ -1648,7 +1801,7 @@ def test_cold_production_phases_prepare_receipts_before_real_install_compile(
 
     sessions, lifecycle, _queue, _mapping_id, build_id, nodes = setup_services(tmp_path)
     with sessions.begin() as session:
-        session.query(NodeArtifact).delete()
+        clear_inventory_artifacts(session)
         build = session.get(RecipeBuild, build_id)
         assert build is not None
         image_digest = build.image_digest
@@ -2111,19 +2264,30 @@ def _cold_compile_switch(
         # observation time moves, so inventory freshness is never the blocker.
         for node_id in nodes:
             inventory.record(
-                InventorySnapshotInput(
-                    node_id,
-                    clock.now,
-                    10_000,
-                    8_000,
-                    10_000,
-                    8_000,
-                    10_000,
-                    8_000,
-                    1,
-                    False,
-                    ("runtime.vonk.v1", "recipe.image.pull.v1", "recipe.operations.v1"),
-                    memory_pool="shared",
+                NodeInventoryReport.model_validate_json(
+                    canonical_message(
+                        {
+                            "node_id": node_id,
+                            "observed_at": clock.now,
+                            "disk_total_bytes": 10_000,
+                            "disk_free_bytes": 8_000,
+                            "host_memory_total_bytes": 10_000,
+                            "host_memory_free_bytes": 8_000,
+                            "gpu_memory_total_bytes": 10_000,
+                            "gpu_memory_free_bytes": 8_000,
+                            "gpu_count": 1,
+                            "artifact_store_read_only": False,
+                            "capabilities": (
+                                "runtime.vonk.v1",
+                                "recipe.image.pull.v1",
+                                "recipe.operations.v1",
+                            ),
+                            "memory_pool": "shared",
+                            "schema_version": 1,
+                            "nvidia_driver_version": "unknown",
+                            "container_runtime_version": "unknown",
+                        }
+                    )
                 )
             )
         for hook in hooks:
@@ -2485,84 +2649,63 @@ def test_cancellation_during_expiring_compile_prevents_a_subsequent_attempt(
         assert list(session.scalars(select(ResourceReservation))) == []
 
 
-def test_preflight_receipt_disagreement_backs_off_then_recovers(
-    tmp_path: Path,
-) -> None:
-    """Receipt ordering races wait durably without replaying completed phases."""
-    switch = _cold_compile_switch(tmp_path, seconds=1, slow_compiles=99)
+def test_preflight_reuse_ignores_operation_history_ordering(tmp_path: Path) -> None:
+    """Catches an old operation timestamp poisoning fresh inventory evidence."""
+    from vonk_agent_protocol import AgentOperation as OperationKind
+
+    switch = _cold_compile_switch(tmp_path, seconds=1, slow_compiles=0)
     stale_time = switch.clock.now - timedelta(seconds=301)
     record_passing_preflight(switch.sessions, stale_time)
     with switch.sessions() as session:
-        stale_ids = list(
-            session.scalars(
-                select(AgentOperation.id).where(
-                    AgentOperation.kind == "runtime.preflight.v1",
+        stale = {
+            operation.id: (operation.node_id, operation.payload_digest)
+            for operation in session.scalars(
+                select(AgentOperation).where(
+                    AgentOperation.kind == OperationKind.RUNTIME_PREFLIGHT.value,
                     AgentOperation.created_at == stale_time,
                 )
             )
-        )
-    assert stale_ids
-
-    with switch.sessions() as session:
-        stale_digests = {
-            operation.node_id: operation.payload_digest
-            for operation in (session.get(AgentOperation, item) for item in stale_ids)
-            if operation is not None
         }
-
-    def order_stale_receipts(*, latest: bool) -> None:
-        with switch.sessions.begin() as session:
-            for operation_id in stale_ids:
-                operation = session.get(AgentOperation, operation_id)
-                operation.updated_at = (
-                    switch.clock.now + timedelta(seconds=1) if latest else stale_time
-                )
-
-    switch.hooks.append(lambda: order_stale_receipts(latest=True))
-    for _ in range(40):
-        view = switch.service.get(switch.operation.operation_id)
-        assert view.state in {"queued", "running"}, view.status_reason
-        if (_result(view).retry_attempt or 1) >= 5:
-            break
-        order_stale_receipts(latest=False)
-        switch.drive()
-        if switch.compiler.compiles:
-            view = switch.service.get(switch.operation.operation_id)
-            assert view.result.preflight.pending_job_id is None
-            assert not view.result.preflight.attempts
-            for node_id, receipt in view.result.preflight.receipts.items():
-                assert receipt.observed_at == int(NOW.timestamp())
-                with switch.sessions() as session:
-                    selected = latest_result(
-                        session, node_id, requirements_sha256=stale_digests[node_id]
-                    )
-                assert selected is not None
-                assert selected.observed_at == int(stale_time.timestamp()), (
-                    view.state,
-                    view.status_reason,
-                    switch.executor.events,
-                    switch.compiler.compiles,
-                    stale_digests[node_id],
-                )
-
-    view = switch.service.get(switch.operation.operation_id)
-    assert view.state == "running"
-    assert view.next_attempt_at > switch.clock.now
-    assert switch.service.tick() is False
-    # Count committed failed cycles, not compiler calls: refreshing an exact
-    # build receipt may compile more than once inside one phase attempt.
-    assert _result(view).retry_attempt == 5
-    assert "runtime-install" not in switch.executor.events
+    assert stale
     with switch.sessions() as session:
-        assert list(session.scalars(select(RecipeInstallation))) == []
-        assert list(session.scalars(select(ResourceReservation))) == []
-    switch.hooks.clear()
-    order_stale_receipts(latest=False)
-    for _ in range(10):
+        baseline = tuple(
+            session.scalars(
+                select(AgentOperation.id).where(
+                    AgentOperation.kind == OperationKind.RUNTIME_PREFLIGHT.value
+                )
+            )
+        )
+
+    def reorder_history() -> None:
+        with switch.sessions.begin() as session:
+            for operation_id in stale:
+                operation = session.get(AgentOperation, operation_id)
+                assert operation is not None
+                operation.updated_at = switch.clock.now + timedelta(seconds=1)
+
+    switch.hooks.append(reorder_history)
+    for _ in range(40):
         switch.drive()
         if "runtime-install" in switch.executor.events:
             break
     assert switch.executor.events.count("runtime-install") == 1
+    with switch.sessions() as session:
+        fresh = list(
+            session.scalars(
+                select(AgentOperation).where(
+                    AgentOperation.kind == OperationKind.RUNTIME_PREFLIGHT.value,
+                    AgentOperation.id.not_in(baseline),
+                )
+            )
+        )
+        identities = [
+            (operation.node_id, operation.payload_digest) for operation in fresh
+        ]
+        assert len(identities) == len(set(identities))
+        for node_id, digest in stale.values():
+            selected = latest_result(session, node_id, requirements_sha256=digest)
+            assert selected is not None
+            assert selected.observed_at > int(stale_time.timestamp())
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
@@ -2596,7 +2739,7 @@ def test_uncached_build_receipt_reaches_copy_after_restart_without_replay(
         )
         node = session.get(AgentNode, nodes[0])
         assert node is not None
-        node.binary_digest = "a" * 64
+        set_inventory_identity(node, binary_digest="a" * 64)
         snapshot = session.scalar(
             select(NodeInventorySnapshot).where(
                 NodeInventorySnapshot.node_id == nodes[0]
@@ -2751,7 +2894,7 @@ def test_first_profile_preparation_preview_replans_a_missing_build_archive(
         assert revision is not None
         node = session.get(AgentNode, nodes[0])
         assert node is not None
-        node.binary_digest = "a" * 64
+        set_inventory_identity(node, binary_digest="a" * 64)
         snapshot = session.scalar(
             select(NodeInventorySnapshot).where(
                 NodeInventorySnapshot.node_id == nodes[0]
@@ -2856,7 +2999,7 @@ def test_editorial_successor_reuses_an_identity_matched_build(tmp_path: Path) ->
         assert revision is not None
         node = session.get(AgentNode, nodes[0])
         assert node is not None
-        node.binary_digest = "a" * 64
+        set_inventory_identity(node, binary_digest="a" * 64)
         snapshot = session.scalar(
             select(NodeInventorySnapshot).where(
                 NodeInventorySnapshot.node_id == nodes[0]
@@ -3086,7 +3229,7 @@ def test_republished_source_bundle_builds_a_new_image_for_the_same_revision(
             old_build.image_bytes = None
         node = session.get(AgentNode, nodes[0])
         assert node is not None
-        node.binary_digest = "a" * 64
+        set_inventory_identity(node, binary_digest="a" * 64)
         snapshot = session.scalar(
             select(NodeInventorySnapshot).where(
                 NodeInventorySnapshot.node_id == nodes[0]
@@ -3205,24 +3348,40 @@ def test_uncached_run_selects_external_fresh_builder_and_plans_container_phase(
             AgentNode(
                 node_id=builder_id,
                 state="active",
-                architecture="linux-arm64",
-                binary_digest="a" * 64,
+                inventory_snapshot=inventory_items_fixture(
+                    builder_id,
+                    observed_at=None,
+                    identity=AgentRuntimeIdentity.model_validate(
+                        {
+                            **PACKAGED_RUNTIME_IDENTITY,
+                            "architecture": "linux-arm64",
+                            "binary_digest": "a" * 64,
+                        }
+                    ),
+                ),
             )
         )
     InventoryRepository(sessions, clock=lambda: NOW).record(
-        InventorySnapshotInput(
-            builder_id,
-            NOW,
-            10_000,
-            8_000,
-            10_000,
-            8_000,
-            10_000,
-            8_000,
-            1,
-            False,
-            ("recipe.build.v1",),
-            memory_pool="shared",
+        NodeInventoryReport.model_validate_json(
+            canonical_message(
+                {
+                    "node_id": builder_id,
+                    "observed_at": NOW,
+                    "disk_total_bytes": 10_000,
+                    "disk_free_bytes": 8_000,
+                    "host_memory_total_bytes": 10_000,
+                    "host_memory_free_bytes": 8_000,
+                    "gpu_memory_total_bytes": 10_000,
+                    "gpu_memory_free_bytes": 8_000,
+                    "gpu_count": 1,
+                    "artifact_store_read_only": False,
+                    "capabilities": ("recipe.build.v1",),
+                    "memory_pool": "shared",
+                    "schema_version": 1,
+                    "nvidia_driver_version": "unknown",
+                    "container_runtime_version": "unknown",
+                }
+            )
         )
     )
     with sessions.begin() as session:
@@ -3295,7 +3454,7 @@ def test_container_phase_delegates_to_existing_recipe_build_child(
         build.plan = {**build.plan, "source_bundle_sha256": source_digest}
         node = session.get(AgentNode, nodes[0])
         assert node is not None
-        node.binary_digest = "a" * 64
+        set_inventory_identity(node, binary_digest="a" * 64)
         snapshot = session.scalar(
             select(NodeInventorySnapshot).where(
                 NodeInventorySnapshot.node_id == nodes[0]
@@ -4744,7 +4903,7 @@ def test_cancel_intent_waits_for_transfer_receipt_and_preserves_shared_copies(tm
     assert cancelled_result.child_operation_id is None
     assert not restarted._advance(operation.operation_id)
     with sessions() as session:
-        assert len(list(session.scalars(select(NodeArtifact)))) > 0
+        assert len(list(all_inventory_artifacts(session))) > 0
         installed = session.get(RecipeInstallation, plan.installation_id)
         assert installed is not None
         assert installed.state == "installed"
@@ -6760,3 +6919,43 @@ def test_dual_profile_disk_review_does_not_decode_unrelated_catalog_documents(
         assert not any(slug.startswith("unrelated-") for slug in decoded), decoded
     finally:
         engine.dispose()
+
+
+@pytest.mark.parametrize("unused_models", (None, 5))
+def test_disk_review_counts_orphan_model_copies_and_scopes_unmeasured_cleanup(
+    tmp_path, unused_models: int | None
+):
+    """Catches a disk refusal claiming only zero removable bytes despite an
+    agent reporting reclaimable orphan models; also proves inventory recovery.
+    """
+    sessions, lifecycle, _queue, _mapping_id, _build_id, nodes = setup_services(
+        tmp_path
+    )
+    service = _service(
+        sessions, lifecycle._clock(), lifecycle, RecordingArtifactExecutor()
+    )
+    request = _request(sessions, nodes[0])
+    initial = service.preview(request, actor="admin")
+    required = initial.fit_current.nodes[0].disk_required_bytes
+    assert required is not None
+    with sessions.begin() as session:
+        snapshot = session.scalar(select(NodeInventorySnapshot))
+        assert snapshot is not None
+        snapshot.disk_free_bytes = 0
+        snapshot.unused_model_bytes = unused_models
+    short = service.preview(request, actor="admin")
+    refusal = next(
+        reason
+        for reason in short.blockers
+        if reason.code == RunSwitchCode.INSUFFICIENT_DISK
+    )
+    assert "Only 0 bytes" not in refusal.detail
+    if unused_models is None:
+        assert "Model-copy reclamation is unknown" in refusal.detail
+    else:
+        assert f"{unused_models} bytes of reclaimable model copies" in refusal.detail
+    with sessions.begin() as session:
+        snapshot = session.scalar(select(NodeInventorySnapshot))
+        assert snapshot is not None
+        snapshot.unused_model_bytes = snapshot.disk_total_bytes
+    assert service.preview(request, actor="admin").allowed

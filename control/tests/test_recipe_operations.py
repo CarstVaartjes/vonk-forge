@@ -21,7 +21,7 @@ from alembic.autogenerate import compare_metadata
 from alembic.config import Config
 from alembic.migration import MigrationContext
 from cryptography.hazmat.primitives.asymmetric import ed25519
-from sqlalchemy import create_engine, event, inspect, select, text
+from sqlalchemy import create_engine, event, inspect, select, text, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
@@ -44,6 +44,7 @@ from vonk_agent_protocol import (
     host_helper_grant_signing_bytes,
 )
 from vonk_agent_protocol import AgentOperation as WireAgentOperation
+from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.host_helper import HostRuntimeRequest
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.agent_operation_facts import SUPERSEDED_CANCELLATION_SECONDS
@@ -71,9 +72,10 @@ from vonk_control.install_admission import (
 from vonk_control.install_admission import (
     require_admissible as require_install_admissible,
 )
+from vonk_control.inventory_items import inventory_items
 from vonk_control.inventory_repository import (
     InventoryRepository,
-    InventorySnapshotInput,
+    NodeInventoryReport,
 )
 from vonk_control.job_documents import RecipeStopParent
 from vonk_control.litellm import LiteLlmGeneration
@@ -82,14 +84,12 @@ from vonk_control.models import (
     AgentNode,
     AgentOperation,
     AgentOperationAttempt,
-    AgentPresence,
     Base,
     CatalogDocument,
     CatalogDocumentRevision,
     ClusterMapping,
     InstallationNode,
     Job,
-    NodeArtifact,
     RecipeBuild,
     RecipeInstallation,
     RecipeRun,
@@ -141,8 +141,15 @@ from vonk_forge_contracts import (
 
 from .agent_fences import fenced_operation
 from .canonical_recipe_fixtures import canonical_example
+from .inventory_artifact_support import (
+    seed_inventory_artifact,
+)
 from .preflight_fixtures import record_passing_preflight
-from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, claim_agent
+from .runtime_identity_support import (
+    PACKAGED_RUNTIME_IDENTITY,
+    claim_agent,
+    inventory_items_fixture,
+)
 from .runtime_image_fixtures import place_test_image
 
 _FIXTURE_ADAPTER = resolve_runtime_adapter("vllm", {"node_count": 1})
@@ -447,7 +454,13 @@ def setup_services(
                 AgentNode(
                     node_id=node_id,
                     state="active",
-                    architecture="linux-arm64",
+                    inventory_snapshot=inventory_items_fixture(
+                        node_id,
+                        observed_at=None,
+                        identity=AgentRuntimeIdentity.model_validate(
+                            {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
+                        ),
+                    ),
                 )
             )
             session.flush()
@@ -460,13 +473,13 @@ def setup_services(
                     not_after=datetime(2027, 8, 7, 12, tzinfo=UTC),
                 )
             )
-            session.add(
-                AgentPresence(
-                    node_id=node_id,
-                    certificate_serial=serial,
-                    certificate_fingerprint=f"fingerprint-{index}",
+            session.execute(
+                update(AgentNode)
+                .where(AgentNode.node_id == node_id)
+                .values(
+                    contact_certificate_serial=serial,
                     management_address=f"192.168.1.{211 + index}",
-                    observed_at=NOW,
+                    management_observed_at=NOW,
                 )
             )
     inventory = InventoryRepository(sessions, clock=lambda: NOW)
@@ -485,21 +498,30 @@ def setup_services(
     )
     for index, node_id in enumerate(node_ids):
         inventory.record(
-            InventorySnapshotInput(
-                node_id,
-                NOW,
-                10_000,
-                8_000,
-                10_000,
-                8_000,
-                10_000,
-                8_000,
-                1,
-                False,
-                capabilities,
-                fabric_address=(f"192.168.100.{index + 2}" if nodes > 1 else None),
-                fabric_bandwidth_mbps=(200000 if nodes > 1 else None),
-                memory_pool="shared",
+            NodeInventoryReport.model_validate_json(
+                canonical_message(
+                    {
+                        "node_id": node_id,
+                        "observed_at": NOW,
+                        "disk_total_bytes": 10_000,
+                        "disk_free_bytes": 8_000,
+                        "host_memory_total_bytes": 10_000,
+                        "host_memory_free_bytes": 8_000,
+                        "gpu_memory_total_bytes": 10_000,
+                        "gpu_memory_free_bytes": 8_000,
+                        "gpu_count": 1,
+                        "artifact_store_read_only": False,
+                        "capabilities": capabilities,
+                        "fabric_address": f"192.168.100.{index + 2}"
+                        if nodes > 1
+                        else None,
+                        "fabric_bandwidth_mbps": 200000 if nodes > 1 else None,
+                        "memory_pool": "shared",
+                        "schema_version": 1,
+                        "nvidia_driver_version": "unknown",
+                        "container_runtime_version": "unknown",
+                    }
+                )
             )
         )
     document = canonical_example("recipe-source-build.json")
@@ -705,8 +727,9 @@ def setup_services(
         session.flush()
         build.plan = {**build.plan, "build_id": build.id}
         build_id = build.id
-        session.add_all(
-            NodeArtifact(
+        for node_id in node_ids:
+            seed_inventory_artifact(
+                session,
                 node_id=node_id,
                 kind="image",
                 digest="1" * 64,
@@ -717,8 +740,6 @@ def setup_services(
                 verified_at=NOW,
                 updated_at=NOW,
             )
-            for node_id in node_ids
-        )
     canonical_cache = _CanonicalModelCache()
 
     def prepare_canonical_runtime_image(document, runtime_spec, build):
@@ -807,7 +828,7 @@ def _issue_exact_stop_grant(
     with sessions() as session:
         node = session.get(AgentNode, node_id)
         assert node is not None
-        fingerprint = node.preflight_fingerprint
+        fingerprint = inventory_items(node).preflight_fingerprint
     claim = claim_agent(
         queue,
         node_id,
@@ -5491,7 +5512,7 @@ def test_distributed_rank_loss_waits_for_fresh_presence_when_evidence_is_missing
     failure_observed_at = NOW + timedelta(seconds=1)
     record_exact_empty_snapshot(sessions, nodes[1], failure_observed_at)
     with sessions.begin() as session:
-        for presence in session.scalars(select(AgentPresence)):
+        for presence in session.scalars(select(AgentNode)):
             session.delete(presence)
     recovery = DistributedRecoveryCoordinator(
         sessions, routes=routes, agent_jobs=queue, clock=lambda: NOW
@@ -6156,6 +6177,112 @@ def test_postgres_duplicate_stop_request_returns_same_operation(
             )
             == 1
         )
+
+
+@pytest.mark.parametrize("release_on_wait", [True, False], ids=["released", "deadline"])
+def test_postgres_duplicate_stop_waiting_on_dispatch_replays(
+    tmp_path: Path,
+    postgres_engine,
+    monkeypatch: pytest.MonkeyPatch,
+    release_on_wait: bool,
+) -> None:
+    # Dispatch already owns the accepted parent and run. Re-taking the request
+    # creation key here makes its own duplicate spend every try-lock attempt
+    # before it can read that receipt. Hold dispatch until the duplicate waits
+    # on its run, then let the committed receipt answer both callers.
+    from vonk_control.recipe_operations import persistence
+
+    Base.metadata.drop_all(postgres_engine)
+    sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
+        tmp_path, engine=postgres_engine
+    )
+    installation = installed_recipe(
+        service, mapping_id, build_id, nodes, request_id="e" * 35 + "b"
+    )
+    run = started_recipe(
+        sessions, service, installation.owner_id, nodes, request_id="e" * 35 + "c"
+    )
+    service, routes = bind_route_publications(sessions, service, ConcurrentPublisher())
+    routes.publish_run(run.owner_id)
+    plan = service.preview_stop(run.owner_id)
+    request_key = "e" * 35 + "d"
+    role = threading.local()
+    backend_pids: dict[str, int] = {}
+    dispatch_locked = threading.Event()
+    duplicate_progress = threading.Event()
+    release_dispatch = threading.Event()
+    acquire = persistence.acquire_admission_keys
+
+    def held_dispatch(session, keys, *, holder=None):
+        acquire(session, keys, holder=holder)
+        if getattr(role, "value", None) == "first":
+            backend_pids["first"] = _postgres_backend_pid(session.connection())
+            dispatch_locked.set()
+            assert release_dispatch.wait(timeout=10)
+
+    def before_lock(connection, _cursor, statement, _parameters, _context, _many):
+        if (
+            getattr(role, "value", None) == "second"
+            and "FROM recipe_runs" in statement
+            and "FOR UPDATE" in statement
+        ):
+            backend_pids["second"] = _postgres_backend_pid(connection)
+            duplicate_progress.set()
+
+    def stop(label: str) -> str:
+        role.value = label
+        return service.stop(
+            run.owner_id,
+            plan_digest=plan.plan_digest,
+            actor="admin",
+            request_id=request_key,
+        ).id
+
+    monkeypatch.setattr(persistence, "acquire_admission_keys", held_dispatch)
+    event.listen(postgres_engine, "before_cursor_execute", before_lock)
+    pool = ThreadPoolExecutor(max_workers=2)
+    try:
+        first = pool.submit(stop, "first")
+        assert dispatch_locked.wait(timeout=10)
+        second = pool.submit(stop, "second")
+        second.add_done_callback(lambda _future: duplicate_progress.set())
+        assert duplicate_progress.wait(timeout=10)
+        if second.done():
+            # Surface an early refusal as its actual error, not a sync timeout.
+            second.result()
+            pytest.fail("duplicate Stop returned before dispatch released its run")
+        _wait_for_postgres_block(
+            postgres_engine,
+            blocked_pid=backend_pids["second"],
+            blocker_pid=backend_pids["first"],
+        )
+        if release_on_wait:
+            release_dispatch.set()
+        # At the SQL lock deadline the duplicate must still return the receipt,
+        # while dispatch remains held. It neither cancels nor fails that Stop.
+        second_id = second.result(timeout=10)
+        release_dispatch.set()
+        first_id = first.result(timeout=10)
+    finally:
+        release_dispatch.set()
+        pool.shutdown(wait=True)
+        event.remove(postgres_engine, "before_cursor_execute", before_lock)
+
+    assert second_id == first_id
+    with sessions() as session:
+        assert [
+            job.id
+            for job in session.scalars(select(Job).where(Job.request_id == request_key))
+        ] == [first_id]
+        assert len(
+            tuple(
+                session.scalars(
+                    select(AgentOperation.id).where(
+                        AgentOperation.parent_job_id == first_id
+                    )
+                )
+            )
+        ) == len(nodes)
 
 
 def test_postgres_duplicate_stop_waiting_on_withdrawal_claim_replays(

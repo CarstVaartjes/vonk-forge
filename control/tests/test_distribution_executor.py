@@ -1229,6 +1229,10 @@ def test_model_download_uses_real_cache_manifest_and_reports_complete_coverage(
     artifact_set = seeded.artifact_set_sha256
     assert artifact_set
     manifest = service.manifest_for_artifact_set(artifact_set)
+    # This test exercises the download handoff after coverage is observed.
+    # A paused observation and its typed wait are covered by the profile test.
+    service._storage_observer.schedule(manifest)
+    service._storage_observer._pending[manifest.digest].result(timeout=30)
     plan = _plan(
         preparation=SimpleNamespace(
             model=SimpleNamespace(
@@ -1273,6 +1277,8 @@ def test_model_download_uses_real_cache_manifest_and_reports_complete_coverage(
     assert completed.result.progress.completed_bytes == 0
     assert completed.result.progress.total_bytes is not None
     assert completed.result.progress.total_bytes < len(payload)
+    executor.close()
+    service.close()
 
 
 @pytest.mark.usefixtures("damaged_json_rows")

@@ -14,6 +14,8 @@ from vonk_agent_protocol.runtime_preflight import (
     RuntimePreflightResult,
 )
 
+PREFLIGHT_MAX_AGE_SECONDS = 300
+
 
 @dataclass(frozen=True, slots=True)
 class RuntimePreflightBlocker:
@@ -86,7 +88,7 @@ def admission_blockers(
     *,
     current_fingerprint: str | None,
     now: int,
-    maximum_age: int = 300,
+    maximum_age: int = PREFLIGHT_MAX_AGE_SECONDS,
 ) -> tuple[RuntimePreflightBlocker, ...]:
     if result is None:
         return (
@@ -134,29 +136,15 @@ def admission_blockers(
 def latest_result(
     session, node_id: str, *, requirements_sha256: str | None = None
 ) -> RuntimePreflightResult | None:
-    """Read validated fenced evidence, including failures, without a new store."""
-    from sqlalchemy import select
+    """Read the canonical reusable item; attempt results remain operation history."""
+    from .inventory_items import inventory_items
+    from .models import AgentNode
 
-    from .models import AgentOperation, AgentOperationAttempt
-
-    raw = session.scalar(
-        select(AgentOperationAttempt.result)
-        .join(AgentOperation, AgentOperation.id == AgentOperationAttempt.operation_id)
-        .where(
-            AgentOperation.node_id == node_id,
-            AgentOperation.kind == "runtime.preflight.v1",
-            AgentOperationAttempt.attempt == AgentOperation.current_attempt,
-            AgentOperation.state == "succeeded",
-            *(
-                [AgentOperation.payload_digest == requirements_sha256]
-                if requirements_sha256 is not None
-                else []
-            ),
-        )
-        .order_by(AgentOperation.updated_at.desc(), AgentOperation.id.desc())
-        .limit(1)
-    )
-    if raw is None:
-        return None
-    # AgentOperationAttempt stores the validated result payload.
-    return RuntimePreflightResult.model_validate(raw)
+    items = inventory_items(session.get(AgentNode, node_id))
+    results = [
+        item.result
+        for item in items.preflights
+        if requirements_sha256 is None
+        or item.requirements_sha256 == requirements_sha256
+    ]
+    return max(results, key=lambda result: result.observed_at, default=None)

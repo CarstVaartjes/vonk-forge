@@ -118,7 +118,12 @@ def _safe(value: object, key: str = "") -> object:
 
 
 def log_event(
-    logger: stdlib_logging.Logger, event: str, *, service: str, **fields: object
+    logger: stdlib_logging.Logger,
+    event: str,
+    *,
+    service: str,
+    level: int = stdlib_logging.INFO,
+    **fields: object,
 ) -> None:
     if re.fullmatch(r"[a-z][a-z0-9_.-]{1,127}", event) is None:
         raise ValueError("structured log event name is invalid")
@@ -126,9 +131,9 @@ def log_event(
         raise ValueError("structured log service name is invalid")
     payload = {
         "timestamp": datetime.now(UTC).isoformat(),
-        "level": stdlib_logging.getLevelName(logger.getEffectiveLevel()).lower(),
+        "level": stdlib_logging.getLevelName(level).lower(),
         "service": service,
         "event": event,
         **{key: _safe(value, key) for key, value in fields.items()},
     }
-    logger.info(json.dumps(payload, sort_keys=True, separators=(",", ":")))
+    logger.log(level, json.dumps(payload, sort_keys=True, separators=(",", ":")))

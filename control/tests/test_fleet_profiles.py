@@ -7,8 +7,7 @@ from copy import deepcopy
 from datetime import UTC, datetime, timedelta
 from importlib.resources import files
 from pathlib import Path
-from types import SimpleNamespace
-from typing import TypedDict, cast
+from typing import TypedDict
 from uuid import uuid4
 
 import pytest
@@ -21,6 +20,7 @@ from vonk_agent_protocol import (
     SupersedeCode,
     canonical_message,
 )
+from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_control.fleet_profile_contract import (
     FleetProfileApplicationProgress,
     FleetProfileApplicationResult,
@@ -87,6 +87,7 @@ from vonk_control.run_switch_contract import (
 )
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
+from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
 from .test_recipe_execution_contract import _installation_plan
 
 NOW = datetime(2026, 8, 28, 12, tzinfo=UTC)
@@ -623,8 +624,14 @@ def _seed(sessions: sessionmaker[Session]) -> tuple[str, str]:
                 node_id=_node_id(1),
                 state="active",
                 protocol_version=1,
-                architecture="linux-arm64",
                 last_seen_at=NOW,
+                inventory_snapshot=inventory_items_fixture(
+                    _node_id(1),
+                    observed_at=NOW,
+                    identity=AgentRuntimeIdentity.model_validate(
+                        {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
+                    ),
+                ),
             )
         )
         # Both documents must be persisted: the revisions below reference these
@@ -755,8 +762,14 @@ def _seed_dual_solo_without_runtime_state(
                 node_id=_node_id(2),
                 state="active",
                 protocol_version=1,
-                architecture="linux-arm64",
                 last_seen_at=NOW,
+                inventory_snapshot=inventory_items_fixture(
+                    _node_id(2),
+                    observed_at=NOW,
+                    identity=AgentRuntimeIdentity.model_validate(
+                        {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
+                    ),
+                ),
             )
         )
         session.execute(
@@ -1105,8 +1118,14 @@ def test_profile_switch_delegates_non_idle_assignment_and_surfaces_child_progres
                 node_id=_node_id(2),
                 state="active",
                 protocol_version=1,
-                architecture="linux-arm64",
                 last_seen_at=NOW,
+                inventory_snapshot=inventory_items_fixture(
+                    _node_id(2),
+                    observed_at=NOW,
+                    identity=AgentRuntimeIdentity.model_validate(
+                        {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
+                    ),
+                ),
             )
         )
     now = [NOW]
@@ -1784,8 +1803,14 @@ def test_profile_switch_adapter_plans_disjoint_assignments_once_and_resumes() ->
                 node_id=_node_id(3),
                 state="active",
                 protocol_version=1,
-                architecture="linux-arm64",
                 last_seen_at=NOW,
+                inventory_snapshot=inventory_items_fixture(
+                    _node_id(3),
+                    observed_at=NOW,
+                    identity=AgentRuntimeIdentity.model_validate(
+                        {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
+                    ),
+                ),
             )
         )
     now = [NOW]
@@ -2080,8 +2105,14 @@ def test_all_idle_profile_has_explicit_scope_and_no_preparation() -> None:
                 node_id=_node_id(2),
                 state="active",
                 protocol_version=1,
-                architecture="linux-arm64",
                 last_seen_at=NOW,
+                inventory_snapshot=inventory_items_fixture(
+                    _node_id(2),
+                    observed_at=NOW,
+                    identity=AgentRuntimeIdentity.model_validate(
+                        {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
+                    ),
+                ),
             )
         )
     adapter = _SwitchAdapter()
@@ -2978,8 +3009,14 @@ def test_profile_preparations_are_stably_ordered_and_reuse_identity() -> None:
                 node_id=_node_id(2),
                 state="active",
                 protocol_version=1,
-                architecture="linux-arm64",
                 last_seen_at=NOW,
+                inventory_snapshot=inventory_items_fixture(
+                    _node_id(2),
+                    observed_at=NOW,
+                    identity=AgentRuntimeIdentity.model_validate(
+                        {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
+                    ),
+                ),
             )
         )
         session.add(
@@ -3175,8 +3212,14 @@ def test_profile_validation_rejects_rank_order_that_mapping_would_rewrite() -> N
                 node_id=_node_id(2),
                 state="active",
                 protocol_version=1,
-                architecture="linux-arm64",
                 last_seen_at=NOW,
+                inventory_snapshot=inventory_items_fixture(
+                    _node_id(2),
+                    observed_at=NOW,
+                    identity=AgentRuntimeIdentity.model_validate(
+                        {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
+                    ),
+                ),
             )
         )
 
@@ -3290,8 +3333,14 @@ def test_profile_scope_reconciles_idle_member_and_retains_reusable_installation(
                 node_id=_node_id(2),
                 state="active",
                 protocol_version=1,
-                architecture="linux-arm64",
                 last_seen_at=NOW,
+                inventory_snapshot=inventory_items_fixture(
+                    _node_id(2),
+                    observed_at=NOW,
+                    identity=AgentRuntimeIdentity.model_validate(
+                        {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
+                    ),
+                ),
             )
         )
         session.execute(
@@ -4260,7 +4309,8 @@ def test_persisted_child_progress_is_read_with_json_semantics() -> None:
     )
 
     view = RunSwitchFleetProfileAdapter._view_from_state(
-        cast("FleetProfileApplication", SimpleNamespace(id=_uuid(900))), state
+        FleetProfileApplication(id=_uuid(900), wait_evidence=None, next_action_at=None),
+        state,
     )
 
     progress = view.progress

@@ -103,36 +103,6 @@ class PhasePlanningMixin:
         except (OSError, RuntimeError, TypeError, ValueError, KeyError) as error:
             return _inspection_unavailable(str(error))
         if (
-            inspection.missing_spark_bytes not in (None, 0)
-            and inspection.nas_coverage == "unknown"
-        ):
-            inspection = ArtifactInspection(
-                required_bytes=inspection.required_bytes,
-                reused_bytes=inspection.reused_bytes,
-                copied_bytes=inspection.copied_bytes,
-                missing_nas_bytes=inspection.missing_nas_bytes,
-                missing_spark_bytes=inspection.missing_spark_bytes,
-                missing_spark_bytes_by_node=inspection.missing_spark_bytes_by_node,
-                reclaimable_bytes=inspection.reclaimable_bytes,
-                nas_coverage=inspection.nas_coverage,
-                spark_coverage=inspection.spark_coverage,
-                artifact_digests=inspection.artifact_digests,
-                reclaimable_digests=inspection.reclaimable_digests,
-                artifact_set_sha256=inspection.artifact_set_sha256,
-                artifact_set_bytes=inspection.artifact_set_bytes,
-                dependency_model_content_sha256=inspection.dependency_model_content_sha256,
-                freshness=inspection.freshness,
-                blockers=(
-                    *inspection.blockers,
-                    _as_reason(
-                        RunSwitchCode.NAS_COVERAGE_UNKNOWN,
-                        "Spark copies are missing but NAS coverage is unknown; the Controller cannot promise a reusable source.",
-                        scope="artifact",
-                    ),
-                ),
-                warnings=inspection.warnings,
-            )
-        if (
             inspection.required_bytes is None
             or inspection.required_bytes < 1
             or not inspection.artifact_digests
@@ -280,7 +250,10 @@ class PhasePlanningMixin:
             )
             return phases
 
-        needs_model_download = inspection.missing_nas_bytes not in (None, 0)
+        # Unknown availability with a resolved exact manifest is preparation,
+        # not a refusal. The durable download phase waits for observation and
+        # skips bytes already present once coverage is known.
+        needs_model_download = inspection.missing_nas_bytes != 0
         needs_target_copy = (
             installation_id is None
             or inspection.missing_spark_bytes not in (None, 0)

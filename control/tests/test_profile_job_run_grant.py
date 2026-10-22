@@ -38,6 +38,7 @@ from vonk_control.host_helper_authority import (
     HostRuntimeAuthorityService,
     HostRuntimeGrantUnsatisfiable,
 )
+from vonk_control.inventory_items import inventory_items
 from vonk_control.models import AgentNode, Job, RecipeRun
 from vonk_control.stored_json import read_row_column
 
@@ -58,7 +59,7 @@ def _claimed_job(world: World, orders: AgentJobService, node_id: str):
     with world.sessions() as session:
         node = session.get(AgentNode, node_id)
         assert node is not None
-        fingerprint = node.preflight_fingerprint
+        fingerprint = inventory_items(node).preflight_fingerprint
     claim = claim_agent(
         orders,
         node_id,

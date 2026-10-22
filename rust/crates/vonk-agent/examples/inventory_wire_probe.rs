@@ -15,6 +15,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         gpu_memory_total_bytes: 16 * 1024 * 1024 * 1024,
         gpu_memory_free_bytes: 12 * 1024 * 1024 * 1024,
         gpu_count: 1,
+        gpu_health: Some(vonk_agent_protocol::generated::GpuHealth::Healthy),
         memory_pool: MemoryPool::Separate,
         artifact_store_read_only: false,
         capabilities: vec![
