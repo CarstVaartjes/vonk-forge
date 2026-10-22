@@ -7,7 +7,11 @@ from sqlalchemy import event, inspect, select
 from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol.state_machines import NodeIdentityState
-from vonk_agent_protocol.telemetry import HostResourceSample, TelemetrySample
+from vonk_agent_protocol.telemetry import (
+    MAX_TELEMETRY_CAPACITY_BYTES,
+    HostResourceSample,
+    TelemetrySample,
+)
 from vonk_control.db import initialize_database, node_facts
 from vonk_control.models import Base, NodeInventoryResourceSnapshot, NodeTelemetrySample
 from vonk_control.telemetry import TelemetryRepository
@@ -206,3 +210,72 @@ def test_archived_measurement_lock_does_not_block_install_admission(
         identifier = service.accept_install(plan, actor="admin", now=now)
     with sessions() as session:
         assert session.get(RecipeInstallation, identifier) is not None
+
+
+@pytest.mark.parametrize(
+    "available", [None, 0, 128 * 1024**3, MAX_TELEMETRY_CAPACITY_BYTES]
+)
+@pytest.mark.parametrize("damaged", [False, True])
+@pytest.mark.usefixtures("damaged_json_rows")
+def test_recent_memory_reads_the_validated_byte_contract(
+    postgres_engine: Engine, available: int | None, damaged: bool
+) -> None:
+    """Catches 32-bit JSON casts, poisoned history and cross-node/window leaks."""
+    from datetime import timedelta
+
+    from sqlalchemy import update
+    from vonk_control.models import AgentNode
+    from vonk_control.observed_run_memory import recent_best_available
+    from vonk_control.settings import PROFILE_STALL_WINDOW_SECONDS
+
+    Base.metadata.create_all(postgres_engine)
+    sessions = sessionmaker(postgres_engine, expire_on_commit=False)
+    other_node = "spk_" + "d" * 32
+    with sessions.begin() as session:
+        session.add_all(
+            AgentNode(node_id=node_id, state=NodeIdentityState.ACTIVE)
+            for node_id in (NODE, other_node)
+        )
+
+    def report(node_id: str, observed_at: datetime, free: int | None) -> str:
+        sample = TelemetrySample(
+            boot_id="00000000-0000-4000-8000-000000000001",
+            observed_at=observed_at,
+            memory_total_bytes=None if free is None else MAX_TELEMETRY_CAPACITY_BYTES,
+            memory_available_bytes=free,
+            disk_total_bytes=None,
+            disk_free_bytes=None,
+            gpu_utilization_percent=None,
+            gpu_memory_total_bytes=None,
+            gpu_memory_free_bytes=None,
+        )
+        return (
+            TelemetryRepository(sessions, clock=lambda: observed_at)
+            .record_batch(node_id, [sample])[0]
+            .id
+        )
+
+    report(
+        NODE,
+        NOW - timedelta(seconds=PROFILE_STALL_WINDOW_SECONDS + 1),
+        MAX_TELEMETRY_CAPACITY_BYTES,
+    )
+    report(other_node, NOW, MAX_TELEMETRY_CAPACITY_BYTES)
+    if damaged:
+        bad_id = report(NODE, NOW - timedelta(seconds=1), 1)
+        with sessions.begin() as session:
+            session.execute(
+                update(NodeInventoryResourceSnapshot)
+                .where(NodeInventoryResourceSnapshot.source_sample_id == bad_id)
+                .values(host_resources={"memory_available_bytes": "unreadable"})
+            )
+    report(NODE, NOW, available)
+    with sessions() as session:
+        assert recent_best_available(session, NODE, NOW) == available
+        assert recent_best_available(session, NODE, None) is None
+        assert (
+            recent_best_available(
+                session, NODE, NOW + timedelta(seconds=PROFILE_STALL_WINDOW_SECONDS + 1)
+            )
+            is None
+        )

@@ -19,9 +19,10 @@ from __future__ import annotations
 from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import JSON, func, select, type_coerce
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import ReservationState
+from vonk_agent_protocol.telemetry import HostResourceSample
 
 from .memory_reservations import MEMORY_RESERVATION_KINDS
 from .models import (
@@ -170,17 +171,22 @@ def recent_best_available(
     if observed_at is None:
         return None
     since = _utc(observed_at) - timedelta(seconds=PROFILE_STALL_WINDOW_SECONDS)
-    return session.scalar(
-        select(
-            func.max(
-                type_coerce(NodeInventoryResourceSnapshot.host_resources, JSON)[
-                    "memory_available_bytes"
-                ].as_integer()
-            )
-        ).where(
+    resources = session.scalars(
+        select(NodeInventoryResourceSnapshot.host_resources).where(
             NodeInventoryResourceSnapshot.node_id == node_id,
             NodeInventoryResourceSnapshot.observed_at >= since,
         )
+    )
+    # Read through the canonical contract, preserving its full byte range and
+    # treating damaged evidence as unknown instead of poisoning admission.
+    return max(
+        (
+            item.memory_available_bytes
+            for item in resources
+            if isinstance(item, HostResourceSample)
+            and item.memory_available_bytes is not None
+        ),
+        default=None,
     )
 
 
