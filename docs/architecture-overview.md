@@ -186,7 +186,8 @@ XDG, vLLM, Triton, FlashInfer and Inductor paths without rebuilding recipe image
 After exact launch authorization, the helper selects backing by runtime image
 manifest digest, observed GPU compute capability and NVIDIA driver version,
 runtime UID/GID, executable, engine environment and argv. Platform rendezvous,
-listen coordinates and job deadlines do not fragment compilation identity. Missing
+listen coordinates and job deadlines do not fragment compilation identity.
+GPU-free plans bind host CPU architecture without querying NVIDIA. Missing GPU
 host identity or an unusable cache directory produces a journal warning and a
 fresh cache in that run's scope. No unknown-host key is shared. Engine caches
 own their content keys and concurrent population; the helper never clears bytes

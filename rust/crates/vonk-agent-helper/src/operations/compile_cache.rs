@@ -57,39 +57,49 @@ impl<R: CommandRunner> OperationExecutor<R> {
     }
 
     fn compile_cache_identity(&self, run: &ValidatedDockerRun) -> Result<String, OperationError> {
-        let output = self
-            .runner
-            .run_with_timeout(
-                Path::new(gpu_clock::NVIDIA_SMI),
-                &[
-                    GPU_QUERY.to_owned(),
-                    vonk_agent_protocol::gpu_clock::CSV_FORMAT.to_owned(),
-                ],
-                Duration::from_secs(10),
-            )
-            .map_err(CommandFailure::Runner)?;
-        if !output.success {
-            return Err(CommandFailure::exit(&output).into());
-        }
-        let host =
-            std::str::from_utf8(&output.stdout).map_err(|_| OperationError::InvalidArtifact)?;
-        // No unknown driver/architecture bucket: unavailable evidence gets a
-        // fresh cache instead. All devices contribute to the host identity.
-        let mut devices = host
-            .lines()
-            .map(|line| {
-                let (arch, driver) = line.trim().split_once(',')?;
-                let arch = arch.trim();
-                let driver = driver.trim();
-                let valid = |value: &str| {
-                    !value.is_empty() && value.bytes().all(|b| b.is_ascii_digit() || b == b'.')
-                };
-                (valid(arch) && valid(driver)).then_some((arch, driver))
+        let host = if run.gpu {
+            let output = self
+                .runner
+                .run_with_timeout(
+                    Path::new(gpu_clock::NVIDIA_SMI),
+                    &[
+                        GPU_QUERY.to_owned(),
+                        vonk_agent_protocol::gpu_clock::CSV_FORMAT.to_owned(),
+                    ],
+                    Duration::from_secs(10),
+                )
+                .map_err(CommandFailure::Runner)?;
+            if !output.success {
+                return Err(CommandFailure::exit(&output).into());
+            }
+            Some(String::from_utf8(output.stdout).map_err(|_| OperationError::InvalidArtifact)?)
+        } else {
+            // A GPU-free signed plan needs no NVIDIA identity. Keep CPU/GPU
+            // namespaces distinct; never reuse an unknown GPU bucket.
+            None
+        };
+        let devices = host
+            .as_deref()
+            .map(|host| {
+                let mut devices = host
+                    .lines()
+                    .map(|line| {
+                        let (arch, driver) = line.trim().split_once(',')?;
+                        let arch = arch.trim();
+                        let driver = driver.trim();
+                        let valid = |value: &str| {
+                            !value.is_empty()
+                                && value.bytes().all(|b| b.is_ascii_digit() || b == b'.')
+                        };
+                        (valid(arch) && valid(driver)).then_some((arch, driver))
+                    })
+                    .collect::<Option<Vec<_>>>()
+                    .filter(|rows| !rows.is_empty())
+                    .ok_or(OperationError::InvalidArtifact)?;
+                devices.sort_unstable();
+                Ok::<_, OperationError>(devices)
             })
-            .collect::<Option<Vec<_>>>()
-            .filter(|rows| !rows.is_empty())
-            .ok_or(OperationError::InvalidArtifact)?;
-        devices.sort_unstable();
+            .transpose()?;
         // Preserve every engine env/argv value, including empty and multiline
         // values. Per-start platform rendezvous/listen coordinates and job
         // observation deadlines are not compiler inputs; retaining them would
@@ -102,6 +112,8 @@ impl<R: CommandRunner> OperationExecutor<R> {
             .collect::<Vec<_>>();
         canonical_json(&(
             &run.platform_manifest_digest,
+            run.gpu,
+            std::env::consts::ARCH,
             devices,
             run.uid,
             run.gid,

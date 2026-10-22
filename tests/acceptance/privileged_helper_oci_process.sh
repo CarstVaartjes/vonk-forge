@@ -267,7 +267,17 @@ docker logs "$run_name" >"$report_root/container-first.log" 2>&1
 grep -q 'uid=10001' "$report_root/container-first.log"
 grep -q 'cache-created' "$report_root/container-first.log"
 grep -q 'tmp-fresh' "$report_root/container-first.log"
-test "$(cat "$installation_root/runtime-cache/helper-cache-ok")" = cache-created
+cache_source=$(docker inspect "$run_name" | python3 -c '
+import json, sys
+from pathlib import Path
+target = json.loads(Path(sys.argv[1]).read_text())["compile_cache_mount"]
+print(next(mount["Source"] for mount in json.load(sys.stdin)[0]["Mounts"] if mount["Destination"] == target))
+' "$fixture")
+case "$cache_source" in
+  /var/lib/vonk-forge/compile-cache/*/data) ;;
+  *) echo "expected persistent compile cache, got $cache_source" >&2; exit 1 ;;
+esac
+test "$(cat "$cache_source/helper-cache-ok")" = cache-created
 docker rm "$run_name" >"$report_root/container-first-remove.log"
 # Disposable cleanup history must not own execution admission. An obstructed
 # root catches both a history-root creation gate and a lock placed in history.
@@ -327,8 +337,18 @@ grep -q 'uid=10001' "$report_root/container.log"
 grep -q 'helper-argv-once' "$report_root/container.log"
 grep -q 'cache-reused' "$report_root/container.log"
 grep -q 'tmp-fresh' "$report_root/container.log"
-test -f "$installation_root/runtime-cache/home/helper-entrypoint-ok"
-test "$(cat "$installation_root/runtime-cache/helper-cache-ok")" = cache-created
+test -f "$cache_source/home/helper-entrypoint-ok"
+test "$(cat "$cache_source/helper-cache-ok")" = cache-created
+# Both starts must bind the same actual backing, not an obsolete logical path.
+python3 - "$fixture" "$report_root/container-inspect.json" "$cache_source" <<'PY_CACHE'
+import json
+import sys
+from pathlib import Path
+
+target = json.loads(Path(sys.argv[1]).read_text())["compile_cache_mount"]
+mounts = json.loads(Path(sys.argv[2]).read_text())[0]["Mounts"]
+assert next(mount["Source"] for mount in mounts if mount["Destination"] == target) == sys.argv[3]
+PY_CACHE
 test -f /var/lib/vonk-forge-agent/runs/$run_id/outputs/tmp/helper-tmp-ok
 printf 'helper-process-proof=passed\narchive_sha256=%s\narchive_bytes=%s\nimage_ref=%s\nplatform_digest=%s\nplatform_config_digest=%s\nconfig_id=%s\ndocker_local_image_id=%s\n' \
   "$archive_sha" "$archive_bytes" "$image_ref" "$platform_digest" "$platform_config_digest" "$config_id" "$docker_local_image_id" \

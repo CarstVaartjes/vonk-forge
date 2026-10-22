@@ -30,10 +30,25 @@ fn fixture() -> (
     OperationExecutor<Runner>,
     ValidatedDockerRun,
 ) {
+    fixture_for_gpu(true)
+}
+fn fixture_for_gpu(
+    gpu: bool,
+) -> (
+    tempfile::TempDir,
+    OperationExecutor<Runner>,
+    ValidatedDockerRun,
+) {
     let (root, roots) = runtime_fixture();
     let model = artifact_path(&roots, 'a');
     fs::create_dir(&model).unwrap();
-    let args = runtime_arguments(&roots, &[(model, "/models", true)]);
+    let mut args = runtime_arguments(&roots, &[(model, "/models", true)]);
+    if gpu {
+        args.splice(
+            1..1,
+            ["--device".to_owned(), "nvidia.com/gpu=all".to_owned()],
+        );
+    }
     let run = validate_docker_run(&args, &roots, None).unwrap();
     let executor = OperationExecutor::new(
         roots,
@@ -254,4 +269,22 @@ fn simultaneous_population_and_restart_reuse_the_same_cache() {
     restarted.bind_compile_cache(&mut third).unwrap();
     assert_eq!(source(&third), a);
     assert_eq!(fs::read(a.join("compiled")).unwrap(), b"kernel");
+}
+
+#[test]
+fn gpu_free_plans_persist_without_querying_an_unknown_nvidia_host() {
+    // Catches unconditional NVIDIA probing: CPU-only acceptance/workloads
+    // otherwise fall back on every start and cannot retain compile bytes.
+    let (_root, executor, mut run) = fixture_for_gpu(false);
+    *executor.runner.host.lock().unwrap() = "N/A".to_owned();
+    executor.bind_compile_cache(&mut run).unwrap();
+    let cache = source(&run);
+    assert!(cache.starts_with(executor.roots.data.join(STORE)));
+    fs::write(cache.join("kernel"), b"cpu compiled").unwrap();
+    let (_next_root, _, mut next) = fixture_for_gpu(false);
+    executor.bind_compile_cache(&mut next).unwrap();
+    assert_eq!(source(&next), cache);
+    assert_eq!(fs::read(cache.join("kernel")).unwrap(), b"cpu compiled");
+    next.gpu = true;
+    assert!(executor.compile_cache_identity(&next).is_err());
 }
