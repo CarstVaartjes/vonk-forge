@@ -6,6 +6,7 @@ import shlex
 from collections.abc import Mapping
 
 from ..cli_telemetry_render import size as _size
+from ..generated_control.models.model_cache_usage import ModelCacheUsage
 from .common import (
     _bytes,
     _field,
@@ -37,6 +38,10 @@ def _library_item(item: Mapping[str, object], noun: str, *, detail: bool) -> Non
     print(f"USE {_text(selector)}")
     _field("Usage", _words(item.get("usage")))
     _field("Disk", _bytes(resources.get("disk_bytes")))
+    if noun == "model":
+        raw_usage = _optional(item.get("cache_usage"), "cache_usage")
+        if raw_usage:
+            _model_storage_note(ModelCacheUsage.from_dict(raw_usage))
     _field("Memory", _bytes(resources.get("memory_bytes")))
     if noun == "recipe":
         assessment = _optional(item.get("assessment"), "assessment")
@@ -162,6 +167,17 @@ def _recipe_alternatives(item: Mapping[str, object]) -> None:
     print("  Compare: vonkctl recipe detail <recipe>")
 
 
+def _model_storage_note(usage: ModelCacheUsage) -> None:
+    _field("Unique bytes", _bytes(usage.unique_bytes))
+    _field("Shared bytes", _bytes(usage.shared_bytes))
+    if isinstance(usage.retained_revisions, list):
+        for revision in usage.retained_revisions:
+            print(
+                f"  Previous revision retained because {', '.join(revision.owners)}; "
+                f"{_bytes(revision.unique_bytes)} unique; rechecked every 30s"
+            )
+
+
 def _library_row(item: Mapping[str, object], noun: str) -> list[object]:
     local = _object(item.get("local"), "local")
     resources = _object(item.get("resources"), "resources")
@@ -178,6 +194,15 @@ def _library_row(item: Mapping[str, object], noun: str) -> list[object]:
         if isinstance(running, list) and running
         else "no",
     ]
+    if noun == "model":
+        raw_usage = _optional(item.get("cache_usage"), "cache_usage")
+        usage = ModelCacheUsage.from_dict(raw_usage) if raw_usage else None
+        row.extend(
+            [
+                _size(usage.unique_bytes if usage is not None else None),
+                _size(usage.shared_bytes if usage is not None else None),
+            ]
+        )
     if noun == "recipe":
         assessment = _optional(item.get("assessment"), "assessment")
         readiness = _optional(assessment.get("readiness"), "readiness")
@@ -257,7 +282,20 @@ def _library(
         if noun == "recipe":
             labels.insert(1, "SPARKS")
             labels.append("READY")
+        if noun == "model":
+            labels.extend(["UNIQUE", "SHARED"])
         _table(labels, [_library_row(item, noun) for item in rows])
+        if noun == "model":
+            for item in rows:
+                raw_usage = _optional(item.get("cache_usage"), "cache_usage")
+                if raw_usage:
+                    usage = ModelCacheUsage.from_dict(raw_usage)
+                    if (
+                        isinstance(usage.retained_revisions, list)
+                        and usage.retained_revisions
+                    ):
+                        print(f"  {_text(item.get('selector'))}")
+                        _model_storage_note(usage)
         for item in rows:
             preparation = _optional(
                 _object(item.get("local"), "local").get("preparation"), "preparation"

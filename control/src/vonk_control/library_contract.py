@@ -36,7 +36,7 @@ from .machine_states import (
     RouteStateField,
     RunStateField,
 )
-from .model_cache_contract import ModelCacheOperationState
+from .model_cache_contract import ModelCacheOperationState, ModelCacheUsage
 from .run_switch_contract import RunSwitchReason, SparkFit, SparkGroup
 from .strict_json import StrictModel
 
@@ -219,6 +219,7 @@ class LibraryModelProjection(StrictModel):
     quantization: Text64
     usage: list[Text64] = Field(max_length=64)
     resources: LibraryResourceProjection
+    cache_usage: ModelCacheUsage | None = None
     local: LibraryLocalState
     updated_at: datetime
     # Alignment is declared by the recipes that serve this model, so a model

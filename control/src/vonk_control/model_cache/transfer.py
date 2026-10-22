@@ -437,6 +437,7 @@ class TransferMixin:
             with cache._session(write=True) as session:
                 row = session.get(ModelCacheSet, set_digest)
                 if row is not None:
+                    cache._remember_verified_models(session, row, manifest)
                     row.state = "cached"
                     row.verified_bytes = manifest.expected_bytes
                     row.verified_at = cache._clock()

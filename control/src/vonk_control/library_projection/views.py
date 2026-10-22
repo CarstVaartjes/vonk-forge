@@ -72,6 +72,7 @@ def models(
         if cached
         else None
     )
+    storage = self._model_storage() if self._model_storage is not None else None
     alignment_by_model = self._alignment_by_model(
         document for _, document in recipe_rows
     )
@@ -80,6 +81,7 @@ def models(
             row,
             model,
             snapshot,
+            storage=storage,
             alignment=sorted(
                 alignment_by_model.get(
                     (model.identity.publisher, model.identity.slug), ()
@@ -94,6 +96,27 @@ def models(
             for item in entries
             if item.local.controller in {"cached", "preparing"} or item.local.running_on
         ]
+    # Select before filtering/pagination: a search cannot resurrect a previous
+    # revision. cached=True chooses the newest locally usable revision, so a
+    # failed successor does not hide the last verified cache.
+    newest: dict[tuple[str, str], LibraryModelProjection] = {}
+    revision_order: dict[str, tuple[int, datetime]] = {}
+    for row, _ in model_rows:
+        order = (row.revision_number, _utc(row.created_at))
+        previous = revision_order.get(row.content_digest)
+        revision_order[row.content_digest] = (
+            order if previous is None else max(previous, order)
+        )
+    for item in sorted(
+        entries,
+        key=lambda item: (
+            revision_order[item.identity.content_sha256],
+            item.identity.content_sha256,
+        ),
+        reverse=True,
+    ):
+        newest.setdefault((item.identity.publisher, item.identity.slug), item)
+    entries = list(newest.values())
     wanted_search = search.casefold() if search else None
     filtered = [
         item
@@ -249,7 +272,10 @@ def model_detail(self: LibraryProjection, selector: str) -> ModelDetailResponse:
         (model.identity.publisher, model.identity.slug), ()
     )
     snapshot = self._local_state_snapshot((digest,))
-    entry = self._model_projection(row, model, snapshot, alignment=sorted(alignment))
+    storage = self._model_storage() if self._model_storage is not None else None
+    entry = self._model_projection(
+        row, model, snapshot, alignment=sorted(alignment), storage=storage
+    )
     return ModelDetailResponse.model_validate(
         entry.model_dump(mode="python") | {"document": model}
     )

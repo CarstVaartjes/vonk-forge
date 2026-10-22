@@ -199,6 +199,7 @@ class AvailabilityMixin:
                 object_digests=tuple(spec.sha256 for spec in manifest.artifacts),
             )
             row = cache._ensure_set(session, manifest)
+            cache._remember_verified_models(session, row, manifest)
             if row.state != "cached":
                 row.state = "cached"
                 row.verified_bytes = manifest.expected_bytes

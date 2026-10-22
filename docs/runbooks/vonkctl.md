@@ -432,6 +432,15 @@ time, candidate group, capacity evidence, and named reasons. The API's
 `assess=false` option skips assessment for exact identity scans; it cannot be
 combined with readiness filters.
 
+Model listings show the newest revision per publisher/slug (the newest usable
+local revision with `--cached`). Disk bytes measure held objects across retained
+revisions; shared objects are charged once to the first publisher/slug in lexical
+order, independently of filters and pagination. Unique and shared bytes remain
+visible separately. After a verified successor download, the worker releases
+older sets through fenced collection. Active owners retain an older revision,
+with an owner note and a recheck every 30 seconds; ending the owner releases it
+without another download. Failed successor downloads preserve the verified copy.
+
 Library `--limit` is a requested maximum. A page can contain fewer entries to
 keep the complete JSON response within the 1 MiB document limit. Continue with
 the returned cursor and the same limit and filters; a short page does not mean

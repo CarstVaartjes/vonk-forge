@@ -74,7 +74,7 @@ from vonk_agent_protocol import (
 from .agent_jobs import release_owned_reservations_in_session
 from .catalog_revision_contract import UnprojectedRevision
 from .logging import log_event
-from .model_cache_contract import CacheOperationKind
+from .model_cache_contract import CacheManifest, CacheOperationKind
 from .models import (
     AgentOperation,
     ArtifactJob,
@@ -89,6 +89,7 @@ from .models import (
     InstallationNode,
     Job,
     ModelCacheOperation,
+    ModelCacheSet,
     RecipeBuild,
     RecipeInstallation,
     RecipeRun,
@@ -101,6 +102,7 @@ from .owner_liveness import builds_in_flight
 from .recovery_policy import RECOVERY
 from .revision_images import revision_images
 from .stored_json import binding_for
+from .wait_contract import WaitOwnerKind
 
 _LOGGER = logging.getLogger(__name__)
 GRACE = timedelta(hours=24)
@@ -529,6 +531,21 @@ class CatalogRevisionCollector:
     def _require_no_remaining_reference(session: Session, revision: _Candidate) -> None:
         """The database's own foreign keys, checked first-hand before the delete."""
 
+        if revision.kind == "model":
+            for value in session.scalars(
+                select(ModelCacheSet.manifest).execution_options(yield_per=_SCAN_BATCH)
+            ):
+                try:
+                    manifest = CacheManifest.model_validate_json(
+                        canonical_message(value)
+                    )
+                except (TypeError, ValueError):
+                    raise _Kept(WaitReason.OBSERVATION_UNAVAILABLE.value) from None
+                if any(
+                    reference.content_sha256 == revision.content_digest
+                    for reference in manifest.verified_models
+                ):
+                    raise _Kept(WaitOwnerKind.MODEL_CACHE.value)
         for name, reference in (
             (
                 "recipe binding",
@@ -848,6 +865,7 @@ def _fence_references(session: Session, deadline: float) -> None:
             InstallationNode,
             Job,
             ModelCacheOperation,
+            ModelCacheSet,
             RecipeBuild,
             RecipeInstallation,
             RecipeRun,

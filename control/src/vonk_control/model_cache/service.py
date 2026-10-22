@@ -46,6 +46,7 @@ from .removal_scope import RemovalScopeMixin
 from .repair import RepairMixin
 from .resolution import ResolutionMixin
 from .retry import RetryMixin
+from .revisions import RevisionsMixin
 from .scheduler import SchedulerMixin
 from .split_transfer import SplitTransferMixin
 from .storage import StorageMixin
@@ -81,6 +82,7 @@ class ModelCacheService(
     InventoryMixin,
     UpdatesMixin,
     StorageMixin,
+    RevisionsMixin,
 ):
     """Resolve, download, verify, repair and remove NAS model artifacts."""
 
@@ -161,6 +163,7 @@ class ModelCacheService(
         self._runtime_archive_available = runtime_archive_available
         self._lock = threading.RLock()
         self._closed = threading.Event()
+        self._revision_scan_at: datetime | None = None
         self._claim_owner = uuid.uuid4().hex
         self._executor = ThreadPoolExecutor(
             max_workers=max_parallel_downloads,

@@ -320,7 +320,10 @@ class InventoryMixin:
                 if row.model_content_sha256 is not None
                 else set()
             )
-        return set(manifest.model_content_digests) or (
+        return (
+            set(manifest.model_content_digests)
+            | {reference.content_sha256 for reference in manifest.verified_models}
+        ) or (
             {row.model_content_sha256}
             if row.model_content_sha256 is not None
             else set()

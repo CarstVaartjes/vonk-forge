@@ -189,6 +189,7 @@ class ArtifactSetManifest:
     model_content_digests: tuple[str, ...]
     artifacts: tuple[ArtifactSpec, ...]
     model_definition_ref: ModelReference | None = None
+    verified_models: tuple[ModelReference, ...] = ()
 
     def contract(self) -> CacheManifest:
         return CacheManifest(
@@ -199,6 +200,7 @@ class ArtifactSetManifest:
             model_definition_ref=self.model_definition_ref,
             model_content_digests=list(self.model_content_digests),
             artifacts=[item.contract() for item in self.artifacts],
+            verified_models=list(self.verified_models),
         )
 
     def document(self) -> dict[str, object]:
@@ -267,6 +269,7 @@ class ArtifactSetManifest:
                 )
             ),
             model_definition_ref=wire.model_definition_ref,
+            verified_models=tuple(wire.verified_models),
         )
         _validate_manifest(result)
         return result
