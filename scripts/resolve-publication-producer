@@ -87,6 +87,7 @@ PRODUCERS = {
             "scripts/build-agent-deb",
             "scripts/materialize-agent-tools",
             "scripts/test-agent-package-native-lifecycle",
+            "tests/acceptance/fixtures/nvidia-smi.sh",
             "tests/scripts/test_agent_deb.py",
             "tests/scripts/test_docker_firewall.sh",
             "scripts/verify-agent-binaries",
