@@ -19,12 +19,12 @@ from ..auth import CursorError
 from ..evidence_repeats import repeating_evidence
 from ..fleet_event_contract import NodeProfilePayload
 from ..fleet_events import FleetEventDraft, FleetEventRepository
+from ..inventory_items import inventory_items
 from ..model_layout_notice import model_layout_notices
 from ..models import (
     AgentCertificate,
     AgentNode,
     AgentNodeProfile,
-    AgentPresence,
     CatalogDocument,
     CatalogDocumentRevision,
     ClusterMapping,
@@ -107,7 +107,6 @@ class FleetProjection:
             profile = session.get(AgentNodeProfile, node_id)
             if profile is None:
                 raise KeyError(node_id)
-            presence = session.get(AgentPresence, node_id)
             if profile.display_name != display_name:
                 profile.display_name = display_name
                 self._events.append_in_session(
@@ -125,8 +124,8 @@ class FleetProjection:
             return FleetNodeIdentity(
                 id=node_id,
                 display_name=profile.display_name,
-                hostname=profile.hostname,
-                ip_address=(None if presence is None else presence.management_address),
+                hostname=inventory_items(node).hostname or "",
+                ip_address=node.management_address,
             )
 
     def read_at(self, event_cursor: int | None) -> FleetSnapshot:
@@ -145,7 +144,6 @@ class FleetProjection:
             agents = self._registered_agents(session)
             node_ids = tuple(agents)
             profiles = self._node_profiles(session, node_ids)
-            presences = self._node_presences(session, node_ids)
             certificates = self._current_certificates(session, node_ids, current)
             inventories = self._latest_inventory(session, node_ids)
             unreadable_telemetry: set[str] = set()
@@ -208,7 +206,6 @@ class FleetProjection:
                 self._node(
                     node_id,
                     profiles.get(node_id),
-                    presences.get(node_id),
                     current=current,
                     agent=agents[node_id],
                     certificate=certificates.get(node_id),
@@ -251,17 +248,6 @@ class FleetProjection:
             select(AgentNodeProfile)
             .where(AgentNodeProfile.node_id.in_(node_ids))
             .order_by(AgentNodeProfile.node_id)
-        )
-        return {row.node_id: row for row in rows}
-
-    @staticmethod
-    def _node_presences(
-        session: Session, node_ids: Sequence[str]
-    ) -> dict[str, AgentPresence]:
-        rows = session.scalars(
-            select(AgentPresence)
-            .where(AgentPresence.node_id.in_(node_ids))
-            .order_by(AgentPresence.node_id)
         )
         return {row.node_id: row for row in rows}
 

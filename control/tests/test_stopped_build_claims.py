@@ -14,12 +14,12 @@ import uuid
 
 from sqlalchemy import select
 from vonk_agent_protocol import AgentOperation as WireOperation
-from vonk_agent_protocol import ReservationState
+from vonk_agent_protocol import ReservationState, canonical_message
 from vonk_control.attempt_residues import AttemptResidueReconciler
 from vonk_control.disk_reservations import outstanding_disk_reservation_bytes
 from vonk_control.inventory_repository import (
     InventoryRepository,
-    InventorySnapshotInput,
+    NodeInventoryReport,
 )
 from vonk_control.memory_reservations import memory_reservations
 from vonk_control.models import Job, ResourceReservation
@@ -130,23 +130,30 @@ def stopped_build_releases_its_resources(tmp_path, engine):
     assert _counted(sessions, node_id) == 0
     later = now + OWNER_SETTLE_GRACE
     InventoryRepository(sessions, clock=lambda: later).record(
-        InventorySnapshotInput(
-            node_id,
-            later,
-            2 * 1024**4,
-            1024**4,
-            100_000,
-            80_000,
-            100_000,
-            80_000,
-            1,
-            False,
-            (
-                WireOperation.RECIPE_BUILD.value,
-                "recipe.image.pull.v1",
-                "runtime.vonk.v1",
-            ),
-            memory_pool="separate",
+        NodeInventoryReport.model_validate_json(
+            canonical_message(
+                {
+                    "node_id": node_id,
+                    "observed_at": later,
+                    "disk_total_bytes": 2 * 1024**4,
+                    "disk_free_bytes": 1024**4,
+                    "host_memory_total_bytes": 100_000,
+                    "host_memory_free_bytes": 80_000,
+                    "gpu_memory_total_bytes": 100_000,
+                    "gpu_memory_free_bytes": 80_000,
+                    "gpu_count": 1,
+                    "artifact_store_read_only": False,
+                    "capabilities": (
+                        WireOperation.RECIPE_BUILD.value,
+                        "recipe.image.pull.v1",
+                        "runtime.vonk.v1",
+                    ),
+                    "memory_pool": "separate",
+                    "schema_version": 1,
+                    "nvidia_driver_version": "unknown",
+                    "container_runtime_version": "unknown",
+                }
+            )
         )
     )
     assert _disk_counted(sessions, node_id, later) == 0

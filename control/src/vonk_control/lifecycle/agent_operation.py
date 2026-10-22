@@ -565,16 +565,19 @@ class AgentOperationAdapter:
             changed = True
         if attempt is not None and after.state is State.BACKOFF:
             changed |= self._fence_upgrade_attempt(operation, attempt, next_action)
-        if (
-            after.state is State.SUCCEEDED
-            and operation.kind == AgentOperation.AGENT_UPGRADE
-        ):
+        if after.state is State.SUCCEEDED and before.state is not State.SUCCEEDED:
             # Identity reconciliation can settle an upgrade without a new agent
             # result. Clear its old warning at the common successful write.
             from ..evidence_repeats import note_success
 
             assert self._session is not None
-            note_success(self._session, operation.kind, operation.node_id)
+            note_success(
+                self._session,
+                operation.kind,
+                operation.node_id,
+                operation=operation,
+                now=now,
+            )
         changed |= lifecycle_wait(
             operation,
             identity=operation.id,

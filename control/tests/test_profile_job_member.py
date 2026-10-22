@@ -33,6 +33,7 @@ from vonk_control.artifact_blob_store import ArtifactBlobStore
 from vonk_control.artifact_jobs import ArtifactJobService
 from vonk_control.cluster_mappings import ClusterMappingService
 from vonk_control.fleet_projection import FleetProjection
+from vonk_control.inventory_items import inventory_items, runtime_value
 from vonk_control.models import (
     AgentNode,
     AgentOperation,
@@ -99,7 +100,9 @@ class _AgentSparks(Sparks):
         )
         with self.world.sessions() as session:
             host = session.get(AgentNode, spark.node_id)
-            fingerprint = None if host is None else host.preflight_fingerprint
+            fingerprint = (
+                None if host is None else inventory_items(host).preflight_fingerprint
+            )
         for _order in range(16):
             claim = claim_agent(
                 orders,
@@ -398,7 +401,10 @@ def test_a_job_that_ended_on_an_offline_spark_never_holds_a_later_load(
             )
             node = session.get(AgentNode, spark[0])
             assert node is not None
-            architecture, fingerprint = node.architecture, node.preflight_fingerprint
+            architecture, fingerprint = (
+                runtime_value(node, lambda identity: identity.architecture),
+                inventory_items(node).preflight_fingerprint,
+            )
         jobs = ArtifactJobService(
             world.sessions,
             recipe_operations=world.controller.lifecycle,
@@ -576,7 +582,7 @@ def _job_in_flight_on_an_offline_spark(tmp_path: Path, world: World, sim: Simula
         ).one()
         host = session.get(AgentNode, spark)
         assert host is not None
-        fingerprint = host.preflight_fingerprint
+        fingerprint = inventory_items(host).preflight_fingerprint
     jobs = ArtifactJobService(
         world.sessions,
         recipe_operations=world.controller.lifecycle,
@@ -881,7 +887,7 @@ def test_a_submission_while_the_spark_is_offline_waits_and_runs_when_it_returns(
             )
             host = session.get(AgentNode, spark)
             assert host is not None
-            fingerprint = host.preflight_fingerprint
+            fingerprint = inventory_items(host).preflight_fingerprint
         jobs = ArtifactJobService(
             world.sessions,
             recipe_operations=world.controller.lifecycle,

@@ -13,6 +13,7 @@ from vonk_agent_protocol.agent_words import FailureStage
 from .. import agent_operation_states, job_states
 from ..agent_upgrade_status import operator_agent_upgrade_reason
 from ..categorized_errors import MissingRecord
+from ..inventory_items import runtime_value
 from ..lifecycle.agent_operation import (
     aggregate_parent_state,
     is_artifact_owned,
@@ -167,13 +168,25 @@ def _aggregate_parent_state(
                             attempt_count=operation.current_attempt,
                             package=package,
                             observed_semantic_version=(
-                                None if node is None else node.semantic_version
+                                None
+                                if node is None
+                                else runtime_value(
+                                    node, lambda identity: identity.semantic_version
+                                )
                             ),
                             observed_binary_digest=(
-                                None if node is None else node.binary_digest
+                                None
+                                if node is None
+                                else runtime_value(
+                                    node, lambda identity: identity.binary_digest
+                                )
                             ),
                             observed_build_digest=(
-                                None if node is None else node.build_digest
+                                None
+                                if node is None
+                                else runtime_value(
+                                    node, lambda identity: identity.build_digest
+                                )
                             ),
                             raw_reason=reason,
                             retry_queued=_retry_authorized_for_current_attempt(

@@ -7,12 +7,13 @@ from importlib import resources
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import ProjectionCode
+from vonk_agent_protocol import ProjectionCode, canonical_message
+from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.inventory import GpuHealth, MemoryPool
 from vonk_control.cluster_mappings import ClusterMappingService
 from vonk_control.inventory_repository import (
     InventoryRepository,
-    InventorySnapshotInput,
+    NodeInventoryReport,
 )
 from vonk_control.models import (
     AgentNode,
@@ -38,6 +39,7 @@ from vonk_control.run_admission import (
 )
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
+from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
 from .stored_documents_support import valid_policy_report
 
 
@@ -94,7 +96,13 @@ def setup(
             AgentNode(
                 node_id=node,
                 state="active",
-                architecture="linux-arm64",
+                inventory_snapshot=inventory_items_fixture(
+                    node,
+                    observed_at=None,
+                    identity=AgentRuntimeIdentity.model_validate(
+                        {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
+                    ),
+                ),
             )
         )
         model_root = CatalogDocument(
@@ -156,22 +164,29 @@ def setup(
         session.flush()
         revision_id = revision.id
     InventoryRepository(sessions, clock=lambda: now).record(
-        InventorySnapshotInput(
-            node,
-            now,
-            1000,
-            500,
-            1000,
-            free_memory,
-            1000,
-            free_memory,
-            1,
-            False,
-            (
-                "runtime.vonk.v1",
-                "recipe.image.pull.v1",
-            ),
-            memory_pool=memory_pool,
+        NodeInventoryReport.model_validate_json(
+            canonical_message(
+                {
+                    "node_id": node,
+                    "observed_at": now,
+                    "disk_total_bytes": 1000,
+                    "disk_free_bytes": 500,
+                    "host_memory_total_bytes": 1000,
+                    "host_memory_free_bytes": free_memory,
+                    "gpu_memory_total_bytes": 1000,
+                    "gpu_memory_free_bytes": free_memory,
+                    "gpu_count": 1,
+                    "artifact_store_read_only": False,
+                    "capabilities": (
+                        "runtime.vonk.v1",
+                        "recipe.image.pull.v1",
+                    ),
+                    "memory_pool": memory_pool,
+                    "schema_version": 1,
+                    "nvidia_driver_version": "unknown",
+                    "container_runtime_version": "unknown",
+                }
+            )
         )
     )
     mappings = ClusterMappingService(sessions)
@@ -572,19 +587,26 @@ def test_memory_capability_and_port_conflicts_are_explained(tmp_path) -> None:
     )
     _claim_memory(sessions, node, now)
     InventoryRepository(sessions, clock=lambda: now).record(
-        InventorySnapshotInput(
-            node,
-            now + timedelta(seconds=1),
-            1000,
-            500,
-            1000,
-            260,
-            1000,
-            260,
-            1,
-            False,
-            ("runtime.sglang.v1",),
-            memory_pool="shared",
+        NodeInventoryReport.model_validate_json(
+            canonical_message(
+                {
+                    "node_id": node,
+                    "observed_at": now + timedelta(seconds=1),
+                    "disk_total_bytes": 1000,
+                    "disk_free_bytes": 500,
+                    "host_memory_total_bytes": 1000,
+                    "host_memory_free_bytes": 260,
+                    "gpu_memory_total_bytes": 1000,
+                    "gpu_memory_free_bytes": 260,
+                    "gpu_count": 1,
+                    "artifact_store_read_only": False,
+                    "capabilities": ("runtime.sglang.v1",),
+                    "memory_pool": "shared",
+                    "schema_version": 1,
+                    "nvidia_driver_version": "unknown",
+                    "container_runtime_version": "unknown",
+                }
+            )
         )
     )
     now += timedelta(seconds=1)
@@ -731,8 +753,6 @@ def test_gpu_health_refuses_work_and_fresh_healthy_inventory_recovers(
 ) -> None:
     # Catches unsupported-metric admission, an invented zero-byte physical
     # capacity refusal after driver loss, and a sticky manual health flag.
-    from dataclasses import replace
-
     from vonk_agent_protocol.inventory import GPU_RESET_RECOVERY
     from vonk_control.fleet_projection import FleetProjection
 
@@ -740,7 +760,8 @@ def test_gpu_health_refuses_work_and_fresh_healthy_inventory_recovers(
     sessions, now, node, installation = setup(tmp_path, engine=engine)
     repo = InventoryRepository(sessions)
     original = repo.latest(node, now=now, maximum_age=300)
-    observation = InventorySnapshotInput(
+    observation = NodeInventoryReport(
+        schema_version=1,
         node_id=node,
         observed_at=now + timedelta(seconds=1),
         disk_total_bytes=original.disk_total_bytes,
@@ -754,6 +775,8 @@ def test_gpu_health_refuses_work_and_fresh_healthy_inventory_recovers(
         capabilities=original.capabilities,
         artifact_store_read_only=False,
         gpu_health=health,
+        nvidia_driver_version=original.nvidia_driver_version,
+        container_runtime_version=original.container_runtime_version,
     )
     repo.record(observation)
     service = RunAdmissionService(sessions, inventory_max_age=300, memory_floor_bytes=0)
@@ -771,19 +794,20 @@ def test_gpu_health_refuses_work_and_fresh_healthy_inventory_recovers(
     spark = next(spark for spark in fleet.nodes if spark.id == node)
     assert spark.inventory is not None and spark.inventory.gpu_health == health
     assert any(w.code == code for w in spark.warnings)
-    healthy = replace(
-        observation,
-        gpu_health=GpuHealth.HEALTHY,
-        gpu_count=original.gpu_count,
-        memory_pool=original.memory_pool,
-        gpu_memory_total_bytes=original.gpu_memory_total_bytes,
-        gpu_memory_free_bytes=original.gpu_memory_free_bytes,
+    healthy = observation.model_copy(
+        update={
+            "gpu_health": GpuHealth.HEALTHY,
+            "gpu_count": original.gpu_count,
+            "memory_pool": original.memory_pool,
+            "gpu_memory_total_bytes": original.gpu_memory_total_bytes,
+            "gpu_memory_free_bytes": original.gpu_memory_free_bytes,
+        }
     )
     # Delayed healthy evidence cannot clear a newer fault. The next fresh
     # healthy observation restores eligibility through the normal store.
-    repo.record(replace(healthy, observed_at=now - timedelta(seconds=1)))
+    repo.record(healthy.model_copy(update={"observed_at": now - timedelta(seconds=1)}))
     assert not service.plan_run(installation, alias="qwen", now=at).allowed
-    repo.record(replace(healthy, observed_at=at))
+    repo.record(healthy.model_copy(update={"observed_at": at}))
     recovered = service.plan_run(installation, alias="qwen", now=at)
     require_admissible(recovered)
     assert service.accept_run(recovered, actor="admin", now=at)

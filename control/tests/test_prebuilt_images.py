@@ -16,7 +16,13 @@ from pathlib import Path
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import LifecycleState, PrebuiltImageCode, RecipeBuildCode
+from vonk_agent_protocol import (
+    LifecycleState,
+    PrebuiltImageCode,
+    RecipeBuildCode,
+    canonical_message,
+)
+from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_control.auth import TokenCodec
 from vonk_control.availability_production import build_recipe_image_availability
 from vonk_control.bounded_json import require_mapping, require_sequence
@@ -25,7 +31,7 @@ from vonk_control.catalog_sync import ManagedRecipeCatalogSyncService
 from vonk_control.install_admission import InstallAdmissionService
 from vonk_control.inventory_repository import (
     InventoryRepository,
-    InventorySnapshotInput,
+    NodeInventoryReport,
 )
 from vonk_control.models import (
     AgentNode,
@@ -67,6 +73,7 @@ from tests.runtime_image_fixtures import place_test_image
 from tests.signed_recipe_release import SignedRecipeRelease, signed_recipe_releases
 from tests.test_recipe_builds import RecordingQueue
 
+from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
 from .stored_documents_support import valid_policy_report
 
 pytestmark = pytest.mark.usefixtures(signed_recipe_releases.__name__)
@@ -154,11 +161,20 @@ def _published_library(
             AgentNode(
                 node_id=NODE,
                 state="active",
-                architecture="linux-arm64",
-                semantic_version="1.2.3",
-                build_digest="sha256:" + "a" * 64,
-                binary_digest="1" * 64,
                 last_seen_at=NOW,
+                inventory_snapshot=inventory_items_fixture(
+                    NODE,
+                    observed_at=NOW,
+                    identity=AgentRuntimeIdentity.model_validate(
+                        {
+                            **PACKAGED_RUNTIME_IDENTITY,
+                            "architecture": "linux-arm64",
+                            "semantic_version": "1.2.3",
+                            "build_digest": "sha256:" + "a" * 64,
+                            "binary_digest": "1" * 64,
+                        }
+                    ),
+                ),
             )
         )
         revision = session.scalar(
@@ -525,25 +541,32 @@ def test_prebuilt_key_mismatch_builds_fresh_instead_of_reusing_old_image(
     production, _builds = _availability(sessions, tmp_path, monkeypatch, lambda: now[0])
     # This Spark has room to build, so the fallback plan is admitted and runs.
     InventoryRepository(sessions, clock=lambda: now[0]).record(
-        InventorySnapshotInput(
-            NODE,
-            NOW,
-            2 * 1024**4,
-            1 * 1024**4,
-            512 * 1024**3,
-            480 * 1024**3,
-            512 * 1024**3,
-            480 * 1024**3,
-            1,
-            False,
-            (
-                "recipe.build.v1",
-                "recipe.build.egress-proxy.v1",
-                "recipe.image.import.v1",
-                "runtime.vonk.v1",
-                "recipe.image.pull.v1",
-            ),
-            memory_pool="separate",
+        NodeInventoryReport.model_validate_json(
+            canonical_message(
+                {
+                    "node_id": NODE,
+                    "observed_at": NOW,
+                    "disk_total_bytes": 2 * 1024**4,
+                    "disk_free_bytes": 1 * 1024**4,
+                    "host_memory_total_bytes": 512 * 1024**3,
+                    "host_memory_free_bytes": 480 * 1024**3,
+                    "gpu_memory_total_bytes": 512 * 1024**3,
+                    "gpu_memory_free_bytes": 480 * 1024**3,
+                    "gpu_count": 1,
+                    "artifact_store_read_only": False,
+                    "capabilities": (
+                        "recipe.build.v1",
+                        "recipe.build.egress-proxy.v1",
+                        "recipe.image.import.v1",
+                        "runtime.vonk.v1",
+                        "recipe.image.pull.v1",
+                    ),
+                    "memory_pool": "separate",
+                    "schema_version": 1,
+                    "nvidia_driver_version": "unknown",
+                    "container_runtime_version": "unknown",
+                }
+            )
         )
     )
 

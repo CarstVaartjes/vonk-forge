@@ -34,6 +34,7 @@ from ..fleet_profile_contract import (
     FleetProfileEndpointState,
     FleetProfileEndpointsView,
 )
+from ..inventory_items import runtime_value
 from ..job_operator_receipts import (
     JobOperatorReceipt,
     record_job_operator_receipt,
@@ -352,9 +353,15 @@ class _DurableOperationProjection:
                     last_seen_at=None if last_seen is None else last_seen.isoformat(),
                     node_id=node.node_id,
                     protocol_version=node.protocol_version,
-                    semantic_version=node.semantic_version,
-                    build_digest=node.build_digest,
-                    binary_digest=node.binary_digest,
+                    semantic_version=runtime_value(
+                        node, lambda identity: identity.semantic_version
+                    ),
+                    build_digest=runtime_value(
+                        node, lambda identity: identity.build_digest
+                    ),
+                    binary_digest=runtime_value(
+                        node, lambda identity: identity.binary_digest
+                    ),
                     stale=age is None or age > self._stale_after_seconds,
                     state=node.state,
                 )

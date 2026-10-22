@@ -24,16 +24,15 @@ from typing import Any, cast
 import pytest
 from sqlalchemy import select, update
 from sqlalchemy.exc import OperationalError
-from vonk_agent_protocol import ArtifactLifecycleCode, LifecycleState
+from vonk_agent_protocol import ArtifactLifecycleCode, LifecycleState, canonical_message
 from vonk_control.distribution_executor import CompositeDistributionPhaseExecutor
 from vonk_control.inventory_repository import (
     InventoryRepository,
-    InventorySnapshotInput,
+    NodeInventoryReport,
 )
 from vonk_control.models import (
     CatalogDocumentRevision,
     Job,
-    NodeArtifact,
     RecipeBuild,
 )
 from vonk_control.run_switch_contract import (
@@ -59,6 +58,9 @@ from vonk_control.runtime_image_preparation import (
     prepare_runtime_image,
 )
 
+from .inventory_artifact_support import (
+    clear_inventory_artifacts,
+)
 from .runtime_image_fixtures import place_test_image
 from .test_lifecycle_preflight import _finish
 from .test_recipe_operations import NOW, _CanonicalModelCache, setup_services
@@ -202,7 +204,7 @@ def _background_image_switch(
     clock = _AdvancingClock(NOW)
     lifecycle._clock = clock
     with sessions.begin() as session:
-        session.query(NodeArtifact).delete()
+        clear_inventory_artifacts(session)
         build = session.get(RecipeBuild, build_id)
         assert build is not None
         image_digest, layout_digest = build.image_digest, build.oci_layout_sha256
@@ -330,19 +332,30 @@ def _background_image_switch(
         for node_id in nodes if clock.now > reported["at"] else ():
             # Agents keep reporting the same capacity while the Controller works.
             inventory.record(
-                InventorySnapshotInput(
-                    node_id,
-                    clock.now,
-                    10_000,
-                    8_000,
-                    10_000,
-                    8_000,
-                    10_000,
-                    8_000,
-                    1,
-                    False,
-                    ("runtime.vonk.v1", "recipe.image.pull.v1", "recipe.operations.v1"),
-                    memory_pool="shared",
+                NodeInventoryReport.model_validate_json(
+                    canonical_message(
+                        {
+                            "node_id": node_id,
+                            "observed_at": clock.now,
+                            "disk_total_bytes": 10_000,
+                            "disk_free_bytes": 8_000,
+                            "host_memory_total_bytes": 10_000,
+                            "host_memory_free_bytes": 8_000,
+                            "gpu_memory_total_bytes": 10_000,
+                            "gpu_memory_free_bytes": 8_000,
+                            "gpu_count": 1,
+                            "artifact_store_read_only": False,
+                            "capabilities": (
+                                "runtime.vonk.v1",
+                                "recipe.image.pull.v1",
+                                "recipe.operations.v1",
+                            ),
+                            "memory_pool": "shared",
+                            "schema_version": 1,
+                            "nvidia_driver_version": "unknown",
+                            "container_runtime_version": "unknown",
+                        }
+                    )
                 )
             )
         reported["at"] = clock.now

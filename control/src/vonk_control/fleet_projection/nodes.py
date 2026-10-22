@@ -7,21 +7,24 @@ from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Annotated
 
 from pydantic import Field, TypeAdapter
-from vonk_agent_protocol import NodeOfflineReason, ProjectionCode
+from vonk_agent_protocol import (
+    NodeOfflineReason,
+    ProjectionCode,
+    UnknownOutcomeError,
+)
 from vonk_agent_protocol.agent_words import ProfileReasonSeverity
-from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.gpu_clock import (
     GpuClockApplyState,
     GpuClockRange,
 )
-from vonk_agent_protocol.inventory import HostSettings, NetworkInterface
+from vonk_agent_protocol.inventory import HostSettings
 
 from ..gpu_health import gpu_health_reason
+from ..inventory_items import inventory_items
 from ..models import (
     AgentCertificate,
     AgentNode,
     AgentNodeProfile,
-    AgentPresence,
     NodeInventorySnapshot,
 )
 from ..nas_route_notice import nas_route_notice
@@ -57,7 +60,6 @@ def _node(
     self: FleetProjection,
     node_id: str,
     profile: AgentNodeProfile | None,
-    presence: AgentPresence | None,
     *,
     current: datetime,
     agent: AgentNode,
@@ -299,29 +301,15 @@ def _node(
             )
     labels = {} if profile is None else profile.labels
     projection_issues: list[str] = []
-    agent_runtime = None
-    if any(
-        value is not None
-        for value in (
-            agent.semantic_version,
-            agent.build_digest,
-            agent.binary_digest,
+    try:
+        items = inventory_items(agent)
+    except UnknownOutcomeError:
+        items = None
+        projection_issues.append(
+            "Stored agent inventory items are unreadable; running build is unknown."
         )
-    ):
-        try:
-            agent_runtime = AgentRuntimeIdentity.model_validate(
-                {
-                    "architecture": agent.architecture,
-                    "semantic_version": agent.semantic_version,
-                    "build_digest": agent.build_digest,
-                    "binary_digest": agent.binary_digest,
-                }
-            )
-        except ValueError:
-            projection_issues.append(
-                "Stored agent runtime identity is unreadable; running build is unknown."
-            )
-            warn_unreadable_once("Fleet agent runtime identity", node_id)
+        warn_unreadable_once("Fleet agent inventory items", node_id)
+    agent_runtime = None if items is None else items.runtime_identity
     try:
         labels = TypeAdapter(
             Annotated[dict[Text64, Text256], Field(max_length=64)]
@@ -337,8 +325,8 @@ def _node(
         gpu_clock_desired=gpu_clock_desired,
         id=node_id,
         display_name=node_id if profile is None else profile.display_name,
-        hostname="" if profile is None else profile.hostname,
-        ip_address=(None if presence is None else presence.management_address),
+        hostname="" if items is None else items.hostname or "",
+        ip_address=agent.management_address,
         lifecycle="managed" if profile is None else profile.lifecycle,
         labels=labels,
         projection_issues=projection_issues or None,
@@ -407,36 +395,24 @@ def _inventory(
         return None
     observed = _utc(value.observed_at)
     age = max(0.0, (current - observed).total_seconds())
+    from ..inventory_repository import _validated_inventory
+
+    report = _validated_inventory(value, observed_at=observed)
     return InventoryState(
+        **report.model_dump(
+            mode="python",
+            exclude={
+                "observed_at",
+                "model_objects",
+                "installations",
+                "runs",
+                "installation_bytes",
+            },
+        ),
         observed_at=observed,
         received_at=_utc(value.received_at),
         age_seconds=age,
         freshness="stale" if age > self._inventory_fresh_seconds else "fresh",
-        disk_total_bytes=value.disk_total_bytes,
-        disk_free_bytes=value.disk_free_bytes,
-        host_memory_total_bytes=value.host_memory_total_bytes,
-        host_memory_free_bytes=value.host_memory_free_bytes,
-        gpu_memory_total_bytes=value.gpu_memory_total_bytes,
-        gpu_memory_free_bytes=value.gpu_memory_free_bytes,
-        gpu_count=value.gpu_count,
-        gpu_health=value.gpu_health,
-        artifact_store_read_only=value.artifact_store_read_only,
-        capabilities=list(value.capabilities),
-        fabric_address=value.fabric_address,
-        fabric_bandwidth_mbps=value.fabric_bandwidth_mbps,
-        nvidia_driver_version=value.nvidia_driver_version,
-        container_runtime_version=value.container_runtime_version,
-        network_interfaces=(
-            None
-            if value.network_interfaces is None
-            else [NetworkInterface(**item) for item in value.network_interfaces]
-        ),
-        nas_route_interface=value.nas_route_interface,
-        host_settings=(
-            None
-            if value.host_settings is None
-            else HostSettings.model_validate(value.host_settings)
-        ),
     )
 
 

@@ -1,11 +1,8 @@
-from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Literal
 
-import pytest
 from fastapi.testclient import TestClient
 from vonk_agent_protocol import NodeOfflineReason
-from vonk_control import api as control_api
 from vonk_control.api import create_app
 from vonk_control.auth import TokenCodec
 from vonk_control.fleet_projection import (
@@ -33,6 +30,12 @@ def _fleet_snapshot(
     gpu_utilization: float | None = None,
 ) -> FleetSnapshot:
     point = TelemetryPoint(
+        memory_total_bytes=None,
+        memory_available_bytes=None,
+        disk_total_bytes=None,
+        disk_free_bytes=None,
+        gpu_memory_total_bytes=None,
+        gpu_memory_free_bytes=None,
         id="00000000-0000-4000-8000-000000000001",
         node_id=NODE,
         boot_id="00000000-0000-4000-8000-000000000002",
@@ -68,6 +71,8 @@ def _fleet_snapshot(
                 inventory=None
                 if inventory is None
                 else InventoryState(
+                    schema_version=1,
+                    memory_pool="separate",
                     observed_at=NOW,
                     received_at=NOW,
                     age_seconds=0,
@@ -108,7 +113,7 @@ def _fleet_snapshot(
 
 def test_metrics_use_typed_fleet_evidence_without_health_or_probe_fields() -> None:
     metrics = MetricsRegistry()
-    metrics.update_fleet(_fleet_snapshot())
+    metrics.set_fleet_source(lambda: _fleet_snapshot())
     text = metrics.render()
     assert f'vonk_node_connection_state{{node_id="{NODE}",state="online"}} 1' in text
     assert f'vonk_node_certificate_state{{node_id="{NODE}",state="valid"}} 1' in text
@@ -127,7 +132,9 @@ def test_metrics_use_typed_fleet_evidence_without_health_or_probe_fields() -> No
 
 def test_metrics_keep_missing_and_stale_evidence_distinct() -> None:
     metrics = MetricsRegistry()
-    metrics.update_fleet(_fleet_snapshot(inventory="stale", telemetry="stale"))
+    metrics.set_fleet_source(
+        lambda: _fleet_snapshot(inventory="stale", telemetry="stale")
+    )
     text = metrics.render()
     assert f'vonk_node_inventory_freshness{{node_id="{NODE}",state="stale"}} 1' in text
     assert f'vonk_node_telemetry_freshness{{node_id="{NODE}",state="stale"}} 1' in text
@@ -141,7 +148,7 @@ def test_metrics_keep_missing_and_stale_evidence_distinct() -> None:
     snapshot = _fleet_snapshot()
     snapshot.nodes[0].inventory = None
     snapshot.nodes[0].telemetry = None
-    metrics.update_fleet(snapshot)
+    metrics.set_fleet_source(lambda: snapshot)
     text = metrics.render()
     assert (
         f'vonk_node_inventory_freshness{{node_id="{NODE}",state="missing"}} 1' in text
@@ -154,13 +161,13 @@ def test_metrics_keep_missing_and_stale_evidence_distinct() -> None:
 
 def test_metrics_export_typed_gpu_utilization_and_omit_unknown() -> None:
     metrics = MetricsRegistry()
-    metrics.update_fleet(_fleet_snapshot(gpu_utilization=42.5))
+    metrics.set_fleet_source(lambda: _fleet_snapshot(gpu_utilization=42.5))
     text = metrics.render()
     assert (
         f'vonk_node_telemetry_gpu_utilization_percent{{node_id="{NODE}"}} 42.5' in text
     )
 
-    metrics.update_fleet(_fleet_snapshot(gpu_utilization=None))
+    metrics.set_fleet_source(lambda: _fleet_snapshot(gpu_utilization=None))
     text = metrics.render()
     assert (
         f'vonk_node_telemetry_gpu_utilization_percent{{node_id="{NODE}"}}' not in text
@@ -169,8 +176,8 @@ def test_metrics_export_typed_gpu_utilization_and_omit_unknown() -> None:
 
 def test_metrics_keep_connection_and_certificate_validity_independent() -> None:
     metrics = MetricsRegistry()
-    metrics.update_fleet(
-        _fleet_snapshot(
+    metrics.set_fleet_source(
+        lambda: _fleet_snapshot(
             online_state="offline", certificate_state=CertificateState.EXPIRED
         )
     )
@@ -181,20 +188,20 @@ def test_metrics_keep_connection_and_certificate_validity_independent() -> None:
     assert f'vonk_node_certificate_state{{node_id="{NODE}",state="valid"}} 0' in text
 
 
-def test_metrics_require_a_typed_fleet_snapshot() -> None:
-    # The point of the guard is a value the type checker already refuses; the
-    # callable is widened only so the runtime rejection can be exercised.
+def test_metrics_read_current_facts_without_retaining_a_projection() -> None:
     metrics = MetricsRegistry()
-    metrics.update_fleet(_fleet_snapshot(gpu_utilization=42.5))
-    previous = metrics.render()
-    update_fleet: Callable[..., None] = metrics.update_fleet
-    with pytest.raises(Exception) as _ending:
-        update_fleet({"nodes": []})
-    assert metrics.render() == previous
-    metrics.update_fleet(_fleet_snapshot(gpu_utilization=7.0))
+    current = _fleet_snapshot(gpu_utilization=42.5)
+    metrics.set_fleet_source(lambda: current)
+    assert "42.5" in metrics.render()
+    current = _fleet_snapshot(gpu_utilization=7.0)
     assert (
         f'vonk_node_telemetry_gpu_utilization_percent{{node_id="{NODE}"}} 7'
         in metrics.render()
+    )
+    current = _fleet_snapshot(telemetry=None)
+    assert (
+        f'vonk_node_telemetry_gpu_utilization_percent{{node_id="{NODE}"}}'
+        not in metrics.render()
     )
 
 
@@ -329,13 +336,11 @@ def test_metrics_endpoint_projects_typed_fleet_snapshot() -> None:
         def enqueue(self, *_args, **_kwargs):
             raise AssertionError
 
-    refresh_fleet_metrics = getattr(control_api, "refresh_fleet_metrics", None)
-    assert callable(refresh_fleet_metrics)
     metrics = MetricsRegistry()
     fleet_state = _fleet_snapshot()
 
     def refresh() -> None:
-        refresh_fleet_metrics(metrics, fleet_state)
+        metrics.set_fleet_source(lambda: fleet_state)
 
     app = create_app(
         jobs=Jobs(),

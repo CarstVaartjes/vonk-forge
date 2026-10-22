@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.inventory import InventoryRequest, NetworkInterface
 from vonk_control.models import (
     AgentNode,
@@ -25,6 +26,8 @@ from vonk_control.nas_transfer_rate import (
 )
 from vonk_control.stored_json import write_guard_mode
 
+from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
+
 NOW = datetime(2026, 10, 17, 20, 0, tzinfo=UTC)
 FAST = "spk_" + "2818" * 8
 SLOW = "spk_" + "9a86" * 8
@@ -39,7 +42,17 @@ def _sessions() -> sessionmaker[Session]:
     with sessions.begin() as session:
         for node_id in (FAST, SLOW):
             session.add(
-                AgentNode(node_id=node_id, state="active", architecture="linux-arm64")
+                AgentNode(
+                    node_id=node_id,
+                    state="active",
+                    inventory_snapshot=inventory_items_fixture(
+                        node_id,
+                        observed_at=None,
+                        identity=AgentRuntimeIdentity.model_validate(
+                            {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
+                        ),
+                    ),
+                )
             )
         session.add(
             Job(

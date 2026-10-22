@@ -14,6 +14,7 @@ from vonk_control.models import (
 from vonk_control.recipe_builds import RecipeBuildPlan
 from vonk_control.run_switch_operations import RunSwitchOperationService
 
+from .runtime_identity_support import set_inventory_identity
 from .test_recipe_operations import setup_services
 from .test_run_switch_operations import (
     CompleteArtifactInspector,
@@ -38,7 +39,7 @@ def test_build_completed_during_lookup_is_available(
         assert revision is not None
         node = session.get(AgentNode, nodes[0])
         assert node is not None
-        node.binary_digest = "a" * 64
+        set_inventory_identity(node, binary_digest="a" * 64)
         snapshot = session.scalar(
             select(NodeInventorySnapshot).where(
                 NodeInventorySnapshot.node_id == nodes[0]

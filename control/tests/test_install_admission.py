@@ -7,16 +7,18 @@ import pytest
 from sqlalchemy import create_engine, delete, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import CompiledExecutionPlan
+from vonk_agent_protocol import CompiledExecutionPlan, ModelFileState, canonical_message
+from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.compiled_execution_plan import CompileCacheMount
 from vonk_control.cluster_mappings import ClusterMappingService
 from vonk_control.install_admission import (
     InstallAdmissionService,
     installation_plan_digest_from_stored_document,
 )
+from vonk_control.inventory_items import inventory_artifacts
 from vonk_control.inventory_repository import (
     InventoryRepository,
-    InventorySnapshotInput,
+    NodeInventoryReport,
 )
 from vonk_control.models import (
     AgentCertificate,
@@ -29,7 +31,6 @@ from vonk_control.models import (
     ClusterMapping,
     ClusterMappingNode,
     InstallationNode,
-    NodeArtifact,
     RecipeBuild,
     RecipeInstallation,
     ResourceReservation,
@@ -43,7 +44,17 @@ from vonk_forge_contracts import (
     read_recipe,
 )
 
+from .inventory_artifact_support import (
+    clear_inventory_artifacts,
+    replace_inventory_artifact,
+    seed_inventory_artifact,
+)
 from .preflight_fixtures import record_passing_preflight
+from .runtime_identity_support import (
+    PACKAGED_RUNTIME_IDENTITY,
+    inventory_items_fixture,
+    set_inventory_fingerprint,
+)
 from .stored_documents_support import valid_policy_report
 
 MODEL_SOURCE = "vonk-forge/synthetic-tiny@0123456789abcdef0123456789abcdef01234567"
@@ -375,7 +386,13 @@ def setup(
             AgentNode(
                 node_id=node_id,
                 state="active",
-                architecture="linux-arm64",
+                inventory_snapshot=inventory_items_fixture(
+                    node_id,
+                    observed_at=None,
+                    identity=AgentRuntimeIdentity.model_validate(
+                        {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
+                    ),
+                ),
             )
         )
         session.flush()
@@ -389,22 +406,29 @@ def setup(
             )
         )
     InventoryRepository(sessions, clock=lambda: now).record(
-        InventorySnapshotInput(
-            node_id,
-            now - timedelta(seconds=observed_age),
-            1000,
-            free,
-            1000,
-            800,
-            1000,
-            800,
-            1,
-            read_only,
-            (
-                "runtime.vonk.v1",
-                "recipe.image.pull.v1",
-            ),
-            memory_pool="shared",
+        NodeInventoryReport.model_validate_json(
+            canonical_message(
+                {
+                    "node_id": node_id,
+                    "observed_at": now - timedelta(seconds=observed_age),
+                    "disk_total_bytes": 1000,
+                    "disk_free_bytes": free,
+                    "host_memory_total_bytes": 1000,
+                    "host_memory_free_bytes": 800,
+                    "gpu_memory_total_bytes": 1000,
+                    "gpu_memory_free_bytes": 800,
+                    "gpu_count": 1,
+                    "artifact_store_read_only": read_only,
+                    "capabilities": (
+                        "runtime.vonk.v1",
+                        "recipe.image.pull.v1",
+                    ),
+                    "memory_pool": "shared",
+                    "schema_version": 1,
+                    "nvidia_driver_version": "unknown",
+                    "container_runtime_version": "unknown",
+                }
+            )
         )
     )
     resolved = _seed_canonical_catalog(
@@ -435,18 +459,17 @@ def setup(
         session.flush()
         build_id = build.id
         image_digest = "1" * 64
-        session.add(
-            NodeArtifact(
-                node_id=node_id,
-                kind="image",
-                digest=image_digest,
-                source="docker-archive:" + "2" * 64,
-                size_bytes=30,
-                state="verified",
-                ref_count=0,
-                verified_at=now,
-                updated_at=now,
-            )
+        seed_inventory_artifact(
+            session,
+            node_id=node_id,
+            kind="image",
+            digest=image_digest,
+            source="docker-archive:" + "2" * 64,
+            size_bytes=30,
+            state="verified",
+            ref_count=0,
+            verified_at=now,
+            updated_at=now,
         )
     return sessions, now, node_id, mapping_id, build_id
 
@@ -591,8 +614,7 @@ def test_cold_install_uses_actual_image_and_model_sizes_instead_of_recipe_estima
         tmp_path, free=free, disk_estimates=(1, 1)
     )
     with sessions.begin() as session:
-        for artifact in session.scalars(select(NodeArtifact)):
-            session.delete(artifact)
+        clear_inventory_artifacts(session)
     plan = _service(sessions, inventory_max_age=300, disk_floor_bytes=10).plan_install(
         mapping, build, now=now
     )
@@ -616,18 +638,17 @@ def test_territorial_license_install_admission_is_informational(tmp_path) -> Non
 def test_verified_existing_artifacts_reduce_disk_and_download(tmp_path) -> None:
     sessions, now, node, mapping, build = setup(tmp_path, free=80)
     with sessions.begin() as session:
-        session.add(
-            NodeArtifact(
-                node_id=node,
-                kind="model",
-                digest="3" * 64,
-                source=MODEL_SOURCE,
-                size_bytes=70,
-                state="verified",
-                ref_count=0,
-                verified_at=now,
-                updated_at=now,
-            )
+        seed_inventory_artifact(
+            session,
+            node_id=node,
+            kind="model",
+            digest="3" * 64,
+            source=MODEL_SOURCE,
+            size_bytes=70,
+            state="verified",
+            ref_count=0,
+            verified_at=now,
+            updated_at=now,
         )
     plan = _service(sessions, inventory_max_age=300, disk_floor_bytes=10).plan_install(
         mapping, build, now=now
@@ -723,11 +744,11 @@ def test_queue_rejects_artifact_or_reservation_mutation_after_preview(tmp_path) 
     service = _service(sessions, inventory_max_age=300, disk_floor_bytes=10)
     plan = service.plan_install(mapping, build, now=now)
     with sessions.begin() as session:
-        artifact = session.scalar(
-            select(NodeArtifact).where(NodeArtifact.node_id == node)
-        )
+        artifact = next(iter(inventory_artifacts(session, node)), None)
         assert artifact is not None
-        artifact.state = "missing"
+        replace_inventory_artifact(
+            session, node, artifact.model_copy(update={"state": ModelFileState.MISSING})
+        )
         session.add(
             ResourceReservation(
                 node_id=node,
@@ -797,22 +818,29 @@ def test_plan_digest_ignores_fresh_inventory_observation_noise(tmp_path) -> None
     service = _service(sessions, inventory_max_age=300, disk_floor_bytes=10)
     original = service.plan_install(mapping, build, now=now)
     InventoryRepository(sessions, clock=lambda: now).record(
-        InventorySnapshotInput(
-            node,
-            now + timedelta(seconds=1),
-            1000,
-            199,
-            1000,
-            800,
-            1000,
-            800,
-            1,
-            False,
-            (
-                "runtime.vonk.v1",
-                "recipe.image.pull.v1",
-            ),
-            memory_pool="shared",
+        NodeInventoryReport.model_validate_json(
+            canonical_message(
+                {
+                    "node_id": node,
+                    "observed_at": now + timedelta(seconds=1),
+                    "disk_total_bytes": 1000,
+                    "disk_free_bytes": 199,
+                    "host_memory_total_bytes": 1000,
+                    "host_memory_free_bytes": 800,
+                    "gpu_memory_total_bytes": 1000,
+                    "gpu_memory_free_bytes": 800,
+                    "gpu_count": 1,
+                    "artifact_store_read_only": False,
+                    "capabilities": (
+                        "runtime.vonk.v1",
+                        "recipe.image.pull.v1",
+                    ),
+                    "memory_pool": "shared",
+                    "schema_version": 1,
+                    "nvidia_driver_version": "unknown",
+                    "container_runtime_version": "unknown",
+                }
+            )
         )
     )
 
@@ -871,19 +899,26 @@ def test_install_topology_capability_loss_is_a_plan_blocker(tmp_path) -> None:
         registered = session.get(AgentNode, node)
         assert registered is not None
     InventoryRepository(sessions, clock=lambda: now).record(
-        InventorySnapshotInput(
-            node,
-            now + timedelta(seconds=1),
-            1000,
-            200,
-            1000,
-            800,
-            1000,
-            800,
-            1,
-            False,
-            (),
-            memory_pool="shared",
+        NodeInventoryReport.model_validate_json(
+            canonical_message(
+                {
+                    "node_id": node,
+                    "observed_at": now + timedelta(seconds=1),
+                    "disk_total_bytes": 1000,
+                    "disk_free_bytes": 200,
+                    "host_memory_total_bytes": 1000,
+                    "host_memory_free_bytes": 800,
+                    "gpu_memory_total_bytes": 1000,
+                    "gpu_memory_free_bytes": 800,
+                    "gpu_count": 1,
+                    "artifact_store_read_only": False,
+                    "capabilities": (),
+                    "memory_pool": "shared",
+                    "schema_version": 1,
+                    "nvidia_driver_version": "unknown",
+                    "container_runtime_version": "unknown",
+                }
+            )
         )
     )
 
@@ -905,19 +940,26 @@ def test_database_rejects_mutable_built_image_identity(tmp_path) -> None:
 def test_an_agent_that_cannot_pull_images_asks_for_an_upgrade(tmp_path) -> None:
     sessions, now, node, mapping, build = setup(tmp_path, free=200)
     InventoryRepository(sessions, clock=lambda: now).record(
-        InventorySnapshotInput(
-            node,
-            now + timedelta(seconds=1),
-            1000,
-            200,
-            1000,
-            800,
-            1000,
-            800,
-            1,
-            False,
-            ("runtime.vonk.v1",),
-            memory_pool="shared",
+        NodeInventoryReport.model_validate_json(
+            canonical_message(
+                {
+                    "node_id": node,
+                    "observed_at": now + timedelta(seconds=1),
+                    "disk_total_bytes": 1000,
+                    "disk_free_bytes": 200,
+                    "host_memory_total_bytes": 1000,
+                    "host_memory_free_bytes": 800,
+                    "gpu_memory_total_bytes": 1000,
+                    "gpu_memory_free_bytes": 800,
+                    "gpu_count": 1,
+                    "artifact_store_read_only": False,
+                    "capabilities": ("runtime.vonk.v1",),
+                    "memory_pool": "shared",
+                    "schema_version": 1,
+                    "nvidia_driver_version": "unknown",
+                    "container_runtime_version": "unknown",
+                }
+            )
         )
     )
 
@@ -945,22 +987,29 @@ def _record_inventory(sessions, node_id, at, *, free=200) -> None:
     """Keep reporting the same authenticated capacity at a later observation."""
 
     InventoryRepository(sessions, clock=lambda: at).record(
-        InventorySnapshotInput(
-            node_id,
-            at,
-            1000,
-            free,
-            1000,
-            800,
-            1000,
-            800,
-            1,
-            False,
-            (
-                "runtime.vonk.v1",
-                "recipe.image.pull.v1",
-            ),
-            memory_pool="shared",
+        NodeInventoryReport.model_validate_json(
+            canonical_message(
+                {
+                    "node_id": node_id,
+                    "observed_at": at,
+                    "disk_total_bytes": 1000,
+                    "disk_free_bytes": free,
+                    "host_memory_total_bytes": 1000,
+                    "host_memory_free_bytes": 800,
+                    "gpu_memory_total_bytes": 1000,
+                    "gpu_memory_free_bytes": 800,
+                    "gpu_count": 1,
+                    "artifact_store_read_only": False,
+                    "capabilities": (
+                        "runtime.vonk.v1",
+                        "recipe.image.pull.v1",
+                    ),
+                    "memory_pool": "shared",
+                    "schema_version": 1,
+                    "nvidia_driver_version": "unknown",
+                    "container_runtime_version": "unknown",
+                }
+            )
         )
     )
 
@@ -1030,7 +1079,7 @@ def test_refreshable_preflight_and_capacity_changes_wait_for_fresh_state(
         with sessions.begin() as session:
             host = session.get(AgentNode, node)
             assert host is not None
-            host.preflight_fingerprint = "b" * 64
+            set_inventory_fingerprint(host, "b" * 64)
 
     with pytest.raises(Exception) as _ending:
         service.accept_install(plan, actor="admin", now=later)
@@ -1060,7 +1109,7 @@ def test_moved_host_fingerprint_refreshes_instead_of_failing_the_identical_plan(
     with sessions.begin() as session:
         host = session.get(AgentNode, node)
         assert host is not None
-        host.preflight_fingerprint = "b" * 64
+        set_inventory_fingerprint(host, "b" * 64)
 
     with pytest.raises(Exception) as _ending:
         service.accept_install(plan, actor="admin", now=later)
@@ -1089,7 +1138,7 @@ def test_runtime_preflight_is_required_and_host_changes_invalidate_install(tmp_p
     with sessions.begin() as session:
         node = session.get(AgentNode, node_id)
         assert node is not None
-        node.preflight_fingerprint = "b" * 64
+        set_inventory_fingerprint(node, "b" * 64)
     blocked = service.plan_install(mapping, build, now=now)
     assert not blocked.allowed
 

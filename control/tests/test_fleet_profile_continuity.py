@@ -1,3 +1,7 @@
+from vonk_agent_protocol.claims import AgentRuntimeIdentity
+
+from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
+
 """An independent unchanged executor survives a newer whole-fleet decision."""
 
 from datetime import timedelta
@@ -25,8 +29,14 @@ def _world():
                 node_id=_node_id(2),
                 state="active",
                 protocol_version=1,
-                architecture="linux-arm64",
                 last_seen_at=NOW,
+                inventory_snapshot=inventory_items_fixture(
+                    _node_id(2),
+                    observed_at=NOW,
+                    identity=AgentRuntimeIdentity.model_validate(
+                        {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
+                    ),
+                ),
             )
         )
     adapter = _SwitchAdapter()

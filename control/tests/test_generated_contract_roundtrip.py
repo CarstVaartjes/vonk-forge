@@ -21,8 +21,17 @@ def test_generated_telemetry_models_consume_current_pydantic_documents() -> None
                 "observed_at": "2026-09-05T00:00:00Z",
                 "received_at": "2026-09-05T00:00:01Z",
                 "gpu_utilization_percent": 75.0,
+                "memory_total_bytes": None,
+                "memory_available_bytes": None,
+                "disk_total_bytes": None,
+                "disk_free_bytes": None,
+                "gpu_memory_total_bytes": None,
+                "gpu_memory_free_bytes": None,
             }
         )
     )
     point = TelemetryPoint.from_dict(json.loads(producer.model_dump_json()))
     assert point.gpu_utilization_percent == 75.0
+
+    assert point.memory_total_bytes is None
+    assert point.gpu_memory_free_bytes is None

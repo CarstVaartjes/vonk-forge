@@ -11,6 +11,7 @@ from uuid import uuid4
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import sessionmaker
+from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.package_source import AgentPackageSource
 from vonk_control import agent_operation_states as aos
 from vonk_control.agent_jobs import AgentJobService
@@ -23,6 +24,7 @@ from vonk_control.models import AgentCertificate, AgentNode, AgentOperation, Bas
 from vonk_control.operation_api import durable_operation_services
 from vonk_control.operator_projection_api import FleetOperatorServices
 
+from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
 from .test_agent_upgrades import NODE_A, NODE_B, OLD_IDENTITY, PACKAGE_MODEL, SOURCE
 from .test_profile_load_installed_cli import _https_api_peer, _process_environment
 
@@ -41,11 +43,20 @@ def test_installed_upgrade_reconnects_and_moves_past_a_failed_spark(
                 AgentNode(
                     node_id=node_id,
                     state="active",
-                    architecture="linux-arm64",
-                    semantic_version="0.1.0",
-                    build_digest=OLD_IDENTITY["build_digest"],
-                    binary_digest=OLD_IDENTITY["binary_digest"],
                     last_seen_at=now,
+                    inventory_snapshot=inventory_items_fixture(
+                        node_id,
+                        observed_at=now,
+                        identity=AgentRuntimeIdentity.model_validate(
+                            {
+                                **PACKAGED_RUNTIME_IDENTITY,
+                                "architecture": "linux-arm64",
+                                "semantic_version": "0.1.0",
+                                "build_digest": OLD_IDENTITY["build_digest"],
+                                "binary_digest": OLD_IDENTITY["binary_digest"],
+                            }
+                        ),
+                    ),
                 )
             )
             session.flush()

@@ -18,6 +18,7 @@ import httpx2
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.agent_upgrades import (
     AgentUpgradeInvalid,
@@ -27,6 +28,7 @@ from vonk_control.agent_upgrades import (
 from vonk_control.bounded_json import require_mapping
 from vonk_control.models import AgentNode, Base, Job
 
+from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
 from .test_agent_upgrades import (  # noqa: F401  (the autouse fixture pins the rollback source)
     NODE_A,
     NODE_B,
@@ -151,10 +153,19 @@ def _node(tmp_path):
             AgentNode(
                 node_id=NODE_A,
                 state="active",
-                architecture="linux-arm64",
-                semantic_version="0.1.0",
-                build_digest=OLD_IDENTITY["build_digest"],
-                binary_digest=OLD_IDENTITY["binary_digest"],
+                inventory_snapshot=inventory_items_fixture(
+                    NODE_A,
+                    observed_at=None,
+                    identity=AgentRuntimeIdentity.model_validate(
+                        {
+                            **PACKAGED_RUNTIME_IDENTITY,
+                            "architecture": "linux-arm64",
+                            "semantic_version": "0.1.0",
+                            "build_digest": OLD_IDENTITY["build_digest"],
+                            "binary_digest": OLD_IDENTITY["binary_digest"],
+                        }
+                    ),
+                ),
             )
         )
     return sessions, upgrades

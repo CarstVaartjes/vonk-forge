@@ -15,10 +15,10 @@ from ..catalog_revision_contract import (
     RecipeRevisionProjection,
     read_catalog_projection,
 )
+from ..inventory_items import inventory_artifacts, inventory_items
 from ..models import (
     AgentNode,
     CatalogDocumentRevision,
-    NodeArtifact,
     RecipeBuild,
     RecipeSourceBundle,
 )
@@ -115,18 +115,19 @@ class BuildEvidenceMixin:
                 observed_architecture = "linux/arm64"
             if candidate_plan_valid and observed_architecture is None:
                 builder = session.get(AgentNode, candidate.builder_node_id)
-                if builder is not None and isinstance(builder.architecture, str):
+                identity = inventory_items(builder).runtime_identity
+                if identity is not None:
                     observed_architecture = _normalise_architecture(
-                        builder.architecture
+                        identity.architecture
                     )
         node_architectures = tuple(
-            _normalise_architecture(node.architecture)
+            _normalise_architecture(identity.architecture)
             for node in session.scalars(
                 select(AgentNode).where(
                     AgentNode.node_id.in_([item.node_id for item in group.nodes])
                 )
             )
-            if isinstance(node.architecture, str)
+            if (identity := inventory_items(node).runtime_identity) is not None
         )
         compatibility_state = "unknown"
         if expected_architecture != "unknown" and observed_architecture is not None:
@@ -207,11 +208,13 @@ class BuildEvidenceMixin:
         )
         if image_bytes is not None and runtime_raw_digest is not None:
             for node in group.nodes:
-                artifact = session.scalar(
-                    select(NodeArtifact).where(
-                        NodeArtifact.node_id == node.node_id,
-                        NodeArtifact.digest == runtime_raw_digest,
-                    )
+                artifact = next(
+                    (
+                        item
+                        for item in inventory_artifacts(session, node.node_id)
+                        if item.digest == runtime_raw_digest
+                    ),
+                    None,
                 )
                 if (
                     artifact is not None

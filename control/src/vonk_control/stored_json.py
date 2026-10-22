@@ -478,9 +478,16 @@ def _check(binding: JsonColumn, value: object, kind: str | None) -> str | None:
     adapter = binding.adapter_for(kind)
     if adapter is None:
         return f"no contract for kind {kind!r}"
-    if isinstance(value, BaseModel):
-        value = value.model_dump(mode="json")
     try:
+        if isinstance(value, BaseModel):
+            value = value.model_dump(mode="json")
+        elif isinstance(value, list):
+            # Preserve every supplied field until the canonical JSON validator
+            # checks it, including typed item lists; never trim an invalid shape.
+            value = [
+                item.model_dump(mode="json") if isinstance(item, BaseModel) else item
+                for item in value
+            ]
         adapter.validate_json(json.dumps(value, allow_nan=False))
     except (TypeError, ValueError) as error:
         return stored_document_detail(error) or type(error).__name__

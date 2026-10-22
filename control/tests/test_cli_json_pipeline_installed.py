@@ -13,12 +13,14 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import func, select
 from sqlalchemy.orm import sessionmaker
+from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_control.api import create_app
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.fleet_projection import FleetProjection
 from vonk_control.jobs import JobService
 from vonk_control.models import AgentNode, Base, FleetProfileApplication, Job, RecipeRun
 
+from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
 from .test_profile_load_installed_cli import _https_api_peer, _process_environment
 
 pytest_plugins = ("tests.test_profile_load_installed_cli",)
@@ -69,8 +71,14 @@ def test_installed_no_input_fleet_json_pipeline_is_read_only(
             AgentNode(
                 node_id="spk_" + "1" * 32,
                 state="active",
-                architecture="linux-arm64",
                 last_seen_at=now,
+                inventory_snapshot=inventory_items_fixture(
+                    "spk_" + "1" * 32,
+                    observed_at=now,
+                    identity=AgentRuntimeIdentity.model_validate(
+                        {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
+                    ),
+                ),
             )
         )
     tokens = TokenCodec(b"installed-fleet-json-pipeline-key-32")

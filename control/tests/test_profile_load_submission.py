@@ -18,6 +18,7 @@ from sqlalchemy import event, select, text
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import canonical_message
+from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_control.admission_locking import acquire_admission_keys, node_admission_key
 from vonk_control.auth import Actor
 from vonk_control.fleet_profile_contract import (
@@ -54,6 +55,7 @@ from cluster_profiles.control_client import ControlClient
 
 from .consumer_outcomes import not_adopted
 from .lock_wait_support import backend_pid, lock_waits_behind
+from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
 from .test_fleet_profile_api import _client, _headers
 from .test_fleet_profile_review import _replace_run
 from .test_fleet_profiles import _exact_cleanup_profile, _SwitchAdapter
@@ -195,8 +197,14 @@ def test_accepted_profile_roster_maintenance_survives_actor_revocation(postgres_
                 node_id="spk_" + "3" * 32,
                 state="active",
                 protocol_version=2,
-                architecture="linux-arm64",
                 last_seen_at=NOW,
+                inventory_snapshot=inventory_items_fixture(
+                    "spk_" + "3" * 32,
+                    observed_at=NOW,
+                    identity=AgentRuntimeIdentity.model_validate(
+                        {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
+                    ),
+                ),
             )
         )
     # The worker maintains the accepted snapshot without a new user decision.
@@ -379,8 +387,17 @@ def test_admission_change_preserves_consent_and_supersedes_a_newer_save(
                         node_id="spk_" + "3" * 32,
                         state="active",
                         protocol_version=2,
-                        architecture="linux-arm64",
                         last_seen_at=NOW,
+                        inventory_snapshot=inventory_items_fixture(
+                            "spk_" + "3" * 32,
+                            observed_at=NOW,
+                            identity=AgentRuntimeIdentity.model_validate(
+                                {
+                                    **PACKAGED_RUNTIME_IDENTITY,
+                                    "architecture": "linux-arm64",
+                                }
+                            ),
+                        ),
                     )
                 )
             elif change == "authority":
@@ -505,8 +522,14 @@ def test_admission_serializes_insertion_of_a_previously_unknown_spark(postgres_e
                     node_id="spk_" + "3" * 32,
                     state="active",
                     protocol_version=2,
-                    architecture="linux-arm64",
                     last_seen_at=NOW,
+                    inventory_snapshot=inventory_items_fixture(
+                        "spk_" + "3" * 32,
+                        observed_at=NOW,
+                        identity=AgentRuntimeIdentity.model_validate(
+                            {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
+                        ),
+                    ),
                 )
             )
 

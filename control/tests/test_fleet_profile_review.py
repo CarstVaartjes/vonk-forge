@@ -10,6 +10,7 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import inspect, select
 from vonk_agent_protocol import LifecycleState
+from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_control.fleet_profile_contract import FleetProfileInput
 from vonk_control.fleet_profiles import (
     FleetProfileConflict,
@@ -35,6 +36,7 @@ from vonk_control.run_switch_contract import RunSwitchAssessment
 from cluster_profiles.cli_render import render_payload
 
 from .non_blocking import assert_ended_without_blocking
+from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
 from .test_fleet_profiles import (
     NOW,
     _assessment,
@@ -379,8 +381,14 @@ def test_review_binds_idle_roster_and_definition_but_not_observation_time():
                 node_id=_node_id(2),
                 state="active",
                 protocol_version=2,
-                architecture="linux-arm64",
                 last_seen_at=now,
+                inventory_snapshot=inventory_items_fixture(
+                    _node_id(2),
+                    observed_at=now,
+                    identity=AgentRuntimeIdentity.model_validate(
+                        {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
+                    ),
+                ),
             )
         )
     expanded = service.preview(profile.id)

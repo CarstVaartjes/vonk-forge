@@ -6,7 +6,7 @@ from datetime import timedelta
 from types import SimpleNamespace
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, update
 from vonk_agent_protocol import (
     AgentResult,
     AgentResultState,
@@ -14,7 +14,9 @@ from vonk_agent_protocol import (
     RecipeStopResult,
     RecipeUninstallResult,
     RuntimePreflightFindingCode,
+    canonical_message,
 )
+from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.runtime_preflight import (
     RuntimePreflightFinding,
     RuntimePreflightRequest,
@@ -28,16 +30,16 @@ from vonk_control.fleet_profiles import (
     _persisted_profile_progress,
     build_production_fleet_profile_service,
 )
+from vonk_control.inventory_items import inventory_items
 from vonk_control.inventory_repository import (
     InventoryRepository,
-    InventorySnapshotInput,
+    NodeInventoryReport,
 )
 from vonk_control.models import (
     AgentCertificate,
     AgentNode,
     AgentOperation,
     AgentOperationAttempt,
-    AgentPresence,
     CatalogDocumentRevision,
     FleetProfileApplication,
     FleetProfileSelection,
@@ -56,7 +58,11 @@ from vonk_control.runtime_preflight import mandatory_capabilities
 from vonk_control.terminal_history_collection import TerminalHistoryCollector
 
 from .preflight_fixtures import record_passing_preflight
-from .runtime_identity_support import claim_agent
+from .runtime_identity_support import (
+    PACKAGED_RUNTIME_IDENTITY,
+    claim_agent,
+    inventory_items_fixture,
+)
 from .test_fleet_profiles import _node_id, _uuid
 from .test_recipe_operations import (
     NOW,
@@ -169,9 +175,15 @@ def test_serving_selection_completes_stop_and_cleanup_after_author_loses_authori
             AgentNode(
                 node_id=node_b,
                 state="active",
-                architecture="linux-arm64",
                 protocol_version=2,
                 last_seen_at=NOW,
+                inventory_snapshot=inventory_items_fixture(
+                    node_b,
+                    observed_at=NOW,
+                    identity=AgentRuntimeIdentity.model_validate(
+                        {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
+                    ),
+                ),
             )
         )
         session.flush()
@@ -184,13 +196,13 @@ def test_serving_selection_completes_stop_and_cleanup_after_author_loses_authori
                 not_after=NOW + timedelta(days=1),
             )
         )
-        session.add(
-            AgentPresence(
-                node_id=node_b,
-                certificate_serial="serial-b",
-                certificate_fingerprint="fingerprint-b",
+        session.execute(
+            update(AgentNode)
+            .where(AgentNode.node_id == node_b)
+            .values(
+                contact_certificate_serial="serial-b",
                 management_address="192.168.1.212",
-                observed_at=NOW,
+                management_observed_at=NOW,
             )
         )
         revision = session.scalar(
@@ -202,19 +214,30 @@ def test_serving_selection_completes_stop_and_cleanup_after_author_loses_authori
         assert revision is not None
         revision_id, selector = revision.id, f"{revision.publisher}/{revision.slug}"
     InventoryRepository(sessions, clock=lambda: NOW).record(
-        InventorySnapshotInput(
-            node_b,
-            NOW,
-            10_000,
-            8_000,
-            10_000,
-            8_000,
-            10_000,
-            8_000,
-            1,
-            False,
-            ("runtime.vonk.v1", "recipe.image.pull.v1", "recipe.operations.v1"),
-            memory_pool="shared",
+        NodeInventoryReport.model_validate_json(
+            canonical_message(
+                {
+                    "node_id": node_b,
+                    "observed_at": NOW,
+                    "disk_total_bytes": 10_000,
+                    "disk_free_bytes": 8_000,
+                    "host_memory_total_bytes": 10_000,
+                    "host_memory_free_bytes": 8_000,
+                    "gpu_memory_total_bytes": 10_000,
+                    "gpu_memory_free_bytes": 8_000,
+                    "gpu_count": 1,
+                    "artifact_store_read_only": False,
+                    "capabilities": (
+                        "runtime.vonk.v1",
+                        "recipe.image.pull.v1",
+                        "recipe.operations.v1",
+                    ),
+                    "memory_pool": "shared",
+                    "schema_version": 1,
+                    "nvidia_driver_version": "unknown",
+                    "container_runtime_version": "unknown",
+                }
+            )
         )
     )
     record_passing_preflight(sessions, NOW)
@@ -297,8 +320,10 @@ def test_serving_selection_completes_stop_and_cleanup_after_author_loses_authori
     # does; an omitted field truthfully invalidates old preflight evidence.
     with sessions() as session:
         host = session.get(AgentNode, node_b)
-        assert host is not None and host.preflight_fingerprint is not None
-        host_fingerprint = host.preflight_fingerprint
+        assert (
+            host is not None and inventory_items(host).preflight_fingerprint is not None
+        )
+        host_fingerprint = inventory_items(host).preflight_fingerprint
     # Drive only native coordinators until B's exact Stop has been issued.
     stop_claim = None
     due_checks = []
@@ -414,8 +439,12 @@ def test_serving_selection_completes_stop_and_cleanup_after_author_loses_authori
                         operation.parent_job_id == child.result.preflight.pending_job_id
                     )
                     node = session.get(AgentNode, node_b)
-                    assert node is not None and node.preflight_fingerprint is not None
-                    fingerprint = node.preflight_fingerprint
+                    assert (
+                        node is not None
+                        and inventory_items(node).preflight_fingerprint is not None
+                    )
+                    fingerprint = inventory_items(node).preflight_fingerprint
+                    assert fingerprint is not None
                 jobs.record_result(
                     AgentResult(
                         fence=claim.fence,

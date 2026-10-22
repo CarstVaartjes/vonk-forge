@@ -17,6 +17,7 @@ from vonk_agent_protocol import ClusterMappingCode
 from vonk_forge_contracts import RecipeDefinition, RecipeOptionError, read_recipe
 from vonk_forge_contracts.recipe import RecipeTopology, Scalar
 
+from .inventory_items import runtime_value
 from .mapping_parameters import MappingParameters
 from .models import (
     AgentNode,
@@ -305,7 +306,7 @@ def _active_nodes(
     if any(
         row.state != "active"
         or row.revoked_at is not None
-        or row.architecture != "linux-arm64"
+        or runtime_value(row, lambda identity: identity.architecture) != "linux-arm64"
         for row in rows
     ):
         raise ClusterMappingError(

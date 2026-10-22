@@ -1,3 +1,5 @@
+from .runtime_identity_support import set_inventory_identity
+
 """Accepted kit content survives unrelated builder/provenance damage."""
 
 import io
@@ -47,7 +49,7 @@ def test_prebuilt_preparation_has_no_nominal_spark_admission(tmp_path, damage):
         elif damage == "revoked":
             node.revoked_at = now
         else:
-            node.binary_digest = None
+            set_inventory_identity(node, binary_digest=None)
     service = RecipeBuildService(sessions, bundles=bundles)
     service._inventory.latest = lambda *_args, **_kwargs: pytest.fail(
         "Controller prebuilt preparation must not request Spark inventory"
@@ -163,7 +165,7 @@ def test_failed_controller_pull_ends_and_fresh_request_publishes_exact_image(tmp
     with sessions.begin() as session:
         node = session.get(AgentNode, NODE)
         assert node is not None
-        node.binary_digest = None
+        set_inventory_identity(node, binary_digest=None)
     first = builds.plan(revision_id, NODE, now=NOW)
     job = operations.build(
         first,

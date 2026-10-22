@@ -5,22 +5,23 @@ from __future__ import annotations
 from datetime import timedelta
 from uuid import uuid4
 
-from sqlalchemy import select
-from vonk_agent_protocol import DesiredAssignmentState
+from sqlalchemy import select, update
+from vonk_agent_protocol import DesiredAssignmentState, canonical_message
+from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_control.fleet_profile_contract import (
     FleetProfileAssignmentInput,
     FleetProfileInput,
 )
+from vonk_control.inventory_items import runtime_value
 from vonk_control.inventory_repository import (
     InventoryRepository,
-    InventorySnapshotInput,
+    NodeInventoryReport,
 )
 from vonk_control.memory_reservations import memory_reservations
 from vonk_control.models import (
     AgentCertificate,
     AgentNode,
     AgentOperation,
-    AgentPresence,
     CatalogDocumentRevision,
     ClusterMapping,
     Job,
@@ -31,6 +32,7 @@ from vonk_control.models import (
 )
 
 from .profile_due_fixtures import next_profile_due
+from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
 from .test_profile_capacity_admission import _capacity_profile
 from .test_recipe_operations import (
     installed_recipe,
@@ -130,8 +132,19 @@ def test_profile_apply_stops_only_reachable_rank_and_retains_missing_claim(
                     node_id=unrelated_node,
                     state="active",
                     protocol_version=1,
-                    architecture=template.architecture,
                     last_seen_at=observed_at,
+                    inventory_snapshot=inventory_items_fixture(
+                        unrelated_node,
+                        observed_at=observed_at,
+                        identity=AgentRuntimeIdentity.model_validate(
+                            {
+                                **PACKAGED_RUNTIME_IDENTITY,
+                                "architecture": runtime_value(
+                                    template, lambda identity: identity.architecture
+                                ),
+                            }
+                        ),
+                    ),
                 )
             )
             session.flush()
@@ -146,31 +159,38 @@ def test_profile_apply_stops_only_reachable_rank_and_retains_missing_claim(
                     not_after=observed_at + timedelta(days=365),
                 )
             )
-            session.add(
-                AgentPresence(
-                    node_id=unrelated_node,
-                    certificate_serial=serial,
-                    certificate_fingerprint=fingerprint,
+            session.execute(
+                update(AgentNode)
+                .where(AgentNode.node_id == unrelated_node)
+                .values(
+                    contact_certificate_serial=serial,
                     management_address=f"192.168.1.{213 + index}",
-                    observed_at=observed_at,
+                    management_observed_at=observed_at,
                 )
             )
         InventoryRepository(sessions, clock=lifecycle._clock).record(
-            InventorySnapshotInput(
-                node_id=unrelated_node,
-                observed_at=observed_at,
-                disk_total_bytes=10_000,
-                disk_free_bytes=8_000,
-                host_memory_total_bytes=10_000,
-                host_memory_free_bytes=8_000,
-                gpu_memory_total_bytes=10_000,
-                gpu_memory_free_bytes=8_000,
-                gpu_count=1,
-                artifact_store_read_only=False,
-                capabilities=capabilities,
-                memory_pool="shared",
-                fabric_address=f"192.168.100.{4 + index}",
-                fabric_bandwidth_mbps=200000,
+            NodeInventoryReport.model_validate_json(
+                canonical_message(
+                    {
+                        "node_id": unrelated_node,
+                        "observed_at": observed_at,
+                        "disk_total_bytes": 10_000,
+                        "disk_free_bytes": 8_000,
+                        "host_memory_total_bytes": 10_000,
+                        "host_memory_free_bytes": 8_000,
+                        "gpu_memory_total_bytes": 10_000,
+                        "gpu_memory_free_bytes": 8_000,
+                        "gpu_count": 1,
+                        "artifact_store_read_only": False,
+                        "capabilities": capabilities,
+                        "memory_pool": "shared",
+                        "fabric_address": f"192.168.100.{4 + index}",
+                        "fabric_bandwidth_mbps": 200000,
+                        "schema_version": 1,
+                        "nvidia_driver_version": "unknown",
+                        "container_runtime_version": "unknown",
+                    }
+                )
             )
         )
     profiles.update(

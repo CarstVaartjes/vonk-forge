@@ -19,6 +19,7 @@ from vonk_agent_protocol import (
     OperationProgress,
 )
 from vonk_agent_protocol.claims import AGENT_PROTOCOL_VERSION
+from vonk_agent_protocol.state_machines import CertificateRecordState
 
 from . import agent_operation_states, job_states
 from .compose_bundle import ComposeBundle
@@ -36,7 +37,7 @@ from .terminal_history_collection import history_rows_past_grace
 from .worker_memory_contract import WorkerMemoryReport, WorkerTraceState
 
 if TYPE_CHECKING:
-    from .fleet_projection import FleetSnapshot, TelemetryPoint
+    from .fleet_projection import FleetSnapshot
 
 _NODE = re.compile(r"spk_[0-9a-f]{32}")
 _METHODS = frozenset({"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"})
@@ -242,20 +243,8 @@ def _worker_memory_lines(report: WorkerMemoryReport, age: float | None) -> list[
 class MetricsRegistry:
     def __init__(self) -> None:
         self._lock = threading.RLock()
-        self._nodes: dict[
-            str,
-            tuple[
-                str,
-                str,
-                str,
-                str,
-                int | None,
-                int | None,
-                float | None,
-                float | None,
-            ],
-        ] = {}
-        self._telemetry_samples: dict[str, TelemetryPoint] = {}
+        self._fleet_source: Callable[[], FleetSnapshot] | None = None
+        self._contact_source: Callable[[], list[str]] | None = None
         self._jobs: dict[tuple[str, str], int] = {}
         self._runnable_job_ages: dict[str, float] = {}
         self._route_state = "unavailable"
@@ -265,10 +254,8 @@ class MetricsRegistry:
         self._backup_restore_verification_age: float | None = None
         self._api_counts: dict[tuple[str, str], int] = defaultdict(int)
         self._api_durations: dict[tuple[str, str], list[float]] = defaultdict(list)
-        self._agent_nodes: dict[str, tuple[str, str, float | None, float | None]] = {}
         self._agent_operations: dict[tuple[str, str], int] = {}
         self._stalled_operations: dict[str, int] = {}
-        self._agent_leases: dict[tuple[str, str], float] = {}
         self._worker_memory: WorkerMemoryReport | None = None
         self._worker_memory_age: float | None = None
         self._compose_bundle: ComposeBundle | None = None
@@ -309,7 +296,12 @@ class MetricsRegistry:
             raise ValueError(f"{field} must be a nonnegative finite number")
         return float(value)
 
-    def update_fleet(self, snapshot: FleetSnapshot) -> None:
+    def set_fleet_source(self, source: Callable[[], FleetSnapshot]) -> None:
+        """Bind the owner, never retain the facts returned by a scrape."""
+        self._fleet_source = source
+
+    @staticmethod
+    def _fleet_values(snapshot: FleetSnapshot):
         """Project the typed FleetSnapshot without inventing node health."""
 
         from .fleet_projection import FleetSnapshot
@@ -343,13 +335,11 @@ class MetricsRegistry:
                 None if telemetry is None else telemetry.age_seconds,
                 None if telemetry is None else telemetry.sample.gpu_utilization_percent,
             )
-        with self._lock:
-            self._nodes = nodes
-            self._telemetry_samples = {
-                node.id: node.telemetry.sample
-                for node in snapshot.nodes
-                if node.telemetry is not None
-            }
+        return nodes, {
+            node.id: node.telemetry.sample
+            for node in snapshot.nodes
+            if node.telemetry is not None
+        }
 
     def set_job_count(self, kind: str, state: str, count: int) -> None:
         safe_kind = kind if kind in _JOB_KINDS else "other"
@@ -459,34 +449,9 @@ class MetricsRegistry:
     def _replace_agent_snapshot(
         self,
         *,
-        nodes: dict[str, tuple[str, str, float | None, float | None]],
         operations: dict[tuple[str, str], int],
         stalled: dict[str, int],
-        leases: dict[tuple[str, str], float],
     ) -> None:
-        safe_nodes = {}
-        for node_id, (
-            state,
-            version_bucket,
-            last_seen_age,
-            certificate_expiry,
-        ) in nodes.items():
-            if _NODE.fullmatch(node_id) is None:
-                raise ValueError("metrics node ID must be a stable generated ID")
-            safe_state = state if state in _AGENT_STATES else "other"
-            safe_version = (
-                version_bucket if version_bucket in _VERSION_BUCKETS else "incompatible"
-            )
-            safe_nodes[node_id] = (
-                safe_state,
-                safe_version,
-                None
-                if last_seen_age is None
-                else self._number(last_seen_age, "last-seen age"),
-                None
-                if certificate_expiry is None
-                else self._number(certificate_expiry, "certificate expiry"),
-            )
         safe_operations: dict[tuple[str, str], int] = defaultdict(int)
         for (operation, state), count in operations.items():
             safe_operations[
@@ -495,31 +460,18 @@ class MetricsRegistry:
                     state if state in _JOB_STATES else "other",
                 )
             ] += int(self._number(count, "operation count"))
-        safe_leases: dict[tuple[str, str], float] = {}
-        for (node_id, operation), age in leases.items():
-            if _NODE.fullmatch(node_id) is None:
-                raise ValueError("metrics node ID must be a stable generated ID")
-            safe_key = (
-                node_id,
-                operation if operation in _AGENT_OPERATIONS else "other",
-            )
-            safe_age = self._number(age, "operation lease age")
-            safe_leases[safe_key] = max(safe_leases.get(safe_key, 0.0), safe_age)
         safe_stalled: dict[str, int] = defaultdict(int)
         for operation, count in stalled.items():
             safe_stalled[operation if operation in _AGENT_OPERATIONS else "other"] += (
                 int(self._number(count, "stalled operation count"))
             )
         with self._lock:
-            self._agent_nodes = safe_nodes
             self._agent_operations = dict(safe_operations)
             self._stalled_operations = dict(safe_stalled)
-            self._agent_leases = safe_leases
 
     def render(self) -> str:
         with self._lock:
-            nodes, jobs = dict(self._nodes), dict(self._jobs)
-            telemetry_samples = dict(self._telemetry_samples)
+            jobs = dict(self._jobs)
             runnable_job_ages = dict(self._runnable_job_ages)
             route_state = self._route_state
             backup_age = self._backup_age
@@ -530,16 +482,20 @@ class MetricsRegistry:
             api_durations = {
                 key: tuple(values) for key, values in self._api_durations.items()
             }
-            agent_nodes = dict(self._agent_nodes)
             agent_operations = dict(self._agent_operations)
             stalled_operations = dict(self._stalled_operations)
-            agent_leases = dict(self._agent_leases)
             recent_job_failures = dict(self._recent_job_failures)
             recent_operation_failures = dict(self._recent_operation_failures)
             history_rows = self._history_rows_past_grace
             worker_memory = self._worker_memory
             worker_memory_age = self._worker_memory_age
             compose_bundle = self._compose_bundle
+        nodes, telemetry_samples = (
+            ({}, {})
+            if self._fleet_source is None
+            else self._fleet_values(self._fleet_source())
+        )
+        contact_lines = [] if self._contact_source is None else self._contact_source()
         lines = [
             "# HELP vonk_route_state Current inference route state.",
             "# TYPE vonk_route_state gauge",
@@ -681,25 +637,7 @@ class MetricsRegistry:
                 "# TYPE vonk_agent_certificate_expiry_seconds gauge",
             )
         )
-        for node_id, (
-            state,
-            version_bucket,
-            last_seen_age,
-            certificate_expiry,
-        ) in sorted(agent_nodes.items()):
-            label = f'node_id="{node_id}"'
-            lines.append(f'vonk_agent_state{{{label},state="{state}"}} 1')
-            lines.append(
-                f'vonk_agent_version_compatibility{{{label},version_bucket="{version_bucket}"}} 1'
-            )
-            if last_seen_age is not None:
-                lines.append(
-                    f"vonk_agent_last_seen_age_seconds{{{label}}} {last_seen_age:g}"
-                )
-            if certificate_expiry is not None:
-                lines.append(
-                    f"vonk_agent_certificate_expiry_seconds{{{label}}} {certificate_expiry:g}"
-                )
+        lines.extend(contact_lines)
         lines.extend(
             (
                 "# HELP vonk_agent_operations Durable agent operations by bounded kind and state.",
@@ -752,10 +690,6 @@ class MetricsRegistry:
                 "# TYPE vonk_agent_operation_lease_age_seconds gauge",
             )
         )
-        for (node_id, operation), age in sorted(agent_leases.items()):
-            lines.append(
-                f'vonk_agent_operation_lease_age_seconds{{node_id="{node_id}",operation="{operation}"}} {age:g}'
-            )
         lines.extend(
             (
                 "# HELP vonk_api_requests_total API responses by method and status class.",
@@ -818,28 +752,12 @@ class OperationalMetricsCollector:
         self._clock = clock
         self._protocol_minimum = protocol_minimum
         self._protocol_maximum = protocol_maximum
+        registry._contact_source = self.render_contacts
 
     def refresh(self) -> None:
         now = _aware(self._clock())
         with self._sessions() as session:
             history_rows = history_rows_past_grace(session, now)
-            agent_nodes = list(
-                session.scalars(select(AgentNode).order_by(AgentNode.node_id))
-            )
-            certificates = list(
-                session.scalars(
-                    select(AgentCertificate)
-                    .where(
-                        AgentCertificate.state == "active",
-                        AgentCertificate.revoked_at.is_(None),
-                    )
-                    .order_by(
-                        AgentCertificate.node_id,
-                        AgentCertificate.not_after.desc(),
-                        AgentCertificate.generation.desc(),
-                    )
-                )
-            )
             operation_rows = list(
                 session.execute(
                     select(AgentOperation.kind, AgentOperation.state, func.count())
@@ -869,30 +787,6 @@ class OperationalMetricsCollector:
                     .group_by(AgentOperation.kind)
                 )
             )
-            lease_rows = list(
-                session.execute(
-                    select(
-                        AgentOperation.node_id,
-                        AgentOperation.kind,
-                        AgentOperation.updated_at,
-                    )
-                    .join(
-                        AgentOperationAttempt,
-                        (AgentOperationAttempt.operation_id == AgentOperation.id)
-                        & (
-                            AgentOperationAttempt.attempt
-                            == AgentOperation.current_attempt
-                        ),
-                    )
-                    .where(
-                        AgentOperation.state == "running",
-                        AgentOperationAttempt.state == "running",
-                    )
-                    .order_by(
-                        AgentOperation.node_id, AgentOperation.kind, AgentOperation.id
-                    )
-                )
-            )
             progress_rows = list(
                 session.execute(
                     select(AgentOperation.kind, AgentOperationAttempt.progress)
@@ -905,41 +799,16 @@ class OperationalMetricsCollector:
                         ),
                     )
                     .where(
-                        AgentOperation.state == "running",
-                        AgentOperationAttempt.state == "running",
+                        AgentOperation.state == LifecycleState.RUNNING,
+                        AgentOperationAttempt.state == LifecycleState.RUNNING,
                         AgentOperationAttempt.progress.is_not(None),
                     )
                     .order_by(AgentOperation.kind, AgentOperation.id)
                 )
             )
-        active_certificates: dict[str, AgentCertificate] = {}
-        for certificate in certificates:
-            active_certificates.setdefault(certificate.node_id, certificate)
-        nodes = {}
-        for node in agent_nodes:
-            certificate = active_certificates.get(node.node_id)
-            nodes[node.node_id] = (
-                node.state,
-                protocol_version_bucket(
-                    node.protocol_version,
-                    minimum=self._protocol_minimum,
-                    maximum=self._protocol_maximum,
-                ),
-                None
-                if node.last_seen_at is None
-                else max(0.0, (now - _aware(node.last_seen_at)).total_seconds()),
-                None
-                if certificate is None
-                else max(0.0, (_aware(certificate.not_after) - now).total_seconds()),
-            )
         operations = {
             (kind, state): int(count) for kind, state, count in operation_rows
         }
-        leases: dict[tuple[str, str], float] = {}
-        for node_id, operation, updated_at in lease_rows:
-            key = (node_id, operation)
-            age = max(0.0, (now - _aware(updated_at)).total_seconds())
-            leases[key] = max(leases.get(key, 0.0), age)
         # Stalled work is derived from the same advisory projection the operator
         # API already exposes: a running operation that declared measurable
         # progress and has stopped advancing.  A malformed stored snapshot is
@@ -962,8 +831,110 @@ class OperationalMetricsCollector:
             ),
         )
         self._registry._replace_agent_snapshot(
-            nodes=nodes,
             operations=operations,
             stalled=dict(stalled),
-            leases=leases,
         )
+
+    def render_contacts(self) -> list[str]:
+        """Read per-node contact and active lease facts for this scrape only."""
+        now = _aware(self._clock())
+        with self._sessions() as session:
+            agent_nodes = list(
+                session.execute(
+                    select(
+                        AgentNode.node_id,
+                        AgentNode.state,
+                        AgentNode.protocol_version,
+                        AgentNode.last_seen_at,
+                    ).order_by(AgentNode.node_id)
+                )
+            )
+            certificates = list(
+                session.scalars(
+                    select(AgentCertificate)
+                    .where(
+                        AgentCertificate.state == CertificateRecordState.ACTIVE,
+                        AgentCertificate.revoked_at.is_(None),
+                    )
+                    .order_by(
+                        AgentCertificate.node_id,
+                        AgentCertificate.not_after.desc(),
+                        AgentCertificate.generation.desc(),
+                    )
+                )
+            )
+            lease_rows = list(
+                session.execute(
+                    select(
+                        AgentOperation.node_id,
+                        AgentOperation.kind,
+                        AgentOperation.updated_at,
+                    )
+                    .join(
+                        AgentOperationAttempt,
+                        (AgentOperationAttempt.operation_id == AgentOperation.id)
+                        & (
+                            AgentOperationAttempt.attempt
+                            == AgentOperation.current_attempt
+                        ),
+                    )
+                    .where(
+                        AgentOperation.state == LifecycleState.RUNNING,
+                        AgentOperationAttempt.state == LifecycleState.RUNNING,
+                    )
+                    .order_by(
+                        AgentOperation.node_id, AgentOperation.kind, AgentOperation.id
+                    )
+                )
+            )
+        active_certificates: dict[str, AgentCertificate] = {}
+        for certificate in certificates:
+            active_certificates.setdefault(certificate.node_id, certificate)
+        nodes = {}
+        for node in agent_nodes:
+            certificate = active_certificates.get(node.node_id)
+            nodes[node.node_id] = (
+                node.state,
+                protocol_version_bucket(
+                    node.protocol_version,
+                    minimum=self._protocol_minimum,
+                    maximum=self._protocol_maximum,
+                ),
+                None
+                if node.last_seen_at is None
+                else max(0.0, (now - _aware(node.last_seen_at)).total_seconds()),
+                None
+                if certificate is None
+                else max(0.0, (_aware(certificate.not_after) - now).total_seconds()),
+            )
+        leases: dict[tuple[str, str], float] = {}
+        for node_id, operation, updated_at in lease_rows:
+            key = (node_id, operation)
+            age = max(0.0, (now - _aware(updated_at)).total_seconds())
+            leases[key] = max(leases.get(key, 0.0), age)
+
+        lines: list[str] = []
+        for node_id, (state, version, seen, expiry) in sorted(nodes.items()):
+            if _NODE.fullmatch(node_id) is None:
+                continue
+            state = state if state in _AGENT_STATES else "other"
+            lines.append(f'vonk_agent_state{{node_id="{node_id}",state="{state}"}} 1')
+            lines.append(
+                f'vonk_agent_version_compatibility{{node_id="{node_id}",version_bucket="{version}"}} 1'
+            )
+            if seen is not None:
+                lines.append(
+                    f'vonk_agent_last_seen_age_seconds{{node_id="{node_id}"}} {seen:g}'
+                )
+            if expiry is not None:
+                lines.append(
+                    f'vonk_agent_certificate_expiry_seconds{{node_id="{node_id}"}} {expiry:g}'
+                )
+        for (node_id, operation), age in sorted(leases.items()):
+            if _NODE.fullmatch(node_id) is None:
+                continue
+            operation = operation if operation in _AGENT_OPERATIONS else "other"
+            lines.append(
+                f'vonk_agent_operation_lease_age_seconds{{node_id="{node_id}",operation="{operation}"}} {age:g}'
+            )
+        return lines

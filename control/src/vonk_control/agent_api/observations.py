@@ -34,7 +34,8 @@ from ..download_contract import download_responses
 from ..inventory_repository import (
     MAX_INVENTORY_FUTURE_SKEW,
     InventoryRepository,
-    InventorySnapshotInput,
+    NodeInventoryReport,
+    _validated_inventory,
 )
 from ..library_contract import UuidId
 from ..logging import log_event
@@ -53,7 +54,7 @@ from ..presence import PresenceError
 from ..recipe_operations import prepare_exact_recipe_run_observation_nodes
 from ..source_bundles import SourceBundleError
 from ..spark_store_retention import store_retention_request
-from ..telemetry import TelemetryRepository, TelemetrySampleInput
+from ..telemetry import TelemetryRepository
 from ..untracked_installations import (
     node_run_ids,
     untracked_installations,
@@ -63,7 +64,6 @@ from .common import (
     _CANONICAL_UUID,
     _DIGEST,
     _LOGGER,
-    _TELEMETRY_FIELDS,
     RANK_UNREADY_GRACE,
     RECIPE_RUN_DISPOSITION_HEADER,
     RECIPE_RUN_GENERATION_HEADER,
@@ -181,35 +181,17 @@ def install_observations_routes(
             snapshot = InventoryRepository(
                 required.sessions, clock=required.clock
             ).record(
-                InventorySnapshotInput(
-                    node_id=identity.node_id,
-                    observed_at=observed_at,
-                    disk_total_bytes=body.disk_total_bytes,
-                    disk_free_bytes=body.disk_free_bytes,
-                    host_memory_total_bytes=body.host_memory_total_bytes,
-                    host_memory_free_bytes=body.host_memory_free_bytes,
-                    gpu_memory_total_bytes=body.gpu_memory_total_bytes,
-                    gpu_memory_free_bytes=body.gpu_memory_free_bytes,
-                    gpu_count=body.gpu_count,
-                    gpu_health=body.gpu_health,
-                    memory_pool=body.memory_pool,
-                    artifact_store_read_only=body.artifact_store_read_only,
-                    capabilities=tuple(body.capabilities),
-                    fabric_address=fabric_address,
-                    fabric_bandwidth_mbps=fabric_bandwidth_mbps,
-                    nvidia_driver_version=body.nvidia_driver_version,
-                    container_runtime_version=body.container_runtime_version,
-                    network_interfaces=(
-                        None
-                        if body.network_interfaces is None
-                        else tuple(body.network_interfaces)
-                    ),
-                    nas_route_interface=body.nas_route_interface,
-                    host_settings=body.host_settings,
-                    unused_model_bytes=body.unused_model_bytes,
-                    model_objects=body.model_objects,
+                NodeInventoryReport.model_validate_json(
+                    canonical_message(
+                        {
+                            **body.model_dump(mode="json"),
+                            "node_id": identity.node_id,
+                            "observed_at": observed_at,
+                            "fabric_address": fabric_address,
+                            "fabric_bandwidth_mbps": fabric_bandwidth_mbps,
+                        }
+                    )
                 ),
-                report=body,
             )
         except ValueError as error:
             raise HTTPException(status_code=422, detail=str(error)) from None
@@ -219,20 +201,25 @@ def install_observations_routes(
         clock_authority = (
             required.host_runtime_authority if body.host_settings is not None else None
         )
-        if body.installations is None and body.runs is None and clock_authority is None:
+        stored_report = _validated_inventory(snapshot, observed_at=observed_at)
+        if (
+            stored_report.installations is None
+            and stored_report.runs is None
+            and clock_authority is None
+        ):
             # An older agent, or one that could not list them: no verdict.
             return Response(status_code=status.HTTP_204_NO_CONTENT)
         with required.sessions() as session:
             verdict = InventoryVerdict(
                 store_retention=store_retention_request(session, identity.node_id, now),
                 untracked_installations=untracked_installations(
-                    session, identity.node_id, body.installations or ()
+                    session, identity.node_id, stored_report.installations or ()
                 ),
                 # Absent unless the runs were named: an older agent's strict
                 # reader never sees the field.
                 untracked_runs=None
-                if body.runs is None
-                else untracked_runs(session, identity.node_id, body.runs),
+                if stored_report.runs is None
+                else untracked_runs(session, identity.node_id, stored_report.runs),
             )
         if clock_authority is not None:
             try:
@@ -264,13 +251,7 @@ def install_observations_routes(
         try:
             TelemetryRepository(required.sessions, clock=required.clock).record_batch(
                 identity.node_id,
-                tuple(
-                    TelemetrySampleInput(
-                        boot_id=uuid.UUID(sample.boot_id),
-                        **{name: getattr(sample, name) for name in _TELEMETRY_FIELDS},
-                    )
-                    for sample in body.samples
-                ),
+                body.samples,
             )
         except ValueError as error:
             raise HTTPException(status_code=422, detail=str(error)) from None

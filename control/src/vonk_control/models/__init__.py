@@ -27,7 +27,7 @@ from .catalog import (
     _catalog_document_revision_is_immutable as _catalog_document_revision_is_immutable,
 )
 from .coordinator import CoordinatorFailure as CoordinatorFailure
-from .evidence import EvidenceRepeat as EvidenceRepeat
+from .evidence import REPEATED_EVIDENCE_SEQUENCE as REPEATED_EVIDENCE_SEQUENCE
 from .execution import ACTIVE_RUN_STATES as ACTIVE_RUN_STATES
 from .execution import (
     STOPPABLE_NOT_RUNNING_RUN_STATES as STOPPABLE_NOT_RUNNING_RUN_STATES,
@@ -48,7 +48,6 @@ from .fleet import AgentEnrollmentGrant as AgentEnrollmentGrant
 from .fleet import AgentIssuedCertificateRevocation as AgentIssuedCertificateRevocation
 from .fleet import AgentNode as AgentNode
 from .fleet import AgentNodeProfile as AgentNodeProfile
-from .fleet import AgentPresence as AgentPresence
 from .fleet import FleetProfile as FleetProfile
 from .fleet import FleetProfileApplication as FleetProfileApplication
 from .fleet import FleetProfileSelection as FleetProfileSelection
@@ -70,8 +69,10 @@ from .routes import RoutePublication as RoutePublication
 from .routes import RoutePublicationOwner as RoutePublicationOwner
 from .telemetry import FleetEventCursor as FleetEventCursor
 from .telemetry import FleetStreamEvent as FleetStreamEvent
-from .telemetry import NodeArtifact as NodeArtifact
+from .telemetry import NodeInventoryItemsSnapshot as NodeInventoryItemsSnapshot
+from .telemetry import NodeInventoryResourceSnapshot as NodeInventoryResourceSnapshot
 from .telemetry import NodeInventorySnapshot as NodeInventorySnapshot
+from .telemetry import NodeSnapshot as NodeSnapshot
 from .telemetry import NodeTelemetryLatest as NodeTelemetryLatest
 from .telemetry import NodeTelemetrySample as NodeTelemetrySample
 from .telemetry import _seed_fleet_event_cursor as _seed_fleet_event_cursor

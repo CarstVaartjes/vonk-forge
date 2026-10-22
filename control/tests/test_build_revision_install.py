@@ -1,3 +1,8 @@
+from sqlalchemy import update
+from vonk_control.inventory_items import runtime_value
+
+from .runtime_identity_support import set_inventory_identity
+
 """The same verified build must survive a recipe-only revision through install."""
 
 import json
@@ -20,7 +25,6 @@ from vonk_control.install_admission import (
 from vonk_control.models import (
     AgentCertificate,
     AgentNode,
-    AgentPresence,
     CatalogDocumentRevision,
     NodeInventorySnapshot,
     RecipeBuild,
@@ -310,13 +314,13 @@ def test_editorial_successor_installs_and_starts_without_any_record_of_the_image
             snapshot.host_memory_free_bytes = 10**12
             snapshot.gpu_memory_total_bytes = 10**12
             snapshot.gpu_memory_free_bytes = 10**12
-        session.add(
-            AgentPresence(
-                node_id=plan.nodes[0].node_id,
-                certificate_serial="revision-reuse-preflight",
-                certificate_fingerprint="revision-reuse-preflight",
+        session.execute(
+            update(AgentNode)
+            .where(AgentNode.node_id == plan.nodes[0].node_id)
+            .values(
+                contact_certificate_serial="revision-reuse-preflight",
                 management_address="192.168.1.211",
-                observed_at=now,
+                management_observed_at=now,
             )
         )
     run_plan = service.preview_run(installed.id, "qwen")
@@ -360,8 +364,8 @@ def test_review_of_a_successor_finds_its_build_after_the_builder_was_upgraded(
     with _sessions.begin() as session:
         node = session.scalar(select(AgentNode))
         assert node is not None
-        assert node.binary_digest != "e" * 64
-        node.binary_digest = "e" * 64
+        assert runtime_value(node, lambda identity: identity.binary_digest) != "e" * 64
+        set_inventory_identity(node, binary_digest="e" * 64)
         for snapshot in session.scalars(select(NodeInventorySnapshot)):
             snapshot.host_memory_free_bytes = 1
             snapshot.gpu_memory_free_bytes = 1

@@ -12,6 +12,7 @@ from ..agent_upgrade_contract import (
     AgentUpgradePackage,
     AgentUpgradeRepairManifest,
 )
+from ..inventory_items import runtime_value
 from ..models import AgentNode
 from ..strict_json import read_stored_model
 from .constants import _ONLINE_WINDOW
@@ -62,7 +63,10 @@ class EligibilityMixin:
 
         if node.state != "active" or node.revoked_at is not None:
             return "is not active"
-        if node.architecture != package.architecture:
+        if (
+            runtime_value(node, lambda identity: identity.architecture)
+            != package.architecture
+        ):
             return "has an incompatible architecture"
         return None
 
@@ -90,6 +94,8 @@ class EligibilityMixin:
     @staticmethod
     def _at_target(node: AgentNode, package: AgentUpgradePackage) -> bool:
         return bool(
-            node.build_digest == package.target_build_digest
-            and node.binary_digest == package.target_binary_digest
+            runtime_value(node, lambda identity: identity.build_digest)
+            == package.target_build_digest
+            and runtime_value(node, lambda identity: identity.binary_digest)
+            == package.target_binary_digest
         )

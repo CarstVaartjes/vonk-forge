@@ -48,6 +48,11 @@ from vonk_control.distribution import (
 )
 from vonk_control.distribution_assignment import NodeDistributionAssignment
 from vonk_control.install_admission import InstallAdmissionService
+from vonk_control.inventory_items import (
+    inventory_artifacts,
+    inventory_items,
+    runtime_value,
+)
 from vonk_control.lifecycle import Outcome, Reported
 from vonk_control.lifecycle.agent_operation import (
     AgentOperationAdapter,
@@ -60,7 +65,6 @@ from vonk_control.models import (
     AgentOperationAttempt,
     Base,
     Job,
-    NodeArtifact,
     RecipeBuild,
     RecipeRun,
     ResourceReservation,
@@ -78,6 +82,7 @@ from .recipe_stop_fixtures import recipe_stop_payload
 from .runtime_identity_support import (
     PACKAGED_RUNTIME_IDENTITY,
     claim_agent,
+    inventory_items_fixture,
 )
 
 _BUILD_ADAPTER = (
@@ -236,10 +241,19 @@ def service(tmp_path):
                     node_id=node_id,
                     state="active",
                     workload_intent_ordinal=1,
-                    architecture="linux-arm64",
-                    semantic_version="1.0.0",
-                    build_digest="sha256:" + "f" * 64,
-                    binary_digest="f" * 64,
+                    inventory_snapshot=inventory_items_fixture(
+                        node_id,
+                        observed_at=None,
+                        identity=AgentRuntimeIdentity.model_validate(
+                            {
+                                **PACKAGED_RUNTIME_IDENTITY,
+                                "architecture": "linux-arm64",
+                                "semantic_version": "1.0.0",
+                                "build_digest": "sha256:" + "f" * 64,
+                                "binary_digest": "f" * 64,
+                            }
+                        ),
+                    ),
                 )
             )
             session.add(
@@ -851,7 +865,7 @@ def test_rust_claim_updates_current_contact(service) -> None:
     with sessions() as session:
         node = session.get(AgentNode, NODE_A)
         assert node is not None
-        assert node.preflight_fingerprint == "e" * 64
+        assert inventory_items(node).preflight_fingerprint == "e" * 64
         assert node.protocol_version == 4
 
 
@@ -1026,7 +1040,10 @@ def test_recipe_build_is_rejected_when_builder_runtime_changed_before_claim(
         )
         assert stored is not None and stored.state == "failed"
         assert parent_row is not None and parent_row.state == "failed"
-        assert node is not None and node.binary_digest == "e" * 64
+        assert (
+            node is not None
+            and runtime_value(node, lambda identity: identity.binary_digest) == "e" * 64
+        )
         assert build is not None and build.state == "failed"
         assert reservation is not None and reservation.state == "released"
 
@@ -1817,9 +1834,7 @@ def test_a_finished_distribution_records_the_pulled_image_on_the_spark(
     jobs.succeed(claim, {"downloaded_bytes": 7})
 
     with sessions() as session:
-        stored = session.scalars(
-            select(NodeArtifact).where(NodeArtifact.node_id == NODE_A)
-        ).all()
+        stored = inventory_artifacts(session, NODE_A)
     # Exactly the record admission and Run/Switch read as "image present".
     assert [
         (item.kind, item.digest, item.size_bytes, item.state) for item in stored
@@ -1979,10 +1994,14 @@ def test_claim_persists_authenticated_running_release_identity(service) -> None:
         node = session.get(AgentNode, NODE_A)
         assert node is not None
         assert {
-            "architecture": node.architecture,
-            "binary_digest": node.binary_digest,
-            "build_digest": node.build_digest,
-            "semantic_version": node.semantic_version,
+            "architecture": runtime_value(node, lambda identity: identity.architecture),
+            "binary_digest": runtime_value(
+                node, lambda identity: identity.binary_digest
+            ),
+            "build_digest": runtime_value(node, lambda identity: identity.build_digest),
+            "semantic_version": runtime_value(
+                node, lambda identity: identity.semantic_version
+            ),
         } == runtime_identity.model_dump(exclude={"package_activation"})
         assert node.contact_observation_digest is not None
         assert re.fullmatch(r"[0-9a-f]{64}", node.contact_observation_digest)
@@ -2014,10 +2033,17 @@ def test_claim_rejects_malformed_runtime_architecture_without_persisting_it(
     with sessions() as session:
         node = session.get(AgentNode, NODE_A)
         assert node is not None
-        assert node.architecture == "linux-arm64"
-        assert node.semantic_version == "1.0.0"
-        assert node.build_digest == "sha256:" + "f" * 64
-        assert node.binary_digest == "f" * 64
+        assert (
+            runtime_value(node, lambda identity: identity.architecture) == "linux-arm64"
+        )
+        assert (
+            runtime_value(node, lambda identity: identity.semantic_version) == "1.0.0"
+        )
+        assert (
+            runtime_value(node, lambda identity: identity.build_digest)
+            == "sha256:" + "f" * 64
+        )
+        assert runtime_value(node, lambda identity: identity.binary_digest) == "f" * 64
 
 
 @pytest.mark.parametrize("agent_action", ("heartbeat", "result"))
@@ -4713,18 +4739,17 @@ def test_an_order_that_ended_keeps_its_outcome_unless_its_report_is_replaced(
 def test_gpu_fault_between_admission_and_claim_waits_then_recovers(service) -> None:
     # Catches dispatching a previously accepted launch after the GPU broke;
     # cleanup must remain claimable and a healthy observation must unblock it.
-    from dataclasses import replace
-
     from vonk_agent_protocol import ProjectionCode
     from vonk_agent_protocol.inventory import GpuHealth
     from vonk_control.inventory_repository import (
         InventoryRepository,
-        InventorySnapshotInput,
+        NodeInventoryReport,
     )
 
     jobs, sessions, clock = service
     repo = InventoryRepository(sessions)
-    evidence = InventorySnapshotInput(
+    evidence = NodeInventoryReport(
+        schema_version=1,
         node_id=NODE_A,
         observed_at=clock.now,
         disk_total_bytes=1000,
@@ -4735,8 +4760,10 @@ def test_gpu_fault_between_admission_and_claim_waits_then_recovers(service) -> N
         gpu_memory_free_bytes=900,
         gpu_count=1,
         memory_pool="shared",
-        capabilities=(),
+        capabilities=[],
         artifact_store_read_only=False,
+        nvidia_driver_version="unknown",
+        container_runtime_version="unknown",
         gpu_health=GpuHealth.NEEDS_RESET,
     )
     repo.record(evidence)
@@ -4776,7 +4803,11 @@ def test_gpu_fault_between_admission_and_claim_waits_then_recovers(service) -> N
     assert fenced_operation(sessions, stop).id == cleanup.id
     jobs.succeed(stop, STOP_RESULT)
     clock.advance(seconds=5)
-    repo.record(replace(evidence, observed_at=clock.now, gpu_health=GpuHealth.HEALTHY))
+    repo.record(
+        evidence.model_copy(
+            update={"observed_at": clock.now, "gpu_health": GpuHealth.HEALTHY}
+        )
+    )
     clock.advance(seconds=1)
     claim = claim_agent(jobs, NODE_A, "serial-a")
     assert claim is not None
@@ -4785,3 +4816,60 @@ def test_gpu_fault_between_admission_and_claim_waits_then_recovers(service) -> N
         current = session.get(AgentOperation, operation.id)
         assert current is not None
         assert current.recovery_deadline == deadline
+
+
+def test_reusable_preflight_survives_operation_history_collection(service) -> None:
+    """Catches treating a historical command receipt as current capability storage."""
+    from sqlalchemy import delete
+    from vonk_control.runtime_preflight import (
+        admission_blockers,
+        latest_result,
+        request_digest,
+    )
+
+    from .test_runtime_preflight import request as preflight_request
+    from .test_runtime_preflight import result as passing_result
+
+    queue, sessions, clock = service
+    request = preflight_request()
+    digest = request_digest(request)
+    job = parent(sessions, clock)
+    operation = queue.enqueue(
+        job.id,
+        NODE_A,
+        ProtocolAgentOperation.RUNTIME_PREFLIGHT,
+        COMMIT,
+        request.model_dump(mode="json"),
+    )
+    claim = claim_agent(queue, NODE_A, "serial-a", preflight_fingerprint="a" * 64)
+    assert claim is not None
+    result = passing_result(request, observed_at=int(clock.now.timestamp()))
+    queue.succeed(claim.fence, result)
+    with sessions.begin() as session:
+        session.execute(
+            delete(AgentOperationAttempt).where(
+                AgentOperationAttempt.operation_id == operation.id
+            )
+        )
+        session.execute(delete(AgentOperation).where(AgentOperation.id == operation.id))
+    with sessions() as session:
+        retained = latest_result(session, NODE_A, requirements_sha256=digest)
+        assert retained == result
+        assert not admission_blockers(
+            request,
+            retained,
+            current_fingerprint="a" * 64,
+            now=int(clock.now.timestamp()),
+        )
+        assert admission_blockers(
+            request,
+            retained,
+            current_fingerprint="b" * 64,
+            now=int(clock.now.timestamp()),
+        )
+        assert admission_blockers(
+            request,
+            retained,
+            current_fingerprint="a" * 64,
+            now=int(clock.now.timestamp()) + 301,
+        )

@@ -22,6 +22,7 @@ from vonk_agent_protocol.agent_words import ProfileDocumentState
 from ..catalog_revision_contract import RecipeRevisionProjection
 from ..categorized_errors import BookkeepingUnknown
 from ..content_identity import reusable_build
+from ..inventory_items import runtime_value
 from ..lifecycle.evidence import BookkeepingReason, retire_as_unknown
 from ..models import AgentNode, CatalogDocumentRevision, RecipeBuild
 from ..operator_receipt_contract import ReceiptOwner
@@ -347,7 +348,11 @@ def _resolve_once(
                 # is only a reconstruction candidate: reusable_build below
                 # must reproduce the exact accepted executable input digest.
                 node = session.get(AgentNode, candidate.builder_node_id)
-                builder_digest = node.binary_digest if node is not None else None
+                builder_digest = (
+                    runtime_value(node, lambda identity: identity.binary_digest)
+                    if node is not None
+                    else None
+                )
             if (
                 not isinstance(builder_digest, str)
                 or _SHA256.fullmatch(builder_digest) is None

@@ -114,9 +114,12 @@ class ResultConsumptionMixin:
         evidence: object,
     ) -> RecipeOperationView:
         service = typing_cast("RecipeOperationService", self)
-        now = service._clock()
         with service._sessions.begin() as session:
-            job = session.get(Job, operation_id)
+            # Evidence settlement may flush its child; acquire the parent first.
+            job = session.scalar(
+                select(Job).where(Job.id == operation_id).with_for_update(of=Job)
+            )
+            now = service._clock()
             if job is None or not job.kind.startswith("recipe."):
                 raise RecipeRetryLater("recipe result owner observation is unavailable")
             operations = tuple(

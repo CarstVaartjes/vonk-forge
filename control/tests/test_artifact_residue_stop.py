@@ -31,7 +31,7 @@ from vonk_control.host_helper_authority import (
 )
 from vonk_control.inventory_repository import (
     InventoryRepository,
-    InventorySnapshotInput,
+    NodeInventoryReport,
 )
 from vonk_control.models import (
     AgentOperation,
@@ -269,19 +269,30 @@ def test_unknown_cancelled_job_retains_run_claims_until_exact_stop_receipt(
             )
         )
     InventoryRepository(sessions, clock=clock).record(
-        InventorySnapshotInput(
-            node_id,
-            clock(),
-            10_000,
-            8_000,
-            10_000,
-            8_000,
-            10_000,
-            8_000,
-            1,
-            False,
-            ("runtime.vonk.v1", "recipe.image.pull.v1", "recipe.operations.v1"),
-            memory_pool="shared",
+        NodeInventoryReport.model_validate_json(
+            canonical_message(
+                {
+                    "node_id": node_id,
+                    "observed_at": clock(),
+                    "disk_total_bytes": 10_000,
+                    "disk_free_bytes": 8_000,
+                    "host_memory_total_bytes": 10_000,
+                    "host_memory_free_bytes": 8_000,
+                    "gpu_memory_total_bytes": 10_000,
+                    "gpu_memory_free_bytes": 8_000,
+                    "gpu_count": 1,
+                    "artifact_store_read_only": False,
+                    "capabilities": (
+                        "runtime.vonk.v1",
+                        "recipe.image.pull.v1",
+                        "recipe.operations.v1",
+                    ),
+                    "memory_pool": "shared",
+                    "schema_version": 1,
+                    "nvidia_driver_version": "unknown",
+                    "container_runtime_version": "unknown",
+                }
+            )
         )
     )
     plan = operations.preview_run(installation_id, "image-job")

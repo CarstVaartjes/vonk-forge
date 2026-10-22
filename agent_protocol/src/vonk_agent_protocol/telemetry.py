@@ -60,7 +60,28 @@ class TelemetryWireModel(WireModel):
     pass
 
 
-class TelemetrySample(OptionalEvidenceModel, TelemetryWireModel):
+class HostResourceSample(TelemetryWireModel):
+    """RAM and filesystem readings, owned by the inventory store."""
+
+    memory_total_bytes: int | None = Field(ge=0, le=MAX_TELEMETRY_CAPACITY_BYTES)
+    memory_available_bytes: int | None = Field(ge=0, le=MAX_TELEMETRY_CAPACITY_BYTES)
+    disk_total_bytes: int | None = Field(ge=0, le=MAX_TELEMETRY_CAPACITY_BYTES)
+    disk_free_bytes: int | None = Field(ge=0, le=MAX_TELEMETRY_CAPACITY_BYTES)
+
+    @model_validator(mode="after")
+    def capacity_pairs(self) -> HostResourceSample:
+        for total, free in (
+            (self.memory_total_bytes, self.memory_available_bytes),
+            (self.disk_total_bytes, self.disk_free_bytes),
+        ):
+            if (total is None) != (free is None) or (
+                total is not None and free is not None and free > total
+            ):
+                raise ValueError("telemetry capacity values are inconsistent")
+        return self
+
+
+class TelemetrySample(OptionalEvidenceModel, HostResourceSample):
     """One host sample. The capacity scalars are the core; the 4.1 readings
     (temperature, CPU clocks) are optional evidence dropped when invalid."""
 
@@ -86,10 +107,6 @@ class TelemetrySample(OptionalEvidenceModel, TelemetryWireModel):
         pattern=r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
     )
     observed_at: datetime
-    memory_total_bytes: int | None = Field(ge=0, le=MAX_TELEMETRY_CAPACITY_BYTES)
-    memory_available_bytes: int | None = Field(ge=0, le=MAX_TELEMETRY_CAPACITY_BYTES)
-    disk_total_bytes: int | None = Field(ge=0, le=MAX_TELEMETRY_CAPACITY_BYTES)
-    disk_free_bytes: int | None = Field(ge=0, le=MAX_TELEMETRY_CAPACITY_BYTES)
     gpu_unavailable_reason: GpuUnavailableReason | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
@@ -124,8 +141,6 @@ class TelemetrySample(OptionalEvidenceModel, TelemetryWireModel):
     @model_validator(mode="after")
     def internally_consistent(self) -> TelemetrySample:
         for total, available in (
-            (self.memory_total_bytes, self.memory_available_bytes),
-            (self.disk_total_bytes, self.disk_free_bytes),
             (self.gpu_memory_total_bytes, self.gpu_memory_free_bytes),
         ):
             if (total is None) is not (available is None) or (

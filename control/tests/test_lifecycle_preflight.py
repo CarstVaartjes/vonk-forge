@@ -4,7 +4,12 @@ from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import delete, select
-from vonk_agent_protocol.runtime_preflight import RuntimePreflightRequest
+from vonk_agent_protocol import canonical_message
+from vonk_agent_protocol.runtime_preflight import (
+    RuntimePreflightRequest,
+    RuntimePreflightResult,
+)
+from vonk_control.inventory_items import inventory_items, record_preflight
 from vonk_control.lifecycle_preflight import (
     LifecyclePreflight,
     LifecyclePreflightCheckpoint,
@@ -19,11 +24,17 @@ from vonk_control.models import (
 from vonk_control.runtime_preflight import mandatory_capabilities
 
 from .agent_fences import fenced_operation
+from .runtime_identity_support import set_inventory_fingerprint
 from .test_recipe_operations import NOW, setup_services
 
 
 def _clear(sessions):
     with sessions.begin() as session:
+        for node in session.scalars(select(AgentNode)):
+            if node.inventory_snapshot is not None:
+                node.inventory_snapshot.agent_items = inventory_items(node).model_copy(
+                    update={"preflights": []}
+                )
         operations = list(
             session.scalars(
                 select(AgentOperation).where(
@@ -51,15 +62,9 @@ def _finish(sessions, checkpoint, now, *, failed=None, fingerprint="a" * 64):
         job.state = operation.state = "succeeded"
         operation.current_attempt = 1
         operation.updated_at = now
-        session.add(
-            AgentOperationAttempt(
-                operation_id=operation.id,
-                attempt=1,
-                fence=str(uuid.uuid4()),
-                lease_deadline=now + timedelta(seconds=60),
-                agent_certificate_serial="serial-0",
-                state="succeeded",
-                result={
+        result = RuntimePreflightResult.model_validate_json(
+            canonical_message(
+                {
                     "fingerprint": fingerprint,
                     "observed_at": int(now.timestamp()),
                     "findings": [
@@ -72,8 +77,25 @@ def _finish(sessions, checkpoint, now, *, failed=None, fingerprint="a" * 64):
                         }
                         for capability in mandatory_capabilities(request)
                     ],
-                },
+                }
             )
+        )
+        session.add(
+            AgentOperationAttempt(
+                operation_id=operation.id,
+                attempt=1,
+                fence=str(uuid.uuid4()),
+                lease_deadline=now + timedelta(seconds=60),
+                agent_certificate_serial="serial-0",
+                state="succeeded",
+                result=result.model_dump(mode="json"),
+            )
+        )
+        record_preflight(
+            session.get(AgentNode, operation.node_id),
+            operation.payload_digest,
+            result,
+            now,
         )
 
 
@@ -387,7 +409,7 @@ def test_only_preflight_checkpoint_refreshes_when_dependent_identity_changes(
         with sessions.begin() as session:
             node = session.get(AgentNode, node_id)
             assert node is not None
-            node.preflight_fingerprint = "b" * 64
+            set_inventory_fingerprint(node, "b" * 64)
     elif change == "age":
         clock.now += timedelta(seconds=301)
     else:
@@ -412,7 +434,7 @@ def test_changed_earlier_rank_is_reprobed_after_pending_peer_completes(tmp_path)
     with sessions.begin() as session:
         node = session.get(AgentNode, nodes[0])
         assert node is not None
-        node.preflight_fingerprint = "b" * 64
+        set_inventory_fingerprint(node, "b" * 64)
     _finish(sessions, second, clock.now)
     refreshed, error = service.ensure(**arguments, previous=second)
     assert error is None

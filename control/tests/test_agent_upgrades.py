@@ -9,6 +9,7 @@ import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import canonical_message
+from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.contracts import AgentUpgradeResult
 from vonk_agent_protocol.package_upgrade import PackageActivationOutcome
 from vonk_agent_protocol.recipe_operations import RecipeStopResult
@@ -42,6 +43,11 @@ from vonk_control.models import (
 
 from .agent_fences import fenced_attempt, fenced_operation
 from .recipe_stop_fixtures import recipe_stop_payload
+from .runtime_identity_support import (
+    PACKAGED_RUNTIME_IDENTITY,
+    inventory_items_fixture,
+    set_inventory_identity,
+)
 
 NODE_A = "spk_" + "a" * 32
 NODE_B = "spk_" + "b" * 32
@@ -170,11 +176,20 @@ def test_repair_plan_binds_manifest_but_dispatches_current_source_bound_package_
             AgentNode(
                 node_id=NODE_A,
                 state="active",
-                architecture="linux-arm64",
-                semantic_version="0.1.0",
-                build_digest=OLD_IDENTITY["build_digest"],
-                binary_digest=OLD_IDENTITY["binary_digest"],
                 last_seen_at=now,
+                inventory_snapshot=inventory_items_fixture(
+                    NODE_A,
+                    observed_at=now,
+                    identity=AgentRuntimeIdentity.model_validate(
+                        {
+                            **PACKAGED_RUNTIME_IDENTITY,
+                            "architecture": "linux-arm64",
+                            "semantic_version": "0.1.0",
+                            "build_digest": OLD_IDENTITY["build_digest"],
+                            "binary_digest": OLD_IDENTITY["binary_digest"],
+                        }
+                    ),
+                ),
             )
         )
     operations = AgentJobService(sessions, clock=lambda: now)
@@ -252,11 +267,20 @@ def test_repair_manifest_requires_canonical_immutable_url_and_latest_request_lea
             AgentNode(
                 node_id=NODE_A,
                 state="active",
-                architecture="linux-arm64",
-                semantic_version="0.1.0",
-                build_digest=OLD_IDENTITY["build_digest"],
-                binary_digest=OLD_IDENTITY["binary_digest"],
                 last_seen_at=now,
+                inventory_snapshot=inventory_items_fixture(
+                    NODE_A,
+                    observed_at=now,
+                    identity=AgentRuntimeIdentity.model_validate(
+                        {
+                            **PACKAGED_RUNTIME_IDENTITY,
+                            "architecture": "linux-arm64",
+                            "semantic_version": "0.1.0",
+                            "build_digest": OLD_IDENTITY["build_digest"],
+                            "binary_digest": OLD_IDENTITY["binary_digest"],
+                        }
+                    ),
+                ),
             )
         )
     operations = AgentJobService(sessions, clock=lambda: now)
@@ -1748,13 +1772,24 @@ def _rollout(
                 AgentNode(
                     node_id=node_id,
                     state="active",
-                    architecture="linux-arm64",
-                    semantic_version="0.1.0",
-                    build_digest=OLD_IDENTITY["build_digest"],
-                    binary_digest=OLD_IDENTITY["binary_digest"],
                     last_seen_at=now - timedelta(hours=1)
                     if node_id in offline
                     else now,
+                    inventory_snapshot=inventory_items_fixture(
+                        node_id,
+                        observed_at=now - timedelta(hours=1)
+                        if node_id in offline
+                        else now,
+                        identity=AgentRuntimeIdentity.model_validate(
+                            {
+                                **PACKAGED_RUNTIME_IDENTITY,
+                                "architecture": "linux-arm64",
+                                "semantic_version": "0.1.0",
+                                "build_digest": OLD_IDENTITY["build_digest"],
+                                "binary_digest": OLD_IDENTITY["binary_digest"],
+                            }
+                        ),
+                    ),
                 )
             )
             session.flush()  # Certificates reference the persisted node on PostgreSQL.
@@ -2180,8 +2215,8 @@ def test_upgrade_identity_warning_names_its_order_and_clears_on_confirmation(
         OutcomeUnknown,
         WaitReason,
     )
-    from vonk_control.evidence_repeats import note_repeat
-    from vonk_control.models import AgentOperation, EvidenceRepeat
+    from vonk_control.evidence_repeats import note_repeat, owner_evidence
+    from vonk_control.models import AgentOperation
 
     from .agent_fences import fenced_operation
     from .test_evidence_repeats import LIMIT, _repeating
@@ -2218,6 +2253,7 @@ def test_upgrade_identity_warning_names_its_order_and_clears_on_confirmation(
                 operation.kind,
                 NODE_A,
                 WaitReason.UPGRADE_AWAITING_IDENTITY,
+                operation=operation,
                 now=clock(),
             )
     with sessions() as session:
@@ -2242,12 +2278,7 @@ def test_upgrade_identity_warning_names_its_order_and_clears_on_confirmation(
     with sessions() as session:
         stored = session.get(AgentOperation, operation.id)
         assert stored is not None and stored.state == LifecycleState.SUCCEEDED
-        assert (
-            session.query(EvidenceRepeat)
-            .filter_by(node_id=NODE_A, subject=operation.kind)
-            .count()
-            == 0
-        )
+        assert any(item.code is None for item in owner_evidence(stored) or [])
 
     # A retained aggregate whose operation already resolved is not an open wait,
     # even if its old ledger entry was never cleared by the deployed version.
@@ -2258,6 +2289,7 @@ def test_upgrade_identity_warning_names_its_order_and_clears_on_confirmation(
                 operation.kind,
                 NODE_A,
                 WaitReason.UPGRADE_AWAITING_IDENTITY,
+                operation=operation,
                 now=clock(),
             )
     assert _repeating(sessions, NODE_A, clock()) == []
@@ -2307,8 +2339,8 @@ def test_idle_worker_adopts_only_exact_retained_upgrade_receipt(
         operation_id = operation.id
         # Retained authenticated evidence, with the fresh contact already
         # committed before the previous Controller worker died.
-        node.binary_digest = result.binary_digest
-        node.build_digest = result.build_digest
+        set_inventory_identity(node, binary_digest=result.binary_digest)
+        set_inventory_identity(node, build_digest=result.build_digest)
         node.protocol_version = AGENT_PROTOCOL_VERSION
         node.last_seen_at = clock()
         schedule_agent_upgrade_retry(operation, attempt, clock())
@@ -2317,7 +2349,7 @@ def test_idle_worker_adopts_only_exact_retained_upgrade_receipt(
         attempt.state = LifecycleState.OBSERVING
         attempt.observation_cause = ObservationCause.LEASE_LAPSED
         if change == "binary":
-            node.binary_digest = OLD_IDENTITY["binary_digest"]
+            set_inventory_identity(node, binary_digest=OLD_IDENTITY["binary_digest"])
         elif change == "receipt":
             result = result.model_copy(
                 update={

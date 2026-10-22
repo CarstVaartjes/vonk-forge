@@ -24,7 +24,6 @@ def test_preflight_query_projects_only_comparison_fields(
     with postgres_engine.begin() as connection:
         for statement in (
             "CREATE TEMP TABLE jobs (id text, result jsonb, state text)",
-            "CREATE TEMP TABLE agent_nodes (node_id text, preflight_fingerprint text)",
             "CREATE TEMP TABLE agent_operations (id text, node_id text, kind text, payload_digest text, current_attempt int, updated_at int, parent_job_id text)",
             "CREATE TEMP TABLE agent_operation_attempts (operation_id text, attempt int, result jsonb, state text, lease_deadline timestamptz, progress jsonb)",
         ):
@@ -35,10 +34,6 @@ def test_preflight_query_projects_only_comparison_fields(
                 "id": operation_id,
                 "result": json.dumps({"preflight": {"receipts": {node_id: receipt}}}),
             },
-        )
-        connection.execute(
-            text("INSERT INTO agent_nodes VALUES (:node, :fingerprint)"),
-            {"node": node_id, "fingerprint": "d" * 64},
         )
         connection.execute(
             text(
@@ -95,7 +90,6 @@ def test_preflight_query_projects_only_comparison_fields(
         assert evidence[1]["child_state"] == "waiting-for-operator"
         assert evidence[1]["attempt_state"] == "expired"
         assert evidence[1]["lease_deadline"] == "2026-09-08T12:00:00+00:00"
-    assert evidence[0]["current_fingerprint"] == "d" * 64
     assert evidence[0]["receipt_fingerprint"] == "b" * 64
     assert evidence[0]["payload_sha256"] == "c" * 64
     assert evidence[0]["observed_at"] == 100

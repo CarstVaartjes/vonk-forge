@@ -6,10 +6,9 @@ vonk_control.models.AgentEnrollmentGrant|agent_enrollment_grants|
 vonk_control.models.AgentEnrollment|agent_enrollments|
 vonk_control.models.AgentIssuedCertificateRevocation|agent_issued_certificate_revocations|
 vonk_control.models.AgentNodeProfile|agent_node_profiles|
-vonk_control.models.AgentNode|agent_nodes|
+vonk_control.models.AgentNode|agent_nodes|inventory_snapshot:vonk_control.models.telemetry.NodeInventoryItemsSnapshot:None:ONETOMANY
 vonk_control.models.AgentOperationAttempt|agent_operation_attempts|
 vonk_control.models.AgentOperation|agent_operations|
-vonk_control.models.AgentPresence|agent_presence|
 vonk_control.models.ArtifactDistributionAssignment|artifact_distribution_assignments|
 vonk_control.models.ArtifactJobBlob|artifact_job_blobs|
 vonk_control.models.ArtifactJobFile|artifact_job_files|
@@ -23,7 +22,6 @@ vonk_control.models.ClusterMappingNode|cluster_mapping_nodes|
 vonk_control.models.ClusterMapping|cluster_mappings|
 vonk_control.models.ControlProcessHeartbeat|control_process_heartbeats|
 vonk_control.models.CoordinatorFailure|coordinator_failures|
-vonk_control.models.EvidenceRepeat|evidence_repeats|
 vonk_control.models.FleetEventCursor|fleet_event_cursor|
 vonk_control.models.FleetProfileApplication|fleet_profile_applications|
 vonk_control.models.FleetProfileSelection|fleet_profile_selection|
@@ -38,10 +36,12 @@ vonk_control.models.LoginSession|sessions|
 vonk_control.models.ModelCacheOperation|model_cache_operations|
 vonk_control.models.ModelCacheSetArtifact|model_cache_set_artifacts|
 vonk_control.models.ModelCacheSet|model_cache_sets|
-vonk_control.models.NodeArtifact|node_artifacts|
+vonk_control.models.NodeInventoryItemsSnapshot|node_inventory_snapshots|
+vonk_control.models.NodeInventoryResourceSnapshot|node_inventory_snapshots|
 vonk_control.models.NodeInventorySnapshot|node_inventory_snapshots|
+vonk_control.models.NodeSnapshot|node_inventory_snapshots|
 vonk_control.models.NodeTelemetryLatest|node_telemetry_latest|
-vonk_control.models.NodeTelemetrySample|node_telemetry_samples|
+vonk_control.models.NodeTelemetrySample|node_telemetry_samples|resource_snapshot:vonk_control.models.telemetry.NodeInventoryResourceSnapshot:None:ONETOMANY
 vonk_control.models.RecipeBuild|recipe_builds|
 vonk_control.models.RecipeInstallation|recipe_installations|
 vonk_control.models.RecipeLibrarySyncRun|recipe_library_sync_runs|

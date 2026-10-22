@@ -26,6 +26,7 @@ from ..agent_upgrade_contract import (
     AgentUpgradePackage,
     AgentUpgradeRolloutResult,
 )
+from ..inventory_items import runtime_value
 from ..lifecycle import CancelRequested
 from ..lifecycle.agent_operation import AgentOperationAdapter
 from ..models import AgentNode, AgentOperation, Job
@@ -259,12 +260,15 @@ class DispatchMixin:
             and node.state == "active"
             and node.revoked_at is None
             and node.protocol_version == AGENT_PROTOCOL_VERSION
-            and node.architecture == package.architecture
+            and runtime_value(node, lambda identity: identity.architecture)
+            == package.architecture
             # Signed package and binary/build digests are the compatibility
             # identity.  Version strings remain audit metadata and may differ
             # across packaging schemes without invalidating an exact upgrade.
-            and node.build_digest == package.target_build_digest
-            and node.binary_digest == package.target_binary_digest
+            and runtime_value(node, lambda identity: identity.build_digest)
+            == package.target_build_digest
+            and runtime_value(node, lambda identity: identity.binary_digest)
+            == package.target_binary_digest
             and evidence.get("architecture") == package.architecture
             and evidence.get("build_digest") == package.target_build_digest
             and evidence.get("binary_digest") == package.target_binary_digest
@@ -291,8 +295,10 @@ class DispatchMixin:
         node = session.get(AgentNode, node_id)
         if (
             node is None
-            or node.binary_digest != source.package.binary_sha256
-            or node.build_digest != source.build_digest
+            or runtime_value(node, lambda identity: identity.binary_digest)
+            != source.package.binary_sha256
+            or runtime_value(node, lambda identity: identity.build_digest)
+            != source.build_digest
         ):
             return "rollback source no longer matches installed agent"
         payload = AgentUpgradePayload(

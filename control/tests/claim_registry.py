@@ -114,7 +114,6 @@ CLAIMS: dict[str, Claim] = {
 NOT_CLAIMS: dict[str, str] = {
     "agent_nodes": "the node identity itself",
     "agent_certificates": "issued credentials of a node; identity, not a reservation",
-    "agent_presence": "the latest observation of a node",
     "agent_node_profiles": "the observed hardware of a node",
     "artifact_job_files": "a named file slot inside its own artifact job",
     "cluster_mappings": "an immutable placement; endpoint_owner names a rank",
@@ -123,9 +122,6 @@ NOT_CLAIMS: dict[str, str] = {
     "resource_reservations",
     "run_nodes": "a run's members; its port and memory claims are "
     "resource_reservations",
-    "evidence_repeats": "attention evidence of a repeated failure; it never "
-    "holds or blocks work and clears on the next success",
-    "node_artifacts": "observed artifacts on a node",
     "node_inventory_snapshots": "observed inventory of a node",
     "node_telemetry_latest": "observed telemetry of a node",
     "node_telemetry_samples": "observed telemetry of a node",

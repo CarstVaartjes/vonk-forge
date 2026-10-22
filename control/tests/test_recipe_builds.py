@@ -26,14 +26,16 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol import (
     AgentOperation as ProtocolOperation,
 )
+from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_control.agent_jobs import AgentJobService, superseded_cancellation_deadline
 from vonk_control.availability_production import build_recipe_image_availability
 from vonk_control.bounded_json import require_integer
 from vonk_control.catalog_entities import CatalogEntityService
 from vonk_control.install_admission import InstallAdmissionService
+from vonk_control.inventory_items import inventory_artifacts
 from vonk_control.inventory_repository import (
     InventoryRepository,
-    InventorySnapshotInput,
+    NodeInventoryReport,
 )
 from vonk_control.models import (
     AgentCertificate,
@@ -42,7 +44,6 @@ from vonk_control.models import (
     Base,
     CatalogDocumentRevision,
     Job,
-    NodeArtifact,
     RecipeBuild,
     RecipeSourceBundle,
     ResourceReservation,
@@ -70,6 +71,11 @@ from vonk_control.source_bundles import SourceBundleStore, generate_source_bundl
 from vonk_forge_contracts import RecipeDefinition, document_sha256, read_recipe
 
 from .recipe_removal_review_support import remove_after_review
+from .runtime_identity_support import (
+    PACKAGED_RUNTIME_IDENTITY,
+    inventory_items_fixture,
+    set_inventory_identity,
+)
 from .runtime_image_fixtures import place_test_image, remove_test_image
 from .test_recipe_image_availability import _typed_availability_payload
 
@@ -134,19 +140,26 @@ def _json_text(value: object) -> str:
 
 def _restore_builder_inventory(sessions, node_id, now):
     InventoryRepository(sessions, clock=lambda: now).record(
-        InventorySnapshotInput(
-            node_id,
-            now,
-            2 * 1024**4,
-            1 * 1024**4,
-            100_000,
-            80_000,
-            100_000,
-            80_000,
-            1,
-            False,
-            ("recipe.build.v1", "recipe.build.egress-proxy.v1"),
-            memory_pool="separate",
+        NodeInventoryReport.model_validate_json(
+            canonical_message(
+                {
+                    "node_id": node_id,
+                    "observed_at": now,
+                    "disk_total_bytes": 2 * 1024**4,
+                    "disk_free_bytes": 1 * 1024**4,
+                    "host_memory_total_bytes": 100_000,
+                    "host_memory_free_bytes": 80_000,
+                    "gpu_memory_total_bytes": 100_000,
+                    "gpu_memory_free_bytes": 80_000,
+                    "gpu_count": 1,
+                    "artifact_store_read_only": False,
+                    "capabilities": ("recipe.build.v1", "recipe.build.egress-proxy.v1"),
+                    "memory_pool": "separate",
+                    "schema_version": 1,
+                    "nvidia_driver_version": "unknown",
+                    "container_runtime_version": "unknown",
+                }
+            )
         )
     )
 
@@ -192,17 +205,26 @@ def setup(
         builder = session.get(AgentNode, node_id) if existing_node else None
         if existing_node:
             assert builder is not None
-            builder.binary_digest = "1" * 64
+            set_inventory_identity(builder, binary_digest="1" * 64)
         else:
             session.add(
                 AgentNode(
                     node_id=node_id,
                     state="active",
-                    architecture="linux-arm64",
-                    semantic_version="1.2.3",
-                    build_digest="sha256:" + "a" * 64,
-                    binary_digest="1" * 64,
                     last_seen_at=now,
+                    inventory_snapshot=inventory_items_fixture(
+                        node_id,
+                        observed_at=now,
+                        identity=AgentRuntimeIdentity.model_validate(
+                            {
+                                **PACKAGED_RUNTIME_IDENTITY,
+                                "architecture": "linux-arm64",
+                                "semantic_version": "1.2.3",
+                                "build_digest": "sha256:" + "a" * 64,
+                                "binary_digest": "1" * 64,
+                            }
+                        ),
+                    ),
                 )
             )
         # Another recipe on an existing builder may share the same bundle.
@@ -219,25 +241,32 @@ def setup(
             )
         )
     InventoryRepository(sessions, clock=lambda: now).record(
-        InventorySnapshotInput(
-            node_id,
-            now,
-            2 * 1024**4,
-            1 * 1024**4,
-            100_000,
-            80_000,
-            100_000,
-            80_000,
-            1,
-            False,
-            (
-                "recipe.build.v1",
-                "recipe.build.egress-proxy.v1",
-                "recipe.image.import.v1",
-                "runtime.vonk.v1",
-                "recipe.image.pull.v1",
-            ),
-            memory_pool="separate",
+        NodeInventoryReport.model_validate_json(
+            canonical_message(
+                {
+                    "node_id": node_id,
+                    "observed_at": now,
+                    "disk_total_bytes": 2 * 1024**4,
+                    "disk_free_bytes": 1 * 1024**4,
+                    "host_memory_total_bytes": 100_000,
+                    "host_memory_free_bytes": 80_000,
+                    "gpu_memory_total_bytes": 100_000,
+                    "gpu_memory_free_bytes": 80_000,
+                    "gpu_count": 1,
+                    "artifact_store_read_only": False,
+                    "capabilities": (
+                        "recipe.build.v1",
+                        "recipe.build.egress-proxy.v1",
+                        "recipe.image.import.v1",
+                        "runtime.vonk.v1",
+                        "recipe.image.pull.v1",
+                    ),
+                    "memory_pool": "separate",
+                    "schema_version": 1,
+                    "nvidia_driver_version": "unknown",
+                    "container_runtime_version": "unknown",
+                }
+            )
         )
     )
     catalog = CatalogEntityService(sessions, clock=lambda: now)
@@ -336,7 +365,7 @@ def test_prepared_plan_failure_rolls_back_without_orphan_build(tmp_path: Path) -
     with sessions.begin() as session:
         node = session.get(AgentNode, node_id)
         assert node is not None
-        node.binary_digest = "2" * 64
+        set_inventory_identity(node, binary_digest="2" * 64)
 
     with (
         pytest.raises(RecipeBuildError),
@@ -359,7 +388,7 @@ def test_build_identity_changes_when_builder_runtime_changes(tmp_path: Path) -> 
     with sessions.begin() as session:
         node = session.get(AgentNode, node_id)
         assert node is not None
-        node.binary_digest = "2" * 64
+        set_inventory_identity(node, binary_digest="2" * 64)
     second = service.plan(revision.id, node_id, now=now)
 
     assert second.build_id != first.build_id
@@ -384,7 +413,7 @@ def test_build_resolution_reuses_exact_receipt_without_builder_admission(
         node = session.get(AgentNode, node_id)
         assert node is not None
         node.state = "revoked"
-        node.binary_digest = None
+        set_inventory_identity(node, binary_digest=None)
 
     resolution = service.resolve(revision.id)
 
@@ -918,31 +947,47 @@ def test_resolution_reuses_the_present_receipt_for_the_shared_identity(
             AgentNode(
                 node_id=second_node,
                 state="active",
-                architecture="linux-arm64",
-                semantic_version="1.2.3",
-                build_digest="sha256:" + "a" * 64,
-                binary_digest="1" * 64,
                 last_seen_at=now,
+                inventory_snapshot=inventory_items_fixture(
+                    second_node,
+                    observed_at=now,
+                    identity=AgentRuntimeIdentity.model_validate(
+                        {
+                            **PACKAGED_RUNTIME_IDENTITY,
+                            "architecture": "linux-arm64",
+                            "semantic_version": "1.2.3",
+                            "build_digest": "sha256:" + "a" * 64,
+                            "binary_digest": "1" * 64,
+                        }
+                    ),
+                ),
             )
         )
     InventoryRepository(sessions, clock=lambda: now).record(
-        InventorySnapshotInput(
-            second_node,
-            now,
-            2 * 1024**4,
-            1 * 1024**4,
-            100_000,
-            80_000,
-            100_000,
-            80_000,
-            1,
-            False,
-            (
-                "recipe.build.v1",
-                "recipe.build.egress-proxy.v1",
-                "recipe.image.import.v1",
-            ),
-            memory_pool="separate",
+        NodeInventoryReport.model_validate_json(
+            canonical_message(
+                {
+                    "node_id": second_node,
+                    "observed_at": now,
+                    "disk_total_bytes": 2 * 1024**4,
+                    "disk_free_bytes": 1 * 1024**4,
+                    "host_memory_total_bytes": 100_000,
+                    "host_memory_free_bytes": 80_000,
+                    "gpu_memory_total_bytes": 100_000,
+                    "gpu_memory_free_bytes": 80_000,
+                    "gpu_count": 1,
+                    "artifact_store_read_only": False,
+                    "capabilities": (
+                        "recipe.build.v1",
+                        "recipe.build.egress-proxy.v1",
+                        "recipe.image.import.v1",
+                    ),
+                    "memory_pool": "separate",
+                    "schema_version": 1,
+                    "nvidia_driver_version": "unknown",
+                    "container_runtime_version": "unknown",
+                }
+            )
         )
     )
     second_plan = service.plan(revision.id, second_node, now=now)
@@ -1055,7 +1100,7 @@ def test_build_resolution_without_cache_returns_durable_intent_identity(
         node = session.get(AgentNode, node_id)
         assert node is not None
         node.state = "revoked"
-        node.binary_digest = None
+        set_inventory_identity(node, binary_digest=None)
 
     resolution = service.resolve(revision.id)
 
@@ -1155,19 +1200,26 @@ def test_build_plan_from_intent_rechecks_selected_builder_capacity(
     resolution = service.resolve(revision.id)
     newer = now + timedelta(seconds=1)
     InventoryRepository(sessions, clock=lambda: newer).record(
-        InventorySnapshotInput(
-            node_id,
-            newer,
-            2 * 1024**4,
-            1,
-            100_000,
-            80_000,
-            100_000,
-            80_000,
-            1,
-            False,
-            ("recipe.build.v1", "recipe.build.egress-proxy.v1"),
-            memory_pool="separate",
+        NodeInventoryReport.model_validate_json(
+            canonical_message(
+                {
+                    "node_id": node_id,
+                    "observed_at": newer,
+                    "disk_total_bytes": 2 * 1024**4,
+                    "disk_free_bytes": 1,
+                    "host_memory_total_bytes": 100_000,
+                    "host_memory_free_bytes": 80_000,
+                    "gpu_memory_total_bytes": 100_000,
+                    "gpu_memory_free_bytes": 80_000,
+                    "gpu_count": 1,
+                    "artifact_store_read_only": False,
+                    "capabilities": ("recipe.build.v1", "recipe.build.egress-proxy.v1"),
+                    "memory_pool": "separate",
+                    "schema_version": 1,
+                    "nvidia_driver_version": "unknown",
+                    "container_runtime_version": "unknown",
+                }
+            )
         )
     )
 
@@ -1214,7 +1266,7 @@ def test_build_reservation_rejects_changed_builder_runtime(tmp_path: Path) -> No
     with sessions.begin() as session:
         node = session.get(AgentNode, node_id)
         assert node is not None
-        node.binary_digest = "2" * 64
+        set_inventory_identity(node, binary_digest="2" * 64)
 
     with (
         sessions.begin() as session,
@@ -1401,7 +1453,7 @@ def test_build_rejects_builder_without_runtime_identity(tmp_path: Path) -> None:
     with sessions.begin() as session:
         node = session.get(AgentNode, node_id)
         assert node is not None
-        node.binary_digest = None
+        set_inventory_identity(node, binary_digest=None)
 
     with pytest.raises(RecipeBuildError):
         RecipeBuildService(sessions, bundles=bundles).plan(
@@ -1411,7 +1463,7 @@ def test_build_rejects_builder_without_runtime_identity(tmp_path: Path) -> None:
     with sessions.begin() as session:
         node = session.get(AgentNode, node_id)
         assert node is not None
-        node.binary_digest = "1" * 64
+        set_inventory_identity(node, architecture="linux-arm64", binary_digest="1" * 64)
     assert (
         RecipeBuildService(sessions, bundles=bundles)
         .plan(revision.id, node_id, now=now)
@@ -2067,19 +2119,26 @@ def test_build_plan_rejects_disk_below_concurrent_oci_export_peak(
     # reserve retained for the Spark host.
     newer = now + timedelta(seconds=1)
     InventoryRepository(sessions, clock=lambda: newer).record(
-        InventorySnapshotInput(
-            node_id,
-            newer,
-            disk_total_bytes,
-            required_bytes - 1,
-            100_000,
-            80_000,
-            100_000,
-            80_000,
-            1,
-            False,
-            ("recipe.build.v1",),
-            memory_pool="separate",
+        NodeInventoryReport.model_validate_json(
+            canonical_message(
+                {
+                    "node_id": node_id,
+                    "observed_at": newer,
+                    "disk_total_bytes": disk_total_bytes,
+                    "disk_free_bytes": required_bytes - 1,
+                    "host_memory_total_bytes": 100_000,
+                    "host_memory_free_bytes": 80_000,
+                    "gpu_memory_total_bytes": 100_000,
+                    "gpu_memory_free_bytes": 80_000,
+                    "gpu_count": 1,
+                    "artifact_store_read_only": False,
+                    "capabilities": ("recipe.build.v1",),
+                    "memory_pool": "separate",
+                    "schema_version": 1,
+                    "nvidia_driver_version": "unknown",
+                    "container_runtime_version": "unknown",
+                }
+            )
         )
     )
 
@@ -2150,19 +2209,26 @@ def test_public_build_rejects_stale_inventory_without_egress_capability(
     )
     newer = now + timedelta(seconds=1)
     InventoryRepository(sessions, clock=lambda: newer).record(
-        InventorySnapshotInput(
-            node_id,
-            newer,
-            2 * 1024**4,
-            1 * 1024**4,
-            100_000,
-            80_000,
-            100_000,
-            80_000,
-            1,
-            False,
-            ("recipe.build.v1", "recipe.image.import.v1"),
-            memory_pool="separate",
+        NodeInventoryReport.model_validate_json(
+            canonical_message(
+                {
+                    "node_id": node_id,
+                    "observed_at": newer,
+                    "disk_total_bytes": 2 * 1024**4,
+                    "disk_free_bytes": 1 * 1024**4,
+                    "host_memory_total_bytes": 100_000,
+                    "host_memory_free_bytes": 80_000,
+                    "gpu_memory_total_bytes": 100_000,
+                    "gpu_memory_free_bytes": 80_000,
+                    "gpu_count": 1,
+                    "artifact_store_read_only": False,
+                    "capabilities": ("recipe.build.v1", "recipe.image.import.v1"),
+                    "memory_pool": "separate",
+                    "schema_version": 1,
+                    "nvidia_driver_version": "unknown",
+                    "container_runtime_version": "unknown",
+                }
+            )
         )
     )
 
@@ -2211,9 +2277,7 @@ def test_success_does_not_claim_isolated_build_image_is_installed(
 
     assert completed.image_digest == "sha256:" + "b" * 64
     with sessions() as session:
-        artifact = session.scalar(
-            select(NodeArtifact).where(NodeArtifact.node_id == node_id)
-        )
+        artifact = next(iter(inventory_artifacts(session, node_id)), None)
         assert artifact is None
 
 

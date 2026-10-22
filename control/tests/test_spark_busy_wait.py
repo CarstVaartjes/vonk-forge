@@ -23,6 +23,7 @@ from vonk_agent_protocol import (
     WaitReason,
     canonical_message,
 )
+from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.recipe_operations import RecipeStopResult
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.agent_jobs.contracts import CLAIM_LEASE_SECONDS
@@ -49,7 +50,11 @@ from cluster_profiles.cli_render import progress_line
 from .agent_fences import fenced_operation
 from .package_upgrade_fixtures import source_transport
 from .recipe_stop_fixtures import recipe_stop_payload
-from .runtime_identity_support import claim_agent
+from .runtime_identity_support import (
+    PACKAGED_RUNTIME_IDENTITY,
+    claim_agent,
+    inventory_items_fixture,
+)
 
 NODE_A = "spk_" + "a" * 32
 NODE_B = "spk_" + "b" * 32
@@ -83,10 +88,19 @@ def fleet(tmp_path, postgres_engine):
                     node_id=node_id,
                     state="active",
                     workload_intent_ordinal=1,
-                    architecture="linux-arm64",
-                    semantic_version="1.0.0",
-                    build_digest="sha256:" + "f" * 64,
-                    binary_digest="f" * 64,
+                    inventory_snapshot=inventory_items_fixture(
+                        node_id,
+                        observed_at=None,
+                        identity=AgentRuntimeIdentity.model_validate(
+                            {
+                                **PACKAGED_RUNTIME_IDENTITY,
+                                "architecture": "linux-arm64",
+                                "semantic_version": "1.0.0",
+                                "build_digest": "sha256:" + "f" * 64,
+                                "binary_digest": "f" * 64,
+                            }
+                        ),
+                    ),
                 )
             )
             session.flush()

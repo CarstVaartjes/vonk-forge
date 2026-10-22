@@ -8,14 +8,14 @@ cause dropped, and the run-switch re-entered the start phase forever.
 """
 
 import pytest
-from sqlalchemy import delete, select
+from sqlalchemy import select, update
 from vonk_agent_protocol import (
     AgentOperation,
     InvalidRequestError,
     UnknownOutcomeError,
 )
 from vonk_control.failure_classification import error_detail, is_definite
-from vonk_control.models import AgentPresence, Job, RecipeRun
+from vonk_control.models import AgentNode, Job, RecipeRun
 
 from .test_artifact_jobs import _configure_artifact_recipe
 from .test_recipe_operations import installed_recipe, setup_services
@@ -61,7 +61,11 @@ def test_missing_endpoint_presence_waits_and_names_the_node(tmp_path):
     )
     plan = service.preview_run(installed.owner_id, "qwen")
     with sessions.begin() as session:
-        session.execute(delete(AgentPresence))
+        session.execute(
+            update(AgentNode).values(
+                management_address=None, management_observed_at=None
+            )
+        )
 
     with pytest.raises(UnknownOutcomeError) as raised:
         service.start(

@@ -13,9 +13,9 @@ from sqlalchemy import select
 from vonk_agent_protocol import AgentResult, ReservationState
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.models import (
+    AgentNode,
     AgentOperation,
     AgentOperationAttempt,
-    AgentPresence,
     InstallationNode,
     Job,
     RecipeInstallation,
@@ -58,7 +58,7 @@ def _record_original_install_attempts(sessions, installation_id: str) -> None:
         )
         for operation in operations:
             evidence = evidence_by_node[operation.node_id]
-            presence = session.get(AgentPresence, operation.node_id)
+            presence = session.get(AgentNode, operation.node_id)
             assert presence is not None
             operation.current_attempt = 1
             session.add(
@@ -67,7 +67,7 @@ def _record_original_install_attempts(sessions, installation_id: str) -> None:
                     attempt=1,
                     fence=str(uuid.uuid4()),
                     lease_deadline=NOW,
-                    agent_certificate_serial=presence.certificate_serial,
+                    agent_certificate_serial=presence.contact_certificate_serial,
                     state="succeeded",
                     result=evidence,
                 )
@@ -211,7 +211,7 @@ def test_postgres_new_review_keeps_the_reconciled_rank_after_a_cancelled_rank(
                 AgentOperation.node_id == node_ids[1],
             )
         )
-        presence = session.get(AgentPresence, node_ids[1])
+        presence = session.get(AgentNode, node_ids[1])
         assert child is not None and presence is not None
         child.state = "running"
         child.current_attempt = 1
@@ -223,7 +223,7 @@ def test_postgres_new_review_keeps_the_reconciled_rank_after_a_cancelled_rank(
                 attempt=1,
                 fence=fence,
                 lease_deadline=deadline,
-                agent_certificate_serial=presence.certificate_serial,
+                agent_certificate_serial=presence.contact_certificate_serial,
                 state="running",
             )
         )

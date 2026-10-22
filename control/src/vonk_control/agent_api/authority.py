@@ -57,6 +57,7 @@ from ..http_errors import SecurityHTTPError
 from ..logging import redact_text
 from ..models import AgentOperation, AgentOperationAttempt, Job
 from ..operator_acceptance import ReceiptPolicy, operator_acceptance
+from ..repeated_evidence_contract import RepeatedEvidenceSubject, host_grant_subject
 from ..strict_json import ControllerAPIRoute
 from .common import (
     AgentApiServices,
@@ -109,7 +110,7 @@ def issue_host_runtime_grant(
 
 #: The subject a Spark's refused results are counted under: one per Spark,
 #: cleared by its next accepted result.
-RESULT_REFUSALS = "agent result"
+RESULT_REFUSALS = RepeatedEvidenceSubject.AGENT_RESULT
 
 
 def _refusal_detail(error: RequestValidationError) -> str:
@@ -284,7 +285,7 @@ def install_authority_routes(
             ),
             evidence_available=lambda: attempt_evidence(body.fence),
             node_id=identity.node_id,
-            subject=f"host runtime {body.action} grant",
+            subject=host_grant_subject(body.action),
         )
         return _json_response(_host_grant_response(grant))
 
@@ -305,7 +306,7 @@ def install_authority_routes(
             ),
             evidence_available=lambda: activation_evidence(identity.node_id),
             node_id=identity.node_id,
-            subject="package activation grant",
+            subject=RepeatedEvidenceSubject.PACKAGE_ACTIVATION_GRANT,
         )
         return _json_response(_host_grant_response(grant))
 
@@ -327,7 +328,7 @@ def install_authority_routes(
             ),
             evidence_available=lambda: attempt_evidence(body.fence),
             node_id=identity.node_id,
-            subject="agent upgrade grant",
+            subject=RepeatedEvidenceSubject.AGENT_UPGRADE_GRANT,
         )
         return _json_response(_host_grant_response(grant))
 

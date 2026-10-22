@@ -12,6 +12,8 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
+from vonk_agent_protocol.claims import AgentRuntimeIdentity
+from vonk_control.inventory_items import runtime_value
 from vonk_control.models import (
     AgentNode,
     FleetProfileApplication,
@@ -26,6 +28,7 @@ from vonk_control.runtime_image_preparation import (
     RuntimeImageReceipt,
 )
 
+from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
 from .runtime_image_fixtures import place_test_image, remove_test_image
 from .test_profile_build_memory import _accepted_build_profile
 from .test_profile_build_process_recovery import _worker_process
@@ -89,8 +92,19 @@ def test_running_image_replacement_executes_the_reviewed_build_receipt(
                 AgentNode(
                     node_id=second_builder_id,
                     state="active",
-                    binary_digest=builder.binary_digest,
                     workload_intent_ordinal=1,
+                    inventory_snapshot=inventory_items_fixture(
+                        second_builder_id,
+                        observed_at=None,
+                        identity=AgentRuntimeIdentity.model_validate(
+                            {
+                                **PACKAGED_RUNTIME_IDENTITY,
+                                "binary_digest": runtime_value(
+                                    builder, lambda identity: identity.binary_digest
+                                ),
+                            }
+                        ),
+                    ),
                 )
             )
             session.flush()

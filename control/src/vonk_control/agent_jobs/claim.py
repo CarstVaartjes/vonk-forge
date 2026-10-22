@@ -33,6 +33,7 @@ from ..agent_operation_facts import attempt_holds_order as _attempt_holds_order
 from ..agent_operation_facts import aware as _aware
 from ..auth import AgentSource
 from ..categorized_errors import InvalidValue
+from ..inventory_items import inventory_items, runtime_value
 from ..lifecycle import CancelRequested, Outcome, Reported
 from ..lifecycle.agent_operation import AgentOperationAdapter
 from ..lifecycle.evidence import Residue
@@ -92,11 +93,15 @@ def _claim_once(
                 node is None
                 or operation.node_id != node_id
                 or attempt.agent_certificate_serial != certificate_serial
-                or node.binary_digest != runtime_identity.binary_digest
-                or node.build_digest != runtime_identity.build_digest
-                or node.architecture != runtime_identity.architecture
-                or node.semantic_version != runtime_identity.semantic_version
-                or node.preflight_fingerprint != preflight_fingerprint
+                or runtime_value(node, lambda identity: identity.binary_digest)
+                != runtime_identity.binary_digest
+                or runtime_value(node, lambda identity: identity.build_digest)
+                != runtime_identity.build_digest
+                or runtime_value(node, lambda identity: identity.architecture)
+                != runtime_identity.architecture
+                or runtime_value(node, lambda identity: identity.semantic_version)
+                != runtime_identity.semantic_version
+                or inventory_items(node).preflight_fingerprint != preflight_fingerprint
             ):
                 raise InvalidValue(
                     "claim request identity changed",

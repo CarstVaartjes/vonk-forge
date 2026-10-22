@@ -7,6 +7,7 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
+from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_control.fleet_profile_contract import FleetProfileInput
 from vonk_control.fleet_profiles import build_production_fleet_profile_service
 from vonk_control.models import (
@@ -17,6 +18,11 @@ from vonk_control.models import (
 )
 from vonk_control.run_switch_operations import RunSwitchOperationService
 
+from .runtime_identity_support import (
+    PACKAGED_RUNTIME_IDENTITY,
+    inventory_items_fixture,
+    set_inventory_hostname,
+)
 from .test_fleet_profile_api import _client, _headers
 from .test_profile_load_installed_cli import (
     _https_api_peer,
@@ -62,17 +68,18 @@ def test_installed_cli_reviews_real_whole_fleet_effects_before_prompt(
                 node_id=idle_node,
                 state="active",
                 protocol_version=2,
-                architecture="linux-arm64",
                 last_seen_at=lifecycle._clock(),
+                inventory_snapshot=inventory_items_fixture(
+                    idle_node,
+                    observed_at=lifecycle._clock(),
+                    identity=AgentRuntimeIdentity.model_validate(
+                        {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
+                    ),
+                ),
             )
         )
-        session.add(
-            AgentNodeProfile(
-                node_id=idle_node,
-                display_name="Idle Spark",
-                hostname="idle-spark",
-            )
-        )
+        session.add(AgentNodeProfile(node_id=idle_node, display_name="Idle Spark"))
+        set_inventory_hostname(session, idle_node, "idle-spark")
 
     planner = RunSwitchOperationService(
         sessions,

@@ -8,8 +8,9 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, update
 from vonk_agent_protocol import LifecycleState, OperationProgress, canonical_message
+from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.execution_plan_service import (
     ControllerExecutionPlanService,
@@ -25,7 +26,7 @@ from vonk_control.fleet_profiles import (
 )
 from vonk_control.inventory_repository import (
     InventoryRepository,
-    InventorySnapshotInput,
+    NodeInventoryReport,
 )
 from vonk_control.job_documents import RecipeStartParent
 from vonk_control.lifecycle.evidence import Residue
@@ -34,7 +35,6 @@ from vonk_control.models import (
     AgentNode,
     AgentOperation,
     AgentOperationAttempt,
-    AgentPresence,
     CatalogDocumentRevision,
     FleetProfileApplication,
     Job,
@@ -65,7 +65,11 @@ from vonk_control.stored_json import write_guard_mode
 from cluster_profiles.control_client import validate_control_document
 
 from .preflight_fixtures import record_passing_preflight
-from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, claim_agent
+from .runtime_identity_support import (
+    PACKAGED_RUNTIME_IDENTITY,
+    claim_agent,
+    inventory_items_fixture,
+)
 from .test_fleet_profile_api import _client, _headers
 from .test_profile_installed_execution import (
     _apply,
@@ -532,9 +536,15 @@ def test_disjoint_child_samples_remain_distinct_after_restart(
             AgentNode(
                 node_id=second,
                 state="active",
-                architecture="linux-arm64",
                 protocol_version=2,
                 last_seen_at=NOW,
+                inventory_snapshot=inventory_items_fixture(
+                    second,
+                    observed_at=NOW,
+                    identity=AgentRuntimeIdentity.model_validate(
+                        {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
+                    ),
+                ),
             )
         )
         session.flush()
@@ -547,13 +557,13 @@ def test_disjoint_child_samples_remain_distinct_after_restart(
                 not_after=NOW + timedelta(days=1),
             )
         )
-        session.add(
-            AgentPresence(
-                node_id=second,
-                certificate_serial="serial-b",
-                certificate_fingerprint="fingerprint-b",
+        session.execute(
+            update(AgentNode)
+            .where(AgentNode.node_id == second)
+            .values(
+                contact_certificate_serial="serial-b",
                 management_address="192.168.1.212",
-                observed_at=NOW,
+                management_observed_at=NOW,
             )
         )
         revision = session.scalar(
@@ -565,19 +575,30 @@ def test_disjoint_child_samples_remain_distinct_after_restart(
         assert revision is not None
         selector = f"{revision.publisher}/{revision.slug}"
     InventoryRepository(sessions, clock=lambda: NOW).record(
-        InventorySnapshotInput(
-            second,
-            NOW,
-            10_000,
-            8_000,
-            10_000,
-            8_000,
-            10_000,
-            8_000,
-            1,
-            False,
-            ("runtime.vonk.v1", "recipe.image.pull.v1", "recipe.operations.v1"),
-            memory_pool="shared",
+        NodeInventoryReport.model_validate_json(
+            canonical_message(
+                {
+                    "node_id": second,
+                    "observed_at": NOW,
+                    "disk_total_bytes": 10_000,
+                    "disk_free_bytes": 8_000,
+                    "host_memory_total_bytes": 10_000,
+                    "host_memory_free_bytes": 8_000,
+                    "gpu_memory_total_bytes": 10_000,
+                    "gpu_memory_free_bytes": 8_000,
+                    "gpu_count": 1,
+                    "artifact_store_read_only": False,
+                    "capabilities": (
+                        "runtime.vonk.v1",
+                        "recipe.image.pull.v1",
+                        "recipe.operations.v1",
+                    ),
+                    "memory_pool": "shared",
+                    "schema_version": 1,
+                    "nvidia_driver_version": "unknown",
+                    "container_runtime_version": "unknown",
+                }
+            )
         )
     )
     record_passing_preflight(sessions, NOW)

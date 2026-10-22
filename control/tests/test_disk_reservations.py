@@ -7,11 +7,12 @@ from threading import Barrier
 
 import pytest
 from sqlalchemy import select
+from vonk_agent_protocol import canonical_message
 from vonk_control.install_admission import InstallPlanConflict
 from vonk_control.inventory_repository import (
     MAX_INVENTORY_FUTURE_SKEW,
     InventoryRepository,
-    InventorySnapshotInput,
+    NodeInventoryReport,
 )
 from vonk_control.models import (
     InstallationNode,
@@ -25,19 +26,30 @@ from .test_run_switch_operations import RecordingArtifactExecutor, _request, _se
 
 def _record_disk(sessions, node_id, *, at, free, observed_at=None):
     InventoryRepository(sessions, clock=lambda: at).record(
-        InventorySnapshotInput(
-            node_id,
-            observed_at if observed_at is not None else at,
-            10_000,
-            free,
-            10_000,
-            8_000,
-            10_000,
-            8_000,
-            1,
-            False,
-            ("runtime.vonk.v1", "recipe.image.pull.v1", "recipe.operations.v1"),
-            memory_pool="shared",
+        NodeInventoryReport.model_validate_json(
+            canonical_message(
+                {
+                    "node_id": node_id,
+                    "observed_at": observed_at if observed_at is not None else at,
+                    "disk_total_bytes": 10_000,
+                    "disk_free_bytes": free,
+                    "host_memory_total_bytes": 10_000,
+                    "host_memory_free_bytes": 8_000,
+                    "gpu_memory_total_bytes": 10_000,
+                    "gpu_memory_free_bytes": 8_000,
+                    "gpu_count": 1,
+                    "artifact_store_read_only": False,
+                    "capabilities": (
+                        "runtime.vonk.v1",
+                        "recipe.image.pull.v1",
+                        "recipe.operations.v1",
+                    ),
+                    "memory_pool": "shared",
+                    "schema_version": 1,
+                    "nvidia_driver_version": "unknown",
+                    "container_runtime_version": "unknown",
+                }
+            )
         )
     )
 

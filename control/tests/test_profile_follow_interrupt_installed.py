@@ -11,23 +11,28 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_agent_protocol import canonical_message
+from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_control.cluster_mappings import ClusterMappingService
 from vonk_control.fleet_profile_contract import FleetProfileApplicationProgress
+from vonk_control.inventory_items import inventory_artifacts
 from vonk_control.inventory_repository import (
     InventoryRepository,
-    InventorySnapshotInput,
+    NodeInventoryReport,
 )
 from vonk_control.models import (
     AgentCertificate,
     AgentNode,
-    AgentPresence,
     CatalogDocumentRevision,
     FleetProfileApplication,
-    NodeArtifact,
 )
 
+from .inventory_artifact_support import (
+    seed_inventory_artifact,
+)
+from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
 from .test_fleet_profile_api import _client, _headers
 from .test_fleet_profile_cancel import _application
 from .test_profile_load_installed_cli import _https_api_peer, _process_environment
@@ -45,7 +50,13 @@ def _add_disjoint_profile_node(
             AgentNode(
                 node_id=node_id,
                 state="active",
-                architecture="linux-arm64",
+                inventory_snapshot=inventory_items_fixture(
+                    node_id,
+                    observed_at=None,
+                    identity=AgentRuntimeIdentity.model_validate(
+                        {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
+                    ),
+                ),
             )
         )
         session.flush()
@@ -60,22 +71,19 @@ def _add_disjoint_profile_node(
             )
         )
         session.flush()
-        session.add(
-            AgentPresence(
-                node_id=node_id,
-                certificate_serial=certificate_serial,
-                certificate_fingerprint=f"fingerprint-{node_id[-1]}",
+        session.execute(
+            update(AgentNode)
+            .where(AgentNode.node_id == node_id)
+            .values(
+                contact_certificate_serial=certificate_serial,
                 management_address="192.168.1.212",
-                observed_at=NOW,
+                management_observed_at=NOW,
             )
         )
-        artifacts = tuple(
-            session.scalars(
-                select(NodeArtifact).where(NodeArtifact.node_id == source_node_id)
-            )
-        )
-        session.add_all(
-            NodeArtifact(
+        artifacts = tuple(inventory_artifacts(session, source_node_id))
+        for artifact in artifacts:
+            seed_inventory_artifact(
+                session,
                 node_id=node_id,
                 kind=artifact.kind,
                 digest=artifact.digest,
@@ -86,8 +94,6 @@ def _add_disjoint_profile_node(
                 verified_at=artifact.verified_at,
                 updated_at=NOW,
             )
-            for artifact in artifacts
-        )
         revision = session.scalar(
             select(CatalogDocumentRevision).where(
                 CatalogDocumentRevision.kind == "recipe",
@@ -98,19 +104,26 @@ def _add_disjoint_profile_node(
         revision_id = revision.id
         revision_slug = revision.slug
     InventoryRepository(sessions, clock=lambda: NOW).record(
-        InventorySnapshotInput(
-            node_id,
-            NOW,
-            10_000,
-            8_000,
-            10_000,
-            8_000,
-            10_000,
-            8_000,
-            1,
-            False,
-            tuple(capabilities),
-            memory_pool="shared",
+        NodeInventoryReport.model_validate_json(
+            canonical_message(
+                {
+                    "node_id": node_id,
+                    "observed_at": NOW,
+                    "disk_total_bytes": 10_000,
+                    "disk_free_bytes": 8_000,
+                    "host_memory_total_bytes": 10_000,
+                    "host_memory_free_bytes": 8_000,
+                    "gpu_memory_total_bytes": 10_000,
+                    "gpu_memory_free_bytes": 8_000,
+                    "gpu_count": 1,
+                    "artifact_store_read_only": False,
+                    "capabilities": tuple(capabilities),
+                    "memory_pool": "shared",
+                    "schema_version": 1,
+                    "nvidia_driver_version": "unknown",
+                    "container_runtime_version": "unknown",
+                }
+            )
         )
     )
     mappings = ClusterMappingService(sessions)

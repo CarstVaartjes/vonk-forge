@@ -149,19 +149,22 @@ def test_every_stop_failing_with_the_same_code_is_attention_until_one_succeeds(
     assert _repeating(services.sessions, NODE_A, clock.now) == []
 
 
-def test_an_unreadable_repeat_table_never_fails_the_report_or_the_fleet(
+def test_unreadable_contact_evidence_does_not_block_command_history(
     tmp_path,
 ) -> None:
     client, services, _codec, clock = make_agent_system(tmp_path)
     with services.sessions.begin() as session:
-        session.execute(text("DROP TABLE evidence_repeats"))
+        session.execute(
+            text("UPDATE agent_nodes SET contact_repeated_evidence = :invalid"),
+            {"invalid": '"damaged"'},
+        )
     failed = {
         "state": "failed",
         "result": {"status": "failed", "error_code": FailureCode.RECIPE_STOP_FAILED},
     }
     for _ in range(LIMIT):
         _report_order(client, services, clock, failed)
-    assert _repeating(services.sessions, NODE_A, clock.now) == []
+    assert len(_repeating(services.sessions, NODE_A, clock.now)) == 1
 
 
 class _RefusingAuthority:

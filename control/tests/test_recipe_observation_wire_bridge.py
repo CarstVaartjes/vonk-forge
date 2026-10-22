@@ -39,7 +39,6 @@ from vonk_control.job_documents import RecipeStartParent, RecipeStopParent
 from vonk_control.models import (
     AgentNode,
     AgentOperation,
-    AgentPresence,
     Job,
     RecipeInstallation,
     RecipeRun,
@@ -1171,9 +1170,9 @@ def test_stale_singleton_absence_can_be_refreshed_read_only_and_recovered(
         endpoint_ready=False,
     )
     with sessions.begin() as session:
-        presence = session.get(AgentPresence, node_id)
+        presence = session.get(AgentNode, node_id)
         assert presence is not None
-        presence.observed_at = now[0]
+        presence.management_observed_at = now[0]
     now[0] = NOW + timedelta(seconds=126)
 
     assert recovery.tick() is True
@@ -1220,9 +1219,9 @@ def test_stale_presence_waits_then_recovery_resumes_without_new_run(
         engine=postgres_engine,
     )
     with sessions.begin() as session:
-        presence = session.get(AgentPresence, node_id)
+        presence = session.get(AgentNode, node_id)
         assert presence is not None
-        presence.observed_at = NOW - timedelta(minutes=10)
+        presence.management_observed_at = NOW - timedelta(minutes=10)
     now[0] = NOW + timedelta(seconds=4)
     recovery = DistributedRecoveryCoordinator(
         sessions,
@@ -1256,9 +1255,9 @@ def test_stale_presence_waits_then_recovery_resumes_without_new_run(
         assert run is not None and run.next_action_at is not None
         now[0] = max(NOW + timedelta(seconds=10), run.next_action_at)
     with sessions.begin() as session:
-        presence = session.get(AgentPresence, node_id)
+        presence = session.get(AgentNode, node_id)
         assert presence is not None
-        presence.observed_at = now[0]
+        presence.management_observed_at = now[0]
 
     assert recovery.tick() is True
 
