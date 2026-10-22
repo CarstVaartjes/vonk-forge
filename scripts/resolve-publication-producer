@@ -28,7 +28,11 @@ SETUP_PLATFORMS = ("nas", "linux-arm64")
 SHA = re.compile(r"[a-f0-9]{40}\Z")
 PAGE_SIZE = 100
 # Every producer is rebuilt when the release graph or this reuse rule changes.
-ORCHESTRATION = (RELEASE_WORKFLOW, "scripts/resolve-publication-producer")
+ORCHESTRATION = (
+    RELEASE_WORKFLOW,
+    "scripts/resolve-publication-producer",
+    ".tool-versions",
+)
 PROTOCOL_WHEEL_INPUTS = ("scripts/protocol-wheel-name", "scripts/protocol_wheel.py")
 
 
@@ -153,6 +157,8 @@ PRODUCERS = {
             "deploy/compose/hermes-agent/**",
             "deploy/compose/image-janitor/janitor.py",
             "deploy/compose/litellm/**",
+            "deploy/compose/python-bootstrap.lock",
+            "deploy/compose/uv-bootstrap.lock",
             "deploy/compose/postgres/**",
             "deploy/compose/prometheus/**",
             "deploy/compose/registry/config.yml",

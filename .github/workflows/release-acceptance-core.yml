@@ -68,7 +68,7 @@ jobs:
         id: runtime
         uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
-          version: "0.12.19"
+          version-file: .tool-versions
           python-version: "3.14"
           enable-cache: true
       - name: Find the pull request candidate and its Spark evidence
@@ -220,7 +220,7 @@ jobs:
         timeout-minutes: 5
         uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
-          version: "0.12.19"
+          version-file: .tool-versions
           python-version: "3.14"
           enable-cache: true
 
@@ -626,7 +626,7 @@ jobs:
       - name: Install uv and Python
         uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
-          version: "0.12.19"
+          version-file: .tool-versions
           python-version: "3.14"
           enable-cache: true
       - name: Build recipe library index and packages
@@ -927,7 +927,7 @@ jobs:
       - name: Install canonical publication model runtime
         uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
-          version: "0.12.19"
+          version-file: .tool-versions
           python-version: "3.14"
           enable-cache: true
 

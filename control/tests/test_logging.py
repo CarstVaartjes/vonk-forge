@@ -98,3 +98,27 @@ def test_persisted_failure_evidence_does_not_retain_signed_download_queries() ->
     )
     assert "signed-download-secret" not in str(safe)
     assert "https://cdn.example/model" in str(safe)
+
+
+def test_retired_bookkeeping_names_subject_and_reason_in_production_output(
+    capsys,
+) -> None:
+    """The runtime formatter drops extra fields; the cause must survive it."""
+    from vonk_control.lifecycle.evidence import (
+        BookkeepingReason,
+        Damaged,
+        read_or_rebuild,
+    )
+
+    configure_controller_logging()
+    read_or_rebuild(
+        kind="recipe-build.receipt",
+        subject="lost-receipt-operation",
+        reason=BookkeepingReason.ROW_INCOMPLETE,
+        read=lambda: Damaged("receipt missing; Authorization: Bearer must-not-appear"),
+    )
+    output = capsys.readouterr().err
+    assert "lost-receipt-operation" in output
+    assert BookkeepingReason.ROW_INCOMPLETE in output
+    assert "receipt missing" in output
+    assert "must-not-appear" not in output

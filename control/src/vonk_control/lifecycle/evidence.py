@@ -26,6 +26,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
 
+from ..logging import redact_text
 from .types import Effect, Observed
 
 _LOG = logging.getLogger(__name__)
@@ -103,7 +104,11 @@ def retire_as_unknown(
         _REPORTED.add(key)
     _LOG.log(
         logging.WARNING if first else logging.DEBUG,
-        "bookkeeping retired as unknown",
+        "bookkeeping retired as unknown: %s:%s (%s): %s",
+        redact_text(kind),
+        redact_text(subject),
+        reason.value,
+        redact_text(note)[:200],
         extra={
             "residue_kind": kind,
             "residue_subject": subject,
