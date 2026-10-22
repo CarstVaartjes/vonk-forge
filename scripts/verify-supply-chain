@@ -352,7 +352,7 @@ def image_errors(root: Path) -> list[str]:
             "target": "worker",
         },
         {
-            "context": "deploy/compose/hermes-agent",
+            "context": ".",
             "dockerfile": "deploy/compose/hermes-agent/Dockerfile",
             "environment": "HERMES_AGENT_IMAGE",
             "package": "vonk-forge-hermes",
@@ -407,6 +407,12 @@ def image_errors(root: Path) -> list[str]:
             errors.append(f"{name} build base is missing or invalid")
         elif reference not in dockerfile:
             errors.append(f"{name} build base is absent from control Dockerfile")
+        elif (
+            name == "python"
+            and reference
+            not in (root / "deploy/compose/litellm/Dockerfile").read_text()
+        ):
+            errors.append("Python bootstrap base is absent from LiteLLM Dockerfile")
     hermes_reference = build_bases.get("hermes")
     if not isinstance(hermes_reference, str):
         errors.append("hermes build base is missing or invalid")

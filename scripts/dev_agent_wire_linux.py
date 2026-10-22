@@ -52,10 +52,10 @@ CI_RUNNER = "ubuntu:24.04"
 # docs/local-linux-lane.md.
 BASE_IMAGE = (
     "ubuntu:24.04@sha256:"
-    "008173c23f95b170204355c12626cb5a965d779a7e1283b09e9cffbb1bf33ca3"
+    "68ee22004a9109b44973313b02ff7b1de250f1de0f5ecb628d73f579aaff33ac"
 )
 RUST_TOOLCHAIN = "1.98.1"
-UV_VERSION = "0.12.19"
+UV_VERSION = (REPO_ROOT / ".tool-versions").read_text().split()[1]
 PYTHON_VERSION = "3.14"
 RECIPE_REVISION_FILE = Path("tests/acceptance/recipe-library-revision.txt")
 # Whitespace-normalized form of the CI step "Exercise Controller requests and
@@ -141,14 +141,16 @@ def lane_contract(workflow_text: str, root: Path | None = None) -> dict[str, obj
         if "run_agent_wire_contracts.py" in command and "--build-only" not in command
     ]
     rust = re.search(r"rustup toolchain install (\S+)", job)
-    uv = re.search(r'^\s*version:\s*"([^"]+)"\s*$', job, re.MULTILINE)
+    uv = re.search(r"^\s*version-file:\s*(\S+)\s*$", job, re.MULTILINE)
     python = re.search(r'^\s*python-version:\s*"([^"]+)"\s*$', job, re.MULTILINE)
     runner = re.search(r"^\s*runs-on:\s*(\S+)\s*$", job, re.MULTILINE)
     revision = re.search(r"cat\s+(tests/acceptance/recipe-library-revision\.txt)", job)
     return {
         "tier_commands": tier_commands,
         "rust_toolchain": rust.group(1) if rust else None,
-        "uv_version": uv.group(1) if uv else None,
+        "uv_version": (root / uv.group(1)).read_text().split()[1]
+        if uv and root is not None
+        else None,
         "python_version": python.group(1) if python else None,
         "runner": runner.group(1) if runner else None,
         "recipe_revision_file": revision.group(1) if revision else None,

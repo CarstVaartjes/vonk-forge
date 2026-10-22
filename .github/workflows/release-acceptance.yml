@@ -142,7 +142,7 @@ jobs:
           # API and worker share every expensive Dockerfile stage. Keep them on
           # one builder so the worker reuses this exact candidate's build graph.
           - {role: api, context: '.', file: control/Dockerfile, target: api, cache: 'type=registry,ref=ghcr.io/carstvaartjes/vonk-forge-api:buildcache'}
-          - {role: hermes, context: deploy/compose/hermes-agent, file: deploy/compose/hermes-agent/Dockerfile, target: managed, cache: 'type=gha,scope=vonk-forge-hermes'}
+          - {role: hermes, context: ., file: deploy/compose/hermes-agent/Dockerfile, target: managed, cache: 'type=gha,scope=vonk-forge-hermes'}
           - {role: litellm, context: '.', file: deploy/compose/litellm/Dockerfile, target: '', cache: 'type=gha,scope=vonk-forge-litellm'}
     env:
       # Pull requests keep their own Controller build cache so a later push

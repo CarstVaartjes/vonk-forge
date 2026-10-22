@@ -448,3 +448,41 @@ def parsed_repository() -> None:
     for root in {*PYTHON_ROOTS, CODE_POSITION_ROOT}:
         for module in python_files(REPO_ROOT / root):
             parse_file(module)
+
+
+# One prebuilt-image fixture owner for security and runtime image consumers.
+def _built_image(variable: str) -> str:
+    image = os.environ.get(variable, "")
+    reason = None
+    if not image:
+        reason = (
+            f"{variable} names no prebuilt image; run scripts/test-local "
+            "--with-image-build or build control/Dockerfile and set it"
+        )
+    elif shutil.which("docker") is None:
+        reason = "Docker is unavailable"
+    elif (
+        subprocess.run(
+            ["docker", "image", "inspect", image],
+            capture_output=True,
+            check=False,
+            timeout=15,
+        ).returncode
+        != 0
+    ):
+        reason = f"{variable}={image} is not a local Docker image"
+    if reason is None:
+        return image
+    if os.getenv("CI", "").lower() == "true":
+        pytest.fail(f"CI prerequisite missing: {reason}", pytrace=False)
+    pytest.skip(reason)
+
+
+@pytest.fixture(scope="session")
+def controller_image() -> str:
+    return _built_image("VONK_TEST_CONTROLLER_IMAGE")
+
+
+@pytest.fixture(scope="session")
+def worker_image() -> str:
+    return _built_image("VONK_TEST_WORKER_IMAGE")
