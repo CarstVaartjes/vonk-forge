@@ -54,7 +54,11 @@ from ..recipe_operations import prepare_exact_recipe_run_observation_nodes
 from ..source_bundles import SourceBundleError
 from ..spark_store_retention import store_retention_request
 from ..telemetry import TelemetryRepository, TelemetrySampleInput
-from ..untracked_installations import untracked_installations, untracked_runs
+from ..untracked_installations import (
+    node_run_ids,
+    untracked_installations,
+    untracked_runs,
+)
 from .common import (
     _CANONICAL_UUID,
     _DIGEST,
@@ -222,13 +226,13 @@ def install_observations_routes(
             verdict = InventoryVerdict(
                 store_retention=store_retention_request(session, identity.node_id, now),
                 untracked_installations=untracked_installations(
-                    session, body.installations or ()
+                    session, identity.node_id, body.installations or ()
                 ),
                 # Absent unless the runs were named: an older agent's strict
                 # reader never sees the field.
                 untracked_runs=None
                 if body.runs is None
-                else untracked_runs(session, body.runs),
+                else untracked_runs(session, identity.node_id, body.runs),
             )
         if clock_authority is not None:
             try:
@@ -537,20 +541,26 @@ def install_observations_routes(
     def recipe_run_disposition(run_id: str, request: Request) -> Response:
         """Say whether this Controller still wants one local run.
 
-        Only a run the Controller can still stop is wanted (planned, starting,
-        running, stopping, lost). Any other run, including one this Controller
-        never owned (for example after its database was rebuilt) or one it
+        Only a run assigned to this Spark that the Controller can still stop is
+        wanted (planned, starting, running, stopping, lost). Any other run,
+        including one this Controller never owned (for example after its
+        database was rebuilt) or one it
         failed or stopped, is named ``unowned``: it holds no capacity here, so
         the agent retires its local lifecycle instead of keeping it forever.
-        The agent asks only once the process is gone: a process still running
-        for an ended run is reported, and that report reopens the run as lost.
+        The agent retires only after proving the process gone. A process still
+        running for an ended run is reported, reopening it as lost.
         """
 
-        helper_identity(request)
+        identity = helper_identity(request)
         if _CANONICAL_UUID.fullmatch(run_id) is None:
             raise HTTPException(status_code=422, detail="recipe run id is invalid")
         with _require_services(services).sessions() as session:
-            run = session.get(RecipeRun, run_id)
+            run = session.scalar(
+                select(RecipeRun).where(
+                    RecipeRun.id == run_id,
+                    RecipeRun.id.in_(node_run_ids(identity.node_id)),
+                )
+            )
             wanted = run is not None and run.state in STOPPABLE_RUN_STATES
             # A lost run (a cancelled start left it so) is reported on too: the
             # agent's word that its process is gone releases its claims.

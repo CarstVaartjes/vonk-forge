@@ -2,7 +2,7 @@
 use Collector::*;
 use StoreRoot::*;
 
-/// Unused non-model data expires after one day.
+/// All unused Spark data, including model copies, expires after one day.
 pub const GRACE: std::time::Duration = std::time::Duration::from_secs(24 * 60 * 60);
 
 /// How one store's entries leave.
@@ -16,10 +16,12 @@ pub enum Collector {
     Bookkeeping,
     /// Unused entries, once unchanged for [`GRACE`].
     Ended,
-    /// Model objects leave on low space; a checkpoint or isolated entry is [`Ended`].
+    /// Unused model copies leave after [`GRACE`] or on low space; scratch is [`Ended`].
     ModelObjects,
     /// A base image no build has opened for [`GRACE`], and isolated entries.
     BaseImages,
+    /// Private build scratch, after its systemd units have settled for collection.
+    BuildStaging,
     /// An installation the Controller has not tracked for [`GRACE`] and no
     /// started run names, and isolated entries; one it tracks only on its order.
     Untracked,
@@ -80,7 +82,7 @@ pub const STORES: &[Store] = &[
     Store("runs/", UntrackedRuns, "the Controller's run or job record; its verdict", Agent),
     Store("run-metadata/", UntrackedRuns, "the Controller's run or job record; its verdict", Agent),
     Store("builds/", Ended, "the build claim, until the Controller has the image", Agent),
-    Store("build-staging/", Claim, "the build claim", Agent),
+    Store("build-staging/", BuildStaging, "the build claim and its exact systemd units", Agent),
     Store("base-images/", BaseImages, "the builds that open each image", Agent),
     Store("containers/", Claim, "Podman's default storage; builds use private storage", Agent),
     Store("tmp/", Claim, "the process that made each temporary file", Agent),

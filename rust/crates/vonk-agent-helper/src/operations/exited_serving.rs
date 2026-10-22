@@ -5,9 +5,9 @@
 //! container that no Stop will reach: the Controller names the ended run
 //! `unowned` and the agent retires its lifecycle claim
 //! (`run-metadata/<run>/lifecycle.json`) without touching the container. The
-//! claim's absence is therefore the Controller's verdict that the run has
-//! ended, as the agent recorded it; a live run (planned, starting, running,
-//! stopping, lost) keeps its claim.
+//! claim's absence leaves no local owner, including after local state loss;
+//! a live run (planned, starting, running, stopping, lost) keeps its claim.
+//! Failed reads and malformed claim directories remain unknown.
 //!
 //! An exited serving container whose run holds no claim and that exited more
 //! than a grace ago is removed, its exit account and bounded output journaled
@@ -17,12 +17,10 @@
 
 use super::*;
 
-/// One pass is due at most this often, on a helper request.
-pub const EXITED_SERVING_SWEEP_INTERVAL: Duration = Duration::from_secs(60 * 60);
-
 /// An exited container stays this long after its process ended, for anyone
 /// who wants to read it with Docker's own tools.
-const GRACE: chrono::TimeDelta = chrono::TimeDelta::hours(24);
+const GRACE: chrono::TimeDelta =
+    chrono::TimeDelta::seconds(vonk_agent_protocol::store_retention::GRACE.as_secs() as i64);
 
 /// One listing names at most this many exited managed containers, newest
 /// first, full ids only; a before cursor continues past protected entries.
@@ -90,8 +88,11 @@ impl<R: CommandRunner> OperationExecutor<R> {
     }
 
     pub(super) fn sweep_exited_serving_at(&self, now: chrono::DateTime<chrono::Utc>) {
-        // Unknown is not none: without the agent's claims nothing is removed.
-        if let Err(error) = self.run_claims() {
+        // Missing is absence, including after a crash or identity change.
+        // A denied read or malformed directory is unknown, never absence.
+        if let Err(error) = self.run_claims()
+            && error != rustix::io::Errno::NOENT
+        {
             eprintln!(
                 "vonk-agent-helper: exited serving sweep deferred: the agent's run claims are unreadable: {error}"
             );

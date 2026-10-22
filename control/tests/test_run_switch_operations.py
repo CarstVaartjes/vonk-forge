@@ -6760,3 +6760,43 @@ def test_dual_profile_disk_review_does_not_decode_unrelated_catalog_documents(
         assert not any(slug.startswith("unrelated-") for slug in decoded), decoded
     finally:
         engine.dispose()
+
+
+@pytest.mark.parametrize("unused_models", (None, 5))
+def test_disk_review_counts_orphan_model_copies_and_scopes_unmeasured_cleanup(
+    tmp_path, unused_models: int | None
+):
+    """Catches a disk refusal claiming only zero removable bytes despite an
+    agent reporting reclaimable orphan models; also proves inventory recovery.
+    """
+    sessions, lifecycle, _queue, _mapping_id, _build_id, nodes = setup_services(
+        tmp_path
+    )
+    service = _service(
+        sessions, lifecycle._clock(), lifecycle, RecordingArtifactExecutor()
+    )
+    request = _request(sessions, nodes[0])
+    initial = service.preview(request, actor="admin")
+    required = initial.fit_current.nodes[0].disk_required_bytes
+    assert required is not None
+    with sessions.begin() as session:
+        snapshot = session.scalar(select(NodeInventorySnapshot))
+        assert snapshot is not None
+        snapshot.disk_free_bytes = 0
+        snapshot.unused_model_bytes = unused_models
+    short = service.preview(request, actor="admin")
+    refusal = next(
+        reason
+        for reason in short.blockers
+        if reason.code == RunSwitchCode.INSUFFICIENT_DISK
+    )
+    assert "Only 0 bytes" not in refusal.detail
+    if unused_models is None:
+        assert "Model-copy reclamation is unknown" in refusal.detail
+    else:
+        assert f"{unused_models} bytes of reclaimable model copies" in refusal.detail
+    with sessions.begin() as session:
+        snapshot = session.scalar(select(NodeInventorySnapshot))
+        assert snapshot is not None
+        snapshot.unused_model_bytes = snapshot.disk_total_bytes
+    assert service.preview(request, actor="admin").allowed

@@ -208,7 +208,33 @@ impl<R> RecipeExecutor<'_, R> {
         };
         match disposition {
             RecipeRunDisposition::Unowned => {
-                if self.retire_claim(run_id, "unreadable managed metadata") {
+                let request_root = self.runtime_root.join("runtime-requests");
+                let boundary = HostRuntimeBoundary {
+                    client: self.client,
+                    request_root: &request_root,
+                    helper_socket: self.helper_socket,
+                };
+                match boundary
+                    .inspect_recipe_run_evidence_for_observation(
+                        vec![run_id.to_owned()],
+                        false,
+                        None,
+                    )
+                    .await
+                {
+                    Ok(report) if !report.running => {}
+                    Ok(_) => return Err(skip("the container is running")),
+                    Err(inspection) => {
+                        return Err(skip_because(
+                            &inspection.preflight_code(),
+                            &format!(
+                                "the container could not be inspected: {}",
+                                inspection.cause()
+                            ),
+                        ));
+                    }
+                }
+                if self.retire_claim(run_id, "unreadable managed metadata; process gone") {
                     Err(RecipeObservationError::UnownedRun)
                 } else {
                     Err(skip("retirement failed"))

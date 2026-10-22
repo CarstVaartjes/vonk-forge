@@ -146,13 +146,14 @@ def test_referenced_model_expands_to_protected_content_objects(
     with world.sessions() as session:
         request = store_retention_request(session, NODE, NOW)
     assert request is not None
-    assert expected <= set(request.protected_model_objects)
+    if owner == "operation":
+        assert expected <= set(request.protected_model_objects)
+    else:
+        assert expected.isdisjoint(request.protected_model_objects)
 
 
-def test_profile_build_layout_protects_its_docker_manifest_identity(world) -> None:
-    """A layout's digest differs from Docker's manifest. Passing only the layout
-    to native retention would remove a profile's source-built image.
-    """
+def test_saved_profile_does_not_pin_an_unused_spark_image(world) -> None:
+    """Catches a saved profile retaining an unused Spark image forever."""
     revision = world.revision("glm", 1, head=ProfileDocumentState.ACTIVE)
     build_id = world.build(revision, archive="d" * 64)
     _profile(world, "vonk-forge/glm")
@@ -163,16 +164,14 @@ def test_profile_build_layout_protects_its_docker_manifest_identity(world) -> No
         assert request is not None
         assert (
             build.image_digest.removeprefix("sha256:")
-            in request.protected_image_addresses
+            not in request.protected_image_addresses
         )
 
 
-def test_pinned_definition_protects_file_identity_without_a_matching_cache_owner(
+def test_live_operation_protects_file_identity_without_a_matching_cache_owner(
     world,
 ) -> None:
-    """Cache provenance can belong to another model revision. A profile pins
-    the accepted model's files, independently of that disposable cache index.
-    """
+    """Catches resolving live work only through a disposable cache index."""
     from vonk_control.models import CatalogDocumentRevision
     from vonk_forge_contracts import document_sha256, read_model
 
@@ -189,8 +188,18 @@ def test_pinned_definition_protects_file_identity_without_a_matching_cache_owner
         )
         expected = {file.sha256 for file in definition.files}
         assert expected
-    _head_recipe_naming(world, digest)
-    _profile(world, "vonk-forge/glm")
+    from vonk_control.job_documents import RecipeStopParent
+
+    world.job(
+        RecipeStopParent(
+            schema_version=1,
+            owner_kind="installation",
+            owner_id="cb555393-764b-4eb6-8f15-b416d289428f",
+            plan_digest=digest,
+        ).model_dump(mode="json"),
+        state=LifecycleState.RUNNING,
+        updated=world.now,
+    )
     with world.sessions() as session:
         request = store_retention_request(session, NODE, world.now)
     assert request is not None
@@ -224,7 +233,17 @@ def test_missing_model_dependency_defers_collection_instead_of_authorizing_parti
             .where(CatalogDocumentRevision.id == model_id)
             .values(document=document, content_digest=digest)
         )
-    _head_recipe_naming(world, digest)
-    _profile(world, "vonk-forge/glm")
+    from vonk_control.job_documents import RecipeStopParent
+
+    world.job(
+        RecipeStopParent(
+            schema_version=1,
+            owner_kind="installation",
+            owner_id="cb555393-764b-4eb6-8f15-b416d289428f",
+            plan_digest=digest,
+        ).model_dump(mode="json"),
+        state=LifecycleState.RUNNING,
+        updated=world.now,
+    )
     with world.sessions() as session:
         assert store_retention_request(session, NODE, world.now) is None

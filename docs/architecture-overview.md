@@ -167,12 +167,13 @@ layout is repaired; its Fleet warning clears on success. Removing an
 installation removes its links, and its model cleanup removes the store object
 when that was the last link, so the bytes are freed when the last name goes
 (see [unused storage](runbooks/model-cache.md#unused-storage-retention)).
-Model files are the one cache kept until the space is needed: an object no
-installation links or names stays until the Spark is below the Controller's
-low-space line, and then the agent removes such objects least recently used
-first, until free space is back above the line plus the eviction reserve.
-Everything else unused is removed once nothing has used or changed it for 24
-hours, whatever the free space: a transfer checkpoint or build export whose
+Spark model objects no installation links or names expire 24 hours after their
+last use, independent of free space. Adding or dropping an installation hard
+link records that use in the inode change time. A current live operation also
+protects its objects. Pressure can remove unused objects sooner, least recently
+used first, until free space meets the load target or low-space reserve. NAS
+model retention remains pressure-driven. Everything else unused on a Spark is
+removed once nothing has used or changed it for 24 hours, whatever the free space: a transfer checkpoint or build export whose
 claim ended, an isolated entry, a base image no build has opened, a retired
 store nothing reads; a build's export goes as soon as the Controller has its
 image. Every store below the agent's data root declares its owner and collector

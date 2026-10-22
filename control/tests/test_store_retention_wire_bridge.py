@@ -38,11 +38,12 @@ def store_retention_probe() -> Path:
     return prebuilt_probe("VONK_STORE_RETENTION_PROBE")
 
 
-def test_full_disk_load_evicts_unused_objects_keeps_profile_content_and_retries(
-    tmp_path: Path, postgres_engine, store_retention_probe: Path
+@pytest.mark.parametrize("installed", (False, True))
+def test_full_disk_load_evicts_unused_objects_keeps_installed_content_and_retries(
+    tmp_path: Path, postgres_engine, store_retention_probe: Path, installed: bool
 ) -> None:
-    """Catches native low-water-only collection: free space is above that line,
-    yet below the accepted load's demand, which must reach the agent's LRU.
+    """Catches profile-only Spark pins, eviction of an installation's shared
+    files, and ignoring an accepted load's demand above the low-water line.
     """
     Base.metadata.create_all(postgres_engine)
     world = Catalog(postgres_engine)
@@ -77,6 +78,13 @@ def test_full_disk_load_evicts_unused_objects_keeps_profile_content_and_retries(
         objects.mkdir(parents=True)
         pinned = objects / manifest.artifacts[0].sha256
         pinned.write_bytes(b"weights")
+        # Saved profiles retain the NAS cache. Only an installation's real
+        # local reference keeps this Spark copy when no live operation names it.
+        assert pinned.name not in request.protected_model_objects
+        if installed:
+            link = root / "installations" / str(uuid.uuid4()) / "models/weights"
+            link.parent.mkdir(parents=True)
+            link.hardlink_to(pinned)
         oldest, newest = objects / ("e" * 64), objects / ("f" * 64)
         oldest.write_bytes(bytes(64 * 1024))
         time.sleep(0.02)
@@ -96,7 +104,11 @@ def test_full_disk_load_evicts_unused_objects_keeps_profile_content_and_retries(
             timeout=30,
         )
         assert not oldest.exists(), result.stderr
-        assert newest.exists() and pinned.read_bytes() == b"weights"
+        assert newest.exists()
+        if installed:
+            assert pinned.read_bytes() == b"weights"
+        else:
+            assert not pinned.exists()
         measured_free = int(result.stdout)
         assert measured_free >= target
         # The collector's real measured result returns through inventory storage,
