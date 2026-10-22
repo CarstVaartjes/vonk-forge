@@ -1,8 +1,8 @@
 # syntax=docker/dockerfile:1.7
 # Platform build bases bind reviewed multi-platform index digests. Refresh the
 # tag and digest together through docs/image-pin-refresh.md.
-ARG NODE_IMAGE=node:26-trixie-slim@sha256:ec7758ee051e457b468b32bde57b0879010b325bb9862718e9615225ce4aaae1
-ARG PYTHON_IMAGE=python:3.14-slim-trixie@sha256:51dafde81dbdb6ebde285137a295cf18a47ca95234fe388a343719cb97305b3d
+ARG NODE_IMAGE=node:26-trixie-slim@sha256:36793bcbb160a6a16cede1e62b93f84e26b78a972a8a4c0b879c1c12f22761ec
+ARG PYTHON_IMAGE=python:3.14-slim-trixie@sha256:0514bc76712d64f8bb48adcb95b1ab0d88c69fee95d62fe4c18ee948bee9b1e1
 ARG SKOPEO_IMAGE=quay.io/skopeo/stable:v1.22.3-immutable@sha256:c0ee1f4edca5c01cb8d5611124f92f3cc47196ecab68aee5d0f90834e00574d5
 ARG SKOPEO_INDEX_DIGEST=sha256:c0ee1f4edca5c01cb8d5611124f92f3cc47196ecab68aee5d0f90834e00574d5
 ARG SKOPEO_AMD64_DIGEST=sha256:ab4c269c9e2bd11affe2666b860fb651a15afec121c15986b052b02e09d86239
@@ -16,7 +16,9 @@ ARG SKOPEO_ARM64_DIGEST
 # skopeo rejects a reference that carries both a tag and a digest, so this
 # resolution check uses the bare repository plus the index digest. The tag is
 # carried on the FROM above.
-RUN test -x /usr/bin/skopeo \
+RUN dnf upgrade --assumeyes ca-certificates \
+    && dnf clean all \
+    && test -x /usr/bin/skopeo \
     && /usr/bin/skopeo --version \
     && test -f /etc/containers/policy.json \
     && test -f /etc/containers/registries.conf \
@@ -71,11 +73,15 @@ FROM --platform=$BUILDPLATFORM ${NODE_IMAGE} AS node-tools
 FROM --platform=$BUILDPLATFORM ${PYTHON_IMAGE} AS contracts
 COPY --from=node-tools /usr/local/bin/node /usr/local/bin/node
 COPY --from=node-tools /usr/local/lib/node_modules /usr/local/lib/node_modules
+COPY .tool-versions /tmp/.tool-versions
+COPY deploy/compose/python-bootstrap.lock deploy/compose/uv-bootstrap.lock /tmp/
 RUN apt-get update \
-    && apt-get install --yes --no-install-recommends git libatomic1 \
+    && apt-get install --yes --no-install-recommends ca-certificates git libatomic1 \
     && rm -rf /var/lib/apt/lists/* \
     && ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
-    && python -m pip install --no-cache-dir uv==0.12.19
+    && VONK_UV_VERSION="$(awk '$1 == "uv" {print $2}' /tmp/.tool-versions)" \
+        python -m pip install --no-cache-dir --require-hashes \
+        -r /tmp/python-bootstrap.lock -r /tmp/uv-bootstrap.lock
 WORKDIR /repo
 COPY pyproject.toml ./
 COPY control/pyproject.toml control/uv.lock control/openapi-python-client.yaml ./control/
@@ -136,8 +142,10 @@ COPY control/packaging/public-contracts.lock ./packaging/public-contracts.lock
 COPY inventory/wheels/vonk_agent_protocol-*.whl /wheels/
 COPY agent_protocol/pyproject.toml ./agent_protocol/
 COPY scripts/protocol-wheel-name scripts/protocol_wheel.py ./scripts/
+COPY deploy/compose/python-bootstrap.lock /tmp/python-bootstrap.lock
 RUN apt-get update \
-    && apt-get install --yes --no-install-recommends git \
+    && apt-get install --yes --no-install-recommends ca-certificates git \
+    && python -m pip install --no-cache-dir --require-hashes -r /tmp/python-bootstrap.lock \
     && public_contracts_revision="$(sed -n 's/^revision = "//p' packaging/public-contracts.lock | tr -d '"')" \
     && test "$(printf '%s' "$public_contracts_revision" | wc -c)" = 40 \
     && git clone --filter=blob:none --no-checkout \
@@ -155,12 +163,12 @@ RUN apt-get update \
 # Our own vonk-* packages are installed from local files below. These are
 # transitive dependencies of the image, not requested ones, so the REQUESTED
 # markers that -r adds are removed to keep the layer identical to a one-step
-# install.
+# install. Ignore build-interpreter packages: only /install reaches runtime.
 ARG DEPENDENCY_DAY=undated
 COPY pyproject.toml /vonk-cluster-profiles/
 RUN echo "dependency day: ${DEPENDENCY_DAY}" \
     && python -c 'import pathlib, tomllib; print("\n".join(d for path in ("pyproject.toml", "/vonk-cluster-profiles/pyproject.toml") for d in tomllib.loads(pathlib.Path(path).read_text())["project"]["dependencies"] if not d.lower().startswith("vonk-")))' > /tmp/third-party.txt \
-    && python -m pip install --no-cache-dir --prefix=/install -r /tmp/third-party.txt \
+    && python -m pip install --no-cache-dir --ignore-installed --prefix=/install -r /tmp/third-party.txt \
     && find /install -name REQUESTED -delete \
     && find /install -name RECORD -exec sed -i '/\.dist-info\/REQUESTED,/d' {} +
 COPY --from=cli /cli-wheels /cli-wheels
@@ -183,32 +191,31 @@ ARG TARGETARCH
 ARG SKOPEO_INDEX_DIGEST
 ARG SKOPEO_AMD64_DIGEST
 ARG SKOPEO_ARM64_DIGEST
-# The pinned skopeo image ships /etc/ssl/certs as a symlink into /etc/pki/tls,
-# while the Python base has a real directory there; COPY cannot replace a
-# directory with a symlink, so drop the base directory before the copy below.
-# The runtime installs nothing, so the base image's pip (and the libraries it
-# vendors) is removed rather than shipped. Debian security fixes for packages
-# the base already carries (e.g. OpenSSL) are applied here, so a base image
-# that lags a fixed release never ships a known, fixable vulnerability.
+# Keep the updated Debian trust store for Python and Skopeo. The imported
+# Skopeo libraries use /etc/pki/tls/certs/ca-bundle.crt, linked below.
+# Runtime pip is removed because this image installs nothing at startup.
 RUN apt-get update \
     && apt-get upgrade --yes --no-install-recommends \
+    && apt-get install --yes --no-install-recommends ca-certificates \
     && rm -rf /var/lib/apt/lists/* \
     && python -m pip uninstall --yes --root-user-action=ignore pip \
     && groupadd --gid 10001 control \
     && useradd --uid 10001 --gid 10001 --no-create-home control \
     && install -d -o 10001 -g 10001 -m 0700 /tmp/control \
     && install -d -o 10001 -g 10001 -m 0700 /tmp/control-cache \
-    && install -d -o 10001 -g 10001 -m 1777 /var/tmp \
-    && rm -rf /etc/ssl/certs
+    && install -d -o 10001 -g 10001 -m 1777 /var/tmp
+
 COPY --from=build /install /usr/local
 COPY --from=skopeo /usr/bin/skopeo /usr/local/lib/skopeo/skopeo.real
 COPY --from=skopeo /skopeo-runtime/lib /usr/local/lib/skopeo
 COPY --from=skopeo /etc/containers /etc/containers
-COPY --from=skopeo /etc/pki /etc/pki
-COPY --from=skopeo /etc/ssl /etc/ssl
-COPY --from=skopeo /usr/share/pki /usr/share/pki
+
 COPY --from=skopeo /usr/share/containers /usr/share/containers
-RUN case "$TARGETARCH" in \
+RUN mkdir -p /etc/pki/tls/certs \
+    && ln -sf /etc/ssl/certs/ca-certificates.crt /etc/pki/tls/certs/ca-bundle.crt \
+    && ln -sf certs/ca-bundle.crt /etc/pki/tls/cert.pem \
+    && ln -sf ca-certificates.crt /etc/ssl/certs/ca-bundle.crt \
+    && case "$TARGETARCH" in \
         amd64) skopeo_loader=ld-linux-x86-64.so.2 ;; \
         arm64) skopeo_loader=ld-linux-aarch64.so.1 ;; \
         *) echo "unsupported target architecture: $TARGETARCH" >&2; exit 1 ;; \

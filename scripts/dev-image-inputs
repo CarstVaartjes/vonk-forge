@@ -10,9 +10,15 @@ import sys
 from pathlib import Path
 
 CONTEXTS = {
-    "hermes": ("deploy/compose/hermes-agent",),
+    "hermes": (
+        "deploy/compose/hermes-agent",
+        ".tool-versions",
+        "deploy/compose/python-bootstrap.lock",
+        "deploy/compose/uv-bootstrap.lock",
+    ),
     "litellm": (
         "deploy/compose/litellm",
+        "deploy/compose/python-bootstrap.lock",
         "agent_protocol/src/vonk_agent_protocol/route_activation.py",
         "agent_protocol/src/vonk_agent_protocol/route_activation_words.py",
     ),
@@ -78,8 +84,6 @@ def prepare(role: str, commit: str, destination: Path) -> None:
         if kind != "blob" or mode not in {"100644", "100755"}:
             raise ValueError("image context must contain regular tracked files")
         relative = Path(raw_path.decode())
-        if role == "hermes":
-            relative = relative.relative_to(CONTEXTS[role][0])
         target = destination / relative
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(git("cat-file", "blob", blob))

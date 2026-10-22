@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import shutil
 import stat
 import subprocess
 from pathlib import Path
@@ -125,20 +124,14 @@ def test_optional_huggingface_secret_treats_dev_null_as_absent(tmp_path: Path) -
     assert not destination.exists()
 
 
-@pytest.mark.lane  # Runs the module inside a Docker container.
-@pytest.mark.skipif(
-    os.environ.get("RUN_ORBSTACK_CONTAINER_TESTS") != "1",
-    reason="OrbStack container checks are opt-in",
-)
+@pytest.mark.built_image
+@pytest.mark.lane  # Uses the shipped runtime and its canonical protocol dependency.
 def test_optional_huggingface_secret_handles_bind_mounted_dev_null_in_container(
     tmp_path: Path,
+    controller_image: str,
 ) -> None:
-    if shutil.which("docker") is None:
-        pytest.skip("Docker is unavailable")
-    source_module = Path(runtime_init.__file__).resolve()
     destination = tmp_path / "normalized" / "hf-token"
     command = (
-        "import sys; sys.path.insert(0, '/tmp/module'); "
         "from pathlib import Path; "
         "from vonk_control.runtime_init import _stage_optional_private_key; "
         "destination = Path('/tmp/normalized/hf-token'); destination.parent.mkdir(parents=True, exist_ok=True); "
@@ -151,14 +144,13 @@ def test_optional_huggingface_secret_handles_bind_mounted_dev_null_in_container(
             "docker",
             "run",
             "--rm",
+            "--entrypoint",
+            "python",
             "-v",
             "/dev/null:/run/secrets/hf-token:ro",
             "-v",
-            f"{source_module.parent.parent}:/tmp/module:ro",
-            "-v",
             f"{tmp_path}:/tmp/normalized",
-            "python:3.14-slim-trixie@sha256:51dafde81dbdb6ebde285137a295cf18a47ca95234fe388a343719cb97305b3d",
-            "python",
+            controller_image,
             "-c",
             command,
         ],

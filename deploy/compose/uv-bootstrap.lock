@@ -1,0 +1,6 @@
+# Version is expanded by pip from .tool-versions, the CI owner.
+# Reviewed Linux x86_64 and aarch64 wheels (glibc and musl).
+uv==${VONK_UV_VERSION} \
+    --hash=sha256:2386c2dc9b59fc1d39b1c500e4319d71d3268232eb3b38e29cd6775d6269e8d4 \
+    --hash=sha256:fa8d26e08e34c29c0c4e820cf3181757086d547240b4f4d31ff1d8bd810ca946 \
+    --hash=sha256:91e58e304b63b6c91bac5561459ab0c3ea24f17bc01ea9359d69fed72142978f

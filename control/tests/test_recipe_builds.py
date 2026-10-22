@@ -18,6 +18,7 @@ from sqlalchemy import Table, create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
     AgentClaim,
+    LifecycleState,
     ProgressPhase,
     RecipeBuildRequest,
     canonical_message,
@@ -590,8 +591,9 @@ def test_nonforced_availability_dispatch_reuses_build_resolved_after_queue(
     production.close()
 
 
-def test_present_archive_without_receipt_is_reprepared_not_rebuilt(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("damage", ["receipt", "size", LifecycleState.FAILED])
+def test_present_archive_with_damaged_receipt_is_reprepared_not_rebuilt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, damage: str
 ) -> None:
     sessions, bundles, now, node_id, revision = setup(tmp_path)
     artifact_root = tmp_path / "artifacts"
@@ -618,11 +620,29 @@ def test_present_archive_without_receipt_is_reprepared_not_rebuilt(
         now=now,
     )
 
+    if damage in {"size", LifecycleState.FAILED}:
+        _write_controller_build_receipt(
+            storage,
+            archive=archive,
+            image_digest=image_digest,
+            build_id=plan.build_id,
+            build_input_sha256=plan.build_input_sha256,
+            distribution_content_sha256=revision.content_digest,
+        )
+        with sessions.begin() as session:
+            damaged = session.get(RecipeBuild, plan.build_id)
+            assert damaged is not None
+            if damage == "size":
+                damaged.image_bytes = len(archive) + 1
+            else:
+                damaged.state = LifecycleState.FAILED
+                damaged.error = "replacement attempt failed"
+
     resolution = builds.resolve(revision.id)
 
     assert resolution.cached is True
     assert resolution.stale_receipt is False
-    assert resolution.receipt_pending is True
+    assert resolution.receipt_pending is (damage == "receipt")
     assert resolution.build_input_sha256 == plan.build_input_sha256
 
     class Operations:
@@ -681,6 +701,14 @@ def test_present_archive_without_receipt_is_reprepared_not_rebuilt(
             session.scalars(select(Job).where(Job.kind == "recipe.build.v1"))
         )
     assert build_jobs == ()
+    with sessions() as session:
+        repaired = session.get(RecipeBuild, plan.build_id)
+        assert repaired is not None and repaired.image_bytes == len(archive)
+        assert repaired.state == LifecycleState.SUCCEEDED
+        assert repaired.error is None
+        layout, size = repaired.oci_layout_sha256, repaired.image_bytes
+        assert layout is not None and size is not None
+        assert storage.build_archive_available(layout, size)
     production.close()
 
 
@@ -2573,3 +2601,42 @@ def test_verified_completion_does_not_let_lost_or_damaged_index_block_new_reques
         assert current.image_digest == completion.image_digest
         assert current.oci_layout_sha256 == completion.oci_layout_sha256
         assert current.image_bytes == completion.image_bytes
+
+
+@pytest.mark.parametrize("field", ["image_digest", "oci_layout_sha256", "image_bytes"])
+def test_succeeded_build_with_lost_result_is_reprepared(
+    tmp_path: Path, field: str
+) -> None:
+    """Lost completion fields must not replay an incomplete success forever."""
+    from vonk_agent_protocol import LifecycleState
+
+    sessions, bundles, now, node_id, revision = setup(tmp_path)
+    service = RecipeBuildService(sessions, bundles=bundles)
+    plan = service.plan(revision.id, node_id, now=now)
+    service.record_success(
+        plan.build_id,
+        build_input_sha256=plan.build_input_sha256,
+        image_digest="sha256:" + "b" * 64,
+        oci_layout_sha256="c" * 64,
+        image_bytes=500,
+        now=now,
+    )
+    with sessions.begin() as session:
+        build = session.get(RecipeBuild, plan.build_id)
+        assert build is not None
+        setattr(build, field, None)
+    repaired = service.plan(revision.id, node_id, now=now)
+    assert repaired.build_id == plan.build_id
+    assert repaired.build_input_sha256 == plan.build_input_sha256
+    with sessions() as session:
+        build = session.get(RecipeBuild, repaired.build_id)
+        assert build is not None and build.state != LifecycleState.SUCCEEDED
+    service.record_success(
+        repaired.build_id,
+        build_input_sha256=repaired.build_input_sha256,
+        image_digest="sha256:" + "b" * 64,
+        oci_layout_sha256="c" * 64,
+        image_bytes=500,
+        now=now,
+    )
+    assert service.resolve(revision.id).cached

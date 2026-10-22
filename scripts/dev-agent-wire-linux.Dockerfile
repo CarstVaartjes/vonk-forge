@@ -9,10 +9,10 @@
 # digest is asserted against scripts/dev_agent_wire_linux.py. Refresh with
 # `docker buildx imagetools inspect ubuntu:24.04` and a reviewed edit here, in
 # the module, and in docs/local-linux-lane.md.
-FROM ubuntu:24.04@sha256:008173c23f95b170204355c12626cb5a965d779a7e1283b09e9cffbb1bf33ca3
+FROM ubuntu:24.04@sha256:68ee22004a9109b44973313b02ff7b1de250f1de0f5ecb628d73f579aaff33ac
 
 ARG RUST_TOOLCHAIN=1.98.1
-ARG UV_VERSION=0.12.19
+ARG UV_VERSION
 ARG PYTHON_VERSION=3.14
 
 ENV DEBIAN_FRONTEND=noninteractive \
@@ -48,7 +48,8 @@ RUN curl --proto '=https' --tlsv1.2 --silent --show-error --fail https://sh.rust
 ENV RUSTUP_TOOLCHAIN=${RUST_TOOLCHAIN} \
     RUSTUP_AUTO_INSTALL=0
 
-RUN curl --location --silent --show-error --fail \
+RUN test -n "${UV_VERSION}" \
+    && curl --location --silent --show-error --fail \
         "https://astral.sh/uv/${UV_VERSION}/install.sh" \
         | env UV_UNMANAGED_INSTALL=/usr/local/bin sh
 

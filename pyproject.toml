@@ -80,3 +80,6 @@ testpaths = ["tests"]
 timeout = 120
 timeout_method = "thread"
 # Markers: tools/pytest_prereqs.py (prerequisites) and tools/pytest_budget.py (slow).
+
+[tool.uv]
+required-version = ">=0.13.5"

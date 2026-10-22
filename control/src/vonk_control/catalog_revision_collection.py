@@ -61,16 +61,21 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import Select, and_, delete, exists, or_, select, text
+from sqlalchemy import Select, and_, delete, exists, false, or_, select, text
 from sqlalchemy.exc import DBAPIError, SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
+    TERMINAL_LIFECYCLE_STATES,
     InstallationState,
+    LifecycleState,
+    LifecycleSubject,
     RunState,
     WaitReason,
     canonical_message,
+    stored_words,
 )
 
+from . import job_states
 from .agent_jobs import release_owned_reservations_in_session
 from .catalog_revision_contract import UnprojectedRevision
 from .logging import log_event
@@ -111,7 +116,12 @@ _SCAN_BATCH = 20
 # One sweep stops here and the rest continues on the next worker pass, so a
 # first sweep over a large catalog never holds the worker loop for long.
 SWEEP_BUDGET_SECONDS = 20.0
-_FINISHED = ("succeeded", "failed", "cancelled", "superseded")
+_FINISHED = job_states.words(
+    LifecycleState.SUCCEEDED,
+    LifecycleState.FAILED,
+    LifecycleState.CANCELLED,
+    LifecycleState.SUPERSEDED,
+)
 _FINISHED_BUILDS = ("succeeded", "failed")
 # Terminal states are candidates only; exact current-generation absence is
 # independently required before releasing claims and discarding recovery rows.
@@ -643,13 +653,14 @@ def operation_tokens(
     token observation alone cannot establish absence. With ``recent=False``
     only operations that have not ended count (an expired job has ended).
     ``superseded_applications`` are profile loads a reviewed load replaces:
-    they name nothing for it (the selected one still does).
+    they name nothing for it. Selected desired state is protected by its
+    profile references, not by historical operation effects.
     """
 
     window = now - GRACE if recent else None
-    ended = _FINISHED if recent else (*_FINISHED, "expired")
 
-    def live(state, updated):
+    def live(state, updated, subject=LifecycleSubject.JOB):
+        ended = stored_words(subject, TERMINAL_LIFECYCLE_STATES)
         return (
             state.not_in(ended)
             if window is None
@@ -665,7 +676,11 @@ def operation_tokens(
             for column in (Job.payload, Job.result)
         ),
         select(AgentOperation.payload).where(
-            live(AgentOperation.state, AgentOperation.updated_at)
+            live(
+                AgentOperation.state,
+                AgentOperation.updated_at,
+                LifecycleSubject.AGENT_OPERATION,
+            )
         ),
         *(
             select(column).where(
@@ -674,12 +689,13 @@ def operation_tokens(
                         live(
                             FleetProfileApplication.state,
                             FleetProfileApplication.updated_at,
+                            LifecycleSubject.FLEET_PROFILE_APPLICATION,
                         ),
                         FleetProfileApplication.id.not_in(
                             tuple(superseded_applications)
                         ),
                     ),
-                    FleetProfileApplication.id == selected,
+                    FleetProfileApplication.id == selected if recent else false(),
                 ),
                 column.is_not(None),
             )
@@ -689,7 +705,11 @@ def operation_tokens(
             )
         ),
         select(ModelCacheOperation.payload).where(
-            live(ModelCacheOperation.state, ModelCacheOperation.updated_at),
+            live(
+                ModelCacheOperation.state,
+                ModelCacheOperation.updated_at,
+                LifecycleSubject.MODEL_CACHE_OPERATION,
+            ),
             ModelCacheOperation.kind.is_not(None)
             if include_removals
             else ModelCacheOperation.kind != CacheOperationKind.REMOVE,
@@ -698,7 +718,11 @@ def operation_tokens(
             # A job still being prepared has no lifecycle state yet.
             or_(
                 ArtifactJob.state.is_(None),
-                live(ArtifactJob.state, ArtifactJob.updated_at),
+                live(
+                    ArtifactJob.state,
+                    ArtifactJob.updated_at,
+                    LifecycleSubject.ARTIFACT_JOB,
+                ),
             )
         ),
     )

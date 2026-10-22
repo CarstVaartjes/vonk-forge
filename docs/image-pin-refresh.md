@@ -30,7 +30,7 @@ reference and will fail if only the lock changes.
 | `build_bases.hermes` | `nousresearch/hermes-agent` | `deploy/compose/images.lock.json`, `deploy/compose/hermes-agent/Dockerfile`, `tests/scripts/test_verify_supply_chain.py` |
 | `build_bases.litellm` | `ghcr.io/berriai/litellm` | `deploy/compose/images.lock.json`, `deploy/compose/litellm/Dockerfile` (both `FROM` lines) |
 | `build_bases.node` | `node` | `deploy/compose/images.lock.json`, `control/Dockerfile` (`ARG NODE_IMAGE`) |
-| `build_bases.python` | `python` | `deploy/compose/images.lock.json`, `control/Dockerfile` (`ARG PYTHON_IMAGE`) |
+| `build_bases.python` | `python` | `deploy/compose/images.lock.json`, `control/Dockerfile`, `deploy/compose/litellm/Dockerfile` (`ARG PYTHON_IMAGE`, bootstrap roots) |
 | `build_bases.skopeo` | `quay.io/skopeo/stable` | `deploy/compose/images.lock.json`, `control/Dockerfile` (`SKOPEO_IMAGE` plus the three `*_DIGEST` args and labels), `scripts/verify-controller-skopeo`, `control/tests/test_controller_image_packaging.py`, `tests/scripts/test_verify_controller_skopeo.py` |
 | _(no lock key — developer lane)_ | `ubuntu` | `scripts/dev-agent-wire-linux.Dockerfile` (`FROM`, pinned by index digest) |
 
@@ -53,14 +53,9 @@ reference is handed to skopeo:
 
 Do not "helpfully" add the tag to those skopeo invocations.
 
-The upstream filesystem layout can also differ between rebuilds of the same
-version. Every `-immutable` tag ships `/etc/ssl/certs` as a symlink into
-`/etc/pki/tls`, while the superseded `stable` rebuild shipped a real directory
-there. `control/Dockerfile` therefore removes the Python base's
-`/etc/ssl/certs` directory before copying the skopeo `/etc/ssl` tree; `COPY`
-cannot replace a directory with a symlink. If a future refresh changes that
-layout again, the control image build in verification step 4 fails — adjust the
-`rm -rf` line, do not drop the `COPY`.
+The Controller keeps Debian's updated certificate store. Imported Skopeo
+libraries use `/etc/pki/tls/certs/ca-bundle.crt`, which links to that same store;
+never copy the Skopeo image's older `/etc/ssl` over the updated runtime roots.
 
 ### Known pins outside the lock
 
