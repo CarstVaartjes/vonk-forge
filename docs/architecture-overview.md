@@ -189,7 +189,9 @@ runtime UID/GID, executable, engine environment and argv. Platform rendezvous,
 listen coordinates and job deadlines do not fragment compilation identity.
 GPU-free plans bind host CPU architecture without querying NVIDIA. Missing GPU
 host identity or an unusable cache directory produces a journal warning and a
-fresh cache in that run's scope. No unknown-host key is shared. Engine caches
+fresh per-run cache in helper-owned `compile-cache-fallback/`. Both stores share
+one collector, so private fallback trees never depend on unprivileged run cleanup.
+No unknown-host key is shared. Engine caches
 own their content keys and concurrent population; the helper never clears bytes
 beneath an active mount. The existing periodic store pass refreshes mounted
 keys' last-use time and removes unused keys after 24 hours, or earlier at the

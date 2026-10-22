@@ -784,8 +784,5 @@ fn corrupt_persistent_cache_still_reaches_docker_with_fresh_run_backing() {
         .iter()
         .find(|arg| arg.ends_with(",dst=/outputs/cache"))
         .unwrap();
-    assert!(
-        mount.contains("/runs/") && mount.contains("/compile-cache-"),
-        "{mount}"
-    );
+    assert!(mount.contains("/compile-cache-fallback/"), "{mount}");
 }

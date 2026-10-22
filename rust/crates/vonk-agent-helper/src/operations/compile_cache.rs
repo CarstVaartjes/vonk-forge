@@ -5,6 +5,7 @@ use vonk_agent_protocol::store_retention::GRACE;
 
 pub(super) const GPU_QUERY: &str = "--query-gpu=compute_cap,driver_version";
 const STORE: &str = "compile-cache";
+const FALLBACK_STORE: &str = "compile-cache-fallback";
 
 impl<R: CommandRunner> OperationExecutor<R> {
     /// Called only after exact-plan validation and proven container absence,
@@ -29,11 +30,11 @@ impl<R: CommandRunner> OperationExecutor<R> {
                     "vonk-agent-helper: warning: run {} persistent compile cache unavailable: {error}; using a fresh per-run cache; next start retries persistence",
                     run.run_id
                 );
-                let entry = run
-                    .outputs
-                    .parent()
-                    .ok_or(OperationError::UnsafePath)?
-                    .join(format!("compile-cache-{}", uuid::Uuid::new_v4()));
+                // Keep privileged scratch with its privileged collector. An
+                // agent-owned run tree cannot chmod/remove helper-owned dirs.
+                let root = self.roots.data.join(FALLBACK_STORE);
+                cache_directory(&root)?;
+                let entry = root.join(format!("{}-{}", run.run_id, uuid::Uuid::new_v4()));
                 cache_directory(&entry)?;
                 self.prepare_compile_cache_data(&entry, run.uid)?
             }
@@ -184,12 +185,27 @@ impl<R: CommandRunner> OperationExecutor<R> {
         deadline: Instant,
         mounts: &HashSet<PathBuf>,
     ) {
-        let root = self.roots.data.join(STORE);
-        if require_exact_directory(&root, Some(rustix::process::geteuid().as_raw()), 0o700).is_err()
+        self.collect_compile_cache_store(&self.roots.data.join(STORE), now, deadline, mounts);
+        self.collect_compile_cache_store(
+            &self.roots.data.join(FALLBACK_STORE),
+            now,
+            deadline,
+            mounts,
+        );
+    }
+
+    fn collect_compile_cache_store(
+        &self,
+        root: &Path,
+        now: SystemTime,
+        deadline: Instant,
+        mounts: &HashSet<PathBuf>,
+    ) {
+        if require_exact_directory(root, Some(rustix::process::geteuid().as_raw()), 0o700).is_err()
         {
             return;
         }
-        let Ok(entries) = fs::read_dir(&root) else {
+        let Ok(entries) = fs::read_dir(root) else {
             return;
         };
         let mut entries = entries.filter_map(Result::ok).collect::<Vec<_>>();

@@ -147,7 +147,18 @@ fn corrupted_unwritable_or_unknown_cache_falls_back_without_poisoning_next_start
         }
         executor.bind_compile_cache(&mut run).unwrap();
         let fallback = source(&run);
-        assert!(fallback.starts_with(run.outputs.parent().unwrap()));
+        assert!(fallback.starts_with(executor.roots.data.join(FALLBACK_STORE)));
+        assert!(!fallback.starts_with(executor.roots.agent_data.join("runs")));
+        assert!(
+            fallback
+                .parent()
+                .unwrap()
+                .file_name()
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .starts_with(&run.run_id)
+        );
         assert!(!fallback.starts_with(&store));
         assert!(fallback.join("home").is_dir());
         assert!(exact_runtime_acl(&fallback, run.uid));
@@ -287,4 +298,28 @@ fn gpu_free_plans_persist_without_querying_an_unknown_nvidia_host() {
     assert_eq!(fs::read(cache.join("kernel")).unwrap(), b"cpu compiled");
     next.gpu = true;
     assert!(executor.compile_cache_identity(&next).is_err());
+}
+
+#[test]
+fn fallback_scratch_is_collected_by_the_helper_even_if_the_primary_store_is_corrupt() {
+    // Catches private helper-owned fallback trees being stranded beneath
+    // agent-owned runs, and a broken primary root blocking fallback retention.
+    let (_root, executor, mut run) = fixture();
+    fs::write(executor.roots.data.join(STORE), b"not a cache directory").unwrap();
+    executor.bind_compile_cache(&mut run).unwrap();
+    let cache = source(&run);
+    assert!(cache.starts_with(executor.roots.data.join(FALLBACK_STORE)));
+    let now = SystemTime::now();
+    let deadline = || Instant::now() + Duration::from_secs(10);
+    executor.collect_compile_caches(now + GRACE * 2, deadline(), &HashSet::from([cache.clone()]));
+    assert!(cache.exists());
+    executor.collect_compile_caches(
+        now + GRACE * 3 + Duration::from_secs(1),
+        deadline(),
+        &HashSet::new(),
+    );
+    assert!(
+        !cache.exists(),
+        "unused fallback escaped its privileged collector"
+    );
 }
