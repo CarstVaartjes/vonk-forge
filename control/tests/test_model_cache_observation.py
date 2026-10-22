@@ -173,6 +173,7 @@ def test_slow_nas_observation_converges_beyond_ten_request_budgets(
 ):
     """Catches nested request deadlines aborting a large set on every retry."""
     cache, _sessions, manifest, _now = observed_cache
+    normal_budget = profile_read_observation.PROFILE_READ_STORAGE_SECONDS
     monkeypatch.setattr(profile_read_observation, "PROFILE_READ_STORAGE_SECONDS", 0.1)
     calls = Counter()
     original = cache._read_object_receipt
@@ -204,6 +205,12 @@ def test_slow_nas_observation_converges_beyond_ten_request_budgets(
 
     monkeypatch.setattr(cache._storage_observer, "_read", request_must_not_touch_nas)
     monkeypatch.setattr(cache, "free_bytes", request_must_not_touch_nas)
+    # The reduced budget above tests storage convergence. Run the complete
+    # SQL/catalog consumer with its real budget, rather than timing unrelated
+    # queries against 100 ms under full-suite contention. NAS reads still fail.
+    monkeypatch.setattr(
+        profile_read_observation, "PROFILE_READ_STORAGE_SECONDS", normal_budget
+    )
     inspection = _inspect(cache, sessions=_sessions, manifest=manifest)
     assert inspection.missing_nas_bytes == 0
     assert not inspection.blockers
