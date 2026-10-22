@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import time
 import uuid
@@ -280,12 +281,13 @@ def install_observations_routes(
         identity = _authenticated_identity(request, required)
         observed_at = body.observed_at.astimezone(UTC)
         now = _now(required.clock()).astimezone(UTC)
-        if observed_at > now + timedelta(seconds=30) or now - observed_at > timedelta(
-            minutes=5
-        ):
+        # Old content may be a durable replay after a lost acknowledgement.
+        # Per-rank generation and observed_at comparisons below fence it from
+        # newer intent/evidence. Its original time must never be refreshed.
+        if observed_at > now + timedelta(seconds=30):
             raise HTTPException(
                 status_code=422,
-                detail="recipe run observation time is outside the accepted window",
+                detail="recipe run observation time is in the future",
             )
         # One stale or no-longer-assigned run must not discard the evidence
         # for every other run in the report: each run is judged on its own.
@@ -369,10 +371,8 @@ def install_observations_routes(
                             and evidence.failure_diagnostics
                         ):
                             # The exit's cause outlives the settle it allows.
-                            node.last_exit_diagnostics = (
-                                evidence.failure_diagnostics.model_dump(
-                                    mode="json", exclude_none=True
-                                )
+                            node.last_exit_diagnostics = json.loads(
+                                canonical_message(evidence.failure_diagnostics)
                             )
                         continue
                     if node.state not in {RunState.RUNNING, RunState.FAILED} or (
@@ -467,9 +467,7 @@ def install_observations_routes(
                     node.observed_run_generation = run.run_generation
                     node.observation_process_running = evidence.process_running
                     node.observation_failure_diagnostics = (
-                        evidence.failure_diagnostics.model_dump(
-                            mode="json", exclude_none=True
-                        )
+                        json.loads(canonical_message(evidence.failure_diagnostics))
                         if not evidence.process_running and evidence.failure_diagnostics
                         else None
                     )
@@ -489,17 +487,10 @@ def install_observations_routes(
                     ):
                         schedule_wait(run, None)
                         run.updated_at = max(_now(run.updated_at).astimezone(UTC), now)
-                if (
-                    rejected
-                    and not accepted
-                    and not all(
-                        reason.endswith(("is not assigned", "observation is stale"))
-                        for reason in rejected
-                    )
-                ):
-                    # Nothing in this report was usable; report the cause so
-                    # the agent's log names it.  No state changed.
-                    raise ValueError("; ".join(rejected[:4]))
+                # Obsolete generations/assignments are consumed without effects.
+                # A durable replay must not become a permanent rejection after
+                # newer authorized intent supersedes it; the next page replans.
+
         except ValueError as error:
             raise HTTPException(status_code=422, detail=str(error)) from None
         request.state.observation_acceptance = ObservationAcceptance(

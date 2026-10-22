@@ -111,10 +111,7 @@ impl ObservationServer {
             reports
         });
         Self {
-            client: AgentHttpClient::for_http_test(
-                &format!("http://{address}/"),
-                "spk_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-            ),
+            client: AgentHttpClient::for_http_test(&format!("http://{address}/"), NODE_ID),
             stop,
             worker,
         }

@@ -784,3 +784,84 @@ async fn an_observation_names_the_generation_of_its_run() {
     let reports = server.finish();
     assert_eq!(reports[0]["runs"][0]["run_generation"], 2);
 }
+
+#[tokio::test]
+async fn lost_observation_ack_replays_identical_content_after_restart() {
+    // Wrong implementation: re-inspecting after a lost reply replaces terminal
+    // evidence, or acknowledges it before the Controller actually replies.
+    let root = tempdir().unwrap();
+    let database = root.path().join("state.sqlite");
+    let failed = ObservationServer::new(None);
+    let observed_at = Utc::now();
+    let observation = exact_observation(Uuid::new_v4());
+    let mut state = StateStore::open(&database, failed.client.node_id()).unwrap();
+    assert!(
+        deliver_recipe_observation(&failed.client, observed_at, &[observation], &mut state,)
+            .await
+            .is_err()
+    );
+    let attempted = failed.finish();
+    assert_eq!(attempted.len(), 1);
+    drop(state);
+    let recovered = ObservationServer::new(Some(204));
+    let mut state = StateStore::open(&database, recovered.client.node_id()).unwrap();
+    let pending = state.pending_recipe_observation().unwrap().unwrap();
+    assert_eq!(serde_json::to_value(&pending).unwrap(), attempted[0]);
+    recovered
+        .client
+        .report_recipe_observation_envelope(&pending)
+        .await
+        .unwrap();
+    // Death here replays again; only the exact acknowledged content is removed.
+    let mut different = pending.clone();
+    different.runs[0].process_running = !different.runs[0].process_running;
+    assert!(state.acknowledge_recipe_observation(&different).is_err());
+    assert!(state.retain_recipe_observation(&different).is_err());
+    assert_eq!(
+        state.pending_recipe_observation().unwrap().unwrap(),
+        pending
+    );
+    state.acknowledge_recipe_observation(&pending).unwrap();
+    assert!(state.pending_recipe_observation().unwrap().is_none());
+    assert_eq!(recovered.finish(), attempted);
+}
+
+#[test]
+fn largest_inspection_wave_fits_the_edge_document_limit() {
+    // Wrong implementation: increasing inspection concurrency or diagnostic
+    // bounds silently creates bodies Caddy cuts off at one MiB.
+    let mut report: vonk_agent_protocol::RecipeRunObservationsWire = serde_json::from_str(
+        include_str!("../../../../../../agent_protocol/src/vonk_agent_protocol/vectors/recipe-run-observation-exited-v1.json")
+    ).unwrap();
+    let mut run = report.runs.pop().unwrap();
+    let diagnostic = run.failure_diagnostics.as_mut().unwrap();
+    diagnostic.stdout.text = "\u{0000}".repeat(2048);
+    diagnostic.stderr.text = "\u{0000}".repeat(2048);
+    // Maximal escaping is larger than ordinary logs. Fill every property too.
+    for (properties, count) in [
+        (&mut diagnostic.versions, 8),
+        (&mut diagnostic.sandbox, 12),
+        (&mut diagnostic.storage, 8),
+        (&mut diagnostic.preflight, 8),
+    ] {
+        let mut property = properties[0].clone();
+        property.name = "n".repeat(64);
+        property.value = "\u{0000}".repeat(256);
+        *properties = vec![property; count];
+    }
+    diagnostic.collector_errors = vec!["\u{0000}".repeat(256); 8];
+    report.runs = (0..BACKGROUND_RUN_INSPECTION_CONCURRENCY)
+        .map(|_| {
+            let mut run = run.clone();
+            run.run_id = Uuid::new_v4();
+            run
+        })
+        .collect();
+    let bytes = vonk_agent_protocol::canonical_generated_json(&report).unwrap();
+    eprintln!("maximal escaped observation wave bytes={}", bytes.len());
+    assert!(
+        bytes.len() <= 1024 * 1024,
+        "observation wave exceeds edge/Controller bound: {}",
+        bytes.len()
+    );
+}
