@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import io
+
 import pytest
 from sqlalchemy import update
 from vonk_agent_protocol import SecurityRefusalError, SourceBundleCode
@@ -239,33 +241,32 @@ def test_damaged_completion_index_is_observed_then_fresh_completion_is_admitted(
     assert completed.image_digest == "sha256:" + "b" * 64
 
 
-def test_damaged_stored_source_observation_rederives_and_verifies_exact_bytes(
-    tmp_path, monkeypatch
-):
-    from vonk_control.source_bundles import SourceBundleIntegrityRefused
+def test_damaged_stored_source_is_a_miss_until_background_ingress(tmp_path):
+    """Catches a request hashing or repairing a changed local copy itself."""
+    from vonk_control.recipe_builds import RecipeBuildUnknown
 
     sessions, bundles, now, node_id, revision = setup(tmp_path)
     digest = _json_text(revision.projected["source_bundle_sha256"])
-    original = bundles.get
-    bundle = original(digest)
-    reads = []
+    bundle = bundles.get(digest)
+    rederived = []
 
-    def damaged(address):
-        reads.append(address)
-        if len(reads) == 1:
-            raise SourceBundleIntegrityRefused("damaged local observation")
-        return original(address)
+    def fresh_source(*args):
+        rederived.append(args)
+        return bundle.archive
 
-    monkeypatch.setattr(bundles, "get", damaged)
     service = RecipeBuildService(
-        sessions,
-        bundles=bundles,
-        source_rederiver=lambda *_args: bundle.archive,
+        sessions, bundles=bundles, source_rederiver=fresh_source
     )
+    stored = bundles.put(digest, io.BytesIO(bundle.archive))
+    stored.path.write_bytes(b"changed local archive")
+    with pytest.raises(RecipeBuildUnknown):
+        service.plan(revision.id, node_id, now=now)
+    assert not rederived
+    assert service.reconcile_source_bundles()
+    assert len(rederived) == 1
     plan = service.plan(revision.id, node_id, now=now)
     assert plan.source_bundle_sha256 == digest
-    assert original(digest).archive == bundle.archive
-    assert reads == [digest, digest]
+    assert bundles.get(digest).archive == bundle.archive
     assert service.plan(revision.id, node_id, now=now).build_id == plan.build_id
     with sessions() as session:
         assert_no_orphaned_holds(session)

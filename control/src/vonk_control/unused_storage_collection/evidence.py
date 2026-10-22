@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from ..artifact_reference_scan import _selector_revisions
 from ..catalog_revision_collection import GRACE, live_tokens, operation_tokens, tokens
+from ..content_identity import catalog_selector_membership
 from ..models import (
     ArtifactDistributionAssignment,
     CatalogDocumentHead,
@@ -123,21 +124,28 @@ class _Evidence:
         # What a profile points to is the newest revision of the recipes it
         # names. A recipe nobody named is offered by the catalog but is no
         # more than a download away, so it can go when space is short.
-        pointed = [
-            row
-            for row in session.execute(
-                select(
-                    CatalogDocumentRevision.id,
-                    CatalogDocumentRevision.publisher,
-                    CatalogDocumentRevision.slug,
-                    CatalogDocumentRevision.content_digest,
-                    CatalogDocumentRevision.document,
-                ).where(CatalogDocumentRevision.id.in_(head_ids))
+        pointed_query = select(
+            CatalogDocumentRevision.id,
+            CatalogDocumentRevision.publisher,
+            CatalogDocumentRevision.slug,
+            CatalogDocumentRevision.content_digest,
+            CatalogDocumentRevision.document,
+        ).where(CatalogDocumentRevision.id.in_(head_ids))
+        if pointers is not None:
+            # Filter before loading JSON: preview fits each Spark separately,
+            # and an unpointed library head contributes no retention evidence.
+            # Unreadable profiles still conservatively retain every head.
+            pointed_query = pointed_query.where(
+                or_(
+                    CatalogDocumentRevision.id.in_(applied_ids),
+                    catalog_selector_membership(
+                        CatalogDocumentRevision.publisher,
+                        CatalogDocumentRevision.slug,
+                        tuple(pointers),
+                    ),
+                )
             )
-            if pointers is None
-            or row.id in applied_ids
-            or (row.publisher.casefold(), row.slug.casefold()) in pointers
-        ]
+        pointed = session.execute(pointed_query).all()
         pointed_ids = frozenset(row.id for row in pointed)
         pinned = tokens(row.document for row in pointed)
         bound = frozenset(

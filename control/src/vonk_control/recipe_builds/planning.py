@@ -27,6 +27,7 @@ from ..prebuilt_images import (
     PrebuiltDecision,
     executable_build_key,
 )
+from ..profile_read_observation import observe_selection
 from ..recipe_execution_contract import (
     RecipeExecutionContractError,
     build_plan_document,
@@ -231,7 +232,7 @@ def _prepare_plan_once(
         adapter = _resolved_adapter(projected)
         source_sha256 = _source_bundle_handle(projected)
         public_network = _public_build_network(build)
-    bundle = self._verified_bundle(projected, build, source_sha256)
+    bundle = self._verified_bundle(build, source_sha256)
     # Inspection is diagnostic. Acceptance of declarative build policy belongs
     # to the kit compiler; managed source bytes are verified at ingress.
     policy = inspect_build_source_policy(
@@ -441,6 +442,9 @@ def plan(
     raise last_error
 
 
+# SQL selects the current receipt for a revision; unlike content-addressed
+# storage, that selection must be fresh for every review and acceptance.
+@observe_selection
 def reusable_build_id(self: RecipeBuildService, recipe_revision_id: str) -> str | None:
     """The succeeded build whose inputs this revision reproduces, whoever built it.
 
