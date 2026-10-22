@@ -2541,9 +2541,8 @@ class SparkLifecycle:
         smi = self.temporary_root / "synthetic-nvidia-smi"
         ctk = self.temporary_root / "synthetic-nvidia-ctk"
         cdi.write_bytes(raw)
-        smi.write_text(
-            "#!/bin/sh\nprintf '%s\\n' 'NVIDIA GB10, [N/A], [N/A], synthetic-ci'\n",
-            encoding="ascii",
+        smi.write_bytes(
+            Path(__file__).with_name("fixtures").joinpath("nvidia-smi.sh").read_bytes()
         )
         ctk.write_text(
             "#!/bin/sh\n"

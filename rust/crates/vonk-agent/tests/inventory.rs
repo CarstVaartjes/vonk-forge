@@ -554,3 +554,93 @@ fn reset_inventory_reaches_the_wire_and_recovers_without_a_flag() {
         assert_eq!(parsed.gpu_health, Some(health));
     }
 }
+
+#[tokio::test]
+async fn acceptance_device_uses_the_real_inventory_health_contract() {
+    // Catches a synthetic device that returns inventory CSV for the health query,
+    // so normal admission waits forever for a GPU the fixture says is absent.
+    let script = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../../tests/acceptance/fixtures/nvidia-smi.sh");
+    async fn query(script: &Path, arguments: &[&str]) -> Vec<u8> {
+        let output = tokio::time::timeout(
+            Duration::from_secs(10),
+            tokio::process::Command::new("/bin/sh")
+                .arg(script)
+                .args(arguments)
+                .output(),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert!(output.status.success(), "{:?}", output);
+        output.stdout
+    }
+    struct SyntheticRunner {
+        health: Vec<u8>,
+        inventory: Vec<u8>,
+    }
+    impl ProcessRunner for SyntheticRunner {
+        fn run(
+            &self,
+            program: Program,
+            arguments: &[String],
+            timeout: Duration,
+        ) -> Result<ProcessOutput, ProcessError> {
+            if program == Program::NvidiaSmi {
+                return Ok(ProcessOutput {
+                    exit_code: Some(0),
+                    success: true,
+                    stdout: if arguments == ["-q"] {
+                        self.health.clone()
+                    } else {
+                        self.inventory.clone()
+                    },
+                    stderr: vec![],
+                });
+            }
+            FakeRunner {
+                calls: RefCell::new(vec![]),
+                gpu_output: b"",
+                cdi_output: b"nvidia.com/gpu=all\n",
+            }
+            .run(program, arguments, timeout)
+        }
+    }
+    let runner = SyntheticRunner {
+        health: query(&script, &["-q"]).await,
+        inventory: query(
+            &script,
+            &[
+                "--query-gpu=name,memory.total,memory.free,driver_version",
+                CSV_FORMAT,
+            ],
+        )
+        .await,
+    };
+    let directory = tempdir().unwrap();
+    let meminfo = directory.path().join("meminfo");
+    fs::write(&meminfo, "MemTotal: 123456 kB\nMemAvailable: 65432 kB\n").unwrap();
+    let inventory = InventoryCollector {
+        runner: &runner,
+        meminfo_path: &meminfo,
+        store_path: directory.path(),
+        egress_binary_path: Path::new("/bin/true"),
+        fabric_address: None,
+        fabric_bandwidth_mbps: None,
+    }
+    .collect()
+    .unwrap();
+    assert_eq!(
+        inventory.gpu_health,
+        vonk_agent_protocol::generated::GpuHealth::Healthy
+    );
+    assert_eq!(inventory.gpu_count, 1);
+    assert_eq!(
+        inventory.memory_pool,
+        vonk_agent_protocol::MemoryPool::Shared
+    );
+    assert_eq!(
+        inventory.gpu_memory_free_bytes,
+        inventory.memory_available_bytes
+    );
+}
