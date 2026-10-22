@@ -1,0 +1,166 @@
+{
+  "inventory": {
+    "schema_version": 1,
+    "observed_at": "2026-10-18T12:00:00Z",
+    "disk_total_bytes": 100,
+    "disk_free_bytes": 50,
+    "host_memory_total_bytes": 100,
+    "host_memory_free_bytes": 50,
+    "gpu_memory_total_bytes": 100,
+    "gpu_memory_free_bytes": 50,
+    "gpu_count": 1,
+    "memory_pool": "shared",
+    "artifact_store_read_only": false,
+    "capabilities": [],
+    "nvidia_driver_version": "580.1",
+    "container_runtime_version": "podman 5",
+    "network_interfaces": [
+      {
+        "name": "wlP9s9",
+        "kind": "wifi",
+        "carrier": true,
+        "signal_dbm": -78,
+        "frequency_mhz": 2412,
+        "tx_bitrate_mbps": 866.7,
+        "rx_bitrate_mbps": 6.5
+      }
+    ],
+    "nas_route_interface": "wlP9s9"
+  },
+  "observations": {
+    "observed_at": "2026-10-17T08:00:00Z",
+    "runs": [
+      {
+        "endpoint_ready": false,
+        "failure_diagnostics": {
+          "category": "runtime",
+          "collected_at": "2026-10-17T08:00:00+00:00",
+          "collector_errors": [
+            "runtime-version-unavailable"
+          ],
+          "phase": "recipe.start",
+          "preflight": [
+            {
+              "name": "exit_code",
+              "value": "1"
+            },
+            {
+              "name": "oom_killed",
+              "value": "false"
+            },
+            {
+              "name": "exit_cause",
+              "value": "python_exception"
+            }
+          ],
+          "sandbox": [
+            {
+              "name": "Uid",
+              "value": "501\t501\t501\t501"
+            },
+            {
+              "name": "Gid",
+              "value": "501\t501\t501\t501"
+            },
+            {
+              "name": "CapEff",
+              "value": "0000000000000000"
+            },
+            {
+              "name": "NoNewPrivs",
+              "value": "0"
+            },
+            {
+              "name": "Seccomp",
+              "value": "0"
+            },
+            {
+              "name": "User",
+              "value": ""
+            },
+            {
+              "name": "ReadWritePaths",
+              "value": ""
+            },
+            {
+              "name": "ReadOnlyPaths",
+              "value": ""
+            },
+            {
+              "name": "PrivateTmp",
+              "value": "no"
+            },
+            {
+              "name": "ProtectSystem",
+              "value": "no"
+            },
+            {
+              "name": "NoNewPrivileges",
+              "value": "no"
+            },
+            {
+              "name": "RestrictNamespaces",
+              "value": "no"
+            }
+          ],
+          "schema_version": 1,
+          "stderr": {
+            "dropped_bytes": 0,
+            "dropped_lines": 0,
+            "text": "FileNotFoundError: /opt/vonk/prewarm/sglang/flashinfer/autotune/fused_moe.json",
+            "truncated": false
+          },
+          "stdout": {
+            "dropped_bytes": 0,
+            "dropped_lines": 0,
+            "text": "rank 0 listening on 8888",
+            "truncated": false
+          },
+          "storage": [
+            {
+              "name": "data-root",
+              "value": "/var/lib/vonk-forge-agent"
+            },
+            {
+              "name": "free-bytes",
+              "value": "224889409536"
+            }
+          ],
+          "versions": [
+            {
+              "name": "agent",
+              "value": "0.1.1"
+            },
+            {
+              "name": "kernel",
+              "value": "6.11.0-1016-nvidia"
+            }
+          ]
+        },
+        "process_running": false,
+        "run_generation": 1,
+        "run_id": "00000000-0000-4000-8000-000000000032"
+      }
+    ]
+  },
+  "cache_manifest": {
+    "schema_version": 2,
+    "source_policy": "nas-first",
+    "model_content_sha256": null,
+    "recipe_revision_sha256": null,
+    "model_definition_ref": null,
+    "model_content_digests": [],
+    "artifacts": []
+  },
+  "cache_transfer": {
+    "schema_version": 2,
+    "total_bytes": 10,
+    "artifacts": {
+      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": {
+        "baseline_bytes": 3,
+        "received_bytes": 5,
+        "started_at": "2026-10-20T12:00:00Z"
+      }
+    }
+  }
+}

@@ -181,8 +181,8 @@ in `store_retention::STORES`; the Controller's orders remove installations and
 run scopes. A later claim that needs a removed entry fetches or builds it again.
 
 Compile/JIT bytes are disposable helper-owned execution caches under
-`compile-cache/<content-key>/data`, outside run scopes. The compiled plan binds
-`compile_cache_mount`; the fixed `/outputs/cache` target preserves platform
+`compile-cache/<content-key>/data`, outside run scopes. The fixed
+`/outputs/cache` target belongs to the OCI projection and preserves platform
 XDG, vLLM, Triton, FlashInfer and Inductor paths without rebuilding recipe images.
 After exact launch authorization, the helper selects backing by runtime image
 manifest digest, observed GPU compute capability and NVIDIA driver version,

@@ -244,3 +244,22 @@ fn every_mount_nested_in_the_outputs_is_a_named_runtime_mountpoint() {
     assert!(!nested.is_empty());
     assert_eq!(nested, runtime_output_mountpoints().collect::<Vec<_>>());
 }
+
+#[test]
+fn previous_release_plan_retains_identity_and_projects_the_fixed_cache() {
+    // Catches a required additive field breaking agent/helper adoption, and a
+    // default which silently changes signed bytes while reading an old plan.
+    let stored: Value = serde_json::from_str(include_str!(
+        "../../../../../../control/tests/fixtures/stored_installation_33dc45f0.json"
+    ))
+    .unwrap();
+    let recorded = &stored["compiled_execution_plans"]["spk_00000000000000000000000000000000"];
+    let plan: CompiledExecutionPlan = serde_json::from_value(recorded.clone()).unwrap();
+    assert_eq!(serde_json::to_value(&plan).unwrap(), *recorded);
+    let invocation = project(&plan, &paths()).unwrap();
+    assert!(invocation.mounts.contains(&OciMount {
+        source: paths().cache_root,
+        target: super::super::RUNTIME_CACHE_TARGET.to_owned(),
+        read_only: false,
+    }));
+}
