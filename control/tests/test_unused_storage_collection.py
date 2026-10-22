@@ -1144,27 +1144,60 @@ def _application(
         return application.id
 
 
-@pytest.mark.usefixtures("damaged_json_rows")
-def test_installation_the_selected_profile_application_names_is_kept(
-    world: Catalog,
+@pytest.mark.parametrize(
+    "ended",
+    [
+        LifecycleState.SUCCEEDED,
+        LifecycleState.FAILED,
+        LifecycleState.CANCELLED,
+        LifecycleState.SUPERSEDED,
+        None,
+    ],
+)
+def test_selected_application_releases_historical_installation_hold(
+    postgres_engine: Engine,
+    ended: LifecycleState | None,
 ) -> None:
-    """The selected application is what the fleet was last asked to be."""
+    """A selected snapshot must not retain obsolete effects after its owner ends."""
+    from vonk_control.fleet_profile_contract import FleetProfileInstallationEffect
 
+    Base.metadata.create_all(postgres_engine)
+    world = Catalog(postgres_engine)
     old = world.revision("glm", 1)
     world.revision("glm", 2, head="active")
-    installation, _ = world.workload(old, run="stopped")
-    _application(
+    installation, _ = world.workload(old, run=RunState.STOPPED)
+    application_id = _application(
         world,
-        {"effects": {"installations": [{"installation_id": installation}]}},
-        state="succeeded",
+        {},
+        state=LifecycleState.RUNNING,
         selected=True,
+        canonical=True,
     )
-    lifecycle = FakeLifecycle(world.sessions)
-
-    result = _collector(world, lifecycle).collect()
-
-    assert lifecycle.removed == []
-    assert _kept(result, "live operation") == 1
+    with world.sessions.begin() as session:
+        application = _required(session.get(FleetProfileApplication, application_id))
+        plan = FleetProfilePreview.model_validate_json(json.dumps(application.plan))
+        plan.effects.installations = [
+            FleetProfileInstallationEffect(
+                installation_id=installation,
+                node_ids=[NODE],
+                action="keep",
+            )
+        ]
+        application.plan = plan.model_dump(mode="json")
+    with world.sessions() as session:
+        assert installation in _Evidence.read(session, NOW).operations
+    # Simulate completion/cancellation/supersession or loss between reconciles.
+    with world.sessions.begin() as session:
+        application = _required(session.get(FleetProfileApplication, application_id))
+        if ended is None:
+            session.delete(_required(session.get(FleetProfileSelection, 1)))
+            session.flush()
+            session.delete(application)
+        else:
+            application.state = ended
+            application.updated_at = NOW
+    with world.sessions() as session:
+        assert installation not in _Evidence.read(session, NOW).operations
 
 
 def test_a_load_accepted_before_the_removal_is_queued_stops_the_removal(
