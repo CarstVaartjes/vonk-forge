@@ -27,6 +27,7 @@ from vonk_agent_protocol import (
     OutcomeKind,
     RecipeOperationRequest,
     SupersedeCode,
+    WaitReason,
     canonical_message,
 )
 from vonk_agent_protocol import AgentOperation as ProtocolAgentOperation
@@ -4048,9 +4049,21 @@ def _scenario_operator_retry_attempt_not_ready(
     )
 
 
+def _scenario_queued_observation_not_due(
+    sessions, clock, parent_job, operation
+) -> None:
+    _set_operation(
+        sessions,
+        operation,
+        recovery_deadline=clock.now + timedelta(hours=1),
+        next_action_at=clock.now + timedelta(seconds=60),
+    )
+
+
 #: One scenario per condition the predicate can fail.  Each leaves exactly one
 #: named condition false, so the classifier must name that condition.
 _REFUSAL_SCENARIOS: dict[str, Callable[..., None]] = {
+    WaitReason.OBSERVATION_UNAVAILABLE: _scenario_queued_observation_not_due,
     "parent-cancel-flag-malformed": _scenario_parent_cancel_flag_malformed,
     "parent-job-missing": _scenario_parent_job_missing,
     "workload-intent-superseded": _scenario_workload_intent_superseded,
@@ -4695,3 +4708,80 @@ def test_an_order_that_ended_keeps_its_outcome_unless_its_report_is_replaced(
             stored, None, None, Outcome.FAILED, clock.now, replaces_report=True
         )
         assert stored.state == "failed"
+
+
+def test_gpu_fault_between_admission_and_claim_waits_then_recovers(service) -> None:
+    # Catches dispatching a previously accepted launch after the GPU broke;
+    # cleanup must remain claimable and a healthy observation must unblock it.
+    from dataclasses import replace
+
+    from vonk_agent_protocol import ProjectionCode
+    from vonk_agent_protocol.inventory import GpuHealth
+    from vonk_control.inventory_repository import (
+        InventoryRepository,
+        InventorySnapshotInput,
+    )
+
+    jobs, sessions, clock = service
+    repo = InventoryRepository(sessions)
+    evidence = InventorySnapshotInput(
+        node_id=NODE_A,
+        observed_at=clock.now,
+        disk_total_bytes=1000,
+        disk_free_bytes=900,
+        host_memory_total_bytes=1000,
+        host_memory_free_bytes=900,
+        gpu_memory_total_bytes=1000,
+        gpu_memory_free_bytes=900,
+        gpu_count=1,
+        memory_pool="shared",
+        capabilities=(),
+        artifact_store_read_only=False,
+        gpu_health=GpuHealth.NEEDS_RESET,
+    )
+    repo.record(evidence)
+    operation = jobs.enqueue(
+        parent(sessions, clock).id,
+        NODE_A,
+        ProtocolAgentOperation.RECIPE_START,
+        COMMIT,
+        superseded_order_payload(clock),
+    )
+    assert claim_agent(jobs, NODE_A, "serial-a") is None
+    with sessions() as session:
+        waiting = session.get(AgentOperation, operation.id)
+        assert waiting is not None
+        assert waiting.current_attempt == 0
+        assert ProjectionCode.NODE_GPU_REQUIRES_RESET in waiting.status_reason
+        assert waiting.next_action_at is not None
+        deadline = waiting.recovery_deadline
+    from vonk_control.agent_jobs.waits import record_queue_waits
+
+    with sessions.begin() as session:
+        waiting = session.get(AgentOperation, operation.id)
+        assert waiting is not None
+        record_queue_waits(session, [waiting], clock.now)
+        assert waiting.wait_evidence is not None
+        assert waiting.wait_evidence.reason == ProjectionCode.NODE_GPU_REQUIRES_RESET
+        assert waiting.wait_evidence.blockers[0].node_ids == [NODE_A]
+    cleanup = jobs.enqueue(
+        parent(sessions, clock).id,
+        NODE_A,
+        ProtocolAgentOperation.RECIPE_STOP,
+        COMMIT,
+        STOP_PAYLOAD,
+    )
+    stop = claim_agent(jobs, NODE_A, "serial-a")
+    assert stop is not None
+    assert fenced_operation(sessions, stop).id == cleanup.id
+    jobs.succeed(stop, STOP_RESULT)
+    clock.advance(seconds=5)
+    repo.record(replace(evidence, observed_at=clock.now, gpu_health=GpuHealth.HEALTHY))
+    clock.advance(seconds=1)
+    claim = claim_agent(jobs, NODE_A, "serial-a")
+    assert claim is not None
+    assert fenced_operation(sessions, claim).id == operation.id
+    with sessions() as session:
+        current = session.get(AgentOperation, operation.id)
+        assert current is not None
+        assert current.recovery_deadline == deadline

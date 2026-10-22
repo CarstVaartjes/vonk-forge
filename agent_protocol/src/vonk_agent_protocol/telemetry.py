@@ -52,6 +52,7 @@ class GpuUnavailableReason(StrEnum):
     COMMAND_FAILED = "gpu.command-failed"
     COMMAND_TIMEOUT = "gpu.command-timeout"
     INVALID_OUTPUT = "gpu.invalid-output"
+    REQUIRES_RESET = "gpu.requires-reset"
     UNSUPPORTED_METRICS = "gpu.unsupported-metrics"
 
 

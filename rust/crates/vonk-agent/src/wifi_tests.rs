@@ -54,6 +54,7 @@ fn signed_signal_fractional_rates_and_extended_rate_survive_agent_output() {
         disk_available_bytes: 50,
         state_database_reserve_held: true,
         gpu_count: 1,
+        gpu_health: vonk_agent_protocol::generated::GpuHealth::Healthy,
         gpu_memory_total_bytes: 100,
         gpu_memory_free_bytes: 50,
         memory_pool: InventoryRequestMemoryPool::Shared,

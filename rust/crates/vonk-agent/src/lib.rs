@@ -9,6 +9,7 @@ mod compose_document;
 pub mod config;
 pub mod executor;
 pub mod failure_evidence;
+mod gpu_health;
 pub mod health;
 mod held_lock;
 pub mod helper_codes;

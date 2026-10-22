@@ -16,6 +16,7 @@ fn out_of_contract_inventory_is_clamped_instead_of_refused() {
         gpu_memory_total_bytes: 0,
         gpu_memory_free_bytes: 0,
         gpu_count: 1,
+        gpu_health: Some(vonk_agent_protocol::generated::GpuHealth::Healthy),
         memory_pool: vonk_agent_protocol::generated::InventoryRequestMemoryPool::Shared,
         artifact_store_read_only: false,
         capabilities: vec![
@@ -349,13 +350,15 @@ fn inventory_with_all_evidence() -> vonk_agent_protocol::InventoryRequest {
 
 #[test]
 fn the_inventory_core_keeps_the_capacity_report_and_no_optional_evidence() {
-    let request = inventory_with_all_evidence();
+    let mut request = inventory_with_all_evidence();
+    request.gpu_health = Some(vonk_agent_protocol::generated::GpuHealth::NeedsReset);
 
     let core = inventory_core(&request);
 
     core.validate().unwrap();
     let mut expected = valid_inventory();
     expected.observed_at = request.observed_at;
+    expected.gpu_health = request.gpu_health;
     assert_eq!(core, expected);
 }
 

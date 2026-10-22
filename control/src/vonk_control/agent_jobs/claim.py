@@ -42,7 +42,7 @@ from ..operation_progress import stored_progress
 from ..own_cleanup import CLEANUP_KINDS
 from ..persisted_waits import schedule_wait
 from ..recovery_policy import WAIT_STEP
-from .claim_authority import recipe_build_disk_wait
+from .claim_authority import gpu_health_wait, recipe_build_disk_wait
 from .contracts import _MUTATING_OPERATIONS, CLAIM_LEASE_SECONDS
 from .endings import end_unobserved_order
 from .evidence import (
@@ -658,6 +658,8 @@ def _claim_once(
             and operation.current_attempt == 0
         ):
             _anchor_start_budget(session, operation, now)
+        if gpu_health_wait(self, session, operation, now):
+            return None
         fence = claim_fence or str(uuid.uuid4())
         deadline = now + timedelta(seconds=CLAIM_LEASE_SECONDS)
         # The claim consumes the schedule the previous attempt carried

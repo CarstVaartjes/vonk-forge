@@ -16,6 +16,7 @@ from vonk_agent_protocol.gpu_clock import (
 )
 from vonk_agent_protocol.inventory import HostSettings, NetworkInterface
 
+from ..gpu_health import gpu_health_reason
 from ..models import (
     AgentCertificate,
     AgentNode,
@@ -119,6 +120,16 @@ def _node(
                 code=ProjectionCode.INVENTORY_STALE,
                 detail="Admission inventory is stale.",
                 severity="warning",
+            )
+        )
+    health_reason = gpu_health_reason(
+        inventory_state.gpu_health if inventory_state is not None else None
+    )
+    if health_reason is not None:
+        code, detail = health_reason
+        warnings.append(
+            ProjectionReason(
+                code=code, detail=detail, severity=ProfileReasonSeverity.WARNING.value
             )
         )
     route_notice = (
@@ -392,6 +403,7 @@ def _inventory(
         gpu_memory_total_bytes=value.gpu_memory_total_bytes,
         gpu_memory_free_bytes=value.gpu_memory_free_bytes,
         gpu_count=value.gpu_count,
+        gpu_health=value.gpu_health,
         artifact_store_read_only=value.artifact_store_read_only,
         capabilities=list(value.capabilities),
         fabric_address=value.fabric_address,

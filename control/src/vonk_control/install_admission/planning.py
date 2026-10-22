@@ -32,6 +32,7 @@ from ..disk_reservations import (
     models_stored_on_node,
     outstanding_disk_charges,
 )
+from ..gpu_health import gpu_health_reason
 from ..inventory_repository import InventoryRepository, InventorySnapshotView
 from ..legal_admission import territorial_admission
 from ..models import (
@@ -377,6 +378,9 @@ class InstallPlanningService:
                     )
                 )
             snapshot = inventory_by_node.get(mapping_node.node_id)
+            health_reason = gpu_health_reason(snapshot.gpu_health if snapshot else None)
+            if health_reason is not None:
+                blockers.append(AdmissionReason(*health_reason))
             if snapshot is None:
                 blockers.append(
                     AdmissionReason(

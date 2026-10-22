@@ -8,6 +8,7 @@
   "gpu_memory_total_bytes": 100,
   "gpu_memory_free_bytes": 50,
   "gpu_count": 1,
+  "gpu_health": "healthy",
   "memory_pool": "shared",
   "artifact_store_read_only": false,
   "capabilities": [],

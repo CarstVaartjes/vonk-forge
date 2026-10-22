@@ -92,6 +92,8 @@ class ProjectionCode(WireEnum):
     )
     #: Measured: this Spark's recent copies from the NAS are far slower than another's.
     NETWORK_NAS_TRANSFER_SLOW = "network.nas-transfer-slow"
+    NODE_GPU_REQUIRES_RESET = "node.gpu_requires_reset"
+    NODE_GPU_UNAVAILABLE = "node.gpu_unavailable"
     NODE_OFFLINE = "node.offline"
     PROFILE_RETRYING = "profile.retrying"
     RECIPE_UPDATE_AVAILABLE = "recipe.update_available"

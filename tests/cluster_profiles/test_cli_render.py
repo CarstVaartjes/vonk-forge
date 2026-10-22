@@ -1085,3 +1085,23 @@ def test_clock_unavailable_readings_name_reason_and_receipt_cause(capsys):
     output = capsys.readouterr().out
     assert "graphics 0 / SM not supported (driver returned [N/A])" in output
     assert "helper receipt unavailable; inventory retries" in output
+
+
+def test_fleet_shows_gpu_reset_warning_and_physical_recovery(capsys):
+    # Catches rendering a broken GPU as ordinary online/idle metrics absence.
+    from vonk_agent_protocol import ProjectionCode
+    from vonk_agent_protocol.agent_words import ProfileReasonSeverity
+    from vonk_agent_protocol.inventory import GPU_RESET_RECOVERY
+
+    spark = _wifi_spark()
+    spark["warnings"] = [
+        {
+            "code": ProjectionCode.NODE_GPU_REQUIRES_RESET,
+            "detail": f"GPU requires reset. {GPU_RESET_RECOVERY}",
+            "severity": ProfileReasonSeverity.WARNING.value,
+        }
+    ]
+    render_payload(spark, "fleet", action="detail")
+    captured = capsys.readouterr()
+    assert "GPU requires reset" in captured.err
+    assert GPU_RESET_RECOVERY in captured.err
