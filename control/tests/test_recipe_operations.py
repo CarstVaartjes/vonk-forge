@@ -6158,6 +6158,112 @@ def test_postgres_duplicate_stop_request_returns_same_operation(
         )
 
 
+@pytest.mark.parametrize("release_on_wait", [True, False], ids=["released", "deadline"])
+def test_postgres_duplicate_stop_waiting_on_dispatch_replays(
+    tmp_path: Path,
+    postgres_engine,
+    monkeypatch: pytest.MonkeyPatch,
+    release_on_wait: bool,
+) -> None:
+    # Dispatch already owns the accepted parent and run. Re-taking the request
+    # creation key here makes its own duplicate spend every try-lock attempt
+    # before it can read that receipt. Hold dispatch until the duplicate waits
+    # on its run, then let the committed receipt answer both callers.
+    from vonk_control.recipe_operations import persistence
+
+    Base.metadata.drop_all(postgres_engine)
+    sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
+        tmp_path, engine=postgres_engine
+    )
+    installation = installed_recipe(
+        service, mapping_id, build_id, nodes, request_id="e" * 35 + "b"
+    )
+    run = started_recipe(
+        sessions, service, installation.owner_id, nodes, request_id="e" * 35 + "c"
+    )
+    service, routes = bind_route_publications(sessions, service, ConcurrentPublisher())
+    routes.publish_run(run.owner_id)
+    plan = service.preview_stop(run.owner_id)
+    request_key = "e" * 35 + "d"
+    role = threading.local()
+    backend_pids: dict[str, int] = {}
+    dispatch_locked = threading.Event()
+    duplicate_progress = threading.Event()
+    release_dispatch = threading.Event()
+    acquire = persistence.acquire_admission_keys
+
+    def held_dispatch(session, keys, *, holder=None):
+        acquire(session, keys, holder=holder)
+        if getattr(role, "value", None) == "first":
+            backend_pids["first"] = _postgres_backend_pid(session.connection())
+            dispatch_locked.set()
+            assert release_dispatch.wait(timeout=10)
+
+    def before_lock(connection, _cursor, statement, _parameters, _context, _many):
+        if (
+            getattr(role, "value", None) == "second"
+            and "FROM recipe_runs" in statement
+            and "FOR UPDATE" in statement
+        ):
+            backend_pids["second"] = _postgres_backend_pid(connection)
+            duplicate_progress.set()
+
+    def stop(label: str) -> str:
+        role.value = label
+        return service.stop(
+            run.owner_id,
+            plan_digest=plan.plan_digest,
+            actor="admin",
+            request_id=request_key,
+        ).id
+
+    monkeypatch.setattr(persistence, "acquire_admission_keys", held_dispatch)
+    event.listen(postgres_engine, "before_cursor_execute", before_lock)
+    pool = ThreadPoolExecutor(max_workers=2)
+    try:
+        first = pool.submit(stop, "first")
+        assert dispatch_locked.wait(timeout=10)
+        second = pool.submit(stop, "second")
+        second.add_done_callback(lambda _future: duplicate_progress.set())
+        assert duplicate_progress.wait(timeout=10)
+        if second.done():
+            # Surface an early refusal as its actual error, not a sync timeout.
+            second.result()
+            pytest.fail("duplicate Stop returned before dispatch released its run")
+        _wait_for_postgres_block(
+            postgres_engine,
+            blocked_pid=backend_pids["second"],
+            blocker_pid=backend_pids["first"],
+        )
+        if release_on_wait:
+            release_dispatch.set()
+        # At the SQL lock deadline the duplicate must still return the receipt,
+        # while dispatch remains held. It neither cancels nor fails that Stop.
+        second_id = second.result(timeout=10)
+        release_dispatch.set()
+        first_id = first.result(timeout=10)
+    finally:
+        release_dispatch.set()
+        pool.shutdown(wait=True)
+        event.remove(postgres_engine, "before_cursor_execute", before_lock)
+
+    assert second_id == first_id
+    with sessions() as session:
+        assert [
+            job.id
+            for job in session.scalars(select(Job).where(Job.request_id == request_key))
+        ] == [first_id]
+        assert len(
+            tuple(
+                session.scalars(
+                    select(AgentOperation.id).where(
+                        AgentOperation.parent_job_id == first_id
+                    )
+                )
+            )
+        ) == len(nodes)
+
+
 def test_postgres_duplicate_stop_waiting_on_withdrawal_claim_replays(
     tmp_path: Path, postgres_engine, monkeypatch: pytest.MonkeyPatch
 ) -> None:
