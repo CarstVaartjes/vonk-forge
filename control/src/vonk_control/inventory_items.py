@@ -1,6 +1,7 @@
 """One inventory path for claims and reusable runtime evidence."""
 
 import hashlib
+import logging
 from collections.abc import Callable
 from datetime import datetime
 
@@ -62,6 +63,24 @@ def record_items(node: AgentNode, items: AgentInventoryItems, now: datetime) -> 
         node.inventory_snapshot.evidence_digest = digest
 
 
+def _reported_items(node: AgentNode) -> AgentInventoryItems:
+    """A fresh authenticated producer can rebuild its facts after storage damage.
+
+    Readers still expose unknown. Other item families remain unknown until
+    their own producers supply evidence; damaged bytes never become authority.
+    """
+    snapshot = node.inventory_snapshot
+    if snapshot is not None and not isinstance(
+        snapshot.agent_items, AgentInventoryItems
+    ):
+        logging.getLogger(__name__).warning(
+            "Rebuilding unreadable inventory items from a fresh report for %s",
+            node.node_id,
+        )
+        return AgentInventoryItems()
+    return inventory_items(node)
+
+
 def record_runtime(
     node: AgentNode,
     identity: AgentRuntimeIdentity,
@@ -69,7 +88,7 @@ def record_runtime(
     hostname: str | None,
     now: datetime,
 ) -> None:
-    items = inventory_items(node)
+    items = _reported_items(node)
     record_items(
         node,
         items.model_copy(
@@ -89,7 +108,7 @@ def record_preflight(
     result: RuntimePreflightResult,
     now: datetime,
 ) -> None:
-    items = inventory_items(node)
+    items = _reported_items(node)
     entries = [
         item
         for item in items.preflights
@@ -109,7 +128,7 @@ def inventory_artifacts(
 
 
 def record_artifact(node: AgentNode, artifact: InventoryArtifactItem) -> None:
-    items = inventory_items(node)
+    items = _reported_items(node)
     artifacts = [item for item in items.artifacts if item.digest != artifact.digest]
     artifacts.append(artifact)
     record_items(

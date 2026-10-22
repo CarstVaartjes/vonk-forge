@@ -470,12 +470,14 @@ def reconcile_schema(connection: Connection) -> None:
     from .node_facts import (
         move_artifact_facts,
         move_repeated_evidence,
+        move_resource_facts,
         move_runtime_facts,
     )
 
     move_runtime_facts(connection)
     move_artifact_facts(connection)
     move_repeated_evidence(connection)
+    move_resource_facts(connection)
 
     remaining = _check_constraint_differences(connection)
     if remaining:

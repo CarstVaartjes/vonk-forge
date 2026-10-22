@@ -19,7 +19,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import func, select
+from sqlalchemy import JSON, func, select, type_coerce
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import ReservationState
 
@@ -27,7 +27,7 @@ from .memory_reservations import MEMORY_RESERVATION_KINDS
 from .models import (
     CatalogDocumentRevision,
     InstallationNode,
-    NodeTelemetrySample,
+    NodeInventoryResourceSnapshot,
     RecipeInstallation,
     RecipeRun,
     ResourceReservation,
@@ -171,9 +171,15 @@ def recent_best_available(
         return None
     since = _utc(observed_at) - timedelta(seconds=PROFILE_STALL_WINDOW_SECONDS)
     return session.scalar(
-        select(func.max(NodeTelemetrySample.memory_available_bytes)).where(
-            NodeTelemetrySample.node_id == node_id,
-            NodeTelemetrySample.observed_at >= since,
+        select(
+            func.max(
+                type_coerce(NodeInventoryResourceSnapshot.host_resources, JSON)[
+                    "memory_available_bytes"
+                ].as_integer()
+            )
+        ).where(
+            NodeInventoryResourceSnapshot.node_id == node_id,
+            NodeInventoryResourceSnapshot.observed_at >= since,
         )
     )
 

@@ -1,3 +1,4 @@
+from vonk_agent_protocol import canonical_message
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 
 from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
@@ -20,7 +21,7 @@ from sqlalchemy import select
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.inventory_repository import (
     InventoryRepository,
-    InventorySnapshotInput,
+    NodeInventoryReport,
 )
 from vonk_control.library_api import install_library_routes
 from vonk_control.library_assessment import LibraryAssessment
@@ -325,19 +326,26 @@ def test_fit_search_continues_after_an_ineligible_first_group(assessed_library):
         snapshot.host_memory_free_bytes = 0
         snapshot.gpu_memory_free_bytes = 0
     InventoryRepository(sessions, clock=lambda: NOW).record(
-        InventorySnapshotInput(
-            later,
-            NOW,
-            10_000,
-            8_000,
-            10_000,
-            8_000,
-            10_000,
-            8_000,
-            1,
-            False,
-            capabilities,
-            memory_pool="shared",
+        NodeInventoryReport.model_validate_json(
+            canonical_message(
+                {
+                    "node_id": later,
+                    "observed_at": NOW,
+                    "disk_total_bytes": 10_000,
+                    "disk_free_bytes": 8_000,
+                    "host_memory_total_bytes": 10_000,
+                    "host_memory_free_bytes": 8_000,
+                    "gpu_memory_total_bytes": 10_000,
+                    "gpu_memory_free_bytes": 8_000,
+                    "gpu_count": 1,
+                    "artifact_store_read_only": False,
+                    "capabilities": capabilities,
+                    "memory_pool": "shared",
+                    "schema_version": 1,
+                    "nvidia_driver_version": "unknown",
+                    "container_runtime_version": "unknown",
+                }
+            )
         )
     )
     rows = projection.recipe_library(fits_fleet=True).recipes

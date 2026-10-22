@@ -6,7 +6,7 @@ from datetime import timedelta
 from uuid import uuid4
 
 from sqlalchemy import select, update
-from vonk_agent_protocol import DesiredAssignmentState
+from vonk_agent_protocol import DesiredAssignmentState, canonical_message
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_control.fleet_profile_contract import (
     FleetProfileAssignmentInput,
@@ -15,7 +15,7 @@ from vonk_control.fleet_profile_contract import (
 from vonk_control.inventory_items import runtime_value
 from vonk_control.inventory_repository import (
     InventoryRepository,
-    InventorySnapshotInput,
+    NodeInventoryReport,
 )
 from vonk_control.memory_reservations import memory_reservations
 from vonk_control.models import (
@@ -169,21 +169,28 @@ def test_profile_apply_stops_only_reachable_rank_and_retains_missing_claim(
                 )
             )
         InventoryRepository(sessions, clock=lifecycle._clock).record(
-            InventorySnapshotInput(
-                node_id=unrelated_node,
-                observed_at=observed_at,
-                disk_total_bytes=10_000,
-                disk_free_bytes=8_000,
-                host_memory_total_bytes=10_000,
-                host_memory_free_bytes=8_000,
-                gpu_memory_total_bytes=10_000,
-                gpu_memory_free_bytes=8_000,
-                gpu_count=1,
-                artifact_store_read_only=False,
-                capabilities=capabilities,
-                memory_pool="shared",
-                fabric_address=f"192.168.100.{4 + index}",
-                fabric_bandwidth_mbps=200000,
+            NodeInventoryReport.model_validate_json(
+                canonical_message(
+                    {
+                        "node_id": unrelated_node,
+                        "observed_at": observed_at,
+                        "disk_total_bytes": 10_000,
+                        "disk_free_bytes": 8_000,
+                        "host_memory_total_bytes": 10_000,
+                        "host_memory_free_bytes": 8_000,
+                        "gpu_memory_total_bytes": 10_000,
+                        "gpu_memory_free_bytes": 8_000,
+                        "gpu_count": 1,
+                        "artifact_store_read_only": False,
+                        "capabilities": capabilities,
+                        "memory_pool": "shared",
+                        "fabric_address": f"192.168.100.{4 + index}",
+                        "fabric_bandwidth_mbps": 200000,
+                        "schema_version": 1,
+                        "nvidia_driver_version": "unknown",
+                        "container_runtime_version": "unknown",
+                    }
+                )
             )
         )
     profiles.update(

@@ -28,7 +28,7 @@ from vonk_control.fleet_profiles import (
 )
 from vonk_control.inventory_repository import (
     InventoryRepository,
-    InventorySnapshotInput,
+    NodeInventoryReport,
 )
 from vonk_control.models import (
     AgentNode,
@@ -139,19 +139,30 @@ def _pending_stop(
     # Its physical load remains simulated; the offline Stop lane is not given
     # fresh inventory or an absence report to release its retained claims.
     InventoryRepository(sessions, clock=lambda: clock[0]).record(
-        InventorySnapshotInput(
-            _node_id(2),
-            clock[0],
-            10_000,
-            8_000,
-            10_000,
-            8_000,
-            10_000,
-            8_000,
-            1,
-            False,
-            ("runtime.vonk.v1", "recipe.image.pull.v1", "recipe.operations.v1"),
-            memory_pool="shared",
+        NodeInventoryReport.model_validate_json(
+            canonical_message(
+                {
+                    "node_id": _node_id(2),
+                    "observed_at": clock[0],
+                    "disk_total_bytes": 10_000,
+                    "disk_free_bytes": 8_000,
+                    "host_memory_total_bytes": 10_000,
+                    "host_memory_free_bytes": 8_000,
+                    "gpu_memory_total_bytes": 10_000,
+                    "gpu_memory_free_bytes": 8_000,
+                    "gpu_count": 1,
+                    "artifact_store_read_only": False,
+                    "capabilities": (
+                        "runtime.vonk.v1",
+                        "recipe.image.pull.v1",
+                        "recipe.operations.v1",
+                    ),
+                    "memory_pool": "shared",
+                    "schema_version": 1,
+                    "nvidia_driver_version": "unknown",
+                    "container_runtime_version": "unknown",
+                }
+            )
         )
     )
     profiles = FleetProfileService(

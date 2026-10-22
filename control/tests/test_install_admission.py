@@ -7,7 +7,7 @@ import pytest
 from sqlalchemy import create_engine, delete, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import CompiledExecutionPlan, ModelFileState
+from vonk_agent_protocol import CompiledExecutionPlan, ModelFileState, canonical_message
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_control.cluster_mappings import ClusterMappingService
 from vonk_control.install_admission import (
@@ -17,7 +17,7 @@ from vonk_control.install_admission import (
 from vonk_control.inventory_items import inventory_artifacts
 from vonk_control.inventory_repository import (
     InventoryRepository,
-    InventorySnapshotInput,
+    NodeInventoryReport,
 )
 from vonk_control.models import (
     AgentCertificate,
@@ -404,22 +404,29 @@ def setup(
             )
         )
     InventoryRepository(sessions, clock=lambda: now).record(
-        InventorySnapshotInput(
-            node_id,
-            now - timedelta(seconds=observed_age),
-            1000,
-            free,
-            1000,
-            800,
-            1000,
-            800,
-            1,
-            read_only,
-            (
-                "runtime.vonk.v1",
-                "recipe.image.pull.v1",
-            ),
-            memory_pool="shared",
+        NodeInventoryReport.model_validate_json(
+            canonical_message(
+                {
+                    "node_id": node_id,
+                    "observed_at": now - timedelta(seconds=observed_age),
+                    "disk_total_bytes": 1000,
+                    "disk_free_bytes": free,
+                    "host_memory_total_bytes": 1000,
+                    "host_memory_free_bytes": 800,
+                    "gpu_memory_total_bytes": 1000,
+                    "gpu_memory_free_bytes": 800,
+                    "gpu_count": 1,
+                    "artifact_store_read_only": read_only,
+                    "capabilities": (
+                        "runtime.vonk.v1",
+                        "recipe.image.pull.v1",
+                    ),
+                    "memory_pool": "shared",
+                    "schema_version": 1,
+                    "nvidia_driver_version": "unknown",
+                    "container_runtime_version": "unknown",
+                }
+            )
         )
     )
     resolved = _seed_canonical_catalog(
@@ -809,22 +816,29 @@ def test_plan_digest_ignores_fresh_inventory_observation_noise(tmp_path) -> None
     service = _service(sessions, inventory_max_age=300, disk_floor_bytes=10)
     original = service.plan_install(mapping, build, now=now)
     InventoryRepository(sessions, clock=lambda: now).record(
-        InventorySnapshotInput(
-            node,
-            now + timedelta(seconds=1),
-            1000,
-            199,
-            1000,
-            800,
-            1000,
-            800,
-            1,
-            False,
-            (
-                "runtime.vonk.v1",
-                "recipe.image.pull.v1",
-            ),
-            memory_pool="shared",
+        NodeInventoryReport.model_validate_json(
+            canonical_message(
+                {
+                    "node_id": node,
+                    "observed_at": now + timedelta(seconds=1),
+                    "disk_total_bytes": 1000,
+                    "disk_free_bytes": 199,
+                    "host_memory_total_bytes": 1000,
+                    "host_memory_free_bytes": 800,
+                    "gpu_memory_total_bytes": 1000,
+                    "gpu_memory_free_bytes": 800,
+                    "gpu_count": 1,
+                    "artifact_store_read_only": False,
+                    "capabilities": (
+                        "runtime.vonk.v1",
+                        "recipe.image.pull.v1",
+                    ),
+                    "memory_pool": "shared",
+                    "schema_version": 1,
+                    "nvidia_driver_version": "unknown",
+                    "container_runtime_version": "unknown",
+                }
+            )
         )
     )
 
@@ -883,19 +897,26 @@ def test_install_topology_capability_loss_is_a_plan_blocker(tmp_path) -> None:
         registered = session.get(AgentNode, node)
         assert registered is not None
     InventoryRepository(sessions, clock=lambda: now).record(
-        InventorySnapshotInput(
-            node,
-            now + timedelta(seconds=1),
-            1000,
-            200,
-            1000,
-            800,
-            1000,
-            800,
-            1,
-            False,
-            (),
-            memory_pool="shared",
+        NodeInventoryReport.model_validate_json(
+            canonical_message(
+                {
+                    "node_id": node,
+                    "observed_at": now + timedelta(seconds=1),
+                    "disk_total_bytes": 1000,
+                    "disk_free_bytes": 200,
+                    "host_memory_total_bytes": 1000,
+                    "host_memory_free_bytes": 800,
+                    "gpu_memory_total_bytes": 1000,
+                    "gpu_memory_free_bytes": 800,
+                    "gpu_count": 1,
+                    "artifact_store_read_only": False,
+                    "capabilities": (),
+                    "memory_pool": "shared",
+                    "schema_version": 1,
+                    "nvidia_driver_version": "unknown",
+                    "container_runtime_version": "unknown",
+                }
+            )
         )
     )
 
@@ -917,19 +938,26 @@ def test_database_rejects_mutable_built_image_identity(tmp_path) -> None:
 def test_an_agent_that_cannot_pull_images_asks_for_an_upgrade(tmp_path) -> None:
     sessions, now, node, mapping, build = setup(tmp_path, free=200)
     InventoryRepository(sessions, clock=lambda: now).record(
-        InventorySnapshotInput(
-            node,
-            now + timedelta(seconds=1),
-            1000,
-            200,
-            1000,
-            800,
-            1000,
-            800,
-            1,
-            False,
-            ("runtime.vonk.v1",),
-            memory_pool="shared",
+        NodeInventoryReport.model_validate_json(
+            canonical_message(
+                {
+                    "node_id": node,
+                    "observed_at": now + timedelta(seconds=1),
+                    "disk_total_bytes": 1000,
+                    "disk_free_bytes": 200,
+                    "host_memory_total_bytes": 1000,
+                    "host_memory_free_bytes": 800,
+                    "gpu_memory_total_bytes": 1000,
+                    "gpu_memory_free_bytes": 800,
+                    "gpu_count": 1,
+                    "artifact_store_read_only": False,
+                    "capabilities": ("runtime.vonk.v1",),
+                    "memory_pool": "shared",
+                    "schema_version": 1,
+                    "nvidia_driver_version": "unknown",
+                    "container_runtime_version": "unknown",
+                }
+            )
         )
     )
 
@@ -957,22 +985,29 @@ def _record_inventory(sessions, node_id, at, *, free=200) -> None:
     """Keep reporting the same authenticated capacity at a later observation."""
 
     InventoryRepository(sessions, clock=lambda: at).record(
-        InventorySnapshotInput(
-            node_id,
-            at,
-            1000,
-            free,
-            1000,
-            800,
-            1000,
-            800,
-            1,
-            False,
-            (
-                "runtime.vonk.v1",
-                "recipe.image.pull.v1",
-            ),
-            memory_pool="shared",
+        NodeInventoryReport.model_validate_json(
+            canonical_message(
+                {
+                    "node_id": node_id,
+                    "observed_at": at,
+                    "disk_total_bytes": 1000,
+                    "disk_free_bytes": free,
+                    "host_memory_total_bytes": 1000,
+                    "host_memory_free_bytes": 800,
+                    "gpu_memory_total_bytes": 1000,
+                    "gpu_memory_free_bytes": 800,
+                    "gpu_count": 1,
+                    "artifact_store_read_only": False,
+                    "capabilities": (
+                        "runtime.vonk.v1",
+                        "recipe.image.pull.v1",
+                    ),
+                    "memory_pool": "shared",
+                    "schema_version": 1,
+                    "nvidia_driver_version": "unknown",
+                    "container_runtime_version": "unknown",
+                }
+            )
         )
     )
 

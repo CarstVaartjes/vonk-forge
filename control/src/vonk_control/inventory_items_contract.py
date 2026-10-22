@@ -15,6 +15,7 @@ from .strict_json import StrictModel
 class InventorySnapshotKind(StrEnum):
     REPORT = "report"
     ITEMS = "items"
+    MEASUREMENTS = "measurements"
 
 
 class PreflightInventoryItem(StrictModel):

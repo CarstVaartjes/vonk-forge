@@ -10,7 +10,11 @@ import uuid
 from pathlib import Path
 
 from sqlalchemy import create_engine, select
-from vonk_agent_protocol import InstallationBytes, InstallationNodeState
+from vonk_agent_protocol import (
+    InstallationBytes,
+    InstallationNodeState,
+    canonical_message,
+)
 from vonk_control.installed_bytes import refresh_installed_bytes
 from vonk_control.models import Base, InstallationNode
 
@@ -71,17 +75,16 @@ def test_postgres_missing_installation_inventory_allows_reinstall_without_releas
 ):
     # Wrong implementation: successful directory listings only refresh sizes,
     # so deleted installations stay installed forever and are reused on apply.
-    from dataclasses import asdict
     from datetime import timedelta
 
-    from vonk_agent_protocol import InstallationState, RunState, canonical_message
+    from vonk_agent_protocol import InstallationState, RunState
     from vonk_agent_protocol.inventory import (
         MAX_REPORTED_INSTALLATIONS,
         InventoryRequest,
     )
     from vonk_control.inventory_repository import (
         InventoryRepository,
-        InventorySnapshotInput,
+        NodeInventoryReport,
     )
     from vonk_control.models import RecipeInstallation, RecipeRun
 
@@ -95,25 +98,36 @@ def test_postgres_missing_installation_inventory_allows_reinstall_without_releas
     repo = InventoryRepository(world.sessions)
 
     def record(at, ids):
-        value = InventorySnapshotInput(
-            NODE,
-            at,
-            1000,
-            700,
-            500,
-            300,
-            400,
-            250,
-            1,
-            False,
-            (),
-            memory_pool="separate",
+        value = NodeInventoryReport.model_validate_json(
+            canonical_message(
+                {
+                    "node_id": NODE,
+                    "observed_at": at,
+                    "disk_total_bytes": 1000,
+                    "disk_free_bytes": 700,
+                    "host_memory_total_bytes": 500,
+                    "host_memory_free_bytes": 300,
+                    "gpu_memory_total_bytes": 400,
+                    "gpu_memory_free_bytes": 250,
+                    "gpu_count": 1,
+                    "artifact_store_read_only": False,
+                    "capabilities": (),
+                    "memory_pool": "separate",
+                    "schema_version": 1,
+                    "nvidia_driver_version": "unknown",
+                    "container_runtime_version": "unknown",
+                }
+            )
         )
-        document = asdict(value)
+        document = value.model_dump(mode="json")
         del document["node_id"]
         document.update(schema_version=1, installations=ids)
         report = InventoryRequest.model_validate_json(canonical_message(document))
-        repo.record(value, report=report)
+        repo.record(
+            NodeInventoryReport.model_validate_json(
+                canonical_message({**report.model_dump(mode="json"), "node_id": NODE})
+            )
+        )
 
     # Unknown, truncated, or predating the receipt cannot invalidate a rank.
     record(NOW + timedelta(seconds=60), None)

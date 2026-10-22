@@ -36,6 +36,7 @@ from .models import (
     RunNode,
 )
 from .operator_receipt_contract import AcceptanceReceipt, ReceiptOwner, ReceiptPolicy
+from .telemetry import _same_sample
 
 if TYPE_CHECKING:
     from .operator_acceptance import AcceptanceArguments, OperatorReceiptResolver
@@ -188,15 +189,7 @@ def resolve_agent_receipt(
                 )
                 _require(saved is not None)
                 assert saved is not None
-                # These are the producer's contract fields, not another schema.
-                _require(
-                    all(
-                        aware(saved.observed_at) == sample.observed_at
-                        if name == "observed_at"
-                        else getattr(saved, name) == getattr(sample, name)
-                        for name in type(sample).model_fields
-                    )
-                )
+                _require(_same_sample(saved, sample))
             return AcceptanceReceipt(
                 owner=ReceiptOwner.TELEMETRY,
                 id=saved.id,

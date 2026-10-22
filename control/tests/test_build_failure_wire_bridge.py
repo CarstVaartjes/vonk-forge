@@ -28,7 +28,7 @@ from vonk_control.availability_production import build_recipe_image_availability
 from vonk_control.inventory_items import runtime_value
 from vonk_control.inventory_repository import (
     InventoryRepository,
-    InventorySnapshotInput,
+    NodeInventoryReport,
 )
 from vonk_control.models import (
     AgentCertificate,
@@ -133,23 +133,30 @@ def _fresh_build_identity(sessions, node_id: str, now: datetime) -> None:
             )
         )
     InventoryRepository(sessions, clock=lambda: now).record(
-        InventorySnapshotInput(
-            node_id,
-            now,
-            2 * 1024**4,
-            1 * 1024**4,
-            100_000,
-            80_000,
-            100_000,
-            80_000,
-            1,
-            False,
-            (
-                "recipe.build.v1",
-                "recipe.build.egress-proxy.v1",
-                "recipe.image.import.v1",
-            ),
-            memory_pool="separate",
+        NodeInventoryReport.model_validate_json(
+            canonical_message(
+                {
+                    "node_id": node_id,
+                    "observed_at": now,
+                    "disk_total_bytes": 2 * 1024**4,
+                    "disk_free_bytes": 1 * 1024**4,
+                    "host_memory_total_bytes": 100_000,
+                    "host_memory_free_bytes": 80_000,
+                    "gpu_memory_total_bytes": 100_000,
+                    "gpu_memory_free_bytes": 80_000,
+                    "gpu_count": 1,
+                    "artifact_store_read_only": False,
+                    "capabilities": (
+                        "recipe.build.v1",
+                        "recipe.build.egress-proxy.v1",
+                        "recipe.image.import.v1",
+                    ),
+                    "memory_pool": "separate",
+                    "schema_version": 1,
+                    "nvidia_driver_version": "unknown",
+                    "container_runtime_version": "unknown",
+                }
+            )
         )
     )
 

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import dataclasses
 import fcntl
 import hashlib
 import logging
@@ -69,19 +68,11 @@ from ..models import AgentCertificate, AgentNode, AgentOperation
 from ..presence import AgentPresenceService, ManagementAddressPolicy, PresenceError
 from ..source_bundles import SourceBundleStoreProtocol
 from ..strict_json import StrictJSONModel, read_stored_model
-from ..telemetry import TelemetrySampleInput
 
 """mTLS-authenticated machine agent API routes."""
 
 
 _DIGEST = re.compile(r"[0-9a-f]{64}\Z")
-
-
-_TELEMETRY_FIELDS = tuple(
-    item.name
-    for item in dataclasses.fields(TelemetrySampleInput)
-    if item.name != "boot_id"
-)
 
 
 RECIPE_RUN_DISPOSITION_HEADER = "x-vonk-recipe-run-disposition"

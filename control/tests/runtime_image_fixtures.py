@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 
+from vonk_agent_protocol import canonical_message
 from vonk_control.oci_image_store import OCI_MANIFEST
 from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
 
@@ -67,12 +68,11 @@ def remove_test_image(storage: FilesystemRuntimeImageStorage, address: str) -> N
 
 def refresh_inventory(sessions, now) -> None:
     """Publish current physical fixture evidence after advancing an injected clock."""
-    from dataclasses import fields
 
     from sqlalchemy import select
     from vonk_control.inventory_repository import (
         InventoryRepository,
-        InventorySnapshotInput,
+        NodeInventoryReport,
     )
     from vonk_control.models import NodeInventorySnapshot
 
@@ -88,8 +88,20 @@ def refresh_inventory(sessions, now) -> None:
     inventory = InventoryRepository(sessions, clock=lambda: now)
     for snapshot in snapshots.values():
         values = {
-            field.name: getattr(snapshot, field.name)
-            for field in fields(InventorySnapshotInput)
+            field: getattr(snapshot, field)
+            for field in NodeInventoryReport.model_fields
+            if field != "schema_version"
         }
         values["observed_at"] = now
-        inventory.record(InventorySnapshotInput(**values))
+        inventory.record(
+            NodeInventoryReport.model_validate_json(
+                canonical_message(
+                    {
+                        **values,
+                        "schema_version": 1,
+                        "nvidia_driver_version": "unknown",
+                        "container_runtime_version": "unknown",
+                    }
+                )
+            )
+        )

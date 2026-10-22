@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import Any, ClassVar, TypedDict
+from typing import ClassVar
 
 from sqlalchemy import (
     JSON,
@@ -25,27 +25,24 @@ from sqlalchemy import (
     event,
     literal_column,
 )
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 from vonk_agent_protocol.gpu_clock import GpuClockObservation
 from vonk_agent_protocol.inventory import (
+    HostSettings,
     InstallationBytes,
     InstallationId,
     InventoryRequest,
     MemoryPool,
+    ModelStoreObject,
+    NetworkInterface,
     RunScopeId,
 )
+from vonk_agent_protocol.telemetry import HostResourceSample
 
 from ..inventory_items_contract import AgentInventoryItems, InventorySnapshotKind
 from ..lifecycle.evidence import Residue
 from ..model_primitives import Base, _lower_hex, _Utf8ByteLength, _uuid_shape
 from ..stored_json import ContractJSON
-
-
-class ModelStoreObjectDocument(TypedDict):
-    """JSON encoding of the inventory contract, validated by stored_columns."""
-
-    sha256: str
-    bytes: int
 
 
 class NodeSnapshot(Base):
@@ -71,9 +68,6 @@ class NodeSnapshot(Base):
             f"kind != '{InventorySnapshotKind.ITEMS.value}' OR agent_items IS NOT NULL",
             name="ck_inventory_items_required",
         ),
-        UniqueConstraint(
-            "node_id", "kind", "observed_at", name="uq_inventory_node_kind_observed"
-        ),
         CheckConstraint(
             "disk_total_bytes>=0 AND disk_free_bytes>=0 AND disk_free_bytes<=disk_total_bytes",
             name="ck_inventory_disk",
@@ -89,6 +83,10 @@ class NodeSnapshot(Base):
         CheckConstraint(
             "(fabric_address IS NULL AND fabric_bandwidth_mbps IS NULL) OR (fabric_address IS NOT NULL AND fabric_bandwidth_mbps>0)",
             name="ck_inventory_fabric",
+        ),
+        CheckConstraint(
+            f"kind != '{InventorySnapshotKind.MEASUREMENTS.value}' OR (host_resources IS NOT NULL AND source_sample_id IS NOT NULL)",
+            name="ck_inventory_measurements_required",
         ),
         CheckConstraint(_lower_hex("evidence_digest", 64), name="ck_inventory_digest"),
         CheckConstraint(
@@ -131,13 +129,25 @@ class NodeInventorySnapshot(NodeSnapshot):
     fabric_address: Mapped[str | None] = mapped_column(String(45))
     fabric_bandwidth_mbps: Mapped[int | None] = mapped_column(BigInteger)
     # NULL: the agent did not report network evidence (unknown, not "none").
-    network_interfaces: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON)
+    network_interfaces: Mapped[list[NetworkInterface] | Residue | None] = mapped_column(
+        ContractJSON[list[NetworkInterface]](
+            "node_inventory_snapshots", "network_interfaces", none_as_null=True
+        )
+    )
     nas_route_interface: Mapped[str | None] = mapped_column(String(15))
     # NULL: the agent did not report host settings (unknown).
-    host_settings: Mapped[dict[str, bool | None] | None] = mapped_column(JSON)
+    host_settings: Mapped[HostSettings | Residue | None] = mapped_column(
+        ContractJSON[HostSettings](
+            "node_inventory_snapshots", "host_settings", none_as_null=True
+        )
+    )
     # NULL: the agent did not report its unused model bytes (unknown).
     unused_model_bytes: Mapped[int | None] = mapped_column(BigInteger)
-    model_objects: Mapped[list[ModelStoreObjectDocument] | None] = mapped_column(JSON)
+    model_objects: Mapped[list[ModelStoreObject] | Residue | None] = mapped_column(
+        ContractJSON[list[ModelStoreObject]](
+            "node_inventory_snapshots", "model_objects", none_as_null=True
+        )
+    )
     installations: Mapped[list[InstallationId] | Residue | None] = mapped_column(
         ContractJSON[list[InstallationId]](
             "node_inventory_snapshots", "installations", none_as_null=True
@@ -186,6 +196,43 @@ Index(
 )
 
 
+Index(
+    "uq_inventory_report_node_observed",
+    NodeSnapshot.node_id,
+    NodeSnapshot.observed_at,
+    unique=True,
+    postgresql_where=NodeSnapshot.kind == InventorySnapshotKind.REPORT,
+    sqlite_where=NodeSnapshot.kind == InventorySnapshotKind.REPORT,
+)
+
+
+class NodeInventoryResourceSnapshot(NodeSnapshot):
+    __mapper_args__: ClassVar = {
+        "polymorphic_identity": InventorySnapshotKind.MEASUREMENTS
+    }
+    source_sample_id: Mapped[str] = mapped_column(
+        String(36),
+        nullable=True,
+        unique=True,
+    )
+    host_resources: Mapped[HostResourceSample | Residue] = mapped_column(
+        ContractJSON[HostResourceSample]("node_inventory_snapshots", "host_resources"),
+        nullable=True,
+    )
+
+
+inventory_table = NodeSnapshot.__table__
+assert isinstance(inventory_table, Table)
+inventory_table.append_constraint(
+    ForeignKeyConstraint(
+        ("node_id", "source_sample_id"),
+        ("node_telemetry_samples.node_id", "node_telemetry_samples.id"),
+        name="fk_inventory_resource_sample",
+        ondelete="CASCADE",
+    )
+)
+
+
 class NodeTelemetrySample(Base):
     __tablename__ = "node_telemetry_samples"
     __table_args__ = (
@@ -201,24 +248,6 @@ class NodeTelemetrySample(Base):
             "gpu_utilization_percent IS NULL OR "
             "gpu_utilization_percent BETWEEN 0 AND 100",
             name="ck_telemetry_utilization",
-        ),
-        CheckConstraint(
-            "(memory_total_bytes IS NULL AND memory_available_bytes IS NULL) OR "
-            "(memory_total_bytes IS NOT NULL AND memory_available_bytes IS NOT NULL AND "
-            "memory_total_bytes >= 0 AND memory_available_bytes >= 0 AND "
-            "memory_total_bytes <= 17592186044416 AND "
-            "memory_available_bytes <= 17592186044416 AND "
-            "memory_available_bytes <= memory_total_bytes)",
-            name="ck_telemetry_memory",
-        ),
-        CheckConstraint(
-            "(disk_total_bytes IS NULL AND disk_free_bytes IS NULL) OR "
-            "(disk_total_bytes IS NOT NULL AND disk_free_bytes IS NOT NULL AND "
-            "disk_total_bytes >= 0 AND disk_free_bytes >= 0 AND "
-            "disk_total_bytes <= 17592186044416 AND "
-            "disk_free_bytes <= 17592186044416 AND "
-            "disk_free_bytes <= disk_total_bytes)",
-            name="ck_telemetry_disk",
         ),
         CheckConstraint(
             "(gpu_memory_total_bytes IS NULL AND gpu_memory_free_bytes IS NULL) OR "
@@ -244,10 +273,6 @@ class NodeTelemetrySample(Base):
     received_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )
-    memory_total_bytes: Mapped[int | None] = mapped_column(BigInteger)
-    memory_available_bytes: Mapped[int | None] = mapped_column(BigInteger)
-    disk_total_bytes: Mapped[int | None] = mapped_column(BigInteger)
-    disk_free_bytes: Mapped[int | None] = mapped_column(BigInteger)
     gpu_utilization_percent: Mapped[float | None] = mapped_column(Float)
     gpu_memory_total_bytes: Mapped[int | None] = mapped_column(BigInteger)
     gpu_memory_free_bytes: Mapped[int | None] = mapped_column(BigInteger)
@@ -262,6 +287,15 @@ class NodeTelemetrySample(Base):
     cpu_frequency_avg_mhz: Mapped[int | None] = mapped_column(Integer)
     cpu_frequency_min_mhz: Mapped[int | None] = mapped_column(Integer)
     cpu_frequency_max_mhz: Mapped[int | None] = mapped_column(Integer)
+
+    resource_snapshot: Mapped[NodeInventoryResourceSnapshot] = relationship(
+        foreign_keys=[
+            NodeInventoryResourceSnapshot.node_id,
+            NodeInventoryResourceSnapshot.source_sample_id,
+        ],
+        lazy="joined",
+        uselist=False,
+    )
 
 
 class NodeTelemetryLatest(Base):

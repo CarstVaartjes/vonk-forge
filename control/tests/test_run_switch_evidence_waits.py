@@ -14,14 +14,14 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import select
-from vonk_agent_protocol import LifecycleState
+from vonk_agent_protocol import LifecycleState, canonical_message
 from vonk_agent_protocol.agent_words import ProfileChildPhase
 from vonk_control.cluster_mappings import ClusterMappingService
 from vonk_control.fleet_profile_contract import FleetProfileApplicationProgress
 from vonk_control.inventory_repository import (
     MAX_INVENTORY_FUTURE_SKEW,
     InventoryRepository,
-    InventorySnapshotInput,
+    NodeInventoryReport,
 )
 from vonk_control.models import RecipeRun, RunNode
 from vonk_control.operation_blockers import STALL_RETRY_ATTEMPT, ProgressStall
@@ -58,25 +58,30 @@ def _report(sessions, node_id: str, observed_at: datetime, received_at: datetime
     inventory = InventoryRepository(sessions, clock=lambda: received_at)
     report = inventory.latest(node_id, now=received_at, maximum_age=10**9)
     inventory.record(
-        InventorySnapshotInput(
-            node_id,
-            observed_at,
-            report.disk_total_bytes,
-            report.disk_free_bytes,
-            report.host_memory_total_bytes,
-            report.host_memory_free_bytes,
-            report.gpu_memory_total_bytes,
-            report.gpu_memory_free_bytes,
-            report.gpu_count,
-            report.artifact_store_read_only,
-            report.capabilities,
-            memory_pool=report.memory_pool,
-            fabric_address=report.fabric_address,
-            fabric_bandwidth_mbps=report.fabric_bandwidth_mbps,
-            nvidia_driver_version=report.nvidia_driver_version,
-            container_runtime_version=report.container_runtime_version,
-            network_interfaces=report.network_interfaces,
-            nas_route_interface=report.nas_route_interface,
+        NodeInventoryReport.model_validate_json(
+            canonical_message(
+                {
+                    "node_id": node_id,
+                    "observed_at": observed_at,
+                    "disk_total_bytes": report.disk_total_bytes,
+                    "disk_free_bytes": report.disk_free_bytes,
+                    "host_memory_total_bytes": report.host_memory_total_bytes,
+                    "host_memory_free_bytes": report.host_memory_free_bytes,
+                    "gpu_memory_total_bytes": report.gpu_memory_total_bytes,
+                    "gpu_memory_free_bytes": report.gpu_memory_free_bytes,
+                    "gpu_count": report.gpu_count,
+                    "artifact_store_read_only": report.artifact_store_read_only,
+                    "capabilities": report.capabilities,
+                    "memory_pool": report.memory_pool,
+                    "fabric_address": report.fabric_address,
+                    "fabric_bandwidth_mbps": report.fabric_bandwidth_mbps,
+                    "nvidia_driver_version": report.nvidia_driver_version,
+                    "container_runtime_version": report.container_runtime_version,
+                    "network_interfaces": report.network_interfaces,
+                    "nas_route_interface": report.nas_route_interface,
+                    "schema_version": 1,
+                }
+            )
         )
     )
 

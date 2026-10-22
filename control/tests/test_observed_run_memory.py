@@ -1,3 +1,5 @@
+from vonk_agent_protocol import canonical_message
+
 """Admission uses what a recipe really used once that exceeds its declaration."""
 
 from datetime import timedelta
@@ -7,11 +9,11 @@ import pytest
 from sqlalchemy import delete, select
 from vonk_control.inventory_repository import (
     InventoryRepository,
-    InventorySnapshotInput,
+    NodeInventoryReport,
 )
 from vonk_control.models import RecipeRun, ResourceReservation, RunNode
 from vonk_control.run_admission import RunAdmissionService, RunPlanInvalid
-from vonk_control.telemetry import TelemetryRepository, TelemetrySampleInput
+from vonk_control.telemetry import TelemetryRepository, TelemetrySample
 
 from .test_run_admission import setup
 
@@ -49,16 +51,20 @@ def _serve(sessions, now, node, installation, *, lowest_available, other_claim=N
     TelemetryRepository(sessions, clock=lambda: observed_at).record_batch(
         node,
         (
-            TelemetrySampleInput(
-                boot_id=uuid4(),
-                observed_at=observed_at,
-                memory_total_bytes=1000,
-                memory_available_bytes=lowest_available,
-                disk_total_bytes=None,
-                disk_free_bytes=None,
-                gpu_utilization_percent=None,
-                gpu_memory_total_bytes=None,
-                gpu_memory_free_bytes=None,
+            TelemetrySample.model_validate_json(
+                canonical_message(
+                    {
+                        "boot_id": str(uuid4()),
+                        "observed_at": observed_at,
+                        "memory_total_bytes": 1000,
+                        "memory_available_bytes": lowest_available,
+                        "disk_total_bytes": None,
+                        "disk_free_bytes": None,
+                        "gpu_utilization_percent": None,
+                        "gpu_memory_total_bytes": None,
+                        "gpu_memory_free_bytes": None,
+                    }
+                )
             ),
         ),
     )
@@ -81,19 +87,26 @@ def _serve(sessions, now, node, installation, *, lowest_available, other_claim=N
 
 def _inventory(sessions, now, node, free):
     InventoryRepository(sessions, clock=lambda: now).record(
-        InventorySnapshotInput(
-            node,
-            now,
-            1000,
-            500,
-            1000,
-            free,
-            1000,
-            free,
-            1,
-            False,
-            ("runtime.vonk.v1", "recipe.image.pull.v1"),
-            memory_pool="shared",
+        NodeInventoryReport.model_validate_json(
+            canonical_message(
+                {
+                    "node_id": node,
+                    "observed_at": now,
+                    "disk_total_bytes": 1000,
+                    "disk_free_bytes": 500,
+                    "host_memory_total_bytes": 1000,
+                    "host_memory_free_bytes": free,
+                    "gpu_memory_total_bytes": 1000,
+                    "gpu_memory_free_bytes": free,
+                    "gpu_count": 1,
+                    "artifact_store_read_only": False,
+                    "capabilities": ("runtime.vonk.v1", "recipe.image.pull.v1"),
+                    "memory_pool": "shared",
+                    "schema_version": 1,
+                    "nvidia_driver_version": "unknown",
+                    "container_runtime_version": "unknown",
+                }
+            )
         )
     )
 

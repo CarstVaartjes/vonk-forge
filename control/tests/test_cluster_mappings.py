@@ -10,11 +10,12 @@ from pathlib import Path
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
+from vonk_agent_protocol import canonical_message
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_control.cluster_mappings import ClusterMappingError, ClusterMappingService
 from vonk_control.inventory_repository import (
     InventoryRepository,
-    InventorySnapshotInput,
+    NodeInventoryReport,
 )
 from vonk_control.models import (
     AgentNode,
@@ -219,25 +220,32 @@ def setup(tmp_path: Path, *, options: bool = False):
     inventory = InventoryRepository(sessions, clock=lambda: now)
     for index, node_id in enumerate(node_ids, start=1):
         inventory.record(
-            InventorySnapshotInput(
-                node_id=node_id,
-                observed_at=now,
-                disk_total_bytes=1_000,
-                disk_free_bytes=900,
-                host_memory_total_bytes=1_000,
-                host_memory_free_bytes=900,
-                gpu_memory_total_bytes=1_000,
-                gpu_memory_free_bytes=900,
-                gpu_count=1,
-                artifact_store_read_only=False,
-                capabilities=(
-                    "runtime.vonk.v1",
-                    "recipe.image.pull.v1",
-                    "fabric.connected.mbps.200000",
-                ),
-                fabric_address=f"192.168.100.{index}",
-                fabric_bandwidth_mbps=200_000,
-                memory_pool="shared",
+            NodeInventoryReport.model_validate_json(
+                canonical_message(
+                    {
+                        "node_id": node_id,
+                        "observed_at": now,
+                        "disk_total_bytes": 1_000,
+                        "disk_free_bytes": 900,
+                        "host_memory_total_bytes": 1_000,
+                        "host_memory_free_bytes": 900,
+                        "gpu_memory_total_bytes": 1_000,
+                        "gpu_memory_free_bytes": 900,
+                        "gpu_count": 1,
+                        "artifact_store_read_only": False,
+                        "capabilities": (
+                            "runtime.vonk.v1",
+                            "recipe.image.pull.v1",
+                            "fabric.connected.mbps.200000",
+                        ),
+                        "fabric_address": f"192.168.100.{index}",
+                        "fabric_bandwidth_mbps": 200_000,
+                        "memory_pool": "shared",
+                        "schema_version": 1,
+                        "nvidia_driver_version": "unknown",
+                        "container_runtime_version": "unknown",
+                    }
+                )
             )
         )
     revision = _seed_canonical_catalog(sessions, now, options=options)
@@ -366,22 +374,29 @@ def test_mapping_rejects_wrong_node_count_and_missing_required_fabric(
         service.preview(revision.id, node_ids[:2], {}, "admin")
 
     InventoryRepository(sessions, clock=lambda: _now + timedelta(seconds=1)).record(
-        InventorySnapshotInput(
-            node_id=node_ids[0],
-            observed_at=_now + timedelta(seconds=1),
-            disk_total_bytes=1_000,
-            disk_free_bytes=900,
-            host_memory_total_bytes=1_000,
-            host_memory_free_bytes=900,
-            gpu_memory_total_bytes=1_000,
-            gpu_memory_free_bytes=900,
-            gpu_count=1,
-            artifact_store_read_only=False,
-            capabilities=(
-                "runtime.vonk.v1",
-                "recipe.image.pull.v1",
-            ),
-            memory_pool="shared",
+        NodeInventoryReport.model_validate_json(
+            canonical_message(
+                {
+                    "node_id": node_ids[0],
+                    "observed_at": _now + timedelta(seconds=1),
+                    "disk_total_bytes": 1_000,
+                    "disk_free_bytes": 900,
+                    "host_memory_total_bytes": 1_000,
+                    "host_memory_free_bytes": 900,
+                    "gpu_memory_total_bytes": 1_000,
+                    "gpu_memory_free_bytes": 900,
+                    "gpu_count": 1,
+                    "artifact_store_read_only": False,
+                    "capabilities": (
+                        "runtime.vonk.v1",
+                        "recipe.image.pull.v1",
+                    ),
+                    "memory_pool": "shared",
+                    "schema_version": 1,
+                    "nvidia_driver_version": "unknown",
+                    "container_runtime_version": "unknown",
+                }
+            )
         )
     )
 

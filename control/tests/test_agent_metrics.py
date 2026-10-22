@@ -203,7 +203,9 @@ def test_operational_metrics_project_existing_agent_state_with_bounded_labels(
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
-def test_operational_metrics_refresh_replaces_stale_node_series(tmp_path) -> None:
+def test_operational_metrics_scrape_reads_current_contact_and_lease_owners(
+    tmp_path,
+) -> None:
     sessions = _sessions(tmp_path)
     metrics = MetricsRegistry()
     collector = OperationalMetricsCollector(metrics, sessions, clock=lambda: NOW)
@@ -214,12 +216,19 @@ def test_operational_metrics_refresh_replaces_stale_node_series(tmp_path) -> Non
         assert node is not None
         node.state = "retired"
         node.last_seen_at = NOW - timedelta(seconds=5)
-    collector.refresh()
+        operation = session.get(AgentOperation, "running-operation-id-secret")
+        assert operation is not None
+        operation.updated_at = NOW - timedelta(seconds=2)
     rendered = metrics.render()
 
     assert f'vonk_agent_state{{node_id="{NODE}",state="active"}}' not in rendered
     assert f'vonk_agent_state{{node_id="{NODE}",state="retired"}} 1' in rendered
     assert f'vonk_agent_last_seen_age_seconds{{node_id="{NODE}"}} 5' in rendered
+
+    assert (
+        f'vonk_agent_operation_lease_age_seconds{{node_id="{NODE}",operation="recipe.start"}} 2'
+        in rendered
+    )
 
 
 @pytest.mark.usefixtures("damaged_json_rows")

@@ -33,7 +33,7 @@ from ..download_contract import download_responses
 from ..inventory_repository import (
     MAX_INVENTORY_FUTURE_SKEW,
     InventoryRepository,
-    InventorySnapshotInput,
+    NodeInventoryReport,
     _validated_inventory,
 )
 from ..library_contract import UuidId
@@ -53,13 +53,12 @@ from ..presence import PresenceError
 from ..recipe_operations import prepare_exact_recipe_run_observation_nodes
 from ..source_bundles import SourceBundleError
 from ..spark_store_retention import store_retention_request
-from ..telemetry import TelemetryRepository, TelemetrySampleInput
+from ..telemetry import TelemetryRepository
 from ..untracked_installations import untracked_installations, untracked_runs
 from .common import (
     _CANONICAL_UUID,
     _DIGEST,
     _LOGGER,
-    _TELEMETRY_FIELDS,
     RANK_UNREADY_GRACE,
     RECIPE_RUN_DISPOSITION_HEADER,
     RECIPE_RUN_GENERATION_HEADER,
@@ -177,34 +176,17 @@ def install_observations_routes(
             snapshot = InventoryRepository(
                 required.sessions, clock=required.clock
             ).record(
-                InventorySnapshotInput(
-                    node_id=identity.node_id,
-                    observed_at=observed_at,
-                    disk_total_bytes=body.disk_total_bytes,
-                    disk_free_bytes=body.disk_free_bytes,
-                    host_memory_total_bytes=body.host_memory_total_bytes,
-                    host_memory_free_bytes=body.host_memory_free_bytes,
-                    gpu_memory_total_bytes=body.gpu_memory_total_bytes,
-                    gpu_memory_free_bytes=body.gpu_memory_free_bytes,
-                    gpu_count=body.gpu_count,
-                    memory_pool=body.memory_pool,
-                    artifact_store_read_only=body.artifact_store_read_only,
-                    capabilities=tuple(body.capabilities),
-                    fabric_address=fabric_address,
-                    fabric_bandwidth_mbps=fabric_bandwidth_mbps,
-                    nvidia_driver_version=body.nvidia_driver_version,
-                    container_runtime_version=body.container_runtime_version,
-                    network_interfaces=(
-                        None
-                        if body.network_interfaces is None
-                        else tuple(body.network_interfaces)
-                    ),
-                    nas_route_interface=body.nas_route_interface,
-                    host_settings=body.host_settings,
-                    unused_model_bytes=body.unused_model_bytes,
-                    model_objects=body.model_objects,
+                NodeInventoryReport.model_validate_json(
+                    canonical_message(
+                        {
+                            **body.model_dump(mode="json"),
+                            "node_id": identity.node_id,
+                            "observed_at": observed_at,
+                            "fabric_address": fabric_address,
+                            "fabric_bandwidth_mbps": fabric_bandwidth_mbps,
+                        }
+                    )
                 ),
-                report=body,
             )
         except ValueError as error:
             raise HTTPException(status_code=422, detail=str(error)) from None
@@ -264,13 +246,7 @@ def install_observations_routes(
         try:
             TelemetryRepository(required.sessions, clock=required.clock).record_batch(
                 identity.node_id,
-                tuple(
-                    TelemetrySampleInput(
-                        boot_id=uuid.UUID(sample.boot_id),
-                        **{name: getattr(sample, name) for name in _TELEMETRY_FIELDS},
-                    )
-                    for sample in body.samples
-                ),
+                body.samples,
             )
         except ValueError as error:
             raise HTTPException(status_code=422, detail=str(error)) from None

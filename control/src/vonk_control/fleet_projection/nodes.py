@@ -7,13 +7,17 @@ from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Annotated
 
 from pydantic import Field, TypeAdapter
-from vonk_agent_protocol import NodeOfflineReason, ProjectionCode, UnknownOutcomeError
+from vonk_agent_protocol import (
+    NodeOfflineReason,
+    ProjectionCode,
+    UnknownOutcomeError,
+)
 from vonk_agent_protocol.agent_words import ProfileReasonSeverity
 from vonk_agent_protocol.gpu_clock import (
     GpuClockApplyState,
     GpuClockRange,
 )
-from vonk_agent_protocol.inventory import HostSettings, NetworkInterface
+from vonk_agent_protocol.inventory import HostSettings
 
 from ..inventory_items import inventory_items
 from ..models import (
@@ -364,35 +368,24 @@ def _inventory(
         return None
     observed = _utc(value.observed_at)
     age = max(0.0, (current - observed).total_seconds())
+    from ..inventory_repository import _validated_inventory
+
+    report = _validated_inventory(value, observed_at=observed)
     return InventoryState(
+        **report.model_dump(
+            mode="python",
+            exclude={
+                "observed_at",
+                "model_objects",
+                "installations",
+                "runs",
+                "installation_bytes",
+            },
+        ),
         observed_at=observed,
         received_at=_utc(value.received_at),
         age_seconds=age,
         freshness="stale" if age > self._inventory_fresh_seconds else "fresh",
-        disk_total_bytes=value.disk_total_bytes,
-        disk_free_bytes=value.disk_free_bytes,
-        host_memory_total_bytes=value.host_memory_total_bytes,
-        host_memory_free_bytes=value.host_memory_free_bytes,
-        gpu_memory_total_bytes=value.gpu_memory_total_bytes,
-        gpu_memory_free_bytes=value.gpu_memory_free_bytes,
-        gpu_count=value.gpu_count,
-        artifact_store_read_only=value.artifact_store_read_only,
-        capabilities=list(value.capabilities),
-        fabric_address=value.fabric_address,
-        fabric_bandwidth_mbps=value.fabric_bandwidth_mbps,
-        nvidia_driver_version=value.nvidia_driver_version,
-        container_runtime_version=value.container_runtime_version,
-        network_interfaces=(
-            None
-            if value.network_interfaces is None
-            else [NetworkInterface(**item) for item in value.network_interfaces]
-        ),
-        nas_route_interface=value.nas_route_interface,
-        host_settings=(
-            None
-            if value.host_settings is None
-            else HostSettings.model_validate(value.host_settings)
-        ),
     )
 
 

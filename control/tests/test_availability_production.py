@@ -261,31 +261,38 @@ def test_recipe_download_api_reuses_verified_cached_source_build(
         reobserver.calls = 0
         from vonk_control.inventory_repository import (
             InventoryRepository,
-            InventorySnapshotInput,
+            NodeInventoryReport,
         )
 
         now += timedelta(seconds=1)
         inventory = InventoryRepository(sessions, clock=lambda: now)
         inventory.record(
-            InventorySnapshotInput(
-                node_id,
-                now,
-                2 * 1024**4,
-                1024**4,
-                1024**4,
-                1024**4,
-                1024**4,
-                1024**4,
-                1,
-                False,
-                (
-                    "recipe.build.v1",
-                    "recipe.build.egress-proxy.v1",
-                    "recipe.image.import.v1",
-                    "runtime.vonk.v1",
-                    "recipe.image.pull.v1",
-                ),
-                memory_pool="separate",
+            NodeInventoryReport.model_validate_json(
+                canonical_message(
+                    {
+                        "node_id": node_id,
+                        "observed_at": now,
+                        "disk_total_bytes": 2 * 1024**4,
+                        "disk_free_bytes": 1024**4,
+                        "host_memory_total_bytes": 1024**4,
+                        "host_memory_free_bytes": 1024**4,
+                        "gpu_memory_total_bytes": 1024**4,
+                        "gpu_memory_free_bytes": 1024**4,
+                        "gpu_count": 1,
+                        "artifact_store_read_only": False,
+                        "capabilities": (
+                            "recipe.build.v1",
+                            "recipe.build.egress-proxy.v1",
+                            "recipe.image.import.v1",
+                            "runtime.vonk.v1",
+                            "recipe.image.pull.v1",
+                        ),
+                        "memory_pool": "separate",
+                        "schema_version": 1,
+                        "nvidia_driver_version": "unknown",
+                        "container_runtime_version": "unknown",
+                    }
+                )
             )
         )
     plan = builds.plan(revision.id, node_id, now=now)

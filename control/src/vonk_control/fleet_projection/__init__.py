@@ -4,7 +4,6 @@ from vonk_agent_protocol import CertificateState as CertificateState
 
 from .common import _AGENT_STATE_ADAPTER as _AGENT_STATE_ADAPTER
 from .common import _AUTHORITY_REVISION as _AUTHORITY_REVISION
-from .common import _BOOT_UUID_PATTERN as _BOOT_UUID_PATTERN
 from .common import _CERTIFICATE_OFFLINE_REASONS as _CERTIFICATE_OFFLINE_REASONS
 from .common import _INSTALL_DEGRADED_REASON_ADAPTER as _INSTALL_DEGRADED_REASON_ADAPTER
 from .common import _INSTALL_PARTIAL_MAX_NAMED as _INSTALL_PARTIAL_MAX_NAMED
@@ -13,7 +12,6 @@ from .common import _LOW_CLOCK_LOOKBACK_SLACK as _LOW_CLOCK_LOOKBACK_SLACK
 from .common import _MAX_FLEET_NODES as _MAX_FLEET_NODES
 from .common import _MAX_SIGNED_BIGINT as _MAX_SIGNED_BIGINT
 from .common import _MAX_SIGNED_INTEGER as _MAX_SIGNED_INTEGER
-from .common import _MAX_TELEMETRY_BYTES as _MAX_TELEMETRY_BYTES
 from .common import _MEMBER_COORDINATES as _MEMBER_COORDINATES
 from .common import _NODE_PATTERN as _NODE_PATTERN
 from .common import _REVISION_PATTERN as _REVISION_PATTERN
@@ -22,15 +20,12 @@ from .common import _UUID_PATTERN as _UUID_PATTERN
 from .common import AgentState as AgentState
 from .common import Annotated as Annotated
 from .common import AuthorityRevision as AuthorityRevision
-from .common import BootId as BootId
 from .common import CapacityReservations as CapacityReservations
 from .common import CertificateStateField as CertificateStateField
-from .common import ConfigDict as ConfigDict
 from .common import Field as Field
 from .common import FleetNode as FleetNode
 from .common import FleetNodeIdentity as FleetNodeIdentity
 from .common import FleetSnapshot as FleetSnapshot
-from .common import GpuUnavailableReason as GpuUnavailableReason
 from .common import InstallationPresence as InstallationPresence
 from .common import InstallationPresenceRow as InstallationPresenceRow
 from .common import InstallationStateField as InstallationStateField
@@ -38,7 +33,6 @@ from .common import InstallPartialEvidence as InstallPartialEvidence
 from .common import InventoryState as InventoryState
 from .common import Literal as Literal
 from .common import LoadedPresence as LoadedPresence
-from .common import NetworkInterface as NetworkInterface
 from .common import NodeConnection as NodeConnection
 from .common import NodeId as NodeId
 from .common import NodeOfflineReason as NodeOfflineReason

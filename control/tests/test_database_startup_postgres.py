@@ -390,3 +390,42 @@ def test_artifact_move_preserves_runtime_items_and_restarts_after_interruption(
         )
     with postgres_engine.connect() as connection:
         assert "node_artifacts" not in inspect(connection).get_table_names()
+
+
+@pytest.mark.usefixtures("damaged_json_rows")
+def test_authenticated_claim_rebuilds_damaged_inventory_without_blessing_old_facts(
+    postgres_engine: Engine, tmp_path: Path
+) -> None:
+    """Catches a moved JSON owner permanently refusing every subsequent report."""
+    from sqlalchemy import update
+    from vonk_agent_protocol import UnknownOutcomeError
+    from vonk_control.inventory_items import inventory_items
+    from vonk_control.models import AgentNode, NodeInventoryItemsSnapshot
+
+    from .test_agent_api import NODE_A, agent_headers, make_agent_system
+
+    client, services, _, _ = make_agent_system(tmp_path, engine=postgres_engine)
+    headers = agent_headers(NODE_A, "serial-a")
+    assert client.post("/agent/claim", headers=headers).status_code == 204
+    with services.sessions.begin() as session:
+        session.execute(
+            update(NodeInventoryItemsSnapshot)
+            .where(NodeInventoryItemsSnapshot.node_id == NODE_A)
+            .values(agent_items={"runtime_identity": {"invalid": True}})
+        )
+    with services.sessions() as session, pytest.raises(UnknownOutcomeError):
+        inventory_items(session.get(AgentNode, NODE_A))
+    # Reconnect through the ordinary authenticated producer. Unrelated facts
+    # are unknown, not fabricated or recovered through an old column reader.
+    assert (
+        client.post(
+            "/agent/claim", headers=headers, json={"hostname": "spark-recovered"}
+        ).status_code
+        == 204
+    )
+    with services.sessions() as session:
+        recovered = inventory_items(session.get(AgentNode, NODE_A))
+        assert recovered.runtime_identity is not None
+        assert recovered.hostname == "spark-recovered"
+        assert recovered.artifacts == []
+        assert recovered.preflights == []

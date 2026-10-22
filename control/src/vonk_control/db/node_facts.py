@@ -406,3 +406,78 @@ def move_repeated_evidence(connection: Connection) -> None:
         is None
     ):
         connection.execute(text("DROP TABLE evidence_repeats"))
+
+
+def move_resource_facts(connection: Connection) -> None:
+    """Adopt each sample's measurements into inventory before retiring columns.
+
+    Receipt identity and the source FK preserve historical observations and
+    their retention lifetime. All writes and drops share startup's transaction.
+    """
+    import hashlib
+    import uuid
+
+    from sqlalchemy import insert, select
+    from vonk_agent_protocol import canonical_message
+    from vonk_agent_protocol.telemetry import HostResourceSample
+
+    from ..inventory_items_contract import InventorySnapshotKind
+    from ..models import NodeInventoryResourceSnapshot
+
+    inspector = inspect(connection)
+    # Replacement report-only uniqueness was installed by reconciliation.
+    for constraint in inspector.get_unique_constraints("node_inventory_snapshots"):
+        if constraint["name"] == "uq_inventory_node_kind_observed":
+            connection.execute(
+                text(
+                    "ALTER TABLE node_inventory_snapshots DROP CONSTRAINT uq_inventory_node_kind_observed"
+                )
+            )
+    columns = {
+        column["name"] for column in inspector.get_columns("node_telemetry_samples")
+    }
+    if "memory_total_bytes" not in columns:
+        return
+    # These rows are protected by the original pair/range constraints. Validate
+    # the actual JSON contract too, so invalid input rolls back without loss.
+    existing = set(
+        connection.scalars(select(NodeInventoryResourceSnapshot.source_sample_id))
+    )
+    rows = connection.execute(
+        text(
+            "SELECT id, node_id, observed_at, received_at, memory_total_bytes, memory_available_bytes, disk_total_bytes, disk_free_bytes FROM node_telemetry_samples"
+        )
+    ).mappings()
+    for row in rows:
+        if row["id"] in existing:
+            continue
+        resources = HostResourceSample.model_validate_json(
+            canonical_message(
+                {name: row[name] for name in HostResourceSample.model_fields}
+            )
+        )
+        connection.execute(
+            insert(NodeInventoryResourceSnapshot).values(
+                id=str(uuid.uuid4()),
+                node_id=row["node_id"],
+                kind=InventorySnapshotKind.MEASUREMENTS,
+                observed_at=row["observed_at"],
+                received_at=row["received_at"],
+                source_sample_id=row["id"],
+                host_resources=resources,
+                evidence_digest=hashlib.sha256(
+                    canonical_message(
+                        {
+                            "node_id": row["node_id"],
+                            "source_sample_id": row["id"],
+                            "host_resources": resources,
+                        }
+                    )
+                ).hexdigest(),
+            )
+        )
+    for name in HostResourceSample.model_fields:
+        # Field identifiers come only from the canonical contract.
+        connection.execute(
+            text(f'ALTER TABLE node_telemetry_samples DROP COLUMN "{name}"')
+        )

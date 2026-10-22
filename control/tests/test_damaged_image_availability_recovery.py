@@ -25,7 +25,7 @@ from vonk_control.image_store_collection import GRACE, ImageStoreCollector
 from vonk_control.install_admission import InstallAdmissionService
 from vonk_control.inventory_repository import (
     InventoryRepository,
-    InventorySnapshotInput,
+    NodeInventoryReport,
 )
 from vonk_control.models import AgentCertificate, Job, ResourceReservation, User
 from vonk_control.oci_image_store import OciImageStore, StoredImage
@@ -170,25 +170,32 @@ def test_damaged_receipted_manifest_recovers_through_new_availability_request(
     assert not (storage.root / f"{receipt.oci_archive_sha256}.receipt.json").exists()
     # Real inventory ingress restores current builder evidence after the grace.
     InventoryRepository(sessions, clock=lambda: now[0]).record(
-        InventorySnapshotInput(
-            node_id,
-            now[0],
-            2 * 1024**4,
-            1024**4,
-            100_000,
-            80_000,
-            100_000,
-            80_000,
-            1,
-            False,
-            (
-                "recipe.build.v1",
-                "recipe.build.egress-proxy.v1",
-                "recipe.image.import.v1",
-                "runtime.vonk.v1",
-                "recipe.image.pull.v1",
-            ),
-            memory_pool="separate",
+        NodeInventoryReport.model_validate_json(
+            canonical_message(
+                {
+                    "node_id": node_id,
+                    "observed_at": now[0],
+                    "disk_total_bytes": 2 * 1024**4,
+                    "disk_free_bytes": 1024**4,
+                    "host_memory_total_bytes": 100_000,
+                    "host_memory_free_bytes": 80_000,
+                    "gpu_memory_total_bytes": 100_000,
+                    "gpu_memory_free_bytes": 80_000,
+                    "gpu_count": 1,
+                    "artifact_store_read_only": False,
+                    "capabilities": (
+                        "recipe.build.v1",
+                        "recipe.build.egress-proxy.v1",
+                        "recipe.image.import.v1",
+                        "runtime.vonk.v1",
+                        "recipe.image.pull.v1",
+                    ),
+                    "memory_pool": "separate",
+                    "schema_version": 1,
+                    "nvidia_driver_version": "unknown",
+                    "container_runtime_version": "unknown",
+                }
+            )
         )
     )
     restarted_storage = FilesystemRuntimeImageStorage(artifact_root)

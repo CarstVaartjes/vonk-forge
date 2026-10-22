@@ -32,7 +32,7 @@ from vonk_control.operation_api import durable_operation_services
 from vonk_control.stored_json import write_guard_mode
 from vonk_control.telemetry import (
     TelemetryRepository,
-    TelemetrySampleInput,
+    TelemetrySample,
 )
 
 NOW = datetime(2026, 8, 15, 12, tzinfo=UTC)
@@ -191,17 +191,21 @@ def _event_rows(sessions) -> list[models.FleetStreamEvent]:
 
 def _telemetry_sample(
     *, boot_id: str, sequence: int, observed_at: datetime, cpu: float | None = None
-) -> TelemetrySampleInput:
-    return TelemetrySampleInput(
-        boot_id=uuid.UUID(boot_id),
-        observed_at=observed_at,
-        gpu_utilization_percent=cpu,
-        memory_total_bytes=None,
-        memory_available_bytes=None,
-        disk_total_bytes=None,
-        disk_free_bytes=None,
-        gpu_memory_total_bytes=None,
-        gpu_memory_free_bytes=None,
+) -> TelemetrySample:
+    return TelemetrySample.model_validate_json(
+        canonical_message(
+            {
+                "boot_id": str(uuid.UUID(boot_id)),
+                "observed_at": observed_at,
+                "gpu_utilization_percent": cpu,
+                "memory_total_bytes": None,
+                "memory_available_bytes": None,
+                "disk_total_bytes": None,
+                "disk_free_bytes": None,
+                "gpu_memory_total_bytes": None,
+                "gpu_memory_free_bytes": None,
+            }
+        )
     )
 
 
@@ -618,13 +622,14 @@ def test_recorder_emits_bounded_profile_events_when_agent_hostname_changes(
             models.AgentNodeProfile(
                 node_id=node_id,
                 display_name=node_id,
-                hostname="",
                 lifecycle="ready",
                 labels={},
             )
         )
     with sessions.begin() as session:
-        session.get(models.AgentNodeProfile, node_id).hostname = "spark-3542"
+        from .runtime_identity_support import set_inventory_hostname
+
+        set_inventory_hostname(session, node_id, "spark-3542")
 
     rows = _event_rows(sessions)
     assert [(row.event_type, row.entity_kind, row.entity_id) for row in rows] == [
@@ -1017,3 +1022,13 @@ def test_missing_cursor_repairs_without_losing_source_or_next_event(sessions):
         event.entity_id
         for event in repository.replay_after(first.id, NOW, limit=128).events
     ] == ["after-loss"]
+
+
+def test_recorder_watchers_reference_current_owner_fields() -> None:
+    """Catches stale field registrations after moving a fact to another mapper."""
+    from sqlalchemy import inspect
+
+    for owner, fields in FleetEventRecorder._tracked_fields.items():
+        mapper = inspect(owner)
+        assert mapper is not None
+        assert set(fields) <= set(mapper.attrs.keys())

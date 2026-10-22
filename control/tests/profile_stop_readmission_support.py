@@ -1,3 +1,4 @@
+from vonk_agent_protocol import canonical_message
 from vonk_control.inventory_items import inventory_items, runtime_value
 
 """Prove confirmed profile cleanup leaves the same physical gang admissible."""
@@ -11,7 +12,7 @@ from vonk_agent_protocol.recipe_operations import RecipeStartPayload
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.inventory_repository import (
     InventoryRepository,
-    InventorySnapshotInput,
+    NodeInventoryReport,
 )
 from vonk_control.models import AgentNode, RecipeRun, ResourceReservation, RunNode
 from vonk_control.recipe_operations import RecipeOperationService
@@ -56,25 +57,30 @@ def start_on_released_gang(
     for node_id in nodes:
         report = inventory.latest(node_id, now=clock(), maximum_age=300)
         inventory.record(
-            InventorySnapshotInput(
-                node_id,
-                clock(),
-                report.disk_total_bytes,
-                report.disk_free_bytes,
-                report.host_memory_total_bytes,
-                report.host_memory_free_bytes,
-                report.gpu_memory_total_bytes,
-                report.gpu_memory_free_bytes,
-                report.gpu_count,
-                report.artifact_store_read_only,
-                report.capabilities,
-                memory_pool=report.memory_pool,
-                fabric_address=report.fabric_address,
-                fabric_bandwidth_mbps=report.fabric_bandwidth_mbps,
-                nvidia_driver_version=report.nvidia_driver_version,
-                container_runtime_version=report.container_runtime_version,
-                network_interfaces=report.network_interfaces,
-                nas_route_interface=report.nas_route_interface,
+            NodeInventoryReport.model_validate_json(
+                canonical_message(
+                    {
+                        "node_id": node_id,
+                        "observed_at": clock(),
+                        "disk_total_bytes": report.disk_total_bytes,
+                        "disk_free_bytes": report.disk_free_bytes,
+                        "host_memory_total_bytes": report.host_memory_total_bytes,
+                        "host_memory_free_bytes": report.host_memory_free_bytes,
+                        "gpu_memory_total_bytes": report.gpu_memory_total_bytes,
+                        "gpu_memory_free_bytes": report.gpu_memory_free_bytes,
+                        "gpu_count": report.gpu_count,
+                        "artifact_store_read_only": report.artifact_store_read_only,
+                        "capabilities": report.capabilities,
+                        "memory_pool": report.memory_pool,
+                        "fabric_address": report.fabric_address,
+                        "fabric_bandwidth_mbps": report.fabric_bandwidth_mbps,
+                        "nvidia_driver_version": report.nvidia_driver_version,
+                        "container_runtime_version": report.container_runtime_version,
+                        "network_interfaces": report.network_interfaces,
+                        "nas_route_interface": report.nas_route_interface,
+                        "schema_version": 1,
+                    }
+                )
             )
         )
     preview = lifecycle.preview_run(installation_id, f"after-stop-{request_id}")

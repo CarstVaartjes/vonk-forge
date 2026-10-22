@@ -19,6 +19,7 @@ from sqlalchemy.orm import configure_mappers
 from sqlalchemy.types import TypeDecorator
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.inventory import HostSettings
+from vonk_agent_protocol.telemetry import HostResourceSample
 from vonk_control import models
 from vonk_control.inventory_items_contract import AgentInventoryItems
 from vonk_control.stored_json import (
@@ -376,6 +377,14 @@ def node_fact_violations(
                 problems.append(
                     f"{name}.{field}: agent report belongs in typed inventory"
                 )
+    telemetry = metadata.tables.get("node_telemetry_samples")
+    if telemetry is not None:
+        for field in set(HostResourceSample.model_fields).intersection(
+            telemetry.columns.keys()
+        ):
+            problems.append(
+                f"node_telemetry_samples.{field}: measurement belongs in typed inventory"
+            )
     return sorted(problems)
 
 
@@ -453,5 +462,15 @@ def test_guard_rejects_runtime_claim_columns_on_contact_owner(field: str) -> Non
     )
     assert any(
         f"agent_nodes.{field}:" in problem
+        for problem in node_fact_violations(metadata, {})
+    )
+
+
+@pytest.mark.parametrize("field", tuple(HostResourceSample.model_fields))
+def test_guard_rejects_restoring_duplicate_resource_columns(field: str) -> None:
+    metadata = MetaData()
+    Table("node_telemetry_samples", metadata, Column(field, String))
+    assert any(
+        f"node_telemetry_samples.{field}:" in problem
         for problem in node_fact_violations(metadata, {})
     )

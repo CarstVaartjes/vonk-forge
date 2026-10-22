@@ -449,7 +449,7 @@ def telemetry_payload(
     return {
         "samples": [
             {
-                "boot_id": boot_id,
+                "boot_id": str(boot_id),
                 "observed_at": (observed_at or clock.now).isoformat(),
                 "memory_total_bytes": 128_000_000_000,
                 "memory_available_bytes": 64_000_000_000,

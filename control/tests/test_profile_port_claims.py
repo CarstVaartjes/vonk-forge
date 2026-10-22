@@ -1,6 +1,5 @@
 """Accepted serving ports survive preparation and transfer to the exact run."""
 
-from dataclasses import fields
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
@@ -17,7 +16,7 @@ from vonk_control.fleet_projection import FleetProjection
 from vonk_control.inventory_repository import (
     MAX_INVENTORY_FUTURE_SKEW,
     InventoryRepository,
-    InventorySnapshotInput,
+    NodeInventoryReport,
 )
 from vonk_control.models import (
     AgentNode,
@@ -252,11 +251,23 @@ def test_profile_port_promise_preserves_live_owner_and_survives_reviewed_stop(
     inventory = InventoryRepository(sessions, clock=lambda: later)
     for node_id in nodes:
         sample = {
-            field.name: getattr(latest[node_id], field.name)
-            for field in fields(InventorySnapshotInput)
+            field: getattr(latest[node_id], field)
+            for field in NodeInventoryReport.model_fields
+            if field != "schema_version"
         }
         sample["observed_at"] = later
-        inventory.record(InventorySnapshotInput(**sample))
+        inventory.record(
+            NodeInventoryReport.model_validate_json(
+                canonical_message(
+                    {
+                        **sample,
+                        "schema_version": 1,
+                        "nvidia_driver_version": "unknown",
+                        "container_runtime_version": "unknown",
+                    }
+                )
+            )
+        )
     # Even after the old owner releases its active port, unrelated work cannot
     # take the promised port in the gap before the replacement worker starts.
     _occupy_unpromised_endpoint_ports(sessions, nodes)

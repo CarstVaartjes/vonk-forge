@@ -7,12 +7,13 @@ from importlib import resources
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
+from vonk_agent_protocol import canonical_message
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.inventory import MemoryPool
 from vonk_control.cluster_mappings import ClusterMappingService
 from vonk_control.inventory_repository import (
     InventoryRepository,
-    InventorySnapshotInput,
+    NodeInventoryReport,
 )
 from vonk_control.models import (
     AgentNode,
@@ -163,22 +164,29 @@ def setup(
         session.flush()
         revision_id = revision.id
     InventoryRepository(sessions, clock=lambda: now).record(
-        InventorySnapshotInput(
-            node,
-            now,
-            1000,
-            500,
-            1000,
-            free_memory,
-            1000,
-            free_memory,
-            1,
-            False,
-            (
-                "runtime.vonk.v1",
-                "recipe.image.pull.v1",
-            ),
-            memory_pool=memory_pool,
+        NodeInventoryReport.model_validate_json(
+            canonical_message(
+                {
+                    "node_id": node,
+                    "observed_at": now,
+                    "disk_total_bytes": 1000,
+                    "disk_free_bytes": 500,
+                    "host_memory_total_bytes": 1000,
+                    "host_memory_free_bytes": free_memory,
+                    "gpu_memory_total_bytes": 1000,
+                    "gpu_memory_free_bytes": free_memory,
+                    "gpu_count": 1,
+                    "artifact_store_read_only": False,
+                    "capabilities": (
+                        "runtime.vonk.v1",
+                        "recipe.image.pull.v1",
+                    ),
+                    "memory_pool": memory_pool,
+                    "schema_version": 1,
+                    "nvidia_driver_version": "unknown",
+                    "container_runtime_version": "unknown",
+                }
+            )
         )
     )
     mappings = ClusterMappingService(sessions)
@@ -579,19 +587,26 @@ def test_memory_capability_and_port_conflicts_are_explained(tmp_path) -> None:
     )
     _claim_memory(sessions, node, now)
     InventoryRepository(sessions, clock=lambda: now).record(
-        InventorySnapshotInput(
-            node,
-            now + timedelta(seconds=1),
-            1000,
-            500,
-            1000,
-            260,
-            1000,
-            260,
-            1,
-            False,
-            ("runtime.sglang.v1",),
-            memory_pool="shared",
+        NodeInventoryReport.model_validate_json(
+            canonical_message(
+                {
+                    "node_id": node,
+                    "observed_at": now + timedelta(seconds=1),
+                    "disk_total_bytes": 1000,
+                    "disk_free_bytes": 500,
+                    "host_memory_total_bytes": 1000,
+                    "host_memory_free_bytes": 260,
+                    "gpu_memory_total_bytes": 1000,
+                    "gpu_memory_free_bytes": 260,
+                    "gpu_count": 1,
+                    "artifact_store_read_only": False,
+                    "capabilities": ("runtime.sglang.v1",),
+                    "memory_pool": "shared",
+                    "schema_version": 1,
+                    "nvidia_driver_version": "unknown",
+                    "container_runtime_version": "unknown",
+                }
+            )
         )
     )
     now += timedelta(seconds=1)

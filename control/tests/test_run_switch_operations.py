@@ -41,7 +41,7 @@ from vonk_control.install_admission import (
 )
 from vonk_control.inventory_repository import (
     InventoryRepository,
-    InventorySnapshotInput,
+    NodeInventoryReport,
 )
 from vonk_control.model_cache import (
     ArtifactSetManifest,
@@ -2120,19 +2120,30 @@ def _cold_compile_switch(
         # observation time moves, so inventory freshness is never the blocker.
         for node_id in nodes:
             inventory.record(
-                InventorySnapshotInput(
-                    node_id,
-                    clock.now,
-                    10_000,
-                    8_000,
-                    10_000,
-                    8_000,
-                    10_000,
-                    8_000,
-                    1,
-                    False,
-                    ("runtime.vonk.v1", "recipe.image.pull.v1", "recipe.operations.v1"),
-                    memory_pool="shared",
+                NodeInventoryReport.model_validate_json(
+                    canonical_message(
+                        {
+                            "node_id": node_id,
+                            "observed_at": clock.now,
+                            "disk_total_bytes": 10_000,
+                            "disk_free_bytes": 8_000,
+                            "host_memory_total_bytes": 10_000,
+                            "host_memory_free_bytes": 8_000,
+                            "gpu_memory_total_bytes": 10_000,
+                            "gpu_memory_free_bytes": 8_000,
+                            "gpu_count": 1,
+                            "artifact_store_read_only": False,
+                            "capabilities": (
+                                "runtime.vonk.v1",
+                                "recipe.image.pull.v1",
+                                "recipe.operations.v1",
+                            ),
+                            "memory_pool": "shared",
+                            "schema_version": 1,
+                            "nvidia_driver_version": "unknown",
+                            "container_runtime_version": "unknown",
+                        }
+                    )
                 )
             )
         for hook in hooks:
@@ -2494,84 +2505,63 @@ def test_cancellation_during_expiring_compile_prevents_a_subsequent_attempt(
         assert list(session.scalars(select(ResourceReservation))) == []
 
 
-def test_preflight_receipt_disagreement_backs_off_then_recovers(
-    tmp_path: Path,
-) -> None:
-    """Receipt ordering races wait durably without replaying completed phases."""
-    switch = _cold_compile_switch(tmp_path, seconds=1, slow_compiles=99)
+def test_preflight_reuse_ignores_operation_history_ordering(tmp_path: Path) -> None:
+    """Catches an old operation timestamp poisoning fresh inventory evidence."""
+    from vonk_agent_protocol import AgentOperation as OperationKind
+
+    switch = _cold_compile_switch(tmp_path, seconds=1, slow_compiles=0)
     stale_time = switch.clock.now - timedelta(seconds=301)
     record_passing_preflight(switch.sessions, stale_time)
     with switch.sessions() as session:
-        stale_ids = list(
-            session.scalars(
-                select(AgentOperation.id).where(
-                    AgentOperation.kind == "runtime.preflight.v1",
+        stale = {
+            operation.id: (operation.node_id, operation.payload_digest)
+            for operation in session.scalars(
+                select(AgentOperation).where(
+                    AgentOperation.kind == OperationKind.RUNTIME_PREFLIGHT.value,
                     AgentOperation.created_at == stale_time,
                 )
             )
-        )
-    assert stale_ids
-
-    with switch.sessions() as session:
-        stale_digests = {
-            operation.node_id: operation.payload_digest
-            for operation in (session.get(AgentOperation, item) for item in stale_ids)
-            if operation is not None
         }
-
-    def order_stale_receipts(*, latest: bool) -> None:
-        with switch.sessions.begin() as session:
-            for operation_id in stale_ids:
-                operation = session.get(AgentOperation, operation_id)
-                operation.updated_at = (
-                    switch.clock.now + timedelta(seconds=1) if latest else stale_time
-                )
-
-    switch.hooks.append(lambda: order_stale_receipts(latest=True))
-    for _ in range(40):
-        view = switch.service.get(switch.operation.operation_id)
-        assert view.state in {"queued", "running"}, view.status_reason
-        if (_result(view).retry_attempt or 1) >= 5:
-            break
-        order_stale_receipts(latest=False)
-        switch.drive()
-        if switch.compiler.compiles:
-            view = switch.service.get(switch.operation.operation_id)
-            assert view.result.preflight.pending_job_id is None
-            assert not view.result.preflight.attempts
-            for node_id, receipt in view.result.preflight.receipts.items():
-                assert receipt.observed_at == int(NOW.timestamp())
-                with switch.sessions() as session:
-                    selected = latest_result(
-                        session, node_id, requirements_sha256=stale_digests[node_id]
-                    )
-                assert selected is not None
-                assert selected.observed_at == int(stale_time.timestamp()), (
-                    view.state,
-                    view.status_reason,
-                    switch.executor.events,
-                    switch.compiler.compiles,
-                    stale_digests[node_id],
-                )
-
-    view = switch.service.get(switch.operation.operation_id)
-    assert view.state == "running"
-    assert view.next_attempt_at > switch.clock.now
-    assert switch.service.tick() is False
-    # Count committed failed cycles, not compiler calls: refreshing an exact
-    # build receipt may compile more than once inside one phase attempt.
-    assert _result(view).retry_attempt == 5
-    assert "runtime-install" not in switch.executor.events
+    assert stale
     with switch.sessions() as session:
-        assert list(session.scalars(select(RecipeInstallation))) == []
-        assert list(session.scalars(select(ResourceReservation))) == []
-    switch.hooks.clear()
-    order_stale_receipts(latest=False)
-    for _ in range(10):
+        baseline = tuple(
+            session.scalars(
+                select(AgentOperation.id).where(
+                    AgentOperation.kind == OperationKind.RUNTIME_PREFLIGHT.value
+                )
+            )
+        )
+
+    def reorder_history() -> None:
+        with switch.sessions.begin() as session:
+            for operation_id in stale:
+                operation = session.get(AgentOperation, operation_id)
+                assert operation is not None
+                operation.updated_at = switch.clock.now + timedelta(seconds=1)
+
+    switch.hooks.append(reorder_history)
+    for _ in range(40):
         switch.drive()
         if "runtime-install" in switch.executor.events:
             break
     assert switch.executor.events.count("runtime-install") == 1
+    with switch.sessions() as session:
+        fresh = list(
+            session.scalars(
+                select(AgentOperation).where(
+                    AgentOperation.kind == OperationKind.RUNTIME_PREFLIGHT.value,
+                    AgentOperation.id.not_in(baseline),
+                )
+            )
+        )
+        identities = [
+            (operation.node_id, operation.payload_digest) for operation in fresh
+        ]
+        assert len(identities) == len(set(identities))
+        for node_id, digest in stale.values():
+            selected = latest_result(session, node_id, requirements_sha256=digest)
+            assert selected is not None
+            assert selected.observed_at > int(stale_time.timestamp())
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
@@ -3228,19 +3218,26 @@ def test_uncached_run_selects_external_fresh_builder_and_plans_container_phase(
             )
         )
     InventoryRepository(sessions, clock=lambda: NOW).record(
-        InventorySnapshotInput(
-            builder_id,
-            NOW,
-            10_000,
-            8_000,
-            10_000,
-            8_000,
-            10_000,
-            8_000,
-            1,
-            False,
-            ("recipe.build.v1",),
-            memory_pool="shared",
+        NodeInventoryReport.model_validate_json(
+            canonical_message(
+                {
+                    "node_id": builder_id,
+                    "observed_at": NOW,
+                    "disk_total_bytes": 10_000,
+                    "disk_free_bytes": 8_000,
+                    "host_memory_total_bytes": 10_000,
+                    "host_memory_free_bytes": 8_000,
+                    "gpu_memory_total_bytes": 10_000,
+                    "gpu_memory_free_bytes": 8_000,
+                    "gpu_count": 1,
+                    "artifact_store_read_only": False,
+                    "capabilities": ("recipe.build.v1",),
+                    "memory_pool": "shared",
+                    "schema_version": 1,
+                    "nvidia_driver_version": "unknown",
+                    "container_runtime_version": "unknown",
+                }
+            )
         )
     )
     with sessions.begin() as session:

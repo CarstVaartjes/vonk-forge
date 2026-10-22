@@ -8,7 +8,9 @@ from types import SimpleNamespace
 import pytest
 from sqlalchemy import create_engine, select, update
 from sqlalchemy.orm import sessionmaker
+from vonk_agent_protocol import canonical_message
 from vonk_agent_protocol.reason_codes import ProjectionCode
+from vonk_agent_protocol.telemetry import HostResourceSample
 from vonk_control import telemetry_maintenance
 from vonk_control.fleet_events import FleetEventRepository
 from vonk_control.fleet_projection import FleetProjection
@@ -25,6 +27,8 @@ from vonk_control.models import (
 from vonk_control.telemetry import (
     TelemetryRepository,
 )
+
+from .telemetry_support import telemetry_with_resources
 
 NODE_A = "spk_" + "a" * 32
 BOOT_A = "00000000-0000-4000-8000-000000000001"
@@ -48,19 +52,23 @@ def _raw(
     sequence: int,
     cpu: float | None = None,
 ) -> NodeTelemetrySample:
-    return NodeTelemetrySample(
-        id=identifier,
-        node_id=NODE_A,
-        boot_id=BOOT_A,
-        observed_at=observed_at,
-        received_at=observed_at,
-        gpu_utilization_percent=cpu,
-        memory_total_bytes=None,
-        memory_available_bytes=None,
-        disk_total_bytes=None,
-        disk_free_bytes=None,
-        gpu_memory_total_bytes=None,
-        gpu_memory_free_bytes=None,
+    return telemetry_with_resources(
+        NodeTelemetrySample(
+            id=identifier,
+            node_id=NODE_A,
+            boot_id=BOOT_A,
+            observed_at=observed_at,
+            received_at=observed_at,
+            gpu_utilization_percent=cpu,
+            gpu_memory_total_bytes=None,
+            gpu_memory_free_bytes=None,
+        ),
+        HostResourceSample(
+            memory_total_bytes=None,
+            memory_available_bytes=None,
+            disk_total_bytes=None,
+            disk_free_bytes=None,
+        ),
     )
 
 
@@ -267,28 +275,35 @@ def test_inventory_history_keeps_a_day_and_always_each_nodes_newest_row(
 ) -> None:
     from vonk_control.inventory_repository import (
         InventoryRepository,
-        InventorySnapshotInput,
+        NodeInventoryReport,
     )
     from vonk_control.models import NodeInventorySnapshot
 
     def record(node_id: str, observed_at: datetime) -> None:
         InventoryRepository(sessions, clock=lambda: observed_at).record(
-            InventorySnapshotInput(
-                node_id,
-                observed_at,
-                10_000,
-                8_000,
-                10_000,
-                8_000,
-                10_000,
-                8_000,
-                1,
-                False,
-                (
-                    "runtime.vonk.v1",
-                    "recipe.image.pull.v1",
-                ),
-                memory_pool="shared",
+            NodeInventoryReport.model_validate_json(
+                canonical_message(
+                    {
+                        "node_id": node_id,
+                        "observed_at": observed_at,
+                        "disk_total_bytes": 10_000,
+                        "disk_free_bytes": 8_000,
+                        "host_memory_total_bytes": 10_000,
+                        "host_memory_free_bytes": 8_000,
+                        "gpu_memory_total_bytes": 10_000,
+                        "gpu_memory_free_bytes": 8_000,
+                        "gpu_count": 1,
+                        "artifact_store_read_only": False,
+                        "capabilities": (
+                            "runtime.vonk.v1",
+                            "recipe.image.pull.v1",
+                        ),
+                        "memory_pool": "shared",
+                        "schema_version": 1,
+                        "nvidia_driver_version": "unknown",
+                        "container_runtime_version": "unknown",
+                    }
+                )
             )
         )
 

@@ -13,13 +13,14 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_agent_protocol import canonical_message
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_control.cluster_mappings import ClusterMappingService
 from vonk_control.fleet_profile_contract import FleetProfileApplicationProgress
 from vonk_control.inventory_items import inventory_artifacts
 from vonk_control.inventory_repository import (
     InventoryRepository,
-    InventorySnapshotInput,
+    NodeInventoryReport,
 )
 from vonk_control.models import (
     AgentCertificate,
@@ -103,19 +104,26 @@ def _add_disjoint_profile_node(
         revision_id = revision.id
         revision_slug = revision.slug
     InventoryRepository(sessions, clock=lambda: NOW).record(
-        InventorySnapshotInput(
-            node_id,
-            NOW,
-            10_000,
-            8_000,
-            10_000,
-            8_000,
-            10_000,
-            8_000,
-            1,
-            False,
-            tuple(capabilities),
-            memory_pool="shared",
+        NodeInventoryReport.model_validate_json(
+            canonical_message(
+                {
+                    "node_id": node_id,
+                    "observed_at": NOW,
+                    "disk_total_bytes": 10_000,
+                    "disk_free_bytes": 8_000,
+                    "host_memory_total_bytes": 10_000,
+                    "host_memory_free_bytes": 8_000,
+                    "gpu_memory_total_bytes": 10_000,
+                    "gpu_memory_free_bytes": 8_000,
+                    "gpu_count": 1,
+                    "artifact_store_read_only": False,
+                    "capabilities": tuple(capabilities),
+                    "memory_pool": "shared",
+                    "schema_version": 1,
+                    "nvidia_driver_version": "unknown",
+                    "container_runtime_version": "unknown",
+                }
+            )
         )
     )
     mappings = ClusterMappingService(sessions)

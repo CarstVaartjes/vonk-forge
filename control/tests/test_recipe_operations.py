@@ -75,7 +75,7 @@ from vonk_control.install_admission import (
 from vonk_control.inventory_items import inventory_items
 from vonk_control.inventory_repository import (
     InventoryRepository,
-    InventorySnapshotInput,
+    NodeInventoryReport,
 )
 from vonk_control.job_documents import RecipeStopParent
 from vonk_control.litellm import LiteLlmGeneration
@@ -498,21 +498,30 @@ def setup_services(
     )
     for index, node_id in enumerate(node_ids):
         inventory.record(
-            InventorySnapshotInput(
-                node_id,
-                NOW,
-                10_000,
-                8_000,
-                10_000,
-                8_000,
-                10_000,
-                8_000,
-                1,
-                False,
-                capabilities,
-                fabric_address=(f"192.168.100.{index + 2}" if nodes > 1 else None),
-                fabric_bandwidth_mbps=(200000 if nodes > 1 else None),
-                memory_pool="shared",
+            NodeInventoryReport.model_validate_json(
+                canonical_message(
+                    {
+                        "node_id": node_id,
+                        "observed_at": NOW,
+                        "disk_total_bytes": 10_000,
+                        "disk_free_bytes": 8_000,
+                        "host_memory_total_bytes": 10_000,
+                        "host_memory_free_bytes": 8_000,
+                        "gpu_memory_total_bytes": 10_000,
+                        "gpu_memory_free_bytes": 8_000,
+                        "gpu_count": 1,
+                        "artifact_store_read_only": False,
+                        "capabilities": capabilities,
+                        "fabric_address": f"192.168.100.{index + 2}"
+                        if nodes > 1
+                        else None,
+                        "fabric_bandwidth_mbps": 200000 if nodes > 1 else None,
+                        "memory_pool": "shared",
+                        "schema_version": 1,
+                        "nvidia_driver_version": "unknown",
+                        "container_runtime_version": "unknown",
+                    }
+                )
             )
         )
     document = canonical_example("recipe-source-build.json")

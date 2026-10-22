@@ -13,6 +13,7 @@ from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import canonical_message
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.inventory import InventoryRequest
+from vonk_agent_protocol.telemetry import HostResourceSample
 from vonk_control.fleet_events import FleetEventRepository
 from vonk_control.fleet_projection import (
     _AUTHORITY_REVISION,
@@ -26,7 +27,7 @@ from vonk_control.fleet_projection import (
 from vonk_control.fleet_stream_contract import FleetChangeEvent
 from vonk_control.inventory_repository import (
     InventoryRepository,
-    InventorySnapshotInput,
+    NodeInventoryReport,
 )
 from vonk_control.models import (
     AgentCertificate,
@@ -62,6 +63,7 @@ from .runtime_identity_support import (
     inventory_items_fixture,
     set_inventory_hostname,
 )
+from .telemetry_support import telemetry_with_resources
 
 NOW = datetime(2026, 8, 15, 12, 0, tzinfo=UTC)
 COMMIT = "a" * 64
@@ -199,19 +201,23 @@ def _telemetry(
     cpu: float,
     boot_id: str = "00000000-0000-4000-8000-000000000001",
 ) -> NodeTelemetrySample:
-    return NodeTelemetrySample(
-        id=sample_id,
-        node_id=node_id,
-        boot_id=boot_id,
-        observed_at=observed_at,
-        received_at=observed_at + timedelta(milliseconds=250),
-        gpu_utilization_percent=cpu,
-        memory_total_bytes=2_000,
-        memory_available_bytes=1_400,
-        disk_total_bytes=1_000,
-        disk_free_bytes=700,
-        gpu_memory_total_bytes=2_000,
-        gpu_memory_free_bytes=1_300,
+    return telemetry_with_resources(
+        NodeTelemetrySample(
+            id=sample_id,
+            node_id=node_id,
+            boot_id=boot_id,
+            observed_at=observed_at,
+            received_at=observed_at + timedelta(milliseconds=250),
+            gpu_utilization_percent=cpu,
+            gpu_memory_total_bytes=2_000,
+            gpu_memory_free_bytes=1_300,
+        ),
+        HostResourceSample(
+            memory_total_bytes=2_000,
+            memory_available_bytes=1_400,
+            disk_total_bytes=1_000,
+            disk_free_bytes=700,
+        ),
     )
 
 
@@ -455,6 +461,8 @@ def test_read_uses_postgresql_registration_latest_rows_and_a_bounded_query_set()
                     "last_seen_age_seconds": 5.0,
                 },
                 "inventory": {
+                    "schema_version": 1,
+                    "memory_pool": "separate",
                     "observed_at": "2026-08-15T11:59:50Z",
                     "received_at": "2026-08-15T11:59:51Z",
                     "age_seconds": 10.0,
@@ -526,6 +534,8 @@ def test_read_uses_postgresql_registration_latest_rows_and_a_bounded_query_set()
                     "last_seen_age_seconds": 7.0,
                 },
                 "inventory": {
+                    "schema_version": 1,
+                    "memory_pool": "separate",
                     "observed_at": "2026-08-15T11:59:48Z",
                     "received_at": "2026-08-15T11:59:49Z",
                     "age_seconds": 12.0,
@@ -738,6 +748,13 @@ def test_fleet_telemetry_dto_rejects_nil_and_noncanonical_boot_ids(
 ) -> None:
     with pytest.raises(ValidationError):
         TelemetryPoint(
+            memory_total_bytes=None,
+            memory_available_bytes=None,
+            disk_total_bytes=None,
+            disk_free_bytes=None,
+            gpu_utilization_percent=None,
+            gpu_memory_total_bytes=None,
+            gpu_memory_free_bytes=None,
             id="00000000-0000-4000-8000-000000000004",
             node_id=NODE_A,
             boot_id=boot_id,
@@ -784,10 +801,13 @@ def test_projection_schema_is_finite_for_states_items_and_task3_numbers() -> Non
         == "^spk_[0-9a-f]{32}$"
     )
     telemetry = definitions["TelemetryPoint"]["properties"]
-    assert telemetry["boot_id"]["pattern"] == (
-        "^(?!00000000-0000-0000-0000-000000000000$)"
-        "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    from vonk_agent_protocol.telemetry import TelemetrySample
+
+    assert (
+        telemetry["boot_id"]["pattern"]
+        == TelemetrySample.model_json_schema()["properties"]["boot_id"]["pattern"]
     )
+
     assert telemetry["memory_total_bytes"]["anyOf"][0]["maximum"] == (16 * 1024**4)
 
 
@@ -2630,10 +2650,7 @@ def test_fleet_names_the_spark_that_copies_from_the_nas_far_slower(
         request = InventoryRequest.model_validate_json(vector.read_bytes())
         with sessions.begin() as session:
             inventory = _inventory(NODE_B, NOW, free_bytes=100)
-            inventory.network_interfaces = [
-                item.model_dump(mode="json")
-                for item in request.network_interfaces or []
-            ]
+            inventory.network_interfaces = request.network_interfaces
             inventory.nas_route_interface = request.nas_route_interface
             session.add(inventory)
     nodes = {
@@ -2840,20 +2857,27 @@ def _host_codes(host_settings: dict[str, object] | None) -> list[str]:
         )
     )
     InventoryRepository(sessions, clock=lambda: NOW).record(
-        InventorySnapshotInput(
-            node_id=NODE_A,
-            observed_at=report.observed_at,
-            disk_total_bytes=report.disk_total_bytes,
-            disk_free_bytes=report.disk_free_bytes,
-            host_memory_total_bytes=report.host_memory_total_bytes,
-            host_memory_free_bytes=report.host_memory_free_bytes,
-            gpu_memory_total_bytes=report.gpu_memory_total_bytes,
-            gpu_memory_free_bytes=report.gpu_memory_free_bytes,
-            gpu_count=report.gpu_count,
-            artifact_store_read_only=report.artifact_store_read_only,
-            capabilities=tuple(report.capabilities),
-            memory_pool=report.memory_pool,
-            host_settings=report.host_settings,
+        NodeInventoryReport.model_validate_json(
+            canonical_message(
+                {
+                    "node_id": NODE_A,
+                    "observed_at": report.observed_at,
+                    "disk_total_bytes": report.disk_total_bytes,
+                    "disk_free_bytes": report.disk_free_bytes,
+                    "host_memory_total_bytes": report.host_memory_total_bytes,
+                    "host_memory_free_bytes": report.host_memory_free_bytes,
+                    "gpu_memory_total_bytes": report.gpu_memory_total_bytes,
+                    "gpu_memory_free_bytes": report.gpu_memory_free_bytes,
+                    "gpu_count": report.gpu_count,
+                    "artifact_store_read_only": report.artifact_store_read_only,
+                    "capabilities": tuple(report.capabilities),
+                    "memory_pool": report.memory_pool,
+                    "host_settings": report.host_settings,
+                    "schema_version": 1,
+                    "nvidia_driver_version": "unknown",
+                    "container_runtime_version": "unknown",
+                }
+            )
         )
     )
     node = FleetProjection(sessions, clock=lambda: NOW).read().nodes[0]

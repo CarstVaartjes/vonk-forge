@@ -35,6 +35,7 @@ from vonk_agent_protocol.recipe_jobs import RecipeJobRunResult
 from vonk_agent_protocol.route_activation import ActivationMarker
 from vonk_agent_protocol.runtime_preflight import RuntimePreflightRequest
 from vonk_agent_protocol.source_bundles import SourceBundleManifest
+from vonk_agent_protocol.telemetry import HostResourceSample
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition
 
 from .agent_upgrade_contract import (
@@ -387,3 +388,5 @@ bind(
     list[RepeatedEvidence],
     nullable=True,
 )
+
+bind("node_inventory_snapshots", "host_resources", HostResourceSample, nullable=True)

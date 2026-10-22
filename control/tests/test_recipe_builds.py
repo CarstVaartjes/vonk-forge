@@ -35,7 +35,7 @@ from vonk_control.install_admission import InstallAdmissionService
 from vonk_control.inventory_items import inventory_artifacts
 from vonk_control.inventory_repository import (
     InventoryRepository,
-    InventorySnapshotInput,
+    NodeInventoryReport,
 )
 from vonk_control.models import (
     AgentCertificate,
@@ -140,19 +140,26 @@ def _json_text(value: object) -> str:
 
 def _restore_builder_inventory(sessions, node_id, now):
     InventoryRepository(sessions, clock=lambda: now).record(
-        InventorySnapshotInput(
-            node_id,
-            now,
-            2 * 1024**4,
-            1 * 1024**4,
-            100_000,
-            80_000,
-            100_000,
-            80_000,
-            1,
-            False,
-            ("recipe.build.v1", "recipe.build.egress-proxy.v1"),
-            memory_pool="separate",
+        NodeInventoryReport.model_validate_json(
+            canonical_message(
+                {
+                    "node_id": node_id,
+                    "observed_at": now,
+                    "disk_total_bytes": 2 * 1024**4,
+                    "disk_free_bytes": 1 * 1024**4,
+                    "host_memory_total_bytes": 100_000,
+                    "host_memory_free_bytes": 80_000,
+                    "gpu_memory_total_bytes": 100_000,
+                    "gpu_memory_free_bytes": 80_000,
+                    "gpu_count": 1,
+                    "artifact_store_read_only": False,
+                    "capabilities": ("recipe.build.v1", "recipe.build.egress-proxy.v1"),
+                    "memory_pool": "separate",
+                    "schema_version": 1,
+                    "nvidia_driver_version": "unknown",
+                    "container_runtime_version": "unknown",
+                }
+            )
         )
     )
 
@@ -234,25 +241,32 @@ def setup(
             )
         )
     InventoryRepository(sessions, clock=lambda: now).record(
-        InventorySnapshotInput(
-            node_id,
-            now,
-            2 * 1024**4,
-            1 * 1024**4,
-            100_000,
-            80_000,
-            100_000,
-            80_000,
-            1,
-            False,
-            (
-                "recipe.build.v1",
-                "recipe.build.egress-proxy.v1",
-                "recipe.image.import.v1",
-                "runtime.vonk.v1",
-                "recipe.image.pull.v1",
-            ),
-            memory_pool="separate",
+        NodeInventoryReport.model_validate_json(
+            canonical_message(
+                {
+                    "node_id": node_id,
+                    "observed_at": now,
+                    "disk_total_bytes": 2 * 1024**4,
+                    "disk_free_bytes": 1 * 1024**4,
+                    "host_memory_total_bytes": 100_000,
+                    "host_memory_free_bytes": 80_000,
+                    "gpu_memory_total_bytes": 100_000,
+                    "gpu_memory_free_bytes": 80_000,
+                    "gpu_count": 1,
+                    "artifact_store_read_only": False,
+                    "capabilities": (
+                        "recipe.build.v1",
+                        "recipe.build.egress-proxy.v1",
+                        "recipe.image.import.v1",
+                        "runtime.vonk.v1",
+                        "recipe.image.pull.v1",
+                    ),
+                    "memory_pool": "separate",
+                    "schema_version": 1,
+                    "nvidia_driver_version": "unknown",
+                    "container_runtime_version": "unknown",
+                }
+            )
         )
     )
     catalog = CatalogEntityService(sessions, clock=lambda: now)
@@ -950,23 +964,30 @@ def test_resolution_reuses_the_present_receipt_for_the_shared_identity(
             )
         )
     InventoryRepository(sessions, clock=lambda: now).record(
-        InventorySnapshotInput(
-            second_node,
-            now,
-            2 * 1024**4,
-            1 * 1024**4,
-            100_000,
-            80_000,
-            100_000,
-            80_000,
-            1,
-            False,
-            (
-                "recipe.build.v1",
-                "recipe.build.egress-proxy.v1",
-                "recipe.image.import.v1",
-            ),
-            memory_pool="separate",
+        NodeInventoryReport.model_validate_json(
+            canonical_message(
+                {
+                    "node_id": second_node,
+                    "observed_at": now,
+                    "disk_total_bytes": 2 * 1024**4,
+                    "disk_free_bytes": 1 * 1024**4,
+                    "host_memory_total_bytes": 100_000,
+                    "host_memory_free_bytes": 80_000,
+                    "gpu_memory_total_bytes": 100_000,
+                    "gpu_memory_free_bytes": 80_000,
+                    "gpu_count": 1,
+                    "artifact_store_read_only": False,
+                    "capabilities": (
+                        "recipe.build.v1",
+                        "recipe.build.egress-proxy.v1",
+                        "recipe.image.import.v1",
+                    ),
+                    "memory_pool": "separate",
+                    "schema_version": 1,
+                    "nvidia_driver_version": "unknown",
+                    "container_runtime_version": "unknown",
+                }
+            )
         )
     )
     second_plan = service.plan(revision.id, second_node, now=now)
@@ -1179,19 +1200,26 @@ def test_build_plan_from_intent_rechecks_selected_builder_capacity(
     resolution = service.resolve(revision.id)
     newer = now + timedelta(seconds=1)
     InventoryRepository(sessions, clock=lambda: newer).record(
-        InventorySnapshotInput(
-            node_id,
-            newer,
-            2 * 1024**4,
-            1,
-            100_000,
-            80_000,
-            100_000,
-            80_000,
-            1,
-            False,
-            ("recipe.build.v1", "recipe.build.egress-proxy.v1"),
-            memory_pool="separate",
+        NodeInventoryReport.model_validate_json(
+            canonical_message(
+                {
+                    "node_id": node_id,
+                    "observed_at": newer,
+                    "disk_total_bytes": 2 * 1024**4,
+                    "disk_free_bytes": 1,
+                    "host_memory_total_bytes": 100_000,
+                    "host_memory_free_bytes": 80_000,
+                    "gpu_memory_total_bytes": 100_000,
+                    "gpu_memory_free_bytes": 80_000,
+                    "gpu_count": 1,
+                    "artifact_store_read_only": False,
+                    "capabilities": ("recipe.build.v1", "recipe.build.egress-proxy.v1"),
+                    "memory_pool": "separate",
+                    "schema_version": 1,
+                    "nvidia_driver_version": "unknown",
+                    "container_runtime_version": "unknown",
+                }
+            )
         )
     )
 
@@ -1435,7 +1463,7 @@ def test_build_rejects_builder_without_runtime_identity(tmp_path: Path) -> None:
     with sessions.begin() as session:
         node = session.get(AgentNode, node_id)
         assert node is not None
-        set_inventory_identity(node, binary_digest="1" * 64)
+        set_inventory_identity(node, architecture="linux-arm64", binary_digest="1" * 64)
     assert (
         RecipeBuildService(sessions, bundles=bundles)
         .plan(revision.id, node_id, now=now)
@@ -2091,19 +2119,26 @@ def test_build_plan_rejects_disk_below_concurrent_oci_export_peak(
     # reserve retained for the Spark host.
     newer = now + timedelta(seconds=1)
     InventoryRepository(sessions, clock=lambda: newer).record(
-        InventorySnapshotInput(
-            node_id,
-            newer,
-            disk_total_bytes,
-            required_bytes - 1,
-            100_000,
-            80_000,
-            100_000,
-            80_000,
-            1,
-            False,
-            ("recipe.build.v1",),
-            memory_pool="separate",
+        NodeInventoryReport.model_validate_json(
+            canonical_message(
+                {
+                    "node_id": node_id,
+                    "observed_at": newer,
+                    "disk_total_bytes": disk_total_bytes,
+                    "disk_free_bytes": required_bytes - 1,
+                    "host_memory_total_bytes": 100_000,
+                    "host_memory_free_bytes": 80_000,
+                    "gpu_memory_total_bytes": 100_000,
+                    "gpu_memory_free_bytes": 80_000,
+                    "gpu_count": 1,
+                    "artifact_store_read_only": False,
+                    "capabilities": ("recipe.build.v1",),
+                    "memory_pool": "separate",
+                    "schema_version": 1,
+                    "nvidia_driver_version": "unknown",
+                    "container_runtime_version": "unknown",
+                }
+            )
         )
     )
 
@@ -2174,19 +2209,26 @@ def test_public_build_rejects_stale_inventory_without_egress_capability(
     )
     newer = now + timedelta(seconds=1)
     InventoryRepository(sessions, clock=lambda: newer).record(
-        InventorySnapshotInput(
-            node_id,
-            newer,
-            2 * 1024**4,
-            1 * 1024**4,
-            100_000,
-            80_000,
-            100_000,
-            80_000,
-            1,
-            False,
-            ("recipe.build.v1", "recipe.image.import.v1"),
-            memory_pool="separate",
+        NodeInventoryReport.model_validate_json(
+            canonical_message(
+                {
+                    "node_id": node_id,
+                    "observed_at": newer,
+                    "disk_total_bytes": 2 * 1024**4,
+                    "disk_free_bytes": 1 * 1024**4,
+                    "host_memory_total_bytes": 100_000,
+                    "host_memory_free_bytes": 80_000,
+                    "gpu_memory_total_bytes": 100_000,
+                    "gpu_memory_free_bytes": 80_000,
+                    "gpu_count": 1,
+                    "artifact_store_read_only": False,
+                    "capabilities": ("recipe.build.v1", "recipe.image.import.v1"),
+                    "memory_pool": "separate",
+                    "schema_version": 1,
+                    "nvidia_driver_version": "unknown",
+                    "container_runtime_version": "unknown",
+                }
+            )
         )
     )
 

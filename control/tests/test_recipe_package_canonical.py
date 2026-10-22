@@ -13,6 +13,7 @@ from typing import Any
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
+from vonk_agent_protocol import canonical_message
 from vonk_agent_protocol.build_import import RecipeBuildRequest
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_control.auth import TokenCodec
@@ -20,7 +21,7 @@ from vonk_control.bounded_json import require_mapping, require_sequence
 from vonk_control.catalog_service import CatalogService
 from vonk_control.inventory_repository import (
     InventoryRepository,
-    InventorySnapshotInput,
+    NodeInventoryReport,
 )
 from vonk_control.models import (
     AgentNode,
@@ -200,19 +201,26 @@ def test_canonical_synthetic_nested_source_path_lists_and_fetches(
         assert revision is not None
         revision_id = revision.id
     InventoryRepository(sessions, clock=lambda: now).record(
-        InventorySnapshotInput(
-            node_id=node_id,
-            observed_at=now,
-            disk_total_bytes=45 * 1024**3,
-            disk_free_bytes=30 * 1024**3,
-            host_memory_total_bytes=6 * 1024**3,
-            host_memory_free_bytes=4 * 1024**3,
-            gpu_memory_total_bytes=0,
-            gpu_memory_free_bytes=0,
-            gpu_count=0,
-            artifact_store_read_only=False,
-            capabilities=("recipe.build.v1",),
-            memory_pool="separate",
+        NodeInventoryReport.model_validate_json(
+            canonical_message(
+                {
+                    "node_id": node_id,
+                    "observed_at": now,
+                    "disk_total_bytes": 45 * 1024**3,
+                    "disk_free_bytes": 30 * 1024**3,
+                    "host_memory_total_bytes": 6 * 1024**3,
+                    "host_memory_free_bytes": 4 * 1024**3,
+                    "gpu_memory_total_bytes": 0,
+                    "gpu_memory_free_bytes": 0,
+                    "gpu_count": 0,
+                    "artifact_store_read_only": False,
+                    "capabilities": ("recipe.build.v1",),
+                    "memory_pool": "separate",
+                    "schema_version": 1,
+                    "nvidia_driver_version": "unknown",
+                    "container_runtime_version": "unknown",
+                }
+            )
         )
     )
     builder = RecipeBuildService(sessions, bundles=bundles)

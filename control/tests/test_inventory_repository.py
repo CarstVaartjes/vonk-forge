@@ -3,10 +3,11 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+from vonk_agent_protocol import canonical_message
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_control.inventory_repository import (
     InventoryRepository,
-    InventorySnapshotInput,
+    NodeInventoryReport,
 )
 from vonk_control.models import AgentNode, Base, NodeInventorySnapshot
 from vonk_control.stored_json import write_guard_mode
@@ -40,35 +41,49 @@ def test_new_snapshot_supersedes_old_but_preserves_evidence(tmp_path) -> None:
     repo, now = repository(tmp_path)
     node = "spk_" + "1" * 32
     first = repo.record(
-        InventorySnapshotInput(
-            node,
-            now,
-            1000,
-            700,
-            500,
-            300,
-            400,
-            250,
-            1,
-            False,
-            ("runtime.vllm.v1",),
-            memory_pool="separate",
+        NodeInventoryReport.model_validate_json(
+            canonical_message(
+                {
+                    "node_id": node,
+                    "observed_at": now,
+                    "disk_total_bytes": 1000,
+                    "disk_free_bytes": 700,
+                    "host_memory_total_bytes": 500,
+                    "host_memory_free_bytes": 300,
+                    "gpu_memory_total_bytes": 400,
+                    "gpu_memory_free_bytes": 250,
+                    "gpu_count": 1,
+                    "artifact_store_read_only": False,
+                    "capabilities": ("runtime.vllm.v1",),
+                    "memory_pool": "separate",
+                    "schema_version": 1,
+                    "nvidia_driver_version": "unknown",
+                    "container_runtime_version": "unknown",
+                }
+            )
         )
     )
     second = repo.record(
-        InventorySnapshotInput(
-            node,
-            now + timedelta(seconds=5),
-            1000,
-            600,
-            500,
-            250,
-            400,
-            200,
-            1,
-            False,
-            ("runtime.vllm.v1",),
-            memory_pool="separate",
+        NodeInventoryReport.model_validate_json(
+            canonical_message(
+                {
+                    "node_id": node,
+                    "observed_at": now + timedelta(seconds=5),
+                    "disk_total_bytes": 1000,
+                    "disk_free_bytes": 600,
+                    "host_memory_total_bytes": 500,
+                    "host_memory_free_bytes": 250,
+                    "gpu_memory_total_bytes": 400,
+                    "gpu_memory_free_bytes": 200,
+                    "gpu_count": 1,
+                    "artifact_store_read_only": False,
+                    "capabilities": ("runtime.vllm.v1",),
+                    "memory_pool": "separate",
+                    "schema_version": 1,
+                    "nvidia_driver_version": "unknown",
+                    "container_runtime_version": "unknown",
+                }
+            )
         )
     )
     latest = repo.latest(node, now=now + timedelta(seconds=6), maximum_age=10)
@@ -80,19 +95,26 @@ def test_stale_inventory_is_explicit(tmp_path) -> None:
     repo, now = repository(tmp_path)
     node = "spk_" + "1" * 32
     repo.record(
-        InventorySnapshotInput(
-            node,
-            now,
-            1000,
-            700,
-            500,
-            300,
-            400,
-            250,
-            1,
-            False,
-            ("runtime.vllm.v1",),
-            memory_pool="separate",
+        NodeInventoryReport.model_validate_json(
+            canonical_message(
+                {
+                    "node_id": node,
+                    "observed_at": now,
+                    "disk_total_bytes": 1000,
+                    "disk_free_bytes": 700,
+                    "host_memory_total_bytes": 500,
+                    "host_memory_free_bytes": 300,
+                    "gpu_memory_total_bytes": 400,
+                    "gpu_memory_free_bytes": 250,
+                    "gpu_count": 1,
+                    "artifact_store_read_only": False,
+                    "capabilities": ("runtime.vllm.v1",),
+                    "memory_pool": "separate",
+                    "schema_version": 1,
+                    "nvidia_driver_version": "unknown",
+                    "container_runtime_version": "unknown",
+                }
+            )
         )
     )
     assert (
@@ -104,19 +126,26 @@ def test_latest_rejects_malformed_persisted_capabilities(tmp_path) -> None:
     repo, now = repository(tmp_path)
     node = "spk_" + "1" * 32
     stored = repo.record(
-        InventorySnapshotInput(
-            node,
-            now,
-            1000,
-            700,
-            500,
-            300,
-            400,
-            250,
-            1,
-            False,
-            ("runtime.vllm.v1",),
-            memory_pool="separate",
+        NodeInventoryReport.model_validate_json(
+            canonical_message(
+                {
+                    "node_id": node,
+                    "observed_at": now,
+                    "disk_total_bytes": 1000,
+                    "disk_free_bytes": 700,
+                    "host_memory_total_bytes": 500,
+                    "host_memory_free_bytes": 300,
+                    "gpu_memory_total_bytes": 400,
+                    "gpu_memory_free_bytes": 250,
+                    "gpu_count": 1,
+                    "artifact_store_read_only": False,
+                    "capabilities": ("runtime.vllm.v1",),
+                    "memory_pool": "separate",
+                    "schema_version": 1,
+                    "nvidia_driver_version": "unknown",
+                    "container_runtime_version": "unknown",
+                }
+            )
         )
     )
     with write_guard_mode(strict=False), repo._sessions.begin() as session:
@@ -134,7 +163,7 @@ def test_latest_rejects_malformed_persisted_capabilities(tmp_path) -> None:
         snapshot.capabilities = ["runtime.vllm.v1"]
     repaired = repo.latest(node, now=now, maximum_age=60)
     assert repaired is not None and repaired.id == stored.id
-    assert repaired.capabilities == ("runtime.vllm.v1",)
+    assert repaired.capabilities == ["runtime.vllm.v1"]
     assert repaired.host_memory_free_bytes == 300
 
 
@@ -150,19 +179,26 @@ def test_original_directory_items_and_sizes_survive_store_load(
 
     repo, now = repository(tmp_path)
     node_id = "spk_" + "1" * 32
-    value = InventorySnapshotInput(
-        node_id,
-        now,
-        1000,
-        700,
-        500,
-        300,
-        400,
-        250,
-        1,
-        False,
-        ("runtime.vllm.v1",),
-        memory_pool="separate",
+    value = NodeInventoryReport.model_validate_json(
+        canonical_message(
+            {
+                "node_id": node_id,
+                "observed_at": now,
+                "disk_total_bytes": 1000,
+                "disk_free_bytes": 700,
+                "host_memory_total_bytes": 500,
+                "host_memory_free_bytes": 300,
+                "gpu_memory_total_bytes": 400,
+                "gpu_memory_free_bytes": 250,
+                "gpu_count": 1,
+                "artifact_store_read_only": False,
+                "capabilities": ("runtime.vllm.v1",),
+                "memory_pool": "separate",
+                "schema_version": 1,
+                "nvidia_driver_version": "unknown",
+                "container_runtime_version": "unknown",
+            }
+        )
     )
     measured = (
         None
@@ -176,7 +212,11 @@ def test_original_directory_items_and_sizes_survive_store_load(
             "installation_bytes": measured,
         }
     )
-    stored = repo.record(value, report=report)
+    stored = repo.record(
+        NodeInventoryReport.model_validate_json(
+            canonical_message({**report.model_dump(mode="json"), "node_id": node_id})
+        )
+    )
     with repo._sessions() as session:
         loaded = session.get(NodeInventorySnapshot, stored.id)
         assert loaded is not None
