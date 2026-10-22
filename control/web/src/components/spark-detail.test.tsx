@@ -173,19 +173,17 @@ test("display reservation stays unknown and renders Controller advice", async ()
   const recommendation =
     "Set Advanced → Advanced Menu → Display Reserved Memory to 0.5 GB (fixed); save and reboot.";
   const api = {
-    fleetNode: vi
-      .fn()
-      .mockResolvedValue({
-        ...node,
-        warnings: [
-          {
-            code: ProjectionCode.HOST_DISPLAY_MEMORY,
-            detail,
-            recommendation,
-            severity: ProfileReasonSeverity.WARNING,
-          },
-        ],
-      }),
+    fleetNode: vi.fn().mockResolvedValue({
+      ...node,
+      warnings: [
+        {
+          code: ProjectionCode.HOST_DISPLAY_MEMORY,
+          detail,
+          recommendation,
+          severity: ProfileReasonSeverity.WARNING,
+        },
+      ],
+    }),
   } as unknown as ControlApi;
   render(<SparkDetail api={api} id="spk_1" onClose={vi.fn()} />);
   expect(await screen.findByText(`${detail} ${recommendation}`)).toBeVisible();
