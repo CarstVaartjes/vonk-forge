@@ -51,7 +51,6 @@ from vonk_control.source_bundles import (
     parse_source_bundle,
 )
 from vonk_forge_contracts import (
-    CONTRACT_VERSION,
     ModelDefinition,
     RecipeDefinition,
     document_sha256,
@@ -231,7 +230,8 @@ def test_sync_imports_canonical_models_and_changed_recipe_once(tmp_path: Path) -
         reader.snapshot.version,
         reader.snapshot.updated_at,
     )
-    assert result.library_version == CONTRACT_VERSION
+    # Report the signed publication version, not the consumer wheel version.
+    assert result.library_version == reader.snapshot.version
     assert reader.fetches == [item.uri]
     with sessions() as session:
         revisions = session.scalars(select(CatalogDocumentRevision)).all()

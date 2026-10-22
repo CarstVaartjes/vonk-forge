@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import io
+import time
 from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from typing import TYPE_CHECKING
@@ -12,14 +13,19 @@ from sqlalchemy import case, select
 from vonk_agent_protocol import (
     LifecycleState,
     RecipeBuildCode,
+    SecurityRefusalError,
     UnknownOutcomeError,
     WaitReason,
 )
+from vonk_agent_protocol.agent_words import ProfileDocumentState
 
 from ..catalog_revision_contract import RecipeRevisionProjection
+from ..categorized_errors import BookkeepingUnknown
 from ..content_identity import reusable_build
 from ..lifecycle.evidence import BookkeepingReason, retire_as_unknown
 from ..models import AgentNode, CatalogDocumentRevision, RecipeBuild
+from ..operator_receipt_contract import ReceiptOwner
+from ..profile_read_observation import observing_profile
 from ..recipe_build_receipts import BuildCandidate, PreparedBuildReceipt
 from ..recipe_execution_contract import (
     RecipeExecutionContractError,
@@ -44,7 +50,6 @@ from .common import (
     _BUILD_RUNTIME_PLATFORM,
     _LOGGER,
     _SHA256,
-    _UNHEALABLE_BUNDLE_CODES,
     BUILD_ARTIFACT_FORMAT,
     RecipeBuildRefused,
     RecipeBuildResolution,
@@ -68,62 +73,27 @@ if TYPE_CHECKING:
 
 def _verified_bundle(
     self: RecipeBuildService,
-    projected: RecipeRevisionProjection,
     build: Mapping[str, object],
     source_sha256: str,
 ) -> GeneratedSourceBundle:
-    """The stored source bundle, healed from evidence when the stored copy is damaged.
-
-    Source is verified at ingress; what the store holds afterwards can be
-    damaged (a lost or corrupted copy, metadata that no longer matches) and
-    a damaged stored copy is not a recipe fault. A bundle that cannot be
-    read, or that lacks the build's Dockerfile, is derived again from the
-    recipe package's closure and stored through the same ingress check (the
-    digest must match), then read again. Incomplete local evidence after
-    that fresh verification remains unknown; when it cannot be
-    derived at all the build remains unknown and the bounded request retry
-    observes it again.
-    """
-
-    dockerfile = build.get("dockerfile")
-    context = build.get("context")
-    context_path = context.get("path") if isinstance(context, Mapping) else None
-
-    def read() -> GeneratedSourceBundle | SourceBundleError:
-        try:
-            return self._bundles.get(source_sha256)
-        except SourceBundleUnknown as error:
-            if error.code in _UNHEALABLE_BUNDLE_CODES:
-                raise
-            return error
-        except SourceBundleRefused as error:
-            raise RecipeBuildRefused(
-                error.code, str(error), reason=error.typed_reason
+    """Read ingress proof; source repair belongs to the worker, never a reader."""
+    try:
+        bundle = self._bundles.get(source_sha256)
+    except SecurityRefusalError:
+        raise
+    except SourceBundleError as error:
+        if observing_profile():
+            raise BookkeepingUnknown(
+                str(error), reason=WaitReason.RECEIPT_MISSING
             ) from error
-        except SourceBundleError as error:
-            return error
-
-    def damaged(value: GeneratedSourceBundle | SourceBundleError) -> bool:
-        if isinstance(value, SourceBundleError):
-            return value.code not in _UNHEALABLE_BUNDLE_CODES
-        return not isinstance(dockerfile, str) or dockerfile not in value.files
-
-    loaded = read()
-    if damaged(loaded):
-        healed = self._heal_source_bundle(projected, context_path, source_sha256)
-        if healed:
-            loaded = read()
-        if isinstance(loaded, SourceBundleError):
-            raise RecipeBuildUnknown(loaded.code, str(loaded)) from loaded
-        if damaged(loaded):
-            raise RecipeBuildUnknown(
-                RecipeBuildCode.SOURCE_UNAVAILABLE,
-                "source bundle evidence remains incomplete after rederivation",
-                reason=WaitReason.OBSERVATION_UNAVAILABLE,
-            )
-    if isinstance(loaded, SourceBundleError):
-        raise RecipeBuildUnknown(loaded.code, str(loaded)) from loaded
-    return loaded
+        raise RecipeBuildUnknown(error.code, str(error)) from error
+    dockerfile = build.get("dockerfile")
+    if not isinstance(dockerfile, str) or dockerfile not in bundle.files:
+        raise RecipeBuildUnknown(
+            RecipeBuildCode.SOURCE_UNAVAILABLE,
+            "Verified source bundle does not contain the recipe Dockerfile",
+        )
+    return bundle
 
 
 def _heal_source_bundle(
@@ -151,6 +121,59 @@ def _heal_source_bundle(
     return True
 
 
+def reconcile_source_bundles(self: RecipeBuildService) -> bool:
+    """Restore missing ingress receipts outside requests and SQL transactions.
+
+    Reconstruct from catalog closure and pass the exact digest through normal
+    ingress. A changed local copy is a cache miss, never trusted or rehashed.
+    The next worker pass retries unavailable closure, without blocking other sources.
+    """
+    if time.monotonic() < self._source_check_at:
+        return False
+    self._source_check_at = time.monotonic() + 30.0
+    with self._sessions() as session:
+        revisions = list(
+            session.scalars(
+                select(CatalogDocumentRevision).where(
+                    CatalogDocumentRevision.kind == ReceiptOwner.RECIPE.value,
+                    CatalogDocumentRevision.state == ProfileDocumentState.ACTIVE.value,
+                )
+            )
+        )
+    repaired = False
+    seen: set[str] = set()
+    for revision in revisions:
+        try:
+            projected = _read_recipe_projection(revision)
+            digest = _source_bundle_handle(projected)
+            if digest in seen:
+                continue
+            try:
+                self._bundles.verified_manifest(digest)
+                seen.add(digest)
+                continue
+            except SourceBundleUnknown:
+                pass
+            build = _canonical_build(
+                _canonical_recipe_document(revision.document), projected
+            )
+            context = build.get("context")
+            path = context.get("path") if isinstance(context, Mapping) else None
+            if self._heal_source_bundle(projected, path, digest):
+                seen.add(digest)
+                repaired = True
+            else:
+                _LOGGER.warning(
+                    "source %s awaits exact catalog closure; worker retries in 30 seconds",
+                    digest,
+                )
+        except (SourceBundleError, UnknownOutcomeError, RecipeBuildRefused) as error:
+            _LOGGER.warning(
+                "source verification pending for revision %s: %s", revision.id, error
+            )
+    return repaired
+
+
 def check_source(
     self: RecipeBuildService, recipe_revision_id: str
 ) -> SourcePolicyReport:
@@ -166,6 +189,8 @@ def check_source(
         try:
             return self._check_source_once(recipe_revision_id)
         except UnknownOutcomeError as error:
+            if observing_profile():
+                raise
             last_error = error
     assert last_error is not None
     raise last_error
@@ -190,7 +215,7 @@ def _check_source_once(
         document = _canonical_recipe_document(revision.document)
         build = _canonical_build(document, projected)
         source_sha256 = _source_bundle_handle(projected)
-    bundle = self._verified_bundle(projected, build, source_sha256)
+    bundle = self._verified_bundle(build, source_sha256)
     return inspect_build_source_policy(
         _source_policy_document(document, build, source_sha256), bundle
     )
@@ -205,6 +230,8 @@ def resolve(self: RecipeBuildService, recipe_revision_id: str) -> RecipeBuildRes
         try:
             return self._resolve_once(recipe_revision_id)
         except UnknownOutcomeError as error:
+            if observing_profile():
+                raise
             last_error = error
     assert last_error is not None
     raise last_error
@@ -239,7 +266,7 @@ def _resolve_once(
         adapter = _resolved_adapter(projected)
         source_sha256 = _source_bundle_handle(projected)
 
-    bundle = self._verified_bundle(projected, build, source_sha256)
+    bundle = self._verified_bundle(build, source_sha256)
     dockerfile_path = build.get("dockerfile")
     dockerfile_payload = (
         bundle.files.get(dockerfile_path) if isinstance(dockerfile_path, str) else None

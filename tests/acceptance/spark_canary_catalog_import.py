@@ -89,6 +89,8 @@ class FixtureReader:
                 description=str(metadata["description"]),
                 tags=tuple(str(tag) for tag in metadata.get("tags", [])),
                 content_sha256=digest,
+                source_bundle_sha256=str(entry["source_bundle_sha256"]),
+                package_sha256=str(entry["package"]["sha256"]),
                 uri=f"vonk://catalog/{identity['publisher']}/{identity['slug']}@sha256:{digest}",
                 document=dict(document),
             )

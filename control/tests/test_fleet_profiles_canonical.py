@@ -1324,6 +1324,16 @@ def test_profile_read_observes_distinct_content_once(
         return parser(raw)
 
     monkeypatch.setattr(contract, "read_recipe", parsed)
+    from vonk_control import profile_read_observation as observation
+
+    submissions = []
+    submit = observation._POOL.submit
+
+    def submitted(*args, **kwargs):
+        submissions.append(True)
+        return submit(*args, **kwargs)
+
+    monkeypatch.setattr(observation._POOL, "submit", submitted)
     queries = []
 
     def counted(_connection, _cursor, statement, _parameters, _context, _many):
@@ -1345,9 +1355,15 @@ def test_profile_read_observes_distinct_content_once(
         elapsed = time.monotonic() - started
         event.remove(postgres_engine, "before_cursor_execute", counted)
     print(
-        f"{endpoint} selectors={selector_count}: {elapsed:.3f}s SQL={len(queries)} resolutions={len(calls)} storage={storage_calls} parses={parses}"
+        f"{endpoint} selectors={selector_count}: {elapsed:.3f}s SQL={len(queries)} resolutions={len(calls)} storage={storage_calls} parses={parses} submissions={len(submissions)}"
     )
-    assert len(calls) <= (selector_count if endpoint == "get" else 0)
+    # Distinct revision identities still resolve exactly once, but shared
+    # content must not pay an executor handoff for every assignment/selector.
+    # This catches a serial observe_storage(resolver) dispatch in the loop,
+    # even on a host where its scheduling latency stays below five seconds.
+    assert len(calls) == (selector_count if endpoint == "get" else 0)
+    assert len(set(calls)) == len(calls)
+    assert len(submissions) == (1 if endpoint == "get" else 0)
     assert storage_calls == (
         Counter(model=1, image=1) if endpoint == "get" else Counter()
     )
@@ -1367,7 +1383,9 @@ def test_profile_storage_wait_is_bounded_and_recovers(
     from threading import Event
 
     from vonk_agent_protocol import ProfileReasonCode
+    from vonk_control.categorized_errors import BookkeepingUnknown
     from vonk_control.model_cache import ModelCacheService
+    from vonk_control.profile_read_observation import profile_read
     from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
 
     from tests.test_fleet_profiles import _assessment, _exact_preparation
@@ -1436,8 +1454,12 @@ def test_profile_storage_wait_is_bounded_and_recovers(
             return service.list().profiles[0]
         return service.read_number(1)
 
-    started = time.monotonic()
     try:
+        # Establish the stalled I/O before measuring the profile projection.
+        with pytest.raises(BookkeepingUnknown):
+            profile_read(stored)()
+        assert entered.wait(30)
+        started = time.monotonic()
         result = read()
         elapsed = time.monotonic() - started
         assert entered.is_set()
