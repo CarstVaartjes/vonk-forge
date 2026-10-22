@@ -138,6 +138,15 @@ SQL may reference an exact artifact identity without owning its availability.
 Use a database only where its transactions, coordination, or queries reduce
 total complexity; do not build a second job scheduler out of JSON files.
 
+Per-Spark facts have one owner: agent-reported data uses one canonical typed
+Pydantic contract per item in a typed column of `node_inventory_snapshots` or
+`node_telemetry_samples`; Controller observations of contact use columns on
+`agent_nodes`. Do not add per-feature fact tables, ad hoc JSON, duplicate fact
+owners, or authoritative in-memory copies. Operation intent/history, grants,
+and desired configuration are distinct from observed Spark facts. Existing
+misplaced fields require an owner-approved move; do not extend them. The
+per-node fact guard freezes audited outside columns and checks JSON bindings.
+
 Move each producer, reader, API projection, and meaningful test together, then
 remove its obsolete persistence path. Never add dual writers, fallback readers,
 or a schema-1 compatibility path to make the transition appear complete.
