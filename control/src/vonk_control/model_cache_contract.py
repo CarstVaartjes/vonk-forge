@@ -175,6 +175,7 @@ class ModelCacheObservedObject(StrippedStrictModel):
     expected_bytes: int = Field(ge=0)
     available: bool
     baseline_bytes: int = Field(ge=0)
+    observed_at: AwareDatetime
 
 
 class ModelCacheStorageObservation(StrippedStrictModel):

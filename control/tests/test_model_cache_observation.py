@@ -463,3 +463,97 @@ def test_checkpoint_storage_loss_is_visible_and_recovers(observed_cache, monkeyp
     observation = cache._storage_observer.read(manifest)
     assert observation.completed_at is not None
     assert all(entry.available for entry in observation.objects.values())
+
+
+def test_model_only_checkpoint_reloads_required_null_fields(
+    observed_cache, monkeypatch
+):
+    """Catches a writer dropping required nulls so another process starts over."""
+    from dataclasses import replace
+
+    cache, sessions, manifest, now = observed_cache
+    model_only = replace(
+        manifest, recipe_revision_sha256=None, model_definition_ref=None
+    )
+    cache._storage_observer.schedule(model_only)
+    _finish(cache, model_only)
+    other = ModelCacheService(
+        sessions,
+        cache.root,
+        reserve_bytes=0,
+        fixture_sources=True,
+        clock=lambda: now[0],
+    )
+
+    def must_reuse_checkpoint(*_args):
+        pytest.fail("another observer discarded a completed model-only checkpoint")
+
+    monkeypatch.setattr(other, "_stored_object", must_reuse_checkpoint)
+    try:
+        other._storage_observer.schedule(model_only)
+        _finish(other, model_only)
+        result = other._storage_observer.read(model_only)
+        assert result.completed_at is not None
+        assert result.manifest.recipe_revision_sha256 is None
+        assert result.manifest.model_definition_ref is None
+    finally:
+        other.close()
+
+
+def test_refresh_preserves_measured_facts_for_any_read_interval(
+    observed_cache, monkeypatch
+):
+    """Catches each late retry landing in an expiry gap and waiting forever."""
+    cache, _sessions, manifest, now = observed_cache
+    cache._storage_observer.schedule(manifest)
+    _finish(cache, manifest)
+    completed_at = cache._storage_observer.read(manifest).completed_at
+    now[0] += timedelta(seconds=31)
+    entered, release = Event(), Event()
+    original = cache._stored_object
+
+    def slow(digest, expected):
+        entered.set()
+        assert release.wait(30)
+        return original(digest, expected)
+
+    monkeypatch.setattr(cache, "_stored_object", slow)
+    cache._storage_observer.schedule(manifest)
+    try:
+        assert entered.wait(30)
+        # A late read reuses known facts while the current refresh progresses.
+        observation = cache._storage_observer.read(manifest)
+        assert observation.completed_at == completed_at
+        assert all(entry.available for entry in observation.objects.values())
+        assert not cache._storage_observer._pending[manifest.digest].done()
+    finally:
+        release.set()
+        _finish(cache, manifest)
+    assert cache._storage_observer.read(manifest).completed_at == now[0]
+
+
+def test_capacity_observation_recovers_after_all_members_are_checkpointed(
+    observed_cache, monkeypatch
+):
+    """Catches a recovered capacity read leaving the old error as a permanent wait."""
+    cache, _sessions, manifest, now = observed_cache
+    capacity = cache.free_bytes
+
+    def unavailable():
+        raise OSError("injected capacity observation outage")
+
+    monkeypatch.setattr(cache, "free_bytes", unavailable)
+    cache._storage_observer.schedule(manifest)
+    _finish(cache, manifest)
+    with pytest.raises(BookkeepingUnknown, match="capacity observation outage"):
+        cache._storage_observer.read(manifest)
+
+    def members_are_checkpointed(*_args):
+        pytest.fail("capacity recovery restarted completed member observations")
+
+    monkeypatch.setattr(cache, "_stored_object", members_are_checkpointed)
+    monkeypatch.setattr(cache, "free_bytes", capacity)
+    now[0] += timedelta(seconds=6)
+    cache._storage_observer.schedule(manifest)
+    _finish(cache, manifest)
+    assert cache._storage_observer.read(manifest).completed_at is not None

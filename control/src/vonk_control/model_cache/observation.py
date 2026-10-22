@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING
 
 from pydantic import ValidationError
 from sqlalchemy import or_, select, update
-from vonk_agent_protocol import WaitReason
+from vonk_agent_protocol import WaitReason, canonical_message
 
 from ..categorized_errors import BookkeepingUnknown
 from ..model_cache_contract import (
@@ -99,8 +99,8 @@ class StorageObserver:
         path = self._path(manifest.digest)
         temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
         try:
-            with temporary.open("w") as handle:
-                handle.write(value.model_dump_json(exclude_none=True))
+            with temporary.open("wb") as handle:
+                handle.write(canonical_message(value))
                 handle.flush()
                 os.fsync(handle.fileno())
             os.replace(temporary, path)
@@ -120,15 +120,27 @@ class StorageObserver:
         with self._lock:
             value = self._snapshots.get(manifest.digest)
         now = self._cache._clock()
+        if value is None or now >= value.next_check_at:
+            self.schedule(manifest)
+        # Age starts background refresh; it does not erase a measured fact.
+        # Retain completed members while refreshing, so any polling interval
+        # can collect the result instead of repeatedly landing in an expiry gap.
         if (
             value is not None
             and value.completed_at is not None
-            and now < value.next_check_at
+            and value.available_bytes is not None
+            and value.objects.keys() == _unique_artifacts(manifest.artifacts).keys()
+            and value.detail is None
         ):
             return value
-        if value is None or now >= value.next_check_at:
-            self.schedule(manifest)
-        completed = 0 if value is None else len(value.objects)
+        completed = (
+            0
+            if value is None
+            else sum(
+                entry.observed_at >= value.started_at
+                for entry in value.objects.values()
+            )
+        )
         total = len(_unique_artifacts(manifest.artifacts))
         next_attempt = (
             now + timedelta(seconds=_RECHECK_SECONDS)
@@ -208,15 +220,28 @@ class StorageObserver:
                 if (
                     value is not None
                     and value.completed_at is not None
+                    and value.completed_at >= value.started_at
                     and now < value.next_check_at
                 ):
                     return
-                if value is None or value.completed_at is not None:
+                if value is None:
                     value = ModelCacheStorageObservation(
                         schema_version=SCHEMA_VERSION,
                         manifest=manifest.contract(),
                         started_at=now,
                         next_check_at=now + timedelta(seconds=_RECHECK_SECONDS),
+                    )
+                    self._write(manifest, value)
+                elif (
+                    value.completed_at is not None
+                    and value.completed_at >= value.started_at
+                ):
+                    value = value.model_copy(
+                        update={
+                            "started_at": now,
+                            "next_check_at": now + timedelta(seconds=_RECHECK_SECONDS),
+                            "detail": None,
+                        }
                     )
                     self._write(manifest, value)
                 if now < value.next_check_at and value.detail is not None:
@@ -225,7 +250,11 @@ class StorageObserver:
                     for digest, spec in _unique_artifacts(manifest.artifacts).items():
                         if self._cache._closed.is_set():
                             return
-                        if digest in value.objects:
+                        previous = value.objects.get(digest)
+                        if (
+                            previous is not None
+                            and previous.observed_at >= value.started_at
+                        ):
                             continue
                         available = (
                             self._cache._stored_object(digest, spec.expected_bytes)
@@ -240,6 +269,7 @@ class StorageObserver:
                             expected_bytes=spec.expected_bytes,
                             available=available,
                             baseline_bytes=baseline,
+                            observed_at=self._cache._clock(),
                         )
                         value.next_check_at = self._cache._clock() + timedelta(
                             seconds=_RECHECK_SECONDS
@@ -247,6 +277,7 @@ class StorageObserver:
                         value.detail = None
                         self._write(manifest, value)
                     value.available_bytes = self._cache.free_bytes()
+                    value.detail = None
                     value.completed_at = self._cache._clock()
                     value.next_check_at = value.completed_at + timedelta(
                         seconds=_REFRESH_SECONDS
@@ -308,6 +339,8 @@ class StorageObserver:
                 manifest=manifest.contract(),
                 objects={} if previous is None else previous.objects,
                 started_at=now if previous is None else previous.started_at,
+                completed_at=None if previous is None else previous.completed_at,
+                available_bytes=None if previous is None else previous.available_bytes,
                 next_check_at=now + timedelta(seconds=_RECHECK_SECONDS),
                 detail=f"{type(error).__name__}: {error}",
             )
