@@ -6,7 +6,7 @@ from datetime import timedelta
 from uuid import UUID, uuid4, uuid5
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, update
 from vonk_agent_protocol import (
     RecipeBuildCode,
     ReservationState,
@@ -74,10 +74,16 @@ def _accepted_build_profile(
         assert snapshot is not None and node is not None and build is not None
         revision = session.get(CatalogDocumentRevision, build.recipe_revision_id)
         assert revision is not None
-        revision.projected = {
-            **revision.projected,
-            "source_bundle_sha256": bundle.sha256,
-        }
+        session.execute(
+            update(CatalogDocumentRevision)
+            .where(CatalogDocumentRevision.id == revision.id)
+            .values(
+                projected={
+                    **revision.projected,
+                    "source_bundle_sha256": bundle.sha256,
+                }
+            )
+        )
         node.binary_digest = "1" * 64
         snapshot.capabilities = [*snapshot.capabilities, "recipe.build.v1"]
         snapshot.host_memory_free_bytes = snapshot.gpu_memory_free_bytes = 275
