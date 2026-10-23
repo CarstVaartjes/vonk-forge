@@ -23,6 +23,14 @@ pub(super) fn remove_directory_contents(
     directory: &impl std::os::fd::AsFd,
     expected_device: u64,
 ) -> Result<(), OperationError> {
+    remove_directory_contents_last(directory, expected_device, None)
+}
+
+pub(super) fn remove_directory_contents_last(
+    directory: &impl std::os::fd::AsFd,
+    expected_device: u64,
+    last: Option<&CStr>,
+) -> Result<(), OperationError> {
     let mut buffer = [MaybeUninit::uninit(); 8192];
     let mut entries = Vec::new();
     {
@@ -35,6 +43,11 @@ pub(super) fn remove_directory_contents(
             }
             entries.push(CString::new(name.to_bytes()).map_err(|_| OperationError::UnsafePath)?);
         }
+    }
+    // Retention's grace marker survives partial deletion. A retry must not
+    // start another 24-hour grace after an unrelated child failed to leave.
+    if let Some(last) = last {
+        entries.sort_by_key(|name| name.as_c_str() == last);
     }
     for name in entries {
         remove_directory_entry(directory, &name, expected_device)?;

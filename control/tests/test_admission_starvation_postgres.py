@@ -5,6 +5,7 @@ from __future__ import annotations
 import threading
 import time
 from datetime import UTC, datetime, timedelta
+from unittest.mock import Mock
 
 import pytest
 from sqlalchemy import select
@@ -19,6 +20,7 @@ from vonk_control.admission_locking import (
     patient_admission,
 )
 from vonk_control.models import AgentNode, Base, NodeTelemetrySample
+from vonk_control.observation_delivery import ObservationDeliveryMiddleware
 
 NODE = "spk_" + "a" * 32
 NOW = datetime(2026, 10, 5, tzinfo=UTC)
@@ -154,3 +156,45 @@ def test_telemetry_maintenance_skips_a_node_an_admission_holds(sessions) -> None
     maintenance.run_once()
     with sessions.begin() as session:
         assert session.get(NodeTelemetrySample, "sample-old") is None
+
+
+def _delivery(sessions):
+    services = Mock()
+    services.sessions = sessions
+    return ObservationDeliveryMiddleware(Mock(), services=services)
+
+
+def test_changed_contact_skips_busy_admission_then_recovers(sessions) -> None:
+    """Diagnostic delivery cannot queue behind admission, even on a new error."""
+    delivery = _delivery(sessions)
+    done = threading.Event()
+    errors = []
+
+    def record():
+        try:
+            for attempt in range(8):
+                delivery._record(NODE, 422, NOW + timedelta(microseconds=attempt))
+        except Exception as error:  # noqa: BLE001 -- propagate test thread failure
+            errors.append(error)
+        finally:
+            done.set()
+
+    traffic = threading.Thread(target=record)
+    try:
+        with sessions.begin() as admission:
+            admission.scalars(select(AgentNode).with_for_update()).all()
+            traffic.start()
+            assert done.wait(10), "contact reply queued behind capacity admission"
+    finally:
+        traffic.join(10)
+    assert not traffic.is_alive() and not errors
+    delivery._record(NODE, 422, NOW + timedelta(seconds=1))
+    # A delayed older success must not clear the newer rejection.
+    delivery._record(NODE, 204, NOW)
+    with sessions() as session:
+        node = session.get(AgentNode, NODE)
+        assert node is not None and node.recipe_observation_http_status == 422
+    delivery._record(NODE, 204, NOW + timedelta(seconds=2))
+    with sessions() as session:
+        node = session.get(AgentNode, NODE)
+        assert node is not None and node.recipe_observation_http_status == 204

@@ -60,9 +60,7 @@ pub fn relink_private_model_copies(
             continue;
         }
         if let Err(error) = relink_installation(data_root, &installation, &mut relinked) {
-            eprintln!(
-                "vonk-agent: store retention keeps installation {name}'s private model copies: {error}"
-            );
+            crate::store_retention::report_unreadable_installation(data_root, &name, &error);
         }
     }
     if relinked.files > 0 {

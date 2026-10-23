@@ -151,3 +151,35 @@ def test_policy_miss_is_reobserved_without_reusing_a_false_current_receipt(monke
         )
     )
     assert fresh.completed_at is not None and fresh.unchanged_count == 1
+
+
+def test_current_sync_releases_receipt_connection_before_availability(postgres_engine):
+    """A one-connection pool catches nested-session starvation on a current sync."""
+    engine = create_engine(
+        postgres_engine.url, pool_size=1, max_overflow=0, pool_timeout=0.5
+    )
+    try:
+        Base.metadata.create_all(engine)
+        sessions = sessionmaker(engine, expire_on_commit=False)
+        catalog = CatalogService(
+            sessions, clock=lambda: datetime.now(UTC), cursors=CursorCodec(b"c" * 32)
+        )
+        item = replace(_item(_recipe(_model())), dependencies=(_model(),))
+
+        class Reader:
+            def list(self):
+                return RecipeLibrarySnapshot("c" * 40, (item,))
+
+            def fetch(self, uri):
+                return item
+
+        sync = ManagedRecipeCatalogSyncService(
+            sessions, catalog=catalog, reader=Reader(), clock=lambda: datetime.now(UTC)
+        )
+        first = sync.automatic()
+        assert first.completed_at is not None
+        # The current-receipt branch must return its connection before the
+        # actual catalog availability reader checks out this same pool's slot.
+        assert sync.automatic().id == first.id
+    finally:
+        engine.dispose()

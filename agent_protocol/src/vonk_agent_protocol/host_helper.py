@@ -383,7 +383,7 @@ class SignedHostHelperGrant(WireModel):
 class RecipeRunInspectionRequest(WireModel):
     """Helper frame for one read-only inspection of a managed run.
 
-    Unlike every other helper operation it needs no Controller grant: it only
+    Like local store retention it needs no Controller grant: it only
     reports whether the exact container of an agent-written ``run-inspect``
     runtime request is running.  With ``include_logs`` it also returns the
     bounded tail of that exact container's own output (``process_logs``), read

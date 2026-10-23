@@ -55,3 +55,71 @@ def test_library_request_queries_are_scoped():
             for line in scan_tree(parse_file(path).tree, path=relative)
         )
     assert not errors, "\n".join(errors)
+
+
+def _server_cursors(tree):
+    lines = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+            continue
+        if (
+            node.func.attr == "yield_per"
+            or (
+                node.func.attr == "cursor"
+                and (node.args or any(key.arg == "name" for key in node.keywords))
+            )
+            or (
+                node.func.attr == "execution_options"
+                and any(
+                    key.arg in {"yield_per", "stream_results"}
+                    and not (
+                        isinstance(key.value, ast.Constant)
+                        and key.value.value in (None, False)
+                    )
+                    for key in node.keywords
+                )
+            )
+        ):
+            lines.append(node.lineno)
+    return lines
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "query.yield_per(20)",
+        "query.execution_options(yield_per=20)",
+        "query.execution_options(stream_results=True)",
+        "connection.cursor(name='reply')",
+        "connection.cursor('reply')",
+    ],
+)
+def test_api_cursor_guard_rejects_server_cursors(query):
+    assert _server_cursors(ast.parse(query))
+    assert not _server_cursors(
+        ast.parse("query.execution_options(yield_per=None, stream_results=False)")
+    )
+    assert not _server_cursors(ast.parse("connection.cursor()"))
+
+
+def test_controller_sessions_end_before_suspension_and_api_reads_buffer():
+    """Guard explicit lifetimes; process/PG tests own indirect I/O boundaries."""
+    from pathlib import Path
+
+    from control.tests.coordination_boundaries import scan_coordination_sites
+    from control.tests.parsed_sources import parse_file
+
+    root = Path(__file__).resolve().parents[1]
+    errors = []
+    for path in (root / "control/src/vonk_control").rglob("*.py"):
+        tree = parse_file(path).tree
+        lines = []
+        if {"api", "agent_api"} & set(path.parts) or path.name.endswith("_api.py"):
+            lines.extend(_server_cursors(tree))
+        errors.extend(f"{path.relative_to(root)}:{line}" for line in lines)
+    errors.extend(
+        site.render()
+        for site in scan_coordination_sites()
+        if site.detail.startswith("suspension ")
+    )
+    assert not errors, "SQL session/cursor survives a suspension:\n" + "\n".join(errors)

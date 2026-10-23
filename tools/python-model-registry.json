@@ -123,6 +123,10 @@
       "kind": "agent-protocol"
     },
     {
+      "module": "agent_protocol/src/vonk_agent_protocol/store_cleanup.py",
+      "kind": "agent-protocol"
+    },
+    {
       "module": "agent_protocol/src/vonk_agent_protocol/telemetry.py",
       "kind": "agent-protocol"
     },

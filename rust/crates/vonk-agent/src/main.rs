@@ -609,12 +609,9 @@ async fn collect_stores(
             if swept.pending { "; more remain" } else { "" }
         );
     }
-    Instant::now()
-        + if swept.pending {
-            Duration::ZERO
-        } else {
-            INTERVAL
-        }
+    // A timed-out helper can exhaust a pass without making progress. Keep
+    // the normal retry cadence instead of immediately looping on that fault.
+    Instant::now() + INTERVAL
 }
 
 async fn run_inventory_lane(config: AgentConfig, client: AgentHttpClient, verdict: LatestVerdict) {

@@ -33,6 +33,39 @@ const MAX_HELPER_MESSAGE_BYTES: usize = vonk_agent_protocol::MAX_HELPER_FRAME_BY
 /// The privileged helper's socket.
 pub const HELPER_SOCKET: &str = "/run/vonk-forge-package-helper/package-helper.sock";
 
+pub(crate) fn remove_agent_store(
+    request: &vonk_agent_protocol::generated::AgentStoreRemovalRequest,
+) -> std::io::Result<()> {
+    remove_agent_store_at(Path::new(HELPER_SOCKET), request)
+}
+
+pub(crate) fn remove_agent_store_at(
+    socket: &Path,
+    request: &vonk_agent_protocol::generated::AgentStoreRemovalRequest,
+) -> std::io::Result<()> {
+    let call = || -> Result<(), HostRuntimeError> {
+        let body = canonical_generated_json(request)
+            .map_err(|_| HostRuntimeError::HelperProtocol(HelperProtocolCause::RequestEncoding))?;
+        let response = call_helper(socket, &body, &Inactivity::new(Duration::from_secs(60)))?;
+        require_bound_response(&response, &request.request_id.to_string())?;
+        if let Some(code) = response.error_code {
+            return Err(HostRuntimeError::HelperRejected {
+                code,
+                diagnostic: response.diagnostic,
+                process_logs: None,
+            });
+        }
+        require_executed_outcome(&response, false)?;
+        if response.exit_code != Some(0) {
+            return Err(HostRuntimeError::HelperProtocol(
+                HelperProtocolCause::OutcomeMalformed,
+            ));
+        }
+        Ok(())
+    };
+    call().map_err(|error| std::io::Error::other(error.cause()))
+}
+
 pub(crate) const BACKGROUND_RUN_INSPECTION_CONCURRENCY: usize = 8;
 pub(crate) const RUN_INSPECTION_REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 fn background_inspection_slots(socket: &Path) -> std::sync::Arc<tokio::sync::Semaphore> {
@@ -184,6 +217,88 @@ pub(crate) fn runtime_request(
         start_plan,
         stop_plan,
     }
+}
+
+/// Read-only ownership evidence for retention, even when a stored plan is invalid.
+/// The caller runs between claims. Unknown/refused evidence protects only this
+/// installation and is retried on the next bounded retention pass.
+pub(crate) fn installation_in_use(installation_id: &str) -> Result<bool, HostRuntimeError> {
+    let response = inspect_runtime(
+        Path::new(vonk_agent_protocol::HOST_RUNTIME_REQUEST_ROOT),
+        Path::new(HELPER_SOCKET),
+        vec![
+            vonk_agent_protocol::INSTALLATION_REOBSERVATION_ARGUMENT.to_owned(),
+            installation_id.to_owned(),
+        ],
+        false,
+        None,
+    )?;
+    if response.status != HostHelperResponseStatus::ContainerRuntimeRequestExecuted
+        || response.exit_code.is_some()
+        || response.process_logs.is_some()
+        || response.diagnostic.is_some()
+    {
+        return Err(HostRuntimeError::HelperProtocol(
+            HelperProtocolCause::InspectionOutcome,
+        ));
+    }
+    response
+        .process_running
+        .ok_or(HostRuntimeError::HelperProtocol(
+            HelperProtocolCause::InspectionOutcome,
+        ))
+}
+
+fn inspect_runtime(
+    request_root: &Path,
+    helper_socket: &Path,
+    arguments: Vec<String>,
+    include_logs: bool,
+    run_generation: Option<u64>,
+) -> Result<HelperResponse, HostRuntimeError> {
+    let request = HostRuntimeRequest {
+        action: HostRuntimeAction::RunInspect,
+        fence: uuid::Uuid::new_v4(),
+        arguments,
+        job_plan: None,
+        installation_id: None,
+        reconciliation_identity: None,
+        run_generation,
+        start_plan: None,
+        stop_plan: None,
+    };
+    request
+        .validate()
+        .map_err(HostRuntimeError::request_refusal)?;
+    let body = canonical_json(&request)
+        .map_err(|_| HostRuntimeError::HelperProtocol(HelperProtocolCause::RequestEncoding))?;
+    let digest = hex_sha256(&body);
+    let request_path = write_request(request_root, &digest, &body)?;
+    let request_cleanup = RequestFileCleanup(request_path);
+    let request_id = uuid::Uuid::new_v4();
+    let frame = canonical_generated_json(&RecipeRunInspectionRequest {
+        request_id,
+        request_sha256: digest,
+        include_logs: include_logs.then_some(true),
+        content_observation: None,
+    })
+    .map_err(|_| HostRuntimeError::HelperProtocol(HelperProtocolCause::RequestEncoding))?;
+    let _request_cleanup = request_cleanup;
+    let response = call_helper(
+        helper_socket,
+        &frame,
+        &Inactivity::new(RUN_INSPECTION_REQUEST_TIMEOUT),
+    )?;
+    require_bound_response(&response, &request_id.to_string())?;
+    if response.error_code.is_some() {
+        return Err(runtime_rejection(&response, HostRuntimeAction::RunInspect));
+    }
+    if response.status != HostHelperResponseStatus::ContainerRuntimeRequestExecuted {
+        return Err(HostRuntimeError::HelperProtocol(
+            HelperProtocolCause::InspectionOutcome,
+        ));
+    }
+    Ok(response)
 }
 
 pub struct HostRuntimeBoundary<'a> {
@@ -411,57 +526,22 @@ impl HostRuntimeBoundary<'_> {
         permit: Option<tokio::sync::OwnedSemaphorePermit>,
         run_generation: Option<u64>,
     ) -> Result<HelperResponse, HostRuntimeError> {
-        let request = HostRuntimeRequest {
-            action: HostRuntimeAction::RunInspect,
-            fence: uuid::Uuid::new_v4(),
-            arguments,
-            job_plan: None,
-            installation_id: None,
-            reconciliation_identity: None,
-            run_generation,
-            start_plan: None,
-            stop_plan: None,
-        };
-        request
-            .validate()
-            .map_err(HostRuntimeError::request_refusal)?;
-        let body = canonical_json(&request)
-            .map_err(|_| HostRuntimeError::HelperProtocol(HelperProtocolCause::RequestEncoding))?;
-        let digest = hex_sha256(&body);
-        let request_path = write_request(self.request_root, &digest, &body)?;
-        let request_cleanup = RequestFileCleanup(request_path);
-        let request_id = uuid::Uuid::new_v4();
-        let frame = canonical_generated_json(&RecipeRunInspectionRequest {
-            request_id,
-            request_sha256: digest,
-            include_logs: include_logs.then_some(true),
-            content_observation: None,
-        })
-        .map_err(|_| HostRuntimeError::HelperProtocol(HelperProtocolCause::RequestEncoding))?;
+        let request_root = self.request_root.to_path_buf();
         let helper_socket = self.helper_socket.to_path_buf();
-        let response = tokio::task::spawn_blocking(move || {
-            // Both native ownership and its request stay alive until actual
-            // socket work returns, even when the awaiting page is cancelled.
+        tokio::task::spawn_blocking(move || {
+            // Native capacity and request custody last until the socket call
+            // returns, even if the observing future is cancelled.
             let _permit = permit;
-            let _request_cleanup = request_cleanup;
-            call_helper(
+            inspect_runtime(
+                &request_root,
                 &helper_socket,
-                &frame,
-                &Inactivity::new(RUN_INSPECTION_REQUEST_TIMEOUT),
+                arguments,
+                include_logs,
+                run_generation,
             )
         })
         .await
-        .map_err(|_| HostRuntimeError::HelperProtocol(HelperProtocolCause::HelperCallJoin))??;
-        require_bound_response(&response, &request_id.to_string())?;
-        if response.error_code.is_some() {
-            return Err(runtime_rejection(&response, HostRuntimeAction::RunInspect));
-        }
-        if response.status != HostHelperResponseStatus::ContainerRuntimeRequestExecuted {
-            return Err(HostRuntimeError::HelperProtocol(
-                HelperProtocolCause::InspectionOutcome,
-            ));
-        }
-        Ok(response)
+        .map_err(|_| HostRuntimeError::HelperProtocol(HelperProtocolCause::HelperCallJoin))?
     }
 
     /// Grant-free exact preparation observation; never renews authority.

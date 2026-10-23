@@ -297,7 +297,7 @@ class TrustedProxyAgentIdentityMiddleware:
             and (
                 scoped_identity is None
                 or validator is None
-                or not validator(scoped_identity)
+                or not await asyncio.to_thread(validator, scoped_identity)
             )
         ):
             await Response(status_code=401)(safe_scope, receive, send)
