@@ -186,29 +186,27 @@ def test_startup_adds_wait_columns_without_restarting_a_live_attempt(
     from vonk_control.models import JobAttempt
 
     Base.metadata.create_all(postgres_engine)
-    identifier, request_id, fence = str(uuid4()), str(uuid4()), str(uuid4())
+    sessions = sessionmaker(postgres_engine, expire_on_commit=False)
+    fence = str(uuid4())
+    # Persist real running work through its producer, then remove just the wait
+    # columns under test. Unrelated required fields retain their model defaults.
+    with sessions.begin() as session:
+        job = _job()
+        session.add(job)
+        session.flush()
+        claimed = JobAdapter().claim(
+            session,
+            job,
+            worker_id="executor",
+            fence=fence,
+            lease_deadline=NOW + timedelta(minutes=5),
+            now=NOW,
+        )
+        assert claimed is not None
+        identifier = job.id
     with postgres_engine.begin() as connection:
         connection.exec_driver_sql("ALTER TABLE jobs DROP COLUMN wait_evidence")
         connection.exec_driver_sql("ALTER TABLE jobs DROP COLUMN next_action_at")
-        connection.execute(
-            text("""INSERT INTO jobs
-            (id, request_id, kind, state, actor, authority_revision, targets,
-             payload_digest, payload, current_attempt, created_at, updated_at)
-            VALUES (:id, :request, 'wait-probe', 'running', 'test', 'test',
-                    '[]', :digest, '{}', 1, :now, :now)"""),
-            {"id": identifier, "request": request_id, "digest": "0" * 64, "now": NOW},
-        )
-        connection.execute(
-            text("""INSERT INTO job_attempts
-            (id, job_id, attempt, fence, worker_id, lease_deadline, state)
-            VALUES (:id, :job, 1, :fence, 'executor', :lease, 'running')"""),
-            {
-                "id": str(uuid4()),
-                "job": identifier,
-                "fence": fence,
-                "lease": NOW + timedelta(minutes=5),
-            },
-        )
     with postgres_engine.begin() as connection:
         reconcile_schema(connection)
     sessions = sessionmaker(postgres_engine)
