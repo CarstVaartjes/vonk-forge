@@ -60,7 +60,7 @@ def _pending_due(sessions, request_key: str):
         return due
 
 
-def test_parked_load_names_its_lock_holder_then_queues_for_the_lock(
+def test_parked_load_reports_unknown_row_holder_then_queues_for_the_lock(
     tmp_path, postgres_engine
 ) -> None:
     sessions, profiles, _, profile, api, headers, _, nodes = _capacity_profile(
@@ -93,7 +93,8 @@ def test_parked_load_names_its_lock_holder_then_queues_for_the_lock(
         assert retry_at.isoformat() in (waiting.status_reason or "")
 
         # Each retry while the row stays held is refused, and the parked load
-        # says which lock refused it and who holds it.
+        # names the lock. NOWAIT leaves no blocking edge to identify its holder;
+        # even the real writer's last statement is not ownership evidence.
         while (parked := _pending(sessions, request_key)).admission_attempt < (
             PATIENT_AFTER_RETRIES
         ):
@@ -106,7 +107,8 @@ def test_parked_load_names_its_lock_holder_then_queues_for_the_lock(
             assert refused.admission_attempt == parked.admission_attempt + 1
             detail = " ".join(blocker.detail for blocker in refused.blockers)
             assert "agent_nodes" in detail, detail
-            assert "agent-heartbeat" in detail, detail
+            assert "blocking pid unavailable" in detail, detail
+            assert "agent-heartbeat" not in detail, detail
             assert "review again" not in detail.lower(), detail
             assert any(
                 blocker.code == ProfileReasonCode.ADMISSION_BUSY
