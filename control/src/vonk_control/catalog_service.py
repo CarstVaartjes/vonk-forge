@@ -44,6 +44,7 @@ from .catalog_revision_contract import (
     read_catalog_projection,
     write_catalog_projection,
 )
+from .identity_insert import insert_identity
 from .models import (
     CatalogDocument,
     CatalogDocumentHead,
@@ -486,12 +487,9 @@ class CatalogService:
             raise CatalogValidationError(
                 CatalogCode.RECIPE_INVALID, "catalog revision is not a recipe"
             )
-        root = session.get(CatalogDocument, revision.document_id, with_for_update=True)
-        if root is None:
-            # This authorized import names the retained immutable revision.
-            # Rebuild only its lookup root; no user, grant or selected profile
-            # is reconstructed from artifact discovery.
-            root = CatalogDocument(
+        root, _ = insert_identity(
+            session,
+            CatalogDocument(
                 id=revision.document_id,
                 kind=revision.kind,
                 publisher=revision.publisher,
@@ -500,9 +498,9 @@ class CatalogService:
                 created_by=revision.created_by,
                 created_at=revision.created_at,
                 updated_at=self._clock(),
-            )
-            session.add(root)
-            session.flush()
+            ),
+            key=("kind", "publisher", "slug"),
+        )
         head = _head(session, root)
         if head.active_revision_id == revision.id:
             return
@@ -525,6 +523,35 @@ class CatalogService:
         kind = str(parsed.kind)
         digest = captured.content_digest
         identity = parsed.identity
+        retained_root_id = session.scalar(
+            select(CatalogDocumentRevision.document_id)
+            .where(
+                CatalogDocumentRevision.kind == kind,
+                CatalogDocumentRevision.publisher == identity.publisher,
+                CatalogDocumentRevision.slug == identity.slug,
+            )
+            .limit(1)
+        )
+        root_values = CatalogDocument(
+            kind=kind,
+            publisher=identity.publisher,
+            slug=identity.slug,
+            title=(
+                parsed.identity.model.title
+                if isinstance(parsed, ModelDefinition)
+                else parsed.metadata.title
+            ),
+            created_by=actor,
+            created_at=self._clock(),
+            updated_at=self._clock(),
+        )
+        if retained_root_id is not None:
+            root_values.id = retained_root_id
+        root, _ = insert_identity(
+            session,
+            root_values,
+            key=("kind", "publisher", "slug"),
+        )
         existing = session.scalar(
             select(CatalogDocumentRevision).where(
                 CatalogDocumentRevision.kind == kind,
@@ -575,26 +602,6 @@ class CatalogService:
                     )
                 )
                 session.refresh(existing)
-            root = session.get(
-                CatalogDocument, existing.document_id, with_for_update=True
-            )
-            if root is None:
-                root = CatalogDocument(
-                    id=existing.document_id,
-                    kind=kind,
-                    publisher=identity.publisher,
-                    slug=identity.slug,
-                    title=(
-                        parsed.identity.model.title
-                        if isinstance(parsed, ModelDefinition)
-                        else parsed.metadata.title
-                    ),
-                    created_by=actor,
-                    created_at=self._clock(),
-                    updated_at=self._clock(),
-                )
-                session.add(root)
-                session.flush()
             service = CatalogEntityService(
                 session, clock=self._clock, cursors=self._cursors
             )
@@ -626,73 +633,21 @@ class CatalogService:
         service = CatalogEntityService(
             session, clock=self._clock, cursors=self._cursors
         )
-        root = session.scalar(
-            select(CatalogDocument)
-            .where(
-                CatalogDocument.kind == kind,
-                CatalogDocument.publisher == identity.publisher,
-                CatalogDocument.slug == identity.slug,
-            )
-            .with_for_update()
+        head = _head(session, root)
+        if head.candidate_revision_id is not None:
+            service.fail_candidate(root.id, reason=CatalogCode.STALE_REVISION.value)
+        latest = session.scalar(
+            select(CatalogDocumentRevision.revision_number)
+            .where(CatalogDocumentRevision.document_id == root.id)
+            .order_by(CatalogDocumentRevision.revision_number.desc())
+            .limit(1)
         )
-        if root is None:
-            # A retained revision owns its lookup-root identity, even when the
-            # derived root disappeared. Recreate metadata from this verified
-            # ingress, without choosing an active head from history.
-            retained_root_id = session.scalar(
-                select(CatalogDocumentRevision.document_id)
-                .where(
-                    CatalogDocumentRevision.kind == kind,
-                    CatalogDocumentRevision.publisher == identity.publisher,
-                    CatalogDocumentRevision.slug == identity.slug,
-                )
-                .limit(1)
-            )
-            if retained_root_id is not None:
-                root = CatalogDocument(
-                    id=retained_root_id,
-                    kind=kind,
-                    publisher=identity.publisher,
-                    slug=identity.slug,
-                    title=(
-                        parsed.identity.model.title
-                        if isinstance(parsed, ModelDefinition)
-                        else parsed.metadata.title
-                    ),
-                    created_by=actor,
-                    created_at=self._clock(),
-                    updated_at=self._clock(),
-                )
-                session.add(root)
-                session.flush()
-        if root is None:
-            candidate = service.create_draft(document, actor=actor)
-        else:
-            head = session.scalar(
-                select(CatalogDocumentHead)
-                .where(
-                    CatalogDocumentHead.kind == kind,
-                    CatalogDocumentHead.publisher == identity.publisher,
-                    CatalogDocumentHead.slug == identity.slug,
-                )
-                .with_for_update()
-            )
-            if head is not None and head.candidate_revision_id is not None:
-                service.fail_candidate(
-                    root.id, reason=f"Superseded by imported {kind} {digest}."
-                )
-            latest = session.scalar(
-                select(CatalogDocumentRevision.revision_number)
-                .where(CatalogDocumentRevision.document_id == root.id)
-                .order_by(CatalogDocumentRevision.revision_number.desc())
-                .limit(1)
-            )
-            candidate = service.revise(
-                root.id,
-                document,
-                actor=actor,
-                expected_revision=latest,
-            )
+        candidate = service.revise(
+            root.id,
+            document,
+            actor=actor,
+            expected_revision=latest,
+        )
         # resolve selects this newly created candidate as the accepted head in
         # this same transaction. Retain that completed work rather than issue
         # another root/head read solely to discover the already-selected id.

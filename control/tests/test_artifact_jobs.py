@@ -12,7 +12,7 @@ from types import SimpleNamespace
 from typing import TypedDict
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import event, select
 from vonk_agent_protocol import (
     AgentResult,
     AgentResultState,
@@ -62,7 +62,6 @@ from vonk_control.recipe_operations import (
     RecipeOperationView,
     RecipeRequestInvalid,
 )
-from vonk_control.recipe_operations import job_activation as recipe_operations_module
 from vonk_control.resource_planning import PLATFORM_MEMORY_FLOOR_BYTES
 from vonk_forge_contracts import RecipeDefinition, document_sha256
 
@@ -312,7 +311,7 @@ def running_artifact_service(tmp_path, *, recipe_transform=None, engine=None):
     )
 
 
-def test_activate_replay_serializes_request_key_lookup(tmp_path, monkeypatch) -> None:
+def test_activate_replay_uses_no_request_advisory_key(tmp_path, monkeypatch) -> None:
     sessions, recipe_operations, _queue, mapping_id, build_id, nodes = setup_services(
         tmp_path, recipe_transform=_configure_artifact_recipe
     )
@@ -326,14 +325,12 @@ def test_activate_replay_serializes_request_key_lookup(tmp_path, monkeypatch) ->
     plan = recipe_operations.preview_run(installation.owner_id, "image-job")
 
     request_id = "00000000-0000-4000-8000-000000000102"
-    acquired = []
-    acquire = recipe_operations_module.acquire_admission_keys
+    statements = []
 
-    def record_keys(session, keys):
-        acquired.extend(keys)
-        return acquire(session, keys)
+    def record_sql(_connection, _cursor, statement, _parameters, _context, _many):
+        statements.append(statement)
 
-    monkeypatch.setattr(recipe_operations_module, "acquire_admission_keys", record_keys)
+    event.listen(sessions.kw["bind"], "before_cursor_execute", record_sql)
     # Force the race window's fast read to miss, as it can for concurrent callers.
     monkeypatch.setattr(
         recipe_operations, "_idempotent", lambda *_args, **_kwargs: None
@@ -352,10 +349,11 @@ def test_activate_replay_serializes_request_key_lookup(tmp_path, monkeypatch) ->
     )
 
     assert replay == activated
+    assert not any("job-request" in statement for statement in statements)
     assert any(
-        key.namespace == "job-request" and key.identity == request_id
-        for key in acquired
+        "ON CONFLICT" in statement and "jobs" in statement for statement in statements
     )
+    event.remove(sessions.kw["bind"], "before_cursor_execute", record_sql)
     with sessions() as session:
         assert (
             len(tuple(session.scalars(select(Job).where(Job.request_id == request_id))))

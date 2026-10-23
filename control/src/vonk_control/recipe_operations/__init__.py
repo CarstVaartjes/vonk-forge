@@ -71,7 +71,6 @@ from ..admission_locking import acquire_admission_keys as acquire_admission_keys
 from ..admission_locking import admission_attempts as admission_attempts
 from ..admission_locking import admission_wait_exhausted as admission_wait_exhausted
 from ..admission_locking import is_admission_contention as is_admission_contention
-from ..admission_locking import job_request_key as job_request_key
 from ..admission_locking import lock_admission_rows as lock_admission_rows
 from ..admission_locking import node_admission_key as node_admission_key
 from ..agent_jobs import AgentJobService as AgentJobService
@@ -629,7 +628,6 @@ __all__ = [
     "enforce_recovery_deadline",
     "func",
     "is_admission_contention",
-    "job_request_key",
     "job_states",
     "lock_admission_rows",
     "new_recipe_job",

@@ -27,10 +27,10 @@ from .. import job_states
 from ..admission_locking import (
     AdmissionLockBusy,
     AdmissionRowLock,
+    ConstraintReplay,
     acquire_admission_keys,
     admission_attempts,
     admission_wait_exhausted,
-    job_request_key,
     lock_admission_rows,
     node_admission_key,
 )
@@ -195,10 +195,7 @@ class BuildMixin:
             try:
                 acquire_admission_keys(
                     session,
-                    (
-                        job_request_key(request_id),
-                        node_admission_key(plan.builder_node_id),
-                    ),
+                    (node_admission_key(plan.builder_node_id),),
                     holder="recipe-operation",
                 )
                 locked = lock_admission_rows(
@@ -452,6 +449,14 @@ class BuildMixin:
                     force=force,
                     admission_guard=admission_guard,
                 )
+            except ConstraintReplay as duplicate:
+                return duplicate.replay(
+                    lambda: service._idempotent(
+                        request_id,
+                        WireAgentOperation.RECIPE_BUILD.value,
+                        build_input_sha256,
+                    )
+                )
             except UnknownOutcomeError as error:
                 refused = error
                 if admission_wait_exhausted(error):
@@ -531,10 +536,6 @@ class BuildMixin:
         upload records, under the nominal builder named in the plan.
         """
         service = typing_cast("RecipeOperationService", self)
-        try:
-            acquire_admission_keys(session, (job_request_key(request_id),))
-        except AdmissionLockBusy as error:
-            raise RecipeBuildAdmissionBusy() from error
         existing = service._idempotent_job_in_session(
             session,
             request_id,
@@ -573,7 +574,7 @@ class BuildMixin:
             created_at=now,
             updated_at=now,
         )
-        session.add(job)
+        job = service._insert_job(session, job)
         session.flush()
         return job
 

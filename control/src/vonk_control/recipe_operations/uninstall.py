@@ -27,7 +27,6 @@ from ..admission_locking import (
     admission_attempts,
     admission_wait_exhausted,
     admitting,
-    job_request_key,
     node_admission_key,
 )
 from ..install_admission import (
@@ -86,10 +85,7 @@ class UninstallMixin:
                 try:
                     acquire_admission_keys(
                         session,
-                        (
-                            job_request_key(request_id),
-                            *(node_admission_key(node_id) for node_id in target_nodes),
-                        ),
+                        tuple(node_admission_key(node_id) for node_id in target_nodes),
                         holder="recipe-operation",
                     )
                 except AdmissionLockBusy as error:

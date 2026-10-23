@@ -19,8 +19,7 @@ from vonk_agent_protocol import (
 )
 
 from ..admission_locking import (
-    acquire_admission_keys,
-    job_request_key,
+    set_admission_timeout,
 )
 from ..job_documents import (
     RecipeStopParent,
@@ -245,9 +244,7 @@ class StopAcceptanceMixin:
         # withdrawal, which needs the owner, is the accepted Stop's continuation
         # and waits for a busy owner there instead of refusing this request.
         with service._sessions.begin() as session:
-            acquire_admission_keys(
-                session, (job_request_key(request_id),), holder="recipe-stop-admission"
-            )
+            set_admission_timeout(session)
             existing = service._idempotent_job_in_session(
                 session,
                 request_id,
@@ -257,13 +254,8 @@ class StopAcceptanceMixin:
                 owner_id=run_id,
             )
             if existing is not None:
-                # A duplicate replays the accepted Stop. Every stage change of
-                # the Stop (withdrawal claim, dispatch) commits under the run
-                # row lock, so take that lock first and only then re-read the
-                # Job: the review is checked against the route state it
-                # belongs with. The Job needs no lock (this replay writes
-                # nothing), and locking it after the run would invert the
-                # Job-then-run order of the claim and defer paths.
+                # The run fence binds route state to its Stop stage; it does
+                # not arbitrate request creation. Re-read after that fence.
                 session.get(RecipeRun, run_id, with_for_update=True)
                 replayed = session.get(Job, existing.id, populate_existing=True)
                 if replayed is None:
@@ -350,6 +342,6 @@ class StopAcceptanceMixin:
                 created_at=now,
                 updated_at=now,
             )
-            session.add(job)
+            job = service._insert_job(session, job)
             session.flush()
             return job

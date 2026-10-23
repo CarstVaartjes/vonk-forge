@@ -39,6 +39,7 @@ from .catalog_revision_contract import (
     read_catalog_projection,
     write_catalog_projection,
 )
+from .identity_insert import insert_identity
 from .models import (
     CatalogDocument,
     CatalogDocumentHead,
@@ -305,6 +306,14 @@ class CatalogEntityService:
                 raise CatalogValidationError(
                     CatalogCode.IDENTITY_CHANGED, "document identity cannot change"
                 )
+            existing = session.scalar(
+                select(CatalogDocumentRevision).where(
+                    CatalogDocumentRevision.document_id == root.id,
+                    CatalogDocumentRevision.content_digest == document_sha256(clean),
+                )
+            )
+            if existing is not None:
+                return existing
             head = _head(session, root)
             latest = session.scalar(
                 select(CatalogDocumentRevision.revision_number)
@@ -321,8 +330,13 @@ class CatalogEntityService:
                     CatalogCode.STALE_REVISION, "document revision changed"
                 )
             revision = _revision(root, parsed, clean, latest_number + 1, actor, now)
-            session.add(revision)
-            session.flush()
+            revision, created = insert_identity(
+                session,
+                revision,
+                key=("kind", "publisher", "slug", "content_digest"),
+            )
+            if not created:
+                return revision
             head.candidate_revision_id, root.title, root.updated_at = (
                 revision.id,
                 title,
@@ -933,27 +947,18 @@ def _digest(value: object) -> str:
 
 
 def _head(session: Session, root: CatalogDocument) -> CatalogDocumentHead:
-    head = session.scalar(
-        select(CatalogDocumentHead)
-        .where(
-            CatalogDocumentHead.kind == root.kind,
-            CatalogDocumentHead.publisher == root.publisher,
-            CatalogDocumentHead.slug == root.slug,
-        )
-        .with_for_update()
-    )
-    if head is None:
-        # Every caller holds this document root's write lock. Recreate only its
-        # empty selection record: history cannot choose an accepted head. The
-        # current authorized request binds the candidate or imported revision.
-        head = CatalogDocumentHead(
+    # Only the current request chooses a candidate/active head. History cannot
+    # reconstruct an accepted selection, even when this derived row was lost.
+    head, _ = insert_identity(
+        session,
+        CatalogDocumentHead(
             kind=root.kind,
             publisher=root.publisher,
             slug=root.slug,
             generation=0,
-        )
-        session.add(head)
-        session.flush()
+        ),
+        key=("kind", "publisher", "slug"),
+    )
     return head
 
 

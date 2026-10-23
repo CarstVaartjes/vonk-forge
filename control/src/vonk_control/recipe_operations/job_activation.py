@@ -20,11 +20,9 @@ from vonk_agent_protocol import (
 )
 
 from ..admission_locking import (
-    AdmissionLockBusy,
-    acquire_admission_keys,
+    ConstraintReplay,
     admission_attempts,
     admission_wait_exhausted,
-    job_request_key,
 )
 from ..job_documents import RecipeJobActivateParent, controller_recipe_document
 from ..models import (
@@ -39,7 +37,6 @@ from ..recipe_execution_contract import (
 )
 from ..recipe_progress import _catalog_recipe
 from ..run_admission import (
-    RunAdmissionBusy,
     RunPlan,
 )
 from ..run_admission import (
@@ -92,10 +89,6 @@ class JobActivationMixin:
             return existing
         now = service._clock()
         with service._sessions.begin() as session:
-            try:
-                acquire_admission_keys(session, (job_request_key(request_id),))
-            except AdmissionLockBusy as error:
-                raise RunAdmissionBusy("run capacity writer is busy") from error
             replay = service._idempotent_in_session(
                 session,
                 request_id,
@@ -227,7 +220,7 @@ class JobActivationMixin:
                 created_at=now,
                 updated_at=now,
             )
-            session.add(job)
+            job = service._insert_job(session, job)
             session.flush()
             return service._view(job)
 
@@ -257,6 +250,16 @@ class JobActivationMixin:
                     request_id=request_id,
                     workload_intent_ordinal=workload_intent_ordinal,
                     profile_application_id=profile_application_id,
+                )
+            except ConstraintReplay as duplicate:
+                return duplicate.replay(
+                    lambda: service._idempotent(
+                        request_id,
+                        "recipe.job.activate.v1",
+                        None,
+                        installation_id=plan.installation_id,
+                        run_alias=plan.alias,
+                    )
                 )
             except UnknownOutcomeError as error:
                 refused = error
