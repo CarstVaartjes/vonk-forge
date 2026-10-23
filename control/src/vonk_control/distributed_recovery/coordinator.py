@@ -398,7 +398,7 @@ class DistributedRecoveryCoordinator:
     def _withdraw_routes(self, now: datetime, run_id: str | None = None) -> bool:
         """Withdraw the routes of runs this pass may recover or settle."""
 
-        with self._routes.publication_transaction() as session:
+        def decide(session: Session) -> frozenset[str]:
             candidates = {
                 *session.scalars(
                     select(RecipeRun.id)
@@ -419,13 +419,15 @@ class DistributedRecoveryCoordinator:
                     .order_by(RecipeRun.created_at, RecipeRun.id)
                 ),
             }
-            pending = frozenset(
+            return frozenset(
                 run_id
                 for run_id in sorted(candidates)
                 if not self._routes.withdrawal_complete_in_session(
                     session, frozenset({run_id})
                 )
             )
+
+        pending = self._routes.decide_publication(decide)
         if not pending:
             return False
         self._routes.withdraw_runs(pending, pending=OperatorActionName.RETRY)

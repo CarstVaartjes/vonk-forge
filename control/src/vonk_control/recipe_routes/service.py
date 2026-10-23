@@ -8,7 +8,7 @@ from contextlib import AbstractContextManager, ExitStack, suppress
 from datetime import datetime, timedelta
 
 from sqlalchemy import select
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import OperationalError, SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
     AgentOperation,
@@ -161,7 +161,16 @@ class RecipeRouteService:
                 stack.callback(_SQLITE_ROUTE_PUBLICATION_LOCK.release)
 
             def owned(session: Session) -> T:
-                lock_route_publication_owner_in_session(session)
+                try:
+                    lock_route_publication_owner_in_session(session)
+                except OperationalError as error:
+                    if getattr(error.orig, "sqlstate", None) != "55P03":
+                        raise
+                    # Owner acquisition keeps its paced wait; a run conflict
+                    # below uses the shared optimistic re-plan boundary.
+                    raise RecipeRouteOwnerBusy(
+                        "route publication owner is busy (lock not available, 55P03)"
+                    ) from error
                 return decide(session)
 
             outcome = transition(self.sessions, owned)

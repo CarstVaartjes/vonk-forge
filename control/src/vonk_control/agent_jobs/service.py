@@ -7,6 +7,7 @@ import time
 from collections.abc import Callable, Sequence
 from datetime import datetime
 
+from sqlalchemy import text
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
     AgentClaim,
@@ -51,6 +52,7 @@ from ..operation_contract import validate_progress_update
 from ..operation_progress import progress_document, sample_progress, stored_progress
 from ..optimistic import Stale, transition
 from ..own_cleanup import CLEANUP_KINDS
+from ..settings import DATABASE_WAIT_BUDGETS
 from .aggregation import _aggregate_parent, _aggregate_parent_state
 from .claim import _claim_once
 from .claim_authority import (
@@ -590,6 +592,15 @@ class AgentJobService:
         self._mark_started()
 
         def decide(session: Session) -> None:
+            optimistic_timeout = None
+            if session.get_bind().dialect.name == "postgresql":
+                # Identity/target locks still serialize with revocation and
+                # admission under their existing bounded security budget.
+                optimistic_timeout = session.scalar(text("SHOW lock_timeout"))
+                session.execute(
+                    text("SELECT set_config('lock_timeout', :timeout, true)"),
+                    {"timeout": f"{DATABASE_WAIT_BUDGETS.lock_timeout_ms}ms"},
+                )
             operation, attempt = self._active(
                 session,
                 fence,
@@ -603,6 +614,11 @@ class AgentJobService:
                 # abandoned effect.
                 allow_lapsed_renewal=True,
             )
+            if optimistic_timeout is not None:
+                session.execute(
+                    text("SELECT set_config('lock_timeout', :timeout, true)"),
+                    {"timeout": optimistic_timeout},
+                )
             now = self._clock()
             node = session.get(AgentNode, operation.node_id)
             parent = session.get(Job, operation.parent_job_id)

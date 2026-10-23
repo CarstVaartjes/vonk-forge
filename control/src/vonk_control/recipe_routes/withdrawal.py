@@ -120,8 +120,9 @@ def _withdrawn_after_backoff(
     self: RecipeRouteService, run_ids: frozenset[str], attempt: int
 ) -> bool:
     time.sleep(random.uniform(0.0, _WITHDRAWAL_BACKOFF_SECONDS) * (attempt + 1))
-    with self.publication_transaction() as session:
-        return self.withdrawal_complete_in_session(session, run_ids)
+    return self.decide_publication(
+        lambda session: self.withdrawal_complete_in_session(session, run_ids)
+    )
 
 
 def _withdraw_runs_once(

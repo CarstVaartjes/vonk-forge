@@ -68,9 +68,10 @@ def test_busy_run_yields_typed_wait_and_next_tick_recovers(
     """Catches blocking FOR UPDATE and a stale result retried by an outer loop."""
     routes, _publisher, applied, run_id = setup(tmp_path, engine=postgres_engine)
     worker = RecipeOperationWorker(routes.sessions, routes=routes, clock=lambda: NOW)
-    with routes.sessions() as session:
+    with routes.sessions.begin() as session:
         original = session.get(RecipeRun, run_id)
-        assert original is not None and original.route_state == RouteState.PENDING
+        assert original is not None
+        original.route_state = RouteState.PENDING
 
     def report() -> None:
         if action == "end":

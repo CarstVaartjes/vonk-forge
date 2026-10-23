@@ -1818,7 +1818,9 @@ def test_postgres_concurrent_current_publishers_keep_one_owner_receipt(
     def publish(service: RecipeRouteService) -> LiteLlmGeneration | None:
         try:
             return service.publish_run(run_id)
-        except (RecipeRouteSuperseded, RecipeRouteOwnerBusy):
+        except UnknownOutcomeError as error:
+            if not isinstance(error, (RecipeRouteSuperseded, RecipeRouteOwnerBusy)):
+                assert error.typed_reason == WaitReason.SCOPE_CHANGED
             # The loser of the race is replaced by the newer claim, or finds
             # the owner held; the worker simply retries it, so it is not a
             # failure.
