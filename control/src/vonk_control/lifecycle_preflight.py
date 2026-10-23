@@ -117,6 +117,31 @@ class LifecyclePreflight:
         checkpoint.next_check_at = None
         due: list[datetime] = []
         with self._sessions.begin() as session:
+            # Pending child identities bind one probe round to this request and
+            # phase. Consume its receipts as a set at their last arrival, rather
+            # than ageing them by time spent waiting for the worker. The normal
+            # freshness bound still limits the span between rank receipts;
+            # after the round, reusable inventory is checked against now.
+            round_active = bool(checkpoint.pending_jobs)
+            round_receipts = list(checkpoint.receipts.values())
+            for node_id, child_id in checkpoint.pending_jobs.items():
+                if node_id not in nodes:
+                    continue
+                child = session.get(Job, child_id)
+                if child is not None and child.state == LifecycleState.SUCCEEDED:
+                    receipt = latest_result(
+                        session, node_id, requirements_sha256=child.authority_revision
+                    )
+                    if receipt is not None:
+                        round_receipts.append(receipt)
+            round_received_at = max(
+                (
+                    receipt.received_at.timestamp()
+                    for receipt in round_receipts
+                    if receipt.received_at is not None
+                ),
+                default=now.timestamp(),
+            )
             for node_id, source_build in sorted(nodes.items()):
                 node = session.get(AgentNode, node_id, with_for_update=True)
                 if node is None:
@@ -228,7 +253,11 @@ class LifecyclePreflight:
                     request,
                     receipt,
                     current_fingerprint=fingerprint,
-                    now=now.timestamp(),
+                    now=(
+                        round_received_at
+                        if round_active and (child_id is None or failure is None)
+                        else now.timestamp()
+                    ),
                 )
                 if receipt is not None and not blockers:
                     checkpoint.receipts[node_id] = receipt

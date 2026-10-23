@@ -600,18 +600,18 @@ def test_postgres_duplicate_apply_converges_under_target_lock(
     assert results[0].operation_id == results[1].operation_id
 
 
+@pytest.mark.parametrize("completion_wake", [False, True])
 @pytest.mark.parametrize("node_count,latency", [(2, 180), (2, 240), (1, 360), (2, 360)])
 def test_preflight_delayed_passes_and_completion_wake_reach_transfer(
-    tmp_path, migrated_engine, node_count, latency
+    tmp_path, migrated_engine, node_count, latency, completion_wake
 ):
     """Serial probes livelock dual loads; lost wakes must also self-heal.
 
     Real agent reports persist receipts five seconds after dispatch. Worker
-    observation arrives minutes later; expired evidence refreshes once and
-    completion wakes its exact owner without another worker/backstop turn.
+    observation arrives minutes later; only the worker can advance phases,
+    whether the completion notification arrives or is lost.
     The Spark clock leads the Controller by ten minutes throughout.
     """
-    from vonk_agent_protocol import RuntimePreflightCode
     from vonk_agent_protocol.runtime_preflight import RuntimePreflightRequest
     from vonk_control.agent_jobs import AgentJobService
     from vonk_control.run_switch_operations import RunSwitchOperationService
@@ -682,25 +682,135 @@ def test_preflight_delayed_passes_and_completion_wake_reach_transfer(
                 )
                 assert receipt is not None and receipt.received_at == clock.now
 
-    report_probes()  # Inject a lost completion notification.
+    if completion_wake:
+        queue.set_preflight_completed(service.preflight_completed)
+    report_probes()
+    assert not artifacts.children  # Agent POST /result never advances phases.
     clock.now = NOW + timedelta(seconds=latency)
     service.tick()
-    if latency > 300:
-        stale = service.get(owner.operation_id)
-        assert stale.wait is not None
-        assert stale.wait.reason is RuntimePreflightCode.STALE
-        assert stale.blockers and stale.blockers[0].code == RuntimePreflightCode.STALE
-        assert stale.result is not None and stale.result.preflight is not None
-        due = stale.result.preflight.next_check_at
-        assert due is not None and due > clock.now
-        assert not artifacts.children
-        clock.now = due
-        service.tick()
-        queue.set_preflight_completed(service.preflight_completed)
-        report_probes()  # No tick: completion itself must dispatch the transfer.
     active = service.get(owner.operation_id)
     assert active.result is not None and active.result.child_operation_id
     assert (
         active.result.preflight is not None and not active.result.preflight.pending_jobs
     )
     assert len(artifacts.children) == 1
+
+
+def test_production_result_handler_only_schedules_worker(
+    tmp_path, migrated_engine, monkeypatch
+):
+    """Production's synchronous Composite executor must never run inside POST /result."""
+    from fastapi.testclient import TestClient
+    from vonk_agent_protocol.runtime_preflight import RuntimePreflightRequest
+    from vonk_control.agent_api import AgentApiServices
+    from vonk_control.api import production
+    from vonk_control.distribution_executor import CompositeDistributionPhaseExecutor
+    from vonk_control.settings import Settings
+
+    from .runtime_identity_support import claim_agent
+    from .test_agent_api import agent_headers
+    from .test_lifecycle_preflight import _clear
+    from .test_runtime_preflight import result as passing_result
+
+    sessions, lifecycle, nodes, _ = _installed(tmp_path, migrated_engine)
+    _clear(sessions)
+    artifacts = RecordingArtifactExecutor(child_transfer=True)
+    worker = _service(
+        sessions,
+        NOW,
+        lifecycle,
+        artifacts,
+        artifacts=CompleteArtifactInspector(missing_spark_bytes=1024),
+    )
+    request = _request(sessions, nodes[0])
+    owner = worker.apply(
+        RunSwitchApplyRequest(**request.model_dump(), request_key=str(uuid.uuid4())),
+        actor="admin",
+    )
+    worker.tick()
+
+    agents: list[AgentApiServices] = []
+    switches = []
+    build_agents = production.build_agent_services
+    create_app = production.create_app
+
+    def capture_agents(*args, **kwargs):
+        services = build_agents(*args, **kwargs)
+        agents.append(services)
+        return services
+
+    def capture_app(**kwargs):
+        switches.append(kwargs["run_switch_operations"])
+        # Enable the actual agent HTTP handler with a fixture proxy secret;
+        # the remaining services retain production composition in test mode.
+        kwargs["agent"] = agents[0]
+        kwargs["trusted_agent_proxy_auth"] = b"p" * 32
+        return create_app(**kwargs)
+
+    monkeypatch.setattr(production, "build_agent_services", capture_agents)
+    monkeypatch.setattr(production, "create_app", capture_app)
+    monkeypatch.setattr(production, "datetime", SimpleNamespace(now=lambda _tz: NOW))
+    secrets = tmp_path / "secrets"
+    secrets.mkdir()
+    (secrets / "token-signing-key").write_bytes(b"test-signing-key-32-bytes-12345678")
+    app = production.production_app(
+        Settings(
+            database_url=migrated_engine.url.render_as_string(hide_password=False),
+            deployment_mode="test",
+            management_cidrs="192.168.1.0/24",
+            secrets_root=secrets,
+            state_path=tmp_path / "state",
+            agent_artifact_root=tmp_path / "artifacts",
+            model_cache_root=tmp_path / "model-cache",
+        )
+    )
+    api = switches[0]
+    executor = api._artifact_phase_executor
+    assert isinstance(executor, CompositeDistributionPhaseExecutor)
+    assert not executor._async_runtime_image_preparation
+    advanced = []
+    phases = []
+    redrive = api.redrive
+    execute = executor.execute
+
+    def record_advance(*args, **kwargs):
+        advanced.append(args)
+        return redrive(*args, **kwargs)
+
+    def record_phase(*args, **kwargs):
+        phases.append(args)
+        return execute(*args, **kwargs)
+
+    monkeypatch.setattr(api, "redrive", record_advance)
+    monkeypatch.setattr(executor, "execute", record_phase)
+    queue = agents[0].operations
+    claim = claim_agent(queue, nodes[0], "serial-0", preflight_fingerprint="a" * 64)
+    assert claim is not None
+    operation = fenced_operation(sessions, claim)
+    probe = RuntimePreflightRequest.model_validate_json(
+        canonical_message(operation.payload)
+    )
+    # No lifespan tasks: this request is the only possible API-side advancer.
+    try:
+        response = TestClient(app).post(
+            "/agent/result",
+            headers={
+                **agent_headers(nodes[0], "serial-0"),
+                "x-vonk-agent-fingerprint": "fingerprint-0",
+                "x-vonk-agent-source": "192.168.1.211",
+            },
+            json={
+                "fence": claim.fence,
+                "state": LifecycleState.SUCCEEDED,
+                "result": passing_result(probe).model_dump(mode="json"),
+            },
+        )
+        assert response.status_code == 204, response.text
+        assert not advanced and not phases and not artifacts.children
+        with sessions() as session:
+            job = session.get(Job, owner.operation_id)
+            assert job is not None and job.next_action_at == NOW
+        worker.tick()
+        assert len(artifacts.children) == 1
+    finally:
+        executor.close()

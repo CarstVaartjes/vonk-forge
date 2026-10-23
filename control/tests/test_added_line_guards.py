@@ -895,6 +895,10 @@ def test_document_hashing_stays_at_ingress_and_ignores_existing_calls():
     [
         ("def online(node, now):\n    return node.last_seen_at > now\n", 2),
         (
+            "def fresh(receipt, now):\n    received_at = receipt.received_at\n    return 0 <= now - received_at.timestamp() <= maximum_age\n",
+            3,
+        ),
+        (
             (
                 "def online(node, current):\n"
                 "    seen = node.last_seen_at\n"

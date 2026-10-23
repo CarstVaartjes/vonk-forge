@@ -422,7 +422,10 @@ class RunSwitchAdapter:
             typed_wait_reason(
                 preflight.last_failure_code, RuntimePreflightCode.REQUIRED
             )
-            if preflight and preflight.next_check_at
+            if preflight
+            and preflight.next_check_at
+            and not after.cancel_requested
+            and wait_blockers is None
             else None
         )
         if preflight_reason is not None and preflight is not None:
@@ -441,7 +444,11 @@ class RunSwitchAdapter:
             now=now,
             due=after.next_action_at,
             detail=after.reason,
-            reason=preflight_reason,
+            reason=(
+                WaitReason.STOP_UNCONFIRMED
+                if after.cancel_requested
+                else preflight_reason
+            ),
             deadline=after.recovery_deadline,
             cancelling=after.cancel_requested,
             lease_deadline=after.lease_deadline,

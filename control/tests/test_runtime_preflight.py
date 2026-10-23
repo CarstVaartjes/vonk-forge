@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from pydantic import ValidationError
@@ -126,10 +126,9 @@ def test_fabric_requirement_missing_evidence_blocks():
     assert not blockers(req, result(req))
 
 
-@pytest.mark.parametrize("now", [99, 401])
-def test_stale_and_future_evidence_cannot_admit(now):
+def test_stale_evidence_cannot_admit():
     req = request()
-    assert blockers(req, result(req), now=now)
+    assert blockers(req, result(req), now=401)
     assert not blockers(req, result(req))
 
 
@@ -224,3 +223,22 @@ def test_receipt_age_uses_controller_subsecond_precision():
         current_fingerprint="a" * 64,
         now=100.5,
     )
+
+
+def test_receipt_committed_after_gate_clock_read_stays_fresh(tmp_path):
+    """A Controller receipt may commit between the gate clock and inventory read."""
+    from .test_lifecycle_preflight import _finish, _setup
+
+    sessions, _, clock, node_id, gate, arguments = _setup(tmp_path)
+    pending, _ = gate.ensure(previous=None, **arguments)
+    _finish(sessions, pending, clock.now)
+    # The gate's clock sample precedes the transaction that committed this item.
+    clock.now -= timedelta(microseconds=1)
+    completed, error = gate.ensure(previous=None, **arguments)
+    assert error is None and completed.next_check_at is None
+    assert not completed.pending_jobs and node_id in completed.receipts
+
+
+def test_controller_receipt_newer_than_clock_sample_is_fresh():
+    req = request()
+    assert not blockers(req, result(req), now=99)

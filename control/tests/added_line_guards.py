@@ -340,7 +340,7 @@ def controller_contact_clock_checks(source: str) -> list[int]:
     timestamps and their ages. Behaviour tests own the actual clock race.
     """
     tree = ast.parse(source)
-    attributes = {"last_seen_at"}
+    attributes = {"last_seen_at", "received_at"}
     if "ControlProcessHeartbeat" in source:
         attributes.add("completed_at")
     found: set[int] = set()

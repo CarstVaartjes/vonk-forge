@@ -182,10 +182,9 @@ class ObservationMixin:
         return advanced
 
     def preflight_completed(self, child_id: str, node_id: str) -> None:
-        """A committed probe redrives its owner without scanning unrelated waits.
+        """Make the exact owner due; only the worker may advance its phases.
 
-        A lost notification is harmless: the durable due clock still recovers
-        it. Redrive revalidates current intent, cancellation and exact effects.
+        The worker polls this durable clock, so lost notifications are harmless.
         """
         service = typing_cast("RunSwitchOperationService", self)
         now = _now(service._clock)
@@ -209,11 +208,8 @@ class ObservationMixin:
                     .with_for_update(skip_locked=True)
                 )
             )
-            owner_ids = tuple(job.id for job in owners)
             for job in owners:
                 schedule_wait(job, now)
-        for owner_id in owner_ids:
-            service.redrive(owner_id)
 
     def redrive(self, job_id: str) -> bool:
         """Advance one identity through the same fenced observation path."""

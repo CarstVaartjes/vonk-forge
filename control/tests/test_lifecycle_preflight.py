@@ -697,3 +697,40 @@ def test_checkpoint_rederivation_keeps_existing_children_after_upgrade(tmp_path)
     assert error is None and not complete.pending_jobs
     with sessions() as session:
         assert len(list(session.scalars(select(AgentOperation)))) == 1
+
+
+@pytest.mark.parametrize("intermediate_pass", [False, True])
+@pytest.mark.parametrize("receipt_span", [240, 301])
+def test_probe_round_freshness_bounds_rank_span_not_worker_delay(
+    tmp_path, receipt_span, intermediate_pass
+):
+    """A delayed worker consumes one round; ranks over 300s apart still refresh."""
+    sessions, _, clock, _, service, arguments = _setup(tmp_path, node_count=2)
+    with sessions() as session:
+        nodes = sorted(session.scalars(select(AgentNode.node_id)))
+    arguments["nodes"] = dict.fromkeys(nodes, False)
+    pending, error = service.ensure(previous=None, **arguments)
+    assert error is None
+    for index, node_id in enumerate(nodes):
+        member = pending.model_copy(
+            update={"pending_jobs": {node_id: pending.pending_jobs[node_id]}}
+        )
+        _finish(sessions, member, NOW + timedelta(seconds=index * receipt_span))
+        if index == 0 and intermediate_pass:
+            clock.now = NOW + timedelta(seconds=180)
+            pending, error = service.ensure(previous=pending, **arguments)
+            assert error is None and set(pending.pending_jobs) == {nodes[1]}
+            assert nodes[0] in pending.receipts
+    clock.now = NOW + timedelta(seconds=receipt_span + 360)
+    completed, error = service.ensure(previous=pending, **arguments)
+    assert error is None
+    if receipt_span > 300:
+        assert completed.last_failure_code is RuntimePreflightCode.STALE
+        assert completed.next_check_at is not None
+        assert nodes[0] not in completed.receipts
+    else:
+        assert completed.next_check_at is None
+        assert set(completed.receipts) == set(nodes)
+        # Consumption does not turn this round into indefinitely reusable evidence.
+        reused, error = service.ensure(previous=completed, **arguments)
+        assert error is None and reused.pending_jobs

@@ -114,7 +114,7 @@ def admission_blockers(
             ),
         )
     received_at = receipt.received_at
-    if received_at is None or not 0 <= now - received_at.timestamp() <= maximum_age:
+    if received_at is None or now - received_at.timestamp() > maximum_age:
         return (
             RuntimePreflightBlocker(
                 RuntimePreflightCode.STALE,
