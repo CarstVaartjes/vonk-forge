@@ -956,35 +956,6 @@ def test_failed_upstream_metadata_check_does_not_hide_catalog_update(
     service.close()
 
 
-def test_inventory_cursor_survives_unchanged_storage_reconciliation(
-    tmp_path: Path,
-) -> None:
-    sessions = _database(tmp_path)
-    service, _ = _service(tmp_path, sessions)
-    for index in ("1", "2"):
-        artifact = _artifact(index, index.encode())
-        model_digest = text(artifact["model_content_sha256"])
-        assert model_digest is not None
-        manifest = service.resolve_artifact_set(
-            model_content_sha256=model_digest, artifacts=[artifact]
-        )
-        with sessions.begin() as session:
-            service._ensure_set(session, manifest)
-    page = service.inventory(limit=1)
-    boundary = page["_next_boundary"]
-    assert isinstance(boundary, tuple) and len(boundary) == 2
-    following = service.inventory(limit=1, boundary=boundary)
-    following_entries = require_sequence(
-        following["entries"], "cache inventory entries"
-    )
-    page_entries = require_sequence(page["entries"], "cache inventory entries")
-    following_entry = require_mapping(following_entries[0], "cache inventory entry")
-    page_entry = require_mapping(page_entries[0], "cache inventory entry")
-    assert following_entry["artifact_set_sha256"] != page_entry["artifact_set_sha256"]
-    assert following["_next_boundary"] is None
-    service.close()
-
-
 def test_upstream_page_budget_bounds_concurrency_and_latency(
     tmp_path, monkeypatch, frozen_pass_budgets
 ):

@@ -419,7 +419,7 @@ class RevisionsMixin:
             return
 
     def model_storage(self) -> dict[str, ModelCacheUsage]:
-        """Read storage once per object; never reconcile or advance work on GET."""
+        """Observe storage outside request handling for the disposable Library index."""
         cache = cast("ModelCacheService", self)
         with cache._session() as session:
             sets, bindings = cache._model_revision_sets(session)

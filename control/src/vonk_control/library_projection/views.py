@@ -27,6 +27,7 @@ from ..library_contract import (
 )
 from ..model_cache.resolution import ResolutionMixin
 from ..model_cache.source_helpers import _model_selector
+from ..model_cache_contract import ModelStorageObservationState
 from ..models import CatalogDocumentRevision
 from ..operator_receipt_contract import ReceiptOwner
 from ..request_fault import RequestFault
@@ -72,7 +73,7 @@ def models(
         if cached
         else None
     )
-    storage = self._model_storage() if self._model_storage is not None else None
+    storage = self._model_storage_snapshot
     alignment_by_model = self._alignment_by_model(
         document for _, document in recipe_rows
     )
@@ -190,6 +191,10 @@ def models(
             )
         ]
     response = ModelLibraryResponse(
+        storage_state=ModelStorageObservationState.NOT_OBSERVED
+        if storage is None
+        else ModelStorageObservationState.OBSERVED,
+        storage_observed_at=None if storage is None else storage.observed_at,
         catalog_observed_at=_utc(self._catalog_observed_at),
         generated_at=_utc(self._clock()),
         library=self._library_release(),
@@ -272,7 +277,7 @@ def model_detail(self: LibraryProjection, selector: str) -> ModelDetailResponse:
         (model.identity.publisher, model.identity.slug), ()
     )
     snapshot = self._local_state_snapshot((digest,))
-    storage = self._model_storage() if self._model_storage is not None else None
+    storage = self._model_storage_snapshot
     entry = self._model_projection(
         row, model, snapshot, alignment=sorted(alignment), storage=storage
     )

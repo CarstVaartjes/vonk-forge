@@ -20,11 +20,20 @@ import threading
 import time
 import uuid
 
+import pytest
+from fastapi import Depends, FastAPI
+from fastapi.testclient import TestClient
 from sqlalchemy import event, select, update
-from vonk_control.auth import TokenCodec
+from vonk_control.auth import Actor, TokenCodec
+from vonk_control.library_api import install_library_routes
 from vonk_control.library_assessment import LibraryAssessment
+from vonk_control.library_contract import ModelDetailResponse, ModelLibraryResponse
 from vonk_control.library_image_presence import ImagePresenceIndex
 from vonk_control.library_projection import LibraryProjection
+from vonk_control.model_cache_contract import (
+    ModelCacheUsage,
+    ModelStorageObservationState,
+)
 from vonk_control.models import (
     CatalogDocumentHead,
     CatalogDocumentRevision,
@@ -654,3 +663,132 @@ def test_local_state_query_count_does_not_grow_with_page_size(assessed_library):
     finally:
         event.remove(engine, "before_cursor_execute", observe)
     assert one == fifty
+
+
+def _model_reads(client: TestClient, selector: str):
+    pages = []
+    for query in ({}, {"limit": 1}, {"cached": True}, {"search": "no-such-model"}):
+        response = client.get("/api/model/library", params=query)
+        assert response.status_code == 200, response.text
+        pages.append(ModelLibraryResponse.model_validate_json(response.content))
+    response = client.get(f"/api/model/{selector}")
+    assert response.status_code == 200, response.text
+    return pages, ModelDetailResponse.model_validate_json(response.content)
+
+
+def _model_storage_app(sessions, provider, clock):
+    projection = LibraryProjection(
+        sessions,
+        cursors=TokenCodec(b"s" * 32).cursor_codec(),
+        model_storage=provider,
+        clock=clock,
+    )
+    app = FastAPI()
+    install_library_routes(
+        app,
+        actor_dependency=Depends(lambda: Actor("viewer", "viewer")),
+        projection=projection,
+    )
+    return projection, app
+
+
+def test_model_reads_never_invoke_storage_provider(assessed_library):  # noqa: F811
+    """Catches the full storage walk on every list variant and detail, before filtering."""
+    original, sessions, *_ = assessed_library
+    model = original.models().models[0]
+    calls = []
+    usage = ModelCacheUsage(cached=True, disk_bytes=7, unique_bytes=7, shared_bytes=0)
+
+    def provider():
+        calls.append(True)
+        return {model.identity.content_sha256: usage}
+
+    projection, app = _model_storage_app(sessions, provider, lambda: NOW)
+    with TestClient(app) as client:
+        for _ in range(3):
+            _model_reads(client, model.selector)
+        pages, detail = _model_reads(client, model.selector)
+        assert detail.storage_state == ModelStorageObservationState.NOT_OBSERVED
+        assert all(
+            page.storage_state == ModelStorageObservationState.NOT_OBSERVED
+            for page in pages
+        )
+        assert calls == []  # Fresh startup is typed unknown, never a lazy walk.
+        projection.refresh_catalog()
+        assert len(calls) == 1
+        for _ in range(3):
+            pages, detail = _model_reads(client, model.selector)
+            assert all(page.storage_observed_at == NOW for page in pages)
+            assert detail.cache_usage == usage
+            assert detail.storage_observed_at == NOW
+        assert len(calls) == 1
+
+
+@pytest.mark.parametrize("previously_observed", [False, True])
+def test_model_reads_survive_blocked_and_failed_storage_refresh_then_heal(
+    assessed_library,  # noqa: F811
+    previously_observed,
+):
+    """Reads complete while refresh is blocked, retain old facts on error, then converge."""
+    from concurrent.futures import ThreadPoolExecutor
+    from datetime import timedelta
+
+    original, sessions, *_ = assessed_library
+    model = original.models().models[0]
+    observed = [NOW]
+    entered = threading.Event()
+    release = threading.Event()
+    fault = threading.Event()
+    calls = []
+    usage = ModelCacheUsage(cached=True, disk_bytes=7, unique_bytes=7, shared_bytes=0)
+
+    def provider():
+        calls.append(True)
+        if fault.is_set():
+            entered.set()
+            assert release.wait(timeout=30)
+            raise OSError("injected storage outage")
+        return {model.identity.content_sha256: usage}
+
+    projection, app = _model_storage_app(sessions, provider, lambda: observed[0])
+    if previously_observed:
+        projection.refresh_catalog()
+    fault.set()
+    expected_time = NOW if previously_observed else None
+    expected_usage = usage if previously_observed else None
+
+    def assert_reads(client):
+        pages, detail = _model_reads(client, model.selector)
+        assert all(page.storage_observed_at == expected_time for page in pages)
+        assert detail.storage_observed_at == expected_time
+        assert detail.cache_usage == expected_usage
+        expected_state = (
+            ModelStorageObservationState.OBSERVED
+            if previously_observed
+            else ModelStorageObservationState.NOT_OBSERVED
+        )
+        assert detail.storage_state == expected_state
+        assert all(page.storage_state == expected_state for page in pages)
+        assert detail.resources.disk_bytes == (7 if previously_observed else None)
+
+    with ThreadPoolExecutor(max_workers=1) as executor, TestClient(app) as client:
+        refresh = executor.submit(projection.refresh_catalog)
+        try:
+            assert entered.wait(timeout=30)
+            for _ in range(3):
+                assert_reads(client)
+            assert not refresh.done()  # No short wall-clock claim about real work.
+        finally:
+            release.set()
+        with pytest.raises(OSError, match="injected storage outage"):
+            refresh.result(timeout=30)
+        for _ in range(3):
+            assert_reads(client)
+        assert len(calls) == (2 if previously_observed else 1)
+        fault.clear()
+        observed[0] += timedelta(minutes=1)
+        projection.refresh_catalog()  # The same background path recovers.
+        pages, detail = _model_reads(client, model.selector)
+        assert all(page.storage_observed_at == observed[0] for page in pages)
+        assert detail.storage_observed_at == observed[0]
+        assert detail.cache_usage == usage

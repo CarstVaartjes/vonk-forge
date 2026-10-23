@@ -26,7 +26,11 @@ from ..library_contract import (
     LibraryResourceProjection,
 )
 from ..library_image_presence import ImagePresenceIndex
-from ..model_cache_contract import ModelCacheOperationState, ModelCacheUsage
+from ..model_cache_contract import (
+    ModelCacheOperationState,
+    ModelCacheUsage,
+    ModelStorageSnapshot,
+)
 from ..models import CatalogDocumentRevision
 from .catalog import (
     _catalog_documents,
@@ -104,6 +108,7 @@ class LibraryProjection:
         )
         self._local_state = local_state
         self._model_storage = model_storage
+        self._model_storage_snapshot: ModelStorageSnapshot | None = None
         self._request_budget = request_budget_seconds
         self._image_budget = image_budget_seconds
         self._image_presence = (
@@ -121,7 +126,8 @@ class LibraryProjection:
             list[tuple[CatalogDocumentRevision, RecipeRevisionProjection]],
         ] = ([], [])
         self._catalog_observed_at = self._clock()
-        self.refresh_catalog()
+        # The automatic refresh owns the first storage observation too.
+        self.refresh_catalog(observe_storage=False)
 
     @staticmethod
     def selector(publisher: str, slug: str) -> str:

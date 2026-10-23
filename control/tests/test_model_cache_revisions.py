@@ -120,6 +120,7 @@ def test_verified_successor_collects_only_old_unique_bytes(postgres_engine, tmp_
             cursors=CursorCodec(b"x" * 32),
             model_storage=service.model_storage,
         )
+        library.refresh_catalog()
         assert (
             library._local(
                 old_digest,
@@ -168,6 +169,7 @@ def test_old_revision_survives_owner_then_is_released(
             cursors=CursorCodec(b"x" * 32),
             model_storage=service.model_storage,
         )
+        library.refresh_catalog()
         listed = library.models(cached=True).models
         assert len(listed) == 1
         usage = listed[0].cache_usage
@@ -258,6 +260,7 @@ def test_metadata_only_revision_lists_one_copy_with_real_bytes(
             cursors=CursorCodec(b"x" * 32),
             model_storage=service.model_storage,
         )
+        library.refresh_catalog()
         rows = library.models(cached=True).models
         assert len(rows) == 1
         assert rows[0].identity.content_sha256 == digest
@@ -279,6 +282,7 @@ def test_shared_objects_are_charged_once_even_with_filters(postgres_engine, tmp_
             cursors=CursorCodec(b"x" * 32),
             model_storage=service.model_storage,
         )
+        library.refresh_catalog()
         rows = library.models(cached=True).models
         assert sum(row.resources.disk_bytes or 0 for row in rows) == 12
         for row in rows:
@@ -314,6 +318,7 @@ def test_a_shared_set_is_released_only_after_each_model_has_a_successor(
             cursors=CursorCodec(b"x" * 32),
             model_storage=service.model_storage,
         )
+        library.refresh_catalog()
         listed = library.models(cached=True).models
         assert {model.selector for model in listed} == {"test/aa", "test/bb"}
         assert sum(model.resources.disk_bytes or 0 for model in listed) == 12
@@ -360,6 +365,7 @@ def test_completed_download_repairs_lost_revision_binding_after_restart(
             cursors=CursorCodec(b"x" * 32),
             model_storage=service.model_storage,
         )
+        library.refresh_catalog()
         rows = library.models(cached=True).models
         assert len(rows) == 1 and rows[0].identity.content_sha256 == digest
         assert rows[0].resources.disk_bytes == 9
@@ -404,6 +410,7 @@ def test_cache_bindings_keep_their_model_metadata_until_replacement(
             cursors=CursorCodec(b"x" * 32),
             model_storage=service.model_storage,
         )
+        library.refresh_catalog()
         rows = library.models(cached=True).models
         assert len(rows) == 1 and rows[0].identity.content_sha256 == digest
     finally:

@@ -123,3 +123,28 @@ def test_controller_sessions_end_before_suspension_and_api_reads_buffer():
         if site.detail.startswith("suspension ")
     )
     assert not errors, "SQL session/cursor survives a suspension:\n" + "\n".join(errors)
+
+
+@pytest.mark.parametrize(
+    "provider",
+    [
+        "_model_storage",
+        "model_storage",
+        "inventory",
+        "reconcile_storage",
+        "_stored_object",
+        "lstat",
+    ],
+)
+def test_library_storage_walks_are_rejected_on_added_lines(provider):
+    """A new direct storage provider in a view must fail the patch gate."""
+    from control.tests.added_line_guards import check_source
+
+    path = "control/src/vonk_control/library_projection/views.py"
+    source = f"def models(self):\n    return self.{provider}()\n"
+    assert check_source(path, source, {2}, modes=("request-scans",))
+    assert not check_source(path, source, {1}, modes=("request-scans",))
+    assert not scan_tree(
+        ast.parse(source),
+        path="control/src/vonk_control/library_projection/catalog.py",
+    )

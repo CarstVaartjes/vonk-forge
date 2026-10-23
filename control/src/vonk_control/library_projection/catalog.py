@@ -27,7 +27,11 @@ from ..library_contract import (
     LibraryResourceProjection,
     _utc,
 )
-from ..model_cache_contract import CacheManifest, ModelCacheUsage
+from ..model_cache_contract import (
+    CacheManifest,
+    ModelStorageObservationState,
+    ModelStorageSnapshot,
+)
 from ..models import CatalogDocumentRevision, ModelCacheSet, RecipeLibrarySyncRun
 from ..operator_receipt_contract import ReceiptOwner
 from ..stored_json import read_row_column
@@ -72,9 +76,9 @@ def _model_projection(
     document: ModelDefinition | ModelRevisionProjection,
     snapshot: Mapping[str, LibraryLocalState] | None,
     alignment: Sequence[str] = (),
-    storage: Mapping[str, ModelCacheUsage] | None = None,
+    storage: ModelStorageSnapshot | None = None,
 ) -> LibraryModelProjection:
-    usage = storage.get(revision.content_digest) if storage is not None else None
+    usage = storage.usage.get(revision.content_digest) if storage is not None else None
     local = self._local(
         revision.content_digest, kind=RunSwitchReasonScopeName.MODEL, snapshot=snapshot
     )
@@ -106,6 +110,10 @@ def _model_projection(
             disk_bytes=None if usage is None else usage.disk_bytes
         ),
         cache_usage=usage,
+        storage_state=ModelStorageObservationState.NOT_OBSERVED
+        if storage is None
+        else ModelStorageObservationState.OBSERVED,
+        storage_observed_at=None if storage is None else storage.observed_at,
         local=local,
         updated_at=_utc(revision.created_at),
         alignment=sorted(set(alignment)),
@@ -242,7 +250,7 @@ def _recipe_revision_projection(
     return parsed
 
 
-def refresh_catalog(self: LibraryProjection) -> None:
+def refresh_catalog(self: LibraryProjection, *, observe_storage: bool = True) -> None:
     # Cached bindings keep exact metadata discoverable after its catalog head
     # changes. This background index refresh never advances cache work.
     cached_models: set[str] = set()
@@ -269,6 +277,13 @@ def refresh_catalog(self: LibraryProjection) -> None:
     )
     self._catalog_snapshot = snapshot
     self._catalog_observed_at = self._clock()
+    if observe_storage and self._model_storage is not None:
+        # Publish only a complete observation. A slow/failed walk leaves the
+        # previous snapshot readable; the automatic refresh owner retries it.
+        usage = self._model_storage()
+        self._model_storage_snapshot = ModelStorageSnapshot(
+            observed_at=self._clock(), usage=dict(usage)
+        )
 
 
 def _recipe_facet_values(

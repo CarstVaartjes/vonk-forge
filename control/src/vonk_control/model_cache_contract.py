@@ -131,6 +131,18 @@ class ModelCacheUsage(StrictModel):
     retained_revisions: list[RetainedModelRevision] = Field(default_factory=list)
 
 
+class ModelStorageObservationState(StrEnum):
+    NOT_OBSERVED = "not_observed"
+    OBSERVED = "observed"
+
+
+class ModelStorageSnapshot(StrictModel):
+    """Disposable storage observation, atomically published by the Library refresh."""
+
+    observed_at: AwareDatetime
+    usage: dict[Digest, ModelCacheUsage]
+
+
 class StrippedStrictModel(StrictJSONModel):
     model_config = ConfigDict(extra="forbid", strict=True, str_strip_whitespace=True)
 
