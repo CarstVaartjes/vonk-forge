@@ -6,7 +6,7 @@ import re
 from collections.abc import Callable, Collection, Iterator, Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from types import MappingProxyType
 from typing import Any
@@ -149,16 +149,24 @@ def busy_detail(error: BaseException | None) -> str:
     )
 
 
+class AdmissionLockNamespace(StrEnum):
+    """Only node capacity has a cooperative admission lock identity."""
+
+    NODE = "node"
+
+
 @dataclass(frozen=True, slots=True, order=True)
 class AdmissionLockKey:
-    """One cooperative lock identity, sorted by namespace then exact identity."""
+    """One cooperative node-capacity lock, sorted by exact node identity."""
 
-    namespace: str
     identity: str
+    namespace: AdmissionLockNamespace = field(
+        init=False, default=AdmissionLockNamespace.NODE
+    )
 
     def __post_init__(self) -> None:
-        if not self.namespace or not self.identity:
-            raise ValueError("admission lock identity is incomplete")
+        if not self.identity:
+            raise ValueError("admission lock keys must name a nonempty node identity")
 
     @property
     def database_key(self) -> str:
@@ -184,13 +192,7 @@ class AdmissionRowLock:
 def node_admission_key(node_id: str) -> AdmissionLockKey:
     """Return the common cooperative lock identity for one target node."""
 
-    return AdmissionLockKey("node", node_id)
-
-
-def job_request_key(request_id: str) -> AdmissionLockKey:
-    """Serialize creation for the unique ``jobs.request_id`` identity."""
-
-    return AdmissionLockKey("job-request", request_id)
+    return AdmissionLockKey(node_id)
 
 
 def is_admission_contention(error: DBAPIError) -> bool:
@@ -448,7 +450,7 @@ def acquire_admission_keys(
     if session.get_bind().dialect.name != "postgresql":
         return
     patient = _patient()
-    _set_local_admission_timeout(session)
+    set_admission_timeout(session)
     if holder:
         _label_transaction(session, holder)
     function = "pg_advisory_xact_lock" if patient else "pg_try_advisory_xact_lock"
@@ -486,7 +488,7 @@ def lock_admission_rows(
         raise ValueError("admission row-lock names must be unique")
     postgres = session.get_bind().dialect.name == "postgresql"
     if postgres:
-        _set_local_admission_timeout(session)
+        set_admission_timeout(session)
     locked: dict[str, tuple[Any, ...]] = {}
     ordered = sorted(
         requests,
@@ -561,9 +563,11 @@ def _key_holder(session: Session, key: AdmissionLockKey) -> str | None:
     return f"pid {pid} {(name or 'unnamed').removeprefix(_HOLDER_PREFIX)}"
 
 
-def _set_local_admission_timeout(session: Session) -> None:
+def set_admission_timeout(session: Session) -> None:
     """Apply the fixed admission bound to implicit index/FK waits."""
 
+    if session.get_bind().dialect.name != "postgresql":
+        return
     timeout = _PATIENCE_MS.get() or DATABASE_WAIT_BUDGETS.admission_lock_timeout_ms
     session.execute(
         text("SELECT set_config('lock_timeout', :timeout, true)"),

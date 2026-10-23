@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from typing import ClassVar
 
 from sqlalchemy import (
     JSON,
@@ -16,7 +17,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
 )
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, MappedColumn, mapped_column
 
 from ..model_primitives import Base, _lower_hex
 from .waits import Residue, WaitEvidence, wait_due_column, wait_evidence_column
@@ -31,6 +32,11 @@ class Job(Base):
     id: Mapped[str] = mapped_column(
         String(36), primary_key=True, default=lambda: str(uuid.uuid4())
     )
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    __mapper_args__: ClassVar[dict[str, MappedColumn[int]]] = {
+        "version_id_col": version
+    }
+
     request_id: Mapped[str] = mapped_column(String(36), unique=True, nullable=False)
     # Explicit operator decisions belong to this Job, including old replay keys.
     operator_decisions: Mapped[str | None] = mapped_column(Text)

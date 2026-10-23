@@ -29,9 +29,9 @@ from .. import agent_operation_states, job_states
 from ..admission_locking import (
     AdmissionLockBusy,
     AdmissionRowLock,
+    ConstraintReplay,
     acquire_admission_keys,
     is_admission_contention,
-    job_request_key,
     lock_admission_rows,
     node_admission_key,
 )
@@ -45,6 +45,7 @@ from ..compiled_execution_plan import (
     CompiledExecutionPlanError,
     validate_compiled_launch_payload,
 )
+from ..identity_insert import insert_identity
 from ..install_admission import (
     InstallAdmissionBusy,
 )
@@ -306,6 +307,15 @@ class PersistenceMixin:
             )
         return workload_intent_ordinal
 
+    @staticmethod
+    def _insert_job(session: Session, job: Job) -> Job:
+        inserted, created = insert_identity(session, job, key=("request_id",))
+        if not created:
+            # Unwind the transaction, including any provisional run, admission
+            # or intent writes, before replaying the committed request.
+            raise ConstraintReplay("jobs_request_id_key", None)
+        return inserted
+
     def _queue_in_session(
         self,
         session: Session,
@@ -370,16 +380,7 @@ class PersistenceMixin:
         try:
             acquire_admission_keys(
                 session,
-                (
-                    # An accepted Stop already owns its row; dispatch creates
-                    # no request and must not refuse its own duplicate replay.
-                    *(
-                        (job_request_key(request_id),)
-                        if adopt_stop_parent is None
-                        else ()
-                    ),
-                    *(node_admission_key(node_id) for node_id in targets),
-                ),
+                tuple(node_admission_key(node_id) for node_id in targets),
                 holder="recipe-operation",
             )
         except AdmissionLockBusy as error:
@@ -527,9 +528,9 @@ class PersistenceMixin:
             existing.status_reason = None
             existing.updated_at = now
             job = existing
-        else:
-            session.add(job)
         try:
+            if existing is None:
+                job = service._insert_job(session, job)
             session.flush()
             for operation_id, node_id, payload in phase_groups[0]:
                 service._agent_jobs.enqueue_in_session(

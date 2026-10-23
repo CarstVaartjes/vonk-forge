@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from sqlalchemy import select
+from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
     AgentOperation,
     AgentResult,
@@ -13,6 +14,7 @@ from vonk_agent_protocol import (
     InvalidRequestReason,
     SecurityRefusalReason,
     UnknownOutcomeError,
+    WaitReason,
     canonical_message,
     validate_result_for_operation,
 )
@@ -29,6 +31,7 @@ from ..lifecycle.agent_operation import AgentOperationAdapter
 from ..models import AgentOperation as StoredOperation
 from ..models import AgentOperationAttempt, Job
 from ..offline_stops import is_deferred_stop
+from ..optimistic import Stale, transition
 from ..own_cleanup import CLEANUP_KINDS
 from .contracts import (
     _ABANDONABLE_OPERATIONS,
@@ -122,7 +125,8 @@ def record_late_result(
     host action has ceased; it never applies that order's desired effect.
     """
     self._mark_started()
-    with self._sessions.begin() as session:
+
+    def decide(session: Session, message: AgentResult = message) -> bool:
         hint = session.execute(
             select(
                 StoredOperation.id,
@@ -164,7 +168,7 @@ def record_late_result(
             )
         node, certificate = identity
         self._consume_contact(session, source, node, certificate)
-        parent = session.get(Job, parent_job_id, with_for_update=True)
+        parent = session.get(Job, parent_job_id)
         operation = session.get(StoredOperation, operation_id, with_for_update=True)
         attempt = session.scalar(
             select(AgentOperationAttempt)
@@ -187,6 +191,8 @@ def record_late_result(
                 "agent operation authority or expired attempt is stale",
                 reason=SecurityRefusalReason.STALE_FENCE,
             )
+        # A child receipt must be fenced even when parent state is unchanged.
+        parent.version += 1
         message, _outcome = stored_report(operation.kind, message)
         validate_result_for_operation(
             operation.kind, message.result, state=message.state
@@ -321,3 +327,11 @@ def record_late_result(
             return True
         attempt.result = evidence
         return True
+
+    outcome = transition(self._sessions, decide)
+    if isinstance(outcome, Stale):
+        raise UnknownOutcomeError(
+            "Job result is contended; reconcile again on the next tick",
+            reason=WaitReason.SCOPE_CHANGED,
+        )
+    return outcome.value

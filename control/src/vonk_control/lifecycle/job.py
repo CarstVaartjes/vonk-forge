@@ -51,8 +51,6 @@ from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import update
-from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
     Disposition,
@@ -264,15 +262,10 @@ class JobAdapter:
         row = self.lifecycle(job, attempt or self._attempt(session, job))
 
         def save(before: Lifecycle, after: Lifecycle) -> bool:
-            if guard is not None:
-                outcome = session.execute(
-                    update(Job)
-                    .where(Job.id == job.id, Job.state == guard)
-                    .values(state=_STORED[after.state], updated_at=now)
-                    .execution_options(synchronize_session=False)
-                )
-                if not isinstance(outcome, CursorResult) or outcome.rowcount != 1:
-                    return False
+            if guard is not None and job.state != guard:
+                return False
+            # The mapper checks the read version at flush. A bulk state CAS
+            # would bypass that fence and let a stale decision overwrite it.
             self.apply(job, after, now, attempt=attempt, result=result, reason=reason)
             return True
 

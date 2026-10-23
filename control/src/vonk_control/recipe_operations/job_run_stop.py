@@ -99,7 +99,7 @@ class JobRunStopMixin:
                 )
         with service._sessions.begin() as session:
             pending_job = session.scalar(
-                select(Job).where(Job.request_id == request_id).with_for_update(of=Job)
+                select(Job).where(Job.request_id == request_id)
             )
             if pending_job is not None:
                 if _parent_execution_mode(pending_job) == "profile-jobrun-stop":
@@ -174,11 +174,16 @@ class JobRunStopMixin:
                         reason=InvalidRequestReason.CONFLICT,
                     )
                 if not _one_shot_stop_awaits_continuation(pending_job):
-                    # The caller's pending probe was read before this lock; the
-                    # Stop has ended or been queued since. A duplicate replays it.
+                    # A completed or dispatched Stop is an immediate replay.
                     return service._view(pending_job, session=session)
                 workload_intent_ordinal = bound
             run = session.get(RecipeRun, run_id, with_for_update=True)
+            if pending_job is not None:
+                # Continuations mutate under the run fence. The earlier plain
+                # request lookup may predate another continuation's commit.
+                session.refresh(pending_job)
+                if not _one_shot_stop_awaits_continuation(pending_job):
+                    return service._view(pending_job, session=session)
             # The run passed this check before the lock: the reviewed Stop names
             # a run whose records moved on, which the owner re-plans.
             if run is None or not _run_is_one_shot(session, run):
@@ -312,7 +317,8 @@ class JobRunStopMixin:
             )
             if pending is not None:
                 if pending_job is None:
-                    session.add(
+                    service._insert_job(
+                        session,
                         new_recipe_job(
                             id=str(uuid.uuid4()),
                             request_id=request_id,
@@ -332,7 +338,7 @@ class JobRunStopMixin:
                             result=None,
                             created_at=now,
                             updated_at=now,
-                        )
+                        ),
                     )
                     session.flush()
                 return pending
@@ -383,7 +389,7 @@ class JobRunStopMixin:
                 )
                 pending_job.updated_at = now
             else:
-                session.add(job)
+                job = service._insert_job(session, job)
             session.flush()
             return service._view(job)
 

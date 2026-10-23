@@ -23,10 +23,10 @@ from vonk_agent_protocol.gpu_clock import GpuClockRange
 
 from ..admission_locking import (
     AdmissionLockBusy,
+    ConstraintReplay,
     acquire_admission_keys,
     admission_attempts,
     admission_wait_exhausted,
-    job_request_key,
     node_admission_key,
 )
 from ..lifecycle.evidence import (
@@ -125,10 +125,7 @@ class StartMixin:
             try:
                 acquire_admission_keys(
                     session,
-                    (
-                        job_request_key(request_id),
-                        *(node_admission_key(node.node_id) for node in plan.nodes),
-                    ),
+                    tuple(node_admission_key(node.node_id) for node in plan.nodes),
                     holder="recipe-operation",
                 )
             except AdmissionLockBusy as error:
@@ -188,7 +185,10 @@ class StartMixin:
             installation = session.get(RecipeInstallation, plan.installation_id)
             assert run is not None and revision is not None and installation is not None
             loaded_plans = service._stored_compiled_plans(
-                session, installation, [node.node_id for node in plan.nodes], now=now
+                session,
+                installation,
+                [node.node_id for node in plan.nodes],
+                now=now,
             )
             if isinstance(loaded_plans, Residue):
                 raise RecipeRetryLater(
@@ -372,6 +372,16 @@ class StartMixin:
                     workload_intent_ordinal=workload_intent_ordinal,
                     profile_application_id=profile_application_id,
                     gpu_clock=gpu_clock,
+                )
+            except ConstraintReplay as duplicate:
+                return duplicate.replay(
+                    lambda: service._idempotent(
+                        request_id,
+                        WireAgentOperation.RECIPE_START.value,
+                        None,
+                        installation_id=plan.installation_id,
+                        run_alias=plan.alias,
+                    )
                 )
             except UnknownOutcomeError as error:
                 refused = error

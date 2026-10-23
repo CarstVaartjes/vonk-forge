@@ -14,13 +14,19 @@ from datetime import UTC, datetime, timedelta
 from pydantic import TypeAdapter, ValidationError
 from sqlalchemy import ColumnElement, or_, select, true
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import InvalidRequestReason, SecurityRefusalError
+from vonk_agent_protocol import (
+    InvalidRequestReason,
+    SecurityRefusalError,
+    UnknownOutcomeError,
+    WaitReason,
+)
 
 from .admission_locking import ConstraintReplay, admitting
 from .categorized_errors import InvalidType, InvalidValue, MissingRecord
 from .compiled_execution_plan import MAX_COMPILED_EXECUTION_PLAN_BYTES
 from .lifecycle.job import JobAdapter
 from .models import AgentOperation, Job, JobAttempt
+from .optimistic import Stale, transition
 
 _SENSITIVE = re.compile(r"(?i)(password|secret|token|private.?key|authorization)")
 _MAX_PAYLOAD = 65_536
@@ -442,6 +448,9 @@ class JobService:
         ):
             raise StaleAttempt("job attempt lease or fence is stale")
         _canonical_targets(job.targets)
+        # Fence child-only writes too, including a heartbeat at the same clock
+        # instant (updated_at may be unchanged). The version CAS must still run.
+        job.version += 1
         return job, attempt
 
     def heartbeat(self, fence: AttemptFence, lease_seconds: int) -> AttemptFence:
@@ -449,7 +458,8 @@ class JobService:
             raise InvalidValue(
                 "lease must be positive", reason=InvalidRequestReason.OUT_OF_RANGE
             )
-        with self._sessions.begin() as session:
+
+        def decide(session: Session) -> AttemptFence:
             job, attempt = self._active(session, fence)
             deadline = self._clock() + timedelta(seconds=lease_seconds)
             _ADAPTER.heartbeat(job, attempt, deadline, self._clock())
@@ -465,6 +475,14 @@ class JobService:
                 fence.targets,
             )
 
+        outcome = transition(self._sessions, decide)
+        if isinstance(outcome, Stale):
+            raise UnknownOutcomeError(
+                "Job heartbeat is contended; observe again on the next tick",
+                reason=WaitReason.SCOPE_CHANGED,
+            )
+        return outcome.value
+
     def _finish(
         self,
         fence: AttemptFence,
@@ -472,7 +490,7 @@ class JobService:
         result: Mapping[str, object] | None,
         reason: str | None,
     ) -> None:
-        with self._sessions.begin() as session:
+        def decide(session: Session) -> None:
             job, attempt = self._active(session, fence)
             _ADAPTER.finish(
                 job,
@@ -481,6 +499,12 @@ class JobService:
                 result=result,
                 reason=reason,
                 now=self._clock(),
+            )
+
+        if isinstance(transition(self._sessions, decide), Stale):
+            raise UnknownOutcomeError(
+                "Job completion is contended; observe again on the next tick",
+                reason=WaitReason.SCOPE_CHANGED,
             )
 
     def succeed(self, fence: AttemptFence, result: Mapping[str, object]) -> None:

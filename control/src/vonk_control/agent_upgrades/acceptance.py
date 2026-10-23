@@ -21,6 +21,7 @@ from ..agent_upgrade_contract import (
     AgentUpgradeRolloutPayload,
     AgentUpgradeRolloutResult,
 )
+from ..identity_insert import insert_identity
 from ..inventory_items import runtime_value
 from ..lifecycle.agent_upgrade import AgentUpgradeAdapter
 from ..models import AgentNode, Job
@@ -237,15 +238,11 @@ class AcceptanceMixin:
         )
         try:
             with admitting(), service._sessions.begin() as session:
-                existing = session.scalar(
-                    select(Job).where(Job.request_id == request_id).with_for_update()
-                )
-                if existing is not None:
-                    service._check_replayed_request(existing, actor, intent)
-                    session.expunge(existing)
-                    return existing
-                session.add(job)
-                session.flush()
+                job, created = insert_identity(session, job, key=("request_id",))
+                if not created:
+                    service._check_replayed_request(job, actor, intent)
+                    session.expunge(job)
+                    return job
                 service._supersede_older(session, job, now)
                 if plan.node_ids:
                     service._advance(session, job)

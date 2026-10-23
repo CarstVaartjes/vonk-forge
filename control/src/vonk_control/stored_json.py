@@ -381,14 +381,16 @@ _GUARD_INSTALLED = False
 _REPORTED: set[tuple[str, str]] = set()
 
 
-def install_write_guard(*, strict: bool = False) -> None:
+def install_write_guard(*, strict: bool | None = None) -> None:
     """Check every ORM write of a JSON column against its contract.
 
     The Controller runs ``strict=False``: a document its contract refuses is
     reported once per column and shape and stored unchanged, because
     bookkeeping never blocks work (the reader returns a typed unknown for it).
     The test suite runs ``strict=True``, so a producer that writes a shape no
-    contract describes fails where it writes.
+    contract describes fails where it writes. Without ``strict`` the mode is
+    left as it is: every engine installs the guard, and a later engine must
+    not relax a mode chosen once for the process.
     """
 
     global _GUARD_INSTALLED
@@ -396,7 +398,8 @@ def install_write_guard(*, strict: bool = False) -> None:
 
     from .models import Base
 
-    set_write_guard_mode(strict=strict)
+    if strict is not None:
+        set_write_guard_mode(strict=strict)
     if _GUARD_INSTALLED:
         return
     _GUARD_INSTALLED = True
@@ -421,11 +424,17 @@ def write_guard_mode(*, strict: bool) -> Iterator[None]:
         set_write_guard_mode(strict=previous == "strict")
 
 
-def _guard_row(mapper: Any, connection: Any, row: object) -> None:
+def _guard_row(_mapper: Any, _connection: Any, row: object) -> None:
+    validate_row_write(row)
+
+
+def validate_row_write(row: object) -> None:
+    """Apply the canonical write contract to ORM and insert/replay producers."""
     from sqlalchemy import inspect
 
     state = inspect(row)
     assert state is not None
+    mapper = state.mapper
     table = mapper.local_table.name
     registry = bindings()
     for column in mapper.columns:
@@ -628,5 +637,6 @@ __all__ = [
     "read_row_column",
     "set_write_guard_mode",
     "untyped_leaves",
+    "validate_row_write",
     "write_guard_mode",
 ]

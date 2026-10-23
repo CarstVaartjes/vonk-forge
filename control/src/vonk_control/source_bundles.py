@@ -334,29 +334,36 @@ class DatabaseSourceBundleStore:
         manifest = _inspect_archive(archive, self._limits)
         if manifest.sha256 != expected_sha256:
             raise SourceBundleIntegrityRefused("source bundle digest does not match")
+        from .identity_insert import insert_identity
         from .models import RecipeSourceBundle, SourceBundleArchive
 
         with self._sessions.begin() as session:
-            metadata = session.get(RecipeSourceBundle, expected_sha256)
-            if metadata is None:
-                metadata = RecipeSourceBundle(sha256=expected_sha256)
-                session.add(metadata)
+            metadata, _ = insert_identity(
+                session,
+                RecipeSourceBundle(
+                    sha256=expected_sha256,
+                    media_type="application/vnd.vonk-forge.source-bundle.v1+tar",
+                    archive_bytes=len(archive),
+                    total_bytes=manifest.total_bytes,
+                    file_count=len(manifest.files),
+                    storage_key=f"postgres:{expected_sha256}",
+                    manifest=json.loads(canonical_message(manifest)),
+                    verified_at=datetime.now(UTC),
+                ),
+                key=("sha256",),
+            )
             metadata.media_type = "application/vnd.vonk-forge.source-bundle.v1+tar"
             metadata.archive_bytes = len(archive)
             metadata.total_bytes = manifest.total_bytes
             metadata.file_count = len(manifest.files)
-            metadata.storage_key = f"postgres:{expected_sha256}"
             metadata.manifest = json.loads(canonical_message(manifest))
             metadata.verified_at = datetime.now(UTC)
-            session.flush()
-            stored = session.get(
-                SourceBundleArchive, expected_sha256, with_for_update=True
+            stored, _ = insert_identity(
+                session,
+                SourceBundleArchive(sha256=expected_sha256, archive=archive),
+                key=("sha256",),
             )
-            if stored is None:
-                session.add(
-                    SourceBundleArchive(sha256=expected_sha256, archive=archive)
-                )
-            elif stored.archive != archive:
+            if stored.archive != archive:
                 stored.archive = archive
             session.flush()
             # PostgreSQL changes xmin on every row update, including direct SQL.
