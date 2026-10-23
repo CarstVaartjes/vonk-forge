@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 from typing import cast as _typing_cast
 
+from pydantic import ValidationError
 from sqlalchemy import select
 from vonk_agent_protocol import (
     DesiredAssignmentState,
@@ -432,6 +433,16 @@ class FleetProfileService:
                                     severity=ProfileReasonSeverity.ERROR.value,
                                 )
                             )
+                    except ValidationError as error:
+                        reasons.append(
+                            FleetProfileReason(
+                                code=ProfileReasonCode.ADMISSION_DEFECT,
+                                detail=(
+                                    f"Planner contract failed for assignment {assignment.id}: {error}"
+                                )[:512],
+                                severity=ProfileReasonSeverity.ERROR.value,
+                            )
+                        )
                     except (
                         BookkeepingUnknown,
                         KeyError,
