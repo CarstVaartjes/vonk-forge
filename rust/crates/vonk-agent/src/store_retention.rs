@@ -2,8 +2,9 @@
 //! leaves by that owner.
 //!
 //! The Controller stays the authority for what is in use: an installation it
-//! tracks or a job's scope leaves only on its order, and an installation it
-//! says it does not track leaves here. The other stores hold entries whose
+//! tracks with a readable plan or a job's scope leaves only on its order.
+//! Unreadable installation caches also expire once runtime evidence confirms
+//! they are unused. The other stores hold entries whose
 //! owner the agent observes locally, and the control lane runs one claim at a
 //! time and runs this pass between claims, so no claim is live while it runs.
 //! Two kinds of entry leave here:
@@ -279,6 +280,20 @@ pub fn sweep(
     disk: &dyn Fn() -> Option<(u64, u64)>,
     tick: &dyn Fn(),
 ) -> Swept {
+    sweep_with_runtime(data_root, now, deadline, untracked, disk, tick, &|id| {
+        crate::host_runtime::installation_in_use(id).map_err(|error| error.to_string())
+    })
+}
+
+fn sweep_with_runtime(
+    data_root: &Path,
+    now: SystemTime,
+    deadline: Instant,
+    untracked: Option<&Untracked>,
+    disk: &dyn Fn() -> Option<(u64, u64)>,
+    tick: &dyn Fn(),
+    in_use: &dyn Fn(&str) -> Result<bool, String>,
+) -> Swept {
     let mut pass = Pass {
         now,
         deadline,
@@ -289,6 +304,7 @@ pub fn sweep(
     if !owned_directory(data_root, pass.owner) {
         return pass.swept;
     }
+    let started = runtime_installations(data_root, deadline, tick, in_use);
     for store @ Store(name, collector, _, root_kind) in STORES {
         if *root_kind != StoreRoot::Agent {
             continue;
@@ -318,18 +334,27 @@ pub fn sweep(
                 // A name that is no installation's was isolated (`.damaged`).
                 pass.ended(&root, &|name, _| !installation_name(name));
                 // A started run's installation stays whatever the verdict.
-                if let Some(untracked) = untracked
-                    && let Some(started) =
-                        started_run_installations(&data_root.join("run-metadata"))
-                {
+                if let Some(started) = &started {
+                    // Invalid local cache metadata is not standing ownership.
+                    // Actual runtime use protects it, otherwise the ordinary
+                    // unused grace applies even without a Controller verdict.
                     pass.untracked(
                         &root,
                         "installation directory",
                         &|name| {
-                            untracked.observed_installations.contains(name)
+                            unreadable_installation(data_root, name)
                                 || started.contains(name)
+                                || untracked.is_some_and(|verdict| {
+                                    verdict.observed_installations.contains(name)
+                                })
                         },
-                        &|name| untracked.installations.contains(name) && !started.contains(name),
+                        &|name| {
+                            !started.contains(name)
+                                && (unreadable_installation(data_root, name)
+                                    || untracked.is_some_and(|verdict| {
+                                        verdict.installations.contains(name)
+                                    }))
+                        },
                     );
                 }
             }
@@ -379,9 +404,9 @@ pub fn sweep(
     // Private copies from before files were shared become links of their store
     // object first, so that object is linked, not unused, when it is judged.
     // A started run's installation keeps its files as they are.
-    if let Some(started) = started_run_installations(&data_root.join("run-metadata")) {
+    if let Some(started) = &started {
         pass.swept.pending |=
-            crate::oci::relink_private_model_copies(data_root, &started, deadline).pending;
+            crate::oci::relink_private_model_copies(data_root, started, deadline).pending;
     }
     // A fresh Controller scan protects not-yet-installed profile/operation
     // content too. Missing evidence is unknown, never an empty reference set.
@@ -457,9 +482,9 @@ pub fn sweep(
 }
 
 /// The model objects no installation links or names, least recently used
-/// first, leaving out those `keep` names; `None` when a plan cannot be read
-/// (it could name any). An object is owned by every installation that links
-/// it or whose plan names it. Adding or dropping installation hard links
+/// first, leaving out those `keep` names. Invalid plans cannot name objects;
+/// actual installation links still protect their bytes. An object is owned by
+/// every installation that links it or whose readable plan names it. Adding or dropping installation hard links
 /// updates the shared inode's change time, so a newly unreferenced object
 /// receives a full grace after its final installation lets it go. Reusing an
 /// unlinked object also refreshes its timestamp in the distribution client.
@@ -537,7 +562,7 @@ pub fn model_objects(
 
 /// The bytes of the model objects no installation links or names, which the
 /// agent removes when space is needed, as inventory reports them; `None`
-/// when a plan or the data root cannot be read.
+/// when reference enumeration, permissions or the data root cannot be read.
 pub fn unused_model_bytes(data_root: &Path) -> Option<u64> {
     let owner = rustix::process::geteuid().as_raw();
     if !owned_directory(data_root, owner) {
@@ -756,7 +781,7 @@ impl Pass<'_> {
                     .open(&mark)
                 {
                     Ok(_) => eprintln!(
-                        "vonk-agent: store retention: the Controller does not track {kind} {name}; it leaves after a day unless tracked again"
+                        "vonk-agent: store retention: {kind} {name} is unused; it leaves after a day unless used again"
                     ),
                     Err(error) => {
                         eprintln!("vonk-agent: store retention cannot mark {kind} {name}: {error}")
@@ -769,13 +794,13 @@ impl Pass<'_> {
                         .is_ok_and(|age| age > GRACE);
                     if aged && self.remove(&directory, &metadata) {
                         eprintln!(
-                            "vonk-agent: store retention removed {kind} {name}: the Controller has not tracked it for a day"
+                            "vonk-agent: store retention removed {kind} {name}: unused for a day"
                         );
                     }
                 }
                 (false, Some(_)) => match fs::remove_file(&mark) {
                     Ok(()) => eprintln!(
-                        "vonk-agent: store retention keeps {kind} {name}: it is tracked again"
+                        "vonk-agent: store retention keeps {kind} {name}: it is in use again"
                     ),
                     Err(error) => eprintln!(
                         "vonk-agent: store retention cannot unmark {kind} {name}: {error}"
@@ -937,8 +962,9 @@ fn changed(metadata: &fs::Metadata) -> SystemTime {
         )
 }
 
-/// The model object digests every installation's plan names, or `None` when a
-/// plan cannot be read. The plan is the one the agent itself starts from.
+/// The model object digests readable installation plans name. A malformed
+/// neighbour is not an owner of arbitrary objects. Permission/enumeration
+/// failures remain unknown. The plan is the one the agent starts from.
 fn installation_objects(installations: &Path) -> Option<BTreeSet<String>> {
     let mut named = BTreeSet::new();
     let entries = match fs::read_dir(installations) {
@@ -967,53 +993,80 @@ fn installation_objects(installations: &Path) -> Option<BTreeSet<String>> {
             // An installation still being prepared has no plan and links nothing.
             Err(crate::oci::OciError::Io(error))
                 if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => {
-                eprintln!(
-                    "vonk-agent: store retention keeps model objects: installation {name} plan is unreadable: {error}"
-                );
+            Err(crate::oci::OciError::Io(error))
+                if error.kind() == std::io::ErrorKind::PermissionDenied =>
+            {
+                eprintln!("vonk-agent: store retention cannot read installation {name}: {error}");
                 return None;
             }
+            Err(error) => report_unreadable_installation(data_root, &name, &error),
         }
     }
     Some(named)
 }
 
-/// The installation each started run names (its lifecycle record lives from
-/// its start until its stop completes), or `None` when one cannot be read.
-fn started_run_installations(run_metadata: &Path) -> Option<BTreeSet<String>> {
-    let mut named = BTreeSet::new();
-    let entries = match fs::read_dir(run_metadata) {
-        Ok(entries) => entries,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Some(named),
-        Err(error) => {
-            eprintln!("vonk-agent: store retention keeps installations: {error}");
-            return None;
-        }
-    };
-    for entry in entries {
-        let Ok(entry) = entry else {
-            eprintln!(
-                "vonk-agent: store retention keeps installations: run-metadata is unreadable"
-            );
-            return None;
-        };
-        if !entry.file_type().is_ok_and(|kind| kind.is_dir()) {
+/// Runtime evidence is independent of stored lifecycle/plan parsing. One
+/// uninspectable installation protects itself, never its unrelated neighbours.
+fn runtime_installations(
+    data_root: &Path,
+    deadline: Instant,
+    tick: &dyn Fn(),
+    in_use: &dyn Fn(&str) -> Result<bool, String>,
+) -> Option<BTreeSet<String>> {
+    let mut names = BTreeSet::new();
+    scope_names(&data_root.join("installations"), &mut names)?;
+    let mut started = BTreeSet::new();
+    for id in names {
+        let id = id.to_string();
+        if Instant::now() >= deadline {
+            started.insert(id);
             continue;
         }
-        match crate::oci::read_run_lifecycle(&entry.path().join("lifecycle.json")) {
-            Ok(Some(record)) => {
-                named.insert(record.installation_id);
+        let observation = in_use(&id);
+        tick();
+        match observation {
+            Ok(false) => {}
+            Ok(true) => {
+                started.insert(id);
             }
-            Ok(None) => {}
             Err(error) => {
                 eprintln!(
-                    "vonk-agent: store retention keeps installations: a run record is unreadable: {error}"
+                    "vonk-agent: store retention keeps installation {id}: runtime observation unavailable: {error}; retries next pass"
                 );
-                return None;
+                started.insert(id);
             }
         }
     }
-    Some(named)
+    Some(started)
+}
+
+fn unreadable_installation(data_root: &Path, id: &str) -> bool {
+    match crate::oci::read_persisted_plan(data_root, id) {
+        Err(error @ (crate::oci::OciError::Json(_) | crate::oci::OciError::Artifact)) => {
+            report_unreadable_installation(data_root, id, &error);
+            true
+        }
+        _ => false,
+    }
+}
+
+/// One Spark journal evidence item per installation/cause per process, shared
+/// by reference scanning and relinking. No raw document content is logged.
+pub(crate) fn report_unreadable_installation(
+    data_root: &Path,
+    id: &str,
+    error: &crate::oci::OciError,
+) {
+    static SEEN: Mutex<BTreeSet<(PathBuf, String, String)>> = Mutex::new(BTreeSet::new());
+    let category = error.safe_category();
+    let mut seen = SEEN
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if seen.insert((data_root.to_path_buf(), id.to_owned(), category.to_owned())) {
+        eprintln!(
+            "vonk-agent: installation {id} metadata unreadable ({category}); retention checks runtime ownership independently; invalid plans cannot protect unrelated model objects; logged once per cause"
+        );
+    }
 }
 
 /// The entries `owner` owns of a store root it owns, without following links.

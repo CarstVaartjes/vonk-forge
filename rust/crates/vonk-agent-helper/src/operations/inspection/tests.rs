@@ -346,3 +346,73 @@ fn a_job_reobservation_answers_running_its_recorded_exit_or_proven_absence() {
         Err(OperationError::InvalidOperation)
     ));
 }
+
+#[test]
+fn installation_ownership_uses_running_containers_and_mounts_not_metadata() {
+    // A corrupt plan/lifecycle cannot pin neighbours. Real runtime evidence,
+    // including a mount with damaged labels, must still protect its owner.
+    struct Runner {
+        label: CommandOutput,
+        mount: CommandOutput,
+    }
+    impl CommandRunner for Runner {
+        fn run(&self, program: &Path, args: &[String]) -> Result<CommandOutput, String> {
+            assert_eq!(program, Path::new("/usr/bin/docker"));
+            assert_eq!(&args[..2], &["container", "ls"]);
+            assert!(
+                !args.iter().any(|arg| arg == "--all"),
+                "stopped containers are not live ownership"
+            );
+            Ok(if args.last().unwrap().starts_with("label=") {
+                self.label.clone()
+            } else {
+                assert!(args.last().unwrap().ends_with("/runtime-cache"));
+                self.mount.clone()
+            })
+        }
+    }
+    let check = |label, mount| {
+        let temp = tempfile::tempdir().unwrap();
+        let executor = OperationExecutor::new(
+            ManagedRoots::under(temp.path()),
+            &[0; 32],
+            Runner { label, mount },
+            None,
+        )
+        .unwrap();
+        let request = HostRuntimeRequest {
+            action: HostRuntimeAction::RunInspect,
+            fence: uuid::Uuid::new_v4(),
+            arguments: vec![
+                vonk_agent_protocol::INSTALLATION_REOBSERVATION_ARGUMENT.to_owned(),
+                "ab69f1ba-1fa2-4283-bdf1-a6d2ed59549c".to_owned(),
+            ],
+            installation_id: None,
+            reconciliation_identity: None,
+            job_plan: None,
+            run_generation: None,
+            start_plan: None,
+            stop_plan: None,
+        };
+        let body = canonical_json(&request).unwrap();
+        let digest = hex_sha256(&body);
+        fs::create_dir_all(&executor.roots.runtime_requests).unwrap();
+        let path = executor
+            .roots
+            .runtime_requests
+            .join(format!("{digest}.json"));
+        fs::write(&path, body).unwrap();
+        fs::set_permissions(path, fs::Permissions::from_mode(0o600)).unwrap();
+        executor
+            .inspect_recipe_run_with_logs(&digest, false)
+            .map(|seen| seen.running)
+    };
+    let absent = docker_output(true, "", 0);
+    let live = docker_output(true, &format!("{}\n", "a".repeat(64)), 0);
+    assert!(matches!(check(absent.clone(), absent.clone()), Ok(false)));
+    assert!(matches!(check(live.clone(), absent.clone()), Ok(true)));
+    assert!(matches!(check(absent.clone(), live), Ok(true)));
+    assert!(check(docker_output(false, "", 1), absent.clone()).is_err());
+    assert!(check(absent.clone(), docker_output(false, "", 1)).is_err());
+    assert!(check(docker_output(true, "invalid", 0), absent).is_err());
+}

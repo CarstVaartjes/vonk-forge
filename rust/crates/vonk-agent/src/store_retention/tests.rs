@@ -6,7 +6,7 @@ use std::{
 };
 
 use super::{
-    GRACE, LOW_FREE_PERCENT, RESERVE_FLOOR_BYTES, RESERVE_PERCENT, STORES, Swept, Untracked, sweep,
+    GRACE, LOW_FREE_PERCENT, RESERVE_FLOOR_BYTES, RESERVE_PERCENT, STORES, Swept, Untracked,
 };
 
 const OBJECT: &str = "1111111111111111111111111111111111111111111111111111111111111111";
@@ -29,6 +29,30 @@ fn within_grace() -> SystemTime {
 
 fn run(root: &Path, now: SystemTime, disk: &dyn Fn() -> Option<(u64, u64)>) -> Swept {
     judged(root, now, None, disk)
+}
+
+// Existing fixtures model running containers with their lifecycle. Tests of
+// damaged metadata below inject runtime evidence independently of those files.
+fn sweep(
+    root: &Path,
+    now: SystemTime,
+    deadline: Instant,
+    untracked: Option<&Untracked>,
+    disk: &dyn Fn() -> Option<(u64, u64)>,
+    tick: &dyn Fn(),
+) -> Swept {
+    super::sweep_with_runtime(root, now, deadline, untracked, disk, tick, &|id| {
+        Ok(fs::read_dir(root.join("run-metadata"))
+            .into_iter()
+            .flatten()
+            .filter_map(Result::ok)
+            .filter_map(|entry| {
+                crate::oci::read_run_lifecycle(&entry.path().join("lifecycle.json"))
+                    .ok()
+                    .flatten()
+            })
+            .any(|record| record.installation_id == id))
+    })
 }
 
 /// A pass with the Controller's verdict naming `untracked` installations.
@@ -193,16 +217,17 @@ fn a_model_object_an_installation_plan_names_stays_while_the_installation_does()
     assert_eq!(run(root.path(), after_grace(), &|| SHORT).entries, 0);
     assert!(object.exists());
 
-    // An unreadable plan could name any object; scratch still leaves.
+    // The private primary copy has no store link. Corruption cannot pin
+    // that unlinked object, while the relinked secondary remains protected.
     fs::write(installation.join("spec.json"), b"{").unwrap();
     let partial = file(&store.join(format!("{OTHER}.partial")), b"prefix");
-    assert_eq!(run(root.path(), after_grace(), &|| SHORT).entries, 1);
-    assert!(object.exists() && !partial.exists());
+    assert_eq!(run(root.path(), after_grace(), &|| SHORT).entries, 2);
+    assert!(!object.exists() && !partial.exists());
 
     // Uninstalled: the object has no owner left, nor the one the private
     // copy of the other file became on the first pass.
     fs::remove_dir_all(&installation).unwrap();
-    assert_eq!(run(root.path(), SystemTime::now(), &|| SHORT).entries, 2);
+    assert_eq!(run(root.path(), SystemTime::now(), &|| SHORT).entries, 1);
     assert!(!object.exists() && !store.join(&plan.artifacts[1].sha256).exists());
 }
 
@@ -372,7 +397,8 @@ fn an_installation_the_controller_does_not_track_leaves_a_day_after_it_said_so()
     omitted.observed_installations.clear();
     swept_with(root.path(), after_grace(), &omitted);
     assert!(!orphan.join("untracked-since").exists());
-    // A run record that cannot be read could name any installation.
+    // Corrupt lifecycle metadata is not runtime ownership. The first
+    // confirmed-unused observation starts this installation's grace.
     fs::write(&lifecycle, b"{").unwrap();
     assert_eq!(
         judged(root.path(), after_grace(), Some(&[ORPHAN]), &|| ROOMY).entries,
@@ -414,7 +440,7 @@ fn a_run_scope_no_record_owns_leaves_a_day_after_the_verdict_and_frees_its_insta
             .join("installations")
             .join(ORPHAN)
             .join("spec.json"),
-        b"{}",
+        &serde_json::to_vec(&plan).unwrap(),
     );
     let run_scope = file(
         &root.path().join("runs").join(RUN).join("outputs/x"),
@@ -559,7 +585,8 @@ fn a_removed_installations_cleanup_history_and_lock_leave_after_the_grace() {
             .join("installations")
             .join(INSTALLATION)
             .join("spec.json"),
-        b"{}",
+        &serde_json::to_vec(&crate::oci::test_support::persisted_installation(root.path()).2)
+            .unwrap(),
     );
     let live = file(&history.join(format!("{INSTALLATION}.json")), b"{}");
     let live_lock = file(&locks.join(format!("{INSTALLATION}.lock")), b"");
@@ -1277,4 +1304,125 @@ fn retained_metadata_restores_observation_but_retired_metadata_never_resurrects_
     fs::remove_dir(&scope).unwrap();
     run(root.path(), SystemTime::now(), &|| ROOMY);
     assert!(!scope.exists());
+}
+
+#[test]
+fn one_corrupt_plan_does_not_pin_unrelated_model_objects() {
+    // Fault injection: one truncated spec used to make the complete reference
+    // scan unknown, hiding reclaimable bytes and preventing pressure eviction.
+    let root = tempfile::tempdir().unwrap();
+    let (_, valid, plan) = crate::oci::test_support::persisted_installation(root.path());
+    let broken = file(
+        &root
+            .path()
+            .join("installations")
+            .join(ORPHAN)
+            .join("spec.json"),
+        b"{",
+    );
+    let store = root.path().join("distribution/models");
+    let live = file(&store.join(&plan.artifacts[0].sha256), b"primary");
+    let unused = file(&store.join(THIRD), b"unused");
+    assert_eq!(super::unused_model_bytes(root.path()), Some(6));
+    assert_eq!(super::make_room(root.path(), u64::MAX, &BTreeSet::new()), 6);
+    assert!(!unused.exists());
+    assert!(live.exists() && valid.exists() && broken.exists());
+}
+
+#[test]
+fn corrupt_idle_installations_expire_but_live_and_unknown_neighbours_survive() {
+    // Faults: truncated/foreign spec and lifecycle, an active container whose
+    // files cannot be parsed, and one refused runtime observation. Only the
+    // affected runtime stays protected; a later successful probe self-heals.
+    let root = tempfile::tempdir().unwrap();
+    let ids = [INSTALLATION, ORPHAN, "9d4e5f6a-7b8c-4d9e-8f0a-1b2c3d4e5f6a"];
+    for id in ids {
+        file(
+            &root.path().join("installations").join(id).join("spec.json"),
+            b"{",
+        );
+        file(
+            &root
+                .path()
+                .join("installations")
+                .join(id)
+                .join("models/sel/weights"),
+            b"private",
+        );
+        file(
+            &root
+                .path()
+                .join("run-metadata")
+                .join(id)
+                .join("lifecycle.json"),
+            b"{",
+        );
+    }
+    let object = file(
+        &root.path().join("distribution/models").join(OBJECT),
+        b"unused",
+    );
+    let live_object = file(
+        &root.path().join("distribution/models").join(OTHER),
+        b"live",
+    );
+    fs::hard_link(
+        &live_object,
+        root.path()
+            .join("installations")
+            .join(INSTALLATION)
+            .join("models/sel/shared"),
+    )
+    .unwrap();
+    let probe = |id: &str| {
+        if id == ids[2] {
+            Err("runtime observation refused".to_owned())
+        } else {
+            Ok(id == INSTALLATION)
+        }
+    };
+    let pass = |now, probe: &dyn Fn(&str) -> Result<bool, String>| {
+        super::sweep_with_runtime(
+            root.path(),
+            now,
+            Instant::now() + Duration::from_secs(60),
+            None,
+            &|| ROOMY,
+            &|| {},
+            probe,
+        )
+    };
+    pass(SystemTime::now(), &probe);
+    assert!(
+        ids.iter()
+            .all(|id| root.path().join("installations").join(id).exists())
+    );
+    pass(after_grace(), &probe);
+    assert!(
+        !object.exists(),
+        "corruption must not stop unrelated shared-object collection"
+    );
+    assert!(!root.path().join("installations").join(ORPHAN).exists());
+    assert!(
+        root.path()
+            .join("installations")
+            .join(INSTALLATION)
+            .exists()
+    );
+    assert!(root.path().join("installations").join(ids[2]).exists());
+    assert!(
+        live_object.exists(),
+        "the live workload's linked weights survive"
+    );
+    // Recovery and a stopped workload start fresh durable grace periods.
+    pass(SystemTime::now(), &|_| Ok(false));
+    assert!(live_object.exists());
+    pass(after_grace(), &|_| Ok(false));
+    assert!(
+        ids.iter()
+            .all(|id| !root.path().join("installations").join(id).exists())
+    );
+    // Dropping the final hardlink starts the shared object's own unused grace.
+    pass(after_grace(), &|_| Ok(false));
+    assert!(!live_object.exists());
 }

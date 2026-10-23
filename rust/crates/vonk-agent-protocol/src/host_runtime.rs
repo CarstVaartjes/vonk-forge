@@ -57,11 +57,15 @@ pub const MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES: usize = 16 * 1024 * 1024;
 pub const MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES: usize =
     MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES + MAX_DOCUMENT_BYTES;
 pub const HOST_HELPER_AUTHORITY: &str = "vonk.host-maintenance-helper";
+/// Agent-written requests consumed by the authenticated privileged helper.
+pub const HOST_RUNTIME_REQUEST_ROOT: &str = "/run/vonk-forge-agent/runtime-requests";
 /// The first argument of a grant-free `RunInspect` that re-observes one runtime
 /// container by its whole identity: `[this, target id, run id, installation id,
 /// run generation, plan digest]`. A helper that predates it refuses the shape
 /// as an invalid operation.
 pub const RUNTIME_REOBSERVATION_ARGUMENT: &str = "runtime-identity";
+/// Read-only installation ownership probe: `[this, installation id]`.
+pub const INSTALLATION_REOBSERVATION_ARGUMENT: &str = "installation-in-use";
 /// Exact Stop observation requires its durable generation high-water mark.
 pub const STOP_REOBSERVATION_ARGUMENT: &str = "stop-identity";
 /// Exact cancel-Stop observation additionally requires the durable cancelled
