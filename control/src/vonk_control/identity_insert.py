@@ -38,9 +38,9 @@ def insert_identity[Row: Base](
     if inserted is not None:
         return inserted, True
     existing = session.scalars(
-        select(model).where(
-            *(getattr(model, name) == getattr(candidate, name) for name in key)
-        )
+        select(model)
+        .where(*(getattr(model, name) == getattr(candidate, name) for name in key))
+        .execution_options(populate_existing=True)
     ).one_or_none()
     if existing is None:
         raise UnknownOutcomeError(

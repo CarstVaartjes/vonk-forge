@@ -11,7 +11,7 @@ from typing import cast
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import event, select
+from sqlalchemy import event, select, update
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import (
     AgentOperation,
@@ -276,3 +276,37 @@ def test_admission_advisory_identity_is_node_only():
     constructor = cast(Callable[..., AdmissionLockKey], AdmissionLockKey)
     with pytest.raises(TypeError):
         constructor(namespace="request", identity="same-request")
+
+
+def test_identity_replay_refreshes_a_previously_observed_winner(postgres_engine):
+    # Break caught: SQLAlchemy returns its cached object after the conflict,
+    # hiding the committed winner's current metadata from replay validation.
+    Base.metadata.create_all(postgres_engine)
+    sessions = sessionmaker(postgres_engine, expire_on_commit=False)
+    catalog = CatalogService(
+        sessions, clock=lambda: NOW, cursors=CursorCodec(b"c" * 32)
+    )
+    catalog.import_catalog_models("test", [_model()])
+    with sessions() as observer:
+        observed = observer.scalars(select(CatalogDocument)).one()
+        observer.commit()
+        with sessions.begin() as writer:
+            writer.execute(
+                update(CatalogDocument)
+                .where(CatalogDocument.id == observed.id)
+                .values(title="Latest publisher title")
+            )
+        candidate = CatalogDocument(
+            kind=observed.kind,
+            publisher=observed.publisher,
+            slug=observed.slug,
+            title=observed.title,
+            created_by="test",
+            created_at=NOW,
+            updated_at=NOW,
+        )
+        replayed, created = insert_identity(
+            observer, candidate, key=("kind", "publisher", "slug")
+        )
+        assert not created and replayed.id == observed.id
+        assert replayed.title == "Latest publisher title"
