@@ -6,8 +6,10 @@ use std::{
 };
 
 use super::{
-    GRACE, LOW_FREE_PERCENT, RESERVE_FLOOR_BYTES, RESERVE_PERCENT, STORES, Swept, Untracked, sweep,
+    GRACE, LOW_FREE_PERCENT, RESERVE_FLOOR_BYTES, RESERVE_PERCENT, STORES, Swept, Untracked,
 };
+
+mod foreign_owned;
 
 const OBJECT: &str = "1111111111111111111111111111111111111111111111111111111111111111";
 const OTHER: &str = "2222222222222222222222222222222222222222222222222222222222222222";
@@ -18,6 +20,24 @@ const TOTAL: u64 = 4_000_000_000_000;
 /// Below the 10 % low-space line.
 const SHORT: Option<(u64, u64)> = Some((TOTAL / 20, TOTAL));
 const ROOMY: Option<(u64, u64)> = Some((TOTAL / 2, TOTAL));
+
+// Most policy fixtures contain agent-owned bytes. Delegate through the same
+// boundary with a local remover; foreign_owned drives the real socket/helper.
+fn sweep(
+    root: &Path,
+    now: SystemTime,
+    deadline: Instant,
+    untracked: Option<&Untracked>,
+    disk: &dyn Fn() -> Option<(u64, u64)>,
+    tick: &dyn Fn(),
+) -> Swept {
+    super::sweep_with_remover(root, now, deadline, untracked, disk, tick, &|request| {
+        fs::remove_dir_all(
+            root.join(request.store.as_str())
+                .join(request.scope_id.to_string()),
+        )
+    })
+}
 
 fn after_grace() -> SystemTime {
     SystemTime::now() + GRACE + Duration::from_secs(60)
@@ -1206,6 +1226,9 @@ fn abandoned_build_staging_expires_only_after_its_exact_units_are_quiescent() {
             tick: &|| {},
             owner: rustix::process::geteuid().as_raw(),
             swept: Swept::default(),
+            data_root: root.path(),
+            remover: &|_| unreachable!("build staging has no runtime scope"),
+            failure: None,
         };
         pass.build_staging(&staging, &runner);
     };
@@ -1277,4 +1300,45 @@ fn retained_metadata_restores_observation_but_retired_metadata_never_resurrects_
     fs::remove_dir(&scope).unwrap();
     run(root.path(), SystemTime::now(), &|| ROOMY);
     assert!(!scope.exists());
+}
+
+#[test]
+fn retention_failure_is_durable_deduplicated_and_clears_after_recovery() {
+    // Catches log-only failures, rewriting identical evidence every pass, and
+    // a stale attention item that survives successful collection.
+    use std::os::unix::fs::MetadataExt;
+    let root = tempfile::tempdir().unwrap();
+    let directory = root.path().join("runs").join(INSTALLATION);
+    fs::create_dir_all(&directory).unwrap();
+    fs::write(directory.join(super::UNTRACKED_MARK), b"").unwrap();
+    let verdict = verdict(&[], Some(&[INSTALLATION]));
+    let refused = |_: &vonk_agent_protocol::generated::AgentStoreRemovalRequest| {
+        Err(std::io::Error::from(std::io::ErrorKind::PermissionDenied))
+    };
+    let collect = |remove: &dyn Fn(
+        &vonk_agent_protocol::generated::AgentStoreRemovalRequest,
+    ) -> std::io::Result<()>| {
+        super::sweep_with_remover(
+            root.path(),
+            after_grace(),
+            Instant::now() + Duration::from_secs(10),
+            Some(&verdict),
+            &|| ROOMY,
+            &|| {},
+            remove,
+        )
+    };
+    assert_eq!(collect(&refused).entries, 0);
+    let first = super::retention_failure(root.path()).unwrap();
+    assert_eq!(first.path, format!("runs/{INSTALLATION}"));
+    assert_eq!(first.retry_after_seconds, 60);
+    let evidence = root.path().join(super::FAILURE_FILE);
+    let original = fs::metadata(&evidence).unwrap();
+    assert_eq!(collect(&refused).entries, 0);
+    assert_eq!(super::retention_failure(root.path()), Some(first));
+    assert_eq!(fs::metadata(&evidence).unwrap().ino(), original.ino());
+    assert!(directory.join(super::UNTRACKED_MARK).exists());
+    assert_eq!(collect(&|_| fs::remove_dir_all(&directory)).entries, 1);
+    assert!(super::retention_failure(root.path()).is_none());
+    assert!(!evidence.exists());
 }

@@ -33,6 +33,39 @@ const MAX_HELPER_MESSAGE_BYTES: usize = vonk_agent_protocol::MAX_HELPER_FRAME_BY
 /// The privileged helper's socket.
 pub const HELPER_SOCKET: &str = "/run/vonk-forge-package-helper/package-helper.sock";
 
+pub(crate) fn remove_agent_store(
+    request: &vonk_agent_protocol::generated::AgentStoreRemovalRequest,
+) -> std::io::Result<()> {
+    remove_agent_store_at(Path::new(HELPER_SOCKET), request)
+}
+
+pub(crate) fn remove_agent_store_at(
+    socket: &Path,
+    request: &vonk_agent_protocol::generated::AgentStoreRemovalRequest,
+) -> std::io::Result<()> {
+    let call = || -> Result<(), HostRuntimeError> {
+        let body = canonical_generated_json(request)
+            .map_err(|_| HostRuntimeError::HelperProtocol(HelperProtocolCause::RequestEncoding))?;
+        let response = call_helper(socket, &body, &Inactivity::new(Duration::from_secs(60)))?;
+        require_bound_response(&response, &request.request_id.to_string())?;
+        if let Some(code) = response.error_code {
+            return Err(HostRuntimeError::HelperRejected {
+                code,
+                diagnostic: response.diagnostic,
+                process_logs: None,
+            });
+        }
+        require_executed_outcome(&response, false)?;
+        if response.exit_code != Some(0) {
+            return Err(HostRuntimeError::HelperProtocol(
+                HelperProtocolCause::OutcomeMalformed,
+            ));
+        }
+        Ok(())
+    };
+    call().map_err(|error| std::io::Error::other(error.cause()))
+}
+
 pub(crate) const BACKGROUND_RUN_INSPECTION_CONCURRENCY: usize = 8;
 pub(crate) const RUN_INSPECTION_REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 fn background_inspection_slots(socket: &Path) -> std::sync::Arc<tokio::sync::Semaphore> {

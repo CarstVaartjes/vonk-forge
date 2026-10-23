@@ -425,6 +425,18 @@ _HELPER_CORRECTS = (
 def _host_settings_warnings(host: HostSettings | None) -> list[ProjectionReason]:
     """Drift from the declared headless Spark; unknown (an older agent) is none."""
     warnings: list[ProjectionReason] = []
+    if host is not None and (failure := host.store_retention_failure) is not None:
+        warnings.append(
+            ProjectionReason(
+                code=ProjectionCode.HOST_STORE_RETENTION,
+                detail="Store retention cannot remove unused files; see Spark inventory evidence.",
+                severity=ProfileReasonSeverity.WARNING.value,
+                recommendation=(
+                    f"The agent retries in {failure.retry_after_seconds} seconds. "
+                    "Check the helper and filesystem if this persists."
+                ),
+            )
+        )
     if host is not None and host.display_manager_active:
         warnings.append(
             ProjectionReason(

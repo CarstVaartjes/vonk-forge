@@ -466,6 +466,47 @@ fn handle(
             HelperRejection::new(HelperErrorCode::OperationFailed, error.safe_detail())
         });
     }
+    if let Ok(removal) = vonk_agent_protocol::parse_strict::<
+        vonk_agent_protocol::generated::AgentStoreRemovalRequest,
+    >(&raw)
+    {
+        verifier.authorize_peer(&peer).map_err(|error| {
+            HelperRejection::new(HelperErrorCode::PeerIdentityInvalid, error.safe_detail())
+        })?;
+        let request_id = removal.request_id.to_string();
+        let failure = executor.remove_agent_store(&removal).err().map(|error| {
+            let diagnostic = match &error {
+                OperationError::Io(cause) => cause.to_string(),
+                _ => error.safe_detail().to_owned(),
+            };
+            (
+                HelperRejection::for_error(&request_id, false, error).error_code,
+                diagnostic,
+            )
+        });
+        // Retention publishes changed failures in inventory and logs once at
+        // the agent. Returning evidence here must not spam helper rejections.
+        return respond(
+            stream,
+            &request_id,
+            HelperResponse {
+                schema_version: 1,
+                request_id: Some(removal.request_id),
+                status: if failure.is_some() {
+                    HostHelperResponseStatus::Rejected
+                } else {
+                    HostHelperResponseStatus::ContainerRuntimeRequestExecuted
+                },
+                exit_code: failure.is_none().then_some(0),
+                error_code: failure.as_ref().map(|(code, _)| *code),
+                installation_intent_nonce: None,
+                process_running: None,
+                job_progress_at: None,
+                diagnostic: failure.map(|(_, detail)| detail),
+                process_logs: None,
+            },
+        );
+    }
     if let Ok(inspection) = parse_inspection_request(&raw) {
         verifier.authorize_peer(&peer).map_err(|error| {
             HelperRejection::new(HelperErrorCode::PeerIdentityInvalid, error.safe_detail())

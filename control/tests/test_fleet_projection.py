@@ -2907,3 +2907,33 @@ def test_a_spark_off_its_headless_settings_needs_attention() -> None:
     )
     # An older agent reports nothing: unknown is never a warning.
     assert _host_codes(None) == []
+
+
+def test_retention_failure_survives_inventory_storage_and_projects_one_warning() -> (
+    None
+):
+    # Catches journal-only faults and duplicating attention on every retry.
+    from vonk_agent_protocol import ProjectionCode
+    from vonk_agent_protocol.inventory import HostSettings
+    from vonk_agent_protocol.store_cleanup import StoreRetentionFailure
+
+    host = HostSettings(
+        display_manager_active=False,
+        graphical_default_target=False,
+        store_retention_failure=StoreRetentionFailure(
+            path="runs/10000000-0000-4000-8000-000000000001",
+            diagnostic="Operation not permitted (os error 1)",
+        ),
+    )
+    for _ in range(2):
+        assert _host_codes(host.model_dump(mode="json")) == [
+            ProjectionCode.HOST_STORE_RETENTION
+        ]
+    assert (
+        _host_codes(
+            host.model_copy(update={"store_retention_failure": None}).model_dump(
+                mode="json"
+            )
+        )
+        == []
+    )

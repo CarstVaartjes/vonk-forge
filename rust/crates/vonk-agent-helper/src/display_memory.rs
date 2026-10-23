@@ -313,6 +313,7 @@ mod tests {
         use vonk_agent_protocol::{canonical_generated_json, generated::HostSettings};
         let root = tempfile::tempdir().unwrap();
         let host = HostSettings {
+            store_retention_failure: None,
             display_manager_active: false,
             graphical_default_target: false,
             display_memory: Some(observe(root.path(), None)),

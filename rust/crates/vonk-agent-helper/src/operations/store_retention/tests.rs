@@ -245,3 +245,114 @@ fn collected_security_fences_require_a_new_controller_challenge() {
         Err(OperationError::InstallationIntentObservationRequired { .. })
     ));
 }
+
+fn removal(
+    executor: &OperationExecutor<Runner>,
+    store: vonk_agent_protocol::generated::AgentRetainedStore,
+) -> vonk_agent_protocol::generated::AgentStoreRemovalRequest {
+    let name = match store {
+        vonk_agent_protocol::generated::AgentRetainedStore::Runs => "runs",
+        vonk_agent_protocol::generated::AgentRetainedStore::Installations => "installations",
+    };
+    let metadata = fs::metadata(executor.roots.agent_data.join(name).join(INSTALLATION)).unwrap();
+    vonk_agent_protocol::generated::AgentStoreRemovalRequest {
+        request_id: uuid::Uuid::new_v4(),
+        store,
+        scope_id: INSTALLATION.parse().unwrap(),
+        device: metadata.dev(),
+        inode: metadata.ino(),
+    }
+}
+
+#[test]
+fn agent_store_removal_refuses_live_owners_replacements_and_symlinked_roots() {
+    // Catches broad privileged rm, unknown Docker ownership treated as absent,
+    // deleting a replacement after a lost response, and following store links.
+    use vonk_agent_protocol::generated::AgentRetainedStore;
+    for store in [AgentRetainedStore::Runs, AgentRetainedStore::Installations] {
+        let (_root, executor) = executor();
+        let name = match store {
+            AgentRetainedStore::Runs => "runs",
+            AgentRetainedStore::Installations => "installations",
+        };
+        let scope = executor.roots.agent_data.join(name).join(INSTALLATION);
+        file(&scope, "private/owned-by-runtime");
+        let request = removal(&executor, store);
+        let launch = executor.runtime_stores.read().unwrap();
+        assert!(matches!(
+            executor.remove_agent_store(&request),
+            Err(OperationError::InstallationReconciliationBusy)
+        ));
+        drop(launch);
+        let wrong_owner = OperationExecutor::new(
+            executor.roots.clone(),
+            &[0; 32],
+            executor.runner.clone(),
+            None,
+        )
+        .unwrap()
+        .with_runtime_request_owner(rustix::process::geteuid().as_raw() + 1);
+        assert!(matches!(
+            wrong_owner.remove_agent_store(&request),
+            Err(OperationError::UnsafePath)
+        ));
+        *executor.runner.inspection.lock().unwrap() = Some(serde_json::json!({
+            "Config": {"Labels": {"ai.vonkforge.installation-id": INSTALLATION, "ai.vonkforge.target-id": INSTALLATION}},
+            "Mounts": [{"Source": scope.join("private")}]
+        }));
+        assert!(matches!(
+            executor.remove_agent_store(&request),
+            Err(OperationError::InstallationReconciliationBusy)
+        ));
+        *executor.runner.inspection.lock().unwrap() = None;
+        *executor.runner.unavailable.lock().unwrap() = true;
+        assert!(executor.remove_agent_store(&request).is_err());
+        *executor.runner.unavailable.lock().unwrap() = false;
+        let mut replaced = request.clone();
+        replaced.inode += 1;
+        assert!(matches!(
+            executor.remove_agent_store(&replaced),
+            Err(OperationError::UnsafePath)
+        ));
+        let moved = executor.roots.agent_data.join("outside");
+        fs::rename(scope.parent().unwrap(), &moved).unwrap();
+        std::os::unix::fs::symlink(&moved, scope.parent().unwrap()).unwrap();
+        assert!(matches!(
+            executor.remove_agent_store(&request),
+            Err(OperationError::UnsafePath)
+        ));
+        assert!(
+            moved
+                .join(INSTALLATION)
+                .join("private/owned-by-runtime")
+                .exists()
+        );
+        fs::remove_file(scope.parent().unwrap()).unwrap();
+        fs::rename(&moved, scope.parent().unwrap()).unwrap();
+        let outside = file(&executor.roots.agent_data, "sentinel");
+        std::os::unix::fs::symlink(&outside, scope.join("escape")).unwrap();
+        executor.remove_agent_store(&request).unwrap();
+        executor.remove_agent_store(&request).unwrap();
+        assert!(!scope.exists());
+        assert!(outside.exists());
+    }
+}
+
+#[test]
+fn interrupted_store_collection_does_not_poison_future_retention() {
+    // Catches treating a poisoned launch-exclusion lock as permanently busy.
+    use vonk_agent_protocol::generated::AgentRetainedStore;
+    let (_root, executor) = executor();
+    let scope = executor.roots.agent_data.join("runs").join(INSTALLATION);
+    file(&scope, "private/retained");
+    let request = removal(&executor, AgentRetainedStore::Runs);
+    assert!(
+        std::panic::catch_unwind(|| {
+            let _collection = executor.runtime_stores.write().unwrap();
+            panic!("injected collector death");
+        })
+        .is_err()
+    );
+    executor.remove_agent_store(&request).unwrap();
+    assert!(!scope.exists());
+}
