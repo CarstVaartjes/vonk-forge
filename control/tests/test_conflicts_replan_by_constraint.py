@@ -12,6 +12,7 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import Index, PrimaryKeyConstraint, UniqueConstraint, event, select
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_agent_protocol import LifecycleState, ProfileReasonCode
 from vonk_control import profile_capacity
 from vonk_control.admission_locking import (
     CONSTRAINTS,
@@ -20,7 +21,6 @@ from vonk_control.admission_locking import (
     ConstraintReplan,
     admitting,
 )
-from vonk_control.fleet_profiles import FleetProfileConflict
 from vonk_control.jobs import JobService
 from vonk_control.model_primitives import Base
 from vonk_control.models import FleetProfileApplication, Job, ResourceReservation
@@ -217,14 +217,21 @@ def test_an_unregistered_constraint_fails_at_once_and_a_fresh_load_is_admitted(
             "(owner_id) WHERE kind = 'port' AND state = 'promised'"
         )
 
-    with pytest.raises(FleetProfileConflict) as refused:
-        profiles.apply(profile.id, request_key=str(uuid4()), actor="admin")
+    refused = profiles.apply(profile.id, request_key=str(uuid4()), actor="admin")
 
-    assert "test_one_port_per_load" in str(refused.value)
-    assert "will retry" not in str(refused.value)
+    assert refused.state == LifecycleState.FAILED
+    reason = next(
+        item
+        for item in refused.progress.blockers
+        if item.code == ProfileReasonCode.ADMISSION_DEFECT
+    )
+    assert "test_one_port_per_load" in reason.detail
+    assert "will retry" not in (refused.status_reason or "")
+    assert refused.next_attempt_at is None
+    assert not refused.progress.admission_pending
     with sessions() as session:
-        # Nothing is retained to retry the same plan, and nothing is held.
-        assert not session.scalars(select(FleetProfileApplication.id)).all()
+        # Retain failure evidence, without a retry or a held resource claim.
+        assert session.scalars(select(FleetProfileApplication.id)).all() == [refused.id]
         assert not session.scalars(
             select(ResourceReservation.id).where(
                 ResourceReservation.owner_kind == "fleet-profile"
