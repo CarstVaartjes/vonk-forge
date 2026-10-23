@@ -4,7 +4,8 @@ from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import delete, select
-from vonk_agent_protocol import canonical_message
+from vonk_agent_protocol import RuntimePreflightCode, canonical_message
+from vonk_agent_protocol.agent_words import ProfileChildPhase
 from vonk_agent_protocol.runtime_preflight import (
     RuntimePreflightRequest,
     RuntimePreflightResult,
@@ -305,7 +306,7 @@ def test_removed_node_is_a_terminal_preflight_blocker(tmp_path):
 
     checkpoint, blocked = service.ensure(previous=None, **arguments)
 
-    assert blocked == ("runtime_preflight.node_missing")
+    assert blocked == RuntimePreflightCode.NODE_MISSING
     assert _pending(checkpoint) is None
     assert checkpoint.next_check_at is None
 
@@ -676,7 +677,7 @@ def test_checkpoint_rederivation_keeps_existing_children_after_upgrade(tmp_path)
     assert error is None
     child_id = _pending(pending)
     stored = RunSwitchOperationResult(
-        phase_index=2, completed_phases=["prepare"]
+        phase_index=2, completed_phases=[ProfileChildPhase.PREPARE.value]
     ).model_dump(mode="json")
     stored["preflight"] = {
         "phase_index": 0,
@@ -684,7 +685,9 @@ def test_checkpoint_rederivation_keeps_existing_children_after_upgrade(tmp_path)
         "pending_node_id": node_id,
     }
     restored = RunSwitchOperationResult.model_validate_json(canonical_message(stored))
-    assert restored.phase_index == 2 and restored.completed_phases == ["prepare"]
+    assert restored.phase_index == 2 and restored.completed_phases == [
+        ProfileChildPhase.PREPARE.value
+    ]
     assert restored.preflight is None
     restarted = LifecyclePreflight(sessions, queue, lambda: clock.now, 10)
     resumed, error = restarted.ensure(**arguments, previous=restored.preflight)

@@ -9,7 +9,11 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-from vonk_agent_protocol import RuntimePreflightFindingCode, canonical_message
+from vonk_agent_protocol import (
+    RuntimePreflightCode,
+    RuntimePreflightFindingCode,
+    canonical_message,
+)
 from vonk_agent_protocol.runtime_preflight import (
     RuntimePreflightRequest,
     RuntimePreflightResult,
@@ -83,9 +87,11 @@ def test_agent_preflight_result_is_admitted_by_the_controller(tmp_path: Path) ->
         received_at=datetime.now(UTC),
     )
     blockers = admission_blockers(
-        request, receipt, current_fingerprint=FINGERPRINT, now=int(time.time())
+        request, receipt, current_fingerprint=FINGERPRINT, now=time.time()
     )
-    assert blockers
+    assert any(
+        item.code is RuntimePreflightCode.REQUIREMENT_UNKNOWN for item in blockers
+    )
     restored = RuntimePreflightResult.model_validate_json(canonical_message(result))
     assert restored == result
     assert (
@@ -93,7 +99,7 @@ def test_agent_preflight_result_is_admitted_by_the_controller(tmp_path: Path) ->
             request,
             receipt.model_copy(update={"result": restored}),
             current_fingerprint=FINGERPRINT,
-            now=int(time.time()),
+            now=time.time(),
         )
         == blockers
     )
