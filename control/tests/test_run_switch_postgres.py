@@ -11,7 +11,12 @@ import pytest
 from alembic import command
 from alembic.config import Config
 from sqlalchemy import event, select
-from vonk_agent_protocol import LifecycleState, RunSwitchCode, canonical_message
+from vonk_agent_protocol import (
+    LifecycleState,
+    RunSwitchCode,
+    RuntimePreflightCode,
+    canonical_message,
+)
 from vonk_agent_protocol.state_machines import RouteState
 from vonk_control.logging import configure_controller_logging
 from vonk_control.models import (
@@ -656,6 +661,12 @@ def test_preflight_delayed_passes_and_completion_wake_reach_transfer(
     pending = service.get(owner.operation_id)
     assert pending.result is not None and pending.result.preflight is not None
     assert set(pending.result.preflight.pending_jobs) == set(nodes)
+    # The gate's wait stays typed through the tick, never a generic fallback.
+    assert pending.wait is not None
+    assert pending.wait.reason is RuntimePreflightCode.REQUIRED
+    assert (
+        pending.blockers and pending.blockers[0].code == RuntimePreflightCode.REQUIRED
+    )
     assert not artifacts.children
 
     def report_probes():
