@@ -67,7 +67,6 @@ class NodeOfflineReason(WireEnum):
     AGENT_INACTIVE = "agent-inactive"
     AGENT_REVOKED = "agent-revoked"
     NEVER_SEEN = "never-seen"
-    LAST_SEEN_IN_FUTURE = "last-seen-in-future"
     STALE = "stale"
     CERTIFICATE_MISSING = "certificate-missing"
     CERTIFICATE_NOT_YET_VALID = "certificate-not-yet-valid"
