@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
     TERMINAL_LIFECYCLE_STATES,
     AgentOperation,
+    Disposition,
     RouteState,
     RunState,
     SecurityRefusalError,
@@ -21,7 +22,7 @@ from vonk_agent_protocol import (
 
 from . import job_states
 from .categorized_errors import InvalidValue
-from .failure_classification import error_detail
+from .failure_classification import disposition, error_detail
 from .lifecycle.recipe_operation import RecipeOperationAdapter
 from .logging import log_event
 from .models import Job, RecipeRun, RunNode
@@ -162,8 +163,20 @@ class RecipeOperationWorker:
             result = task()
             self._retry_at.pop(task, None)
             return result
-        except Exception:
+        except Exception as error:
             self._retry_at[task] = now + timedelta(seconds=5)
+            if disposition(error) in {Disposition.WAIT, Disposition.OBSERVE}:
+                log_event(
+                    _LOGGER,
+                    "recipe.coordinator.wait",
+                    service="control-worker",
+                    owner=getattr(task, "__qualname__", type(task).__name__),
+                    reason=getattr(error, "typed_reason", None)
+                    or WaitReason.OBSERVATION_UNAVAILABLE,
+                    detail=error_detail(error),
+                    retry_at=self._retry_at[task],
+                )
+                return False
             _LOGGER.exception(
                 "recipe coordinator observation failed",
                 extra={
@@ -255,10 +268,26 @@ class RecipeOperationWorker:
                 try:
                     self._defer_publication(run_id, error)
                     progressed = True
-                except Exception:
-                    _LOGGER.exception(
-                        "route publication observation failed", extra={"run_id": run_id}
-                    )
+                except Exception as observation_error:
+                    if disposition(observation_error) in {
+                        Disposition.WAIT,
+                        Disposition.OBSERVE,
+                    }:
+                        log_event(
+                            _LOGGER,
+                            "recipe.publication.wait",
+                            service="control-worker",
+                            run_id=run_id,
+                            reason=getattr(observation_error, "typed_reason", None)
+                            or WaitReason.OBSERVATION_UNAVAILABLE,
+                            detail=error_detail(observation_error),
+                            retry_at=self._clock(),
+                        )
+                    else:
+                        _LOGGER.exception(
+                            "route publication observation failed",
+                            extra={"run_id": run_id},
+                        )
                 continue
             return True
         return progressed
@@ -433,7 +462,6 @@ class RecipeOperationWorker:
                 reason=WaitReason.SCOPE_CHANGED,
             )
         return outcome.value
-        return False
 
 
 __all__ = ["RecipeOperationWorker"]

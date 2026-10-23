@@ -27,13 +27,13 @@ RECIPE_RUN_WRITE_VERDICTS: dict[str, dict[str, tuple[str, str]]] = {
     "agent_jobs/observation_receipts.py": {
         "adopt_observation_receipt": (
             "907a98f4c3a0c8a4d01a82845e9a5b99607389ad5308755885e1e33c46cffe97",
-            "HTTP wait: retained receipt is re-observed after rollback through the shared classifier",
+            "HTTP/background wait: middleware or per-candidate order sweep classifies conflicts; rollback retains receipt for next pass",
         ),
     },
     "recipe_operations/result_consumption.py": {
         "consume_agent_result": (
             "4650161a7924cd9401743cf8a6bf56aa3f75b0430b658eae841bb1a4d193d24b",
-            "caller-owned: queue claim/result transaction fences child-only effects; raw conflicts reach HTTP disposition",
+            "caller-owned: queue claim/result and background order-sweep transactions fence child effects; HTTP disposition or per-candidate sweep waits and re-observes",
         ),
     },
     "recipe_routes/candidate.py": {

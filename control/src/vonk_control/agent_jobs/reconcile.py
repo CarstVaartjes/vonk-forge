@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING
 
 from sqlalchemy import or_, select
-from vonk_agent_protocol import AgentOperation, WaitReason
+from vonk_agent_protocol import AgentOperation, Disposition, WaitReason
 
 from .. import agent_operation_states as aos
 from ..admission_locking import (
@@ -16,10 +17,12 @@ from ..admission_locking import (
 )
 from ..agent_operation_facts import attempt_holds_order as _attempt_holds_order
 from ..agent_operation_facts import aware as _aware
+from ..failure_classification import disposition, error_detail
 from ..lifecycle import Reconciler
 from ..lifecycle.agent_operation import AgentOperationAdapter, lapsed_running_orders
 from ..lifecycle.artifact_job import ArtifactJobAdapter
 from ..lifecycle.types import State as _LifecycleState
+from ..logging import log_event
 from ..models import AgentNode, AgentOperationAttempt, Job
 from ..models import AgentOperation as StoredOperation
 from ..own_cleanup import CLEANUP_KINDS
@@ -273,6 +276,22 @@ def _sweep_lapsed_attempts(
                 progressed = True
         except AdmissionLockBusy:
             continue  # an admission owns the node; the next pass retries
+        except Exception as error:
+            if disposition(error) not in {Disposition.WAIT, Disposition.OBSERVE}:
+                raise
+            # The candidate transaction rolled back. The cursor wraps, so the
+            # retained receipt is re-read next pass without starving siblings.
+            log_event(
+                logging.getLogger(__name__),
+                "agent.order_sweep.wait",
+                service="control-worker",
+                operation_id=operation_id,
+                reason=getattr(error, "typed_reason", None)
+                or WaitReason.OBSERVATION_UNAVAILABLE,
+                detail=error_detail(error),
+                retry_at=self._clock(),
+            )
+            continue
     if progressed:
         self.notify_available()
     return progressed
