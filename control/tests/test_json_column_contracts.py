@@ -21,6 +21,8 @@ import pytest
 from pydantic import BaseModel, ConfigDict, JsonValue
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
+from vonk_control import stored_json
+from vonk_control.db.connections import build_engine
 from vonk_control.lifecycle.evidence import Residue
 from vonk_control.models import Base
 from vonk_control.stored_json import (
@@ -165,6 +167,15 @@ def test_the_strict_write_guard_refuses_a_document_no_contract_describes() -> No
         session.add(row)
         with pytest.raises(ValueError):
             session.flush()
+
+
+def test_installing_the_guard_again_keeps_the_process_mode() -> None:
+    # Break caught: every engine re-installed the guard in warn mode, so one
+    # engine built mid-suite relaxed strict checks for every later test.
+    with write_guard_mode(strict=True):
+        build_engine("sqlite://").dispose()
+        install_write_guard()
+        assert stored_json._GUARD_MODE == "strict"
 
 
 def _journal_documents():
