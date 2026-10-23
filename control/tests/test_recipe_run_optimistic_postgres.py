@@ -8,10 +8,18 @@ from concurrent.futures import ThreadPoolExecutor
 import pytest
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import RouteState, RunState, UnknownOutcomeError, WaitReason
-from vonk_control.models import RecipeRun, RunNode
+from vonk_agent_protocol import (
+    Disposition,
+    RouteState,
+    RunState,
+    UnknownOutcomeError,
+    WaitReason,
+)
+from vonk_control.failure_classification import disposition
+from vonk_control.models import RecipeRun, RoutePublicationOwner, RunNode
 from vonk_control.optimistic import Applied, transition
 from vonk_control.recipe_operation_worker import RecipeOperationWorker
+from vonk_control.recovery_policy import ROUTE_RECOVERY
 
 from .test_recipe_routes import NOW, setup
 
@@ -147,3 +155,123 @@ def test_startup_adopts_version_and_preserves_running_run(
         run = session.get(RecipeRun, run_id)
         assert run is not None and run.version > 1
         assert run.route_state == RouteState.WITHDRAWN
+
+
+def test_rank_contention_beyond_publication_budget_waits_then_publishes(
+    postgres_engine, tmp_path
+) -> None:
+    """Catches OBSERVE spending publication retries on a busy rank writer."""
+    routes, _runtime, applied, run_id = setup(tmp_path, engine=postgres_engine)
+    worker = RecipeOperationWorker(routes.sessions, routes, clock=lambda: NOW)
+    with routes.sessions.begin() as session:
+        run = session.get(RecipeRun, run_id)
+        assert run is not None
+        run.route_state = RouteState.PENDING
+    with routes.sessions.begin() as holder:
+        holder.scalar(select(RunNode).where(RunNode.run_id == run_id).with_for_update())
+        for _ in range(ROUTE_RECOVERY.max_failures + 2):
+            assert worker._publish_runs((run_id,))
+            with routes.sessions() as session:
+                run = session.get(RecipeRun, run_id)
+                assert run is not None
+                assert run.route_state == RouteState.PENDING
+                assert run.route_attempts == 0
+                assert run.next_action_at is not None and run.next_action_at > NOW
+                assert run.route_error is not None
+                assert run.route_generation is None
+        assert applied == []
+    assert worker._publish_runs((run_id,))
+    with routes.sessions() as session:
+        run = session.get(RecipeRun, run_id)
+        assert run is not None and run.route_state == RouteState.PUBLISHED
+        assert run.route_generation is not None
+    assert len(applied) == 1
+
+
+def test_owner_contention_after_activation_keeps_completion_and_generation(
+    postgres_engine, tmp_path, monkeypatch
+) -> None:
+    """Catches dropping the completion decision on the first NOWAIT refusal."""
+    from sqlalchemy.exc import OperationalError
+    from vonk_control.recipe_routes import service as service_module
+
+    routes, runtime, applied, run_id = setup(tmp_path, engine=postgres_engine)
+    activated = threading.Event()
+    held = threading.Event()
+    contended = threading.Event()
+    released = threading.Event()
+    original_lock = service_module.lock_route_publication_owner_in_session
+    completions = []
+    original_completion = routes._record_completion
+
+    def acknowledge(_marker) -> None:
+        activated.set()
+        assert held.wait(timeout=10)
+
+    def acquire(session):
+        try:
+            return original_lock(session)
+        except OperationalError:
+            contended.set()
+            assert released.wait(timeout=10)
+            raise
+
+    def complete(publication, generation):
+        completions.append(generation.generation)
+        return original_completion(publication, generation)
+
+    runtime._await_supervisor_ack = acknowledge
+    monkeypatch.setattr(
+        service_module, "lock_route_publication_owner_in_session", acquire
+    )
+    monkeypatch.setattr(routes, "_record_completion", complete)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        publishing = pool.submit(routes.publish_run, run_id)
+        try:
+            assert activated.wait(timeout=10)
+            with routes.sessions.begin() as holder:
+                holder.scalar(select(RoutePublicationOwner).with_for_update())
+                held.set()
+                assert contended.wait(timeout=10)
+        finally:
+            held.set()
+            released.set()
+        generation = publishing.result(timeout=10)
+    assert completions == [generation.generation]
+    assert routes.publish_run(run_id).generation == generation.generation
+    with routes.sessions() as session:
+        run = session.get(RecipeRun, run_id)
+        assert run is not None and run.route_state == RouteState.PUBLISHED
+        assert run.route_generation == generation.generation
+    assert len(list((tmp_path / "litellm/generations").iterdir())) == 1
+    assert applied
+
+
+def test_unwrapped_stale_writer_waits_without_spending_publication_budget(
+    postgres_engine, tmp_path
+) -> None:
+    """Catches raw mapper conflicts outside transition being deterministic FAIL."""
+    from sqlalchemy.orm.exc import StaleDataError
+
+    routes, _runtime, _applied, run_id = setup(tmp_path, engine=postgres_engine)
+    worker = RecipeOperationWorker(routes.sessions, routes, clock=lambda: NOW)
+    with routes.sessions() as loser:
+        stale = loser.get(RecipeRun, run_id)
+        assert stale is not None
+        with routes.sessions.begin() as winner:
+            run = winner.get(RecipeRun, run_id)
+            assert run is not None
+            run.route_state = RouteState.PENDING
+            run.route_error = "new observation"
+        stale.route_error = "obsolete offline stop"
+        with pytest.raises(StaleDataError) as caught:
+            loser.commit()
+        loser.rollback()
+    assert disposition(caught.value) == Disposition.WAIT
+    for _ in range(ROUTE_RECOVERY.max_failures + 2):
+        worker._defer_publication(run_id, caught.value)
+    with routes.sessions() as session:
+        run = session.get(RecipeRun, run_id)
+        assert run is not None and run.route_state == RouteState.PENDING
+        assert run.route_attempts == 0 and run.next_action_at is not None
+    assert worker._publish_runs((run_id,))

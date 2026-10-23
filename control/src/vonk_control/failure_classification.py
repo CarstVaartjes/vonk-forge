@@ -28,6 +28,7 @@ from pydantic import ValidationError
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.exc import OperationalError as DatabaseOperationalError
 from sqlalchemy.exc import TimeoutError as DatabasePoolTimeout
+from sqlalchemy.orm.exc import StaleDataError
 from vonk_agent_protocol import (
     FAILURE_KIND_DISPOSITION,
     SECURITY_REFUSAL_SUFFIXES,
@@ -145,7 +146,9 @@ def _own_disposition(error: BaseException) -> Disposition | None:
         return (
             None if isinstance(error, httpx2.UnsupportedProtocol) else Disposition.WAIT
         )
-    if isinstance(error, (DatabaseOperationalError, DatabasePoolTimeout)):
+    if isinstance(
+        error, (DatabaseOperationalError, DatabasePoolTimeout, StaleDataError)
+    ):
         return Disposition.WAIT
     if isinstance(error, DBAPIError):
         return Disposition.WAIT if error.connection_invalidated else None

@@ -13,7 +13,10 @@ KIND = "versioned owner lock or bulk write; use an optimistic decision or SKIP L
 
 
 def scan_source(
-    source: str, versioned: frozenset[str] = frozenset({"Job", "RecipeRun"})
+    source: str,
+    versioned: frozenset[str] = frozenset({"Job", "RecipeRun"}),
+    *,
+    include_claims: bool = False,
 ) -> list[int]:
     tree = ast.parse(source)
     aliases = {
@@ -28,6 +31,55 @@ def scan_source(
 
     def references(node: ast.AST) -> bool:
         return any(model(child) for child in ast.walk(node))
+
+    parents = {
+        child: parent
+        for parent in ast.walk(tree)
+        for child in ast.iter_child_nodes(parent)
+    }
+    imported_models = {
+        alias.asname or alias.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom) and (node.module or "").endswith("models")
+        for alias in node.names
+    }
+
+    def refresh_target(node: ast.Call) -> bool:
+        # Unknown helper results are guarded too. Exclude an instance only when
+        # its enclosing function explicitly binds it to another canonical model.
+        target = node.args[0]
+        if not isinstance(target, ast.Name):
+            return True
+        scope: ast.AST = node
+        while scope in parents and not isinstance(
+            scope, (ast.FunctionDef, ast.AsyncFunctionDef)
+        ):
+            scope = parents[scope]
+        types: set[str] = set()
+        for binding in ast.walk(scope):
+            value: ast.AST | None = None
+            if (
+                isinstance(binding, ast.arg)
+                and binding.arg == target.id
+                or (
+                    isinstance(binding, ast.AnnAssign)
+                    and isinstance(binding.target, ast.Name)
+                    and binding.target.id == target.id
+                )
+            ):
+                value = binding.annotation
+            elif isinstance(binding, ast.Assign) and any(
+                isinstance(name, ast.Name) and name.id == target.id
+                for name in binding.targets
+            ):
+                value = binding.value
+            if value is not None:
+                types.update(
+                    child.id
+                    for child in ast.walk(value)
+                    if isinstance(child, ast.Name) and child.id in imported_models
+                )
+        return not types or any(aliases.get(name, name) in versioned for name in types)
 
     found: list[int] = []
 
@@ -56,7 +108,7 @@ def scan_source(
         if not isinstance(node, ast.Call):
             continue
         if isinstance(node.func, ast.Attribute) and node.func.attr == "with_for_update":
-            if any(
+            if not include_claims and any(
                 keyword.arg == "skip_locked"
                 and isinstance(keyword.value, ast.Constant)
                 and keyword.value.value is True
@@ -71,17 +123,34 @@ def scan_source(
         elif isinstance(node.func, ast.Attribute) and node.func.attr in {
             "get",
             "get_one",
+            "refresh",
+            "query",
         }:
             lock = next(
                 (kw.value for kw in node.keywords if kw.arg == "with_for_update"), None
             )
-            if lock is not None and node.args and model(node.args[0]):
-                if isinstance(lock, ast.Dict) and any(
-                    isinstance(key, ast.Constant)
-                    and key.value == "skip_locked"
-                    and isinstance(value, ast.Constant)
-                    and value.value is True
-                    for key, value in zip(lock.keys, lock.values, strict=True)
+            # refresh receives an instance (possibly returned by a helper),
+            # so conservatively guard untyped locking refreshes. Query/get carry
+            # their model in the call itself.
+            if (
+                lock is not None
+                and node.args
+                and (
+                    refresh_target(node)
+                    if node.func.attr == "refresh"
+                    else any(references(arg) for arg in node.args)
+                )
+            ):
+                if (
+                    not include_claims
+                    and isinstance(lock, ast.Dict)
+                    and any(
+                        isinstance(key, ast.Constant)
+                        and key.value == "skip_locked"
+                        and isinstance(value, ast.Constant)
+                        and value.value is True
+                        for key, value in zip(lock.keys, lock.values, strict=True)
+                    )
                 ):
                     continue
                 if not (isinstance(lock, ast.Constant) and lock.value is False):

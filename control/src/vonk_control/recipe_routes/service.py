@@ -21,6 +21,7 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol import RouteState as RunRouteState
 from vonk_agent_protocol.route_activation import ROUTE_EVIDENCE_MAX_AGE_SECONDS
 
+from .. import bounded_retry
 from ..agent_operation_facts import job_start_deadline
 from ..bounded_retry import REQUEST_PAUSES, bounded_attempts
 from ..job_documents import DistributedRecoveryMarker
@@ -123,7 +124,7 @@ class RecipeRouteService:
         committed_error: RecipeRouteError | None = None
         publication: _Publication | None = None
 
-        # One owner try: the worker paces a held owner across its passes.
+        # The worker paces initial claims; completion reacquires with request pauses.
         def decide(session: Session) -> _Publication | None:
             nonlocal committed_error
             committed_error = None
@@ -139,7 +140,7 @@ class RecipeRouteService:
                 committed_error = error
             return publication
 
-        publication = self.decide_publication(decide)
+        publication = self.decide_publication(decide, pauses=())
         if committed_error is not None:
             raise committed_error
         assert publication is not None
@@ -150,28 +151,41 @@ class RecipeRouteService:
     ) -> AbstractContextManager[Session]:
         return route_publication_transaction(self.sessions, pauses)
 
-    def decide_publication[T](self, decide: Callable[[Session], T]) -> T:
+    def decide_publication[T](
+        self,
+        decide: Callable[[Session], T],
+        *,
+        pauses: Sequence[float] = REQUEST_PAUSES,
+    ) -> T:
         """Re-plan the complete database decision; publish effects only afterwards."""
-        with ExitStack() as stack:
-            if self.sessions.kw["bind"].dialect.name == "sqlite":
-                if not _SQLITE_ROUTE_PUBLICATION_LOCK.acquire(blocking=False):
-                    raise RecipeRouteOwnerBusy("route publication owner is busy")
-                stack.callback(_SQLITE_ROUTE_PUBLICATION_LOCK.release)
+        for attempt in bounded_retry.bounded_attempts(pauses):
+            try:
+                with ExitStack() as stack:
+                    if self.sessions.kw["bind"].dialect.name == "sqlite":
+                        if not _SQLITE_ROUTE_PUBLICATION_LOCK.acquire(blocking=False):
+                            raise RecipeRouteOwnerBusy(
+                                "route publication owner is busy"
+                            )
+                        stack.callback(_SQLITE_ROUTE_PUBLICATION_LOCK.release)
 
-            def owned(session: Session) -> T:
-                try:
-                    lock_route_publication_owner_in_session(session)
-                except OperationalError as error:
-                    if getattr(error.orig, "sqlstate", None) != "55P03":
-                        raise
-                    # Owner acquisition keeps its paced wait; a run conflict
-                    # below uses the shared optimistic re-plan boundary.
-                    raise RecipeRouteOwnerBusy(
-                        "route publication owner is busy (lock not available, 55P03)"
-                    ) from error
-                return decide(session)
+                    def owned(session: Session) -> T:
+                        try:
+                            lock_route_publication_owner_in_session(session)
+                        except OperationalError as error:
+                            if getattr(error.orig, "sqlstate", None) != "55P03":
+                                raise
+                            # Only owner acquisition is paced; a run conflict
+                            # yields through the optimistic re-plan boundary.
+                            raise RecipeRouteOwnerBusy(
+                                "route publication owner is busy (lock not available, 55P03)"
+                            ) from error
+                        return decide(session)
 
-            outcome = transition(self.sessions, owned)
+                    outcome = transition(self.sessions, owned)
+                break
+            except RecipeRouteOwnerBusy:
+                if attempt == len(pauses):
+                    raise
         if isinstance(outcome, Stale):
             raise _RecipeRunContended(
                 "RecipeRun publication changed; re-plan on the next reconcile tick"

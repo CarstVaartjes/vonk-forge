@@ -161,6 +161,43 @@ FOLLOW_UP_JOB_LOCKS: dict[str, tuple[str, ...]] = {
 }
 
 
+# Retained transactional admission/release boundaries, not new lock exemptions.
+# Each verdict names why this lock remains; added lines still fail everywhere.
+RECIPE_RUN_LOCK_VERDICTS: dict[str, dict[str, str]] = {
+    "distributed_recovery/common.py": {
+        "settle_observed_absent_runs_in_session": "retain: SKIP LOCKED claim for confirmed-absence release",
+    },
+    "agent_jobs/retirement.py": {
+        "_release_retired_owner_in_session": "retain: confirmed reservation release",
+    },
+    "artifact_jobs/service.py": {
+        "_submit_once": "retain: submission binds active run and capacity admission",
+    },
+    "fleet_profiles/queue_application.py": {
+        "_queue_application": "retain: topology-atomic reviewed replacement admission",
+    },
+    "recipe_operations/action_plans.py": {
+        "_stop_plan_in_session": "retain: Stop admission binds reviewed exact effects",
+        "_uninstall_plan_in_session": "retain: uninstall admission excludes active runs",
+    },
+    "recipe_operations/job_run_stop.py": {
+        "_stop_logical_job_run": "retain: exact logical Stop admission",
+    },
+    "recipe_operations/reconciliation_authority.py": {
+        "_reconciliation_authority_in_session": "retain: authority binds inactive runs",
+    },
+    "recipe_operations/start.py": {
+        "enqueue_one_shot_job_in_session": "retain: capacity and current-run admission",
+    },
+    "recipe_operations/stop.py": {
+        "_check_service_stop": "retain: Stop acceptance revalidates the reviewed run",
+    },
+    "recipe_operations/stop_acceptance.py": {
+        "_accept_service_stop": "retain: duplicate Stop replay under the run fence",
+    },
+}
+
+
 @pytest.mark.parametrize(
     "statement",
     [
@@ -168,6 +205,9 @@ FOLLOW_UP_JOB_LOCKS: dict[str, tuple[str, ...]] = {
         "select(Job.id).with_for_update(nowait=True)",
         "select(Job).with_for_update(of=Job)",
         "session.get(Job, identity, with_for_update=True)",
+        "session.refresh(row, with_for_update=True)",
+        "session.refresh(row, with_for_update={'nowait': True})",
+        "session.query(Job, with_for_update=True)",
         "session.get(Job, identity, with_for_update={'nowait': True})",
         "AdmissionRowLock('owner', Job, select(Job))",
         "select(Owner).with_for_update(of=Owner)",
@@ -188,6 +228,8 @@ def test_guard_rejects_versioned_owner_locks(statement: str, owner: str) -> None
         "session.get(Job, identity, with_for_update={'skip_locked': True})",
         "select(Job).with_for_update(of=AgentNode)",
         "session.get(Job, identity)",
+        "session.refresh(row)",
+        "session.refresh(row, with_for_update=False)",
         "select(AgentNode).with_for_update()",
     ],
 )
@@ -231,3 +273,48 @@ def test_editing_an_existing_lock_predicate_is_not_a_new_lock() -> None:
         {3},
         modes=("optimistic",),
     )
+
+
+def test_remaining_recipe_run_lock_sites_have_a_verdict() -> None:
+    """Catches new files AND unreviewed locks added to already classified files."""
+    import ast
+
+    actual: dict[str, set[str]] = {}
+    root = ROOT / "control/src/vonk_control"
+    for path in sorted(root.rglob("*.py")):
+        source = path.read_text()
+        lines = set(_locks(source, frozenset({"RecipeRun"}), include_claims=True))
+        if not lines:
+            continue
+        functions = {
+            node.name
+            for node in ast.walk(ast.parse(source))
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and lines.intersection(
+                range(node.lineno, (node.end_lineno or node.lineno) + 1)
+            )
+        }
+        actual[str(path.relative_to(root))] = functions
+    assert actual == {
+        path: set(verdicts) for path, verdicts in RECIPE_RUN_LOCK_VERDICTS.items()
+    }
+
+
+def test_added_refresh_lock_cannot_hide_behind_unchanged_receiver() -> None:
+    source = "session.refresh(\n    row,\n    with_for_update=True,\n)\n"
+    assert check_source(
+        "control/src/vonk_control/owner.py", source, {3}, modes=("optimistic",)
+    )
+
+
+@pytest.mark.parametrize(
+    "binding",
+    ["def f(row: AgentNode):", "def f():\n    row = session.get(AgentNode, identity)"],
+)
+def test_refresh_of_explicit_other_model_is_allowed(binding: str) -> None:
+    source = (
+        "from vonk_control.models import AgentNode\n"
+        + binding
+        + "\n    session.refresh(row, with_for_update=True)\n"
+    )
+    assert not _locks(source)

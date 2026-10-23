@@ -121,7 +121,11 @@ class StopDispatchMixin:
                 # its Job lock, so lock the Job (before the run, as the claim
                 # and defer paths do) and re-read it: a Stop ended meanwhile is
                 # replayed, never given children or a different outcome.
-                session.refresh(existing, with_for_update=True)
+                existing = session.get(
+                    Job, existing.id, with_for_update=True, populate_existing=True
+                )
+                if existing is None:
+                    raise RecipeRetryLater("accepted Stop disappeared")
                 document = service._service_stop_document(existing)
                 review = document.service_stop_review
                 if (
