@@ -119,7 +119,6 @@ class PlatformObserver:
                         ControlProcessHeartbeat.loop_sequence >= 1,
                         ControlProcessHeartbeat.completed_at
                         >= now - timedelta(seconds=30),
-                        ControlProcessHeartbeat.completed_at <= now,
                     )
                     .order_by(ControlProcessHeartbeat.process_instance_id)
                 )

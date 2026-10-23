@@ -888,3 +888,63 @@ def test_document_hashing_stays_at_ingress_and_ignores_existing_calls():
     assert not check_source(
         "control/src/vonk_control/catalog_service.py", source, {2}, modes=("identity",)
     )
+
+
+@pytest.mark.parametrize(
+    "source,line",
+    [
+        ("def online(node, now):\n    return node.last_seen_at > now\n", 2),
+        (
+            (
+                "def online(node, current):\n"
+                "    seen = node.last_seen_at\n"
+                "    if current - seen < timedelta(0):\n"
+                "        return False\n"
+            ),
+            3,
+        ),
+        (
+            (
+                "def online(node, now):\n"
+                "    age = now - node.last_seen_at\n"
+                "    return 0 <= age < window\n"
+            ),
+            3,
+        ),
+        (
+            (
+                "def ready(heartbeat, now):\n"
+                "    age = now - heartbeat.completed_at\n"
+                "    return age < timedelta(0)\n"
+                "# ControlProcessHeartbeat\n"
+            ),
+            3,
+        ),
+        (
+            "def read(now):\n    return select(ControlProcessHeartbeat).where(ControlProcessHeartbeat.completed_at <= now)\n",
+            2,
+        ),
+        (
+            "def reason():\n    return NodeOfflineReason.LAST_SEEN_IN_FUTURE\n",
+            2,
+        ),
+    ],
+)
+def test_added_line_guard_rejects_negative_controller_contact_age(source, line):
+    """Catches restoring the offline rule through a renamed local age variable."""
+    assert check_source(PATH, source, {line}, modes=("contact-clocks",))
+    assert not check_source(PATH, source, {line + 1}, modes=("contact-clocks",))
+
+
+def test_contact_clock_guard_preserves_staleness_and_security_and_agent_freshness():
+    source = (
+        "def online(node, current):\n"
+        "    seen = node.last_seen_at\n"
+        "    return current - seen > window\n"
+        "def certificate(cert, now):\n"
+        "    return cert.not_before > now\n"
+        "def observation(sample, now):\n"
+        "    age = now - sample.observed_at\n"
+        "    return timedelta(0) <= age < window\n"
+    )
+    assert not check_source(PATH, source, set(range(1, 9)), modes=("contact-clocks",))

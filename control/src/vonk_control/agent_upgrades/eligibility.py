@@ -87,7 +87,7 @@ class EligibilityMixin:
         seen = (
             last_seen if last_seen.tzinfo is not None else last_seen.replace(tzinfo=UTC)
         )
-        if seen > current or current - seen > _ONLINE_WINDOW:
+        if current - seen > _ONLINE_WINDOW:
             return "is not currently online"
         return None
 

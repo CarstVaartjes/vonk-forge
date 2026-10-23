@@ -2383,3 +2383,25 @@ def test_idle_worker_adopts_only_exact_retained_upgrade_receipt(
         assert attempt.lease_deadline == deadline
         if change is None:
             assert attempt.state == AgentResultState.SUCCEEDED
+
+
+def test_upgrade_dispatch_accepts_controller_contact_ahead_of_clock(tmp_path) -> None:
+    """Catches upgrade dispatch treating a negative Controller age as offline."""
+    clock = Clock()
+    sessions, _operations, upgrades, _job = _rollout(
+        tmp_path, "future-contact", clock=clock, offline=(NODE_A,)
+    )
+    with sessions.begin() as session:
+        node = session.get(AgentNode, NODE_A)
+        assert node is not None
+        node.last_seen_at = clock() + timedelta(seconds=2)
+    plan = upgrades.preview([NODE_A], PACKAGE_MODEL)
+    assert plan.node_ids == (NODE_A,)
+    job = upgrades.apply(
+        [NODE_A],
+        PACKAGE_MODEL,
+        plan_digest=plan.plan_digest,
+        actor="admin",
+        request_id=str(uuid.uuid4()),
+    )
+    assert _operation_nodes(sessions, job.id) == [NODE_A]

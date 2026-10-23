@@ -119,7 +119,6 @@ const OFFLINE_REASON_LABELS: Record<
   [NodeOfflineReason.AGENT_INACTIVE]: "Agent is inactive",
   [NodeOfflineReason.AGENT_REVOKED]: "Agent was revoked",
   [NodeOfflineReason.NEVER_SEEN]: "Agent has never connected",
-  [NodeOfflineReason.LAST_SEEN_IN_FUTURE]: "Agent clock is ahead",
   [NodeOfflineReason.STALE]: "Agent presence timed out",
   [NodeOfflineReason.CERTIFICATE_MISSING]: "Certificate missing",
   [NodeOfflineReason.CERTIFICATE_NOT_YET_VALID]: "Certificate not yet valid",

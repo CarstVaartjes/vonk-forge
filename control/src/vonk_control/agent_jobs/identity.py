@@ -199,9 +199,8 @@ def _record_contact(
     preflight_fingerprint: str | None,
     hostname: str | None,
 ) -> None:
-    current = None if node.last_seen_at is None else _aware(node.last_seen_at)
-    observed = _aware(now)
-    contact_time = observed if current is None or observed > current else current
+    # A new accepted contact replaces the old stamp even after clock rollback.
+    contact_time = _aware(now)
     node.last_seen_at = contact_time
     if runtime_identity is not None:
         node.protocol_version = AGENT_PROTOCOL_VERSION

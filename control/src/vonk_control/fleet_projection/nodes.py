@@ -363,6 +363,8 @@ def _connection(
             last_seen_age_seconds=None,
         )
     last_seen = None if value.last_seen_at is None else _utc(value.last_seen_at)
+    # Contact is Controller-stamped: capture latency or clock rollback can
+    # make it newer than current without indicating a lost connection.
     age = None if last_seen is None else max(0.0, (current - last_seen).total_seconds())
     if value.state == "revoked" or value.revoked_at is not None:
         offline_reason: NodeOfflineReason | None = NodeOfflineReason.AGENT_REVOKED
@@ -372,8 +374,6 @@ def _connection(
         offline_reason = _CERTIFICATE_OFFLINE_REASONS[certificate_state]
     elif last_seen is None:
         offline_reason = NodeOfflineReason.NEVER_SEEN
-    elif current - last_seen < timedelta(0):
-        offline_reason = NodeOfflineReason.LAST_SEEN_IN_FUTURE
     elif current - last_seen > timedelta(seconds=self._agent_online_seconds):
         offline_reason = NodeOfflineReason.STALE
     else:

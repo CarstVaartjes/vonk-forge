@@ -4873,3 +4873,35 @@ def test_reusable_preflight_survives_operation_history_collection(service) -> No
             current_fingerprint="a" * 64,
             now=int(clock.now.timestamp()) + 301,
         )
+
+
+@pytest.mark.parametrize("contact_path", ("claim", "heartbeat"))
+def test_controller_clock_rollback_replaces_pinned_contact(
+    service, contact_path
+) -> None:
+    """Catches max(stored, now) keeping a future contact after clock correction."""
+    jobs, sessions, clock = service
+    claim = None
+    if contact_path == "heartbeat":
+        jobs.enqueue(
+            parent(sessions, clock).id,
+            NODE_A,
+            ProtocolAgentOperation.RECIPE_STOP,
+            COMMIT,
+            STOP_PAYLOAD,
+        )
+        claim = claim_agent(jobs, NODE_A, "serial-a")
+        assert claim is not None
+    # The clock steps back inside the certificate validity interval.
+    with sessions.begin() as session:
+        node = session.get(AgentNode, NODE_A)
+        assert node is not None
+        node.last_seen_at = clock() + timedelta(hours=1)
+    if claim is None:
+        claim_agent(jobs, NODE_A, "serial-a")
+    else:
+        jobs.heartbeat(claim, None, 30)
+    with sessions() as session:
+        node = session.get(AgentNode, NODE_A)
+        assert node is not None and node.last_seen_at is not None
+        assert node.last_seen_at.replace(tzinfo=UTC) == clock()

@@ -9,10 +9,12 @@ from typing import cast
 import pytest
 from pydantic import ValidationError
 from sqlalchemy import Table, create_engine, event, literal, select, text, update
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.engine import Engine
+from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import canonical_message
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.inventory import InventoryRequest
+from vonk_agent_protocol.state_machines import NodeIdentityState
 from vonk_agent_protocol.telemetry import HostResourceSample
 from vonk_control.fleet_events import FleetEventRepository
 from vonk_control.fleet_projection import (
@@ -939,7 +941,7 @@ def test_connection_uses_certificate_authority_and_finite_offline_precedence() -
         ("active", "not-yet-valid", "offline", "certificate-not-yet-valid"),
         ("active", "expired", "offline", "certificate-expired"),
         ("active", "valid", "offline", "never-seen"),
-        ("active", "valid", "offline", "last-seen-in-future"),
+        ("active", "valid", "online", None),
         ("active", "valid", "offline", "stale"),
         ("active", "valid", "online", None),
     ]
@@ -2937,3 +2939,72 @@ def test_retention_failure_survives_inventory_storage_and_projects_one_warning()
         )
         == []
     )
+
+
+def test_controller_contact_ahead_of_projection_clock_is_fresh() -> None:
+    """Catches treating Controller clock rollback as loss of agent contact."""
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    with sessions.begin() as session:
+        session.add(
+            AgentNode(
+                node_id=NODE_A,
+                state=NodeIdentityState.ACTIVE,
+                last_seen_at=NOW + timedelta(seconds=2),
+            )
+        )
+        session.flush()
+        session.add(_certificate(NODE_A, "future-contact"))
+    connection = FleetProjection(sessions, clock=lambda: NOW).read().nodes[0].connection
+    assert connection.offline_reason is None
+    assert connection.last_seen_age_seconds == 0
+    assert connection.last_seen_at == NOW + timedelta(seconds=2)
+
+
+def test_contact_committed_between_clock_read_and_postgres_snapshot_stays_online(
+    postgres_engine: Engine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Inject the scheduling gap that lets a later contact enter the snapshot."""
+    from vonk_control.fleet_projection import service
+
+    Base.metadata.create_all(postgres_engine)
+    sessions = sessionmaker(postgres_engine, expire_on_commit=False)
+    with sessions.begin() as session:
+        session.add(
+            AgentNode(
+                node_id=NODE_A,
+                state=NodeIdentityState.ACTIVE,
+                last_seen_at=NOW - timedelta(seconds=151),
+            )
+        )
+        session.flush()
+        session.add(_certificate(NODE_A, "snapshot-race"))
+    begin_capture = service.begin_observation_capture
+    clock_sampled = False
+
+    def clock() -> datetime:
+        nonlocal clock_sampled
+        clock_sampled = True
+        return NOW
+
+    def delayed_capture(session: Session) -> None:
+        assert clock_sampled
+        # Advance the contact producer while capture is delayed, without a
+        # timing-sensitive sleep. Its independent transaction commits first.
+        with sessions.begin() as writer:
+            writer.execute(
+                update(AgentNode)
+                .where(AgentNode.node_id == NODE_A)
+                .values(last_seen_at=NOW + timedelta(seconds=2))
+            )
+        begin_capture(session)
+        assert session.scalar(text("SHOW transaction_isolation")) == "repeatable read"
+
+    monkeypatch.setattr(service, "begin_observation_capture", delayed_capture)
+    snapshot = FleetProjection(sessions, clock=clock).read()
+    assert snapshot.generated_at == NOW
+    connection = snapshot.nodes[0].connection
+    assert connection.last_seen_at == NOW + timedelta(seconds=2)
+    assert connection.offline_reason is None
+    assert connection.last_seen_age_seconds == 0

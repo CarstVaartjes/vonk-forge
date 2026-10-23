@@ -140,3 +140,11 @@ def test_missing_heartbeat_projection_repairs_without_blocking_a_fresh_worker_lo
         assert row is not None and row.loop_sequence == 1
     recorder.completed_loop()
     verify_worker_ready(sessions, process_instance_id=INSTANCE_A, now=NOW)
+
+
+def test_worker_readiness_accepts_controller_heartbeat_ahead_of_clock(tmp_path) -> None:
+    """Catches readiness failure after a heartbeat wins the clock/read race."""
+    sessions = _sessions(tmp_path)
+    with sessions.begin() as session:
+        session.add(_heartbeat(completed_at=NOW + timedelta(seconds=2)))
+    verify_worker_ready(sessions, process_instance_id=INSTANCE_A, now=NOW)
