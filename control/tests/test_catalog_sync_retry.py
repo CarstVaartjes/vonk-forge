@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import pytest
+from psycopg.errors import InFailedSqlTransaction
+from sqlalchemy.exc import InternalError
 from vonk_agent_protocol import CatalogSyncCode, RecipePackageCode
 from vonk_control.catalog_sync import (
     ManagedRecipeCatalogSyncService,
@@ -60,6 +62,14 @@ def test_failed_sync_log_names_the_reason_bounded_and_printable() -> None:
     assert "x y [2Jz" in rendered
     # An untyped exception's message is never echoed.
     assert "secret" not in catalog_sync_failure_reason(RuntimeError("secret"))
+
+
+def test_database_sync_log_reports_server_condition_without_private_sql() -> None:
+    original = InFailedSqlTransaction("private driver detail")
+    error = InternalError("private SQL", {"parameter": "secret"}, original)
+    rendered = catalog_sync_failure_reason(error)
+    assert f"SQLSTATE {original.sqlstate}" in rendered
+    assert "private" not in rendered and "secret" not in rendered
 
 
 def test_the_automatic_sync_is_asked_again_after_every_unsettled_attempt(

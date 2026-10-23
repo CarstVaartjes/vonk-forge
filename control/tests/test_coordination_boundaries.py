@@ -532,3 +532,22 @@ def test_no_constraint_violation_is_handled_outside_admission() -> None:
         for site in scan_coordination_sites()
         if site.kind == INTEGRITY_ERROR_OUTSIDE_ADMISSION
     ] == []
+
+
+@pytest.mark.parametrize(
+    "suspension", ["await request.body()", "yield row", "yield from rows"]
+)
+@pytest.mark.parametrize("scope", ["services.sessions()", "repository._read()"])
+def test_a_session_cannot_survive_a_client_suspension(suspension, scope):
+    assert _scanned(
+        f"async def handler():\n with {scope} as session:\n  {suspension}\n"
+    )
+    assert not _scanned(
+        f"async def handler():\n with services.sessions() as session:\n  rows = session.scalars(query).all()\n {suspension}\n"
+    )
+
+
+def test_a_synchronous_session_context_manager_can_hand_its_session_to_a_caller():
+    assert not _scanned(
+        "@contextmanager\ndef scope():\n with services.sessions() as session:\n  yield session\n"
+    )

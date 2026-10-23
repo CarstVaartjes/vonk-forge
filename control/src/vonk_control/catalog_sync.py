@@ -18,7 +18,7 @@ from typing import Protocol
 from fastapi import HTTPException
 from pydantic import TypeAdapter
 from sqlalchemy import and_, select
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import DBAPIError, SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
     CatalogSyncCode,
@@ -534,14 +534,20 @@ class ManagedRecipeCatalogSyncService:
             # commit was completely applied; partial results must be retried so
             # successful immutable imports are reused while failed entries are
             # fetched again.
-            if (
-                current is not None
-                and not policy_problems
-                and _result(current.result).state == CatalogSyncState.CURRENT
-                and current.controller_marker == _controller_marker()
-                and self._snapshot_available(snapshot)
-            ):
-                return _view(current)
+            current_view = (
+                _view(current)
+                if (
+                    current is not None
+                    and not policy_problems
+                    and _result(current.result).state == CatalogSyncState.CURRENT
+                    and current.controller_marker == _controller_marker()
+                )
+                else None
+            )
+        # Availability opens its own sessions and observes managed storage. Do
+        # not retain the receipt transaction/connection while joining that work.
+        if current_view is not None and self._snapshot_available(snapshot):
+            return current_view
         return self.sync(
             ManagedCatalogSyncRequest(
                 request_key=str(uuid.uuid4()),
@@ -987,6 +993,12 @@ def catalog_sync_failure_reason(error: Exception) -> str:
     code = getattr(error, "code", CatalogSyncCode.FAILED)
     detail = getattr(error, "detail", None)
     status = ""
+    if isinstance(error, DBAPIError):
+        sqlstate = getattr(error.orig, "sqlstate", None)
+        if isinstance(sqlstate, str) and re.fullmatch(r"[0-9A-Z]{5}", sqlstate):
+            # SQLAlchemy's code (e.g. 2j85) is a documentation category, not
+            # the server condition. Never log raw SQL, parameters or messages.
+            status = f"SQLSTATE {sqlstate}; "
     if isinstance(error, HTTPException):
         status = f"HTTP {error.status_code}; "
         if isinstance(detail, CapabilityUnavailableReply):
