@@ -59,6 +59,7 @@ from vonk_agent_protocol import (
     Disposition,
     LifecycleState,
     RunSwitchCode,
+    RuntimePreflightCode,
     WaitOwnerKind,
     WaitReason,
     canonical_message,
@@ -69,7 +70,7 @@ from ..agent_operation_facts import aware
 from ..models import AgentOperation as StoredOperation
 from ..models import Job
 from ..operation_blockers import OperationBlocker, make_blocker
-from ..persisted_waits import lifecycle_wait, schedule_wait, wait_due
+from ..persisted_waits import lifecycle_wait, schedule_wait, typed_wait_reason, wait_due
 from ..run_switch_contract import (
     RunSwitchMemberReceipt,
     RunSwitchMemberState,
@@ -416,6 +417,22 @@ class RunSwitchAdapter:
 
         now = aware(now)
         state = visible if visible and not after.terminal else _STORED[after.state]
+        preflight = progress.preflight if progress else None
+        preflight_reason = (
+            typed_wait_reason(
+                preflight.last_failure_code, RuntimePreflightCode.REQUIRED
+            )
+            if preflight and preflight.next_check_at
+            else None
+        )
+        if preflight_reason is not None and preflight is not None:
+            wait_blockers = [
+                make_blocker(
+                    preflight_reason,
+                    preflight.last_failure_detail or preflight_reason.value,
+                    node_ids=list(job.targets),
+                )
+            ]
         lifecycle_wait(
             job,
             identity=job.id,
@@ -424,6 +441,7 @@ class RunSwitchAdapter:
             now=now,
             due=after.next_action_at,
             detail=after.reason,
+            reason=preflight_reason,
             deadline=after.recovery_deadline,
             cancelling=after.cancel_requested,
             lease_deadline=after.lease_deadline,

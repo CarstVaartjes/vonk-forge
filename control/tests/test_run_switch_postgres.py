@@ -11,7 +11,7 @@ import pytest
 from alembic import command
 from alembic.config import Config
 from sqlalchemy import event, select
-from vonk_agent_protocol import LifecycleState, RunSwitchCode
+from vonk_agent_protocol import LifecycleState, RunSwitchCode, canonical_message
 from vonk_agent_protocol.state_machines import RouteState
 from vonk_control.logging import configure_controller_logging
 from vonk_control.models import (
@@ -33,6 +33,7 @@ from vonk_control.run_switch_contract import (
 )
 from vonk_control.run_switch_operations import _stored_job_plan
 
+from .agent_fences import fenced_operation
 from .non_blocking import assert_ended_without_blocking
 from .test_lifecycle_preflight import _finish
 from .test_recipe_operations import (
@@ -238,9 +239,15 @@ def _awaiting_final_verification(
         assert current.state in {"queued", "running"}, current.status_reason
         assert current.result is not None
         checkpoint = current.result.preflight
-        if queued_distribution and checkpoint is not None and checkpoint.pending_job_id:
+        if (
+            queued_distribution
+            and checkpoint is not None
+            and next(iter(checkpoint.pending_jobs.values()), None)
+        ):
             with sessions() as session:
-                probe = session.get(Job, checkpoint.pending_job_id)
+                probe = session.get(
+                    Job, next(iter(checkpoint.pending_jobs.values()), None)
+                )
                 needs_result = probe is not None and probe.state in {
                     "queued",
                     "running",
@@ -591,3 +598,109 @@ def test_postgres_duplicate_apply_converges_under_target_lock(
         futures = [workers.submit(apply) for _ in range(2)]
         results = [future.result(timeout=10) for future in futures]
     assert results[0].operation_id == results[1].operation_id
+
+
+@pytest.mark.parametrize("node_count,latency", [(2, 180), (2, 240), (1, 360), (2, 360)])
+def test_preflight_delayed_passes_and_completion_wake_reach_transfer(
+    tmp_path, migrated_engine, node_count, latency
+):
+    """Serial probes livelock dual loads; lost wakes must also self-heal.
+
+    Real agent reports persist receipts five seconds after dispatch. Worker
+    observation arrives minutes later; expired evidence refreshes once and
+    completion wakes its exact owner without another worker/backstop turn.
+    The Spark clock leads the Controller by ten minutes throughout.
+    """
+    from vonk_agent_protocol import RuntimePreflightCode
+    from vonk_agent_protocol.runtime_preflight import RuntimePreflightRequest
+    from vonk_control.agent_jobs import AgentJobService
+    from vonk_control.run_switch_operations import RunSwitchOperationService
+    from vonk_control.runtime_preflight import latest_result, request_digest
+
+    from .runtime_identity_support import claim_agent
+    from .test_lifecycle_preflight import _clear
+    from .test_runtime_preflight import result as passing_result
+
+    sessions, lifecycle, nodes, _ = _installed(
+        tmp_path, migrated_engine, nodes=node_count
+    )
+    _clear(sessions)
+    clock = SimpleNamespace(now=NOW)
+    queue = AgentJobService(sessions, clock=lambda: clock.now)
+    lifecycle._agent_jobs = queue
+    artifacts = RecordingArtifactExecutor(child_transfer=True)
+    service = RunSwitchOperationService(
+        sessions,
+        lifecycle=lifecycle,
+        clock=lambda: clock.now,
+        artifacts=CompleteArtifactInspector(missing_spark_bytes=1024),
+        artifact_phase_executor=artifacts,
+        memory_floor_bytes=50,
+    )
+    request = _request(sessions, nodes[0])
+    request.spark_group.nodes.extend(
+        SparkGroupNode(node_id=node_id, rank=rank, role="worker", endpoint_owner=False)
+        for rank, node_id in enumerate(nodes[1:], 1)
+    )
+    plan = service.preview(request, actor="admin")
+    assert plan.allowed, plan.blockers
+    owner = service.apply(
+        RunSwitchApplyRequest(
+            **request.model_dump(),
+            plan_digest=plan.plan_digest,
+            request_key=str(uuid.uuid4()),
+        ),
+        actor="admin",
+    )
+    service.tick()
+    pending = service.get(owner.operation_id)
+    assert pending.result is not None and pending.result.preflight is not None
+    assert set(pending.result.preflight.pending_jobs) == set(nodes)
+    assert not artifacts.children
+
+    def report_probes():
+        clock.now += timedelta(seconds=5)
+        for index, node_id in enumerate(nodes):
+            claim = claim_agent(
+                queue, node_id, f"serial-{index}", preflight_fingerprint="a" * 64
+            )
+            assert claim is not None
+            operation = fenced_operation(sessions, claim)
+            probe_request = RuntimePreflightRequest.model_validate_json(
+                canonical_message(operation.payload)
+            )
+            queue.succeed(
+                claim.fence,
+                passing_result(
+                    probe_request, observed_at=int(clock.now.timestamp()) + 600
+                ),
+            )
+            # A new session sees the committed receipt before the wake dispatches.
+            with sessions() as session:
+                receipt = latest_result(
+                    session, node_id, requirements_sha256=request_digest(probe_request)
+                )
+                assert receipt is not None and receipt.received_at == clock.now
+
+    report_probes()  # Inject a lost completion notification.
+    clock.now = NOW + timedelta(seconds=latency)
+    service.tick()
+    if latency > 300:
+        stale = service.get(owner.operation_id)
+        assert stale.wait is not None
+        assert stale.wait.reason is RuntimePreflightCode.STALE
+        assert stale.blockers and stale.blockers[0].code == RuntimePreflightCode.STALE
+        assert stale.result is not None and stale.result.preflight is not None
+        due = stale.result.preflight.next_check_at
+        assert due is not None and due > clock.now
+        assert not artifacts.children
+        clock.now = due
+        service.tick()
+        queue.set_preflight_completed(service.preflight_completed)
+        report_probes()  # No tick: completion itself must dispatch the transfer.
+    active = service.get(owner.operation_id)
+    assert active.result is not None and active.result.child_operation_id
+    assert (
+        active.result.preflight is not None and not active.result.preflight.pending_jobs
+    )
+    assert len(artifacts.children) == 1

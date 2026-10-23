@@ -29,6 +29,7 @@ from ..models import (
 from ..operation_blockers import (
     bound_blockers,
 )
+from ..persisted_waits import schedule_wait
 from ..stored_json import read_row_column
 from .constants import _LOGGER, _OPERATION_KINDS
 from .errors import RunSwitchOperationConflict
@@ -179,6 +180,40 @@ class ObservationMixin:
         if callable(collect):
             collect()
         return advanced
+
+    def preflight_completed(self, child_id: str, node_id: str) -> None:
+        """A committed probe redrives its owner without scanning unrelated waits.
+
+        A lost notification is harmless: the durable due clock still recovers
+        it. Redrive revalidates current intent, cancellation and exact effects.
+        """
+        service = typing_cast("RunSwitchOperationService", self)
+        now = _now(service._clock)
+        with service._sessions.begin() as session:
+            owners = tuple(
+                session.scalars(
+                    select(Job)
+                    .where(
+                        Job.kind.in_(_OPERATION_KINDS),
+                        Job.state.in_(
+                            job_states.words(
+                                LifecycleState.QUEUED,
+                                LifecycleState.RUNNING,
+                                LifecycleState.OBSERVING,
+                            )
+                        ),
+                        Job.result["preflight"]["pending_jobs"][node_id].as_string()
+                        == child_id,
+                    )
+                    .order_by(Job.id)
+                    .with_for_update(skip_locked=True)
+                )
+            )
+            owner_ids = tuple(job.id for job in owners)
+            for job in owners:
+                schedule_wait(job, now)
+        for owner_id in owner_ids:
+            service.redrive(owner_id)
 
     def redrive(self, job_id: str) -> bool:
         """Advance one identity through the same fenced observation path."""

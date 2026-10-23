@@ -3,7 +3,7 @@
 from datetime import datetime
 from enum import StrEnum
 
-from pydantic import Field
+from pydantic import AwareDatetime, Field
 from vonk_agent_protocol import ModelFileState
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.runtime_preflight import RuntimePreflightResult
@@ -21,6 +21,8 @@ class InventorySnapshotKind(StrEnum):
 class PreflightInventoryItem(StrictModel):
     requirements_sha256: Digest
     result: RuntimePreflightResult
+    # Unknown receipt time is stale evidence, repaired by a fresh probe.
+    received_at: AwareDatetime | None = None
 
 
 class InventoryArtifactKind(StrEnum):

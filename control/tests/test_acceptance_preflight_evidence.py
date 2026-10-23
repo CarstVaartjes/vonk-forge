@@ -32,7 +32,18 @@ def test_preflight_query_projects_only_comparison_fields(
             text("INSERT INTO jobs (id,result) VALUES (:id, CAST(:result AS jsonb))"),
             {
                 "id": operation_id,
-                "result": json.dumps({"preflight": {"receipts": {node_id: receipt}}}),
+                "result": json.dumps(
+                    {
+                        "preflight": {
+                            "receipts": {
+                                node_id: {
+                                    "result": receipt,
+                                    "received_at": "2026-10-23T12:00:00Z",
+                                }
+                            }
+                        }
+                    }
+                ),
             },
         )
         connection.execute(
@@ -50,7 +61,7 @@ def test_preflight_query_projects_only_comparison_fields(
         if expired:
             connection.execute(
                 text(
-                    "UPDATE jobs SET result=jsonb_set(result,'{preflight,pending_job_id}','\"pending-job\"'::jsonb)"
+                    "UPDATE jobs SET result=jsonb_set(result,'{preflight,pending_jobs}','{\"spk_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\":\"pending-job\"}'::jsonb)"
                 )
             )
             connection.execute(
