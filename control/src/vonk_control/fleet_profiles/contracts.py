@@ -229,8 +229,8 @@ class FleetProfileAdmissionBusy(UnknownOutcomeError, FleetProfileConflict):
 
 
 class FleetProfileAdmissionDefect(InvalidRequestError, FleetProfileConflict):
-    """An internal contract or database constraint refused admission: the load
-    fails at once with evidence and is never retried as it stands."""
+    """An unregistered database constraint refused admission: the load fails at
+    once, naming the constraint, and is never retried as it stands."""
 
     code = ProfileReasonCode.ADMISSION_DEFECT
 

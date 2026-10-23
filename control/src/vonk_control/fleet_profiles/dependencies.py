@@ -114,7 +114,6 @@ _PREPARATION_RESOLVABLE_CODES = frozenset(
 #: fast; a wait is never forever).
 ENDING_BLOCKER_CODES = frozenset(
     {
-        ProfileReasonCode.ADMISSION_DEFECT,
         RecipeImageCode.PREPARATION_EXHAUSTED,
         ResourceBlockerCode.DEMAND_EXCEEDS_CAPACITY,
         RunSwitchCode.RESOURCE_DEMAND_EXCEEDS_CAPACITY,

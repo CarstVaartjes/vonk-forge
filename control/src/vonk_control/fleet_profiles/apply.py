@@ -16,7 +16,6 @@ from vonk_agent_protocol import (
 )
 from vonk_agent_protocol.agent_words import (
     ProfileOperationKind,
-    ProfileReasonSeverity,
 )
 
 from .. import job_states
@@ -37,7 +36,6 @@ from ..fleet_profile_contract import (
 )
 from ..lifecycle.evidence import Residue
 from ..models import AgentNode, FleetProfile, FleetProfileApplication
-from ..operation_blockers import make_blocker
 from ..strict_json import read_stored_model
 from .assessment_support import (
     _deferral_code,
@@ -46,7 +44,6 @@ from .assessment_support import (
 )
 from .contracts import (
     FleetProfileAdmissionBusy,
-    FleetProfileAdmissionDefect,
     FleetProfileAdmissionEffectBusy,
     FleetProfileConflict,
     FleetProfileInvalid,
@@ -322,18 +319,6 @@ class FleetProfileService:
                     operation_kind=ProfileOperationKind.APPLY.value,
                     pending_application_id=pending.id,
                 )
-            except FleetProfileAdmissionDefect as error:
-                self._finish_pending_admission(
-                    pending.id,
-                    state=LifecycleState.FAILED,
-                    reason=str(error),
-                    evidence=make_blocker(
-                        error.code,
-                        str(error),
-                        severity=ProfileReasonSeverity.ERROR.value,
-                    ),
-                )
-                return self.application(pending.id)
             except FleetProfileAdmissionBusy as busy:
                 return self._defer_pending_application(
                     pending.id,

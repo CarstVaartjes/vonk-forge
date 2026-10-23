@@ -249,16 +249,9 @@ class FleetProfileService:
             )
             return True
         except FleetProfileAdmissionDefect as error:
-            # A defect fails at once with evidence; it is never retried.
+            # A defect fails at once with its constraint; it is never retried.
             self._finish_pending_admission(
-                application_id,
-                state=LifecycleState.FAILED,
-                reason=str(error),
-                evidence=make_blocker(
-                    error.code,
-                    str(error),
-                    severity=ProfileReasonSeverity.ERROR.value,
-                ),
+                application_id, state=LifecycleState.FAILED, reason=str(error)
             )
             return True
         except _FleetProfileSupersededIntentConflict as error:
