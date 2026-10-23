@@ -73,6 +73,16 @@ impl<R: CommandRunner> OperationExecutor<R> {
         // shapes never answer for one.
         let unbound = request.run_generation.is_none();
         match request.arguments.as_slice() {
+            [marker, installation_id]
+                if unbound
+                    && !include_logs
+                    && marker == vonk_agent_protocol::INSTALLATION_REOBSERVATION_ARGUMENT =>
+            {
+                Ok(RunInspection {
+                    running: self.installation_runtime_present(installation_id, false)?,
+                    ..RunInspection::default()
+                })
+            }
             [marker, identity @ ..]
                 if unbound && marker == vonk_agent_protocol::JOB_REOBSERVATION_ARGUMENT =>
             {

@@ -271,6 +271,22 @@ impl<R: CommandRunner> OperationExecutor<R> {
         &self,
         installation_id: &str,
     ) -> Result<(), OperationError> {
+        if self.installation_runtime_present(installation_id, true)? {
+            return Err(OperationError::InstallationReconciliationStorageUnavailable);
+        }
+        Ok(())
+    }
+
+    /// Query actual containers, independently of stored plans/lifecycle files.
+    /// `all` is for reconciliation, which must also account for stopped effects.
+    pub(super) fn installation_runtime_present(
+        &self,
+        installation_id: &str,
+        all: bool,
+    ) -> Result<bool, OperationError> {
+        if !valid_artifact_id(installation_id) {
+            return Err(OperationError::InvalidOperation);
+        }
         let cache = self
             .roots
             .agent_data
@@ -285,27 +301,37 @@ impl<R: CommandRunner> OperationExecutor<R> {
             format!("label=ai.vonkforge.installation-id={installation_id}"),
             format!("volume={}", cache.display()),
         ] {
-            let output = self.run_docker(&[
+            let mut arguments = vec![
                 "container".to_owned(),
                 "ls".to_owned(),
-                "--all".to_owned(),
                 "--quiet".to_owned(),
                 "--no-trunc".to_owned(),
                 "--filter".to_owned(),
                 filter,
-            ])?;
+            ];
+            if all {
+                arguments.insert(2, "--all".to_owned());
+            }
+            let output = self.run_docker(&arguments)?;
             // Only a successful empty exact observation proves absence. A
             // container ID, malformed bytes, or failed observation preserves
             // the cache for a subsequent bounded owning-operation attempt.
             if !output.success
                 || output.exit_code != Some(0)
                 || output.stdout.len() as u64 > MAX_COMMAND_OUTPUT_BYTES
-                || !output.stdout.iter().all(u8::is_ascii_whitespace)
             {
                 return Err(OperationError::InstallationReconciliationStorageUnavailable);
             }
+            let listing =
+                std::str::from_utf8(&output.stdout).map_err(|_| OperationError::InvalidArtifact)?;
+            if !listing.trim().is_empty() {
+                if !listing.lines().all(|id| lower_hex(id, 64)) {
+                    return Err(OperationError::InvalidArtifact);
+                }
+                return Ok(true);
+            }
         }
-        Ok(())
+        Ok(false)
     }
 }
 
