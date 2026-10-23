@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -164,6 +164,8 @@ class _RecoveryJobQueue(Protocol):
 
 
 class _RecoveryRoutes(Protocol):
+    def decide_publication[T](self, decide: Callable[[Session], T]) -> T: ...
+
     def publication_transaction(self) -> AbstractContextManager[Session]: ...
 
     def withdraw_runs(

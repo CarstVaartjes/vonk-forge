@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from contextlib import AbstractContextManager, suppress
+from contextlib import AbstractContextManager, ExitStack, suppress
 from datetime import datetime, timedelta
 
 from sqlalchemy import select
@@ -16,6 +16,7 @@ from vonk_agent_protocol import (
     RoutePublicationState,
     RunState,
     SecurityRefusalError,
+    UnknownOutcomeError,
     WaitReason,
 )
 from vonk_agent_protocol import RouteState as RunRouteState
@@ -35,6 +36,7 @@ from ..models import (
     RoutePublication,
     RoutePublicationOwner,
 )
+from ..optimistic import Stale, transition
 from ..persisted_waits import schedule_wait
 from ..presence import ManagementAddressPolicy
 from ..recipe_execution_contract import RouteWithdrawalFollowUp
@@ -50,6 +52,7 @@ from . import withdrawal as withdrawal_steps
 from .publisher import AtomicRecipeRoutePublisher
 from .shared import (
     _LOGGER,
+    _SQLITE_ROUTE_PUBLICATION_LOCK,
     RECIPE_ROUTE_CLAIM_ID,
     RecipeRecoveryDeadlineError,
     RecipeRouteError,
@@ -64,6 +67,7 @@ from .shared import (
     _RecipeCandidate,
     _RecipeWithdrawal,
     _RecoveryPublication,
+    lock_route_publication_owner_in_session,
     publication_disposition,
     route_publication_transaction,
 )
@@ -101,6 +105,8 @@ class RecipeRouteService:
                 raise
             except RecipeRouteNotReady as error:
                 last = error
+            except UnknownOutcomeError:
+                raise
             except Exception as error:  # noqa: BLE001
                 last = error
         else:
@@ -118,8 +124,12 @@ class RecipeRouteService:
 
         committed_error: RecipeRouteError | None = None
         publication: _Publication | None = None
+
         # One owner try: the worker paces a held owner across its passes.
-        with self.publication_transaction(pauses=()) as session:
+        def decide(session: Session) -> _Publication | None:
+            nonlocal committed_error
+            committed_error = None
+            publication: _Publication | None = None
             try:
                 publication = self._claim_run_publication(session, run_id)
                 owner = session.get(RoutePublicationOwner, 1)
@@ -129,6 +139,9 @@ class RecipeRouteService:
                     owner.reconciliation_deadline_at = None
             except RecipeRecoveryDeadlineError as error:
                 committed_error = error
+            return publication
+
+        publication = self.decide_publication(decide)
         if committed_error is not None:
             raise committed_error
         assert publication is not None
@@ -138,6 +151,26 @@ class RecipeRouteService:
         self, pauses: Sequence[float] = REQUEST_PAUSES
     ) -> AbstractContextManager[Session]:
         return route_publication_transaction(self.sessions, pauses)
+
+    def decide_publication[T](self, decide: Callable[[Session], T]) -> T:
+        """Re-plan the complete database decision; publish effects only afterwards."""
+        with ExitStack() as stack:
+            if self.sessions.kw["bind"].dialect.name == "sqlite":
+                if not _SQLITE_ROUTE_PUBLICATION_LOCK.acquire(blocking=False):
+                    raise RecipeRouteOwnerBusy("route publication owner is busy")
+                stack.callback(_SQLITE_ROUTE_PUBLICATION_LOCK.release)
+
+            def owned(session: Session) -> T:
+                lock_route_publication_owner_in_session(session)
+                return decide(session)
+
+            outcome = transition(self.sessions, owned)
+        if isinstance(outcome, Stale):
+            raise UnknownOutcomeError(
+                "RecipeRun publication changed; re-plan on the next reconcile tick",
+                reason=WaitReason.SCOPE_CHANGED,
+            )
+        return outcome.value
 
     def _claim_in_session(self, session: Session, digest: str) -> _Claim:
         """Claim the next publication ordinal inside the owner-locked transaction.
@@ -204,6 +237,10 @@ class RecipeRouteService:
                     raise
                 except RecipeRouteNotReady as error:
                     last = error
+                except UnknownOutcomeError as error:
+                    if error.typed_reason == WaitReason.SCOPE_CHANGED:
+                        raise
+                    last = error
                 except Exception as error:  # noqa: BLE001
                     last = error
             assert last is not None
@@ -249,14 +286,20 @@ class RecipeRouteService:
         return generation
 
     def _record_failure(self, publication: _Publication, error: Exception) -> None:
-        if publication.fail is None:
+        fail = publication.fail
+        if fail is None:
             raise error
         committed_error: RecipeRouteError | None = None
-        with self.publication_transaction() as session:
+
+        def decide(session: Session) -> None:
+            nonlocal committed_error
+            committed_error = None
             try:
-                publication.fail(session, error)
+                fail(session, error)
             except RecipeRecoveryDeadlineError as failure:
                 committed_error = failure
+
+        self.decide_publication(decide)
         if committed_error is not None:
             self._settle_failed_run_withdrawal(committed_error.run_id)
             raise committed_error from error
@@ -278,7 +321,10 @@ class RecipeRouteService:
         self, publication: _Publication, generation: LiteLlmGeneration
     ) -> None:
         committed_error: RecipeRouteError | None = None
-        with self.publication_transaction() as session:
+
+        def decide(session: Session) -> None:
+            nonlocal committed_error
+            committed_error = None
             if not self._claim_current(session, publication.claim):
                 raise RecipeRouteSuperseded("route publication was superseded")
             pending = session.get(RoutePublication, RECIPE_ROUTE_CLAIM_ID)
@@ -288,6 +334,8 @@ class RecipeRouteService:
                 publication.complete(session, generation)
             except RecipeRecoveryDeadlineError as failure:
                 committed_error = failure
+
+        self.decide_publication(decide)
         if committed_error is not None:
             self._settle_failed_run_withdrawal(committed_error.run_id)
             raise committed_error
@@ -315,7 +363,9 @@ class RecipeRouteService:
     def _claim_run_publication_once(
         self, session: Session, run_id: str
     ) -> _Publication:
-        run = session.get(RecipeRun, run_id, with_for_update=True)
+        run = session.get(RecipeRun, run_id)
+        if run is not None:
+            run.version += 1
         if run is None:
             raise RecipeRouteSuperseded(
                 "recipe run is no longer present", run_id=run_id
@@ -360,7 +410,9 @@ class RecipeRouteService:
         candidate: _RecipeCandidate,
         generation: LiteLlmGeneration,
     ) -> None:
-        run = session.get(RecipeRun, run_id, with_for_update=True)
+        run = session.get(RecipeRun, run_id)
+        if run is not None:
+            run.version += 1
         if run is None or run.state != RunState.RUNNING:
             # The exact activated bundle is still recorded; missing bookkeeping
             # cannot roll back completion or hold the next publisher's claim.
@@ -390,7 +442,9 @@ class RecipeRouteService:
             recovery.job.result = {**result, "recovery_route_published": True}
             recovery.job.updated_at = self._clock()
         for included_id in sorted(candidate.included):
-            included = session.get(RecipeRun, included_id, with_for_update=True)
+            included = session.get(RecipeRun, included_id)
+            if included is not None:
+                included.version += 1
             if included is None or included.state != RunState.RUNNING:
                 publication = session.get(RoutePublication, RECIPE_ROUTE_AUTHORITY_ID)
                 if publication is not None:
@@ -412,7 +466,9 @@ class RecipeRouteService:
         run_id: str,
         publication_error: Exception,
     ) -> None:
-        run = session.get(RecipeRun, run_id, with_for_update=True)
+        run = session.get(RecipeRun, run_id)
+        if run is not None:
+            run.version += 1
         recovery = self._recovery_context(session, run) if run is not None else None
         if run is None or recovery is None:
             raise publication_error
@@ -620,6 +676,8 @@ class RecipeRouteService:
                 raise
             except RecipeRouteNotReady:
                 continue
+            except UnknownOutcomeError:
+                raise
             except Exception as error:  # noqa: BLE001 - local observation ends within this budget
                 _LOGGER.warning(
                     "route reconciliation observation is unavailable: %s", error

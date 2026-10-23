@@ -49,6 +49,7 @@ from ..models import (
 from ..models import AgentOperation as StoredOperation
 from ..operation_contract import validate_progress_update
 from ..operation_progress import progress_document, sample_progress, stored_progress
+from ..optimistic import Stale, transition
 from ..own_cleanup import CLEANUP_KINDS
 from .aggregation import _aggregate_parent, _aggregate_parent_state
 from .claim import _claim_once
@@ -587,7 +588,8 @@ class AgentJobService:
         source: AgentSource | None = None,
     ) -> None:
         self._mark_started()
-        with self._sessions.begin() as session:
+
+        def decide(session: Session) -> None:
             operation, attempt = self._active(
                 session,
                 fence,
@@ -712,6 +714,13 @@ class AgentJobService:
                 self._result_consumer(session, operation, attempt, message)
             self._aggregate_parent(session, operation.parent_job_id)
             refresh_queue_waits(session, now, node_id=operation.node_id)
+
+        outcome = transition(self._sessions, decide)
+        if isinstance(outcome, Stale):
+            raise UnknownOutcomeError(
+                "RecipeRun changed; re-plan on the next reconcile tick",
+                reason=WaitReason.SCOPE_CHANGED,
+            )
         # A result consumer can atomically make the next durable recipe phase
         # queueable; wake long-polling agents only after that transaction commits.
         self.notify_available()

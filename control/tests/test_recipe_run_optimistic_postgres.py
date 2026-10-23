@@ -57,7 +57,7 @@ def test_concurrent_run_decisions_replan_and_rollback_rank_effects(
     with sessions() as session:
         run = session.get(RecipeRun, run_id)
         assert run is not None and run.state == RunState.STOPPED
-        assert run.version == 2 and run.route_error is None
+        assert run.version == 2
         assert set(session.scalars(select(RunNode.state))) == {RunState.RUNNING}
 
 

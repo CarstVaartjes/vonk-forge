@@ -14,6 +14,7 @@ from vonk_agent_protocol import (
     RoutePublicationState,
     RunState,
     SecurityRefusalError,
+    UnknownOutcomeError,
     WaitReason,
 )
 from vonk_agent_protocol import RouteState as RunRouteState
@@ -129,11 +130,13 @@ def _withdraw_runs_once(
     reason: str | None = None,
     before_withdrawal: Callable[[Session], None] | None = None,
 ) -> LiteLlmGeneration:
-    with self.publication_transaction() as session:
+    def decide(session: Session) -> _Publication:
 
         def record_reason(session: Session) -> None:
             for run_id in sorted(run_ids):
-                run = session.get(RecipeRun, run_id, with_for_update=True)
+                run = session.get(RecipeRun, run_id)
+                if run is not None:
+                    run.version += 1
                 if run is not None and run.state == RunState.RUNNING and reason:
                     run.route_error = reason[:512]
 
@@ -145,6 +148,9 @@ def _withdraw_runs_once(
             withdrawal,
             after=record_reason if reason else None,
         )
+        return publication
+
+    publication = self.decide_publication(decide)
     return self._execute(publication)
 
 
@@ -246,7 +252,9 @@ def _withdrawal_publication(
     # claim, so a newer publication that supersedes this one already
     # excludes these runs and no withdrawal is ever lost.
     for run_id in sorted(withdrawal.excluded):
-        run = session.get(RecipeRun, run_id, with_for_update=True)
+        run = session.get(RecipeRun, run_id)
+        if run is not None:
+            run.version += 1
         if run is not None:
             run.route_state = RunRouteState.WITHDRAWN
             run.updated_at = self._clock()
@@ -284,7 +292,9 @@ def _record_withdrawal_in_session(
         ),
     )
     for included_id in sorted(candidate.included):
-        included = session.get(RecipeRun, included_id, with_for_update=True)
+        included = session.get(RecipeRun, included_id)
+        if included is not None:
+            included.version += 1
         if included is not None:
             included.route_state = RunRouteState.PUBLISHED
             included.route_generation = generation.generation
@@ -294,7 +304,9 @@ def _record_withdrawal_in_session(
             schedule_wait(included, None)
             included.updated_at = self._clock()
     for run_id in sorted(withdrawal.excluded):
-        run = session.get(RecipeRun, run_id, with_for_update=True)
+        run = session.get(RecipeRun, run_id)
+        if run is not None:
+            run.version += 1
         if run is None:
             log_event(
                 _LOGGER,
@@ -321,8 +333,12 @@ def maintain(self) -> bool:
     last: Exception | None = None
     for _attempt in bounded_attempts():
         try:
-            with self.publication_transaction() as session:
+
+            def decide(session: Session) -> bool | _Publication:
                 step = self._maintenance_step_in_session(session)
+                return step
+
+            step = self.decide_publication(decide)
             if isinstance(step, bool):
                 return step
             self._execute(step)
@@ -331,6 +347,8 @@ def maintain(self) -> bool:
             raise
         except RecipeRouteNotReady as error:
             last = error
+        except UnknownOutcomeError:
+            raise
         except Exception as error:  # noqa: BLE001
             last = error
     assert last is not None
@@ -351,13 +369,11 @@ def _restore_abandoned_stop_withdrawals(
     now = _aware(self._clock())
     restored = False
     for run in session.scalars(
-        select(RecipeRun)
-        .where(
+        select(RecipeRun).where(
             RecipeRun.state == RunState.RUNNING,
             RecipeRun.route_state == RunRouteState.WITHDRAWN,
             RecipeRun.route_error == STOP_WITHDRAWAL_PENDING,
         )
-        .with_for_update(of=RecipeRun)
     ):
         accepted_stop = session.scalar(
             select(Job.id)
@@ -413,7 +429,6 @@ def _maintenance_step_in_session(
                 )
             )
             .order_by(RecipeRun.created_at, RecipeRun.id)
-            .with_for_update(of=RecipeRun)
         )
     )
     recovering = tuple(
@@ -425,7 +440,6 @@ def _maintenance_step_in_session(
                 RecipeRun.route_error.startswith(_HEALTH_RECOVERY_ERROR),
             )
             .order_by(RecipeRun.created_at, RecipeRun.id)
-            .with_for_update(of=RecipeRun)
         )
     )
     for run in recovering:
@@ -479,7 +493,7 @@ def _maintenance_step_in_session(
             run_id=error.run_id,
             reason=str(error),
         )
-        if session.get(RecipeRun, error.run_id, with_for_update=True) is None:
+        if session.get(RecipeRun, error.run_id) is None:
             return False
         withdrawal = self.prepare_withdrawal_in_session(
             session, frozenset({error.run_id})
@@ -527,7 +541,9 @@ def _maintenance_step_in_session(
                 session, generation, state=RoutePublicationState.COMPLETED
             )
             for run_id in sorted(candidate.included):
-                run = session.get(RecipeRun, run_id, with_for_update=True)
+                run = session.get(RecipeRun, run_id)
+                if run is not None:
+                    run.version += 1
                 if run is not None:
                     run.route_generation = generation.generation
                     run.route_digest = generation.route_digest

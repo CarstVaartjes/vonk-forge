@@ -21,6 +21,8 @@ from vonk_agent_protocol import (
     RouteState,
     RunState,
     UnknownError,
+    UnknownOutcomeError,
+    WaitReason,
 )
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_control import recipe_routes
@@ -850,8 +852,16 @@ def test_disjoint_sqlite_withdrawals_serialize_one_global_candidate(
     with ThreadPoolExecutor(max_workers=2) as pool:
         futures = [pool.submit(withdraw, run_id) for run_id in (first_run, second_run)]
         for future in futures:
-            future.result(timeout=30)
+            try:
+                future.result(timeout=30)
+            except UnknownOutcomeError as error:
+                assert isinstance(error, RecipeRouteOwnerBusy) or (
+                    error.typed_reason == WaitReason.SCOPE_CHANGED
+                )
 
+    # A contended decision yields; the next reconcile tick reads current intent.
+    for run_id in (first_run, second_run):
+        service.withdraw_run(run_id)
     with service.sessions() as session:
         assert [
             _recipe_run(session, run_id).route_state

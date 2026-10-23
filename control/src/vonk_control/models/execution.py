@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from typing import ClassVar
 
 from pydantic import JsonValue
 from sqlalchemy import (
@@ -19,7 +20,7 @@ from sqlalchemy import (
     UniqueConstraint,
     text,
 )
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, MappedColumn, mapped_column
 from vonk_agent_protocol import (
     ArtifactPreparation,
     InstallationNodeState,
@@ -151,6 +152,10 @@ STOPPABLE_RUN_STATES = ACTIVE_RUN_STATES | {RunState.LOST}
 
 class RecipeRun(Base):
     __tablename__ = "recipe_runs"
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    __mapper_args__: ClassVar[dict[str, MappedColumn[int]]] = {
+        "version_id_col": version
+    }
     wait_evidence: Mapped[WaitEvidence | Residue | None] = wait_evidence_column(
         __tablename__
     )

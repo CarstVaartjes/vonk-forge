@@ -1,4 +1,4 @@
-"""New versioned Job locks fail; existing owners have named follow-up sites."""
+"""New versioned owner locks fail; existing owners have named follow-up sites."""
 
 from __future__ import annotations
 
@@ -175,10 +175,10 @@ FOLLOW_UP_JOB_LOCKS: dict[str, tuple[str, ...]] = {
         "session.query(Job).update(values)",
     ],
 )
-def test_guard_rejects_versioned_owner_locks(statement: str) -> None:
-    assert _locks(
-        "from vonk_control.models import Job as Owner\n" + statement, frozenset({"Job"})
-    )
+@pytest.mark.parametrize("owner", ["Job", "RecipeRun"])
+def test_guard_rejects_versioned_owner_locks(statement: str, owner: str) -> None:
+    statement = statement.replace("Job", owner)
+    assert _locks(f"from vonk_control.models import {owner} as Owner\n" + statement)
 
 
 @pytest.mark.parametrize(
@@ -191,15 +191,16 @@ def test_guard_rejects_versioned_owner_locks(statement: str) -> None:
         "select(AgentNode).with_for_update()",
     ],
 )
-def test_guard_allows_claims_and_other_owners(statement: str) -> None:
-    assert not _locks(statement, frozenset({"Job"}))
+@pytest.mark.parametrize("owner", ["Job", "RecipeRun"])
+def test_guard_allows_claims_and_other_owners(statement: str, owner: str) -> None:
+    assert not _locks(statement.replace("Job", owner))
 
 
 def test_unconverted_job_owners_are_named_for_follow_up() -> None:
     unlisted = [
         str(path.relative_to(ROOT))
         for path in sorted((ROOT / "control/src").rglob("*.py"))
-        if _locks(path.read_text())
+        if _locks(path.read_text(), frozenset({"Job"}))
         and str(path.relative_to(ROOT)) not in FOLLOW_UP_JOB_LOCKS
     ]
     assert not unlisted, "Unconverted Job owners: " + ", ".join(unlisted)
@@ -208,8 +209,9 @@ def test_unconverted_job_owners_are_named_for_follow_up() -> None:
 @pytest.mark.parametrize(
     "path", ["control/src/vonk_control/new_owner.py", *FOLLOW_UP_JOB_LOCKS]
 )
-def test_new_locks_fail_even_in_follow_up_files(path: str) -> None:
-    source = "select(Job)\nselect(Job).with_for_update()\n"
+@pytest.mark.parametrize("owner", ["Job", "RecipeRun"])
+def test_new_locks_fail_even_in_follow_up_files(path: str, owner: str) -> None:
+    source = f"select({owner})\nselect({owner}).with_for_update()\n"
     assert not check_source(path, source, {1}, modes=("optimistic",))
     assert check_source(path, source, {2}, modes=("optimistic",))
 

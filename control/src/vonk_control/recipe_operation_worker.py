@@ -15,6 +15,8 @@ from vonk_agent_protocol import (
     RouteState,
     RunState,
     SecurityRefusalError,
+    UnknownOutcomeError,
+    WaitReason,
 )
 
 from . import job_states
@@ -23,6 +25,7 @@ from .failure_classification import error_detail
 from .lifecycle.recipe_operation import RecipeOperationAdapter
 from .logging import log_event
 from .models import Job, RecipeRun, RunNode
+from .optimistic import Stale, transition
 from .persisted_waits import schedule_wait
 from .recipe_execution_contract import (
     RecipeExecutionContractError,
@@ -272,8 +275,9 @@ class RecipeOperationWorker:
         """
 
         now = self._clock()
-        with self._sessions.begin() as session:
-            run = session.get(RecipeRun, run_id, with_for_update=True)
+
+        def decide(session: Session) -> None:
+            run = session.get(RecipeRun, run_id)
             if run is None or run.route_state != RouteState.PENDING:
                 return
             step = schedule(
@@ -316,21 +320,36 @@ class RecipeOperationWorker:
                         job.updated_at = now
             run.updated_at = now
 
+        outcome = transition(self._sessions, decide)
+        if isinstance(outcome, Stale):
+            raise UnknownOutcomeError(
+                "RecipeRun changed; re-plan on the next reconcile tick",
+                reason=WaitReason.SCOPE_CHANGED,
+            )
+
     def _end_publication(self, run_id: str, error: BaseException) -> None:
-        with self._sessions.begin() as session:
-            run = session.get(RecipeRun, run_id, with_for_update=True)
+        def decide(session: Session) -> None:
+            run = session.get(RecipeRun, run_id)
             if run is not None and run.route_state == RouteState.PENDING:
                 run.route_state = RouteState.WITHDRAWN
                 schedule_wait(run, None)
                 run.route_error = str(error)[:512]
                 run.updated_at = self._clock()
 
+        outcome = transition(self._sessions, decide)
+        if isinstance(outcome, Stale):
+            raise UnknownOutcomeError(
+                "RecipeRun changed; re-plan on the next reconcile tick",
+                reason=WaitReason.SCOPE_CHANGED,
+            )
+
     def _expire_initial_observation_deadline(self, run_id: str | None = None) -> bool:
         now = self._clock()
         if now.tzinfo is None or now.utcoffset() is None:
             raise InvalidValue("recipe operation worker clock must be timezone-aware")
         now = now.astimezone(UTC)
-        with self._sessions.begin() as session:
+
+        def decide(session: Session) -> bool:
             runs = tuple(
                 session.scalars(
                     select(RecipeRun)
@@ -346,7 +365,6 @@ class RecipeOperationWorker:
                         ),
                     )
                     .order_by(RecipeRun.created_at, RecipeRun.id)
-                    .with_for_update(of=RecipeRun)
                 )
             )
             if not runs:
@@ -405,6 +423,15 @@ class RecipeOperationWorker:
                 run.route_error = "initial exact observation deadline elapsed"
                 run.updated_at = now
                 return True
+            return False
+
+        outcome = transition(self._sessions, decide)
+        if isinstance(outcome, Stale):
+            raise UnknownOutcomeError(
+                "RecipeRun changed; re-plan on the next reconcile tick",
+                reason=WaitReason.SCOPE_CHANGED,
+            )
+        return outcome.value
         return False
 
 

@@ -92,9 +92,10 @@ def _candidate_once(
         )
         .order_by(RecipeRun.alias, RecipeRun.id)
     )
-    if lock:
-        run_statement = run_statement.with_for_update(of=RecipeRun)
     runs = tuple(session.scalars(run_statement))
+    if lock:
+        for run in runs:
+            run.version += 1
     # The newest accepted intent owns an alias. An explicit publication takes
     # precedence over older persisted projections, including damaged ones.
     owners: dict[str, RecipeRun] = {}

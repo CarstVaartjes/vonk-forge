@@ -1,4 +1,4 @@
-"""Versioned Job writes must retain their fence; claims alone may lock.
+"""Versioned Job and RecipeRun writes must retain their fence; claims alone may lock.
 
 Report lock syntax and owner references so a new chained lock or changed target
 cannot hide behind an unchanged opening line. Editing an existing predicate is
@@ -9,13 +9,11 @@ from __future__ import annotations
 
 import ast
 
-KIND = (
-    "versioned Job lock or bulk write; use an optimistic decision or SKIP LOCKED claim"
-)
+KIND = "versioned owner lock or bulk write; use an optimistic decision or SKIP LOCKED claim"
 
 
 def scan_source(
-    source: str, versioned: frozenset[str] = frozenset({"Job"})
+    source: str, versioned: frozenset[str] = frozenset({"Job", "RecipeRun"})
 ) -> list[int]:
     tree = ast.parse(source)
     aliases = {
