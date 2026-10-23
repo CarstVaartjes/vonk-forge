@@ -16,7 +16,6 @@ from vonk_agent_protocol import (
     RoutePublicationState,
     RunState,
     SecurityRefusalError,
-    UnknownOutcomeError,
     WaitReason,
 )
 from vonk_agent_protocol import RouteState as RunRouteState
@@ -65,6 +64,7 @@ from .shared import (
     _claim_ordinal,
     _Publication,
     _RecipeCandidate,
+    _RecipeRunContended,
     _RecipeWithdrawal,
     _RecoveryPublication,
     lock_route_publication_owner_in_session,
@@ -101,12 +101,10 @@ class RecipeRouteService:
             try:
                 publication = self._claim_run(run_id)
                 break
-            except (SecurityRefusalError, RecipeRouteOwnerBusy):
+            except (SecurityRefusalError, RecipeRouteOwnerBusy, _RecipeRunContended):
                 raise
             except RecipeRouteNotReady as error:
                 last = error
-            except UnknownOutcomeError:
-                raise
             except Exception as error:  # noqa: BLE001
                 last = error
         else:
@@ -175,9 +173,8 @@ class RecipeRouteService:
 
             outcome = transition(self.sessions, owned)
         if isinstance(outcome, Stale):
-            raise UnknownOutcomeError(
-                "RecipeRun publication changed; re-plan on the next reconcile tick",
-                reason=WaitReason.SCOPE_CHANGED,
+            raise _RecipeRunContended(
+                "RecipeRun publication changed; re-plan on the next reconcile tick"
             )
         return outcome.value
 
@@ -242,13 +239,9 @@ class RecipeRouteService:
             for _attempt in bounded_attempts():
                 try:
                     return self._execute_once(publication)
-                except SecurityRefusalError:
+                except (SecurityRefusalError, _RecipeRunContended):
                     raise
                 except RecipeRouteNotReady as error:
-                    last = error
-                except UnknownOutcomeError as error:
-                    if error.typed_reason == WaitReason.SCOPE_CHANGED:
-                        raise
                     last = error
                 except Exception as error:  # noqa: BLE001
                     last = error
@@ -681,12 +674,10 @@ class RecipeRouteService:
         for _attempt in bounded_attempts():
             try:
                 return self._maintain_once()
-            except (SecurityRefusalError, RecipeRouteOwnerBusy):
+            except (SecurityRefusalError, RecipeRouteOwnerBusy, _RecipeRunContended):
                 raise
             except RecipeRouteNotReady:
                 continue
-            except UnknownOutcomeError:
-                raise
             except Exception as error:  # noqa: BLE001 - local observation ends within this budget
                 _LOGGER.warning(
                     "route reconciliation observation is unavailable: %s", error

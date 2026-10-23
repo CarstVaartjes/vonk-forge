@@ -14,7 +14,6 @@ from vonk_agent_protocol import (
     RoutePublicationState,
     RunState,
     SecurityRefusalError,
-    UnknownOutcomeError,
     WaitReason,
 )
 from vonk_agent_protocol import RouteState as RunRouteState
@@ -52,6 +51,7 @@ from .shared import (
     _aware,
     _Publication,
     _RecipeCandidate,
+    _RecipeRunContended,
     _RecipeWithdrawal,
 )
 
@@ -344,12 +344,10 @@ def maintain(self) -> bool:
                 return step
             self._execute(step)
             return True
-        except SecurityRefusalError:
+        except (SecurityRefusalError, _RecipeRunContended):
             raise
         except RecipeRouteNotReady as error:
             last = error
-        except UnknownOutcomeError:
-            raise
         except Exception as error:  # noqa: BLE001
             last = error
     assert last is not None
