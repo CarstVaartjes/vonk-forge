@@ -96,19 +96,14 @@ def scan_tree(tree: ast.Module, *, path: str) -> list[int]:
             for child in ast.iter_child_nodes(parent)
         }
         for call in ast.walk(function):
-            if (
-                path == "control/src/vonk_control/library_projection/views.py"
-                and isinstance(call, ast.Call)
-                and _tail(call.func)
-                in {
-                    "_model_storage",
-                    "model_storage",
-                    "inventory",
-                    "reconcile_storage",
-                    "_stored_object",
-                    "lstat",
-                }
-            ):
+            if isinstance(call, ast.Call) and _tail(call.func) in {
+                "_model_storage",
+                "model_storage",
+                "inventory",
+                "reconcile_storage",
+                "_stored_object",
+                "lstat",
+            }:
                 sites.append(call.lineno)
             if (
                 isinstance(call, ast.Call)

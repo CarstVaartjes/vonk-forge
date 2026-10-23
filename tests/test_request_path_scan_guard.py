@@ -136,15 +136,24 @@ def test_controller_sessions_end_before_suspension_and_api_reads_buffer():
         "lstat",
     ],
 )
-def test_library_storage_walks_are_rejected_on_added_lines(provider):
+@pytest.mark.parametrize(
+    "path",
+    [
+        "control/src/vonk_control/library_projection/views.py",
+        "control/src/vonk_control/library_projection/catalog.py",
+        "control/src/vonk_control/library_projection/local_state.py",
+        "control/src/vonk_control/model_cache_api.py",
+        "control/src/vonk_control/api/example.py",
+    ],
+)
+def test_library_storage_walks_are_rejected_on_added_lines(provider, path):
     """A new direct storage provider in a view must fail the patch gate."""
     from control.tests.added_line_guards import check_source
 
-    path = "control/src/vonk_control/library_projection/views.py"
     source = f"def models(self):\n    return self.{provider}()\n"
     assert check_source(path, source, {2}, modes=("request-scans",))
     assert not check_source(path, source, {1}, modes=("request-scans",))
     assert not scan_tree(
-        ast.parse(source),
+        ast.parse(source.replace("def models", "def refresh_catalog")),
         path="control/src/vonk_control/library_projection/catalog.py",
     )

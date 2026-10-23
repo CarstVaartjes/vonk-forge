@@ -39,7 +39,7 @@ from .machine_states import (
 from .model_cache_contract import (
     ModelCacheOperationState,
     ModelCacheUsage,
-    ModelStorageObservationState,
+    ModelStorageObservation,
 )
 from .run_switch_contract import RunSwitchReason, SparkFit, SparkGroup
 from .strict_json import StrictModel
@@ -224,11 +224,6 @@ class LibraryModelProjection(StrictModel):
     usage: list[Text64] = Field(max_length=64)
     resources: LibraryResourceProjection
     cache_usage: ModelCacheUsage | None = None
-    # None means storage has not yet been observed; reads never compute it.
-    storage_state: ModelStorageObservationState = (
-        ModelStorageObservationState.NOT_OBSERVED
-    )
-    storage_observed_at: datetime | None = None
     local: LibraryLocalState
     updated_at: datetime
     # Alignment is declared by the recipes that serve this model, so a model
@@ -277,11 +272,7 @@ class LibraryFilterValues(StrictModel):
     fits_fleet: bool | None = None
 
 
-class ModelLibraryResponse(StrictModel):
-    storage_state: ModelStorageObservationState = (
-        ModelStorageObservationState.NOT_OBSERVED
-    )
-    storage_observed_at: datetime | None = None
+class ModelLibraryResponse(ModelStorageObservation):
     catalog_observed_at: datetime | None = None
     generated_at: datetime
     library: LibraryRelease | None = None
@@ -292,7 +283,8 @@ class ModelLibraryResponse(StrictModel):
     freshness_policy: FreshnessPolicy
 
 
-class ModelDetailResponse(LibraryModelProjection):
+class ModelDetailResponse(LibraryModelProjection, ModelStorageObservation):
+    generated_at: datetime
     document: ModelDefinition
 
 

@@ -31,6 +31,7 @@ from .integer_domains import MAX_DATABASE_INTEGER
 from .machine_states import ModelFileStateField
 from .operation_blockers import OperationBlocker
 from .operation_contract import AvailabilityOperationFailure, OperationProgress
+from .settings import RECIPE_LIBRARY_SYNC_INTERVAL_SECONDS
 from .strict_json import StrictJSONModel, StrictModel, read_stored_model
 from .wait_contract import QueueWait
 
@@ -124,23 +125,35 @@ class ModelCacheUsage(StrictModel):
     also referenced by another lineage. No hashes or document estimates.
     """
 
-    cached: bool = False
     disk_bytes: int = Field(ge=0)
     unique_bytes: int = Field(ge=0)
     shared_bytes: int = Field(ge=0)
     retained_revisions: list[RetainedModelRevision] = Field(default_factory=list)
 
 
-class ModelStorageObservationState(StrEnum):
-    NOT_OBSERVED = "not_observed"
-    OBSERVED = "observed"
+class ModelStorageObservationReason(StrEnum):
+    FAILED = "storage_observation_failed"
+    DEADLINE_EXCEEDED = "storage_observation_deadline_exceeded"
+    STALE = "storage_observation_stale"
+
+
+class ModelStorageObservation(StrictModel):
+    """One response-level observation; availability is owned by DB local state."""
+
+    storage_observed_at: AwareDatetime | None = None
+    storage_reason: ModelStorageObservationReason | None = None
+    storage_error_type: str | None = None
+    storage_refresh_seconds: int = RECIPE_LIBRARY_SYNC_INTERVAL_SECONDS
+    storage_deadline_at: AwareDatetime | None = None
 
 
 class ModelStorageSnapshot(StrictModel):
     """Disposable storage observation, atomically published by the Library refresh."""
 
-    observed_at: AwareDatetime
-    usage: dict[Digest, ModelCacheUsage]
+    observation: ModelStorageObservation = Field(
+        default_factory=ModelStorageObservation
+    )
+    usage: dict[Digest, ModelCacheUsage] = Field(default_factory=dict)
 
 
 class StrippedStrictModel(StrictJSONModel):

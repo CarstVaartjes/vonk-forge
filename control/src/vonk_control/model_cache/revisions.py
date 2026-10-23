@@ -422,7 +422,7 @@ class RevisionsMixin:
         """Observe storage outside request handling for the disposable Library index."""
         cache = cast("ModelCacheService", self)
         with cache._session() as session:
-            sets, bindings = cache._model_revision_sets(session)
+            sets, _ = cache._model_revision_sets(session)
             catalog_lineages = list(
                 session.execute(
                     select(
@@ -439,7 +439,6 @@ class RevisionsMixin:
             )
         lineages: dict[str, tuple[str, str]] = {}
         objects: dict[str, int] = {}
-        verified: dict[str, int] = {}
         holders: dict[str, set[tuple[str, str]]] = defaultdict(set)
         content_sets: dict[str, set[str]] = defaultdict(set)
         object_sets: dict[str, set[str]] = defaultdict(set)
@@ -460,11 +459,6 @@ class RevisionsMixin:
                         continue
                     if stat.S_ISREG(metadata.st_mode):
                         objects[spec.sha256] = metadata.st_size
-                        if (
-                            cache._stored_object(spec.sha256, metadata.st_size)
-                            is not None
-                        ):
-                            verified[spec.sha256] = metadata.st_size
                 if spec.sha256 in objects:
                     holders[spec.sha256].add(lineage)
                     object_sets[spec.sha256].add(row.artifact_set_sha256)
@@ -516,21 +510,9 @@ class RevisionsMixin:
                         )
                     )
                 retained.add(revision.content_digest)
-        cached_contents = {
-            content
-            for _, row, manifest in sets
-            if row.state == ModelCacheSetState.CACHED
-            and all(
-                verified.get(spec.sha256) == spec.expected_bytes
-                for spec in manifest.artifacts
-            )
-            for content in bindings[row.artifact_set_sha256]
-        }
         result: dict[str, ModelCacheUsage] = {}
         for content, publisher, slug in catalog_lineages:
             held = usage.get((publisher, slug))
             if held is not None:
-                projected = held.model_copy()
-                projected.cached = content in cached_contents
-                result[content] = projected
+                result[content] = held.model_copy()
         return result

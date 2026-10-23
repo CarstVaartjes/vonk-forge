@@ -32,6 +32,7 @@ from ..failure_evidence import FailureEvidenceService
 from ..gateway_keys import GatewayKeyError, GatewayKeyService, keep_default_key
 from ..gateway_route_grants import recipe_key_routes
 from ..library_assessment import LibraryAssessment
+from ..library_projection import LibraryProjection
 from ..logging import configure_controller_logging
 from ..metrics import MetricsRegistry, read_runnable_job_ages
 from ..model_cache import ModelCacheService
@@ -62,6 +63,13 @@ from ..settings import (
 from ..source_bundles import DatabaseSourceBundleStore
 from .application import create_app
 from .common import _LOGGER, SpaFiles
+
+
+def reconcile_library_observations(
+    visual_library: LibraryProjection, gateway_keys: GatewayKeyService
+) -> bool | UnknownError:
+    visual_library.refresh_catalog()
+    return gateway_keys.ensure_default()
 
 
 async def _keep_recipe_routes(
@@ -176,7 +184,6 @@ def production_app(settings: Settings | None = None) -> FastAPI:
         InstallAdmissionService,
     )
     from ..jobs import JobService
-    from ..library_projection import LibraryProjection
     from ..metrics import OperationalMetricsCollector
     from ..models import Job
     from ..operation_api import durable_operation_services
@@ -529,13 +536,6 @@ def production_app(settings: Settings | None = None) -> FastAPI:
     automatic_sync_task: asyncio.Task[None] | None = None
     automatic_sync_stop = asyncio.Event()
 
-    def reconcile_library_observations() -> bool | UnknownError:
-        visual_library.refresh_catalog()
-        default = gateway_keys.ensure_default()
-        if isinstance(default, UnknownError):
-            return default
-        return default
-
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         nonlocal automatic_sync_task
@@ -545,7 +545,9 @@ def production_app(settings: Settings | None = None) -> FastAPI:
                 managed_catalog_sync,
                 automatic_sync_stop,
                 interval_seconds=RECIPE_LIBRARY_SYNC_INTERVAL_SECONDS,
-                reconcile=reconcile_library_observations,
+                reconcile=lambda: reconcile_library_observations(
+                    visual_library, gateway_keys
+                ),
             )
         )
         route_task = asyncio.create_task(

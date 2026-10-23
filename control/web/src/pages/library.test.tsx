@@ -230,3 +230,29 @@ test("projects measured cache bytes and retained owners instead of document down
   expect(snapshot.models[0]!.model_bytes).toBe(12);
   expect(snapshot.models[0]!.cache_usage).toEqual(usage);
 });
+
+test("keeps storage observation age, failure and cadence visible on an empty model page", async () => {
+  // Catches dropping response-level metadata while projecting an empty result.
+  const { ModelStorageObservationReason } = await import("../api/vocabulary.generated");
+  const { LibraryStorageObservation } = await import("./library");
+  const observed = new Date(Date.now() - 120_000).toISOString();
+  const api = {
+    modelLibrary: async () => ({
+      ...modelLibrary,
+      models: [],
+      storage_observed_at: observed,
+      storage_reason: ModelStorageObservationReason.FAILED,
+      storage_error_type: "OSError",
+      storage_refresh_seconds: 73,
+    }),
+    recipeLibrary: async () => recipeLibrary,
+  } as unknown as ControlApi;
+  const snapshot = await loadLibraryView(api, new AbortController().signal);
+  render(<LibraryStorageObservation snapshot={snapshot} />);
+  expect(screen.getByText(/Storage bytes: observed/)).toBeVisible();
+  expect(
+    screen.getByText(new RegExp(`${ModelStorageObservationReason.FAILED}: OSError`)),
+  ).toBeVisible();
+  expect(screen.getByText(/checked every 73s/)).toBeVisible();
+  expect(screen.getByText("2 minutes ago")).toHaveAttribute("dateTime", observed);
+});

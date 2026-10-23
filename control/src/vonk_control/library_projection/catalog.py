@@ -17,7 +17,6 @@ from ..catalog_revision_contract import (
     read_catalog_projection,
 )
 from ..library_contract import (
-    LibraryCacheState,
     LibraryFacetValues,
     LibraryLocalState,
     LibraryModelProjection,
@@ -29,7 +28,6 @@ from ..library_contract import (
 )
 from ..model_cache_contract import (
     CacheManifest,
-    ModelStorageObservationState,
     ModelStorageSnapshot,
 )
 from ..models import CatalogDocumentRevision, ModelCacheSet, RecipeLibrarySyncRun
@@ -82,17 +80,6 @@ def _model_projection(
     local = self._local(
         revision.content_digest, kind=RunSwitchReasonScopeName.MODEL, snapshot=snapshot
     )
-    if usage is not None:
-        if usage.cached:
-            local = local.model_copy(
-                update={"controller": LibraryCacheState.CACHED.value}
-            )
-        elif local.controller == LibraryCacheState.CACHED:
-            local = local.model_copy(
-                update={"controller": LibraryCacheState.NOT_CACHED.value}
-            )
-    elif storage is not None and local.controller == LibraryCacheState.CACHED:
-        local = local.model_copy(update={"controller": LibraryCacheState.UNKNOWN.value})
     return LibraryModelProjection(
         selector=self.selector(document.identity.publisher, document.identity.slug),
         identity=_model_identity(revision, document),
@@ -110,10 +97,6 @@ def _model_projection(
             disk_bytes=None if usage is None else usage.disk_bytes
         ),
         cache_usage=usage,
-        storage_state=ModelStorageObservationState.NOT_OBSERVED
-        if storage is None
-        else ModelStorageObservationState.OBSERVED,
-        storage_observed_at=None if storage is None else storage.observed_at,
         local=local,
         updated_at=_utc(revision.created_at),
         alignment=sorted(set(alignment)),
@@ -277,13 +260,8 @@ def refresh_catalog(self: LibraryProjection, *, observe_storage: bool = True) ->
     )
     self._catalog_snapshot = snapshot
     self._catalog_observed_at = self._clock()
-    if observe_storage and self._model_storage is not None:
-        # Publish only a complete observation. A slow/failed walk leaves the
-        # previous snapshot readable; the automatic refresh owner retries it.
-        usage = self._model_storage()
-        self._model_storage_snapshot = ModelStorageSnapshot(
-            observed_at=self._clock(), usage=dict(usage)
-        )
+    if observe_storage:
+        self._storage_observer.refresh()
 
 
 def _recipe_facet_values(

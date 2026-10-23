@@ -6,8 +6,9 @@ import time
 from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, cast
 
-from pydantic import ValidationError
+from pydantic import TypeAdapter, ValidationError
 from sqlalchemy import String, and_, column, func, or_, select, values
+from sqlalchemy import cast as sql_cast
 from vonk_agent_protocol import (
     AssetAvailability,
     InstallationState,
@@ -17,6 +18,7 @@ from vonk_agent_protocol import (
     adopt_machine_state,
     canonical_message,
 )
+from vonk_forge_contracts.model import ModelReference
 
 from .. import model_cache_states
 from ..api_availability import AVAILABILITY_ERRORS
@@ -49,6 +51,8 @@ from .common import (
     _controller_state,
     _note_unreadable,
 )
+
+_MODEL_REFERENCES = TypeAdapter(list[ModelReference])
 
 if TYPE_CHECKING:
     from .service import LibraryProjection
@@ -160,27 +164,34 @@ def _database_local_state(
         return {}
     operation_payload = ModelCacheOperation.payload
     with self._sessions() as session:
+        requested = (
+            values(column("digest", String), name="requested")
+            .data([(digest,) for digest in sorted(set(digests))])
+            .cte()
+        )
+        # Fetch only the small verified-reference projection, never artifact
+        # manifests. Text membership is a SQL prefilter; canonical references
+        # below decide exact content membership, including shared-set aliases.
+        verified_models = ModelCacheSet.manifest["verified_models"].as_json()
+        reference_match = sql_cast(verified_models, String).contains(requested.c.digest)
         cache_sets = session.execute(
             select(
                 ModelCacheSet.artifact_set_sha256,
                 ModelCacheSet.model_content_sha256,
                 ModelCacheSet.recipe_revision_sha256,
                 ModelCacheSet.state,
+                verified_models,
             ).where(
                 or_(
                     ModelCacheSet.model_content_sha256.in_(digests),
                     ModelCacheSet.recipe_revision_sha256.in_(digests),
+                    select(requested.c.digest).where(reference_match).exists(),
                 )
             )
         ).all()
         # One latest request per requested content identity. An index on creation
         # time and the existing artifact-set index bound the history lookup; UUID
         # is only a deterministic tie-break after durable request time.
-        requested = (
-            values(column("digest", String), name="requested")
-            .data([(digest,) for digest in sorted(set(digests))])
-            .cte()
-        )
         latest = (
             select(
                 ModelCacheOperation.id,
@@ -208,6 +219,7 @@ def _database_local_state(
                         or_(
                             ModelCacheSet.model_content_sha256 == requested.c.digest,
                             ModelCacheSet.recipe_revision_sha256 == requested.c.digest,
+                            reference_match,
                         ),
                     )
                     .exists(),
@@ -321,7 +333,14 @@ def _database_local_state(
     revision_digests = {revision_id: digest for revision_id, digest, _ in revisions}
     head_digests = {digest for _, digest, is_head in revisions if is_head}
     result: dict[str, LibraryLocalState] = {}
-    for _set_id, model_digest, recipe_digest, set_state in cache_sets:
+    reference_digests: dict[str, set[str]] = {}
+    for set_id, model_digest, recipe_digest, set_state, references in cache_sets:
+        bound = (
+            _MODEL_REFERENCES.validate_json(canonical_message(references))
+            if references is not None
+            else []
+        )
+        reference_digests[set_id] = {reference.content_sha256 for reference in bound}
         controller = _controller_state(
             {
                 "cached": "cached",
@@ -336,6 +355,8 @@ def _database_local_state(
         )
         self._merge_local(result, model_digest, controller=controller)
         self._merge_local(result, recipe_digest, controller=controller)
+        for digest in reference_digests[set_id] & set(digests):
+            self._merge_local(result, digest, controller=controller)
     cache_sets_by_id = {row[0]: row for row in cache_sets}
     for (
         operation_id,
@@ -347,6 +368,7 @@ def _database_local_state(
     ) in cache_operations:
         digest_values = {payload_model_digest, payload_recipe_digest}
         if artifact_set_sha256:
+            digest_values.update(reference_digests.get(artifact_set_sha256, ()))
             cache_set = cache_sets_by_id.get(artifact_set_sha256)
             if cache_set is not None:
                 digest_values.update(

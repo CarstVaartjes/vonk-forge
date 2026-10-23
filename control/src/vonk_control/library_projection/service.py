@@ -26,10 +26,10 @@ from ..library_contract import (
     LibraryResourceProjection,
 )
 from ..library_image_presence import ImagePresenceIndex
+from ..library_storage_observation import LibraryStorageObserver
 from ..model_cache_contract import (
     ModelCacheOperationState,
     ModelCacheUsage,
-    ModelStorageSnapshot,
 )
 from ..models import CatalogDocumentRevision
 from .catalog import (
@@ -107,8 +107,7 @@ class LibraryProjection:
             telemetry_delayed_seconds=telemetry_delayed_seconds,
         )
         self._local_state = local_state
-        self._model_storage = model_storage
-        self._model_storage_snapshot: ModelStorageSnapshot | None = None
+        self._storage_observer = LibraryStorageObserver(model_storage, clock=clock)
         self._request_budget = request_budget_seconds
         self._image_budget = image_budget_seconds
         self._image_presence = (

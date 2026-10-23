@@ -36,5 +36,5 @@ test("shows physical unique/shared bytes and the owner retaining a previous revi
   expect(screen.getByText("3 B")).toBeVisible();
   expect(screen.getByText("9 B")).toBeVisible();
   expect(screen.getByText(/Previous revision retained because installation owner-1/)).toBeVisible();
-  expect(screen.getByText(/2 B unique; rechecked every 30s/)).toBeVisible();
+  expect(screen.getByText(/2 B unique/)).toBeVisible();
 });
