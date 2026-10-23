@@ -56,6 +56,7 @@ MODES = (
     "collections",
     "progress",
     "contact-clocks",
+    "planner-defects",
 )
 # The agent's messages a Controller test may send only as the stand-in pinned
 # to the agent's shared vector; built by hand they are the Controller's idea of
@@ -793,6 +794,11 @@ def check_source(
             (line, "Controller contact rejected for negative clock age")
             for line in controller_contact_clock_checks(source)
         )
+    if python and not is_test and "planner-defects" in modes:
+        hits.extend(
+            (line, "planner contract defect hidden by ValueError wait")
+            for line in planner_defect_waits(source)
+        )
     if python and is_test and "clocks" in modes:
         hits.extend(
             (line, wall_clocks.KIND) for line in wall_clocks.scan_source(source)
@@ -808,7 +814,15 @@ def check_source(
             (node.lineno, node.end_lineno or node.lineno)
             for node in ast.walk(tree)
             if isinstance(
-                node, (ast.Subscript, ast.Compare, ast.Call, ast.Raise, ast.Constant)
+                node,
+                (
+                    ast.Subscript,
+                    ast.Compare,
+                    ast.Call,
+                    ast.Raise,
+                    ast.Constant,
+                    ast.ExceptHandler,
+                ),
             )
         ]
         hits = [
@@ -834,6 +848,53 @@ def check_source(
         set(noexit_hits)
         | {f"{path}:{line}: {kind}" for line, kind in hits if line in added}
     )
+
+
+def planner_defect_waits(source: str) -> list[int]:
+    """A ValueError wait around a planner must first separate contract defects."""
+    planners = {
+        "_assessment_provider",
+        "inspect_request",
+        "recheck_resources_in_session",
+        "_preview_run",
+        "_resource_fits",
+    }
+    sites = []
+    for node in ast.walk(ast.parse(source)):
+        if not isinstance(node, ast.Try):
+            continue
+        calls = [
+            part
+            for statement in node.body
+            for part in ast.walk(statement)
+            if isinstance(part, ast.Call)
+            and isinstance(part.func, (ast.Name, ast.Attribute))
+            and (part.func.id if isinstance(part.func, ast.Name) else part.func.attr)
+            in planners
+        ]
+        if not calls:
+            continue
+        protected = False
+        for handler in node.handlers:
+            caught = (
+                {
+                    part.id if isinstance(part, ast.Name) else part.attr
+                    for part in ast.walk(handler.type)
+                    if isinstance(part, (ast.Name, ast.Attribute))
+                }
+                if handler.type is not None
+                else set()
+            )
+            if caught == {"ValidationError"}:
+                protected = any(
+                    isinstance(part, ast.Call)
+                    and isinstance(part.func, ast.Name)
+                    and part.func.id == "planner_contract_defect"
+                    for part in ast.walk(handler)
+                )
+            if "ValueError" in caught and not protected:
+                sites.extend([handler.lineno, *(call.lineno for call in calls)])
+    return sites
 
 
 def main(*, modes: Sequence[str] = MODES) -> int:

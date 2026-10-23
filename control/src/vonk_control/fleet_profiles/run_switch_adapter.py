@@ -5,6 +5,7 @@ from __future__ import annotations
 from contextlib import nullcontext
 from datetime import datetime
 
+from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
@@ -64,6 +65,7 @@ from .contracts import (
     FleetProfileAdmissionEffectBusy,
     FleetProfileInvalid,
     FleetProfileResourceRecheckUnavailable,
+    planner_contract_defect,
 )
 from .dependencies import _LOGGER
 from .persistence import (
@@ -597,6 +599,8 @@ class RunSwitchFleetProfileAdapter(
                     ),
                     kept_run_ids=plan_kept_runs(reviewed.effects),
                 )
+            except ValidationError as error:
+                raise planner_contract_defect(assignment.id, error) from error
             except (
                 RunSwitchOperationConflict,
                 KeyError,

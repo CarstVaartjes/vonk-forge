@@ -952,3 +952,28 @@ def test_contact_clock_guard_preserves_staleness_and_security_and_agent_freshnes
         "    return timedelta(0) <= age < window\n"
     )
     assert not check_source(PATH, source, set(range(1, 9)), modes=("contact-clocks",))
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        "self._assessment_provider",
+        "self._run_switch.inspect_request",
+        "self._run_switch.recheck_resources_in_session",
+    ],
+)
+@pytest.mark.parametrize("caught", ["ValueError", "(KeyError, TypeError, ValueError)"])
+def test_planner_defects_cannot_be_added_as_preparation_waits(call, caught):
+    """Catch a new planner call or broad handler swallowing ValidationError."""
+    source = f"try:\n    plan = {call}(request)\nexcept {caught}:\n    wait()\n"
+    for line in (2, 3):
+        assert check_source(PATH, source, {line}, modes=("planner-defects",))
+    assert not check_source(PATH, source, {1}, modes=("planner-defects",))
+    separated = source.replace(
+        f"except {caught}:",
+        "except ValidationError as error:\n    raise planner_contract_defect(assignment.id, error) from error\n"
+        + f"except {caught}:",
+    )
+    assert not check_source(
+        PATH, separated, set(range(1, 8)), modes=("planner-defects",)
+    )
