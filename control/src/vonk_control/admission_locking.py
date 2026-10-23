@@ -54,8 +54,9 @@ class AdmissionLockBusy(UnknownOutcomeError, RuntimeError):
     ``holder`` names the kind of work that holds the lock when PostgreSQL could
     say (see ``acquire_admission_keys``); it is ``None`` when it is unknown.
     ``sqlstate`` is the PostgreSQL condition that ended the attempt (``None``
-    for a refused advisory try-lock) and ``activity`` summarises the other open
-    transactions seen at that moment, so "busy" always says why and by whom.
+    for a refused advisory try-lock). NOWAIT and an expired lock wait leave no
+    blocking edge to inspect; their row-lock holder is unknown. Unrelated open
+    transactions are never presented as evidence of a blocking owner.
     """
 
     #: A live owner or dependency holds the work: a wait, never a spent retry.
@@ -69,12 +70,10 @@ class AdmissionLockBusy(UnknownOutcomeError, RuntimeError):
         *,
         holder: str | None = None,
         sqlstate: str | None = None,
-        activity: str | None = None,
     ) -> None:
         super().__init__(message)
         self.holder = holder
         self.sqlstate = sqlstate
-        self.activity = activity
 
 
 #: An admission that has been refused this many times in a row stops trying and
@@ -465,13 +464,10 @@ def acquire_admission_keys(
             continue  # the blocking form returns only once it holds the key
         if acquired is not True:
             owner = _key_holder(session, key)
-            activity = None if owner else _activity(session)
             raise AdmissionLockBusy(
                 f"admission lock {key.namespace} is busy"
-                + (f" (held by {owner})" if owner else "")
-                + (f"; other open transactions: {activity}" if activity else ""),
+                + (f" (held by {owner})" if owner else "; blocking pid unavailable"),
                 holder=owner,
-                activity=activity,
             )
 
 
@@ -540,29 +536,29 @@ def _label_transaction(session: Session, holder: str) -> None:
 def _key_holder(session: Session, key: AdmissionLockKey) -> str | None:
     """The labelled work holding one advisory key, when PostgreSQL can say.
 
-    Best effort and read only: an unlabelled holder (another process, an older
-    release) or any failure answers ``None`` and never changes the refusal.
+    Best effort and read only: include unlabelled owners by PID. A failed
+    observation answers ``None`` and never changes the refusal.
     """
 
     try:
         with session.begin_nested():
-            name = session.scalar(
+            row = session.execute(
                 text(
-                    "SELECT a.application_name FROM pg_locks l "
+                    "SELECT a.pid, a.application_name FROM pg_locks l "
                     "JOIN pg_stat_activity a ON a.pid = l.pid "
                     "WHERE l.locktype = 'advisory' AND l.granted "
                     "AND l.pid <> pg_backend_pid() AND l.objsubid = 1 "
                     "AND ((l.classid::bigint << 32) | l.objid::bigint) "
                     "= hashtextextended(:key, 0) "
-                    "AND a.application_name LIKE :prefix LIMIT 1"
-                ),
-                {"key": key.database_key, "prefix": f"{_HOLDER_PREFIX}%"},
-            )
+                    "LIMIT 1"
+                ).bindparams(key=key.database_key)
+            ).one_or_none()
     except DBAPIError:
         return None
-    if isinstance(name, str) and name.startswith(_HOLDER_PREFIX):
-        return name[len(_HOLDER_PREFIX) :] or None
-    return None
+    if row is None:
+        return None
+    pid, name = row
+    return f"pid {pid} {(name or 'unnamed').removeprefix(_HOLDER_PREFIX)}"
 
 
 def _set_local_admission_timeout(session: Session) -> None:
@@ -580,53 +576,21 @@ def _sqlstate(error: DBAPIError) -> str | None:
     return getattr(original, "sqlstate", None) or getattr(original, "pgcode", None)
 
 
-def _activity(session: Session) -> str | None:
-    """The other open transactions right now, oldest first (best effort).
-
-    Row locks are not listed by PostgreSQL, so the transactions that could hold
-    one are named instead: who they are (``application_name``), how old their
-    transaction is and what they last ran.  Read only; any failure answers
-    ``None`` and never changes the refusal.
-    """
-
-    try:
-        with session.begin_nested():
-            rows = session.execute(
-                text(
-                    "SELECT application_name, state, "
-                    "EXTRACT(EPOCH FROM (now() - xact_start)), "
-                    "left(regexp_replace(query, '\\s+', ' ', 'g'), 40) "
-                    "FROM pg_stat_activity "
-                    "WHERE datname = current_database() "
-                    "AND pid <> pg_backend_pid() AND xact_start IS NOT NULL "
-                    "AND backend_type = 'client backend' "
-                    "ORDER BY xact_start LIMIT 4"
-                )
-            ).all()
-    except DBAPIError:
-        return None
-    if not rows:
-        return None
-    return "; ".join(
-        f"{name or 'unnamed'} {state} {float(age or 0):.1f}s [{query}]"
-        for name, state, age, query in rows
-    )
-
-
 def _raise_if_busy(
     session: Session, error: OperationalError, *, table: str | None = None
 ) -> None:
     if not is_admission_contention(error):
         return
     sqlstate = _sqlstate(error)
-    activity = _activity(session)
+    # NOWAIT never queues, and a timeout has already removed its wait edge.
+    # pg_blocking_pids cannot identify that former holder; a bystander's last
+    # SELECT is no evidence of which transaction retained the row lock.
     raise AdmissionLockBusy(
         "admission lock is busy"
         + (f" on {table}" if table else "")
         + f" (SQLSTATE {sqlstate})"
-        + (f"; other open transactions: {activity}" if activity else ""),
+        + "; blocking pid unavailable after lock refusal",
         sqlstate=sqlstate,
-        activity=activity,
     ) from error
 
 

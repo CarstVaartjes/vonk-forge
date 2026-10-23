@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 
 import pytest
 from vonk_control.auth import (
@@ -161,3 +162,58 @@ def test_repaired_proxy_ingress_admits_effect_without_exposing_forwarded_secret(
     asyncio.run(middleware(scope(b"p" * 32), lambda: None, lambda _: None))
     assert effects == [NODE]
     assert not exposed
+
+
+def test_slow_identity_database_validation_does_not_park_other_requests() -> None:
+    """A pooled-connection wait in agent auth must not block the ASGI loop."""
+    entered, release = threading.Event(), threading.Event()
+    received = []
+
+    def validate(identity):
+        entered.set()
+        assert release.wait(10), "injected database wait was not released"
+        return False  # Offloading must still refuse revoked authority.
+
+    async def app(scope, receive, send):
+        received.append(scope["path"])
+
+    middleware = TrustedProxyAgentIdentityMiddleware(
+        app, trusted_proxy_auth=b"p" * 32, agent_identity_validator=validate
+    )
+    scope = {
+        "type": "http",
+        "path": "/agent/telemetry",
+        "headers": (
+            (b"x-vonk-agent-node", NODE.encode()),
+            (b"x-vonk-agent-serial", b"123"),
+            (b"x-vonk-agent-fingerprint", b"fingerprint"),
+            (b"x-vonk-agent-verified", b"1"),
+            (b"x-vonk-agent-proxy-auth", b"p" * 32),
+            (b"x-vonk-agent-source", b"10.0.0.42"),
+        ),
+    }
+    replies = []
+
+    async def send(message):
+        replies.append(message)
+
+    async def exercise():
+        task = asyncio.create_task(middleware(scope, lambda: None, send))
+        try:
+            assert await asyncio.to_thread(entered.wait, 10)
+            assert not task.done(), "database validation blocked the event loop"
+            await asyncio.wait_for(
+                middleware(
+                    {"type": "http", "path": "/api/platform", "headers": ()},
+                    lambda: None,
+                    send,
+                ),
+                10,
+            )
+            assert received == ["/api/platform"]
+        finally:
+            release.set()
+            await task
+
+    asyncio.run(exercise())
+    assert replies[0]["status"] == 401

@@ -490,6 +490,10 @@ class _FunctionScanner:
         )
 
     def run(self, node: ast.AST) -> list[Site]:
+        self._context_manager = any(
+            _tail(ast.unparse(decorator)) == "contextmanager"
+            for decorator in getattr(node, "decorator_list", [])
+        )
         self._walk_statements(getattr(node, "body", []))
         return self._sites
 
@@ -516,6 +520,18 @@ class _FunctionScanner:
         for child in ast.iter_child_nodes(node):
             if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
                 continue
+            if self._transaction_depth and (
+                isinstance(child, ast.Await)
+                or (
+                    isinstance(child, (ast.Yield, ast.YieldFrom))
+                    and not self._context_manager
+                )
+            ):
+                self._report(
+                    child.lineno,
+                    SQL_TRANSACTION_SPANS_EXTERNAL_WORK,
+                    f"suspension {type(child).__name__}",
+                )
             if isinstance(child, ast.Call):
                 self._observe_call(child)
             self._walk_expressions(child)
@@ -526,7 +542,12 @@ class _FunctionScanner:
         # inside the held lock. Only a lock acquired from inside an already-open
         # transaction body is the forbidden SQL-to-filesystem edge.
         transaction = any(
-            self._opens_transaction(item.context_expr) for item in node.items
+            self._opens_transaction(item.context_expr)
+            or (
+                isinstance(item.optional_vars, ast.Name)
+                and "session" in item.optional_vars.id
+            )
+            for item in node.items
         )
         locks: list[tuple[int, str, bool]] = []
         for item in node.items:
