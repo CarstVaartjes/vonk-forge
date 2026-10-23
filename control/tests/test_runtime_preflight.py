@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
+
 import pytest
 from pydantic import ValidationError
 from vonk_agent_protocol.runtime_preflight import (
@@ -7,9 +9,11 @@ from vonk_agent_protocol.runtime_preflight import (
     RuntimePreflightRequest,
     RuntimePreflightResult,
 )
+from vonk_control.inventory_items_contract import PreflightInventoryItem
 from vonk_control.runtime_preflight import (
     admission_blockers,
     mandatory_capabilities,
+    request_digest,
 )
 
 
@@ -41,7 +45,17 @@ def result(req, **changes):
 def blockers(req, res, **changes):
     args = {"current_fingerprint": "a" * 64, "now": 101}
     args.update(changes)
-    return admission_blockers(req, res, **args)
+    return admission_blockers(
+        req,
+        PreflightInventoryItem(
+            requirements_sha256=request_digest(req),
+            result=res,
+            received_at=datetime.fromtimestamp(100, UTC),
+        )
+        if res is not None
+        else None,
+        **args,
+    )
 
 
 def test_exact_recipe_and_current_host_can_be_admitted():
@@ -112,10 +126,9 @@ def test_fabric_requirement_missing_evidence_blocks():
     assert not blockers(req, result(req))
 
 
-@pytest.mark.parametrize("now", [99, 401])
-def test_stale_and_future_evidence_cannot_admit(now):
+def test_stale_evidence_cannot_admit():
     req = request()
-    assert blockers(req, result(req), now=now)
+    assert blockers(req, result(req), now=401)
     assert not blockers(req, result(req))
 
 
@@ -170,3 +183,62 @@ def test_failed_preflight_is_readable_and_repaired_evidence_admits(
     assert failed_with(reported)
     req = request()
     assert not blockers(req, result(req))
+
+
+def test_controller_receipt_clock_ignores_agent_clock(tmp_path):
+    from vonk_control.inventory_items import record_preflight
+    from vonk_control.models import AgentNode
+    from vonk_control.runtime_preflight import latest_result
+
+    from .test_lifecycle_preflight import _setup
+
+    sessions, _, clock, node_id, _, _ = _setup(tmp_path)
+    req = request()
+    sample = result(req, observed_at=int(clock.now.timestamp()) + 600)
+    with sessions.begin() as session:
+        node = session.get(AgentNode, node_id)
+        assert node is not None
+        record_preflight(node, request_digest(req), sample, clock.now)
+    with sessions() as session:
+        receipt = latest_result(
+            session, node_id, requirements_sha256=request_digest(req)
+        )
+        assert not admission_blockers(
+            req, receipt, current_fingerprint="a" * 64, now=int(clock.now.timestamp())
+        )
+
+
+def test_receipt_age_uses_controller_subsecond_precision():
+    req = request()
+    receipt = PreflightInventoryItem(
+        requirements_sha256=request_digest(req),
+        result=result(req, observed_at=900),
+        received_at=datetime.fromtimestamp(100.25, UTC),
+    )
+    assert not admission_blockers(req, receipt, current_fingerprint="a" * 64, now=100.5)
+    assert admission_blockers(req, receipt, current_fingerprint="a" * 64, now=400.5)
+    assert admission_blockers(
+        req,
+        receipt.model_copy(update={"received_at": None}),
+        current_fingerprint="a" * 64,
+        now=100.5,
+    )
+
+
+def test_receipt_committed_after_gate_clock_read_stays_fresh(tmp_path):
+    """A Controller receipt may commit between the gate clock and inventory read."""
+    from .test_lifecycle_preflight import _finish, _setup
+
+    sessions, _, clock, node_id, gate, arguments = _setup(tmp_path)
+    pending, _ = gate.ensure(previous=None, **arguments)
+    _finish(sessions, pending, clock.now)
+    # The gate's clock sample precedes the transaction that committed this item.
+    clock.now -= timedelta(microseconds=1)
+    completed, error = gate.ensure(previous=None, **arguments)
+    assert error is None and completed.next_check_at is None
+    assert not completed.pending_jobs and node_id in completed.receipts
+
+
+def test_controller_receipt_newer_than_clock_sample_is_fresh():
+    req = request()
+    assert not blockers(req, result(req), now=99)

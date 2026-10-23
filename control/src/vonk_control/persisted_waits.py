@@ -26,7 +26,7 @@ from .wait_contract import QueueWait, WaitEvidence
 _REASON = TypeAdapter(OperationReason)
 
 
-def typed_wait_reason(value: str | None, fallback: WaitReason) -> OperationReason:
+def typed_wait_reason(value: str | None, fallback: OperationReason) -> OperationReason:
     """Adopt a declared code, never classify the human-readable detail."""
     try:
         return _REASON.validate_json(canonical_message(value))

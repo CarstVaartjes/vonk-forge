@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import threading
 import time
 from collections.abc import Callable, Sequence
@@ -16,6 +17,7 @@ from vonk_agent_protocol import (
     AgentProgress,
     AgentResult,
     InvalidRequestReason,
+    LifecycleState,
     OperationProgress,
     OutcomeDone,
     OutcomeFailed,
@@ -150,6 +152,7 @@ class AgentJobService:
         self._monotonic = monotonic
         self._result_consumer = result_consumer
         self._contact_consumer = contact_consumer
+        self._preflight_completed: Callable[[str, str], object] | None = None
         self._advance_rollout: Callable[[Session, Job], None] | None = None
         self._reconcile_rollouts: Callable[[int], bool] | None = None
         self._advance_node: Callable[[str], None] | None = None
@@ -237,6 +240,11 @@ class AgentJobService:
         return assess_superseded_agent_effects_in_session(
             session, targets, current_ordinal, now
         )
+
+    def set_preflight_completed(self, consumer: Callable[[str, str], object]) -> None:
+        """Wake the exact preflight owner after its receipt transaction commits."""
+        with self._configuration_lock:
+            self._preflight_completed = consumer
 
     def set_result_consumer(self, consumer: ResultConsumer) -> None:
         """Bind projection consumption once, before the queue serves any work."""
@@ -591,7 +599,7 @@ class AgentJobService:
     ) -> None:
         self._mark_started()
 
-        def decide(session: Session) -> None:
+        def decide(session: Session) -> tuple[str, str] | None:
             optimistic_timeout = None
             if session.get_bind().dialect.name == "postgresql":
                 # Identity/target locks still serialize with revocation and
@@ -730,6 +738,17 @@ class AgentJobService:
                 self._result_consumer(session, operation, attempt, message)
             self._aggregate_parent(session, operation.parent_job_id)
             refresh_queue_waits(session, now, node_id=operation.node_id)
+            if (
+                operation.kind == AgentOperation.RUNTIME_PREFLIGHT
+                and operation.state
+                in {
+                    LifecycleState.SUCCEEDED,
+                    LifecycleState.FAILED,
+                    LifecycleState.CANCELLED,
+                }
+            ):
+                return operation.parent_job_id, operation.node_id
+            return None
 
         outcome = transition(self._sessions, decide)
         if isinstance(outcome, Stale):
@@ -740,6 +759,15 @@ class AgentJobService:
         # A result consumer can atomically make the next durable recipe phase
         # queueable; wake long-polling agents only after that transaction commits.
         self.notify_available()
+        if outcome.value is not None and self._preflight_completed is not None:
+            parent_job_id, node_id = outcome.value
+            try:
+                self._preflight_completed(parent_job_id, node_id)
+            except Exception:
+                logging.getLogger(__name__).exception(
+                    "Runtime preflight owner wake deferred for %s",
+                    parent_job_id,
+                )
 
     @staticmethod
     def _report_event(

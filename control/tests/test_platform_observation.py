@@ -122,3 +122,20 @@ def test_platform_worker_fault_repair_through_authenticated_native_cli(
         row = session.scalar(select(ControlProcessHeartbeat))
         assert row is not None and row.source_sha == "b" * 40
     engine.dispose()
+
+
+def test_platform_keeps_controller_heartbeat_ahead_of_capture_clock(tmp_path) -> None:
+    """Catches a live worker disappearing after a Controller clock rollback."""
+    engine = create_engine(f"sqlite:///{tmp_path / 'platform-clock.sqlite'}")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    now = datetime(2026, 10, 23, tzinfo=UTC)
+    WorkerHeartbeatRecorder(
+        sessions,
+        process_instance_id="f" * 64,
+        clock=lambda: now + timedelta(seconds=2),
+    ).completed_loop()
+    observation = PlatformObserver(sessions, clock=lambda: now).read()
+    assert observation.workers is not None
+    assert observation.workers[0].completed_at == now + timedelta(seconds=2)
+    assert observation.workers[0].process_instance_id == "f" * 64

@@ -810,3 +810,48 @@ def test_an_unknown_outcome_outside_the_phase_handler_is_retried_by_the_tick(
             break
     assert _result(harness.view()).phase_index > checkpoint
     assert harness.view().operation_id == held.operation_id
+
+
+@pytest.mark.parametrize("cancelling", [False, True])
+def test_preflight_checkpoint_cannot_hide_retry_or_cancellation_wait(cancelling):
+    """A leftover probe checkpoint must not overwrite the current lifecycle wait."""
+    from dataclasses import replace
+
+    from vonk_agent_protocol import RuntimePreflightCode, WaitReason
+    from vonk_control.lifecycle_preflight import LifecyclePreflightCheckpoint
+    from vonk_control.persisted_waits import read_wait
+
+    adapter = RunSwitchAdapter()
+    job = _job(LifecycleState.RUNNING, {})
+    progress = _read_progress(job.result)
+    progress.preflight = LifecyclePreflightCheckpoint(
+        phase_index=0,
+        next_check_at=NOW + timedelta(seconds=5),
+        last_failure_code=RuntimePreflightCode.STALE,
+    )
+    before = adapter.lifecycle(job, progress, NOW)
+    after = replace(
+        before,
+        state=State.OBSERVING,
+        next_action_at=NOW + timedelta(seconds=30),
+        cancel_requested_at=NOW if cancelling else None,
+        cancel_request_key=str(uuid.uuid4()) if cancelling else None,
+    )
+    # First persist the probe wait so cancellation cannot inherit its reason.
+    adapter.apply(
+        job,
+        progress,
+        before,
+        replace(after, cancel_requested_at=None, cancel_request_key=None),
+        NOW,
+    )
+    if cancelling:
+        adapter.apply(job, progress, before, after, NOW)
+    else:
+        adapter.retry(job, progress, RunSwitchCode.PHASE_RETRY, NOW)
+    waiting = read_wait(job)
+    assert waiting is not None
+    assert waiting.reason is (
+        WaitReason.STOP_UNCONFIRMED if cancelling else RunSwitchCode.PHASE_RETRY
+    )
+    assert waiting.blockers and waiting.blockers[0].code == waiting.reason

@@ -170,7 +170,7 @@ class InstallPlanningService:
                         requirements_sha256=request_digest(preflight_request),
                     ),
                     current_fingerprint=inventory_items(node).preflight_fingerprint,
-                    now=int(now.timestamp()),
+                    now=now.timestamp(),
                 )
                 for node in nodes
             }

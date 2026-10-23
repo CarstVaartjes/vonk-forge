@@ -336,6 +336,8 @@ def test_recipe_run_writes_outside_transition_have_a_verdict() -> None:
     for path in sorted(root.rglob("*.py")):
         source = path.read_text()
         lines = scan_unwrapped_recipe_run_writes(source)
+        if not lines:
+            continue
         tree = ast.parse(source)
         functions = [
             node
@@ -431,3 +433,14 @@ def test_new_write_in_a_reviewed_function_requires_another_verdict() -> None:
     assert not check_source(path, source, {line}, modes=("optimistic",))
     changed = source.replace(bump, bump + "\n" + bump, 1)
     assert check_source(path, changed, {line + 1}, modes=("optimistic",))
+
+
+def test_added_run_bump_continuation_line_is_guarded() -> None:
+    source = (
+        "from vonk_control.models import RecipeRun\n"
+        "def write(session):\n    row = session.get(RecipeRun, identity)\n"
+        "    (\n        row\n    ).version += 1\n"
+    )
+    assert check_source(
+        "control/src/vonk_control/new_owner.py", source, {6}, modes=("optimistic",)
+    )

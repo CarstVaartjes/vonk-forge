@@ -56,6 +56,7 @@ MODES = (
     "clocks",
     "collections",
     "progress",
+    "contact-clocks",
 )
 # The agent's messages a Controller test may send only as the stand-in pinned
 # to the agent's shared vector; built by hand they are the Controller's idea of
@@ -331,6 +332,97 @@ def _rehashes_stored_row(node: ast.Compare) -> bool:
         for operand in operands
         for call in ast.walk(operand)
     )
+
+
+def controller_contact_clock_checks(source: str) -> list[int]:
+    """Detect future-contact rejection, not agent observations or certificate dates.
+
+    This syntax guard tracks local aliases of Controller contact/heartbeat
+    timestamps and their ages. Behaviour tests own the actual clock race.
+    """
+    tree = ast.parse(source)
+    attributes = {"last_seen_at", "received_at"}
+    if "ControlProcessHeartbeat" in source:
+        attributes.add("completed_at")
+    found: set[int] = set()
+    filters = {
+        id(part)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "where"
+        for argument in node.args
+        for part in ast.walk(argument)
+    }
+    for scope in ast.walk(tree):
+        if not isinstance(scope, ast.FunctionDef | ast.AsyncFunctionDef):
+            continue
+        contacts: set[str] = set()
+        ages: set[str] = set()
+
+        def contact(value: ast.AST, contacts: set[str] = contacts) -> bool:
+            return any(
+                isinstance(part, ast.Attribute)
+                and part.attr in attributes
+                or isinstance(part, ast.Name)
+                and part.id in contacts
+                for part in ast.walk(value)
+            )
+
+        def age(value: ast.AST, ages: set[str] = ages) -> bool:
+            return (
+                isinstance(value, ast.Name)
+                and value.id in ages
+                or isinstance(value, ast.BinOp)
+                and isinstance(value.op, ast.Sub)
+                and contact(value.right)
+            )
+
+        def clock(value: ast.AST) -> bool:
+            return ast.unparse(value) in {"now", "current", "timestamp"}
+
+        def zero(value: ast.AST) -> bool:
+            return ast.unparse(value) in {"0", "0.0", "timedelta(0)"}
+
+        for node in ast.walk(scope):
+            if isinstance(node, ast.Assign):
+                names = {
+                    target.id for target in node.targets if isinstance(target, ast.Name)
+                }
+                if age(node.value):
+                    ages.update(names)
+                elif contact(node.value):
+                    contacts.update(names)
+            if not isinstance(node, ast.Compare):
+                continue
+            for left, op, right in zip(
+                (node.left, *node.comparators), node.ops, node.comparators, strict=False
+            ):
+                if (
+                    contact(left)
+                    and clock(right)
+                    and (
+                        isinstance(op, ast.Gt | ast.GtE)
+                        or id(node) in filters
+                        and isinstance(op, ast.Lt | ast.LtE)
+                    )
+                    or clock(left)
+                    and contact(right)
+                    and isinstance(op, ast.Lt | ast.LtE)
+                    or age(left)
+                    and zero(right)
+                    and isinstance(op, ast.Lt | ast.LtE)
+                    or zero(left)
+                    and age(right)
+                    and isinstance(op, ast.Lt | ast.LtE)
+                ):
+                    found.add(node.lineno)
+    found.update(
+        node.lineno
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Attribute) and node.attr == "LAST_SEEN_IN_FUTURE"
+    )
+    return sorted(found)
 
 
 def check_source(
@@ -697,6 +789,16 @@ def check_source(
     if not is_test and "collections" in modes:
         hits.extend(
             (line, collections.KIND) for line in collections.scan_source(path, source)
+        )
+    if (
+        python
+        and not is_test
+        and "contact-clocks" in modes
+        and path.startswith("control/src/")
+    ):
+        hits.extend(
+            (line, "Controller contact rejected for negative clock age")
+            for line in controller_contact_clock_checks(source)
         )
     if python and is_test and "clocks" in modes:
         hits.extend(

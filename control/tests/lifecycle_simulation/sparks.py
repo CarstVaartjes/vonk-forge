@@ -247,7 +247,7 @@ class Sparks:
             if order.kind == "runtime.preflight.v1":
                 complete_preflight(
                     self.world.sessions,
-                    SimpleNamespace(pending_job_id=order.job_id),
+                    SimpleNamespace(pending_jobs={"node": order.job_id}),
                     self.world.clock(),
                 )
                 continue

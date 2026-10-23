@@ -516,18 +516,10 @@ def test_generated_fleet_projection_vocabulary_is_finite() -> None:
     ]
     offline = schema["NodeConnection"]["properties"]["offline_reason"]
     assert offline["anyOf"][0] == {"$ref": "#/components/schemas/NodeOfflineReason"}
+    from vonk_agent_protocol import NodeOfflineReason
+
     assert schema["NodeOfflineReason"]["enum"] == [
-        "unregistered",
-        "agent-inactive",
-        "agent-revoked",
-        "never-seen",
-        "last-seen-in-future",
-        "stale",
-        "certificate-missing",
-        "certificate-not-yet-valid",
-        "certificate-expired",
-        "certificate-revoked",
-        "certificate-inactive",
+        reason.value for reason in NodeOfflineReason
     ]
     from vonk_agent_protocol.telemetry import TelemetrySample
 

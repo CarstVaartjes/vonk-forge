@@ -11,8 +11,7 @@ RECIPE_RUN_WRITE_VERDICTS: dict[str, dict[str, tuple[str, str]]] = {
     "agent_jobs/claim_authority.py": {
         "_reconcile_agent_upgrade": (
             "c53cdd168ced1ab26b9b1db93d8d01cf617b76d3d620df315fde650d5a8e85df",
-            "HTTP wait: result consumer can lose a run "
-            "fence; middleware disposition owns 503",
+            "HTTP wait: result consumer can lose a run fence; middleware disposition owns 503",
         ),
         "_reject_recipe_build_claim": (
             "7e0465c17bd2c79c77e911437e75a5654ad2248fb05a1df596b0b39c32955cf7",
@@ -22,34 +21,26 @@ RECIPE_RUN_WRITE_VERDICTS: dict[str, dict[str, tuple[str, str]]] = {
     "agent_jobs/claim_reconcile.py": {
         "_fail_spent_start_budgets": (
             "f4c2e990417a6f824df4dc14c5c72936d2b986c5a8d825696ad4186683e55f38",
-            "HTTP wait: plain claim transaction rolls "
-            "back; next poll re-observes spent starts",
-        )
+            "HTTP wait: plain claim transaction rolls back; next poll re-observes spent starts",
+        ),
     },
     "agent_jobs/observation_receipts.py": {
         "adopt_observation_receipt": (
             "907a98f4c3a0c8a4d01a82845e9a5b99607389ad5308755885e1e33c46cffe97",
-            "HTTP wait: retained receipt is "
-            "re-observed after rollback through "
-            "the shared classifier",
-        )
+            "HTTP wait: retained receipt is re-observed after rollback through the shared classifier",
+        ),
     },
     "recipe_operations/result_consumption.py": {
         "consume_agent_result": (
             "4650161a7924cd9401743cf8a6bf56aa3f75b0430b658eae841bb1a4d193d24b",
-            "caller-owned: queue claim/result "
-            "transaction fences child-only "
-            "effects; raw conflicts reach HTTP "
-            "disposition",
-        )
+            "caller-owned: queue claim/result transaction fences child-only effects; raw conflicts reach HTTP disposition",
+        ),
     },
     "recipe_routes/candidate.py": {
         "_candidate_once": (
             "bf8ea87e8746ea4fa6e76f6cdf992b1c3507f5b5db6b900a0d2bbbfe26260026",
-            "caller-owned: lock=True bumps every candidate; "
-            "publication transition fences it; reduce churn in "
-            "follow-up",
-        )
+            "caller-owned: lock=True bumps every candidate; publication transition fences it; reduce churn in follow-up",
+        ),
     },
     "recipe_routes/service.py": {
         "_claim_run_publication_once": (
@@ -103,13 +94,13 @@ RECIPE_RUN_WRITE_VERDICTS: dict[str, dict[str, tuple[str, str]]] = {
         "reopen_ended_runs_still_running": (
             "3172bbcb268e8b1e5e53cbec4db1badf697f6e9e09e00b0fa66fa8e879b295f1",
             "caller-owned: observations transition fences reopened runs",
-        )
+        ),
     },
     "distributed_recovery/coordinator.py": {
         "_settle_unreadable_runs": (
             "d075af82573cd171732763a4062b600707f85210d9556391836dea297d0efc33",
             "worker: normal recovery re-observes after a rolled-back conflicting pass",
-        )
+        ),
     },
     "distributed_recovery/common.py": {
         "_wait_for_plan_change": (
@@ -137,7 +128,7 @@ RECIPE_RUN_WRITE_VERDICTS: dict[str, dict[str, tuple[str, str]]] = {
         "_stop_logical_job_run": (
             "33f8fe948db25ddcff4206a5f9602a5555f220cda8c324d70b4e399f4fad93ca",
             "retain: exact logical Stop admission owns run settlement",
-        )
+        ),
     },
     "recipe_operations/stop_dispatch.py": {
         "_dispatch_stop_after_withdrawal": (
@@ -153,31 +144,31 @@ RECIPE_RUN_WRITE_VERDICTS: dict[str, dict[str, tuple[str, str]]] = {
         "_activate_job_run_once": (
             "ed0afa8b088e40eadce7d0eb46b1b8b63a19ea30fd9c708a5e09f4cdf2512a2f",
             "retain: activation admission binds accepted run intent",
-        )
+        ),
     },
     "recipe_operations/start.py": {
         "_start_once": (
             "23a7b52f4272c6ca8dffb9ef65011dec7bfedc29900d155705f26c881e1a4594",
             "retain: Start admission binds run and capacity",
-        )
+        ),
     },
     "recipe_operations/projection.py": {
         "_project_node_result": (
             "89645c096523f986a563ddb04e33910f87c9175b6e46385d7a7d1fe179e7b85b",
             "caller-owned: queue result transaction owns rank and run projection",
-        )
+        ),
     },
     "recipe_operations/terminal_projection.py": {
         "_project_terminal_result": (
             "381aab92244881ed24e907acca256e794897dd9442bdcdd3228a65b36385efe1",
             "caller-owned: queue result transaction owns terminal projection",
-        )
+        ),
     },
     "recipe_operations/offline_stop.py": {
         "_finish_offline_stop": (
             "21ddcb729c738342d18dd6bd039fe2cb08c21ed7a647aa0b1dea53a46795f093",
             "retain: confirmed offline Stop releases only its exact run",
-        )
+        ),
     },
 }
 
@@ -205,6 +196,8 @@ def classified_write_lines(path: str, source: str) -> set[int]:
     verdicts = RECIPE_RUN_WRITE_VERDICTS.get(
         path.removeprefix("control/src/vonk_control/"), {}
     )
+    if not verdicts:
+        return set()
     tree = ast.parse(source)
     parents = {
         child: parent

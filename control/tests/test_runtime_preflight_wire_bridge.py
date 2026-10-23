@@ -5,16 +5,23 @@ from __future__ import annotations
 import os
 import subprocess
 import time
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-from vonk_agent_protocol import RuntimePreflightFindingCode, canonical_message
+from vonk_agent_protocol import (
+    RuntimePreflightCode,
+    RuntimePreflightFindingCode,
+    canonical_message,
+)
 from vonk_agent_protocol.runtime_preflight import (
     RuntimePreflightRequest,
     RuntimePreflightResult,
 )
+from vonk_control.inventory_items_contract import PreflightInventoryItem
 from vonk_control.runtime_preflight import (
     admission_blockers,
+    request_digest,
 )
 
 FINGERPRINT = "a" * 64
@@ -74,15 +81,25 @@ def test_agent_preflight_result_is_admitted_by_the_controller(tmp_path: Path) ->
 
     # The agent proves every local capability it owns; the signed helper stays
     # unknown and still blocks admission.
-    blockers = admission_blockers(
-        request, result, current_fingerprint=FINGERPRINT, now=int(time.time())
+    receipt = PreflightInventoryItem(
+        requirements_sha256=request_digest(request),
+        result=result,
+        received_at=datetime.now(UTC),
     )
-    assert blockers
+    blockers = admission_blockers(
+        request, receipt, current_fingerprint=FINGERPRINT, now=time.time()
+    )
+    assert any(
+        item.code is RuntimePreflightCode.REQUIREMENT_UNKNOWN for item in blockers
+    )
     restored = RuntimePreflightResult.model_validate_json(canonical_message(result))
     assert restored == result
     assert (
         admission_blockers(
-            request, restored, current_fingerprint=FINGERPRINT, now=int(time.time())
+            request,
+            receipt.model_copy(update={"result": restored}),
+            current_fingerprint=FINGERPRINT,
+            now=time.time(),
         )
         == blockers
     )

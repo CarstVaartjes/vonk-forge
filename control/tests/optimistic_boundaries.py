@@ -183,6 +183,8 @@ def scan_unwrapped_recipe_run_writes(source: str) -> list[int]:
     A helper receiving a caller's session needs a verdict even when some callers
     use transition; its other callers can still commit a raw stale fence.
     """
+    if "RecipeRun" not in source and "_result_consumer" not in source:
+        return []
     tree = ast.parse(source)
     aliases = {
         alias.asname or alias.name: alias.name
@@ -301,9 +303,7 @@ def scan_unwrapped_recipe_run_writes(source: str) -> list[int]:
                     or node.attr == "version"
                     and "RecipeRun" in aliases.values()
                 )
-            ):
-                found.append(node.lineno)
-            elif (
+            ) or (
                 isinstance(node, ast.Call)
                 and isinstance(node.func, ast.Attribute)
                 and node.func.attr == "_result_consumer"

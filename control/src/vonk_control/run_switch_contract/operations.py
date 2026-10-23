@@ -8,10 +8,13 @@ from typing import Annotated, Literal
 from pydantic import (
     Field,
     StringConstraints,
+    ValidationError,
+    field_validator,
     model_validator,
 )
 from vonk_agent_protocol import (
     OperationProgress,
+    canonical_message,
 )
 
 from ..integer_domains import MAX_DATABASE_INTEGER
@@ -122,6 +125,20 @@ class RunSwitchOperationResult(StrictModel):
     #: The typed evidence of the refusal that last ended or re-planned a phase;
     #: kept on record, unlike ``blockers``, which is a snapshot.
     refusal: list[OperationBlocker] = Field(default_factory=list, max_length=16)
+
+    @field_validator("preflight", mode="before")
+    @classmethod
+    def rederive_preflight(cls, value: object) -> LifecyclePreflightCheckpoint | None:
+        if value is None or isinstance(value, LifecyclePreflightCheckpoint):
+            return value
+        try:
+            return LifecyclePreflightCheckpoint.model_validate_json(
+                canonical_message(value)
+            )
+        except ValidationError:
+            # This cache is derived from deterministic child request identities
+            # and canonical inventory, never an owner of accepted effects.
+            return None
 
     @model_validator(mode="after")
     def total_bytes_state_is_consistent(self) -> RunSwitchOperationResult:
