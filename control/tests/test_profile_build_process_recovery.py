@@ -175,7 +175,9 @@ def _complete_agent_work(sessions, lifecycle, root: Path) -> None:
                 )
         elif job.kind == "runtime.preflight.v1":
             complete_preflight(
-                sessions, SimpleNamespace(pending_job_id=job.id), lifecycle._clock()
+                sessions,
+                SimpleNamespace(pending_jobs={"node": job.id}),
+                lifecycle._clock(),
             )
         else:
             complete_started_recipe(sessions, lifecycle, job.id)

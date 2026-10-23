@@ -39,7 +39,7 @@ def test_completed_preflight_recovers_and_dispatches_install(
     checkpoint = pending.result.preflight
     node_id = switch.nodes[0]
     assert checkpoint.attempts[node_id] == 1
-    assert checkpoint.pending_job_id is not None
+    assert next(iter(checkpoint.pending_jobs.values()), None) is not None
     with switch.sessions.begin() as session:
         node = session.get(AgentNode, node_id)
         assert node is not None
@@ -67,7 +67,7 @@ def test_completed_preflight_recovers_and_dispatches_install(
     assert retry.result is not None and retry.result.preflight is not None
     checkpoint = retry.result.preflight
     assert checkpoint.attempts[node_id] == 2
-    assert checkpoint.pending_job_id is not None
+    assert next(iter(checkpoint.pending_jobs.values()), None) is not None
     _finish(switch.sessions, checkpoint, switch.clock.now, fingerprint="b" * 64)
 
     install_subphase = get_args(
@@ -94,5 +94,5 @@ def test_completed_preflight_recovers_and_dispatches_install(
         assert orders[0].kind == OperationKind.RECIPE_INSTALL
         assert orders[0].node_id == node_id
     assert installed.result.preflight is not None
-    assert installed.result.preflight.receipts[node_id].fingerprint == "b" * 64
+    assert installed.result.preflight.receipts[node_id].result.fingerprint == "b" * 64
     assert installed.result.phase_results

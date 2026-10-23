@@ -61,7 +61,7 @@ def move_runtime_facts(connection: Connection) -> None:
         connection.execute(
             text("""
         SELECT DISTINCT ON (operation.node_id, operation.payload_digest)
-            operation.node_id, operation.payload_digest, attempt.result
+            operation.node_id, operation.payload_digest, attempt.result, operation.updated_at
         FROM agent_operations AS operation
         JOIN agent_operation_attempts AS attempt
           ON attempt.operation_id = operation.id
@@ -83,6 +83,7 @@ def move_runtime_facts(connection: Connection) -> None:
         try:
             entry = PreflightInventoryItem(
                 requirements_sha256=result["payload_digest"],
+                received_at=result["updated_at"],
                 result=RuntimePreflightResult.model_validate_json(
                     canonical_message(result["result"])
                 ),

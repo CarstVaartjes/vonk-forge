@@ -213,7 +213,7 @@ class PhaseDispatchMixin:
                         )
                         service._schedule_checkpoint_retry(job, current, blocked, now)
                         return True
-                    if checkpoint.pending_job_id:
+                    if checkpoint.pending_jobs:
                         current.operation = _observe_progress(
                             current.operation,
                             OperationProgress.model_validate(
@@ -225,14 +225,19 @@ class PhaseDispatchMixin:
                             ),
                             now,
                         )
-                    job.result = _persisted_result(current)
-                    job.status_reason = (
-                        f"{checkpoint.last_failure_code}: {checkpoint.last_failure_detail}"
-                        if checkpoint.last_failure_code
-                        else None
+                    job.status_reason = checkpoint.last_failure_code
+                    _ADAPTER.project(
+                        job,
+                        current,
+                        now,
+                        state=_LifecycleState.OBSERVING,
+                        due=checkpoint.next_check_at,
+                        visible=job.state,
+                        reason=job.status_reason,
                     )
+                    job.result = _persisted_result(current)
                     job.updated_at = now
-                if checkpoint.pending_job_id or checkpoint.next_check_at is not None:
+                if checkpoint.pending_jobs or checkpoint.next_check_at is not None:
                     return True
         if phase.state in {"skipped", "retained"}:
             execution = PhaseExecution()

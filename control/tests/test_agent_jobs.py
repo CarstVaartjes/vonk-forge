@@ -4854,7 +4854,7 @@ def test_reusable_preflight_survives_operation_history_collection(service) -> No
         session.execute(delete(AgentOperation).where(AgentOperation.id == operation.id))
     with sessions() as session:
         retained = latest_result(session, NODE_A, requirements_sha256=digest)
-        assert retained == result
+        assert retained is not None and retained.result == result
         assert not admission_blockers(
             request,
             retained,
@@ -4873,3 +4873,40 @@ def test_reusable_preflight_survives_operation_history_collection(service) -> No
             current_fingerprint="a" * 64,
             now=int(clock.now.timestamp()) + 301,
         )
+
+
+def test_failed_preflight_wake_preserves_committed_receipt(service, caplog):
+    """A failed notification cannot turn an already committed report into loss."""
+    from vonk_control.runtime_preflight import latest_result, request_digest
+
+    from .test_runtime_preflight import request as preflight_request
+    from .test_runtime_preflight import result as passing_result
+
+    queue, sessions, clock = service
+    request = preflight_request()
+    job = parent(sessions, clock)
+    queue.enqueue(
+        job.id,
+        NODE_A,
+        ProtocolAgentOperation.RUNTIME_PREFLIGHT,
+        COMMIT,
+        request.model_dump(mode="json"),
+    )
+
+    def lost_wake(_child_id: str, _node_id: str) -> None:
+        raise OSError("injected completion wake loss")
+
+    queue.set_preflight_completed(lost_wake)
+    claim = claim_agent(queue, NODE_A, "serial-a", preflight_fingerprint="a" * 64)
+    assert claim is not None
+    queue.succeed(
+        claim.fence, passing_result(request, observed_at=int(clock.now.timestamp()))
+    )
+    with sessions() as session:
+        receipt = latest_result(
+            session, NODE_A, requirements_sha256=request_digest(request)
+        )
+        assert receipt is not None and receipt.received_at == clock.now
+        committed = session.get(Job, job.id)
+        assert committed is not None and committed.state == LifecycleState.SUCCEEDED
+    assert "Runtime preflight owner wake deferred" in caplog.text
