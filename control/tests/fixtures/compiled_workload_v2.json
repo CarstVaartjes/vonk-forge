@@ -191,6 +191,5 @@
     ],
     "health_path": "/v1/models"
   },
-  "job": null,
-  "compile_cache_mount": "/outputs/cache"
+  "job": null
 }

@@ -35,7 +35,6 @@ from vonk_agent_protocol import (
     canonical_message,
 )
 from vonk_agent_protocol.compiled_execution_plan import (
-    CompileCacheMount,
     CompiledArtifact,
     CompiledArtifactMount,
     CompiledEndpoint,
@@ -367,7 +366,6 @@ class VerifiedExecutionPlan(StrictModel):
         )
         try:
             return WireCompiledExecutionPlan(
-                compile_cache_mount=CompileCacheMount.COMPILE,
                 identity=CompiledIdentity(
                     recipe_revision_sha256=self.recipe_revision_sha256,
                     model_artifact_set_sha256=self.model_artifact_set_sha256,

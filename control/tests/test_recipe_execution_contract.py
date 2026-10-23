@@ -5,13 +5,18 @@ from pathlib import Path
 from typing import cast
 
 import pytest
-from vonk_agent_protocol import canonical_message
+from sqlalchemy import Column, MetaData, Table, select, text
+from sqlalchemy.engine import Engine
+from vonk_agent_protocol import RecipeRunObservationsWire, canonical_message
+from vonk_agent_protocol.inventory import InventoryRequest
 from vonk_control.bounded_json import require_mapping, require_sequence
+from vonk_control.model_cache_contract import CacheManifest, ModelCacheTransfer
 from vonk_control.models import RecipeInstallation
 from vonk_control.recipe_execution_contract import (
     RecipeExecutionContractError,
     StoredRunNodePlan,
     StoredRunPlan,
+    installation_matches_runtime_image,
     installation_plan_document,
     installation_serves_authorised_ports,
     parse_stored_build_policy,
@@ -241,3 +246,87 @@ def test_an_installation_is_current_only_if_it_serves_on_a_port_the_platform_ass
     installation = RecipeInstallation(plan=plan)
 
     assert installation_serves_authorised_ports(installation) is current
+
+
+def test_previous_release_installation_survives_restart(
+    postgres_engine: Engine,
+) -> None:
+    """Catches new required fields invalidating accepted plans after an upgrade.
+
+    The launch vector is recorded from 33dc45f0, before persistent compile
+    caches. Never regenerate it from the current producer: that masks additive
+    required fields. Persistence and reserialization must preserve exact bytes
+    so adoption retains the accepted plan identity.
+    """
+    vector = Path(__file__).parent / "fixtures" / "stored_installation_33dc45f0.json"
+    original = canonical_message(json.loads(vector.read_bytes()))
+    engine = postgres_engine
+    plans = Table(
+        "accepted_plans",
+        MetaData(),
+        Column("plan", RecipeInstallation.__table__.c.plan.type),
+    )
+    plans.metadata.create_all(engine)
+    with engine.begin() as connection:
+        # The previous writer already accepted this document. Bypass today's
+        # bind validation so the upgrade exercises the actual persisted reader.
+        connection.execute(
+            text("INSERT INTO accepted_plans VALUES (CAST(:plan AS JSON))"),
+            {"plan": original.decode()},
+        )
+    engine.dispose()
+    try:
+        with engine.connect() as connection:
+            restored = connection.execute(select(plans.c.plan)).scalar_one()
+        parsed = parse_stored_installation_plan(restored)
+        assert canonical_message(parsed) == original
+        installation = RecipeInstallation(
+            plan=restored,
+            image_digest=parsed.image_digest,
+            mapping_id=parsed.mapping_id,
+            mapping_generation=parsed.mapping_generation,
+            recipe_revision_id=parsed.recipe_revision_id,
+            plan_digest=parsed.plan_digest,
+        )
+        image = next(iter(parsed.compiled_execution_plans.values())).runtime_image
+        # This is the fleet-assessment consumer in the failing carry log.
+        assert installation_matches_runtime_image(
+            installation,
+            image_digest=image.image_digest,
+            oci_layout_sha256=image.oci_layout_sha256,
+            image_bytes=image.image_bytes,
+        )
+        assert installation_serves_authorised_ports(installation)
+        assert canonical_message(installation_plan_document(restored)) == original
+    finally:
+        engine.dispose()
+
+
+def test_previous_release_facts_and_cache_checkpoints_remain_consumable() -> None:
+    """Catches required additions to the other #1862 persisted/wire owners.
+
+    Inventory and observation vectors come from 33dc45f0; schema-2 manifest
+    and partial-transfer examples use its contracts. The storage observer is
+    new disposable state, not a replacement for that partial-transfer owner.
+    """
+    path = Path(__file__).parent / "fixtures" / "upgrade_documents_33dc45f0.json"
+    documents = json.loads(path.read_bytes())
+    inventory = InventoryRequest.model_validate_json(
+        canonical_message(documents["inventory"])
+    )
+    assert inventory.gpu_health is None
+    observations = RecipeRunObservationsWire.model_validate_json(
+        canonical_message(documents["observations"])
+    )
+    assert canonical_message(observations) == canonical_message(
+        documents["observations"]
+    )
+    manifest = CacheManifest.model_validate_json(
+        canonical_message(documents["cache_manifest"])
+    )
+    assert manifest.verified_models == []
+    transfer = ModelCacheTransfer.model_validate_json(
+        canonical_message(documents["cache_transfer"])
+    )
+    assert canonical_message(transfer) == canonical_message(documents["cache_transfer"])
+    assert transfer.artifacts["a" * 64].received_bytes == 5

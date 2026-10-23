@@ -42,7 +42,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
         let old = format!(
             "type=bind,src={},dst={}",
             run.cache_root.display(),
-            vonk_agent_protocol::generated::CompileCacheMount::OutputsCache.as_str()
+            vonk_agent_protocol::compiled_oci::RUNTIME_CACHE_TARGET
         );
         let mount = run
             .arguments
@@ -52,7 +52,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
         *mount = format!(
             "type=bind,src={},dst={}",
             source.display(),
-            vonk_agent_protocol::generated::CompileCacheMount::OutputsCache.as_str()
+            vonk_agent_protocol::compiled_oci::RUNTIME_CACHE_TARGET
         );
         Ok(())
     }

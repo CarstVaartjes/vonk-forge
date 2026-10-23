@@ -98,7 +98,6 @@ pub(super) fn compiled_plan() -> Value {
     let primary = digest(b"primary");
     let secondary = digest(b"secondary");
     json!({
-        "compile_cache_mount": vonk_agent_protocol::generated::CompileCacheMount::OutputsCache,
         "identity": {
             "recipe_revision_sha256": "a".repeat(64),
             "model_artifact_set_sha256": "d".repeat(64)

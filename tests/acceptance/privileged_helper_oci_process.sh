@@ -269,10 +269,9 @@ grep -q 'cache-created' "$report_root/container-first.log"
 grep -q 'tmp-fresh' "$report_root/container-first.log"
 cache_source=$(docker inspect "$run_name" | python3 -c '
 import json, sys
-from pathlib import Path
-target = json.loads(Path(sys.argv[1]).read_text())["compile_cache_mount"]
+target = "/outputs/cache"
 print(next(mount["Source"] for mount in json.load(sys.stdin)[0]["Mounts"] if mount["Destination"] == target))
-' "$fixture")
+')
 case "$cache_source" in
   /var/lib/vonk-forge/compile-cache/*/data) ;;
   *) echo "expected persistent compile cache, got $cache_source" >&2; exit 1 ;;
@@ -340,14 +339,14 @@ grep -q 'tmp-fresh' "$report_root/container.log"
 test -f "$cache_source/home/helper-entrypoint-ok"
 test "$(cat "$cache_source/helper-cache-ok")" = cache-created
 # Both starts must bind the same actual backing, not an obsolete logical path.
-python3 - "$fixture" "$report_root/container-inspect.json" "$cache_source" <<'PY_CACHE'
+python3 - "$report_root/container-inspect.json" "$cache_source" <<'PY_CACHE'
 import json
 import sys
 from pathlib import Path
 
-target = json.loads(Path(sys.argv[1]).read_text())["compile_cache_mount"]
-mounts = json.loads(Path(sys.argv[2]).read_text())[0]["Mounts"]
-assert next(mount["Source"] for mount in mounts if mount["Destination"] == target) == sys.argv[3]
+target = "/outputs/cache"
+mounts = json.loads(Path(sys.argv[1]).read_text())[0]["Mounts"]
+assert next(mount["Source"] for mount in mounts if mount["Destination"] == target) == sys.argv[2]
 PY_CACHE
 test -f /var/lib/vonk-forge-agent/runs/$run_id/outputs/tmp/helper-tmp-ok
 printf 'helper-process-proof=passed\narchive_sha256=%s\narchive_bytes=%s\nimage_ref=%s\nplatform_digest=%s\nplatform_config_digest=%s\nconfig_id=%s\ndocker_local_image_id=%s\n' \

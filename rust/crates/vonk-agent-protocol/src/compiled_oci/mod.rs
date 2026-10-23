@@ -18,7 +18,9 @@ pub use invocation::{
     CompiledOciInvocation, CompiledOciPaths, OciImageReceipt, OciMount, OciNetworkMode,
     OciSecurityOptions,
 };
-pub use projection::{project, runtime_output_mountpoints, start_arguments_for_paths};
+pub use projection::{
+    RUNTIME_CACHE_TARGET, project, runtime_output_mountpoints, start_arguments_for_paths,
+};
 
 #[derive(Debug, Error)]
 pub enum CompiledOciError {

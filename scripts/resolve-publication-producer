@@ -101,6 +101,7 @@ PRODUCERS = {
             "control/src/**",
             "control/tests/fixtures/compiled_plan_751.json",
             "control/tests/fixtures/compiled_workload_v2.json",
+            "control/tests/fixtures/stored_installation_33dc45f0.json",
             "control/uv.lock",
             "install/installer-release-public.pem",
             "nas_setup/hatch_build.py",
@@ -234,6 +235,7 @@ PRODUCERS = {
             "rust/crates/vonk-spark-setup/**",
             "scripts/tests/run_installer_pty_recovery.sh",
             "control/tests/fixtures/compiled_workload_v2.json",
+            "control/tests/fixtures/stored_installation_33dc45f0.json",
             "scripts/build-recipe-library",
         ),
         artifacts=tuple(

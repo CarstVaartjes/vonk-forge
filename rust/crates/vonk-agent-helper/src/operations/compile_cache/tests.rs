@@ -85,7 +85,7 @@ fn fixture_for_gpu(
 fn source(run: &ValidatedDockerRun) -> PathBuf {
     let suffix = format!(
         ",dst={}",
-        vonk_agent_protocol::generated::CompileCacheMount::OutputsCache.as_str()
+        vonk_agent_protocol::compiled_oci::RUNTIME_CACHE_TARGET
     );
     run.arguments
         .iter()
