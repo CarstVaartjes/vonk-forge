@@ -852,16 +852,8 @@ def test_disjoint_sqlite_withdrawals_serialize_one_global_candidate(
     with ThreadPoolExecutor(max_workers=2) as pool:
         futures = [pool.submit(withdraw, run_id) for run_id in (first_run, second_run)]
         for future in futures:
-            try:
-                future.result(timeout=30)
-            except UnknownOutcomeError as error:
-                assert isinstance(error, RecipeRouteOwnerBusy) or (
-                    error.typed_reason == WaitReason.SCOPE_CHANGED
-                )
+            future.result(timeout=30)
 
-    # A contended decision yields; the next reconcile tick reads current intent.
-    for run_id in (first_run, second_run):
-        service.withdraw_run(run_id)
     with service.sessions() as session:
         assert [
             _recipe_run(session, run_id).route_state
@@ -2397,3 +2389,46 @@ def test_normal_start_optional_recovery_does_not_block_route_publication(
         generation = _recipe_run(session, run_id).route_generation
         assert generation is not None and generation >= first.generation
         assert _recipe_run(session, second).route_state == "published"
+
+
+@pytest.mark.parametrize("contention", ["owner", "run"])
+def test_maintenance_contention_uses_the_typed_wait_schedule(
+    tmp_path,
+    monkeypatch,
+    caplog,
+    contention,
+) -> None:
+    """Run contention must not fall through _advance's generic traceback handler."""
+    from vonk_control.recipe_routes.shared import _RecipeRunContended
+
+    clock = MutableClock(NOW)
+    routes, _, _, _ = setup(tmp_path, clock=clock)
+    worker = RecipeOperationWorker(routes.sessions, routes, clock=clock)
+    calls = []
+
+    def maintain():
+        calls.append(clock.now)
+        if len(calls) == 1:
+            raise (
+                RecipeRouteOwnerBusy("owner held")
+                if contention == "owner"
+                else _RecipeRunContended("run changed")
+            )
+        return True
+
+    monkeypatch.setattr(routes, "maintain", maintain)
+    caplog.set_level(logging.INFO, logger="vonk-control-worker")
+    assert worker._advance(worker._maintain_routes) is False
+    assert not worker._retry_at
+    assert worker._route_owner_due is not None
+    assert worker._route_owner_due > clock.now
+    assert any(
+        "recipe.route.owner_busy" in record.getMessage() for record in caplog.records
+    )
+    assert not any(record.exc_info for record in caplog.records)
+    assert worker._advance(worker._maintain_routes) is False
+    assert len(calls) == 1
+    clock.now = worker._route_owner_due
+    assert worker._advance(worker._maintain_routes) is True
+    assert len(calls) == 2
+    assert worker._route_owner_due is None

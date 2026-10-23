@@ -8,6 +8,11 @@ import pytest
 
 from control.tests.added_line_guards import check_source
 from control.tests.optimistic_boundaries import scan_source as _locks
+from control.tests.recipe_run_write_verdicts import (
+    RECIPE_RUN_WRITE_VERDICTS,
+    classified_write_lines,
+    writer_name,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -318,3 +323,111 @@ def test_refresh_of_explicit_other_model_is_allowed(binding: str) -> None:
         + "\n    session.refresh(row, with_for_update=True)\n"
     )
     assert not _locks(source)
+
+
+def test_recipe_run_writes_outside_transition_have_a_verdict() -> None:
+    """A new helper or result-consumer call cannot silently inherit a verdict."""
+    import ast
+
+    from control.tests.optimistic_boundaries import scan_unwrapped_recipe_run_writes
+
+    actual: dict[str, set[str]] = {}
+    root = ROOT / "control/src/vonk_control"
+    for path in sorted(root.rglob("*.py")):
+        source = path.read_text()
+        lines = scan_unwrapped_recipe_run_writes(source)
+        tree = ast.parse(source)
+        functions = [
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        ]
+        parents = {
+            child: parent
+            for parent in ast.walk(tree)
+            for child in ast.iter_child_nodes(parent)
+        }
+        for line in lines:
+            enclosing = [
+                node
+                for node in functions
+                if node.lineno <= line <= (node.end_lineno or node.lineno)
+            ]
+            owner = min(
+                enclosing,
+                key=lambda node: (node.end_lineno or node.lineno) - node.lineno,
+            )
+            actual.setdefault(str(path.relative_to(root)), set()).add(
+                writer_name(owner, parents)
+            )
+    assert actual == {
+        path: set(verdicts) for path, verdicts in RECIPE_RUN_WRITE_VERDICTS.items()
+    }
+    for path in actual:
+        source = (root / path).read_text()
+        assert set(scan_unwrapped_recipe_run_writes(source)) == classified_write_lines(
+            "control/src/vonk_control/" + path, source
+        ), f"Re-review the changed writer in {path}"
+
+
+@pytest.mark.parametrize(
+    "write",
+    ["row.version += 1", "row.route_state = state", "row.version = row.version + 1"],
+)
+@pytest.mark.parametrize(
+    "binding",
+    [
+        "row = session.get(Run, identity)",
+        "row = session.scalar(select(Run))",
+        "rows = tuple(session.scalars(select(Run))); row = rows[0]",
+    ],
+)
+def test_added_run_write_outside_transition_is_rejected(write, binding) -> None:
+    source = (
+        "from vonk_control.models import RecipeRun as Run\n"
+        "def f():\n    with sessions.begin() as session:\n"
+        f"        {binding}\n        {write}\n"
+    )
+    # Classifications never exempt additions, even in a reviewed file.
+    for path in ["new_owner.py", *RECIPE_RUN_WRITE_VERDICTS]:
+        path = "control/src/vonk_control/" + path
+        assert check_source(path, source, {5}, modes=("optimistic",))
+        assert not check_source(path, source, {1}, modes=("optimistic",))
+
+
+def test_transition_write_and_other_model_write_are_allowed() -> None:
+    source = (
+        "from vonk_control.models import RecipeRun, AgentNode\n"
+        "def f():\n    def decide(session):\n"
+        "        row = session.get(RecipeRun, identity)\n"
+        "        row.version += 1\n"
+        "    return transition(sessions, decide)\n"
+        "def g(session):\n    row = session.get(AgentNode, identity)\n"
+        "    row.state = state\n"
+    )
+    assert not check_source(
+        "control/src/vonk_control/owner.py",
+        source,
+        set(range(1, 10)),
+        modes=("optimistic",),
+    )
+
+
+def test_added_result_consumer_cannot_hide_behind_unchanged_call_line() -> None:
+    source = "def claim(session):\n    self._result_consumer(\n        session, operation, attempt, message\n    )\n"
+    assert check_source(
+        "control/src/vonk_control/agent_jobs/claim_authority.py",
+        source,
+        {3},
+        modes=("optimistic",),
+    )
+
+
+def test_new_write_in_a_reviewed_function_requires_another_verdict() -> None:
+    path = "control/src/vonk_control/recipe_routes/candidate.py"
+    source = (ROOT / path).read_text()
+    bump = "            run.version += 1"
+    line = source.splitlines().index(bump) + 1
+    assert not check_source(path, source, {line}, modes=("optimistic",))
+    changed = source.replace(bump, bump + "\n" + bump, 1)
+    assert check_source(path, changed, {line + 1}, modes=("optimistic",))

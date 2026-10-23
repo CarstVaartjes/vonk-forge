@@ -38,6 +38,7 @@ from .recipe_routes import (
     RecipeRouteOwnerBusy,
     publication_disposition,
 )
+from .recipe_routes.shared import _RecipeRunContended
 from .recovery_policy import RECOVERY, ROUTE_RECOVERY, schedule
 from .reservation_owners import OwnerKind, OwnerRef, owner
 from .stall_window import stall_deadline
@@ -187,7 +188,7 @@ class RecipeOperationWorker:
             return False
         try:
             result = task()
-        except RecipeRouteOwnerBusy as error:
+        except (RecipeRouteOwnerBusy, _RecipeRunContended) as error:
             self._route_owner_waits += 1
             self._route_owner_due = RECOVERY.next_attempt(
                 "recipe.route.owner", self._route_owner_waits, now, ongoing_intent=True
