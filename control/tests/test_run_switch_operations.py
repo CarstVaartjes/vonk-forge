@@ -2341,9 +2341,13 @@ def _cold_compile_switch(
         view = service.get(operation_id)
         assert view.result is not None
         checkpoint = view.result.preflight
-        if checkpoint is not None and checkpoint.pending_job_id:
+        if checkpoint is not None and next(
+            iter(checkpoint.pending_jobs.values()), None
+        ):
             with sessions() as session:
-                pending = session.get(Job, checkpoint.pending_job_id)
+                pending = session.get(
+                    Job, next(iter(checkpoint.pending_jobs.values()), None)
+                )
                 needs_result = pending is not None and pending.state in {
                     "queued",
                     "running",
@@ -2705,7 +2709,7 @@ def test_preflight_reuse_ignores_operation_history_ordering(tmp_path: Path) -> N
         for node_id, digest in stale.values():
             selected = latest_result(session, node_id, requirements_sha256=digest)
             assert selected is not None
-            assert selected.observed_at > int(stale_time.timestamp())
+            assert selected.result.observed_at > int(stale_time.timestamp())
 
 
 @pytest.mark.usefixtures("damaged_json_rows")

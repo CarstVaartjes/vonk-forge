@@ -35,11 +35,7 @@ def verify_worker_ready(
     if completed_at.tzinfo is None or completed_at.utcoffset() is None:
         completed_at = completed_at.replace(tzinfo=UTC)
     age = timestamp - completed_at.astimezone(UTC)
-    if (
-        heartbeat.loop_sequence < 1
-        or age < timedelta(0)
-        or age > timedelta(seconds=maximum_age_seconds)
-    ):
+    if heartbeat.loop_sequence < 1 or age > timedelta(seconds=maximum_age_seconds):
         raise RuntimeError("worker readiness evidence is invalid or stale")
 
 

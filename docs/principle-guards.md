@@ -12,6 +12,11 @@ coordination detectors also inspect added lines. Bounded waits remain valid.
 No count ledger, baseline regeneration, category assignment or before/after
 report is required. Untouched old findings cannot block a change.
 
+The contact-clock detector rejects new negative-age liveness refusals for
+Controller-stamped contacts and worker heartbeats, including local aliases and
+SQL freshness filters. Clock rollback and capture latency imply age zero;
+certificate validity and agent-stamped observation freshness remain separate.
+
 A test may not put a short wall-clock limit (5 s or less) on real work:
 `future.result(timeout=1)`, `asyncio.wait_for(work, timeout=1)`, an asserted
 `event.wait(2)`, a `communicate`/`subprocess` timeout or a

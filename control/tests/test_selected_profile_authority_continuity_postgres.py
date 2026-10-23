@@ -435,8 +435,8 @@ def test_serving_selection_completes_stop_and_cleanup_after_author_loses_authori
                         .where(AgentOperationAttempt.fence == claim.fence)
                     )
                     assert operation is not None and operation.node_id == node_b
-                    assert (
-                        operation.parent_job_id == child.result.preflight.pending_job_id
+                    assert operation.parent_job_id == next(
+                        iter(child.result.preflight.pending_jobs.values()), None
                     )
                     node = session.get(AgentNode, node_b)
                     assert (

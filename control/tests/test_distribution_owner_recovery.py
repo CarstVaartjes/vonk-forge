@@ -112,9 +112,13 @@ def test_distribution_observation_deadline_survives_restart_and_fresh_admission(
         view = restarted.get(fresh.operation_id)
         assert view.result is not None
         checkpoint = view.result.preflight
-        if checkpoint is not None and checkpoint.pending_job_id:
+        if checkpoint is not None and next(
+            iter(checkpoint.pending_jobs.values()), None
+        ):
             with switch.sessions() as session:
-                pending = session.get(Job, checkpoint.pending_job_id)
+                pending = session.get(
+                    Job, next(iter(checkpoint.pending_jobs.values()), None)
+                )
                 needs_result = pending is not None and pending.state in {
                     LifecycleState.QUEUED,
                     LifecycleState.RUNNING,

@@ -220,9 +220,13 @@ def _complete_parent(world):
         if current.next_attempt_at is not None:
             now[0] = max(now[0], current.next_attempt_at)
         checkpoint = current.result.preflight
-        if checkpoint is not None and checkpoint.pending_job_id:
+        if checkpoint is not None and next(
+            iter(checkpoint.pending_jobs.values()), None
+        ):
             with sessions() as session:
-                pending = session.get(Job, checkpoint.pending_job_id)
+                pending = session.get(
+                    Job, next(iter(checkpoint.pending_jobs.values()), None)
+                )
                 needs_result = pending is not None and pending.state in {
                     LifecycleState.QUEUED,
                     LifecycleState.RUNNING,

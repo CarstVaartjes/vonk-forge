@@ -11,7 +11,12 @@ import pytest
 from alembic import command
 from alembic.config import Config
 from sqlalchemy import event, select
-from vonk_agent_protocol import LifecycleState, RunSwitchCode
+from vonk_agent_protocol import (
+    LifecycleState,
+    RunSwitchCode,
+    RuntimePreflightCode,
+    canonical_message,
+)
 from vonk_agent_protocol.state_machines import RouteState
 from vonk_control.logging import configure_controller_logging
 from vonk_control.models import (
@@ -33,6 +38,7 @@ from vonk_control.run_switch_contract import (
 )
 from vonk_control.run_switch_operations import _stored_job_plan
 
+from .agent_fences import fenced_operation
 from .non_blocking import assert_ended_without_blocking
 from .test_lifecycle_preflight import _finish
 from .test_recipe_operations import (
@@ -238,9 +244,15 @@ def _awaiting_final_verification(
         assert current.state in {"queued", "running"}, current.status_reason
         assert current.result is not None
         checkpoint = current.result.preflight
-        if queued_distribution and checkpoint is not None and checkpoint.pending_job_id:
+        if (
+            queued_distribution
+            and checkpoint is not None
+            and next(iter(checkpoint.pending_jobs.values()), None)
+        ):
             with sessions() as session:
-                probe = session.get(Job, checkpoint.pending_job_id)
+                probe = session.get(
+                    Job, next(iter(checkpoint.pending_jobs.values()), None)
+                )
                 needs_result = probe is not None and probe.state in {
                     "queued",
                     "running",
@@ -591,3 +603,225 @@ def test_postgres_duplicate_apply_converges_under_target_lock(
         futures = [workers.submit(apply) for _ in range(2)]
         results = [future.result(timeout=10) for future in futures]
     assert results[0].operation_id == results[1].operation_id
+
+
+@pytest.mark.parametrize("completion_wake", [False, True])
+@pytest.mark.parametrize("node_count,latency", [(2, 180), (2, 240), (1, 360), (2, 360)])
+def test_preflight_delayed_passes_and_completion_wake_reach_transfer(
+    tmp_path, migrated_engine, node_count, latency, completion_wake
+):
+    """Serial probes livelock dual loads; lost wakes must also self-heal.
+
+    Real agent reports persist receipts five seconds after dispatch. Worker
+    observation arrives minutes later; only the worker can advance phases,
+    whether the completion notification arrives or is lost.
+    The Spark clock leads the Controller by ten minutes throughout.
+    """
+    from vonk_agent_protocol.runtime_preflight import RuntimePreflightRequest
+    from vonk_control.agent_jobs import AgentJobService
+    from vonk_control.run_switch_operations import RunSwitchOperationService
+    from vonk_control.runtime_preflight import latest_result, request_digest
+
+    from .runtime_identity_support import claim_agent
+    from .test_lifecycle_preflight import _clear
+    from .test_runtime_preflight import result as passing_result
+
+    sessions, lifecycle, nodes, _ = _installed(
+        tmp_path, migrated_engine, nodes=node_count
+    )
+    _clear(sessions)
+    clock = SimpleNamespace(now=NOW)
+    queue = AgentJobService(sessions, clock=lambda: clock.now)
+    lifecycle._agent_jobs = queue
+    artifacts = RecordingArtifactExecutor(child_transfer=True)
+    service = RunSwitchOperationService(
+        sessions,
+        lifecycle=lifecycle,
+        clock=lambda: clock.now,
+        artifacts=CompleteArtifactInspector(missing_spark_bytes=1024),
+        artifact_phase_executor=artifacts,
+        memory_floor_bytes=50,
+    )
+    request = _request(sessions, nodes[0])
+    request.spark_group.nodes.extend(
+        SparkGroupNode(node_id=node_id, rank=rank, role="worker", endpoint_owner=False)
+        for rank, node_id in enumerate(nodes[1:], 1)
+    )
+    plan = service.preview(request, actor="admin")
+    assert plan.allowed, plan.blockers
+    owner = service.apply(
+        RunSwitchApplyRequest(
+            **request.model_dump(),
+            plan_digest=plan.plan_digest,
+            request_key=str(uuid.uuid4()),
+        ),
+        actor="admin",
+    )
+    service.tick()
+    pending = service.get(owner.operation_id)
+    assert pending.result is not None and pending.result.preflight is not None
+    assert set(pending.result.preflight.pending_jobs) == set(nodes)
+    # The gate's wait stays typed through the tick, never a generic fallback.
+    assert pending.wait is not None
+    assert pending.wait.reason is RuntimePreflightCode.REQUIRED
+    assert (
+        pending.blockers and pending.blockers[0].code == RuntimePreflightCode.REQUIRED
+    )
+    assert not artifacts.children
+
+    def report_probes():
+        clock.now += timedelta(seconds=5)
+        for index, node_id in enumerate(nodes):
+            claim = claim_agent(
+                queue, node_id, f"serial-{index}", preflight_fingerprint="a" * 64
+            )
+            assert claim is not None
+            operation = fenced_operation(sessions, claim)
+            probe_request = RuntimePreflightRequest.model_validate_json(
+                canonical_message(operation.payload)
+            )
+            queue.succeed(
+                claim.fence,
+                passing_result(
+                    probe_request, observed_at=int(clock.now.timestamp()) + 600
+                ),
+            )
+            # A new session sees the committed receipt before the wake dispatches.
+            with sessions() as session:
+                receipt = latest_result(
+                    session, node_id, requirements_sha256=request_digest(probe_request)
+                )
+                assert receipt is not None and receipt.received_at == clock.now
+
+    if completion_wake:
+        queue.set_preflight_completed(service.preflight_completed)
+    report_probes()
+    assert not artifacts.children  # Agent POST /result never advances phases.
+    clock.now = NOW + timedelta(seconds=latency)
+    service.tick()
+    active = service.get(owner.operation_id)
+    assert active.result is not None and active.result.child_operation_id
+    assert (
+        active.result.preflight is not None and not active.result.preflight.pending_jobs
+    )
+    assert len(artifacts.children) == 1
+
+
+def test_production_result_handler_only_schedules_worker(
+    tmp_path, migrated_engine, monkeypatch
+):
+    """Production's synchronous Composite executor must never run inside POST /result."""
+    from fastapi.testclient import TestClient
+    from vonk_agent_protocol.runtime_preflight import RuntimePreflightRequest
+    from vonk_control.agent_api import AgentApiServices
+    from vonk_control.api import production
+    from vonk_control.distribution_executor import CompositeDistributionPhaseExecutor
+    from vonk_control.settings import Settings
+
+    from .runtime_identity_support import claim_agent
+    from .test_agent_api import agent_headers
+    from .test_lifecycle_preflight import _clear
+    from .test_runtime_preflight import result as passing_result
+
+    sessions, lifecycle, nodes, _ = _installed(tmp_path, migrated_engine)
+    _clear(sessions)
+    artifacts = RecordingArtifactExecutor(child_transfer=True)
+    worker = _service(
+        sessions,
+        NOW,
+        lifecycle,
+        artifacts,
+        artifacts=CompleteArtifactInspector(missing_spark_bytes=1024),
+    )
+    request = _request(sessions, nodes[0])
+    owner = worker.apply(
+        RunSwitchApplyRequest(**request.model_dump(), request_key=str(uuid.uuid4())),
+        actor="admin",
+    )
+    worker.tick()
+
+    agents: list[AgentApiServices] = []
+    switches = []
+    build_agents = production.build_agent_services
+    create_app = production.create_app
+
+    def capture_agents(*args, **kwargs):
+        services = build_agents(*args, **kwargs)
+        agents.append(services)
+        return services
+
+    def capture_app(**kwargs):
+        switches.append(kwargs["run_switch_operations"])
+        # Enable the actual agent HTTP handler with a fixture proxy secret;
+        # the remaining services retain production composition in test mode.
+        kwargs["agent"] = agents[0]
+        kwargs["trusted_agent_proxy_auth"] = b"p" * 32
+        return create_app(**kwargs)
+
+    monkeypatch.setattr(production, "build_agent_services", capture_agents)
+    monkeypatch.setattr(production, "create_app", capture_app)
+    monkeypatch.setattr(production, "datetime", SimpleNamespace(now=lambda _tz: NOW))
+    secrets = tmp_path / "secrets"
+    secrets.mkdir()
+    (secrets / "token-signing-key").write_bytes(b"test-signing-key-32-bytes-12345678")
+    app = production.production_app(
+        Settings(
+            database_url=migrated_engine.url.render_as_string(hide_password=False),
+            deployment_mode="test",
+            management_cidrs="192.168.1.0/24",
+            secrets_root=secrets,
+            state_path=tmp_path / "state",
+            agent_artifact_root=tmp_path / "artifacts",
+            model_cache_root=tmp_path / "model-cache",
+        )
+    )
+    api = switches[0]
+    executor = api._artifact_phase_executor
+    assert isinstance(executor, CompositeDistributionPhaseExecutor)
+    assert not executor._async_runtime_image_preparation
+    advanced = []
+    phases = []
+    redrive = api.redrive
+    execute = executor.execute
+
+    def record_advance(*args, **kwargs):
+        advanced.append(args)
+        return redrive(*args, **kwargs)
+
+    def record_phase(*args, **kwargs):
+        phases.append(args)
+        return execute(*args, **kwargs)
+
+    monkeypatch.setattr(api, "redrive", record_advance)
+    monkeypatch.setattr(executor, "execute", record_phase)
+    queue = agents[0].operations
+    claim = claim_agent(queue, nodes[0], "serial-0", preflight_fingerprint="a" * 64)
+    assert claim is not None
+    operation = fenced_operation(sessions, claim)
+    probe = RuntimePreflightRequest.model_validate_json(
+        canonical_message(operation.payload)
+    )
+    # No lifespan tasks: this request is the only possible API-side advancer.
+    try:
+        response = TestClient(app).post(
+            "/agent/result",
+            headers={
+                **agent_headers(nodes[0], "serial-0"),
+                "x-vonk-agent-fingerprint": "fingerprint-0",
+                "x-vonk-agent-source": "192.168.1.211",
+            },
+            json={
+                "fence": claim.fence,
+                "state": LifecycleState.SUCCEEDED,
+                "result": passing_result(probe).model_dump(mode="json"),
+            },
+        )
+        assert response.status_code == 204, response.text
+        assert not advanced and not phases and not artifacts.children
+        with sessions() as session:
+            job = session.get(Job, owner.operation_id)
+            assert job is not None and job.next_action_at == NOW
+        worker.tick()
+        assert len(artifacts.children) == 1
+    finally:
+        executor.close()

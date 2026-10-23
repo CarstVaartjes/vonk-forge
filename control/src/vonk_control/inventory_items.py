@@ -113,10 +113,13 @@ def record_preflight(
         item
         for item in items.preflights
         if item.requirements_sha256 != requirements_sha256
-        and item.result.observed_at >= int(now.timestamp()) - PREFLIGHT_MAX_AGE_SECONDS
+        and item.received_at is not None
+        and item.received_at.timestamp() >= now.timestamp() - PREFLIGHT_MAX_AGE_SECONDS
     ]
     entries.append(
-        PreflightInventoryItem(requirements_sha256=requirements_sha256, result=result)
+        PreflightInventoryItem(
+            requirements_sha256=requirements_sha256, result=result, received_at=now
+        )
     )
     record_items(node, items.model_copy(update={"preflights": entries}), now)
 

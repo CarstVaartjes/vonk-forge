@@ -289,7 +289,7 @@ def test_retry_reacquires_disk_before_dispatch_and_resumes_when_space_returns(
         actor="admin",
         previous=None,
     )
-    assert checkpoint.pending_job_id is not None
+    assert next(iter(checkpoint.pending_jobs.values()), None) is not None
     load_preflight = claim()
     assert load_preflight is not None
     assert load_preflight.operation == WireOperation.RUNTIME_PREFLIGHT

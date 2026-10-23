@@ -29,6 +29,7 @@ from ..models import (
 from ..operation_blockers import (
     bound_blockers,
 )
+from ..persisted_waits import schedule_wait
 from ..stored_json import read_row_column
 from .constants import _LOGGER, _OPERATION_KINDS
 from .errors import RunSwitchOperationConflict
@@ -179,6 +180,36 @@ class ObservationMixin:
         if callable(collect):
             collect()
         return advanced
+
+    def preflight_completed(self, child_id: str, node_id: str) -> None:
+        """Make the exact owner due; only the worker may advance its phases.
+
+        The worker polls this durable clock, so lost notifications are harmless.
+        """
+        service = typing_cast("RunSwitchOperationService", self)
+        now = _now(service._clock)
+        with service._sessions.begin() as session:
+            owners = tuple(
+                session.scalars(
+                    select(Job)
+                    .where(
+                        Job.kind.in_(_OPERATION_KINDS),
+                        Job.state.in_(
+                            job_states.words(
+                                LifecycleState.QUEUED,
+                                LifecycleState.RUNNING,
+                                LifecycleState.OBSERVING,
+                            )
+                        ),
+                        Job.result["preflight"]["pending_jobs"][node_id].as_string()
+                        == child_id,
+                    )
+                    .order_by(Job.id)
+                    .with_for_update(skip_locked=True)
+                )
+            )
+            for job in owners:
+                schedule_wait(job, now)
 
     def redrive(self, job_id: str) -> bool:
         """Advance one identity through the same fenced observation path."""

@@ -12,16 +12,23 @@ from pydantic import (
     ConfigDict,
     Field,
     StringConstraints,
-    model_validator,
 )
 from sqlalchemy import select
-from vonk_agent_protocol import RuntimePreflightCode
+from vonk_agent_protocol import AgentOperation as OperationKind
+from vonk_agent_protocol import (
+    LifecycleState,
+    OperationReason,
+    RuntimePreflightCode,
+    canonical_message,
+)
 from vonk_agent_protocol.runtime_preflight import RuntimePreflightResult
 
 from .failure_classification import is_security_failure
 from .inventory_items import inventory_items
+from .inventory_items_contract import PreflightInventoryItem
 from .lifecycle.job import JobAdapter
 from .models import AgentNode, AgentOperation, AgentOperationAttempt, Job
+from .persisted_waits import typed_wait_reason
 from .recovery_policy import RECOVERY
 from .runtime_preflight import (
     admission_blockers,
@@ -48,25 +55,13 @@ UuidId = Annotated[
 class LifecyclePreflightCheckpoint(StrictJSONModel):
     model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
     phase_index: int = Field(ge=0, le=31)
-    pending_job_id: UuidId | None = None
-    pending_node_id: NodeId | None = None
+    pending_jobs: dict[NodeId, UuidId] = Field(default_factory=dict)
+    retry_at: dict[NodeId, AwareDatetime] = Field(default_factory=dict)
     next_check_at: AwareDatetime | None = None
-    last_failure_code: str | None = None
+    last_failure_code: OperationReason | None = None
     last_failure_detail: str | None = None
-    attempts: dict[NodeId, Annotated[int, Field(ge=1)]] = Field(
-        default_factory=dict, max_length=33
-    )
-    receipts: dict[NodeId, RuntimePreflightResult] = Field(
-        default_factory=dict, max_length=33
-    )
-
-    @model_validator(mode="after")
-    def pending_identity_is_complete(self):
-        if (self.pending_job_id is None) != (self.pending_node_id is None):
-            raise ValueError(
-                "preflight pending child and node identities must be paired"
-            )
-        return self
+    attempts: dict[NodeId, Annotated[int, Field(ge=1)]] = Field(default_factory=dict)
+    receipts: dict[NodeId, PreflightInventoryItem] = Field(default_factory=dict)
 
 
 # Security refusals (failure_classification.is_security_failure) park the
@@ -119,48 +114,38 @@ class LifecyclePreflight:
                 phase_index=phase_index, receipts=checkpoint.receipts
             )
 
-        def retry_probe(
-            node_id: str, reason: str, error_code: str | None = None
-        ) -> tuple[LifecyclePreflightCheckpoint, str | None]:
-            checkpoint.pending_job_id = None
-            checkpoint.pending_node_id = None
-            checkpoint.receipts.pop(node_id, None)
-            checkpoint.next_check_at = None
-            if is_security_failure(error_code):
-                return checkpoint, reason
-            checkpoint.next_check_at = self._recovery.next_attempt(
-                f"{request_key}:{phase_index}:{node_id}",
-                checkpoint.attempts.get(node_id, 1),
-                now,
-                ongoing_intent=True,
-            )
-            return checkpoint, None
-
-        if checkpoint.pending_job_id is None:
-            if checkpoint.next_check_at is not None and now < checkpoint.next_check_at:
-                return checkpoint, None
-            checkpoint.next_check_at = None
+        checkpoint.next_check_at = None
+        due: list[datetime] = []
         with self._sessions.begin() as session:
-            # Consume the outstanding probe first, then recheck every other node.
-            # A previously checked rank can change while its peer is probing.
-            ordered_nodes = sorted(
-                nodes.items(),
-                key=lambda item: (item[0] != checkpoint.pending_node_id, item[0]),
+            # Pending child identities bind one probe round to this request and
+            # phase. Consume its receipts as a set at their last arrival, rather
+            # than ageing them by time spent waiting for the worker. The normal
+            # freshness bound still limits the span between rank receipts;
+            # after the round, reusable inventory is checked against now.
+            round_active = bool(checkpoint.pending_jobs)
+            round_receipts = list(checkpoint.receipts.values())
+            for node_id, child_id in checkpoint.pending_jobs.items():
+                if node_id not in nodes:
+                    continue
+                child = session.get(Job, child_id)
+                if child is not None and child.state == LifecycleState.SUCCEEDED:
+                    receipt = latest_result(
+                        session, node_id, requirements_sha256=child.authority_revision
+                    )
+                    if receipt is not None:
+                        round_receipts.append(receipt)
+            round_received_at = max(
+                (
+                    receipt.received_at.timestamp()
+                    for receipt in round_receipts
+                    if receipt.received_at is not None
+                ),
+                default=now.timestamp(),
             )
-            for node_id, source_build in ordered_nodes:
+            for node_id, source_build in sorted(nodes.items()):
                 node = session.get(AgentNode, node_id, with_for_update=True)
                 if node is None:
-                    checkpoint.pending_job_id = None
-                    checkpoint.pending_node_id = None
-                    checkpoint.receipts.pop(node_id, None)
-                    checkpoint.next_check_at = None
-                    return (
-                        checkpoint,
-                        (
-                            f"{RuntimePreflightCode.NODE_MISSING}: node was removed from "
-                            "Controller authority"
-                        ),
-                    )
+                    return checkpoint, RuntimePreflightCode.NODE_MISSING
                 if node.revoked_at is not None:
                     return checkpoint, RuntimePreflightCode.NODE_REVOKED
                 request = recipe_requirements(
@@ -168,99 +153,121 @@ class LifecyclePreflight:
                     source_build=source_build,
                     minimum_free_bytes=self._minimum_free_bytes,
                 )
+                digest = request_digest(request)
                 fingerprint = inventory_items(node).preflight_fingerprint
-                result = checkpoint.receipts.get(node_id) or latest_result(
-                    session, node_id, requirements_sha256=request_digest(request)
-                )
-                blockers = admission_blockers(
-                    request,
-                    result,
-                    current_fingerprint=fingerprint,
-                    now=int(now.timestamp()),
-                )
-                # admission_blockers always reports a missing result, so the
-                # explicit check only states that a clean result is the one
-                # being receipted.
-                if (
-                    result is not None
-                    and not blockers
-                    and checkpoint.pending_node_id != node_id
+
+                def key(attempt: int, node_id: str = node_id) -> str:
+                    return str(
+                        uuid.uuid5(
+                            uuid.UUID(request_key),
+                            f"runtime-preflight:{phase_index}:{node_id}:{attempt}",
+                        )
+                    )
+
+                # Checkpoints are derived. Adopt every already-issued child by
+                # its deterministic identity, including after checkpoint loss.
+                attempt = checkpoint.attempts.get(node_id, 0)
+                while child := session.scalar(
+                    select(Job).where(Job.request_id == key(attempt + 1))
                 ):
-                    checkpoint.receipts[node_id] = result
-                    continue
-                if checkpoint.pending_job_id:
-                    if checkpoint.pending_node_id != node_id:
-                        continue
-                    child = session.get(Job, checkpoint.pending_job_id)
-                    if child is None:
-                        return retry_probe(node_id, RuntimePreflightCode.CHILD_MISSING)
+                    attempt += 1
+                    checkpoint.pending_jobs[node_id] = child.id
+                if attempt:
+                    checkpoint.attempts[node_id] = attempt
+                receipt = latest_result(session, node_id, requirements_sha256=digest)
+                child_id = checkpoint.pending_jobs.get(node_id)
+                if child_id is not None:
+                    child = session.get(Job, child_id)
                     operation = session.scalar(
                         select(AgentOperation).where(
-                            AgentOperation.parent_job_id == child.id,
+                            AgentOperation.parent_job_id == child_id,
                             AgentOperation.node_id == node_id,
                         )
                     )
-                    if operation is None:
-                        return retry_probe(
-                            node_id, RuntimePreflightCode.OPERATION_MISSING
+                    failure = None
+                    error_code = None
+                    if child is None:
+                        failure = RuntimePreflightCode.CHILD_MISSING
+                    elif operation is None:
+                        failure = RuntimePreflightCode.OPERATION_MISSING
+                    elif child.state in {LifecycleState.QUEUED, LifecycleState.RUNNING}:
+                        created = child.created_at
+                        if created.tzinfo is None:
+                            created = created.replace(tzinfo=UTC)
+                        interval = (
+                            DELAYED_PROBE_OBSERVATION_INTERVAL
+                            if now >= created + PENDING_PROBE_NORMAL_WINDOW
+                            else PROBE_OBSERVATION_INTERVAL
                         )
-                    if child.state in {"queued", "running"}:
-                        created_at = child.created_at
-                        if created_at.tzinfo is None:
-                            created_at = created_at.replace(tzinfo=UTC)
-                        if (
-                            checkpoint.next_check_at is None
-                            or now >= checkpoint.next_check_at
-                        ):
-                            interval = (
-                                DELAYED_PROBE_OBSERVATION_INTERVAL
-                                if now >= created_at + PENDING_PROBE_NORMAL_WINDOW
-                                else PROBE_OBSERVATION_INTERVAL
-                            )
-                            checkpoint.next_check_at = now + interval
-                        return checkpoint, None
-                    raw = session.scalar(
-                        select(AgentOperationAttempt.result).where(
-                            AgentOperationAttempt.operation_id == operation.id,
-                            AgentOperationAttempt.attempt == operation.current_attempt,
-                        )
-                    )
-                    if child.state != "succeeded":
-                        # Classify on the typed code only; status_reason is prose.
-                        return retry_probe(
-                            node_id,
-                            child.status_reason
-                            or RuntimePreflightCode.EXECUTION_FAILED,
-                            _child_error_code(raw),
-                        )
-                    if raw is None:
-                        return retry_probe(
-                            node_id, RuntimePreflightCode.RECEIPT_MISSING
-                        )
-                    try:
-                        result = RuntimePreflightResult.model_validate(raw)
-                    except (TypeError, ValueError):
-                        return retry_probe(
-                            node_id, RuntimePreflightCode.RECEIPT_INVALID
-                        )
-                    checkpoint.receipts[node_id] = result
-                    # A completed child is evidence of an attempt even when an
-                    # older checkpoint serializer lost the default attempt map.
-                    checkpoint.attempts[node_id] = checkpoint.attempts.get(node_id, 1)
-                    checkpoint.pending_job_id = None
-                    checkpoint.pending_node_id = None
-                    checkpoint.next_check_at = None
-                    blockers = admission_blockers(
-                        request,
-                        result,
-                        current_fingerprint=fingerprint,
-                        now=int(now.timestamp()),
-                    )
-                    if not blockers:
-                        checkpoint.last_failure_code = None
-                        checkpoint.last_failure_detail = None
+                        due.append(now + interval)
                         continue
-                    if any(
+                    else:
+                        raw = session.scalar(
+                            select(AgentOperationAttempt.result).where(
+                                AgentOperationAttempt.operation_id == operation.id,
+                                AgentOperationAttempt.attempt
+                                == operation.current_attempt,
+                            )
+                        )
+                        if child.state != LifecycleState.SUCCEEDED:
+                            error_code = _child_error_code(raw)
+                            failure = (
+                                child.status_reason
+                                or RuntimePreflightCode.EXECUTION_FAILED
+                            )
+                        elif raw is None:
+                            failure = RuntimePreflightCode.RECEIPT_MISSING
+                        else:
+                            try:
+                                result = RuntimePreflightResult.model_validate_json(
+                                    canonical_message(raw)
+                                )
+                                if receipt is None or receipt.result != result:
+                                    failure = RuntimePreflightCode.RECEIPT_MISSING
+                            except (TypeError, ValueError):
+                                failure = RuntimePreflightCode.RECEIPT_INVALID
+                    checkpoint.pending_jobs.pop(node_id)
+                    if failure is not None:
+                        checkpoint.receipts.pop(node_id, None)
+                        checkpoint.last_failure_code = (
+                            typed_wait_reason(
+                                error_code, RuntimePreflightCode.EXECUTION_FAILED
+                            )
+                            if error_code
+                            else typed_wait_reason(
+                                str(failure), RuntimePreflightCode.EXECUTION_FAILED
+                            )
+                        )
+                        checkpoint.last_failure_detail = str(failure)
+                        if is_security_failure(error_code):
+                            return checkpoint, str(failure)
+                        retry_at = self._recovery.next_attempt(
+                            f"{request_key}:{phase_index}:{node_id}",
+                            max(attempt, 1),
+                            now,
+                            ongoing_intent=True,
+                        )
+                        assert retry_at is not None
+                        checkpoint.retry_at[node_id] = retry_at
+                blockers = admission_blockers(
+                    request,
+                    receipt,
+                    current_fingerprint=fingerprint,
+                    now=(
+                        round_received_at
+                        if round_active and (child_id is None or failure is None)
+                        else now.timestamp()
+                    ),
+                )
+                if receipt is not None and not blockers:
+                    checkpoint.receipts[node_id] = receipt
+                    checkpoint.retry_at.pop(node_id, None)
+                    continue
+                checkpoint.receipts.pop(node_id, None)
+                if (
+                    child_id is not None
+                    and failure is None
+                    and any(
                         item.code
                         not in {
                             RuntimePreflightCode.HOST_CHANGED,
@@ -268,74 +275,67 @@ class LifecyclePreflight:
                             RuntimePreflightCode.STALE,
                         }
                         for item in blockers
-                    ):
-                        return checkpoint, "; ".join(item.detail for item in blockers)[
-                            :512
-                        ]
-                    stale_cause = "; ".join(
-                        f"{item.code}: {item.detail}" for item in blockers
                     )
-                    checkpoint.next_check_at = self._recovery.next_attempt(
+                ):
+                    return checkpoint, "; ".join(item.detail for item in blockers)[:512]
+                if child_id is not None and failure is None and blockers:
+                    retry_at = self._recovery.next_attempt(
                         f"{request_key}:{phase_index}:{node_id}",
-                        checkpoint.attempts[node_id],
+                        max(attempt, 1),
                         now,
                         ongoing_intent=True,
                     )
-                    checkpoint.last_failure_code = next(
-                        (
-                            item.code
-                            for item in blockers
-                            if item.code
-                            in {
-                                RuntimePreflightCode.HOST_CHANGED,
-                                RuntimePreflightCode.REQUIREMENTS_CHANGED,
-                                RuntimePreflightCode.STALE,
-                            }
-                        ),
-                        RuntimePreflightCode.STALE,
-                    )
-                    checkpoint.last_failure_detail = stale_cause[:512]
-                    return checkpoint, None
-                attempt = checkpoint.attempts.get(node_id, 0) + 1
+                    assert retry_at is not None
+                    checkpoint.retry_at[node_id] = retry_at
+                    checkpoint.last_failure_code = blockers[0].code
+                    checkpoint.last_failure_detail = "; ".join(
+                        item.detail for item in blockers
+                    )[:512]
+                if (
+                    node_id in checkpoint.retry_at
+                    and now < checkpoint.retry_at[node_id]
+                ):
+                    due.append(checkpoint.retry_at[node_id])
+                    continue
+                checkpoint.retry_at.pop(node_id, None)
+                if blockers:
+                    checkpoint.last_failure_code = blockers[0].code
+                    checkpoint.last_failure_detail = "; ".join(
+                        item.detail for item in blockers
+                    )[:512]
+                attempt += 1
                 checkpoint.attempts[node_id] = attempt
-                key = str(
-                    uuid.uuid5(
-                        uuid.UUID(request_key),
-                        f"runtime-preflight:{phase_index}:{node_id}:{attempt}",
-                    )
+                payload = request.model_dump(mode="json")
+                child = JobAdapter.new_job(
+                    state=LifecycleState.RUNNING.value,
+                    id=str(uuid.uuid4()),
+                    request_id=key(attempt),
+                    kind=OperationKind.RUNTIME_PREFLIGHT.value,
+                    actor=actor,
+                    authority_revision=digest,
+                    targets=[node_id],
+                    payload_digest=digest,
+                    payload=payload,
+                    created_at=now,
+                    updated_at=now,
                 )
-                child = session.scalar(select(Job).where(Job.request_id == key))
-                if child is None:
-                    digest = request_digest(request)
-                    payload = request.model_dump(mode="json")
-                    child = JobAdapter.new_job(
-                        state="running",
-                        id=str(uuid.uuid4()),
-                        request_id=key,
-                        kind="runtime.preflight.v1",
-                        actor=actor,
-                        authority_revision=digest,
-                        targets=[node_id],
-                        payload_digest=digest,
-                        payload=payload,
-                        created_at=now,
-                        updated_at=now,
-                    )
-                    session.add(child)
-                    session.flush()
-                    self._queue.enqueue_in_session(
-                        session,
-                        child.id,
-                        node_id,
-                        "runtime.preflight.v1",
-                        digest,
-                        payload,
-                        operation_id=str(uuid.uuid4()),
-                    )
-                checkpoint.pending_job_id = child.id
-                checkpoint.pending_node_id = node_id
-                checkpoint.next_check_at = now + PROBE_OBSERVATION_INTERVAL
-                break
-        if checkpoint.pending_job_id:
+                session.add(child)
+                session.flush()
+                self._queue.enqueue_in_session(
+                    session,
+                    child.id,
+                    node_id,
+                    OperationKind.RUNTIME_PREFLIGHT.value,
+                    digest,
+                    payload,
+                    operation_id=str(uuid.uuid4()),
+                )
+                checkpoint.pending_jobs[node_id] = child.id
+                due.append(now + PROBE_OBSERVATION_INTERVAL)
+        checkpoint.next_check_at = min(due, default=None)
+        if checkpoint.pending_jobs:
             self._queue.notify_available()
+        if not due:
+            checkpoint.last_failure_code = None
+            checkpoint.last_failure_detail = None
         return checkpoint, None

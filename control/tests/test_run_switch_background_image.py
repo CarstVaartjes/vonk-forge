@@ -364,9 +364,13 @@ def _background_image_switch(
         tick_done.set()
         current = view()
         checkpoint = current.result.preflight if current.result else None
-        if checkpoint is not None and checkpoint.pending_job_id:
+        if checkpoint is not None and next(
+            iter(checkpoint.pending_jobs.values()), None
+        ):
             with sessions() as session:
-                pending = session.get(Job, checkpoint.pending_job_id)
+                pending = session.get(
+                    Job, next(iter(checkpoint.pending_jobs.values()), None)
+                )
                 if pending is not None and pending.state in {"queued", "running"}:
                     _finish(sessions, checkpoint, clock.now)
         wait(

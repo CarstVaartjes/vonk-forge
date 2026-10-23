@@ -11,15 +11,16 @@ from vonk_agent_protocol import RuntimePreflightCode, RuntimePreflightFindingCod
 from vonk_agent_protocol.runtime_preflight import (
     RuntimePreflightFinding,
     RuntimePreflightRequest,
-    RuntimePreflightResult,
 )
+
+from .inventory_items_contract import PreflightInventoryItem
 
 PREFLIGHT_MAX_AGE_SECONDS = 300
 
 
 @dataclass(frozen=True, slots=True)
 class RuntimePreflightBlocker:
-    code: str
+    code: RuntimePreflightCode
     detail: str
 
 
@@ -84,17 +85,25 @@ def _finding_detail(finding: RuntimePreflightFinding) -> str:
 
 def admission_blockers(
     request: RuntimePreflightRequest,
-    result: RuntimePreflightResult | None,
+    receipt: PreflightInventoryItem | None,
     *,
     current_fingerprint: str | None,
-    now: int,
+    now: float,
     maximum_age: int = PREFLIGHT_MAX_AGE_SECONDS,
 ) -> tuple[RuntimePreflightBlocker, ...]:
-    if result is None:
+    if receipt is None:
         return (
             RuntimePreflightBlocker(
                 RuntimePreflightCode.REQUIRED,
                 "Spark runtime preflight has not completed.",
+            ),
+        )
+    result = receipt.result
+    if receipt.requirements_sha256 != request_digest(request):
+        return (
+            RuntimePreflightBlocker(
+                RuntimePreflightCode.REQUIREMENTS_CHANGED,
+                "Runtime requirements changed; rerun preflight.",
             ),
         )
     if current_fingerprint is None or result.fingerprint != current_fingerprint:
@@ -104,7 +113,8 @@ def admission_blockers(
                 "Spark host policy changed or its current fingerprint is unavailable; rerun preflight.",
             ),
         )
-    if result.observed_at > now or now - result.observed_at > maximum_age:
+    received_at = receipt.received_at
+    if received_at is None or now - received_at.timestamp() > maximum_age:
         return (
             RuntimePreflightBlocker(
                 RuntimePreflightCode.STALE,
@@ -135,16 +145,16 @@ def admission_blockers(
 
 def latest_result(
     session, node_id: str, *, requirements_sha256: str | None = None
-) -> RuntimePreflightResult | None:
+) -> PreflightInventoryItem | None:
     """Read the canonical reusable item; attempt results remain operation history."""
     from .inventory_items import inventory_items
     from .models import AgentNode
 
     items = inventory_items(session.get(AgentNode, node_id))
     results = [
-        item.result
+        item
         for item in items.preflights
         if requirements_sha256 is None
         or item.requirements_sha256 == requirements_sha256
     ]
-    return max(results, key=lambda result: result.observed_at, default=None)
+    return max(results, key=lambda item: item.result.observed_at, default=None)

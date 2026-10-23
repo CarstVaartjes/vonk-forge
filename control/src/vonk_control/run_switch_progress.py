@@ -349,8 +349,8 @@ def _progress_view(
         )
     measurement = raw.operation
     if measurement is not None:
-        measuring_preflight = (
-            raw.preflight is not None and raw.preflight.pending_job_id is not None
+        measuring_preflight = raw.preflight is not None and bool(
+            raw.preflight.pending_jobs
         )
         if (
             raw.operation_phase_index != phase_index and not measuring_preflight
