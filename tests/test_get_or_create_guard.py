@@ -47,6 +47,22 @@ def identity_locks(tree: ast.Module) -> list[int]:
             or (isinstance(call.func, ast.Name) and call.func.id == "new_recipe_job")
             for call in calls
         )
+        if inserts or creates_job or function.name == "insert_identity":
+            errors.extend(
+                node.lineno
+                for node in ast.walk(function)
+                if isinstance(node, ast.Constant)
+                and isinstance(node.value, str)
+                and any(
+                    name in node.value for name in ("pg_advisory", "pg_try_advisory")
+                )
+            )
+            errors.extend(
+                call.lineno
+                for call in calls
+                if isinstance(call.func, ast.Attribute)
+                and call.func.attr.startswith(("pg_advisory", "pg_try_advisory"))
+            )
         constructed = {
             call.func.id
             for call in calls
@@ -116,6 +132,8 @@ def identity_locks(tree: ast.Module) -> list[int]:
         "query = select(Job).where(Job.request_id == key)\n    query = query.with_for_update()",
         "select(Document).where(Document.publisher == publisher, Document.slug == slug).with_for_update()",
         "session.get(Document, identity, with_for_update=True)",
+        'session.execute(text("SELECT pg_advisory_xact_lock(1)"))',
+        "session.scalar(select(func.pg_try_advisory_xact_lock(1)))",
     ],
 )
 def test_identity_lock_regressions_are_rejected(query: str):
