@@ -88,6 +88,8 @@ pub const STORES: &[Store] = &[
     Store("tmp/", Claim, "the process that made each temporary file", Agent),
     Store("credentials/", Bookkeeping, "the agent identity", Agent),
     Store("state.sqlite", Bookkeeping, "the agent journal", Agent),
+    Store("store-retention-failure.json", Bookkeeping, "the agent retention pass; current failure evidence", Agent),
+    Store(".store-retention-failure.json.*.tmp", Ended, "an interrupted retention evidence publication", Agent),
     Store("store-retention.json", Bookkeeping, "the Controller inventory verdict", Agent),
     Store("installation-inventory-cursor", Bookkeeping, "inventory page rotation", Agent),
     Store("run-inventory-cursor", Bookkeeping, "inventory page rotation", Agent),

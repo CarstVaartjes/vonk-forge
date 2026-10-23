@@ -280,12 +280,20 @@ pub fn sweep(
     disk: &dyn Fn() -> Option<(u64, u64)>,
     tick: &dyn Fn(),
 ) -> Swept {
-    sweep_with_runtime(data_root, now, deadline, untracked, disk, tick, &|id| {
-        crate::host_runtime::installation_in_use(id).map_err(|error| error.to_string())
-    })
+    sweep_with(
+        data_root,
+        now,
+        deadline,
+        untracked,
+        disk,
+        tick,
+        &|id| crate::host_runtime::installation_in_use(id).map_err(|error| error.to_string()),
+        &crate::host_runtime::remove_agent_store,
+    )
 }
 
-fn sweep_with_runtime(
+#[allow(clippy::too_many_arguments)]
+fn sweep_with(
     data_root: &Path,
     now: SystemTime,
     deadline: Instant,
@@ -293,6 +301,9 @@ fn sweep_with_runtime(
     disk: &dyn Fn() -> Option<(u64, u64)>,
     tick: &dyn Fn(),
     in_use: &dyn Fn(&str) -> Result<bool, String>,
+    remover: &dyn Fn(
+        &vonk_agent_protocol::generated::AgentStoreRemovalRequest,
+    ) -> std::io::Result<()>,
 ) -> Swept {
     let mut pass = Pass {
         now,
@@ -300,6 +311,9 @@ fn sweep_with_runtime(
         tick,
         owner: rustix::process::geteuid().as_raw(),
         swept: Swept::default(),
+        data_root,
+        remover,
+        failure: None,
     };
     if !owned_directory(data_root, pass.owner) {
         return pass.swept;
@@ -478,7 +492,66 @@ fn sweep_with_runtime(
         projection.map_or(0, |request| request.required_free_bytes),
     );
 
+    if pass.failure.is_some() || !pass.swept.pending && untracked.is_some() {
+        record_failure(data_root, pass.failure.as_ref());
+    }
     pass.swept
+}
+
+const FAILURE_FILE: &str = "store-retention-failure.json";
+
+/// Durable evidence, also consumed by collect-inventory subprocesses.
+pub fn retention_failure(
+    data_root: &Path,
+) -> Option<vonk_agent_protocol::generated::StoreRetentionFailure> {
+    use std::io::Read;
+    let file = fs::OpenOptions::new()
+        .read(true)
+        .custom_flags((rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::NONBLOCK).bits() as i32)
+        .open(data_root.join(FAILURE_FILE))
+        .ok()?;
+    if !file.metadata().ok()?.is_file() {
+        return None;
+    }
+    let mut body = Vec::new();
+    file.take(8193).read_to_end(&mut body).ok()?;
+    if body.len() > 8192 {
+        return None;
+    }
+    vonk_agent_protocol::parse_strict(&body).ok()
+}
+
+fn record_failure(
+    data_root: &Path,
+    failure: Option<&vonk_agent_protocol::generated::StoreRetentionFailure>,
+) {
+    let previous = retention_failure(data_root);
+    if previous.as_ref() == failure {
+        return;
+    }
+    match failure {
+        Some(failure) => {
+            eprintln!(
+                "vonk-agent: store retention needs attention: {}: {}; retries every {} seconds",
+                failure.path, failure.diagnostic, failure.retry_after_seconds
+            );
+            let result = vonk_agent_protocol::canonical_generated_json(failure)
+                .map_err(std::io::Error::other)
+                .and_then(|body| {
+                    crate::identity::atomic_private_write(data_root, FAILURE_FILE, &body)
+                });
+            if let Err(error) = result {
+                eprintln!("vonk-agent: store retention evidence could not be saved: {error}");
+            }
+        }
+        None => {
+            if let Err(error) = fs::remove_file(data_root.join(FAILURE_FILE)) {
+                eprintln!("vonk-agent: store retention evidence could not be cleared: {error}");
+            } else {
+                eprintln!("vonk-agent: store retention recovered");
+            }
+        }
+    }
 }
 
 /// The model objects no installation links or names, least recently used
@@ -654,6 +727,11 @@ struct Pass<'a> {
     tick: &'a dyn Fn(),
     owner: u32,
     swept: Swept,
+    data_root: &'a Path,
+    remover: &'a dyn Fn(
+        &vonk_agent_protocol::generated::AgentStoreRemovalRequest,
+    ) -> std::io::Result<()>,
+    failure: Option<vonk_agent_protocol::generated::StoreRetentionFailure>,
 }
 
 impl Pass<'_> {
@@ -926,9 +1004,29 @@ impl Pass<'_> {
             self.swept.pending = true;
             return false;
         }
-        // remove_dir_all never follows a link; a link itself is only unlinked.
-        // A read-only directory the agent owns is made removable first.
-        let result = if metadata.is_dir() {
+        // Runtime/helper writers own descendants of these scopes. Always use
+        // the helper, rather than partially deleting (including the grace
+        // marker) before discovering a foreign-owned directory.
+        use vonk_agent_protocol::generated::{AgentRetainedStore, AgentStoreRemovalRequest};
+        let scope = path.strip_prefix(self.data_root).ok().and_then(|relative| {
+            let mut components = relative.iter();
+            let store = components
+                .next()?
+                .to_str()?
+                .parse::<AgentRetainedStore>()
+                .ok()?;
+            let scope_id = uuid::Uuid::parse_str(components.next()?.to_str()?).ok()?;
+            components.next().is_none().then_some((store, scope_id))
+        });
+        let result = if let Some((store, scope_id)) = scope.filter(|_| metadata.is_dir()) {
+            (self.remover)(&AgentStoreRemovalRequest {
+                request_id: uuid::Uuid::new_v4(),
+                store,
+                scope_id,
+                device: metadata.dev(),
+                inode: metadata.ino(),
+            })
+        } else if metadata.is_dir() {
             crate::recipe_builder::make_owned_directories_removable(path)
                 .and_then(|()| fs::remove_dir_all(path))
         } else {
@@ -941,10 +1039,19 @@ impl Pass<'_> {
                 true
             }
             Err(error) => {
-                eprintln!(
-                    "vonk-agent: store retention kept {}: {error}",
-                    path.display()
-                );
+                if self.failure.is_none() {
+                    self.failure = Some(vonk_agent_protocol::generated::StoreRetentionFailure {
+                        path: path
+                            .strip_prefix(self.data_root)
+                            .unwrap_or(path)
+                            .display()
+                            .to_string(),
+                        diagnostic: crate::failure_evidence::sanitize_exit_summary(
+                            &error.to_string(),
+                        ),
+                        retry_after_seconds: 60,
+                    });
+                }
                 false
             }
         };

@@ -517,7 +517,11 @@ impl<R: ProcessRunner> InventoryCollector<'_, R> {
             fabric_bandwidth_mbps: self.fabric_bandwidth_mbps,
             network_interfaces: None,
             nas_route_interface: None,
-            host_settings: host_settings(self.runner, memory_total_bytes),
+            host_settings: host_settings(self.runner, memory_total_bytes).map(|mut host| {
+                host.store_retention_failure =
+                    crate::store_retention::retention_failure(self.store_path);
+                host
+            }),
             installations,
             unused_model_bytes: crate::store_retention::unused_model_bytes(self.store_path),
             model_objects: crate::store_retention::model_objects(self.store_path),
@@ -553,6 +557,7 @@ fn host_settings<R: ProcessRunner>(
     };
     let display_manager_active = is_active("display-manager.service")?;
     Some(vonk_agent_protocol::generated::HostSettings {
+        store_retention_failure: None,
         display_manager_active,
         graphical_default_target: default_target == "graphical.target",
         display_memory: crate::display_memory::observe(

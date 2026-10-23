@@ -338,6 +338,7 @@ fn inventory_with_all_evidence() -> vonk_agent_protocol::InventoryRequest {
     request.fabric_address = Some("192.168.100.2".to_owned());
     request.fabric_bandwidth_mbps = Some(200_000);
     request.host_settings = Some(vonk_agent_protocol::generated::HostSettings {
+        store_retention_failure: None,
         display_manager_active: false,
         graphical_default_target: false,
         gpu_clock_support: None,

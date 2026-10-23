@@ -17,6 +17,82 @@ struct Owners {
 const OWNERS_FORMAT: &str = "{{index .Config.Labels \"ai.vonkforge.installation-id\"}}\t{{index .Config.Labels \"ai.vonkforge.target-id\"}}{{println}}{{range .Mounts}}{{json .Source}}{{println}}{{end}}";
 
 impl<R: CommandRunner> OperationExecutor<R> {
+    /// Local retention delegates only an agent-owned scope. Reuse the same
+    /// no-follow, same-device deletion as installation cleanup and tmp reset.
+    /// This removes bytes, never workloads or signed installation authority.
+    pub fn remove_agent_store(
+        &self,
+        request: &vonk_agent_protocol::generated::AgentStoreRemovalRequest,
+    ) -> Result<(), OperationError> {
+        use vonk_agent_protocol::generated::AgentRetainedStore;
+        let _launches = match self.runtime_stores.try_write() {
+            Ok(guard) => guard,
+            Err(std::sync::TryLockError::Poisoned(guard)) => guard.into_inner(),
+            Err(std::sync::TryLockError::WouldBlock) => {
+                return Err(OperationError::InstallationReconciliationBusy);
+            }
+        };
+        let store = request.store.as_str();
+        let id = request.scope_id.to_string();
+        let root = StoreRoot::Agent
+            .path(&self.roots.agent_data, store)
+            .ok_or(OperationError::UnsafePath)?;
+        for path in [&self.roots.agent_data, &root] {
+            require_safe_directory(path, self.runtime_request_owner_uid)?;
+        }
+        let flags = rustix::fs::OFlags::RDONLY
+            | rustix::fs::OFlags::DIRECTORY
+            | rustix::fs::OFlags::NOFOLLOW
+            | rustix::fs::OFlags::CLOEXEC;
+        let agent = OpenOptions::new()
+            .read(true)
+            .custom_flags(flags.bits() as i32)
+            .open(&self.roots.agent_data)?;
+        let parent = rustix::fs::openat(&agent, store, flags, rustix::fs::Mode::empty())
+            .map_err(errno_io)?;
+        let scope = match rustix::fs::openat(&parent, id.as_str(), flags, rustix::fs::Mode::empty())
+        {
+            Ok(scope) => scope,
+            Err(rustix::io::Errno::NOENT) => return Ok(()),
+            Err(error) => return Err(errno_io(error).into()),
+        };
+        let metadata = rustix::fs::fstat(&scope).map_err(errno_io)?;
+        let device = rustix::fs::fstat(&agent).map_err(errno_io)?.st_dev;
+        if (metadata.st_dev, metadata.st_ino) != (request.device, request.inode)
+            || metadata.st_dev != device
+            || metadata.st_mode & 0o022 != 0
+            || self
+                .runtime_request_owner_uid
+                .is_some_and(|uid| metadata.st_uid != uid)
+        {
+            return Err(OperationError::UnsafePath);
+        }
+        let owners = self.helper_store_owners(Instant::now() + Duration::from_secs(60))?;
+        let path = root.join(&id);
+        if match request.store {
+            AgentRetainedStore::Runs => owners.runtimes.contains(&id),
+            AgentRetainedStore::Installations => owners.installations.contains(&id),
+        } || owners
+            .mounts
+            .iter()
+            .any(|mount| mount.starts_with(&path) || path.starts_with(mount))
+        {
+            return Err(OperationError::InstallationReconciliationBusy);
+        }
+        remove_directory_contents_last(&scope, device, Some(c"untracked-since"))?;
+        // A lost response is safe to retry; a replacement scope is never removed.
+        let current =
+            rustix::fs::statat(&parent, id.as_str(), rustix::fs::AtFlags::SYMLINK_NOFOLLOW)
+                .map_err(errno_io)?;
+        if (current.st_dev, current.st_ino) != (metadata.st_dev, metadata.st_ino) {
+            return Err(OperationError::UnsafePath);
+        }
+        rustix::fs::unlinkat(&parent, id.as_str(), rustix::fs::AtFlags::REMOVEDIR)
+            .map_err(errno_io)?;
+        rustix::fs::fsync(&parent).map_err(errno_io)?;
+        Ok(())
+    }
+
     pub(super) fn collect_helper_stores(&self, now: SystemTime) {
         let deadline = Instant::now() + Duration::from_secs(60);
         // START holds the read side from challenge through Docker launch.

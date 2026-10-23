@@ -18,6 +18,7 @@ from .optional_evidence import (
     fail_open_on_optional_evidence,
 )
 from .reason_codes import AgentEvidenceCode
+from .store_cleanup import StoreRetentionFailure
 from .wire_model import WireEnum, WireModel, strict_json_datetime
 
 
@@ -91,7 +92,7 @@ class NetworkInterface(WireModel):
 
 
 class HostSettings(WireModel):
-    """The Spark host settings the platform keeps, as the agent observes them.
+    """The Spark host maintenance the platform keeps, as the agent observes it.
 
     A Spark runs headless: a desktop costs about 1 GB of the memory recipes
     count on. Its GPU clock is capped so sustained load cannot power it off.
@@ -108,6 +109,7 @@ class HostSettings(WireModel):
     graphical_default_target: bool
     gpu_clock_support: GpuClockSupport | None = None
     display_memory: DisplayMemoryObservation | None = None
+    store_retention_failure: StoreRetentionFailure | None = None
 
 
 class ModelStoreObject(WireModel):

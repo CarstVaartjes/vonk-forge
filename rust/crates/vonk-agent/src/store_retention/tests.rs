@@ -9,6 +9,8 @@ use super::{
     GRACE, LOW_FREE_PERCENT, RESERVE_FLOOR_BYTES, RESERVE_PERCENT, STORES, Swept, Untracked,
 };
 
+mod foreign_owned;
+
 const OBJECT: &str = "1111111111111111111111111111111111111111111111111111111111111111";
 const OTHER: &str = "2222222222222222222222222222222222222222222222222222222222222222";
 const THIRD: &str = "3333333333333333333333333333333333333333333333333333333333333333";
@@ -41,18 +43,39 @@ fn sweep(
     disk: &dyn Fn() -> Option<(u64, u64)>,
     tick: &dyn Fn(),
 ) -> Swept {
-    super::sweep_with_runtime(root, now, deadline, untracked, disk, tick, &|id| {
-        Ok(fs::read_dir(root.join("run-metadata"))
-            .into_iter()
-            .flatten()
-            .filter_map(Result::ok)
-            .filter_map(|entry| {
-                crate::oci::read_run_lifecycle(&entry.path().join("lifecycle.json"))
-                    .ok()
-                    .flatten()
-            })
-            .any(|record| record.installation_id == id))
-    })
+    super::sweep_with(
+        root,
+        now,
+        deadline,
+        untracked,
+        disk,
+        tick,
+        &|id| {
+            Ok(fs::read_dir(root.join("run-metadata"))
+                .into_iter()
+                .flatten()
+                .filter_map(Result::ok)
+                .filter_map(|entry| {
+                    crate::oci::read_run_lifecycle(&entry.path().join("lifecycle.json"))
+                        .ok()
+                        .flatten()
+                })
+                .any(|record| record.installation_id == id))
+        },
+        &|request| local_remove(root, request),
+    )
+}
+
+// Most policy fixtures contain agent-owned bytes. Delegate through the same
+// boundary with a local remover; foreign_owned drives the real socket/helper.
+fn local_remove(
+    root: &Path,
+    request: &vonk_agent_protocol::generated::AgentStoreRemovalRequest,
+) -> std::io::Result<()> {
+    fs::remove_dir_all(
+        root.join(request.store.as_str())
+            .join(request.scope_id.to_string()),
+    )
 }
 
 /// A pass with the Controller's verdict naming `untracked` installations.
@@ -1233,6 +1256,9 @@ fn abandoned_build_staging_expires_only_after_its_exact_units_are_quiescent() {
             tick: &|| {},
             owner: rustix::process::geteuid().as_raw(),
             swept: Swept::default(),
+            data_root: root.path(),
+            remover: &|_| unreachable!("build staging has no runtime scope"),
+            failure: None,
         };
         pass.build_staging(&staging, &runner);
     };
@@ -1382,7 +1408,7 @@ fn corrupt_idle_installations_expire_but_live_and_unknown_neighbours_survive() {
         }
     };
     let pass = |now, probe: &dyn Fn(&str) -> Result<bool, String>| {
-        super::sweep_with_runtime(
+        super::sweep_with(
             root.path(),
             now,
             Instant::now() + Duration::from_secs(60),
@@ -1390,6 +1416,7 @@ fn corrupt_idle_installations_expire_but_live_and_unknown_neighbours_survive() {
             &|| ROOMY,
             &|| {},
             probe,
+            &|request| local_remove(root.path(), request),
         )
     };
     pass(SystemTime::now(), &probe);
@@ -1425,4 +1452,46 @@ fn corrupt_idle_installations_expire_but_live_and_unknown_neighbours_survive() {
     // Dropping the final hardlink starts the shared object's own unused grace.
     pass(after_grace(), &|_| Ok(false));
     assert!(!live_object.exists());
+}
+
+#[test]
+fn retention_failure_is_durable_deduplicated_and_clears_after_recovery() {
+    // Catches log-only failures, rewriting identical evidence every pass, and
+    // a stale attention item that survives successful collection.
+    use std::os::unix::fs::MetadataExt;
+    let root = tempfile::tempdir().unwrap();
+    let directory = root.path().join("runs").join(INSTALLATION);
+    fs::create_dir_all(&directory).unwrap();
+    fs::write(directory.join(super::UNTRACKED_MARK), b"").unwrap();
+    let verdict = verdict(&[], Some(&[INSTALLATION]));
+    let refused = |_: &vonk_agent_protocol::generated::AgentStoreRemovalRequest| {
+        Err(std::io::Error::from(std::io::ErrorKind::PermissionDenied))
+    };
+    let collect = |remove: &dyn Fn(
+        &vonk_agent_protocol::generated::AgentStoreRemovalRequest,
+    ) -> std::io::Result<()>| {
+        super::sweep_with(
+            root.path(),
+            after_grace(),
+            Instant::now() + Duration::from_secs(10),
+            Some(&verdict),
+            &|| ROOMY,
+            &|| {},
+            &|_| Ok(false),
+            remove,
+        )
+    };
+    assert_eq!(collect(&refused).entries, 0);
+    let first = super::retention_failure(root.path()).unwrap();
+    assert_eq!(first.path, format!("runs/{INSTALLATION}"));
+    assert_eq!(first.retry_after_seconds, 60);
+    let evidence = root.path().join(super::FAILURE_FILE);
+    let original = fs::metadata(&evidence).unwrap();
+    assert_eq!(collect(&refused).entries, 0);
+    assert_eq!(super::retention_failure(root.path()), Some(first));
+    assert_eq!(fs::metadata(&evidence).unwrap().ino(), original.ino());
+    assert!(directory.join(super::UNTRACKED_MARK).exists());
+    assert_eq!(collect(&|_| fs::remove_dir_all(&directory)).entries, 1);
+    assert!(super::retention_failure(root.path()).is_none());
+    assert!(!evidence.exists());
 }

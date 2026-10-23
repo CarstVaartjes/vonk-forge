@@ -245,6 +245,19 @@ jobs:
           # until exec, making an immediately fresh cache attempt spuriously busy.
           RUST_TEST_THREADS: "1"
         run: cargo test --workspace --locked
+      - name: Inject foreign-owned retention files across the agent and helper
+        shell: bash
+        run: |
+          set -euo pipefail
+          test_binary=$(cargo test --locked -p vonk-agent --lib --no-run --message-format=json |
+            python3 -c 'import json,sys; print(next(row["executable"] for line in sys.stdin if (row := json.loads(line)).get("reason") == "compiler-artifact" and row["target"]["name"] == "vonk_agent" and row.get("executable")))')
+          image=$(python3 -c 'import json; print(json.load(open("deploy/compose/images.lock.json"))["ci_tools"]["ubuntu"])')
+          scripts/retry-dependency-fetch docker pull "$image"
+          docker run --rm --network none --read-only --tmpfs /tmp:rw,exec,nosuid \
+            --mount "type=bind,src=$test_binary,dst=/retention-tests,readonly" \
+            --entrypoint /retention-tests "$image" \
+            store_retention::tests::foreign_owned::foreign_owned_scopes_leave_through_helper_with_progress \
+            --exact --ignored --nocapture
 
   controller-spark-wire:
     name: Controller and Spark wire contract

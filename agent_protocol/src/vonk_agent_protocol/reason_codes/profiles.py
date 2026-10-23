@@ -79,6 +79,7 @@ class ProjectionCode(WireEnum):
     HOST_DESKTOP_RUNNING = "host.desktop-running"
     #: The Spark boots to the desktop.
     HOST_DESKTOP_AT_BOOT = "host.desktop-at-boot"
+    HOST_STORE_RETENTION = "host.store-retention"
     #: Informational display reservation recommendation; never admission policy.
     HOST_DISPLAY_MEMORY = "host.display-memory"
     #: The GPU clock ceiling is not applied: sustained load can power it off.
