@@ -8,6 +8,7 @@ Do not add a whole-tree scan to SCOPED: select its file or node in GUARDS.
 
 GUARDS: tuple[str, ...] = (
     "tests/test_get_or_create_guard.py",
+    "tests/test_optimistic_lock_guard.py",
     "tests/test_single_source_values.py",
     "tests/test_request_path_scan_guard.py",
     "tests/test_progress_attempt_guard.py",
@@ -51,6 +52,10 @@ SCOPED: tuple[tuple[str, str], ...] = (
     (
         "control/tests/test_identity_creation_postgres.py",
         "Concurrent PostgreSQL insert, replay and row-lock fault injection at content and request boundaries.",
+    ),
+    (
+        "control/tests/test_optimistic_postgres.py",
+        "PostgreSQL optimistic Job races, child rollback, contention recovery and startup column adoption.",
     ),
     (
         "tests/test_protocol_wheel_identity.py",

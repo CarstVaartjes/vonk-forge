@@ -16,6 +16,7 @@ from . import content_identity_boundaries as identity
 from . import coordination_boundaries as coordination
 from . import deterministic_retries as retries
 from . import lifecycle_reasons as reasons
+from . import optimistic_boundaries as optimistic
 from . import principle_guards as principles
 from . import progress_attempt_boundaries as progress_attempts
 from . import request_path_scans
@@ -50,6 +51,7 @@ MODES = (
     "reasons",
     "boundaries",
     "locks",
+    "optimistic",
     "clocks",
     "collections",
     "progress",
@@ -445,6 +447,8 @@ def check_source(
         source.startswith("#!") and "python" in source.splitlines()[0]
     )
     hits: list[tuple[int, str]] = []
+    if "optimistic" in modes and python and path.startswith("control/src/"):
+        hits.extend((line, optimistic.KIND) for line in optimistic.scan_source(source))
     if (
         "boundaries" in modes
         and python
@@ -707,7 +711,9 @@ def check_source(
         ]
         hits = [
             (
-                next(
+                line
+                if kind == optimistic.KIND
+                else next(
                     (
                         changed
                         for changed in sorted(added)
