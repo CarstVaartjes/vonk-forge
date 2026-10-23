@@ -141,6 +141,16 @@ class StopMixin:
                 )
                 refused = None
                 break
+            except ConstraintReplay as duplicate:
+                return duplicate.replay(
+                    lambda: service._idempotent(
+                        request_id,
+                        WireAgentOperation.RECIPE_STOP.value,
+                        plan_digest,
+                        owner_kind="run",
+                        owner_id=run_id,
+                    )
+                )
             except UnknownOutcomeError as error:
                 refused = error
                 if admission_wait_exhausted(error):
@@ -205,8 +215,7 @@ class StopMixin:
             with admitting():
                 accepted = accept()
         except ConstraintReplay as duplicate:
-            # A duplicate of this request was accepted first (only SQLite has
-            # no advisory request key to serialize them); replay it.
+            # Replay a creation race after its transaction has rolled back.
             accepted = duplicate.replay(accept)
         except (AdmissionLockBusy, OperationalError) as error:
             if isinstance(error, OperationalError) and not is_admission_contention(

@@ -6,7 +6,7 @@ from collections.abc import Callable
 from datetime import UTC
 from typing import TYPE_CHECKING, NoReturn, cast
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
     DistributionAssignmentState,
@@ -14,7 +14,7 @@ from vonk_agent_protocol import (
     DistributionObject,
 )
 
-from ..admission_locking import ConstraintReplay, admitting
+from ..admission_locking import admitting
 from ..artifact_lifecycle import (
     ArtifactIdentity,
     ArtifactLifecycleError,
@@ -22,6 +22,7 @@ from ..artifact_lifecycle import (
 )
 from ..artifact_reference_scan import require_model_sets_open
 from ..distribution_assignment import NodeDistributionAssignment
+from ..identity_insert import insert_identity
 from ..models import (
     ArtifactDistributionAssignment,
 )
@@ -109,14 +110,8 @@ class RegistrationMixin:
                     )
                 service._assignments[key] = assignment
             return
-        try:
-            with admitting():
-                service._register_row(assignment)
-        except ConstraintReplay:
-            # A concurrent identical registration won the unique
-            # (plan_digest, node_id) constraint; the second pass compares.
-            with admitting():
-                service._register_row(assignment)
+        with admitting():
+            service._register_row(assignment)
 
     def _register_row(self, assignment: NodeDistributionAssignment) -> None:
         service = cast("DistributionService", self)
@@ -124,25 +119,95 @@ class RegistrationMixin:
         assert sessions is not None
         with sessions.begin() as session:
             row = session.scalar(
-                select(ArtifactDistributionAssignment)
-                .where(
+                select(ArtifactDistributionAssignment).where(
                     ArtifactDistributionAssignment.plan_digest
                     == assignment.plan_digest,
                     ArtifactDistributionAssignment.node_id == assignment.node_id,
                 )
-                .with_for_update()
             )
+            if (
+                row is not None
+                and service._from_row(row) == assignment
+                and row.state == DistributionAssignmentState.ACTIVE
+            ):
+                return
             now = service.clock()
-            if row is not None:
+            candidate = ArtifactDistributionAssignment(
+                id=assignment.assignment_id,
+                plan_digest=assignment.plan_digest,
+                node_id=assignment.node_id,
+                generation=assignment.generation,
+                expires_at=assignment.expires_at,
+                model_artifact_set_sha256=assignment.model_artifact_set_sha256,
+                objects=[item.to_mapping() for item in assignment.objects],
+                oci_image_digest=assignment.oci_image_digest,
+                oci_image_config_digest=assignment.oci_image_config_digest,
+                oci_archive_sha256=assignment.oci_archive_sha256,
+                state=DistributionAssignmentState.ACTIVE,
+                created_at=now,
+                updated_at=now,
+            )
+            row, created = insert_identity(
+                session,
+                candidate,
+                key=("plan_digest", "node_id"),
+            )
+            if not created:
                 existing = service._from_row(row)
-                if existing == assignment and row.state == "active":
+                if (
+                    existing == assignment
+                    and row.state == DistributionAssignmentState.ACTIVE
+                ):
                     return
                 if not _may_replace(
-                    existing, assignment, active=row.state == "active", now=now
+                    existing,
+                    assignment,
+                    active=row.state == DistributionAssignmentState.ACTIVE,
+                    now=now,
                 ):
                     raise DistributionIntegrityError(
                         DistributionCode.ASSIGNMENT_CONFLICT,
                         "node assignment is already bound",
+                    )
+                # Renewal/reclaim replaces only the exact generation just compared.
+                # Revocation or another renewal wins rather than being overwritten.
+                removed = session.scalar(
+                    delete(ArtifactDistributionAssignment)
+                    .where(
+                        ArtifactDistributionAssignment.id == row.id,
+                        ArtifactDistributionAssignment.generation == row.generation,
+                        ArtifactDistributionAssignment.expires_at == row.expires_at,
+                        ArtifactDistributionAssignment.state == row.state,
+                        ArtifactDistributionAssignment.updated_at == row.updated_at,
+                        ArtifactDistributionAssignment.revoked_at == row.revoked_at,
+                    )
+                    .returning(ArtifactDistributionAssignment.id)
+                )
+                if removed is not None:
+                    _, created = insert_identity(
+                        session, candidate, key=("plan_digest", "node_id")
+                    )
+                if removed is None:
+                    current = session.scalar(
+                        select(ArtifactDistributionAssignment)
+                        .where(
+                            ArtifactDistributionAssignment.plan_digest
+                            == assignment.plan_digest,
+                            ArtifactDistributionAssignment.node_id
+                            == assignment.node_id,
+                        )
+                        .execution_options(populate_existing=True)
+                    )
+                    if (
+                        current is not None
+                        and service._from_row(current) == assignment
+                        and current.state == DistributionAssignmentState.ACTIVE
+                    ):
+                        return
+                if removed is None or not created:
+                    raise DistributionError(
+                        DistributionCode.ASSIGNMENT_CONFLICT,
+                        "node assignment changed during registration",
                     )
             try:
                 require_model_sets_open(
@@ -157,42 +222,6 @@ class RegistrationMixin:
                 )
             except ArtifactLifecycleError as error:
                 raise DistributionUnknown(error.code, error.detail) from error
-            if row is not None and row.id != assignment.assignment_id:
-                # Renewal or reclaim creates a new grant identity. Replace the
-                # matching-content or inactive grant under the plan/node lock;
-                # primary keys never change in place.
-                session.delete(row)
-                session.flush()
-                row = None
-            if row is not None:
-                row.generation = assignment.generation
-                row.expires_at = assignment.expires_at
-                row.model_artifact_set_sha256 = assignment.model_artifact_set_sha256
-                row.objects = [item.to_mapping() for item in assignment.objects]
-                row.oci_image_digest = assignment.oci_image_digest
-                row.oci_image_config_digest = assignment.oci_image_config_digest
-                row.oci_archive_sha256 = assignment.oci_archive_sha256
-                row.state = "active"
-                row.revoked_at = None
-                row.updated_at = now
-                return
-            session.add(
-                ArtifactDistributionAssignment(
-                    id=assignment.assignment_id,
-                    plan_digest=assignment.plan_digest,
-                    node_id=assignment.node_id,
-                    generation=assignment.generation,
-                    expires_at=assignment.expires_at,
-                    model_artifact_set_sha256=assignment.model_artifact_set_sha256,
-                    objects=[item.to_mapping() for item in assignment.objects],
-                    oci_image_digest=assignment.oci_image_digest,
-                    oci_image_config_digest=assignment.oci_image_config_digest,
-                    oci_archive_sha256=assignment.oci_archive_sha256,
-                    state=DistributionAssignmentState.ACTIVE,
-                    created_at=now,
-                    updated_at=now,
-                )
-            )
 
     @staticmethod
     def _from_row(row: ArtifactDistributionAssignment) -> NodeDistributionAssignment:

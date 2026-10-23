@@ -18,10 +18,10 @@ from vonk_agent_protocol import (
 
 from ..admission_locking import (
     AdmissionLockBusy,
+    ConstraintReplay,
     acquire_admission_keys,
     admission_attempts,
     admission_wait_exhausted,
-    job_request_key,
     node_admission_key,
 )
 from ..install_admission import (
@@ -97,10 +97,7 @@ class InstallMixin:
             try:
                 acquire_admission_keys(
                     session,
-                    (
-                        job_request_key(request_id),
-                        *(node_admission_key(node.node_id) for node in plan.nodes),
-                    ),
+                    tuple(node_admission_key(node.node_id) for node in plan.nodes),
                     holder="recipe-operation",
                 )
             except AdmissionLockBusy as error:
@@ -187,6 +184,15 @@ class InstallMixin:
                     actor=actor,
                     request_id=request_id,
                     workload_intent_ordinal=workload_intent_ordinal,
+                )
+            except ConstraintReplay as duplicate:
+                return duplicate.replay(
+                    lambda: service._idempotent(
+                        request_id,
+                        WireAgentOperation.RECIPE_INSTALL.value,
+                        None,
+                        install_identity=(plan.mapping_id, plan.recipe_build_id),
+                    )
                 )
             except UnknownOutcomeError as error:
                 if service._install_preparation is not None:

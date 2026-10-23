@@ -28,6 +28,7 @@ from ..categorized_errors import InvalidValue, MissingRecord
 from ..cluster_mappings import mapping_option_choices
 from ..compiled_artifact_contract import ParameterScalar
 from ..execution_plan_service import compile_job_invocation
+from ..identity_insert import insert_identity
 from ..lifecycle import CancelRequested, Effect, Outcome
 from ..lifecycle.agent_operation import AgentOperationAdapter, set_parent_state
 from ..lifecycle.artifact_job import ArtifactJobAdapter
@@ -311,9 +312,7 @@ class ArtifactJobService(OutputService):
         existing: ArtifactJob | None = None,
     ) -> ArtifactJobView:
         existing = existing or session.scalar(
-            select(ArtifactJob)
-            .where(ArtifactJob.request_id == request_id)
-            .with_for_update()
+            select(ArtifactJob).where(ArtifactJob.request_id == request_id)
         )
         if existing is not None:
             # The replay supplies the same declaration, never replacement bytes.
@@ -445,8 +444,13 @@ class ArtifactJobService(OutputService):
             created_at=now,
             updated_at=now,
         )
-        session.add(artifact_job)
-        session.flush()
+        artifact_job, created = insert_identity(
+            session,
+            artifact_job,
+            key=("request_id",),
+        )
+        if not created:
+            raise ConstraintReplay("artifact_jobs_request_id_key", None)
         return self._view_in_session(session, artifact_job)
 
     def capabilities(self) -> ArtifactJobCapabilitiesResponse:

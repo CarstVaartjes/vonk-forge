@@ -421,11 +421,17 @@ def write_guard_mode(*, strict: bool) -> Iterator[None]:
         set_write_guard_mode(strict=previous == "strict")
 
 
-def _guard_row(mapper: Any, connection: Any, row: object) -> None:
+def _guard_row(_mapper: Any, _connection: Any, row: object) -> None:
+    validate_row_write(row)
+
+
+def validate_row_write(row: object) -> None:
+    """Apply the canonical write contract to ORM and insert/replay producers."""
     from sqlalchemy import inspect
 
     state = inspect(row)
     assert state is not None
+    mapper = state.mapper
     table = mapper.local_table.name
     registry = bindings()
     for column in mapper.columns:
@@ -628,5 +634,6 @@ __all__ = [
     "read_row_column",
     "set_write_guard_mode",
     "untyped_leaves",
+    "validate_row_write",
     "write_guard_mode",
 ]
