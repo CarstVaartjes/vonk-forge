@@ -21,7 +21,6 @@ from ..inventory_items import runtime_value
 from ..models import (
     AgentNode,
     CatalogDocumentRevision,
-    NodeInventorySnapshot,
     RecipeBuild,
 )
 from ..recipe_operations import (
@@ -34,7 +33,7 @@ from ..run_switch_contract import (
 )
 from .identity_helpers import _is_hex_digest
 from .interfaces import _BuildSelection
-from .planning_helpers import _as_reason, _latest_inventory
+from .planning_helpers import PlanInventory, _as_reason
 
 if TYPE_CHECKING:
     from .service import RunSwitchOperationService
@@ -50,6 +49,7 @@ class BuildSelectionMixin:
         group: SparkGroup,
         *,
         now: datetime,
+        inventory: PlanInventory | None = None,
         create_build: bool = True,
     ) -> _BuildSelection:
         """Resolve an immutable build or create a pending Controller build.
@@ -63,6 +63,10 @@ class BuildSelectionMixin:
         receipt; bytes are produced by ``recipe.build.v1`` during apply.
         """
         service = typing_cast("RunSwitchOperationService", self)
+        if inventory is None:
+            inventory = PlanInventory(
+                session, now=now, maximum_age_seconds=service._inventory_max_age
+            )
 
         if build is not None:
             return _BuildSelection(build=build, candidate=build)
@@ -77,7 +81,7 @@ class BuildSelectionMixin:
         ):
             builder = session.get(AgentNode, candidate.builder_node_id)
             freshness, admissible = service._builder_admission(
-                session, builder, now=now
+                session, builder, now=now, inventory=inventory
             )
             if admissible:
                 return _BuildSelection(
@@ -122,7 +126,9 @@ class BuildSelectionMixin:
         errors: list[str] = []
         saw_builder = False
         for node in ordered_nodes:
-            freshness, admissible = service._builder_admission(session, node, now=now)
+            freshness, admissible = service._builder_admission(
+                session, node, now=now, inventory=inventory
+            )
             if not admissible:
                 continue
             saw_builder = True
@@ -241,18 +247,18 @@ class BuildSelectionMixin:
         node: AgentNode | None,
         *,
         now: datetime,
+        inventory: PlanInventory | None = None,
     ) -> tuple[FreshnessEvidence | None, bool]:
         """Return fresh builder evidence and whether it can run recipe.build.v1."""
         service = typing_cast("RunSwitchOperationService", self)
+        if inventory is None:
+            inventory = PlanInventory(
+                session, now=now, maximum_age_seconds=service._inventory_max_age
+            )
 
         if node is None:
             return None, False
-        freshness = _latest_inventory(
-            session,
-            node.node_id,
-            now=now,
-            maximum_age_seconds=service._inventory_max_age,
-        )[1]
+        snapshot, freshness = inventory.read(node.node_id)
         if (
             node.state != "active"
             or node.revoked_at is not None
@@ -264,12 +270,6 @@ class BuildSelectionMixin:
             or freshness.state != "fresh"
         ):
             return freshness, False
-        snapshot = session.scalar(
-            select(NodeInventorySnapshot)
-            .where(NodeInventorySnapshot.node_id == node.node_id)
-            .order_by(NodeInventorySnapshot.observed_at.desc())
-            .limit(1)
-        )
         if snapshot is None or "recipe.build.v1" not in snapshot.capabilities:
             return freshness, False
         return freshness, True

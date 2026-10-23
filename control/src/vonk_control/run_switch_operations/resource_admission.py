@@ -43,6 +43,7 @@ from .constants import (
 from .errors import RunSwitchRequestInvalid
 from .interfaces import _ResourceFits
 from .planning_helpers import (
+    PlanInventory,
     _conditional_post_stop_memory_check,
     _now,
     _resource_reason,
@@ -142,6 +143,7 @@ class ResourceAdmissionMixin:
         request: RunSwitchPreviewRequest,
         *,
         now: datetime,
+        inventory: PlanInventory | None = None,
         stops: Sequence[StopImpact],
         placement_blockers: Sequence[RunSwitchReason],
         effective_settings: object | None,
@@ -160,6 +162,10 @@ class ResourceAdmissionMixin:
         adds no demand either: nothing new starts.
         """
         service = typing_cast("RunSwitchOperationService", self)
+        if inventory is None:
+            inventory = PlanInventory(
+                session, now=now, maximum_age_seconds=service._inventory_max_age
+            )
         kept = kept_runs(session, kept_run_ids, profile_application_id)
         already_kept = _serves_as_kept_run(session, kept, request)
         serving = request.action != "install" and not already_kept
@@ -174,6 +180,7 @@ class ResourceAdmissionMixin:
             revision,
             request.spark_group,
             now=now,
+            inventory=inventory,
             excluded_run_ids=(),
             kept_run_ids=kept,
             effective_settings=effective_settings,
@@ -201,6 +208,7 @@ class ResourceAdmissionMixin:
                 revision,
                 request.spark_group,
                 now=now,
+                inventory=inventory,
                 excluded_run_ids=tuple(stop.run_id for stop in stops),
                 kept_run_ids=kept,
                 effective_settings=effective_settings,

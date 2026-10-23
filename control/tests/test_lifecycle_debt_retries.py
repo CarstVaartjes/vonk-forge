@@ -247,13 +247,16 @@ def test_recipe_request_retries_raw_admission_contention(method, once, monkeypat
 
 def test_unknown_builder_evidence_is_waiting_and_reobserved(monkeypatch):
     """Catches unknown builder evidence preventing the next exact preparation."""
+    from sqlalchemy.orm import sessionmaker
     from vonk_control.models import CatalogDocumentRevision, RecipeBuild
     from vonk_control.recipe_builds import RecipeBuildPlan
     from vonk_control.run_switch_operations import RunSwitchOperationService
 
     from .test_recipe_image_availability import _recipe, _recipe_projection
 
-    service: Any = object.__new__(RunSwitchOperationService)
+    service: Any = RunSwitchOperationService(
+        sessionmaker(), clock=lambda: datetime.now(UTC)
+    )
     calls = []
     selected = RecipeBuild(
         id="same-build",

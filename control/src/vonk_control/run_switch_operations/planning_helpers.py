@@ -283,6 +283,30 @@ def _resource_evidence_digest(revision_digest: str | None) -> str | None:
     )
 
 
+class PlanInventory:
+    """One inventory sample per node for this plan, including builder evidence."""
+
+    def __init__(self, session: Session, *, now: datetime, maximum_age_seconds: int):
+        self._session = session
+        self._now = now
+        self._maximum_age_seconds = maximum_age_seconds
+        self._samples: dict[
+            str, tuple[NodeInventorySnapshot | None, FreshnessEvidence]
+        ] = {}
+
+    def read(
+        self, node_id: str
+    ) -> tuple[NodeInventorySnapshot | None, FreshnessEvidence]:
+        if node_id not in self._samples:
+            self._samples[node_id] = _latest_inventory(
+                self._session,
+                node_id,
+                now=self._now,
+                maximum_age_seconds=self._maximum_age_seconds,
+            )
+        return self._samples[node_id]
+
+
 def _latest_inventory(
     session: Session,
     node_id: str,

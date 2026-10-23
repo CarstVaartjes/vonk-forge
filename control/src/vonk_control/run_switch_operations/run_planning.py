@@ -57,7 +57,13 @@ from ..run_switch_observation_contract import (
 from ..strict_json import read_stored_model
 from .constants import _active_recipe_revision
 from .identity_helpers import _primary_model_digest
-from .planning_helpers import _as_reason, _now, _resource_reason, _settings_view
+from .planning_helpers import (
+    PlanInventory,
+    _as_reason,
+    _now,
+    _resource_reason,
+    _settings_view,
+)
 
 if TYPE_CHECKING:
     from .service import RunSwitchOperationService
@@ -83,6 +89,9 @@ class RunPlanningMixin:
         group = request.spark_group
         node_ids = tuple(node.node_id for node in group.nodes)
         with service._sessions() as session:
+            inventory = PlanInventory(
+                session, now=now, maximum_age_seconds=service._inventory_max_age
+            )
             revision = _active_recipe_revision(session, request.recipe_revision_id)
             if revision is None:
                 raise MissingRecord(request.recipe_revision_id)
@@ -211,6 +220,7 @@ class RunPlanningMixin:
                 build_candidate,
                 group,
                 now=now,
+                inventory=inventory,
                 create_build=create_build,
             )
             build = build_selection.build
@@ -281,6 +291,7 @@ class RunPlanningMixin:
                 revision,
                 request,
                 now=now,
+                inventory=inventory,
                 stops=stops,
                 placement_blockers=placement_blockers,
                 effective_settings=effective_settings,

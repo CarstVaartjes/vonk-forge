@@ -6963,3 +6963,106 @@ def test_disk_review_counts_orphan_model_copies_and_scopes_unmeasured_cleanup(
         assert snapshot is not None
         snapshot.unused_model_bytes = snapshot.disk_total_bytes
     assert service.preview(request, actor="admin").allowed
+
+
+@pytest.mark.parametrize("during_builder", [True, False])
+def test_plan_reuses_inventory_when_a_new_sample_lands_between_read_points(
+    tmp_path: Path, postgres_engine, monkeypatch, during_builder: bool
+) -> None:
+    """Catch READ COMMITTED mixing builder/current/post-stop inventory samples."""
+    from vonk_control.recipe_builds.common import _reopen_build_attempt
+    from vonk_control.run_switch_operations import (
+        build_selection,
+        planning_helpers,
+        resource_fit,
+    )
+
+    sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(
+        tmp_path, engine=postgres_engine
+    )
+    node_id = nodes[0]
+    installed = installed_recipe(
+        lifecycle, mapping_id, build_id, nodes, request_id=str(uuid.uuid4())
+    )
+    admission = lifecycle._run_admission.plan_run(installed.owner_id, "old", now=NOW)
+    run_id = lifecycle._run_admission.accept_run(admission, actor="admin", now=NOW)
+    with sessions.begin() as session:
+        run = session.get(RecipeRun, run_id)
+        node = session.get(AgentNode, node_id)
+        build = session.get(RecipeBuild, build_id)
+        snapshot = session.scalar(select(NodeInventorySnapshot))
+        assert (
+            run is not None
+            and node is not None
+            and build is not None
+            and snapshot is not None
+        )
+        run.state = LifecycleState.RUNNING
+        for rank in session.scalars(select(RunNode).where(RunNode.run_id == run_id)):
+            rank.state = LifecycleState.RUNNING
+        set_inventory_identity(node, binary_digest="a" * 64)
+        snapshot.capabilities = [*snapshot.capabilities, "recipe.build.v1"]
+        if during_builder:
+            _reopen_build_attempt(build, now=NOW)
+
+    service = _service(
+        sessions,
+        NOW,
+        lifecycle,
+        RecordingArtifactExecutor(),
+        phase_executor=SynchronousPhaseExecutor(),
+    )
+    request = _request(sessions, node_id, action="switch")
+    read = planning_helpers._latest_inventory
+    reads = []
+
+    def read_then_publish(session, selected_node, **kwargs):
+        sample, evidence = read(session, selected_node, **kwargs)
+        reads.append(evidence)
+        if len(reads) == 1:
+            assert sample is not None
+            # Commit through a separate connection after the first SELECT. The
+            # old code's next SELECT sees this sample under READ COMMITTED.
+            values = {
+                attribute.key: getattr(sample, attribute.key)
+                for attribute in NodeInventorySnapshot.__mapper__.column_attrs
+                if attribute.key != "id"
+            }
+            values.update(
+                id=str(uuid.uuid4()),
+                observed_at=sample.observed_at + timedelta(seconds=1),
+                evidence_digest="b" * 64,
+                disk_free_bytes=sample.disk_free_bytes - 1,
+            )
+            with sessions.begin() as writer:
+                writer.add(NodeInventorySnapshot(**values))
+        return sample, evidence
+
+    # Cover the old imports too so reverting the production fix demonstrates
+    # the validator error, rather than silently disabling fault injection.
+    monkeypatch.setattr(planning_helpers, "_latest_inventory", read_then_publish)
+    monkeypatch.setattr(
+        build_selection, "_latest_inventory", read_then_publish, raising=False
+    )
+    monkeypatch.setattr(
+        resource_fit, "_latest_inventory", read_then_publish, raising=False
+    )
+    plan = service.preview(request, actor="admin")
+    assert len(reads) == 1
+    assert plan.stops
+    sample = reads[0]
+    for fit in (plan.fit_current, plan.fit_after_stop):
+        if fit is None:
+            continue
+        uncertainty = fit.nodes[0].memory_usage_uncertainty
+        if uncertainty is not None:
+            assert uncertainty.inventory_observed_at == sample.observed_at
+            assert uncertainty.inventory_evidence_digest == sample.evidence_digest
+    assert {
+        item.evidence_digest for item in plan.freshness if item.source == sample.source
+    } == {sample.evidence_digest}
+    assert RunSwitchPlan.model_validate_json(plan.model_dump_json()) == plan
+    # A new plan has a new sample scope and observes the newly committed row.
+    monkeypatch.setattr(planning_helpers, "_latest_inventory", read)
+    newer = service.preview(request, actor="admin")
+    assert any(item.evidence_digest == "b" * 64 for item in newer.freshness)
