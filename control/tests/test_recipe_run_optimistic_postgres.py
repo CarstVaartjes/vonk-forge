@@ -353,7 +353,8 @@ def test_publication_deferral_contention_continues_without_traceback(
         return publish(candidate)
 
     monkeypatch.setattr(routes, "publish_run", unavailable_first)
-    worker = RecipeOperationWorker(routes.sessions, routes, clock=lambda: NOW)
+    now = [NOW]
+    worker = RecipeOperationWorker(routes.sessions, routes, clock=lambda: now[0])
     caplog.set_level(logging.INFO)
     with routes.sessions.begin() as holder:
         run = holder.get(RecipeRun, run_id)
@@ -366,6 +367,10 @@ def test_publication_deferral_contention_continues_without_traceback(
     assert any(wait.get("reason") == WaitReason.SCOPE_CHANGED for wait in waits)
     assert all(record.exc_info is None for record in caplog.records)
     monkeypatch.setattr(routes, "publish_run", publish)
+    assert worker._publish_runs((run_id,)) is False
+    from datetime import timedelta
+
+    now[0] += timedelta(seconds=5)
     assert worker._publish_runs((run_id,)) is True
     with routes.sessions() as session:
         run = session.get(RecipeRun, run_id)
@@ -378,7 +383,7 @@ def test_order_sweep_conflict_rolls_back_continues_and_resweeps(
     """Catches raw receipt-consumer conflicts aborting a pass past its cursor."""
     import json
     import logging
-    from datetime import timedelta
+    from datetime import datetime, timedelta
     from unittest.mock import Mock
 
     from vonk_agent_protocol import (
@@ -515,13 +520,14 @@ def test_order_sweep_conflict_rolls_back_continues_and_resweeps(
         return refresh(*args, **kwargs)
 
     monkeypatch.setattr(sweep, "refresh_queue_waits", refresh_after_sweep)
-    jobs = AgentJobService(sessions, clock=lambda: now)
+    clock = MutableClock(now)
+    jobs = AgentJobService(sessions, clock=clock)
     jobs.set_result_consumer(consume_with_writer)
     caplog.set_level(logging.INFO)
     worker = RecipeOperationWorker(
         sessions,
         routes=Mock(),
-        clock=lambda: now,  # routes are disabled for this pass
+        clock=clock,  # routes are disabled for this pass
         reconcile_routes=False,
         order_reconcile=jobs.reconcile_orders,
     )
@@ -546,9 +552,15 @@ def test_order_sweep_conflict_rolls_back_continues_and_resweeps(
         if record.message.startswith("{")
     ]
     assert any(
-        wait.get("operation_id") == first.id and wait.get("retry_at") for wait in waits
+        wait.get("operation_id") == first.id
+        and wait.get("reason") == WaitReason.SCOPE_CHANGED
+        and datetime.fromisoformat(wait["retry_at"]) == now + timedelta(seconds=5)
+        for wait in waits
     )
     assert all(record.exc_info is None for record in caplog.records)
+    assert worker.tick() is False
+    assert visited.count(first.id) == 1
+    clock.now += timedelta(seconds=5)
     assert worker.tick() is True
     with sessions() as session:
         healed = session.get(AgentOperation, first.id)
@@ -563,3 +575,74 @@ def test_order_sweep_conflict_rolls_back_continues_and_resweeps(
         request_id="f" * 36,
     )
     assert fresh.owner_id != started.owner_id
+
+
+def test_due_route_recovery_contention_is_typed_wait_and_redrives(
+    postgres_engine, tmp_path, caplog
+) -> None:
+    """Catches the backstop reporting normal redrive contention as a failure."""
+    import json
+    import logging
+    from datetime import datetime, timedelta
+
+    from vonk_agent_protocol import WaitOwnerKind
+    from vonk_control.due_waits import DueWaitBackstop, WaitSource
+    from vonk_control.models import AgentNode
+
+    routes, _publisher, _applied, run_id = setup(tmp_path, engine=postgres_engine)
+    now = [NOW]
+    with routes.sessions.begin() as session:
+        run = session.get(RecipeRun, run_id)
+        assert run is not None
+        run.route_state = RouteState.PENDING
+        run.observation_deadline_at = NOW
+        run.next_action_at = NOW
+        for rank in session.scalars(select(RunNode)):
+            rank.observed_run_generation = None
+            rank.observation_observed_at = None
+        for node in session.scalars(select(AgentNode)):
+            node.last_seen_at = NOW
+    worker = RecipeOperationWorker(
+        routes.sessions, routes, clock=lambda: now[0], reconcile_routes=False
+    )
+    backstop = DueWaitBackstop(
+        routes.sessions,
+        [
+            WaitSource(
+                RecipeRun,
+                frozenset({WaitOwnerKind.ROUTE_RECOVERY}),
+                lambda key, kind: worker.redrive_run(str(key[0])),
+            )
+        ],
+        clock=lambda: now[0],
+    )
+    caplog.set_level(logging.INFO)
+    with routes.sessions.begin() as holder:
+        run = holder.get(RecipeRun, run_id)
+        assert run is not None
+        run.version += 1
+        holder.flush()
+        assert backstop.tick() == 1
+        # Enforce the reported retry, then report continued contention even
+        # though the selected snapshot is unchanged. Waits are not failures.
+        assert backstop.tick() == 1
+        assert len(caplog.records) == 1
+        now[0] += timedelta(seconds=5)
+        assert backstop.tick() == 1
+    waits = [json.loads(record.message) for record in caplog.records]
+    assert len(waits) == 2
+    assert all(wait["event"] == "worker.due_wait.wait" for wait in waits)
+    assert all(wait["reason"] == WaitReason.SCOPE_CHANGED for wait in waits)
+    assert datetime.fromisoformat(waits[-1]["retry_at"]) == now[0] + timedelta(
+        seconds=5
+    )
+    assert all(record.exc_info is None for record in caplog.records)
+    with routes.sessions() as session:
+        run = session.get(RecipeRun, run_id)
+        assert run is not None and run.route_state == RouteState.PENDING
+    now[0] += timedelta(seconds=5)
+    assert backstop.tick() == 1
+    with routes.sessions() as session:
+        run = session.get(RecipeRun, run_id)
+        assert run is not None and run.route_state == RouteState.WITHDRAWN
+        assert run.state == RunState.RUNNING

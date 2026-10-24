@@ -123,6 +123,59 @@ def _schedules(target: ast.AST) -> bool:
     )
 
 
+def _visible_wait_lines(handler: ast.ExceptHandler) -> set[int]:
+    """A classified wait reports its due time instead of counting failures."""
+    visible: set[int] = set()
+    for node in ast.walk(handler):
+        if not isinstance(node, ast.If) or not isinstance(node.test, ast.Compare):
+            continue
+        test = node.test
+        if (
+            not isinstance(test.left, ast.Call)
+            or _name(test.left.func) != "disposition"
+            or len(test.ops) != 1
+            or not isinstance(test.comparators[0], ast.Set)
+            or not test.comparators[0].elts
+            or any(
+                not isinstance(item, ast.Attribute)
+                or _name(item.value) != "Disposition"
+                or item.attr not in {"WAIT", "OBSERVE"}
+                for item in test.comparators[0].elts
+            )
+        ):
+            continue
+        if isinstance(test.ops[0], ast.In):
+            statements = node.body
+        elif (
+            isinstance(test.ops[0], ast.NotIn)
+            and node in handler.body
+            and len(node.body) == 1
+            and isinstance(node.body[0], ast.Raise)
+        ):
+            statements = handler.body[handler.body.index(node) + 1 :]
+        else:
+            continue
+        body = list(ast.walk(ast.Module(body=statements, type_ignores=[])))
+        if any(
+            isinstance(item, ast.Call)
+            and _name(item.func) == "log_event"
+            and any(keyword.arg == "retry_at" for keyword in item.keywords)
+            and any(
+                keyword.arg == "reason"
+                and isinstance(keyword.value, ast.Call)
+                and _name(keyword.value.func) == "wait_reason"
+                for keyword in item.keywords
+            )
+            for item in body
+        ):
+            visible.update(
+                item.lineno
+                for item in body
+                if isinstance(item, (ast.Assign, ast.AugAssign, ast.AnnAssign))
+            )
+    return visible
+
+
 def scan_repeats(source: str) -> list[int]:
     """Lines of handlers that schedule a retry without showing its repetition.
 
@@ -142,10 +195,12 @@ def scan_repeats(source: str) -> list[int]:
             for node in body
         ):
             continue
+        visible_waits = _visible_wait_lines(handler)
         sites.extend(
             node.lineno
             for node in body
             if isinstance(node, (ast.Assign, ast.AugAssign, ast.AnnAssign))
+            and node.lineno not in visible_waits
             and any(
                 _schedules(target)
                 for target in (

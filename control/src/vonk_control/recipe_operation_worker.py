@@ -22,7 +22,7 @@ from vonk_agent_protocol import (
 
 from . import job_states
 from .categorized_errors import InvalidValue
-from .failure_classification import disposition, error_detail
+from .failure_classification import disposition, error_detail, wait_reason
 from .lifecycle.recipe_operation import RecipeOperationAdapter
 from .logging import log_event
 from .models import Job, RecipeRun, RunNode
@@ -101,6 +101,7 @@ class RecipeOperationWorker:
         self._residue_cleanup = residue_cleanup
         self._order_reconcile = order_reconcile
         self._retry_at: dict[Callable[[], bool], datetime] = {}
+        self._publication_retry_at: dict[str, datetime] = {}
         # Consecutive passes that found the shared route owner held elsewhere.
         self._route_owner_waits = 0
         self._route_owner_due: datetime | None = None
@@ -171,8 +172,7 @@ class RecipeOperationWorker:
                     "recipe.coordinator.wait",
                     service="control-worker",
                     owner=getattr(task, "__qualname__", type(task).__name__),
-                    reason=getattr(error, "typed_reason", None)
-                    or WaitReason.OBSERVATION_UNAVAILABLE,
+                    reason=wait_reason(error),
                     detail=error_detail(error),
                     retry_at=self._retry_at[task],
                 )
@@ -248,7 +248,15 @@ class RecipeOperationWorker:
 
     def _publish_runs(self, run_ids: tuple[str, ...]) -> bool:
         progressed = False
+        now = self._clock()
+        self._publication_retry_at = {
+            key: due for key, due in self._publication_retry_at.items() if due > now
+        }
         for run_id in run_ids:
+            due = self._publication_retry_at.get(run_id)
+            if due is not None and self._clock() < due:
+                continue
+            self._publication_retry_at.pop(run_id, None)
             try:
                 self._routes.publish_run(run_id)
             except RecipeRouteOwnerBusy:
@@ -273,15 +281,16 @@ class RecipeOperationWorker:
                         Disposition.WAIT,
                         Disposition.OBSERVE,
                     }:
+                        retry_at = self._clock() + timedelta(seconds=5)
+                        self._publication_retry_at[run_id] = retry_at
                         log_event(
                             _LOGGER,
                             "recipe.publication.wait",
                             service="control-worker",
                             run_id=run_id,
-                            reason=getattr(observation_error, "typed_reason", None)
-                            or WaitReason.OBSERVATION_UNAVAILABLE,
+                            reason=wait_reason(observation_error),
                             detail=error_detail(observation_error),
-                            retry_at=self._clock(),
+                            retry_at=retry_at,
                         )
                     else:
                         _LOGGER.exception(

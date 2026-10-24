@@ -37,6 +37,7 @@ from vonk_agent_protocol import (
     Disposition,
     SecurityRefusalError,
     UnknownOutcomeError,
+    WaitReason,
     http_status_disposition,
 )
 
@@ -188,6 +189,25 @@ def disposition(cause: BaseException | AgentFailureKind | Disposition) -> Dispos
     return Disposition.FAIL
 
 
+def wait_reason(error: BaseException) -> WaitReason | None:
+    """Preserve typed wait evidence, including raw database contention."""
+
+    current: BaseException | None = error
+    for _depth in range(16):
+        if current is None:
+            break
+        if isinstance(current, StaleDataError) or (
+            isinstance(current, DBAPIError)
+            and getattr(current.orig, "sqlstate", None) == "55P03"
+        ):
+            return WaitReason.SCOPE_CHANGED
+        reason = getattr(current, "typed_reason", None)
+        if isinstance(reason, WaitReason):
+            return reason
+        current = current.__cause__
+    return None
+
+
 def is_definite(cause: BaseException | AgentFailureKind | Disposition) -> bool:
     """Whether retrying cannot help: ``FAIL`` or ``SECURITY``."""
 
@@ -222,4 +242,5 @@ __all__ = [
     "is_definite",
     "is_redownload",
     "is_security_failure",
+    "wait_reason",
 ]

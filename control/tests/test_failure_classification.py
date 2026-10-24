@@ -95,3 +95,32 @@ def test_explicit_authority_denial_has_no_start_effect_and_allows_fresh_admissio
         assert fresh.state == LifecycleState.QUEUED
     finally:
         switch.worker.composite.close()
+
+
+@pytest.mark.parametrize("wrapped", (False, True))
+@pytest.mark.parametrize("cause", ("version", "lock", "typed", "untyped"))
+def test_wait_reason_preserves_contention_and_typed_evidence(cause, wrapped):
+    """Catches raw SQL/mapper contention being mislabeled as unavailable evidence."""
+    from psycopg.errors import LockNotAvailable
+    from sqlalchemy.exc import OperationalError
+    from sqlalchemy.orm.exc import StaleDataError
+    from vonk_agent_protocol import UnknownOutcomeError, WaitReason
+    from vonk_control.failure_classification import wait_reason
+
+    if cause == "version":
+        error = StaleDataError("concurrent writer")
+        expected = WaitReason.SCOPE_CHANGED
+    elif cause == "lock":
+        error = OperationalError("UPDATE", None, LockNotAvailable())
+        expected = WaitReason.SCOPE_CHANGED
+    elif cause == "typed":
+        error = UnknownOutcomeError("dependency", reason=WaitReason.RECEIPT_MISSING)
+        expected = WaitReason.RECEIPT_MISSING
+    else:
+        error = ConnectionError("not observed")
+        expected = None
+    if wrapped:
+        outer = RuntimeError("wrapped")
+        outer.__cause__ = error
+        error = outer
+    assert wait_reason(error) == expected

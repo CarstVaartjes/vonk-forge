@@ -952,3 +952,31 @@ def test_contact_clock_guard_preserves_staleness_and_security_and_agent_freshnes
         "    return timedelta(0) <= age < window\n"
     )
     assert not check_source(PATH, source, set(range(1, 9)), modes=("contact-clocks",))
+
+
+@pytest.mark.parametrize("negative", (False, True))
+@pytest.mark.parametrize("verdict", ("WAIT", "OBSERVE", "FAIL"))
+@pytest.mark.parametrize("typed", (False, True))
+def test_visible_classified_wait_is_not_counted_as_repeated_failure(
+    negative, verdict, typed
+):
+    """Catches waits needing failure counts, without exempting failure retries."""
+    check = (
+        f"disposition(error) {'not in' if negative else 'in'} {{Disposition.{verdict}}}"
+    )
+    schedule = (
+        "self._retry_at[task] = due\n"
+        "log_event(logger, 'owner.wait', service='control-worker', "
+        f"reason={'wait_reason(error)' if typed else 'str(error)'}, retry_at=due)\n"
+    )
+    from textwrap import indent
+
+    source = "try:\n    work()\nexcept Exception as error:\n"
+    if negative:
+        source += f"    if {check}:\n        raise\n" + indent(schedule, "    ")
+    else:
+        source += f"    if {check}:\n" + indent(schedule, "        ")
+    hits = check_source(
+        PATH, source, set(range(1, len(source.splitlines()) + 1)), modes=("repeats",)
+    )
+    assert bool(hits) == (not typed or verdict == "FAIL")

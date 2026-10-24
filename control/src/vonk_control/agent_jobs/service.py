@@ -160,6 +160,7 @@ class AgentJobService:
         self._started = False
         self._reconciler: Reconciler | None = None
         self._order_sweep_cursor: str | None = None
+        self._order_sweep_retry_at: dict[str, datetime] = {}
         self._queue_wait_cursor: str | None = None
         # SQLite ignores row locks. This only prevents same-service test races;
         # PostgreSQL correctness is provided by the database locks below.
