@@ -7,9 +7,21 @@ from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, cast
 
 from pydantic import ValidationError
-from sqlalchemy import String, and_, column, func, or_, select, values
-from sqlalchemy import cast as sql_cast
-from sqlalchemy.orm import load_only
+from sqlalchemy import (
+    Exists,
+    Select,
+    String,
+    and_,
+    case,
+    column,
+    func,
+    literal,
+    literal_column,
+    or_,
+    select,
+    values,
+)
+from sqlalchemy.orm import Session, load_only
 from vonk_agent_protocol import (
     AssetAvailability,
     InstallationState,
@@ -148,6 +160,88 @@ def _local(
         )
 
 
+def _verifies_requested_model(session: Session, digests: set[str]) -> Exists:
+    """Whether a set's manifest lists a requested digest among its verified models.
+
+    Each set's reference list is expanded once and matched by equality, never
+    joined against every requested digest, so the cost grows with the sets plus
+    the requested digests. A prefilter only: the shared manifest reader still
+    decides exact membership, and a damaged list never fails the read.
+    """
+
+    verified = ModelCacheSet.manifest["verified_models"]
+    if session.get_bind().dialect.name == "postgresql":
+        array = case(
+            (func.json_typeof(verified) == "array", verified),
+            else_=literal_column("'[]'::json"),
+        )
+        reference = func.json_array_elements(array).table_valued("value")
+        content = reference.c.value.op("->>")("content_sha256")
+    else:
+        reference = func.json_each(
+            ModelCacheSet.manifest, "$.verified_models"
+        ).table_valued("value", "type")
+        content = case(
+            (
+                reference.c.type == "object",
+                func.json_extract(reference.c.value, "$.content_sha256"),
+            )
+        )
+    return (
+        select(literal(1)).select_from(reference).where(content.in_(digests)).exists()
+    )
+
+
+def _latest_cache_operations(
+    set_members: Sequence[tuple[str, str]],
+) -> Select[str]:
+    """The latest download or repair request per requested digest.
+
+    ``set_members`` pairs each relevant artifact set with the requested digests
+    it serves. The history is matched to them by an equality join on the
+    indexed set column, so the cost grows with the requested digests plus the
+    retained history, never with their product. UUID is only a deterministic
+    tie-break after durable request time.
+    """
+
+    if not set_members:
+        return select(ModelCacheOperation.id).where(ModelCacheOperation.id.in_(()))
+    members = (
+        values(
+            column("artifact_set_sha256", String),
+            column("digest", String),
+            name="set_members",
+        )
+        .data(list(set_members))
+        .cte()
+    )
+    ranked = (
+        select(
+            ModelCacheOperation.id,
+            func.row_number()
+            .over(
+                partition_by=members.c.digest,
+                order_by=(
+                    ModelCacheOperation.created_at.desc(),
+                    ModelCacheOperation.id.desc(),
+                ),
+            )
+            .label("position"),
+        )
+        .join(
+            members,
+            ModelCacheOperation.artifact_set_sha256 == members.c.artifact_set_sha256,
+        )
+        .where(
+            ModelCacheOperation.kind.in_(
+                (CacheOperationKind.DOWNLOAD, CacheOperationKind.REPAIR)
+            )
+        )
+        .subquery()
+    )
+    return select(ranked.c.id).where(ranked.c.position == 1)
+
+
 def _database_local_state(
     self: LibraryProjection,
     digests: Sequence[str],
@@ -164,17 +258,10 @@ def _database_local_state(
     """
     if not digests:
         return {}
-    operation_payload = ModelCacheOperation.payload
+    requested_digests = set(digests)
     with self._sessions() as session:
-        requested = (
-            values(column("digest", String), name="requested")
-            .data([(digest,) for digest in sorted(set(digests))])
-            .cte()
-        )
-        # Text membership is a SQL prefilter; the shared manifest reader below
-        # decides exact content membership, including shared-set aliases.
-        verified_models = ModelCacheSet.manifest["verified_models"].as_json()
-        reference_match = sql_cast(verified_models, String).contains(requested.c.digest)
+        # The shared manifest reader decides exact content membership, so damage
+        # in one manifest cannot discard unrelated local state.
         cache_sets = [
             (
                 row.artifact_set_sha256,
@@ -198,65 +285,37 @@ def _database_local_state(
                     or_(
                         ModelCacheSet.model_content_sha256.in_(digests),
                         ModelCacheSet.recipe_revision_sha256.in_(digests),
-                        select(requested.c.digest).where(reference_match).exists(),
+                        _verifies_requested_model(session, requested_digests),
                     )
                 )
             )
         ]
-        # One latest request per requested content identity. An index on creation
-        # time and the existing artifact-set index bound the history lookup; UUID
-        # is only a deterministic tie-break after durable request time.
-        latest = (
-            select(
-                ModelCacheOperation.id,
-                func.row_number()
-                .over(
-                    partition_by=requested.c.digest,
-                    order_by=(
-                        ModelCacheOperation.created_at.desc(),
-                        ModelCacheOperation.id.desc(),
-                    ),
+        reference_digests = {
+            set_id: {
+                reference.content_sha256
+                for reference in (
+                    manifest.verified_models
+                    if isinstance(manifest, CacheManifest)
+                    else []
                 )
-                .label("position"),
+            }
+            for set_id, _, _, _, manifest in cache_sets
+        }
+        set_members = sorted(
+            (set_id, digest)
+            for set_id, model_digest, recipe_digest, _, _ in cache_sets
+            for digest in requested_digests.intersection(
+                (model_digest, recipe_digest, *reference_digests[set_id])
             )
-            .join(
-                requested,
-                or_(
-                    operation_payload["model_content_sha256"].as_string()
-                    == requested.c.digest,
-                    operation_payload["recipe_revision_sha256"].as_string()
-                    == requested.c.digest,
-                    select(ModelCacheSet.artifact_set_sha256)
-                    .where(
-                        ModelCacheSet.artifact_set_sha256
-                        == ModelCacheOperation.artifact_set_sha256,
-                        or_(
-                            ModelCacheSet.model_content_sha256 == requested.c.digest,
-                            ModelCacheSet.recipe_revision_sha256 == requested.c.digest,
-                            reference_match,
-                        ),
-                    )
-                    .exists(),
-                ),
-            )
-            .where(
-                ModelCacheOperation.kind.in_(
-                    (CacheOperationKind.DOWNLOAD, CacheOperationKind.REPAIR)
-                )
-            )
-            .subquery()
         )
-        operation_ids = select(latest.c.id).where(latest.c.position == 1)
         cache_operations = session.execute(
             select(
                 ModelCacheOperation.id,
                 ModelCacheOperation.state,
                 ModelCacheOperation.artifact_set_sha256,
-                operation_payload["model_content_sha256"].as_json(),
-                operation_payload["recipe_revision_sha256"].as_json(),
                 ModelCacheOperation.progress,
             )
-            .where(ModelCacheOperation.id.in_(operation_ids))
+            .where(ModelCacheOperation.id.in_(_latest_cache_operations(set_members)))
             .order_by(ModelCacheOperation.created_at, ModelCacheOperation.id)
         ).all()
         revisions = session.execute(
@@ -347,10 +406,7 @@ def _database_local_state(
     revision_digests = {revision_id: digest for revision_id, digest, _ in revisions}
     head_digests = {digest for _, digest, is_head in revisions if is_head}
     result: dict[str, LibraryLocalState] = {}
-    reference_digests: dict[str, set[str]] = {}
-    for set_id, model_digest, recipe_digest, set_state, manifest in cache_sets:
-        bound = manifest.verified_models if isinstance(manifest, CacheManifest) else []
-        reference_digests[set_id] = {reference.content_sha256 for reference in bound}
+    for set_id, model_digest, recipe_digest, set_state, _manifest in cache_sets:
         controller = _controller_state(
             {
                 "cached": "cached",
@@ -372,11 +428,9 @@ def _database_local_state(
         operation_id,
         state,
         artifact_set_sha256,
-        payload_model_digest,
-        payload_recipe_digest,
         stored_progress,
     ) in cache_operations:
-        digest_values = {payload_model_digest, payload_recipe_digest}
+        digest_values: set[str] = set()
         if artifact_set_sha256:
             digest_values.update(reference_digests.get(artifact_set_sha256, ()))
             cache_set = cache_sets_by_id.get(artifact_set_sha256)
@@ -421,12 +475,7 @@ def _database_local_state(
             if state in model_cache_states.LIVE
             else ("cached" if state == "succeeded" else "failed")
         )
-        for digest in digest_values:
-            if digest not in digests:
-                continue
-            if digest is not None and not isinstance(digest, str):
-                _note_unreadable("cache digest", operation_id, repr(digest))
-                continue
+        for digest in digest_values & requested_digests:
             self._merge_local(
                 result,
                 digest,

@@ -56,6 +56,28 @@ def _document_section(document: dict[str, object], key: str) -> dict[str, object
     return section
 
 
+def _model_cache_set(
+    set_id: str, model_digest: str, *, state: str, now: datetime
+) -> ModelCacheSet:
+    """The artifact set a cache operation serves; history belongs to its set."""
+
+    return ModelCacheSet(
+        artifact_set_sha256=set_id,
+        schema_version=2,
+        model_content_sha256=model_digest,
+        recipe_revision_sha256=None,
+        manifest={"schema_version": 2},
+        expected_bytes=10,
+        verified_bytes=10,
+        state=state,
+        protected=False,
+        protected_reasons=[],
+        created_at=now,
+        updated_at=now,
+        last_accessed_at=now,
+    )
+
+
 def _insert_canonical_rows(
     sessions: sessionmaker,
     *,
@@ -878,11 +900,16 @@ def test_cached_download_progress_preserves_exact_totals_and_reads_negative_as_u
         assert isinstance(measurement, dict)
         measurement["total_bytes"] = total_bytes
     with sessions.begin() as session:
+        session.add(
+            _model_cache_set("b" * 64, revision.content_digest, state="cached", now=now)
+        )
+        session.flush()
         operation = ModelCacheOperation(
             request_key=str(uuid.uuid4()),
             kind="download",
             state="succeeded",
-            payload={"model_content_sha256": revision.content_digest},
+            artifact_set_sha256="b" * 64,
+            payload={},
             progress=saved,
             actor="test",
             created_at=now,
@@ -1361,6 +1388,13 @@ def test_detail_and_page_scope_history_and_latest_request_by_time(
         assert target is not None
         digest = target.content_digest
     with sessions.begin() as session:
+        session.add_all(
+            [
+                _model_cache_set("a" * 64, digest, state="downloading", now=now),
+                _model_cache_set("e" * 64, "e" * 64, state="failed", now=now),
+            ]
+        )
+        session.flush()
         # Wrongly loading unrelated history would parse its damaged progress.
         session.add_all(
             [
@@ -1369,7 +1403,8 @@ def test_detail_and_page_scope_history_and_latest_request_by_time(
                     request_key=str(uuid.uuid4()),
                     kind="download",
                     state="failed",
-                    payload={"model_content_sha256": "e" * 64},
+                    artifact_set_sha256="e" * 64,
+                    payload={},
                     progress={"damaged": True},
                     actor="test",
                     created_at=now,
@@ -1408,7 +1443,8 @@ def test_detail_and_page_scope_history_and_latest_request_by_time(
                     request_key=str(uuid.uuid4()),
                     kind="download",
                     state=state,
-                    payload={"model_content_sha256": digest},
+                    artifact_set_sha256="a" * 64,
+                    payload={},
                     progress=serialize_json_value(progress),
                     actor="test",
                     created_at=instant,
