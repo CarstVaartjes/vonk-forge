@@ -209,9 +209,8 @@ class StartMixin:
                 world_size > 1 and topology.distributed and distributed_readiness
             )
             start_deadline = (
-                # Persist the accepted loading/JIT budget. Exact rank-loss recovery
-                # derives this same duration; neither lease renewal nor retry
-                # extends a deadline.
+                # Persist the accepted loading/JIT budget; neither lease renewal
+                # nor retry extends a deadline.
                 (
                     _aware(now)
                     + timedelta(seconds=service._distributed_start_timeout_seconds)

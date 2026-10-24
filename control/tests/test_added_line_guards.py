@@ -1087,3 +1087,44 @@ def test_capacity_guard_allows_reviewed_gates_and_tests() -> None:
     assert not check_source(reviewed, source, {2}, modes=("capacity-gates",))
     test = "control/tests/test_example.py"
     assert not check_source(test, source, {2}, modes=("capacity-gates",))
+
+
+@pytest.mark.parametrize(
+    "body",
+    (
+        # The main-era exact-recovery shape (#1896).
+        "    return parent.start_deadline - start.created_at\n",
+        "    return _aware(parent.start_deadline) - _aware(row.created_at)\n",
+        '    return row["start_anchored_at"] - row["created_at"]\n',
+        (
+            "    created = job.created_at\n"
+            "    return _aware(_parent_start_deadline(job)) - created\n"
+        ),
+    ),
+)
+def test_added_line_guard_rejects_start_budget_from_stored_timestamps(body):
+    """A budget re-derived from an anchored deadline drifts from the accepted one."""
+    source = "def budget(parent, start, row, job):\n" + body
+    last = source.count("\n")
+    assert check_source(PATH, source, {last}, modes=("start-budgets",))
+    assert not check_source(PATH, source, {1}, modes=("start-budgets",))
+
+
+def test_start_budget_guard_allows_reviewed_sites_settings_and_other_clocks():
+    source = (
+        "def _anchor_start_budget(session, operation, now):\n"
+        "    deadline = _operation_start_deadline(operation)\n"
+        "    return _aware(deadline) - _aware(operation.created_at)\n"
+    )
+    reviewed = "control/src/vonk_control/agent_jobs/predicates.py"
+    assert check_source(PATH, source, {3}, modes=("start-budgets",))
+    assert not check_source(reviewed, source, {3}, modes=("start-budgets",))
+    test = "control/tests/test_example.py"
+    assert not check_source(test, source, {3}, modes=("start-budgets",))
+    other = (
+        "def remaining(parent, now, job):\n"
+        "    left = parent.start_deadline - now\n"
+        "    age = now - job.created_at\n"
+        "    return timedelta(seconds=settings.DISTRIBUTED_START_TIMEOUT_SECONDS)\n"
+    )
+    assert not check_source(PATH, other, set(range(1, 5)), modes=("start-budgets",))
