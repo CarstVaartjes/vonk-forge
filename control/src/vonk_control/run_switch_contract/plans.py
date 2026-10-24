@@ -117,11 +117,9 @@ class RunSwitchAssessment(StrictModel):
                 raise ValueError(
                     "conditional memory check requires known feasible demand and capacity"
                 )
-            fit_nodes = {node.node_id for node in self.fit_current.nodes}
-            if any(not set(stop.node_ids) <= fit_nodes for stop in self.stops):
-                raise ValueError(
-                    "conditional memory stops must stay within the reviewed target scope"
-                )
+            # StopImpact owns the reviewed whole-run scope. A replaced run may
+            # span more Sparks than the incoming workload: stopping it frees
+            # memory on all ranks, while fit describes only the new demand.
         return self
 
 
