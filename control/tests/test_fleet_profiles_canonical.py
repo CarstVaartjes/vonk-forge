@@ -1474,7 +1474,13 @@ def test_profile_storage_wait_is_bounded_and_recovers(
         with pytest.raises(BookkeepingUnknown):
             profile_read(stored)()
         assert entered.wait(30)
+        started = frozen_pass_budgets.seconds
         result = read()
+        # The response honours its own request deadline, whatever the stall.
+        assert (
+            frozen_pass_budgets.seconds - started
+            <= profile_read_observation.PROFILE_READ_STORAGE_SECONDS
+        )
         assert entered.is_set()
         # The stalled receipt completes only after release: order, not latency.
         assert not completed.is_set(), "the response waited for the stalled receipt"

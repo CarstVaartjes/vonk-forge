@@ -368,11 +368,17 @@ def test_nested_observation_outlives_request_deadline(monkeypatch, frozen_pass_b
             finished.set()
 
     read = profile_read(batch)
+    started = frozen_pass_budgets.seconds
     try:
         with pytest.raises(BookkeepingUnknown):
             read()
     finally:
         release.set()
+    # The request answers within its own deadline, not the nested probe's.
+    assert (
+        frozen_pass_budgets.seconds - started
+        <= profile_read_observation.PROFILE_READ_STORAGE_SECONDS
+    )
     assert finished.wait(30)
     assert calls == list(range(146))
     monkeypatch.setattr(profile_read_observation, "wait", completing_wait)
