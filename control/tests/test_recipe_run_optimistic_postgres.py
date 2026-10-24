@@ -19,7 +19,7 @@ from vonk_control.failure_classification import disposition
 from vonk_control.models import RecipeRun, RoutePublicationOwner, RunNode
 from vonk_control.optimistic import Applied, transition
 from vonk_control.recipe_operation_worker import RecipeOperationWorker
-from vonk_control.recovery_policy import ROUTE_RECOVERY
+from vonk_control.recovery_policy import ROUTE_RECOVERY, WAIT_STEP
 
 from .test_recipe_routes import NOW, MutableClock, setup
 
@@ -326,12 +326,16 @@ def test_deadline_contention_is_visible_wait_and_heals_next_tick(
         assert run.state == RunState.RUNNING
 
 
+@pytest.mark.parametrize("failure", ["unavailable", "not-ready", "refused"])
 def test_publication_deferral_contention_continues_without_traceback(
-    postgres_engine, tmp_path, monkeypatch, caplog
+    postgres_engine, tmp_path, monkeypatch, caplog, failure
 ) -> None:
     """Catches a stale deferral logged as a failure or starving the next run."""
     import json
     import logging
+
+    from vonk_agent_protocol import SecurityRefusalError
+    from vonk_control.recipe_routes import RecipeRouteNotReady
 
     from .test_recipe_routes import add_running_run
 
@@ -348,9 +352,13 @@ def test_publication_deferral_contention_continues_without_traceback(
 
     def unavailable_first(candidate):
         visited.append(candidate)
-        if candidate == run_id:
-            raise ConnectionError("publisher temporarily unavailable")
-        return publish(candidate)
+        if candidate != run_id:
+            return publish(candidate)
+        if failure == "not-ready":
+            raise RecipeRouteNotReady("evidence pending", run_id=candidate)
+        if failure == "refused":
+            raise SecurityRefusalError("publisher refused")
+        raise ConnectionError("publisher temporarily unavailable")
 
     monkeypatch.setattr(routes, "publish_run", unavailable_first)
     now = [NOW]
@@ -374,6 +382,13 @@ def test_publication_deferral_contention_continues_without_traceback(
     assert worker._publish_runs((run_id,)) is True
     with routes.sessions() as session:
         run = session.get(RecipeRun, run_id)
+        assert run is not None and run.route_state == RouteState.PUBLISHED
+    fresh = add_running_run(
+        routes, run_id, alias="fresh", route_state=RouteState.PENDING, identity=9
+    )
+    assert worker._publish_runs((fresh,)) is True
+    with routes.sessions() as session:
+        run = session.get(RecipeRun, fresh)
         assert run is not None and run.route_state == RouteState.PUBLISHED
 
 
@@ -554,7 +569,8 @@ def test_order_sweep_conflict_rolls_back_continues_and_resweeps(
     assert any(
         wait.get("operation_id") == first.id
         and wait.get("reason") == WaitReason.SCOPE_CHANGED
-        and datetime.fromisoformat(wait["retry_at"]) == now + timedelta(seconds=5)
+        and datetime.fromisoformat(wait["retry_at"])
+        == now + timedelta(seconds=WAIT_STEP)
         for wait in waits
     )
     assert all(record.exc_info is None for record in caplog.records)
@@ -634,7 +650,7 @@ def test_due_route_recovery_contention_is_typed_wait_and_redrives(
     assert all(wait["event"] == "worker.due_wait.wait" for wait in waits)
     assert all(wait["reason"] == WaitReason.SCOPE_CHANGED for wait in waits)
     assert datetime.fromisoformat(waits[-1]["retry_at"]) == now[0] + timedelta(
-        seconds=5
+        seconds=WAIT_STEP
     )
     assert all(record.exc_info is None for record in caplog.records)
     with routes.sessions() as session:
@@ -646,3 +662,12 @@ def test_due_route_recovery_contention_is_typed_wait_and_redrives(
         run = session.get(RecipeRun, run_id)
         assert run is not None and run.route_state == RouteState.WITHDRAWN
         assert run.state == RunState.RUNNING
+    from .test_recipe_routes import add_running_run
+
+    fresh = add_running_run(
+        routes, run_id, alias="qwen", route_state=RouteState.PENDING, identity=9
+    )
+    routes.publish_run(fresh)
+    with routes.sessions() as session:
+        run = session.get(RecipeRun, fresh)
+        assert run is not None and run.route_state == RouteState.PUBLISHED

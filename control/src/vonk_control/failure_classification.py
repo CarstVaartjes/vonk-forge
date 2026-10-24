@@ -24,6 +24,7 @@ from __future__ import annotations
 import errno
 
 import httpx2
+from psycopg.errors import DeadlockDetected, LockNotAvailable
 from pydantic import ValidationError
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.exc import OperationalError as DatabaseOperationalError
@@ -190,22 +191,29 @@ def disposition(cause: BaseException | AgentFailureKind | Disposition) -> Dispos
 
 
 def wait_reason(error: BaseException) -> WaitReason | None:
-    """Preserve typed wait evidence, including raw database contention."""
+    """The typed reason of every ``WAIT``/``OBSERVE``; ``None`` only for non-waits.
 
+    Contention (a version fence, a held lock, a deadlock victim) is
+    ``SCOPE_CHANGED``; typed evidence keeps its own reason; any other wait (an
+    unreachable database, peer or pool) is ``OBSERVATION_UNAVAILABLE``.
+    """
+
+    if disposition(error) not in {Disposition.WAIT, Disposition.OBSERVE}:
+        return None
     current: BaseException | None = error
     for _depth in range(16):
         if current is None:
             break
         if isinstance(current, StaleDataError) or (
             isinstance(current, DBAPIError)
-            and getattr(current.orig, "sqlstate", None) == "55P03"
+            and isinstance(current.orig, (LockNotAvailable, DeadlockDetected))
         ):
             return WaitReason.SCOPE_CHANGED
         reason = getattr(current, "typed_reason", None)
         if isinstance(reason, WaitReason):
             return reason
         current = current.__cause__
-    return None
+    return WaitReason.OBSERVATION_UNAVAILABLE
 
 
 def is_definite(cause: BaseException | AgentFailureKind | Disposition) -> bool:

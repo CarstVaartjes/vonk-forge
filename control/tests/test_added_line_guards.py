@@ -956,18 +956,19 @@ def test_contact_clock_guard_preserves_staleness_and_security_and_agent_freshnes
 
 @pytest.mark.parametrize("negative", (False, True))
 @pytest.mark.parametrize("verdict", ("WAIT", "OBSERVE", "FAIL"))
-@pytest.mark.parametrize("typed", (False, True))
+@pytest.mark.parametrize("reason", ("wait_reason(error)", "str(error)", "None"))
 def test_visible_classified_wait_is_not_counted_as_repeated_failure(
-    negative, verdict, typed
+    negative, verdict, reason
 ):
-    """Catches waits needing failure counts, without exempting failure retries."""
+    """Catches waits needing failure counts or logging a null/free-text reason."""
+    typed = reason == "wait_reason(error)"
     check = (
         f"disposition(error) {'not in' if negative else 'in'} {{Disposition.{verdict}}}"
     )
     schedule = (
         "self._retry_at[task] = due\n"
         "log_event(logger, 'owner.wait', service='control-worker', "
-        f"reason={'wait_reason(error)' if typed else 'str(error)'}, retry_at=due)\n"
+        f"reason={reason}, retry_at=due)\n"
     )
     from textwrap import indent
 

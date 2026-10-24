@@ -27,6 +27,7 @@ from ..logging import log_event
 from ..models import AgentNode, AgentOperationAttempt, Job
 from ..models import AgentOperation as StoredOperation
 from ..own_cleanup import CLEANUP_KINDS
+from ..recovery_policy import WAIT_STEP
 from .endings import end_unobserved_order
 from .observation_receipts import (
     OBSERVATION_KINDS,
@@ -289,7 +290,7 @@ def _sweep_lapsed_attempts(
                 raise
             # The candidate transaction rolled back. The cursor wraps, so the
             # retained receipt is re-read next pass without starving siblings.
-            retry_at = self._clock() + timedelta(seconds=5)
+            retry_at = self._clock() + timedelta(seconds=WAIT_STEP)
             self._order_sweep_retry_at[operation_id] = retry_at
             log_event(
                 logging.getLogger(__name__),

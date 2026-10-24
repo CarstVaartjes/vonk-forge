@@ -37,6 +37,7 @@ from .logging import log_event, redact_text
 from .models import Base
 from .models.waits import ScheduledWaitOwner
 from .persisted_waits import owner_identity
+from .recovery_policy import WAIT_STEP
 from .strict_json import stored_document_detail
 from .wait_contract import WaitEvidence
 
@@ -201,7 +202,7 @@ class DueWaitBackstop:
                 self._failures.pop((table.name, key), None)
             except Exception as error:  # noqa: BLE001 - isolate one row/owner observation
                 if disposition(error) in {Disposition.WAIT, Disposition.OBSERVE}:
-                    retry_at = self._clock() + timedelta(seconds=5)
+                    retry_at = self._clock() + timedelta(seconds=WAIT_STEP)
                     if selected:
                         self._retry_at[(table.name, key)] = retry_at
                     log_event(

@@ -2422,9 +2422,16 @@ def test_maintenance_contention_uses_the_typed_wait_schedule(
     assert not worker._retry_at
     assert worker._route_owner_due is not None
     assert worker._route_owner_due > clock.now
-    assert any(
-        "recipe.route.owner_busy" in record.getMessage() for record in caplog.records
-    )
+    busy = [
+        json.loads(record.getMessage())
+        for record in caplog.records
+        if "recipe.route.owner_busy" in record.getMessage()
+    ]
+    assert [wait["reason"] for wait in busy] == [
+        WaitReason.OBSERVATION_UNAVAILABLE
+        if contention == "owner"
+        else WaitReason.SCOPE_CHANGED
+    ]
     assert not any(record.exc_info for record in caplog.records)
     assert worker._advance(worker._maintain_routes) is False
     assert len(calls) == 1

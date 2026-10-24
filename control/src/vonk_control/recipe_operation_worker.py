@@ -35,12 +35,11 @@ from .recipe_execution_contract import (
 from .recipe_lifecycle_contract import RecipeOperationResult
 from .recipe_operations.constants import _INITIAL_OBSERVATION_GRACE_SECONDS
 from .recipe_routes import (
-    RecipeRouteNotReady,
     RecipeRouteOwnerBusy,
     publication_disposition,
 )
 from .recipe_routes.shared import _RecipeRunContended
-from .recovery_policy import RECOVERY, ROUTE_RECOVERY, schedule
+from .recovery_policy import RECOVERY, ROUTE_RECOVERY, WAIT_STEP, schedule
 from .reservation_owners import OwnerKind, OwnerRef, owner
 from .stall_window import stall_deadline
 
@@ -211,7 +210,8 @@ class RecipeOperationWorker:
                 "recipe.route.owner_busy",
                 service="control-worker",
                 retry_at=self._route_owner_due,
-                reason=str(error),
+                reason=wait_reason(error),
+                detail=error_detail(error),
             )
             return False
         self._route_owner_waits = 0
@@ -261,27 +261,25 @@ class RecipeOperationWorker:
                 self._routes.publish_run(run_id)
             except RecipeRouteOwnerBusy:
                 raise
-            except SecurityRefusalError as error:
-                self._end_publication(run_id, error)
-                progressed = True
-                continue
-            except RecipeRouteNotReady as error:
-                # Publication evidence that is not there yet: a wait on the
-                # one retry clock, so restart cannot turn it into a hot loop
-                # and it never spends the budget of a serving route.
-                self._defer_publication(run_id, error)
-                progressed = True
-                continue
             except Exception as error:  # noqa: BLE001 - failure is scoped to this run
+                # A refusal ends the publication; anything else (evidence not
+                # there yet included) is deferred on the one retry clock.  A
+                # contended record waits for this run only: later runs still
+                # publish in this pass.
+                record = (
+                    self._end_publication
+                    if isinstance(error, SecurityRefusalError)
+                    else self._defer_publication
+                )
                 try:
-                    self._defer_publication(run_id, error)
+                    record(run_id, error)
                     progressed = True
                 except Exception as observation_error:
                     if disposition(observation_error) in {
                         Disposition.WAIT,
                         Disposition.OBSERVE,
                     }:
-                        retry_at = self._clock() + timedelta(seconds=5)
+                        retry_at = self._clock() + timedelta(seconds=WAIT_STEP)
                         self._publication_retry_at[run_id] = retry_at
                         log_event(
                             _LOGGER,
