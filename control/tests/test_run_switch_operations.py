@@ -6965,6 +6965,179 @@ def test_disk_review_counts_orphan_model_copies_and_scopes_unmeasured_cleanup(
     assert service.preview(request, actor="admin").allowed
 
 
+@pytest.mark.parametrize(
+    ("running_count", "load_count"), [(2, 1), (1, 2), (1, 1), (2, 2)]
+)
+@pytest.mark.parametrize("memory_shortfall", [False, True])
+def test_planner_outputs_validate_across_stop_and_load_topologies(
+    tmp_path: Path,
+    postgres_engine,
+    running_count: int,
+    load_count: int,
+    memory_shortfall: bool,
+) -> None:
+    """Catch a planner whose whole-run stops violate its own target-fit contract."""
+    sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(
+        tmp_path, nodes=2, mapping_node_count=running_count, engine=postgres_engine
+    )
+    installed = installed_recipe(
+        lifecycle,
+        mapping_id,
+        build_id,
+        nodes[:running_count],
+        request_id=str(uuid.uuid4()),
+    )
+    run_plan = lifecycle._run_admission.plan_run(installed.owner_id, "old", now=NOW)
+    run_id = lifecycle._run_admission.accept_run(run_plan, actor="admin", now=NOW)
+    request = _request(sessions, nodes[0], action="switch")
+    with sessions.begin() as session:
+        build = session.get(RecipeBuild, build_id)
+        assert build is not None
+        assert (
+            build.image_digest is not None
+            and build.oci_layout_sha256 is not None
+            and build.image_bytes is not None
+        )
+        expected_image = RuntimeImageIdentity(
+            image_digest=build.image_digest,
+            oci_layout_sha256=build.oci_layout_sha256,
+            image_bytes=build.image_bytes,
+            architecture="linux-arm64",
+            runtime_interface="vllm",
+            build_id=build.id,
+        )
+        run = session.get(RecipeRun, run_id)
+        assert run is not None
+        run.state = LifecycleState.RUNNING
+        for rank in session.scalars(select(RunNode).where(RunNode.run_id == run_id)):
+            rank.state = LifecycleState.RUNNING
+            rank.reserved_memory_bytes = 7_800 if memory_shortfall else 100
+        for claim in session.scalars(
+            select(ResourceReservation).where(
+                ResourceReservation.owner_kind == "run",
+                ResourceReservation.owner_id == run_id,
+                ResourceReservation.kind == "unified-memory",
+            )
+        ):
+            claim.amount_bytes = 7_800 if memory_shortfall else 100
+        original = session.get(CatalogDocumentRevision, request.recipe_revision_id)
+        assert original is not None
+        document = RecipeDefinition.model_validate(original.document).model_dump(
+            mode="json"
+        )
+        document["release"]["version"] = "2.0.1"
+        topology = document["topology"]
+        role = topology["roles"][0]
+        topology.update(
+            {
+                "name": f"nodes_{load_count}",
+                "node_count": load_count,
+                "parallelism": {
+                    "tensor": load_count,
+                    "pipeline": 1,
+                    "data": 1,
+                    "backend": "tcp",
+                },
+                "roles": [role]
+                + (
+                    [{**role, "name": "worker", "endpoint_owner": False}]
+                    if load_count == 2
+                    else []
+                ),
+                "start_order": ["worker", "entrypoint"]
+                if load_count == 2
+                else ["entrypoint"],
+            }
+        )
+        document["models"][0]["files"][0]["roles"] = [
+            item["name"] for item in topology["roles"]
+        ]
+        RecipeDefinition.model_validate(document)
+        target = CatalogDocumentRevision(
+            id=str(uuid.uuid4()),
+            document_id=original.document_id,
+            kind=original.kind,
+            publisher=original.publisher,
+            slug=original.slug,
+            revision_number=2,
+            schema_version=2,
+            state=original.state,
+            document=document,
+            content_digest=document_sha256(document),
+            projected={},
+            created_by="admin",
+            created_at=NOW,
+        )
+        session.add(target)
+        session.flush()
+        request = request.model_copy(
+            update={
+                "recipe_revision_id": target.id,
+                "spark_group": SparkGroup(
+                    nodes=[
+                        SparkGroupNode(
+                            node_id=node,
+                            rank=rank,
+                            role="entrypoint" if rank == 0 else "worker",
+                            endpoint_owner=rank == 0,
+                        )
+                        for rank, node in enumerate(nodes[:load_count])
+                    ]
+                ),
+            }
+        )
+    service = _service(
+        sessions,
+        NOW,
+        lifecycle,
+        RecordingArtifactExecutor(),
+        phase_executor=SynchronousPhaseExecutor(),
+    )
+    baseline = service.inspect_request(
+        request,
+        actor="admin",
+        replaced_run_ids=frozenset({run_id}),
+        expected_runtime_image=expected_image,
+    )
+    if memory_shortfall:
+        demand = baseline.fit_current.nodes[0]
+        assert (
+            demand.memory_required_bytes is not None
+            and demand.memory_floor_bytes is not None
+        )
+        with sessions.begin() as session:
+            snapshot = session.scalar(
+                select(NodeInventorySnapshot).where(
+                    NodeInventorySnapshot.node_id == nodes[0]
+                )
+            )
+            assert snapshot is not None
+            total = 7_800 + demand.memory_required_bytes + demand.memory_floor_bytes - 1
+            free = demand.memory_required_bytes + demand.memory_floor_bytes + 10
+            snapshot.host_memory_total_bytes = snapshot.gpu_memory_total_bytes = total
+            snapshot.host_memory_free_bytes = snapshot.gpu_memory_free_bytes = free
+    plan = service.inspect_request(
+        request,
+        actor="admin",
+        replaced_run_ids=frozenset({run_id}),
+        expected_runtime_image=expected_image,
+    )
+    assert plan.allowed, plan.blockers
+    assert len(plan.stops) == 1
+    assert plan.stops[0].node_ids == list(nodes[:running_count])
+    assert [node.node_id for node in plan.fit_current.nodes] == list(nodes[:load_count])
+    assert (plan.post_stop_memory_check is not None) == memory_shortfall
+    assert RunSwitchPlan.model_validate_json(plan.model_dump_json()) == plan
+    # Profile projection and admission refresh are consumers of the same contract.
+    assessment = plan.assessment()
+    with sessions() as session:
+        refreshed = service.recheck_resources_in_session(session, request, assessment)
+    assert (
+        RunSwitchAssessment.model_validate_json(refreshed.model_dump_json())
+        == refreshed
+    )
+
+
 @pytest.mark.parametrize("during_builder", [True, False])
 def test_plan_reuses_inventory_when_a_new_sample_lands_between_read_points(
     tmp_path: Path, postgres_engine, monkeypatch, during_builder: bool
