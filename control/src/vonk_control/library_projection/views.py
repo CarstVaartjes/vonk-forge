@@ -32,12 +32,12 @@ from ..operator_receipt_contract import ReceiptOwner
 from ..request_fault import RequestFault
 from .common import (
     _LIBRARY_ORDER,
-    _bounded_library_page,
     _canonical_model,
     _canonical_recipe,
     _canonical_recipe_summary,
     _filter_digest,
     _note_unreadable,
+    _observed_library_page,
 )
 
 if TYPE_CHECKING:
@@ -228,12 +228,13 @@ def models(
             boundary=boundary,
         )
 
-    selected = filtered[:limit]
-    if not cached:
+    def observe(selected: list[LibraryModelProjection]) -> list[LibraryModelProjection]:
+        if cached:
+            return selected
         snapshot = self._local_state_snapshot(
             [item.identity.content_sha256 for item in selected]
         )
-        selected = [
+        return [
             item.model_copy(
                 update={
                     "local": self._local(
@@ -243,9 +244,11 @@ def models(
             )
             for item in selected
         ]
-    page, next_cursor = _bounded_library_page(
-        selected,
-        has_more_after_candidates=len(filtered) > limit,
+
+    page, next_cursor = _observed_library_page(
+        filtered[:limit],
+        following=len(filtered),
+        observe=observe,
         collection_field="models",
         empty_response=response,
         encode_cursor=encode_cursor,
@@ -468,25 +471,6 @@ def recipe_library(
                 else key(item) > boundary_key
             )
         ]
-    candidates = filtered[:limit]
-    if not cached:
-        snapshot = self._local_state_snapshot(
-            [item.identity.content_sha256 for item in candidates]
-        )
-        candidates = [
-            item.model_copy(
-                update={
-                    "local": self._local(
-                        item.identity.content_sha256,
-                        kind=ReceiptOwner.RECIPE,
-                        snapshot=snapshot,
-                    )
-                }
-            )
-            for item in candidates
-        ]
-    if assess and not filtering_assessment:
-        candidates = self._assessed(candidates, deadline=deadline)
     response = RecipeLibraryResponse(
         catalog_observed_at=_utc(self._catalog_observed_at),
         generated_at=_utc(self._clock()),
@@ -528,9 +512,33 @@ def recipe_library(
             boundary=boundary,
         )
 
-    page, next_cursor = _bounded_library_page(
-        candidates,
-        has_more_after_candidates=len(filtered) > len(candidates),
+    def observe(
+        candidates: list[LibraryRecipeProjection],
+    ) -> list[LibraryRecipeProjection]:
+        if not cached:
+            snapshot = self._local_state_snapshot(
+                [item.identity.content_sha256 for item in candidates]
+            )
+            candidates = [
+                item.model_copy(
+                    update={
+                        "local": self._local(
+                            item.identity.content_sha256,
+                            kind=ReceiptOwner.RECIPE,
+                            snapshot=snapshot,
+                        )
+                    }
+                )
+                for item in candidates
+            ]
+        if assess and not filtering_assessment:
+            candidates = self._assessed(candidates, deadline=deadline)
+        return candidates
+
+    page, next_cursor = _observed_library_page(
+        filtered[:limit],
+        following=len(filtered),
+        observe=observe,
         collection_field="recipes",
         empty_response=response,
         encode_cursor=encode_cursor,

@@ -115,18 +115,21 @@ def _bounded_library_page[T: BaseModel](
     if not candidates:
         return [], None
 
-    item_sizes = [
-        len(_wire_json_bytes(serialize_json_value(item))) for item in candidates
-    ]
     prefix_sizes = [0]
-    for item_size in item_sizes:
-        prefix_sizes.append(prefix_sizes[-1] + item_size)
+    for item in candidates:
+        prefix_sizes.append(
+            prefix_sizes[-1] + len(_wire_json_bytes(serialize_json_value(item)))
+        )
+        if envelope_bytes + prefix_sizes[-1] > MAX_CONTROL_DOCUMENT_BYTES:
+            # No page reaches past this entry: a cursor and commas only add
+            # bytes, so later entries are neither encoded nor tried.
+            break
 
     selected_count = 0
     selected_cursor: str | None = None
     first_item_response_bytes: int | None = None
     first_cursor_too_large = False
-    for count in range(len(candidates), 0, -1):
+    for count in range(len(prefix_sizes) - 1, 0, -1):
         needs_cursor = count < len(candidates) or has_more_after_candidates
         try:
             cursor = encode_cursor(candidates[count - 1]) if needs_cursor else None
@@ -168,6 +171,39 @@ def _bounded_library_page[T: BaseModel](
             f"{MAX_CONTROL_DOCUMENT_BYTES} bytes; narrow filters to exclude it"
         )
     return list(candidates[:selected_count]), selected_cursor
+
+
+def _observed_library_page[T: BaseModel](
+    candidates: Sequence[T],
+    *,
+    following: int,
+    observe: Callable[[list[T]], list[T]],
+    collection_field: Literal["models", "recipes"],
+    empty_response: ModelLibraryResponse | RecipeLibraryResponse,
+    encode_cursor: Callable[[T], str],
+) -> tuple[list[T], str | None]:
+    """Bound the page first, then observe only the entries it can return.
+
+    Per-entry observation (local state, image presence, assessment) costs time
+    for every entry it is given, and the byte budget usually returns far fewer
+    entries than requested. So the page is first bounded on the projection
+    already in hand, ``observe`` runs for that prefix plus one entry (an
+    observation can shorten an entry by a few bytes), and the exact page and
+    cursor are decided on the observed entries. ``following`` counts the
+    matching entries from the first candidate on, beyond the candidates too.
+    """
+
+    def bound(entries: Sequence[T]) -> tuple[list[T], str | None]:
+        return _bounded_library_page(
+            entries,
+            has_more_after_candidates=following > len(entries),
+            collection_field=collection_field,
+            empty_response=empty_response,
+            encode_cursor=encode_cursor,
+        )
+
+    fitting, _ = bound(candidates)
+    return bound(observe(list(candidates[: len(fitting) + 1])))
 
 
 def _controller_state(
