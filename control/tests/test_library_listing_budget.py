@@ -32,6 +32,7 @@ from vonk_control.library_image_presence import ImagePresenceIndex
 from vonk_control.library_projection import LibraryProjection
 from vonk_control.library_storage_observation import (
     STORAGE_OBSERVATION_DEADLINE_SECONDS,
+    LibraryStorageObserver,
 )
 from vonk_control.model_cache_contract import (
     CacheOperationKind,
@@ -1073,3 +1074,45 @@ def test_storage_age_reason_does_not_claim_endpoint_unavailable(reason, capsys):
     assert f"Storage reason: {reason.value}\n" in output
     assert "unavailable" not in output
     assert "Storage observation:" not in output
+
+
+def test_deadline_after_a_failed_walk_names_no_earlier_error():
+    from datetime import timedelta
+
+    # Break caught: a hang past its deadline kept the previous walk's error
+    # class, so clients blamed the hang on an unrelated earlier failure.
+    observed = [NOW]
+    entered = threading.Event()
+    release = threading.Event()
+    calls = []
+
+    def provider():
+        calls.append(True)
+        if len(calls) == 1:
+            raise PermissionError("injected permission fault")
+        entered.set()
+        assert release.wait(timeout=30)
+        return {}
+
+    observer = LibraryStorageObserver(provider, clock=lambda: observed[0])
+    observer.refresh()
+    assert observer._thread is not None
+    observer._thread.join(timeout=30)
+    failed = observer.snapshot().observation
+    reason_code = failed.storage_reason
+    assert reason_code == ModelStorageObservationReason.FAILED
+    assert failed.storage_error_type == PermissionError.__name__
+
+    observer.refresh()
+    try:
+        assert entered.wait(timeout=30)
+        observed[0] += timedelta(seconds=STORAGE_OBSERVATION_DEADLINE_SECONDS)
+        hung = observer.snapshot().observation
+        assert hung.storage_reason == ModelStorageObservationReason.DEADLINE_EXCEEDED
+        assert hung.storage_error_type is None
+    finally:
+        release.set()
+        observer._thread.join(timeout=30)
+    healed = observer.snapshot().observation
+    assert healed.storage_reason is None
+    assert healed.storage_error_type is None

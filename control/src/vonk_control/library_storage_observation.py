@@ -82,6 +82,8 @@ class LibraryStorageObserver:
                 observation = observation.model_copy(
                     update={
                         "storage_reason": ModelStorageObservationReason.DEADLINE_EXCEEDED,
+                        # The hang is this walk's reason, never an earlier error.
+                        "storage_error_type": None,
                     }
                 )
         elif (
