@@ -8,6 +8,7 @@ import time
 from collections.abc import Callable, Sequence
 from datetime import datetime
 
+from sqlalchemy import text
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
     AgentClaim,
@@ -51,7 +52,9 @@ from ..models import (
 from ..models import AgentOperation as StoredOperation
 from ..operation_contract import validate_progress_update
 from ..operation_progress import progress_document, sample_progress, stored_progress
+from ..optimistic import Stale, transition
 from ..own_cleanup import CLEANUP_KINDS
+from ..settings import DATABASE_WAIT_BUDGETS
 from .aggregation import _aggregate_parent, _aggregate_parent_state
 from .claim import _claim_once
 from .claim_authority import (
@@ -157,6 +160,7 @@ class AgentJobService:
         self._started = False
         self._reconciler: Reconciler | None = None
         self._order_sweep_cursor: str | None = None
+        self._order_sweep_retry_at: dict[str, datetime] = {}
         self._queue_wait_cursor: str | None = None
         # SQLite ignores row locks. This only prevents same-service test races;
         # PostgreSQL correctness is provided by the database locks below.
@@ -595,7 +599,17 @@ class AgentJobService:
         source: AgentSource | None = None,
     ) -> None:
         self._mark_started()
-        with self._sessions.begin() as session:
+
+        def decide(session: Session) -> tuple[str, str] | None:
+            optimistic_timeout = None
+            if session.get_bind().dialect.name == "postgresql":
+                # Identity/target locks still serialize with revocation and
+                # admission under their existing bounded security budget.
+                optimistic_timeout = session.scalar(text("SHOW lock_timeout"))
+                session.execute(
+                    text("SELECT set_config('lock_timeout', :timeout, true)"),
+                    {"timeout": f"{DATABASE_WAIT_BUDGETS.lock_timeout_ms}ms"},
+                )
             operation, attempt = self._active(
                 session,
                 fence,
@@ -609,6 +623,11 @@ class AgentJobService:
                 # abandoned effect.
                 allow_lapsed_renewal=True,
             )
+            if optimistic_timeout is not None:
+                session.execute(
+                    text("SELECT set_config('lock_timeout', :timeout, true)"),
+                    {"timeout": optimistic_timeout},
+                )
             now = self._clock()
             node = session.get(AgentNode, operation.node_id)
             parent = session.get(Job, operation.parent_job_id)
@@ -720,25 +739,35 @@ class AgentJobService:
                 self._result_consumer(session, operation, attempt, message)
             self._aggregate_parent(session, operation.parent_job_id)
             refresh_queue_waits(session, now, node_id=operation.node_id)
+            if (
+                operation.kind == AgentOperation.RUNTIME_PREFLIGHT
+                and operation.state
+                in {
+                    LifecycleState.SUCCEEDED,
+                    LifecycleState.FAILED,
+                    LifecycleState.CANCELLED,
+                }
+            ):
+                return operation.parent_job_id, operation.node_id
+            return None
+
+        outcome = transition(self._sessions, decide)
+        if isinstance(outcome, Stale):
+            raise UnknownOutcomeError(
+                "RecipeRun changed; re-plan on the next reconcile tick",
+                reason=WaitReason.SCOPE_CHANGED,
+            )
         # A result consumer can atomically make the next durable recipe phase
         # queueable; wake long-polling agents only after that transaction commits.
         self.notify_available()
-        if (
-            operation.kind == AgentOperation.RUNTIME_PREFLIGHT.value
-            and operation.state
-            in {
-                LifecycleState.SUCCEEDED.value,
-                LifecycleState.FAILED.value,
-                LifecycleState.CANCELLED.value,
-            }
-            and self._preflight_completed is not None
-        ):
+        if outcome.value is not None and self._preflight_completed is not None:
+            parent_job_id, node_id = outcome.value
             try:
-                self._preflight_completed(operation.parent_job_id, operation.node_id)
+                self._preflight_completed(parent_job_id, node_id)
             except Exception:
                 logging.getLogger(__name__).exception(
                     "Runtime preflight owner wake deferred for %s",
-                    operation.parent_job_id,
+                    parent_job_id,
                 )
 
     @staticmethod

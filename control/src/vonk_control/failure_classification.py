@@ -24,10 +24,12 @@ from __future__ import annotations
 import errno
 
 import httpx2
+from psycopg.errors import DeadlockDetected, LockNotAvailable
 from pydantic import ValidationError
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.exc import OperationalError as DatabaseOperationalError
 from sqlalchemy.exc import TimeoutError as DatabasePoolTimeout
+from sqlalchemy.orm.exc import StaleDataError
 from vonk_agent_protocol import (
     FAILURE_KIND_DISPOSITION,
     SECURITY_REFUSAL_SUFFIXES,
@@ -36,6 +38,7 @@ from vonk_agent_protocol import (
     Disposition,
     SecurityRefusalError,
     UnknownOutcomeError,
+    WaitReason,
     http_status_disposition,
 )
 
@@ -145,7 +148,9 @@ def _own_disposition(error: BaseException) -> Disposition | None:
         return (
             None if isinstance(error, httpx2.UnsupportedProtocol) else Disposition.WAIT
         )
-    if isinstance(error, (DatabaseOperationalError, DatabasePoolTimeout)):
+    if isinstance(
+        error, (DatabaseOperationalError, DatabasePoolTimeout, StaleDataError)
+    ):
         return Disposition.WAIT
     if isinstance(error, DBAPIError):
         return Disposition.WAIT if error.connection_invalidated else None
@@ -185,6 +190,32 @@ def disposition(cause: BaseException | AgentFailureKind | Disposition) -> Dispos
     return Disposition.FAIL
 
 
+def wait_reason(error: BaseException) -> WaitReason | None:
+    """The typed reason of every ``WAIT``/``OBSERVE``; ``None`` only for non-waits.
+
+    Contention (a version fence, a held lock, a deadlock victim) is
+    ``SCOPE_CHANGED``; typed evidence keeps its own reason; any other wait (an
+    unreachable database, peer or pool) is ``OBSERVATION_UNAVAILABLE``.
+    """
+
+    if disposition(error) not in {Disposition.WAIT, Disposition.OBSERVE}:
+        return None
+    current: BaseException | None = error
+    for _depth in range(16):
+        if current is None:
+            break
+        if isinstance(current, StaleDataError) or (
+            isinstance(current, DBAPIError)
+            and isinstance(current.orig, (LockNotAvailable, DeadlockDetected))
+        ):
+            return WaitReason.SCOPE_CHANGED
+        reason = getattr(current, "typed_reason", None)
+        if isinstance(reason, WaitReason):
+            return reason
+        current = current.__cause__
+    return WaitReason.OBSERVATION_UNAVAILABLE
+
+
 def is_definite(cause: BaseException | AgentFailureKind | Disposition) -> bool:
     """Whether retrying cannot help: ``FAIL`` or ``SECURITY``."""
 
@@ -219,4 +250,5 @@ __all__ = [
     "is_definite",
     "is_redownload",
     "is_security_failure",
+    "wait_reason",
 ]

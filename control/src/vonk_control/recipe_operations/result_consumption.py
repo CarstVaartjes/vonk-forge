@@ -247,7 +247,9 @@ class ResultConsumptionMixin:
                     )
                     .with_for_update(of=RunNode)
                 )
-                run = session.get(RecipeRun, owner_id, with_for_update=True)
+                run = session.get(RecipeRun, owner_id)
+                if run is not None:
+                    run.version += 1
                 try:
                     target = (
                         read_stored_model(

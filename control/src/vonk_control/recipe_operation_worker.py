@@ -12,17 +12,21 @@ from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
     TERMINAL_LIFECYCLE_STATES,
     AgentOperation,
+    Disposition,
     RouteState,
     RunState,
     SecurityRefusalError,
+    UnknownOutcomeError,
+    WaitReason,
 )
 
 from . import job_states
 from .categorized_errors import InvalidValue
-from .failure_classification import error_detail
+from .failure_classification import disposition, error_detail, wait_reason
 from .lifecycle.recipe_operation import RecipeOperationAdapter
 from .logging import log_event
 from .models import Job, RecipeRun, RunNode
+from .optimistic import Stale, transition
 from .persisted_waits import schedule_wait
 from .recipe_execution_contract import (
     RecipeExecutionContractError,
@@ -31,11 +35,11 @@ from .recipe_execution_contract import (
 from .recipe_lifecycle_contract import RecipeOperationResult
 from .recipe_operations.constants import _INITIAL_OBSERVATION_GRACE_SECONDS
 from .recipe_routes import (
-    RecipeRouteNotReady,
     RecipeRouteOwnerBusy,
     publication_disposition,
 )
-from .recovery_policy import RECOVERY, ROUTE_RECOVERY, schedule
+from .recipe_routes.shared import _RecipeRunContended
+from .recovery_policy import RECOVERY, ROUTE_RECOVERY, WAIT_STEP, schedule
 from .reservation_owners import OwnerKind, OwnerRef, owner
 from .stall_window import stall_deadline
 
@@ -96,6 +100,7 @@ class RecipeOperationWorker:
         self._residue_cleanup = residue_cleanup
         self._order_reconcile = order_reconcile
         self._retry_at: dict[Callable[[], bool], datetime] = {}
+        self._publication_retry_at: dict[str, datetime] = {}
         # Consecutive passes that found the shared route owner held elsewhere.
         self._route_owner_waits = 0
         self._route_owner_due: datetime | None = None
@@ -158,8 +163,19 @@ class RecipeOperationWorker:
             result = task()
             self._retry_at.pop(task, None)
             return result
-        except Exception:
+        except Exception as error:
             self._retry_at[task] = now + timedelta(seconds=5)
+            if disposition(error) in {Disposition.WAIT, Disposition.OBSERVE}:
+                log_event(
+                    _LOGGER,
+                    "recipe.coordinator.wait",
+                    service="control-worker",
+                    owner=getattr(task, "__qualname__", type(task).__name__),
+                    reason=wait_reason(error),
+                    detail=error_detail(error),
+                    retry_at=self._retry_at[task],
+                )
+                return False
             _LOGGER.exception(
                 "recipe coordinator observation failed",
                 extra={
@@ -184,7 +200,7 @@ class RecipeOperationWorker:
             return False
         try:
             result = task()
-        except RecipeRouteOwnerBusy as error:
+        except (RecipeRouteOwnerBusy, _RecipeRunContended) as error:
             self._route_owner_waits += 1
             self._route_owner_due = RECOVERY.next_attempt(
                 "recipe.route.owner", self._route_owner_waits, now, ongoing_intent=True
@@ -194,7 +210,8 @@ class RecipeOperationWorker:
                 "recipe.route.owner_busy",
                 service="control-worker",
                 retry_at=self._route_owner_due,
-                reason=str(error),
+                reason=wait_reason(error),
+                detail=error_detail(error),
             )
             return False
         self._route_owner_waits = 0
@@ -231,30 +248,53 @@ class RecipeOperationWorker:
 
     def _publish_runs(self, run_ids: tuple[str, ...]) -> bool:
         progressed = False
+        now = self._clock()
+        self._publication_retry_at = {
+            key: due for key, due in self._publication_retry_at.items() if due > now
+        }
         for run_id in run_ids:
+            due = self._publication_retry_at.get(run_id)
+            if due is not None and self._clock() < due:
+                continue
+            self._publication_retry_at.pop(run_id, None)
             try:
                 self._routes.publish_run(run_id)
             except RecipeRouteOwnerBusy:
                 raise
-            except SecurityRefusalError as error:
-                self._end_publication(run_id, error)
-                progressed = True
-                continue
-            except RecipeRouteNotReady as error:
-                # Publication evidence that is not there yet: a wait on the
-                # one retry clock, so restart cannot turn it into a hot loop
-                # and it never spends the budget of a serving route.
-                self._defer_publication(run_id, error)
-                progressed = True
-                continue
             except Exception as error:  # noqa: BLE001 - failure is scoped to this run
+                # A refusal ends the publication; anything else (evidence not
+                # there yet included) is deferred on the one retry clock.  A
+                # contended record waits for this run only: later runs still
+                # publish in this pass.
+                record = (
+                    self._end_publication
+                    if isinstance(error, SecurityRefusalError)
+                    else self._defer_publication
+                )
                 try:
-                    self._defer_publication(run_id, error)
+                    record(run_id, error)
                     progressed = True
-                except Exception:
-                    _LOGGER.exception(
-                        "route publication observation failed", extra={"run_id": run_id}
-                    )
+                except Exception as observation_error:
+                    if disposition(observation_error) in {
+                        Disposition.WAIT,
+                        Disposition.OBSERVE,
+                    }:
+                        retry_at = self._clock() + timedelta(seconds=WAIT_STEP)
+                        self._publication_retry_at[run_id] = retry_at
+                        log_event(
+                            _LOGGER,
+                            "recipe.publication.wait",
+                            service="control-worker",
+                            run_id=run_id,
+                            reason=wait_reason(observation_error),
+                            detail=error_detail(observation_error),
+                            retry_at=retry_at,
+                        )
+                    else:
+                        _LOGGER.exception(
+                            "route publication observation failed",
+                            extra={"run_id": run_id},
+                        )
                 continue
             return True
         return progressed
@@ -272,8 +312,9 @@ class RecipeOperationWorker:
         """
 
         now = self._clock()
-        with self._sessions.begin() as session:
-            run = session.get(RecipeRun, run_id, with_for_update=True)
+
+        def decide(session: Session) -> None:
+            run = session.get(RecipeRun, run_id)
             if run is None or run.route_state != RouteState.PENDING:
                 return
             step = schedule(
@@ -316,21 +357,36 @@ class RecipeOperationWorker:
                         job.updated_at = now
             run.updated_at = now
 
+        outcome = transition(self._sessions, decide)
+        if isinstance(outcome, Stale):
+            raise UnknownOutcomeError(
+                "RecipeRun changed; re-plan on the next reconcile tick",
+                reason=WaitReason.SCOPE_CHANGED,
+            )
+
     def _end_publication(self, run_id: str, error: BaseException) -> None:
-        with self._sessions.begin() as session:
-            run = session.get(RecipeRun, run_id, with_for_update=True)
+        def decide(session: Session) -> None:
+            run = session.get(RecipeRun, run_id)
             if run is not None and run.route_state == RouteState.PENDING:
                 run.route_state = RouteState.WITHDRAWN
                 schedule_wait(run, None)
                 run.route_error = str(error)[:512]
                 run.updated_at = self._clock()
 
+        outcome = transition(self._sessions, decide)
+        if isinstance(outcome, Stale):
+            raise UnknownOutcomeError(
+                "RecipeRun changed; re-plan on the next reconcile tick",
+                reason=WaitReason.SCOPE_CHANGED,
+            )
+
     def _expire_initial_observation_deadline(self, run_id: str | None = None) -> bool:
         now = self._clock()
         if now.tzinfo is None or now.utcoffset() is None:
             raise InvalidValue("recipe operation worker clock must be timezone-aware")
         now = now.astimezone(UTC)
-        with self._sessions.begin() as session:
+
+        def decide(session: Session) -> bool:
             runs = tuple(
                 session.scalars(
                     select(RecipeRun)
@@ -346,7 +402,6 @@ class RecipeOperationWorker:
                         ),
                     )
                     .order_by(RecipeRun.created_at, RecipeRun.id)
-                    .with_for_update(of=RecipeRun)
                 )
             )
             if not runs:
@@ -405,7 +460,15 @@ class RecipeOperationWorker:
                 run.route_error = "initial exact observation deadline elapsed"
                 run.updated_at = now
                 return True
-        return False
+            return False
+
+        outcome = transition(self._sessions, decide)
+        if isinstance(outcome, Stale):
+            raise UnknownOutcomeError(
+                "RecipeRun changed; re-plan on the next reconcile tick",
+                reason=WaitReason.SCOPE_CHANGED,
+            )
+        return outcome.value
 
 
 __all__ = ["RecipeOperationWorker"]

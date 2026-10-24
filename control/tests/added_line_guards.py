@@ -23,6 +23,7 @@ from . import request_path_scans
 from . import short_wall_clocks as wall_clocks
 from . import untyped_mapping_boundaries as mappings
 from . import vocabulary_literals as vocabulary
+from .recipe_run_write_verdicts import classified_write_lines
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -541,6 +542,12 @@ def check_source(
     hits: list[tuple[int, str]] = []
     if "optimistic" in modes and python and path.startswith("control/src/"):
         hits.extend((line, optimistic.KIND) for line in optimistic.scan_source(source))
+        classified = classified_write_lines(path, source)
+        hits.extend(
+            (line, optimistic.WRITE_KIND)
+            for line in optimistic.scan_unwrapped_recipe_run_writes(source)
+            if line not in classified
+        )
     if (
         "boundaries" in modes
         and python
@@ -814,7 +821,7 @@ def check_source(
         hits = [
             (
                 line
-                if kind == optimistic.KIND
+                if kind in {optimistic.KIND, optimistic.WRITE_KIND}
                 else next(
                     (
                         changed

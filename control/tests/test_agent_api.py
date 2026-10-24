@@ -24,23 +24,30 @@ from cryptography.hazmat.primitives.asymmetric import ed25519
 from cryptography.x509.oid import NameOID
 from fastapi.testclient import TestClient
 from httpx2 import ASGITransport, AsyncClient, Response
-from sqlalchemy import create_engine, delete, select
+from sqlalchemy import create_engine, delete, event, select
 from sqlalchemy.orm import Session, sessionmaker
 from starlette.types import Message
 from vonk_agent_protocol import CompiledExecutionPlan as AgentCompiledExecutionPlan
 from vonk_agent_protocol import (
     ContainerRuntimeAction,
+    ControllerErrorCode,
     ExecuteContainerRuntimeRequestOperation,
     InstallVonkDebOperation,
     InventoryVerdict,
     LifecycleState,
     PackageRollbackAuthority,
     RecipeStopPayload,
+    RouteState,
     RunState,
     SignedHostHelperGrant,
+    UnknownOutcomeError,
+    WaitReason,
     canonical_message,
 )
-from vonk_agent_protocol.agent_words import RecipeRunDispositionValue
+from vonk_agent_protocol.agent_words import (
+    AgentClientDecision,
+    RecipeRunDispositionValue,
+)
 from vonk_agent_protocol.contracts import AgentOperation as OperationKind
 from vonk_agent_protocol.host_helper import (
     HostRuntimeRequest,
@@ -90,6 +97,7 @@ from vonk_control.models import (
     RecipeSourceBundle,
     RunNode,
 )
+from vonk_control.operation_api import BoundedErrorResponse
 from vonk_control.pki import IssuedCertificate
 from vonk_control.presence import AgentPresenceService, ManagementAddressPolicy
 from vonk_control.source_bundles import SourceBundleStore, generate_source_bundle
@@ -5405,3 +5413,167 @@ def test_display_memory_agent_vectors_reobserve_through_http_store_and_cli(
         assert ("fwupdmgr update" in output) == (index == 0)
         assert ("Display Reserved Memory to 0.5 GB" in output) == bool(advice)
         assert ("0.5 GB (fixed)" in output) == bool(advice)
+
+
+def test_claim_stale_recipe_run_consumer_waits_then_admits(
+    tmp_path,
+    postgres_engine,
+) -> None:
+    """A lost run fence in the plain claim transaction must not become HTTP 500."""
+    from .test_recipe_routes import setup
+
+    client, services, _, clock = make_agent_system(tmp_path, engine=postgres_engine)
+    routes, _, _, run_id = setup(tmp_path / "routes", engine=postgres_engine)
+
+    # The spent-start result consumer shares _claim_once's plain transaction.
+    # Like consume_agent_result's child-only write, it must fence the run too.
+    def consume(session, _operation, _attempt, _message):
+        run = session.get(RecipeRun, run_id)
+        assert run is not None
+        run.version += 1
+
+    services.operations.set_result_consumer(consume)
+    payload = canonical_start_payload(start_deadline=clock.now + timedelta(minutes=30))
+    operation = services.operations.enqueue(
+        parent(services.sessions, clock).id,
+        NODE_A,
+        OperationKind.RECIPE_START,
+        "a" * 64,
+        payload,
+    )
+    headers = agent_headers(NODE_A, "serial-a")
+    assert client.post("/agent/claim", headers=headers).status_code == 200
+    clock.now += timedelta(minutes=31)
+
+    conflicts = []
+
+    def concurrent_writer(session, _context, _instances):
+        if conflicts or not any(isinstance(row, RecipeRun) for row in session.dirty):
+            return
+        conflicts.append(run_id)
+        with routes.sessions.begin() as winner:
+            run = winner.get(RecipeRun, run_id)
+            assert run is not None
+            run.route_error = "concurrent accepted decision"
+
+    event.listen(services.sessions, "before_flush", concurrent_writer)
+    try:
+        response = client.post("/agent/claim", headers=headers)
+    finally:
+        event.remove(services.sessions, "before_flush", concurrent_writer)
+    assert conflicts == [run_id]
+    assert response.status_code == 503
+    assert response.headers["x-vonk-error-code"] == ControllerErrorCode.UNAVAILABLE
+    assert int(response.headers["retry-after"]) > 0
+    problem = BoundedErrorResponse.model_validate_json(response.content)
+    assert problem.context is not None
+    assert problem.context.decision == AgentClientDecision.RETRY
+    assert problem.context.retryable is True
+    with services.sessions() as session:
+        stored = session.get(AgentOperation, operation.id)
+        assert stored is not None and stored.state == LifecycleState.RUNNING
+    services.operations.enqueue(
+        parent(services.sessions, clock).id,
+        NODE_A,
+        OperationKind.RECIPE_STOP,
+        "a" * 64,
+        STOP_PAYLOAD,
+    )
+    assert client.post("/agent/claim", headers=headers).status_code == 200
+
+
+def test_recipe_observation_contention_waits_then_redelivery_commits(
+    tmp_path,
+    postgres_engine,
+) -> None:
+    """Continued contention must roll back observations and acknowledge redelivery."""
+    from .test_recipe_routes import setup
+
+    client, services, _, clock = make_agent_system(tmp_path, engine=postgres_engine)
+    routes, _, _, run_id = setup(tmp_path / "routes", engine=postgres_engine)
+    with services.sessions.begin() as session:
+        rank = session.scalar(select(RunNode).where(RunNode.run_id == run_id).limit(1))
+        assert rank is not None
+        rank.node_id = NODE_A
+        rank.updated_at = clock.now - timedelta(seconds=1)
+        rank.observed_run_generation = None
+        rank.observation_process_running = None
+        rank.observation_observed_at = None
+        run = session.get(RecipeRun, run_id)
+        assert run is not None
+        run.route_state = RouteState.WITHDRAWN
+        run.next_action_at = clock.now
+        generation = run.run_generation
+    body = RecipeRunObservationsWire.model_validate(
+        {
+            "observed_at": clock.now,
+            "runs": [
+                {
+                    "run_id": run_id,
+                    "run_generation": generation,
+                    "process_running": True,
+                    "endpoint_ready": True,
+                }
+            ],
+        }
+    ).model_dump(mode="json")
+    conflicts = []
+
+    def concurrent_writer(session, _context, _instances):
+        if not any(isinstance(row, RecipeRun) for row in session.dirty):
+            return
+        conflicts.append(run_id)
+        with routes.sessions.begin() as winner:
+            run = winner.get(RecipeRun, run_id)
+            assert run is not None
+            run.route_error = f"concurrent decision {len(conflicts)}"
+
+    event.listen(services.sessions, "before_flush", concurrent_writer)
+    try:
+        response = client.post(
+            "/agent/recipe-runs/observations",
+            headers=agent_headers(NODE_A, "serial-a"),
+            json=body,
+        )
+    finally:
+        event.remove(services.sessions, "before_flush", concurrent_writer)
+    assert len(conflicts) == 2  # transition re-read once, then yielded Stale.
+    assert response.status_code == 503
+    assert response.headers["x-vonk-error-code"] == ControllerErrorCode.UNAVAILABLE
+    assert int(response.headers["retry-after"]) > 0
+    with services.sessions() as session:
+        rank = session.scalar(select(RunNode).where(RunNode.node_id == NODE_A))
+        assert rank is not None and rank.observation_observed_at is None
+    delivered = client.post(
+        "/agent/recipe-runs/observations",
+        headers=agent_headers(NODE_A, "serial-a"),
+        json=body,
+    )
+    assert delivered.status_code == 204
+    with services.sessions() as session:
+        rank = session.scalar(select(RunNode).where(RunNode.node_id == NODE_A))
+        assert rank is not None and rank.observation_process_running is True
+        assert rank.observed_run_generation == generation
+
+
+@pytest.mark.parametrize("action", ["succeed", "fail"])
+def test_result_scope_changed_yields_without_outer_replay(
+    agent_system, monkeypatch, action
+):
+    """SCOPE_CHANGED already exhausted transition's fresh decision; do not replay it."""
+    _, services, _, _ = agent_system
+    calls = []
+    refused = UnknownOutcomeError("run changed", reason=WaitReason.SCOPE_CHANGED)
+
+    def finish(*args, **kwargs):
+        calls.append(args)
+        raise refused
+
+    monkeypatch.setattr(services.operations, "_finish", finish)
+    with pytest.raises(UnknownOutcomeError) as caught:
+        if action == "succeed":
+            services.operations.succeed("unused-fence", {})
+        else:
+            services.operations.fail("unused-fence", "invalid result")
+    assert caught.value is refused
+    assert len(calls) == 1

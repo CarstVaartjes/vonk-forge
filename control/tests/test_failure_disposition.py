@@ -544,3 +544,41 @@ def test_cache_reference_adapter_preserves_typed_unknowns_and_refusals(
         )
     wrapped = _reference_error_type(error)(error.code, error.detail)
     assert disposition(wrapped) is expected
+
+
+def test_stale_writer_across_worker_passes_waits_then_publishes(
+    tmp_path, monkeypatch
+) -> None:
+    """Catches a mapper conflict becoming terminal after six publication passes."""
+    from sqlalchemy.orm.exc import StaleDataError
+    from vonk_agent_protocol import RouteState
+    from vonk_control.models import RecipeRun
+    from vonk_control.recipe_operation_worker import RecipeOperationWorker
+    from vonk_control.recovery_policy import ROUTE_RECOVERY
+
+    from .test_recipe_routes import NOW, setup
+
+    routes, _runtime, applied, run_id = setup(tmp_path)
+    worker = RecipeOperationWorker(routes.sessions, routes, clock=lambda: NOW)
+    with routes.sessions.begin() as session:
+        run = session.get(RecipeRun, run_id)
+        assert run is not None
+        run.route_state = RouteState.PENDING
+
+    def stale(_run_id: str) -> None:
+        raise StaleDataError("concurrent versioned writer won")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(routes, "publish_run", stale)
+        for _ in range(ROUTE_RECOVERY.max_failures + 2):
+            worker._publish_runs((run_id,))
+            with routes.sessions() as session:
+                run = session.get(RecipeRun, run_id)
+                assert run is not None and run.route_state == RouteState.PENDING
+                assert run.route_attempts == 0
+                assert run.next_action_at is not None
+    worker._publish_runs((run_id,))
+    with routes.sessions() as session:
+        run = session.get(RecipeRun, run_id)
+        assert run is not None and run.route_state == RouteState.PUBLISHED
+    assert len(applied) == 1

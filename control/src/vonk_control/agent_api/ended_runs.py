@@ -53,7 +53,9 @@ def reopen_ended_runs_still_running(
     for run_id, report in sorted(reports.items()):
         if not report.process_running:
             continue
-        run = session.get(RecipeRun, run_id, with_for_update=True)
+        run = session.get(RecipeRun, run_id)
+        if run is not None:
+            run.version += 1
         if (
             run is None
             or run.state not in ENDED_RUN_STATES
