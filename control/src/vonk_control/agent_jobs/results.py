@@ -65,6 +65,8 @@ def succeed(
             self._finish(fence, "succeeded", result=result, reason=None)
             return
         except UnknownOutcomeError as error:
+            if error.typed_reason == WaitReason.SCOPE_CHANGED:
+                raise
             refused = error
     assert refused is not None
     raise refused
@@ -93,6 +95,8 @@ def fail(
             )
             return
         except UnknownOutcomeError as error:
+            if error.typed_reason == WaitReason.SCOPE_CHANGED:
+                raise
             refused = error
     assert refused is not None
     raise refused

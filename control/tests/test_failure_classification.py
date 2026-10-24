@@ -95,3 +95,55 @@ def test_explicit_authority_denial_has_no_start_effect_and_allows_fresh_admissio
         assert fresh.state == LifecycleState.QUEUED
     finally:
         switch.worker.composite.close()
+
+
+@pytest.mark.parametrize("wrapped", (False, True))
+@pytest.mark.parametrize(
+    "cause",
+    (
+        "version",
+        "lock",
+        "deadlock",
+        "typed",
+        "untyped",
+        "shutdown",
+        "pool",
+        "deterministic",
+    ),
+)
+def test_wait_reason_preserves_contention_and_typed_evidence(cause, wrapped):
+    """Catches a wait logged without a reason, or contention as unavailability."""
+    from psycopg.errors import AdminShutdown, DeadlockDetected, LockNotAvailable
+    from sqlalchemy.exc import OperationalError
+    from sqlalchemy.exc import TimeoutError as PoolTimeout
+    from sqlalchemy.orm.exc import StaleDataError
+    from vonk_agent_protocol import UnknownOutcomeError, WaitReason
+    from vonk_control.failure_classification import wait_reason
+
+    expected: WaitReason | None = WaitReason.OBSERVATION_UNAVAILABLE
+    if cause == "version":
+        error: BaseException = StaleDataError("concurrent writer")
+        expected = WaitReason.SCOPE_CHANGED
+    elif cause == "lock":
+        error = OperationalError("UPDATE", None, LockNotAvailable())
+        expected = WaitReason.SCOPE_CHANGED
+    elif cause == "deadlock":
+        error = OperationalError("UPDATE", None, DeadlockDetected())
+        expected = WaitReason.SCOPE_CHANGED
+    elif cause == "typed":
+        error = UnknownOutcomeError("dependency", reason=WaitReason.RECEIPT_MISSING)
+        expected = WaitReason.RECEIPT_MISSING
+    elif cause == "untyped":
+        error = ConnectionError("not observed")
+    elif cause == "shutdown":
+        error = OperationalError("SELECT", None, AdminShutdown())
+    elif cause == "pool":
+        error = PoolTimeout("QueuePool limit reached")
+    else:
+        error = ValueError("the same input fails the same way")
+        expected = None
+    if wrapped:
+        outer = RuntimeError("wrapped")
+        outer.__cause__ = error
+        error = outer
+    assert wait_reason(error) == expected

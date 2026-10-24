@@ -138,6 +138,16 @@ class RecipeRouteSuperseded(RecipeRouteNotReady):
         self.run_id = run_id
 
 
+class _RecipeRunContended(UnknownOutcomeError, RecipeRouteError):
+    """A stale run decision yields to the next tick, unlike a settled deadline."""
+
+    disposition = Disposition.WAIT
+
+    def __init__(self, message: str) -> None:
+        UnknownOutcomeError.__init__(self, message, reason=WaitReason.SCOPE_CHANGED)
+        self.run_id = None
+
+
 class RecipeRecoveryDeadlineError(UnknownOutcomeError, RecipeRouteError):
     """The bounded recovery scope ended before publication was confirmed."""
 

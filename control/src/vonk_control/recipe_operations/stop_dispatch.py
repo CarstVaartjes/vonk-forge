@@ -318,7 +318,10 @@ class StopDispatchMixin:
         """
         service = typing_cast("RecipeOperationService", self)
 
-        run = session.get(RecipeRun, run_id, with_for_update=True)
+        run = session.get(RecipeRun, run_id)
+
+        if run is not None:
+            run.version += 1
         if (
             run is None
             or run.state != RunState.RUNNING

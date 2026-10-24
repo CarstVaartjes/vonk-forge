@@ -31,8 +31,8 @@ from ..models import (
 from ..stored_json import read_row_column
 from ..strict_json import serialize_json_value
 from .artifacts import ArtifactSetManifest, ArtifactSpec, _optional_digest
-from .catalog_helpers import _datetime, _iso, _parse_iso, _recipe_model_content_digests
-from .constants import SCHEMA_VERSION, SOURCE_POLICY
+from .catalog_helpers import _iso, _recipe_model_content_digests
+from .constants import SCHEMA_VERSION
 from .errors import (
     ModelCacheError,
     ModelCacheStorageUnknown,
@@ -134,67 +134,6 @@ class InventoryMixin:
                 "verified_at": _iso(row.verified_at),
                 "last_error": row.last_error,
             }
-
-    def inventory(
-        self,
-        *,
-        limit: int = 100,
-        boundary: tuple[str, str] | None = None,
-    ) -> dict[str, object]:
-        cache = cast("ModelCacheService", self)
-        if not 1 <= limit <= 100:
-            raise InvalidValue("cache entry limit is invalid")
-        cache.reconcile_storage()
-        with cache._session() as session:
-            rows = list(
-                session.scalars(
-                    select(ModelCacheSet).order_by(
-                        ModelCacheSet.updated_at.desc(),
-                        ModelCacheSet.artifact_set_sha256.desc(),
-                    )
-                )
-            )
-        total = len(rows)
-        start = 0
-        if boundary is not None:
-            boundary_time = _parse_iso(boundary[0])
-            for index, row in enumerate(rows):
-                if (
-                    _datetime(row.updated_at) == boundary_time
-                    and row.artifact_set_sha256 == boundary[1]
-                ):
-                    start = index + 1
-                    break
-            else:
-                # A cursor remains a seek position after its row changes or
-                # disappears. Reading the next page needs no retained owner.
-                start = next(
-                    (
-                        index
-                        for index, row in enumerate(rows)
-                        if (_datetime(row.updated_at), row.artifact_set_sha256)
-                        < (boundary_time, boundary[1])
-                    ),
-                    total,
-                )
-        page = rows[start : start + limit]
-        entries = [
-            entry
-            for entry in (cache._entry(row.artifact_set_sha256) for row in page)
-            if entry is not None  # removed since the page was read
-        ]
-        next_boundary = None
-        if start + limit < total and page:
-            last = page[-1]
-            next_boundary = (_iso(last.updated_at) or "", last.artifact_set_sha256)
-        return {
-            "schema_version": SCHEMA_VERSION,
-            "source_policy": SOURCE_POLICY,
-            "entries": entries,
-            "storage": cache.storage_summary().document(),
-            "total": total,
-            "_next_boundary": next_boundary,
-        }
 
     def reconcile_storage(self) -> dict[str, object]:
         cache = cast("ModelCacheService", self)

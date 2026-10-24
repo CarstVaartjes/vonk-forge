@@ -20,17 +20,32 @@ import threading
 import time
 import uuid
 
+import pytest
+from fastapi import Depends, FastAPI
+from fastapi.testclient import TestClient
 from sqlalchemy import event, select, update
-from vonk_control.auth import TokenCodec
+from vonk_control.auth import Actor, TokenCodec
+from vonk_control.library_api import install_library_routes
 from vonk_control.library_assessment import LibraryAssessment
+from vonk_control.library_contract import ModelDetailResponse, ModelLibraryResponse
 from vonk_control.library_image_presence import ImagePresenceIndex
 from vonk_control.library_projection import LibraryProjection
+from vonk_control.library_storage_observation import (
+    STORAGE_OBSERVATION_DEADLINE_SECONDS,
+    LibraryStorageObserver,
+)
+from vonk_control.model_cache_contract import (
+    CacheOperationKind,
+    ModelCacheUsage,
+    ModelStorageObservationReason,
+)
 from vonk_control.models import (
     CatalogDocumentHead,
     CatalogDocumentRevision,
     ModelCacheSet,
     RecipeBuild,
 )
+from vonk_control.settings import RECIPE_LIBRARY_SYNC_INTERVAL_SECONDS
 from vonk_forge_contracts import RecipeDefinition, document_sha256
 
 from .pass_budget_clocks import PassClock
@@ -384,6 +399,7 @@ def _check_queued_download_projection(sessions, tmp_path, cache):
 def test_queued_download_progress_is_projected_from_the_persisted_row(
     assessed_library,  # noqa: F811
     tmp_path,
+    request,
 ):
     _, sessions, cache, *_ = assessed_library
     _check_queued_download_projection(sessions, tmp_path, cache)
@@ -654,3 +670,449 @@ def test_local_state_query_count_does_not_grow_with_page_size(assessed_library):
     finally:
         event.remove(engine, "before_cursor_execute", observe)
     assert one == fifty
+
+
+def _model_reads(client: TestClient, selector: str):
+    pages = []
+    for query in ({}, {"limit": 1}, {"cached": True}, {"search": "no-such-model"}):
+        response = client.get("/api/model/library", params=query)
+        assert response.status_code == 200, response.text
+        pages.append(ModelLibraryResponse.model_validate_json(response.content))
+    response = client.get(f"/api/model/{selector}")
+    assert response.status_code == 200, response.text
+    return pages, ModelDetailResponse.model_validate_json(response.content)
+
+
+def _model_storage_app(sessions, provider, clock):
+    projection = LibraryProjection(
+        sessions,
+        cursors=TokenCodec(b"s" * 32).cursor_codec(),
+        model_storage=provider,
+        clock=clock,
+    )
+    app = FastAPI()
+    install_library_routes(
+        app,
+        actor_dependency=Depends(lambda: Actor("viewer", "viewer")),
+        projection=projection,
+    )
+    return projection, app
+
+
+def test_model_reads_never_invoke_storage_provider(assessed_library):  # noqa: F811
+    """Catches the full storage walk on every list variant and detail, before filtering."""
+    original, sessions, *_ = assessed_library
+    model = original.models().models[0]
+    calls = []
+    usage = ModelCacheUsage(disk_bytes=7, unique_bytes=7, shared_bytes=0)
+    from datetime import timedelta
+
+    clock = [NOW]
+
+    def provider():
+        calls.append(True)
+        clock[0] += timedelta(seconds=10)
+        return {model.identity.content_sha256: usage}
+
+    projection, app = _model_storage_app(sessions, provider, lambda: clock[0])
+    with TestClient(app) as client:
+        for _ in range(3):
+            _model_reads(client, model.selector)
+        pages, detail = _model_reads(client, model.selector)
+        assert detail.storage_observed_at is None
+        assert all(page.storage_observed_at is None for page in pages)
+        assert calls == []  # Fresh startup is typed unknown, never a lazy walk.
+        projection.refresh_catalog()
+        assert projection._storage_observer._thread is not None
+        projection._storage_observer._thread.join(timeout=30)
+        assert not projection._storage_observer._thread.is_alive()
+        assert len(calls) == 1
+        for _ in range(3):
+            pages, detail = _model_reads(client, model.selector)
+            assert all(page.storage_observed_at == NOW for page in pages)
+            assert detail.cache_usage == usage
+            assert detail.storage_observed_at == NOW
+        clock[0] += timedelta(seconds=RECIPE_LIBRARY_SYNC_INTERVAL_SECONDS)
+        pages, detail = _model_reads(client, model.selector)
+        assert detail.storage_reason is None
+        assert all(page.storage_reason is None for page in pages)
+        # A completed walk stays fresh for the cadence plus the next walk's
+        # deadline; its timestamp is the start, not the completion time.
+        clock[0] = NOW + timedelta(
+            seconds=RECIPE_LIBRARY_SYNC_INTERVAL_SECONDS
+            + STORAGE_OBSERVATION_DEADLINE_SECONDS
+        )
+        pages, detail = _model_reads(client, model.selector)
+        assert detail.storage_reason == ModelStorageObservationReason.STALE
+        assert all(page.storage_reason == detail.storage_reason for page in pages)
+        assert detail.storage_observed_at == NOW
+        assert len(calls) == 1
+
+
+@pytest.mark.parametrize("previously_observed", [False, True])
+@pytest.mark.parametrize("error_class", [OSError, PermissionError])
+def test_production_owner_survives_storage_hang_failure_and_recovers(
+    assessed_library,  # noqa: F811
+    monkeypatch,
+    tmp_path,
+    previously_observed,
+    error_class,
+    caplog,
+    capsys,
+):
+    """A stuck/raising walk must not starve keys or sync; the same owner heals it."""
+    import asyncio
+    from datetime import timedelta
+    from functools import partial
+
+    import httpx2
+    from vonk_control.api.production import reconcile_library_observations
+    from vonk_control.catalog_sync import run_automatic_sync
+    from vonk_control.gateway_keys import GatewayKeyService
+
+    from cluster_profiles.cli_render import render_payload
+
+    from .test_catalog_sync_retry import _PeriodicCatalog
+    from .test_catalog_sync_topology import _Catalog, _example, _item, _sync
+    from .test_gateway_keys import MASTER, FakeLiteLlm, _authorizes
+
+    original, sessions, *_ = assessed_library
+    model = original.models().models[0]
+    observed = [NOW]
+    entered = threading.Event()
+    release = threading.Event()
+    calls = []
+    usage = ModelCacheUsage(disk_bytes=7, unique_bytes=7, shared_bytes=0)
+
+    def provider():
+        calls.append(True)
+        if len(calls) == (2 if previously_observed else 1):
+            entered.set()
+            assert release.wait(timeout=30)
+            raise error_class("injected storage outage")
+        return {model.identity.content_sha256: usage}
+
+    projection, app = _model_storage_app(sessions, provider, lambda: observed[0])
+    peer = FakeLiteLlm()
+    key_path = tmp_path / "client-key"
+    gateway = GatewayKeyService(
+        master_key=lambda: MASTER,
+        transport=httpx2.MockTransport(peer.handle),
+        intent_root=tmp_path / "mutations",
+    )
+    ensure = gateway.ensure_default
+    key_checks = []
+
+    def ensure_default():
+        key_checks.append(True)
+        return ensure(key_path)
+
+    monkeypatch.setattr(gateway, "ensure_default", ensure_default)
+    stop = asyncio.Event()
+    syncs = []
+    item = _item(_example("recipe-source-build.json"))
+    catalog = _Catalog(None)
+
+    class Catalog(_PeriodicCatalog):
+        def automatic(self):
+            syncs.append(True)
+            return _sync(tmp_path, catalog, item)
+
+    phase = 0
+
+    async def advance(awaitable, *, timeout):
+        nonlocal phase
+        awaitable.close()
+        if not timeout:
+            raise TimeoutError
+        worker = projection._storage_observer._thread
+        assert worker is not None
+        with TestClient(app) as client:
+            if previously_observed and phase == 0:
+                worker.join(timeout=30)
+                assert not worker.is_alive()
+                assert _model_reads(client, model.selector)[1].cache_usage == usage
+            elif phase == (1 if previously_observed else 0):
+                assert entered.wait(timeout=30)
+                observed[0] += timedelta(seconds=RECIPE_LIBRARY_SYNC_INTERVAL_SECONDS)
+                pages, detail = _model_reads(client, model.selector)
+                assert (
+                    detail.storage_reason
+                    == ModelStorageObservationReason.DEADLINE_EXCEEDED
+                )
+                assert all(
+                    page.storage_reason == detail.storage_reason for page in pages
+                )
+                assert detail.storage_deadline_at is not None
+                # Repeated owner ticks do not spawn another stuck walker.
+            elif phase == (2 if previously_observed else 1):
+                assert projection._storage_observer._thread is worker
+                assert len(calls) == (2 if previously_observed else 1)
+                release.set()
+                worker.join(timeout=30)
+                assert not worker.is_alive()
+                pages, detail = _model_reads(client, model.selector)
+                reason_code = detail.storage_reason
+                assert reason_code == ModelStorageObservationReason.FAILED
+                assert detail.storage_error_type == error_class.__name__
+                render_payload(
+                    pages[-1].model_dump(mode="json"), "model", action="library"
+                )
+                output = capsys.readouterr().out
+                assert (
+                    output.count(
+                        f"{ModelStorageObservationReason.FAILED}: {error_class.__name__}"
+                    )
+                    == 1
+                )
+                assert f"every {RECIPE_LIBRARY_SYNC_INTERVAL_SECONDS}s" in output
+                if previously_observed:
+                    assert "observed 1 minute before this Controller read" in output
+                else:
+                    assert "Storage bytes: not observed" in output
+                assert detail.storage_observed_at == (
+                    NOW if previously_observed else None
+                )
+                assert detail.cache_usage == (usage if previously_observed else None)
+                assert all(
+                    page.storage_reason == detail.storage_reason for page in pages
+                )
+            else:
+                worker.join(timeout=30)
+                assert not worker.is_alive()
+                pages, detail = _model_reads(client, model.selector)
+                assert detail.storage_reason is None
+                assert detail.storage_observed_at == observed[0]
+                assert detail.cache_usage == usage
+                assert all(page.storage_observed_at == observed[0] for page in pages)
+                stop.set()
+        assert len(key_checks) == len(syncs) == phase + 1
+        assert _authorizes(peer, key_path.read_text().strip())
+        phase += 1
+        raise TimeoutError
+
+    monkeypatch.setattr(asyncio, "wait_for", advance)
+    try:
+        asyncio.run(
+            run_automatic_sync(
+                Catalog(),
+                stop,
+                interval_seconds=60,
+                settle_seconds=0,
+                reconcile=partial(reconcile_library_observations, projection, gateway),
+            )
+        )
+    finally:
+        release.set()
+        if projection._storage_observer._thread is not None:
+            projection._storage_observer._thread.join(timeout=30)
+    assert "automatic managed recipe catalog sync failed" not in caplog.text
+
+
+@pytest.mark.parametrize(
+    "change", [CacheOperationKind.DOWNLOAD, CacheOperationKind.REMOVE]
+)
+def test_completed_cache_change_is_visible_without_storage_refresh(
+    assessed_library,  # noqa: F811
+    tmp_path,
+    request,
+    change,
+):
+    """The DB batch owns list/filter/detail state even when byte observations disagree."""
+    from vonk_agent_protocol import LifecycleState
+    from vonk_control.library_contract import LibraryCacheState
+    from vonk_control.model_cache import ModelCacheService
+
+    from .removal_settle import advance_until_ended, release_ended_gates
+    from .test_model_cache import _artifact, _download
+
+    original, sessions, existing_cache, *_ = assessed_library
+    cache = ModelCacheService(
+        sessions,
+        existing_cache.root,
+        reserve_bytes=0,
+        fixture_sources=True,
+        clock=lambda: NOW,
+    )
+    request.addfinalizer(cache.close)
+    model = original.models().models[0]
+    digest = model.identity.content_sha256
+    artifacts = [_artifact(tmp_path, b"weights")]
+    calls = []
+
+    def storage():
+        calls.append(True)
+        return cache.model_storage()
+
+    if change == CacheOperationKind.REMOVE:
+        completed = _download(
+            cache, artifacts, model_content_sha256=digest, request_key=str(uuid.uuid4())
+        )
+        assert completed.state == LifecycleState.SUCCEEDED
+    projection, app = _model_storage_app(sessions, storage, lambda: NOW)
+    projection.refresh_catalog()
+    assert projection._storage_observer._thread is not None
+    projection._storage_observer._thread.join(timeout=30)
+    if change == CacheOperationKind.DOWNLOAD:
+        completed = _download(
+            cache, artifacts, model_content_sha256=digest, request_key=str(uuid.uuid4())
+        )
+        assert completed.state == LifecycleState.SUCCEEDED
+        expected = LibraryCacheState.CACHED
+    else:
+        removed = cache.remove_model_selector(
+            digest, actor="test", request_key=str(uuid.uuid4())
+        )
+        advance_until_ended(cache, removed.id)
+        release_ended_gates(cache)
+        assert cache.get_operation(removed.id).state == LifecycleState.SUCCEEDED
+        expected = LibraryCacheState.NOT_CACHED
+    with TestClient(app) as client:
+        pages, detail = _model_reads(client, model.selector)
+        assert detail.local.controller == expected
+        assert all(page.models[0].local.controller == expected for page in pages[:2])
+        if change == CacheOperationKind.DOWNLOAD:
+            assert pages[2].models[0].local.controller == expected
+        else:
+            assert pages[2].models == []
+            preview = cache.download_preview(
+                model_content_sha256=digest, artifacts=artifacts
+            )
+            fresh = cache.start_download(
+                actor="test",
+                request_key=str(uuid.uuid4()),
+                plan_digest=str(preview["plan_digest"]),
+                model_content_sha256=digest,
+                artifacts=artifacts,
+            )
+            cache.run_pending()
+            assert cache.get_operation(fresh.id).state == LifecycleState.SUCCEEDED
+            assert (
+                _model_reads(client, model.selector)[1].local.controller
+                == LibraryCacheState.CACHED
+            )
+        assert calls == [True]
+
+
+@pytest.mark.parametrize("references", [[{"retired_shape": True}], "damaged"])
+def test_damaged_verified_references_do_not_hide_healthy_cached_model(
+    assessed_library,  # noqa: F811
+    references,
+):
+    """One bad manifest must not turn unrelated cached rows into unknown state."""
+    from vonk_control.library_contract import LibraryCacheState
+    from vonk_control.model_cache_contract import CacheManifest
+    from vonk_control.stored_json import write_guard_mode
+
+    projection, sessions, *_ = assessed_library
+    healthy = projection.models().models[0]
+    damaged_digest = _hex("damaged-model")
+    manifest = CacheManifest(
+        schema_version=2,
+        source_policy="nas-first",
+        model_content_sha256=healthy.identity.content_sha256,
+        recipe_revision_sha256=None,
+        model_definition_ref=None,
+        model_content_digests=[healthy.identity.content_sha256],
+        artifacts=[],
+    )
+    with write_guard_mode(strict=False), sessions.begin() as session:
+        for digest, stored in (
+            (healthy.identity.content_sha256, manifest.model_dump(mode="json")),
+            (
+                damaged_digest,
+                {**manifest.model_dump(mode="json"), "verified_models": references},
+            ),
+        ):
+            session.add(
+                ModelCacheSet(
+                    artifact_set_sha256=_hex(digest),
+                    schema_version=2,
+                    model_content_sha256=digest,
+                    recipe_revision_sha256=None,
+                    manifest=stored,
+                    expected_bytes=0,
+                    verified_bytes=0,
+                    state=LibraryCacheState.CACHED.value,
+                    created_at=NOW,
+                    updated_at=NOW,
+                    last_accessed_at=NOW,
+                )
+            )
+    snapshot = projection._local_state_snapshot(
+        [damaged_digest, healthy.identity.content_sha256]
+    )
+    assert snapshot is not None
+    assert (
+        snapshot[healthy.identity.content_sha256].controller == LibraryCacheState.CACHED
+    )
+
+
+@pytest.mark.parametrize(
+    "reason",
+    [
+        ModelStorageObservationReason.STALE,
+        ModelStorageObservationReason.DEADLINE_EXCEEDED,
+    ],
+)
+def test_storage_age_reason_does_not_claim_endpoint_unavailable(reason, capsys):
+    """A reason without an exception class must not acquire an unavailable suffix."""
+    from cluster_profiles.cli_render import render_payload
+
+    render_payload(
+        {
+            "models": [],
+            "storage_observed_at": "2026-10-24T12:00:00Z",
+            "generated_at": "2026-10-24T12:03:00Z",
+            "storage_reason": reason.value,
+            "storage_error_type": None,
+        },
+        "model",
+        action="library",
+    )
+    output = capsys.readouterr().out
+    assert f"Storage reason: {reason.value}\n" in output
+    assert "unavailable" not in output
+    assert "Storage observation:" not in output
+
+
+def test_deadline_after_a_failed_walk_names_no_earlier_error():
+    from datetime import timedelta
+
+    # Break caught: a hang past its deadline kept the previous walk's error
+    # class, so clients blamed the hang on an unrelated earlier failure.
+    observed = [NOW]
+    entered = threading.Event()
+    release = threading.Event()
+    calls = []
+
+    def provider():
+        calls.append(True)
+        if len(calls) == 1:
+            raise PermissionError("injected permission fault")
+        entered.set()
+        assert release.wait(timeout=30)
+        return {}
+
+    observer = LibraryStorageObserver(provider, clock=lambda: observed[0])
+    observer.refresh()
+    assert observer._thread is not None
+    observer._thread.join(timeout=30)
+    failed = observer.snapshot().observation
+    reason_code = failed.storage_reason
+    assert reason_code == ModelStorageObservationReason.FAILED
+    assert failed.storage_error_type == PermissionError.__name__
+
+    observer.refresh()
+    try:
+        assert entered.wait(timeout=30)
+        observed[0] += timedelta(seconds=STORAGE_OBSERVATION_DEADLINE_SECONDS)
+        hung = observer.snapshot().observation
+        assert hung.storage_reason == ModelStorageObservationReason.DEADLINE_EXCEEDED
+        assert hung.storage_error_type is None
+    finally:
+        release.set()
+        observer._thread.join(timeout=30)
+    healed = observer.snapshot().observation
+    assert healed.storage_reason is None
+    assert healed.storage_error_type is None

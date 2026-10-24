@@ -21,6 +21,8 @@ from vonk_agent_protocol import (
     RouteState,
     RunState,
     UnknownError,
+    UnknownOutcomeError,
+    WaitReason,
 )
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_control import recipe_routes
@@ -1808,7 +1810,9 @@ def test_postgres_concurrent_current_publishers_keep_one_owner_receipt(
     def publish(service: RecipeRouteService) -> LiteLlmGeneration | None:
         try:
             return service.publish_run(run_id)
-        except (RecipeRouteSuperseded, RecipeRouteOwnerBusy):
+        except UnknownOutcomeError as error:
+            if not isinstance(error, (RecipeRouteSuperseded, RecipeRouteOwnerBusy)):
+                assert error.typed_reason == WaitReason.SCOPE_CHANGED
             # The loser of the race is replaced by the newer claim, or finds
             # the owner held; the worker simply retries it, so it is not a
             # failure.
@@ -2385,3 +2389,53 @@ def test_normal_start_optional_recovery_does_not_block_route_publication(
         generation = _recipe_run(session, run_id).route_generation
         assert generation is not None and generation >= first.generation
         assert _recipe_run(session, second).route_state == "published"
+
+
+@pytest.mark.parametrize("contention", ["owner", "run"])
+def test_maintenance_contention_uses_the_typed_wait_schedule(
+    tmp_path,
+    monkeypatch,
+    caplog,
+    contention,
+) -> None:
+    """Run contention must not fall through _advance's generic traceback handler."""
+    from vonk_control.recipe_routes.shared import _RecipeRunContended
+
+    clock = MutableClock(NOW)
+    routes, _, _, _ = setup(tmp_path, clock=clock)
+    worker = RecipeOperationWorker(routes.sessions, routes, clock=clock)
+    calls = []
+
+    def maintain():
+        calls.append(clock.now)
+        if len(calls) == 1:
+            raise (
+                RecipeRouteOwnerBusy("owner held")
+                if contention == "owner"
+                else _RecipeRunContended("run changed")
+            )
+        return True
+
+    monkeypatch.setattr(routes, "maintain", maintain)
+    caplog.set_level(logging.INFO, logger="vonk-control-worker")
+    assert worker._advance(worker._maintain_routes) is False
+    assert not worker._retry_at
+    assert worker._route_owner_due is not None
+    assert worker._route_owner_due > clock.now
+    busy = [
+        json.loads(record.getMessage())
+        for record in caplog.records
+        if "recipe.route.owner_busy" in record.getMessage()
+    ]
+    assert [wait["reason"] for wait in busy] == [
+        WaitReason.OBSERVATION_UNAVAILABLE
+        if contention == "owner"
+        else WaitReason.SCOPE_CHANGED
+    ]
+    assert not any(record.exc_info for record in caplog.records)
+    assert worker._advance(worker._maintain_routes) is False
+    assert len(calls) == 1
+    clock.now = worker._route_owner_due
+    assert worker._advance(worker._maintain_routes) is True
+    assert len(calls) == 2
+    assert worker._route_owner_due is None

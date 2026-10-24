@@ -5,6 +5,7 @@ from __future__ import annotations
 from contextlib import nullcontext
 from datetime import datetime
 
+from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
@@ -63,6 +64,7 @@ from .assessment_support import (
 from .contracts import (
     FleetProfileAdmissionEffectBusy,
     FleetProfileInvalid,
+    FleetProfileRecheckContractDefect,
     FleetProfileResourceRecheckUnavailable,
 )
 from .dependencies import _LOGGER
@@ -597,6 +599,14 @@ class RunSwitchFleetProfileAdapter(
                     ),
                     kept_run_ids=plan_kept_runs(reviewed.effects),
                 )
+            except ValidationError as error:
+                # This refresh combines the reviewed assessment with current
+                # facts. Admission re-plans a stored review once and ends a
+                # fresh review that still fails as a defect.
+                raise FleetProfileRecheckContractDefect(
+                    f"Resource recheck contract failed for assignment "
+                    f"{assignment.id} ({_error_summary(error)})"
+                ) from error
             except (
                 RunSwitchOperationConflict,
                 KeyError,

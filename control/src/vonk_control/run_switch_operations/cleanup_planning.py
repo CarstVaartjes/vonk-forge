@@ -42,7 +42,7 @@ from ..run_switch_contract import (
 )
 from ..strict_json import read_stored_model
 from .constants import _active_recipe_revision
-from .planning_helpers import _as_reason, _now
+from .planning_helpers import PlanInventory, _as_reason, _now
 
 if TYPE_CHECKING:
     from .service import RunSwitchOperationService
@@ -125,6 +125,9 @@ class CleanupPlanningMixin:
                 revision,
                 group,
                 now=now,
+                inventory=PlanInventory(
+                    session, now=now, maximum_age_seconds=service._inventory_max_age
+                ),
                 # The installation's own runs are being removed, so they are not
                 # capacity this plan has to fit alongside.
                 excluded_run_ids=tuple(

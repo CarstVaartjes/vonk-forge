@@ -34,6 +34,7 @@ from starlette.responses import StreamingResponse
 from vonk_agent_protocol import (
     CatalogCode,
     ControllerErrorCode,
+    Disposition,
     InvalidRequestError,
     OperatorActionName,
     canonical_message,
@@ -73,6 +74,7 @@ from ..capability_contract import CapabilityUnavailableReply, ControllerCapabili
 from ..catalog_api import CatalogProblem, install_catalog_routes
 from ..catalog_service import CatalogService
 from ..download_contract import download_responses
+from ..failure_classification import disposition as failure_disposition
 from ..failure_evidence import FailureEvidenceService
 from ..failure_evidence_api import install_failure_evidence_routes
 from ..fleet_profile_api import install_fleet_profile_routes
@@ -462,7 +464,10 @@ def create_app(
         except Exception as error:  # noqa: BLE001 - middleware safety net, see log below
             # Preserve the correlation key without serializing the exception,
             # request body, headers, or URL query into logs.
-            unavailable = isinstance(error, AVAILABILITY_ERRORS)
+            unavailable = failure_disposition(error) in {
+                Disposition.WAIT,
+                Disposition.OBSERVE,
+            }
             http_status = 503 if unavailable else 500
             code = (
                 ControllerErrorCode.UNAVAILABLE

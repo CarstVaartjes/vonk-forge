@@ -11,6 +11,7 @@ from ..generated_control.models.model_cache_usage import ModelCacheUsage
 from .common import (
     _bytes,
     _field,
+    _freshness,
     _object,
     _optional,
     _records,
@@ -180,7 +181,7 @@ def _model_storage_note(usage: ModelCacheUsage) -> None:
         for revision in usage.retained_revisions:
             print(
                 f"  Previous revision retained because {', '.join(revision.owners)}; "
-                f"{_bytes(revision.unique_bytes)} unique; rechecked every 30s"
+                f"{_bytes(revision.unique_bytes)} unique"
             )
 
 
@@ -259,6 +260,31 @@ def _applied_filters(payload: Mapping[str, object]) -> list[str]:
 def _library(
     payload: Mapping[str, object], noun: str, *, detail: bool, wide: bool
 ) -> None:
+    if noun == LibraryNoun.MODEL:
+        observed = payload.get("storage_observed_at")
+        _field(
+            "Storage bytes",
+            _freshness(observed, payload.get("generated_at"))
+            if observed
+            else "not observed",
+        )
+        reason = payload.get("storage_reason")
+        if reason:
+            error_type = payload.get("storage_error_type")
+            _field(
+                "Storage reason",
+                _text(reason) + (f": {_text(error_type)}" if error_type else ""),
+            )
+        if payload.get("storage_refresh_seconds") is not None:
+            _field(
+                "Storage check cadence",
+                f"every {_text(payload.get('storage_refresh_seconds'))}s",
+            )
+        if payload.get("storage_deadline_at") is not None:
+            _field(
+                "Storage observation deadline",
+                _time(payload.get("storage_deadline_at")),
+            )
     if detail:
         _library_item(payload, noun, detail=True)
         return

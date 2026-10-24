@@ -11,6 +11,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Header, HTTPException, Request, Response, status
 from sqlalchemy import select
+from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
     AgentClaim,
     AgentEvidenceCode,
@@ -48,6 +49,7 @@ from ..models import (
     RunNode,
 )
 from ..operator_acceptance import ReceiptPolicy, operator_acceptance
+from ..optimistic import Stale, transition
 from ..owner_liveness import builds_in_flight, run_has_live_operation
 from ..persisted_waits import schedule_wait
 from ..presence import PresenceError
@@ -282,7 +284,11 @@ def install_observations_routes(
         observed_nodes: list[str] = []
         by_run = {run.run_id: run for run in body.runs}
         try:
-            with required.sessions.begin() as session:
+
+            def decide(session: Session) -> tuple[int, list[str], list[str]]:
+                accepted = 0
+                rejected: list[str] = []
+                observed_nodes: list[str] = []
                 included = set(by_run)
                 if included:
                     current = set(
@@ -473,9 +479,18 @@ def install_observations_routes(
                     ):
                         schedule_wait(run, None)
                         run.updated_at = max(_now(run.updated_at).astimezone(UTC), now)
-                # Obsolete generations/assignments are consumed without effects.
-                # A durable replay must not become a permanent rejection after
-                # newer authorized intent supersedes it; the next page replans.
+                return accepted, rejected, observed_nodes
+
+            outcome = transition(required.sessions, decide)
+            if isinstance(outcome, Stale):
+                raise UnknownOutcomeError(
+                    "RecipeRun observations changed; re-plan on the next delivery",
+                    reason=WaitReason.SCOPE_CHANGED,
+                )
+            accepted, rejected, observed_nodes = outcome.value
+            # Obsolete generations/assignments are consumed without effects.
+            # A durable replay must not become a permanent rejection after
+            # newer authorized intent supersedes it; the next page replans.
 
         except ValueError as error:
             raise HTTPException(status_code=422, detail=str(error)) from None

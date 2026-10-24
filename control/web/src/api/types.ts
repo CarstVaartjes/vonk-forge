@@ -120,6 +120,14 @@ export type LibraryViewModel = {
   recipes: LibraryViewRecipe[];
 };
 export type LibraryViewSnapshot = {
+  storage_observation?: Pick<
+    ModelLibrary,
+    | "storage_observed_at"
+    | "storage_reason"
+    | "storage_error_type"
+    | "storage_refresh_seconds"
+    | "storage_deadline_at"
+  >;
   generated_at: string;
   freshness_policy: components["schemas"]["FreshnessPolicy"];
   library?: components["schemas"]["LibraryRelease"] | null;

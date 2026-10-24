@@ -11,7 +11,7 @@ import logging
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 from typing import cast
 
@@ -30,12 +30,14 @@ from sqlalchemy import (
     cast as sql_cast,
 )
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import WaitOwnerKind
+from vonk_agent_protocol import Disposition, WaitOwnerKind
 
+from .failure_classification import disposition, error_detail, wait_reason
 from .logging import log_event, redact_text
 from .models import Base
 from .models.waits import ScheduledWaitOwner
 from .persisted_waits import owner_identity
+from .recovery_policy import WAIT_STEP
 from .strict_json import stored_document_detail
 from .wait_contract import WaitEvidence
 
@@ -87,6 +89,7 @@ class DueWaitBackstop:
         self._owner_cursor = 0
         self._row_cursors: dict[int, RowKey] = {}
         self._failures: dict[tuple[str, RowKey], bytes] = {}
+        self._retry_at: dict[tuple[str, RowKey], datetime] = {}
 
     def tick(self) -> int:
         """Return rows examined; this is never a measure of work completed.
@@ -98,6 +101,7 @@ class DueWaitBackstop:
         examined = 0
         visited: dict[int, set[RowKey]] = {}
         now = self._clock()
+        self._retry_at = {key: due for key, due in self._retry_at.items() if due > now}
         deadline = self._monotonic() + self._pass_budget
         # No row gets a second turn in this pass, even if its handler cannot
         # move its clock. Rotate owners as well when the batch is smaller than
@@ -159,6 +163,11 @@ class DueWaitBackstop:
                 self._row_cursors[index] = key
                 examined += 1
                 selected = True
+                retry_key = (table.name, key)
+                retry_at = self._retry_at.get(retry_key)
+                if retry_at is not None and now < retry_at:
+                    continue
+                self._retry_at.pop(retry_key, None)
                 raw, next_check, _state = candidate[-3:]
                 fingerprint = sha256(repr(candidate[-3:]).encode()).digest()
                 if raw is None:
@@ -192,6 +201,23 @@ class DueWaitBackstop:
                 advance(key, kind)
                 self._failures.pop((table.name, key), None)
             except Exception as error:  # noqa: BLE001 - isolate one row/owner observation
+                if disposition(error) in {Disposition.WAIT, Disposition.OBSERVE}:
+                    retry_at = self._clock() + timedelta(seconds=WAIT_STEP)
+                    if selected:
+                        self._retry_at[(table.name, key)] = retry_at
+                    log_event(
+                        _LOGGER,
+                        "worker.due_wait.wait",
+                        service="control-worker",
+                        owner=table.name,
+                        row=repr(self._row_cursors.get(index)),
+                        reason=wait_reason(error),
+                        detail=error_detail(error),
+                        retry_at=retry_at if selected else None,
+                    )
+                    if not selected:
+                        exhausted.add(index)
+                    continue
                 if fingerprint is not None:
                     failure_key = (table.name, key)
                     if self._failures.get(failure_key) == fingerprint:

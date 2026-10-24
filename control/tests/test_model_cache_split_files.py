@@ -550,7 +550,6 @@ def test_cache_entry_and_inventory_views_accept_a_split_set(service, hub) -> Non
     assert entry["verified_bytes"] == len(whole)
     (listed,) = entry["artifacts"]  # type: ignore[misc]
     assert listed["sha256"] == artifact["sha256"]  # type: ignore[index]
-    assert service.inventory()
     assert (
         service.read_verified_artifact(
             set_digest, str(artifact["sha256"]), "model-00005.safetensors"

@@ -88,7 +88,6 @@ from .authority import uuid as uuid
 from .common import ROUTE_EVIDENCE_MAX_AGE_SECONDS as ROUTE_EVIDENCE_MAX_AGE_SECONDS
 from .common import STOPPABLE_NOT_RUNNING_RUN_STATES as STOPPABLE_NOT_RUNNING_RUN_STATES
 from .common import UTC as UTC
-from .common import AbstractContextManager as AbstractContextManager
 from .common import AgentNode as AgentNode
 from .common import AgentOperation as AgentOperation
 from .common import CatalogDocumentRevision as CatalogDocumentRevision

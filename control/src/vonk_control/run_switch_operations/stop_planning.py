@@ -49,7 +49,7 @@ from ..run_switch_contract import (
 from ..strict_json import read_stored_model
 from .constants import _active_recipe_revision
 from .errors import RunSwitchRequestInvalid
-from .planning_helpers import _as_reason, _now
+from .planning_helpers import PlanInventory, _as_reason, _now
 
 if TYPE_CHECKING:
     from .service import RunSwitchOperationService
@@ -142,6 +142,9 @@ class StopPlanningMixin:
                 revision,
                 original_group,
                 now=now,
+                inventory=PlanInventory(
+                    session, now=now, maximum_age_seconds=service._inventory_max_age
+                ),
                 excluded_run_ids=(run.id,),
             )
             inspection = service._inspect_artifacts(

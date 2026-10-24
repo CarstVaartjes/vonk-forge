@@ -75,9 +75,9 @@ from ..spark_disk import spark_free_bytes
 from ..unused_storage_collection import spark_eviction_capacity
 from .build_helpers import _recipe_model_digests
 from .planning_helpers import (
+    PlanInventory,
     _as_reason,
     _is_memory_reservation_kind,
-    _latest_inventory,
     _resource_evidence_digest,
     _resource_reason,
 )
@@ -94,6 +94,7 @@ class ResourceFitMixin:
         group: SparkGroup,
         *,
         now: datetime,
+        inventory: PlanInventory,
         excluded_run_ids: Sequence[str],
         kept_run_ids: Collection[str] = (),
         effective_settings: object | None = None,
@@ -140,12 +141,7 @@ class ResourceFitMixin:
         )
         excluded = set(excluded_run_ids)
         for item in group.nodes:
-            snapshot, evidence = _latest_inventory(
-                session,
-                item.node_id,
-                now=now,
-                maximum_age_seconds=service._inventory_max_age,
-            )
+            snapshot, evidence = inventory.read(item.node_id)
             freshness.append(evidence)
             node_blockers: list[RunSwitchReason] = []
             node_warnings: list[RunSwitchReason] = []

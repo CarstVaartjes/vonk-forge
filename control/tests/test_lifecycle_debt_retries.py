@@ -300,9 +300,9 @@ def test_unknown_builder_evidence_is_waiting_and_reobserved(monkeypatch):
         None,
         SimpleNamespace(nodes=[]),
     )
-    waiting = service._select_build(*args, now=datetime.now(UTC))
+    waiting = service._select_build(*args, now=datetime.now(UTC), inventory=object())
     assert waiting.build is None and waiting.candidate is None
-    recovered = service._select_build(*args, now=datetime.now(UTC))
+    recovered = service._select_build(*args, now=datetime.now(UTC), inventory=object())
     assert recovered.build is selected
     assert recovered.candidate is selected
     assert calls == [("revision", "builder")] * 2

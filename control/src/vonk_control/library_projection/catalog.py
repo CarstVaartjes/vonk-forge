@@ -17,7 +17,6 @@ from ..catalog_revision_contract import (
     read_catalog_projection,
 )
 from ..library_contract import (
-    LibraryCacheState,
     LibraryFacetValues,
     LibraryLocalState,
     LibraryModelProjection,
@@ -27,7 +26,10 @@ from ..library_contract import (
     LibraryResourceProjection,
     _utc,
 )
-from ..model_cache_contract import CacheManifest, ModelCacheUsage
+from ..model_cache_contract import (
+    CacheManifest,
+    ModelStorageSnapshot,
+)
 from ..models import CatalogDocumentRevision, ModelCacheSet, RecipeLibrarySyncRun
 from ..operator_receipt_contract import ReceiptOwner
 from ..stored_json import read_row_column
@@ -72,23 +74,12 @@ def _model_projection(
     document: ModelDefinition | ModelRevisionProjection,
     snapshot: Mapping[str, LibraryLocalState] | None,
     alignment: Sequence[str] = (),
-    storage: Mapping[str, ModelCacheUsage] | None = None,
+    storage: ModelStorageSnapshot | None = None,
 ) -> LibraryModelProjection:
-    usage = storage.get(revision.content_digest) if storage is not None else None
+    usage = storage.usage.get(revision.content_digest) if storage is not None else None
     local = self._local(
         revision.content_digest, kind=RunSwitchReasonScopeName.MODEL, snapshot=snapshot
     )
-    if usage is not None:
-        if usage.cached:
-            local = local.model_copy(
-                update={"controller": LibraryCacheState.CACHED.value}
-            )
-        elif local.controller == LibraryCacheState.CACHED:
-            local = local.model_copy(
-                update={"controller": LibraryCacheState.NOT_CACHED.value}
-            )
-    elif storage is not None and local.controller == LibraryCacheState.CACHED:
-        local = local.model_copy(update={"controller": LibraryCacheState.UNKNOWN.value})
     return LibraryModelProjection(
         selector=self.selector(document.identity.publisher, document.identity.slug),
         identity=_model_identity(revision, document),
@@ -242,7 +233,7 @@ def _recipe_revision_projection(
     return parsed
 
 
-def refresh_catalog(self: LibraryProjection) -> None:
+def refresh_catalog(self: LibraryProjection, *, observe_storage: bool = True) -> None:
     # Cached bindings keep exact metadata discoverable after its catalog head
     # changes. This background index refresh never advances cache work.
     cached_models: set[str] = set()
@@ -269,6 +260,8 @@ def refresh_catalog(self: LibraryProjection) -> None:
     )
     self._catalog_snapshot = snapshot
     self._catalog_observed_at = self._clock()
+    if observe_storage:
+        self._storage_observer.refresh()
 
 
 def _recipe_facet_values(

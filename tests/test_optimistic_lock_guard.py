@@ -1,4 +1,4 @@
-"""New versioned Job locks fail; existing owners have named follow-up sites."""
+"""New versioned owner locks fail; existing owners have named follow-up sites."""
 
 from __future__ import annotations
 
@@ -8,6 +8,11 @@ import pytest
 
 from control.tests.added_line_guards import check_source
 from control.tests.optimistic_boundaries import scan_source as _locks
+from control.tests.recipe_run_write_verdicts import (
+    RECIPE_RUN_WRITE_VERDICTS,
+    classified_write_lines,
+    writer_name,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -161,6 +166,43 @@ FOLLOW_UP_JOB_LOCKS: dict[str, tuple[str, ...]] = {
 }
 
 
+# Retained transactional admission/release boundaries, not new lock exemptions.
+# Each verdict names why this lock remains; added lines still fail everywhere.
+RECIPE_RUN_LOCK_VERDICTS: dict[str, dict[str, str]] = {
+    "distributed_recovery/common.py": {
+        "settle_observed_absent_runs_in_session": "retain: SKIP LOCKED claim for confirmed-absence release",
+    },
+    "agent_jobs/retirement.py": {
+        "_release_retired_owner_in_session": "retain: confirmed reservation release",
+    },
+    "artifact_jobs/service.py": {
+        "_submit_once": "retain: submission binds active run and capacity admission",
+    },
+    "fleet_profiles/queue_application.py": {
+        "_queue_application": "retain: topology-atomic reviewed replacement admission",
+    },
+    "recipe_operations/action_plans.py": {
+        "_stop_plan_in_session": "retain: Stop admission binds reviewed exact effects",
+        "_uninstall_plan_in_session": "retain: uninstall admission excludes active runs",
+    },
+    "recipe_operations/job_run_stop.py": {
+        "_stop_logical_job_run": "retain: exact logical Stop admission",
+    },
+    "recipe_operations/reconciliation_authority.py": {
+        "_reconciliation_authority_in_session": "retain: authority binds inactive runs",
+    },
+    "recipe_operations/start.py": {
+        "enqueue_one_shot_job_in_session": "retain: capacity and current-run admission",
+    },
+    "recipe_operations/stop.py": {
+        "_check_service_stop": "retain: Stop acceptance revalidates the reviewed run",
+    },
+    "recipe_operations/stop_acceptance.py": {
+        "_accept_service_stop": "retain: duplicate Stop replay under the run fence",
+    },
+}
+
+
 @pytest.mark.parametrize(
     "statement",
     [
@@ -168,6 +210,9 @@ FOLLOW_UP_JOB_LOCKS: dict[str, tuple[str, ...]] = {
         "select(Job.id).with_for_update(nowait=True)",
         "select(Job).with_for_update(of=Job)",
         "session.get(Job, identity, with_for_update=True)",
+        "session.refresh(row, with_for_update=True)",
+        "session.refresh(row, with_for_update={'nowait': True})",
+        "session.query(Job, with_for_update=True)",
         "session.get(Job, identity, with_for_update={'nowait': True})",
         "AdmissionRowLock('owner', Job, select(Job))",
         "select(Owner).with_for_update(of=Owner)",
@@ -175,10 +220,10 @@ FOLLOW_UP_JOB_LOCKS: dict[str, tuple[str, ...]] = {
         "session.query(Job).update(values)",
     ],
 )
-def test_guard_rejects_versioned_owner_locks(statement: str) -> None:
-    assert _locks(
-        "from vonk_control.models import Job as Owner\n" + statement, frozenset({"Job"})
-    )
+@pytest.mark.parametrize("owner", ["Job", "RecipeRun"])
+def test_guard_rejects_versioned_owner_locks(statement: str, owner: str) -> None:
+    statement = statement.replace("Job", owner)
+    assert _locks(f"from vonk_control.models import {owner} as Owner\n" + statement)
 
 
 @pytest.mark.parametrize(
@@ -188,18 +233,21 @@ def test_guard_rejects_versioned_owner_locks(statement: str) -> None:
         "session.get(Job, identity, with_for_update={'skip_locked': True})",
         "select(Job).with_for_update(of=AgentNode)",
         "session.get(Job, identity)",
+        "session.refresh(row)",
+        "session.refresh(row, with_for_update=False)",
         "select(AgentNode).with_for_update()",
     ],
 )
-def test_guard_allows_claims_and_other_owners(statement: str) -> None:
-    assert not _locks(statement, frozenset({"Job"}))
+@pytest.mark.parametrize("owner", ["Job", "RecipeRun"])
+def test_guard_allows_claims_and_other_owners(statement: str, owner: str) -> None:
+    assert not _locks(statement.replace("Job", owner))
 
 
 def test_unconverted_job_owners_are_named_for_follow_up() -> None:
     unlisted = [
         str(path.relative_to(ROOT))
         for path in sorted((ROOT / "control/src").rglob("*.py"))
-        if _locks(path.read_text())
+        if _locks(path.read_text(), frozenset({"Job"}))
         and str(path.relative_to(ROOT)) not in FOLLOW_UP_JOB_LOCKS
     ]
     assert not unlisted, "Unconverted Job owners: " + ", ".join(unlisted)
@@ -208,8 +256,9 @@ def test_unconverted_job_owners_are_named_for_follow_up() -> None:
 @pytest.mark.parametrize(
     "path", ["control/src/vonk_control/new_owner.py", *FOLLOW_UP_JOB_LOCKS]
 )
-def test_new_locks_fail_even_in_follow_up_files(path: str) -> None:
-    source = "select(Job)\nselect(Job).with_for_update()\n"
+@pytest.mark.parametrize("owner", ["Job", "RecipeRun"])
+def test_new_locks_fail_even_in_follow_up_files(path: str, owner: str) -> None:
+    source = f"select({owner})\nselect({owner}).with_for_update()\n"
     assert not check_source(path, source, {1}, modes=("optimistic",))
     assert check_source(path, source, {2}, modes=("optimistic",))
 
@@ -228,4 +277,170 @@ def test_editing_an_existing_lock_predicate_is_not_a_new_lock() -> None:
         source,
         {3},
         modes=("optimistic",),
+    )
+
+
+def test_remaining_recipe_run_lock_sites_have_a_verdict() -> None:
+    """Catches new files AND unreviewed locks added to already classified files."""
+    import ast
+
+    actual: dict[str, set[str]] = {}
+    root = ROOT / "control/src/vonk_control"
+    for path in sorted(root.rglob("*.py")):
+        source = path.read_text()
+        lines = set(_locks(source, frozenset({"RecipeRun"}), include_claims=True))
+        if not lines:
+            continue
+        functions = {
+            node.name
+            for node in ast.walk(ast.parse(source))
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and lines.intersection(
+                range(node.lineno, (node.end_lineno or node.lineno) + 1)
+            )
+        }
+        actual[str(path.relative_to(root))] = functions
+    assert actual == {
+        path: set(verdicts) for path, verdicts in RECIPE_RUN_LOCK_VERDICTS.items()
+    }
+
+
+def test_added_refresh_lock_cannot_hide_behind_unchanged_receiver() -> None:
+    source = "session.refresh(\n    row,\n    with_for_update=True,\n)\n"
+    assert check_source(
+        "control/src/vonk_control/owner.py", source, {3}, modes=("optimistic",)
+    )
+
+
+@pytest.mark.parametrize(
+    "binding",
+    ["def f(row: AgentNode):", "def f():\n    row = session.get(AgentNode, identity)"],
+)
+def test_refresh_of_explicit_other_model_is_allowed(binding: str) -> None:
+    source = (
+        "from vonk_control.models import AgentNode\n"
+        + binding
+        + "\n    session.refresh(row, with_for_update=True)\n"
+    )
+    assert not _locks(source)
+
+
+def test_recipe_run_writes_outside_transition_have_a_verdict() -> None:
+    """A new helper or result-consumer call cannot silently inherit a verdict."""
+    import ast
+
+    from control.tests.optimistic_boundaries import scan_unwrapped_recipe_run_writes
+
+    actual: dict[str, set[str]] = {}
+    root = ROOT / "control/src/vonk_control"
+    for path in sorted(root.rglob("*.py")):
+        source = path.read_text()
+        lines = scan_unwrapped_recipe_run_writes(source)
+        if not lines:
+            continue
+        tree = ast.parse(source)
+        functions = [
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        ]
+        parents = {
+            child: parent
+            for parent in ast.walk(tree)
+            for child in ast.iter_child_nodes(parent)
+        }
+        for line in lines:
+            enclosing = [
+                node
+                for node in functions
+                if node.lineno <= line <= (node.end_lineno or node.lineno)
+            ]
+            owner = min(
+                enclosing,
+                key=lambda node: (node.end_lineno or node.lineno) - node.lineno,
+            )
+            actual.setdefault(str(path.relative_to(root)), set()).add(
+                writer_name(owner, parents)
+            )
+    assert actual == {
+        path: set(verdicts) for path, verdicts in RECIPE_RUN_WRITE_VERDICTS.items()
+    }
+    for path in actual:
+        source = (root / path).read_text()
+        assert set(scan_unwrapped_recipe_run_writes(source)) == classified_write_lines(
+            "control/src/vonk_control/" + path, source
+        ), f"Re-review the changed writer in {path}"
+
+
+@pytest.mark.parametrize(
+    "write",
+    ["row.version += 1", "row.route_state = state", "row.version = row.version + 1"],
+)
+@pytest.mark.parametrize(
+    "binding",
+    [
+        "row = session.get(Run, identity)",
+        "row = session.scalar(select(Run))",
+        "rows = tuple(session.scalars(select(Run))); row = rows[0]",
+    ],
+)
+def test_added_run_write_outside_transition_is_rejected(write, binding) -> None:
+    source = (
+        "from vonk_control.models import RecipeRun as Run\n"
+        "def f():\n    with sessions.begin() as session:\n"
+        f"        {binding}\n        {write}\n"
+    )
+    # Classifications never exempt additions, even in a reviewed file.
+    for path in ["new_owner.py", *RECIPE_RUN_WRITE_VERDICTS]:
+        path = "control/src/vonk_control/" + path
+        assert check_source(path, source, {5}, modes=("optimistic",))
+        assert not check_source(path, source, {1}, modes=("optimistic",))
+
+
+def test_transition_write_and_other_model_write_are_allowed() -> None:
+    source = (
+        "from vonk_control.models import RecipeRun, AgentNode\n"
+        "def f():\n    def decide(session):\n"
+        "        row = session.get(RecipeRun, identity)\n"
+        "        row.version += 1\n"
+        "    return transition(sessions, decide)\n"
+        "def g(session):\n    row = session.get(AgentNode, identity)\n"
+        "    row.state = state\n"
+    )
+    assert not check_source(
+        "control/src/vonk_control/owner.py",
+        source,
+        set(range(1, 10)),
+        modes=("optimistic",),
+    )
+
+
+def test_added_result_consumer_cannot_hide_behind_unchanged_call_line() -> None:
+    source = "def claim(session):\n    self._result_consumer(\n        session, operation, attempt, message\n    )\n"
+    assert check_source(
+        "control/src/vonk_control/agent_jobs/claim_authority.py",
+        source,
+        {3},
+        modes=("optimistic",),
+    )
+
+
+def test_new_write_in_a_reviewed_function_requires_another_verdict() -> None:
+    path = "control/src/vonk_control/recipe_routes/candidate.py"
+    source = (ROOT / path).read_text()
+    bump = "            run.version += 1"
+    line = source.splitlines().index(bump) + 1
+    assert not check_source(path, source, {line}, modes=("optimistic",))
+    changed = source.replace(bump, bump + "\n" + bump, 1)
+    assert check_source(path, changed, {line + 1}, modes=("optimistic",))
+
+
+def test_added_run_bump_continuation_line_is_guarded() -> None:
+    source = (
+        "from vonk_control.models import RecipeRun\n"
+        "def write(session):\n    row = session.get(RecipeRun, identity)\n"
+        "    (\n        row\n    ).version += 1\n"
+    )
+    assert check_source(
+        "control/src/vonk_control/new_owner.py", source, {6}, modes=("optimistic",)
     )

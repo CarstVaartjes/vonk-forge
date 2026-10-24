@@ -102,13 +102,15 @@ class DistributedRecoveryCoordinator:
 
     def _tick(self, run_id: str | None = None) -> bool:
         now = _aware(self._clock())
-        queued = False
         # Claim, effect, conditional completion: the routes of runs about to be
         # recovered or settled are withdrawn with no transaction open, and the
         # transaction below acts on a run only while that withdrawal is
         # complete. A crash in between resumes here, from the durable intent.
-        worked = self._withdraw_routes(now, run_id)
-        with self._routes.publication_transaction() as session:
+        withdrawn = self._withdraw_routes(now, run_id)
+
+        def decide(session: Session) -> tuple[bool, bool]:
+            queued = False
+            worked = withdrawn
             worked = self._settle_unreadable_runs(session, now, run_id) or worked
             candidates = tuple(
                 session.scalars(
@@ -122,7 +124,6 @@ class DistributedRecoveryCoordinator:
                         ),
                     )
                     .order_by(RecipeRun.created_at, RecipeRun.id)
-                    .with_for_update(of=RecipeRun)
                 )
             )
             for run in candidates:
@@ -387,6 +388,9 @@ class DistributedRecoveryCoordinator:
                 break
             worked = settle_observed_absent_runs_in_session(session, now) or worked
             worked = release_inactive_run_claims_in_session(session, now) or worked
+            return worked, queued
+
+        worked, queued = self._routes.decide_publication(decide)
         if queued:
             self._agent_jobs.notify_available()
         return worked
@@ -394,7 +398,7 @@ class DistributedRecoveryCoordinator:
     def _withdraw_routes(self, now: datetime, run_id: str | None = None) -> bool:
         """Withdraw the routes of runs this pass may recover or settle."""
 
-        with self._routes.publication_transaction() as session:
+        def decide(session: Session) -> frozenset[str]:
             candidates = {
                 *session.scalars(
                     select(RecipeRun.id)
@@ -415,13 +419,15 @@ class DistributedRecoveryCoordinator:
                     .order_by(RecipeRun.created_at, RecipeRun.id)
                 ),
             }
-            pending = frozenset(
+            return frozenset(
                 run_id
                 for run_id in sorted(candidates)
                 if not self._routes.withdrawal_complete_in_session(
                     session, frozenset({run_id})
                 )
             )
+
+        pending = self._routes.decide_publication(decide)
         if not pending:
             return False
         self._routes.withdraw_runs(pending, pending=OperatorActionName.RETRY)
@@ -439,7 +445,7 @@ class DistributedRecoveryCoordinator:
 
         changed = False
         for run_id in _unreadable_run_ids(session, only_id):
-            run = session.get(RecipeRun, run_id, with_for_update=True)
+            run = session.get(RecipeRun, run_id)
             if run is None or run.state not in STOPPABLE_RUN_STATES:
                 continue
             previous = read_wait(run)

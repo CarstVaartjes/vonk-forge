@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 from typing import cast as _typing_cast
 
+from pydantic import ValidationError
 from sqlalchemy import select
 from vonk_agent_protocol import (
     DesiredAssignmentState,
@@ -58,6 +59,7 @@ from .assessment_support import (
 from .colocation import colocated_memory_overcommit
 from .contracts import (
     FleetProfileInvalid,
+    planner_contract_defect,
 )
 from .dependencies import _DISK_REFUSALS, _PREPARATION_RESOLVABLE_CODES
 from .persistence import (
@@ -432,6 +434,16 @@ class FleetProfileService:
                                     severity=ProfileReasonSeverity.ERROR.value,
                                 )
                             )
+                    except ValidationError as error:
+                        reasons.append(
+                            FleetProfileReason(
+                                code=ProfileReasonCode.ADMISSION_DEFECT,
+                                detail=str(
+                                    planner_contract_defect(assignment.id, error)
+                                ),
+                                severity=ProfileReasonSeverity.ERROR.value,
+                            )
+                        )
                     except (
                         BookkeepingUnknown,
                         KeyError,

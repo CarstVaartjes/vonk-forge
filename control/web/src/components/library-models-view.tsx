@@ -453,7 +453,7 @@ function ModelRevisionsRow({
       {(model.cache_usage?.retained_revisions ?? []).map((revision) => (
         <p key={revision.content_sha256}>
           Previous revision retained because {revision.owners.join(", ")};{" "}
-          {formatBytes(revision.unique_bytes)} unique; rechecked every 30s
+          {formatBytes(revision.unique_bytes)} unique
         </p>
       ))}
       {recipes.length > 0 && (

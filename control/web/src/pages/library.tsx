@@ -13,6 +13,7 @@ import type {
   VisualFleetSnapshot,
 } from "../api/types";
 import { CatalogSyncStatusLine } from "../components/catalog-sync-status";
+import { Time } from "../components/time";
 import { PageHeader } from "../components/page-header";
 import { SkeletonRows } from "../components/skeleton";
 import { LibraryBrowser } from "../components/library-browser";
@@ -140,6 +141,13 @@ export async function loadLibraryView(
   return {
     generated_at:
       modelPages[0]?.generated_at ?? recipePages[0]?.generated_at ?? new Date().toISOString(),
+    storage_observation: modelPages[0] && {
+      storage_observed_at: modelPages[0].storage_observed_at,
+      storage_reason: modelPages[0].storage_reason,
+      storage_error_type: modelPages[0].storage_error_type,
+      storage_refresh_seconds: modelPages[0].storage_refresh_seconds,
+      storage_deadline_at: modelPages[0].storage_deadline_at,
+    },
     freshness_policy: modelPages[0]?.freshness_policy ?? recipePages[0]?.freshness_policy!,
     library: recipePages[0]?.library ?? modelPages[0]?.library ?? null,
     models: viewModels,
@@ -436,6 +444,7 @@ export function LibraryPage({
       {!snapshot && !error && <SkeletonRows columns={3} label="Loading Library" />}
       {snapshot && (
         <LibraryNodeNamesProvider names={names}>
+          <LibraryStorageObservation snapshot={snapshot} />
           <LibraryBrowser
             api={api}
             detail={observedDetail}
@@ -457,5 +466,39 @@ export function LibraryPage({
         </LibraryNodeNamesProvider>
       )}
     </div>
+  );
+}
+
+export function LibraryStorageObservation({ snapshot }: { snapshot: LibraryViewSnapshot }) {
+  const observation = snapshot.storage_observation;
+  if (!observation) return null;
+  return (
+    <p role="status">
+      Storage bytes:{" "}
+      {observation.storage_observed_at ? (
+        <>
+          observed <Time value={observation.storage_observed_at} />
+        </>
+      ) : (
+        "not observed"
+      )}
+      .
+      {observation.storage_reason && (
+        <>
+          {" "}
+          {observation.storage_reason}
+          {observation.storage_error_type ? `: ${observation.storage_error_type}` : ""}.
+        </>
+      )}
+      {observation.storage_refresh_seconds != null && (
+        <> Storage observation checked every {observation.storage_refresh_seconds}s.</>
+      )}
+      {observation.storage_deadline_at && (
+        <>
+          {" "}
+          Observation deadline <Time value={observation.storage_deadline_at} />.
+        </>
+      )}
+    </p>
   );
 }

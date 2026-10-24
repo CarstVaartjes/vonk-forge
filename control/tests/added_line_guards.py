@@ -23,6 +23,7 @@ from . import request_path_scans
 from . import short_wall_clocks as wall_clocks
 from . import untyped_mapping_boundaries as mappings
 from . import vocabulary_literals as vocabulary
+from .recipe_run_write_verdicts import classified_write_lines
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -56,6 +57,7 @@ MODES = (
     "collections",
     "progress",
     "contact-clocks",
+    "planner-defects",
 )
 # The agent's messages a Controller test may send only as the stand-in pinned
 # to the agent's shared vector; built by hand they are the Controller's idea of
@@ -541,6 +543,12 @@ def check_source(
     hits: list[tuple[int, str]] = []
     if "optimistic" in modes and python and path.startswith("control/src/"):
         hits.extend((line, optimistic.KIND) for line in optimistic.scan_source(source))
+        classified = classified_write_lines(path, source)
+        hits.extend(
+            (line, optimistic.WRITE_KIND)
+            for line in optimistic.scan_unwrapped_recipe_run_writes(source)
+            if line not in classified
+        )
     if (
         "boundaries" in modes
         and python
@@ -793,6 +801,11 @@ def check_source(
             (line, "Controller contact rejected for negative clock age")
             for line in controller_contact_clock_checks(source)
         )
+    if python and not is_test and "planner-defects" in modes:
+        hits.extend(
+            (line, "planner contract defect hidden by broad wait")
+            for line in planner_defect_waits(source)
+        )
     if python and is_test and "clocks" in modes:
         hits.extend(
             (line, wall_clocks.KIND) for line in wall_clocks.scan_source(source)
@@ -808,13 +821,21 @@ def check_source(
             (node.lineno, node.end_lineno or node.lineno)
             for node in ast.walk(tree)
             if isinstance(
-                node, (ast.Subscript, ast.Compare, ast.Call, ast.Raise, ast.Constant)
+                node,
+                (
+                    ast.Subscript,
+                    ast.Compare,
+                    ast.Call,
+                    ast.Raise,
+                    ast.Constant,
+                    ast.ExceptHandler,
+                ),
             )
         ]
         hits = [
             (
                 line
-                if kind == optimistic.KIND
+                if kind in {optimistic.KIND, optimistic.WRITE_KIND}
                 else next(
                     (
                         changed
@@ -834,6 +855,82 @@ def check_source(
         set(noexit_hits)
         | {f"{path}:{line}: {kind}" for line, kind in hits if line in added}
     )
+
+
+def planner_defect_waits(source: str) -> list[int]:
+    """Planner wrappers must propagate, classify or re-plan contract defects."""
+    planners = {
+        "_assessment_provider",
+        "inspect_request",
+        "recheck_resources_in_session",
+        "_preview_run",
+        "_resource_fits",
+        "preview_run",
+        "_replan_pending_application",
+    }
+    # Other services (upgrades, cluster mappings) have their own ``preview``:
+    # these generic names are the planner's only on the planner's own receiver.
+    own_planners = {"preview", "assess"}
+
+    def planner_call(part: ast.Call) -> bool:
+        if isinstance(part.func, ast.Name):
+            return part.func.id in planners
+        return isinstance(part.func, ast.Attribute) and (
+            part.func.attr in planners
+            or (
+                part.func.attr in own_planners
+                and isinstance(part.func.value, ast.Name)
+                and part.func.value.id in {"self", "service"}
+            )
+        )
+
+    sites = []
+    for node in ast.walk(ast.parse(source)):
+        if not isinstance(node, ast.Try):
+            continue
+        calls = [
+            part
+            for statement in node.body
+            for part in ast.walk(statement)
+            if isinstance(part, ast.Call) and planner_call(part)
+        ]
+        if not calls:
+            continue
+        protected = False
+        for handler in node.handlers:
+            caught = (
+                {
+                    part.id if isinstance(part, ast.Name) else part.attr
+                    for part in ast.walk(handler.type)
+                    if isinstance(part, (ast.Name, ast.Attribute))
+                }
+                if handler.type is not None
+                else set()
+            )
+            if caught == {"ValidationError"}:
+                protected = any(
+                    isinstance(part, ast.Raise)
+                    and (
+                        part.exc is None
+                        or (
+                            isinstance(part.exc, ast.Call)
+                            and isinstance(part.exc.func, ast.Name)
+                            and part.exc.func.id == "FleetProfileRecheckContractDefect"
+                        )
+                    )
+                    or (
+                        isinstance(part, ast.Call)
+                        and isinstance(part.func, ast.Name)
+                        and part.func.id == "planner_contract_defect"
+                    )
+                    for part in ast.walk(handler)
+                )
+            if (
+                handler.type is None
+                or caught & {"ValueError", "Exception", "BaseException"}
+            ) and not protected:
+                sites.extend([handler.lineno, *(call.lineno for call in calls)])
+    return sites
 
 
 def main(*, modes: Sequence[str] = MODES) -> int:

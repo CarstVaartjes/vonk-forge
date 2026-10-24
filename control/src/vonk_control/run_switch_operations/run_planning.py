@@ -7,6 +7,7 @@ from typing import (
 )
 from typing import cast as typing_cast
 
+from pydantic import ValidationError
 from vonk_agent_protocol import (
     InstallationState,
     RunAdmissionCode,
@@ -57,7 +58,13 @@ from ..run_switch_observation_contract import (
 from ..strict_json import read_stored_model
 from .constants import _active_recipe_revision
 from .identity_helpers import _primary_model_digest
-from .planning_helpers import _as_reason, _now, _resource_reason, _settings_view
+from .planning_helpers import (
+    PlanInventory,
+    _as_reason,
+    _now,
+    _resource_reason,
+    _settings_view,
+)
 
 if TYPE_CHECKING:
     from .service import RunSwitchOperationService
@@ -83,6 +90,9 @@ class RunPlanningMixin:
         group = request.spark_group
         node_ids = tuple(node.node_id for node in group.nodes)
         with service._sessions() as session:
+            inventory = PlanInventory(
+                session, now=now, maximum_age_seconds=service._inventory_max_age
+            )
             revision = _active_recipe_revision(session, request.recipe_revision_id)
             if revision is None:
                 raise MissingRecord(request.recipe_revision_id)
@@ -211,6 +221,7 @@ class RunPlanningMixin:
                 build_candidate,
                 group,
                 now=now,
+                inventory=inventory,
                 create_build=create_build,
             )
             build = build_selection.build
@@ -281,6 +292,7 @@ class RunPlanningMixin:
                 revision,
                 request,
                 now=now,
+                inventory=inventory,
                 stops=stops,
                 placement_blockers=placement_blockers,
                 effective_settings=effective_settings,
@@ -310,8 +322,11 @@ class RunPlanningMixin:
             fit_after_stop = resource_fits.after_stop
             blockers.extend(resource_fits.blockers)
             warnings.extend(resource_fits.warnings)
-            if build_selection.builder_freshness is not None:
-                freshness.append(build_selection.builder_freshness)
+            builder_freshness = build_selection.builder_freshness
+            if builder_freshness is not None and not any(
+                item.source == builder_freshness.source for item in freshness
+            ):
+                freshness.append(builder_freshness)
             start_plan_digest: str | None = None
             recipe_build_id = (
                 build.id
@@ -388,6 +403,10 @@ class RunPlanningMixin:
                         released_run_ids=planned_stop_ids,
                         kept_run_ids=resource_fits.kept_run_ids,
                     )
+                except ValidationError:
+                    # A freshly built contract defect belongs to assessment,
+                    # not the availability blocker below.
+                    raise
                 except (
                     KeyError,
                     RecipeOperationConflict,

@@ -9,7 +9,7 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import inspect, select
-from vonk_agent_protocol import LifecycleState
+from vonk_agent_protocol import LifecycleState, ProfileReasonCode
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_control.fleet_profile_contract import FleetProfileInput
 from vonk_control.fleet_profiles import (
@@ -675,3 +675,296 @@ def test_review_binds_effects_but_not_readiness_counters_or_blockers():
     # The plan digest follows readiness and blockers; the reviewed effects do not.
     assert len({review.plan_digest, reusable.plan_digest, refused.plan_digest}) == 3
     assert review.effects_digest == reusable.effects_digest == refused.effects_digest
+
+
+def _recheck_world(tmp_path, postgres_engine):
+    """A real planner and profile service over PostgreSQL, with a movable clock."""
+    from vonk_control.run_switch_operations import RunSwitchOperationService
+
+    from .test_recipe_operations import setup_services
+    from .test_run_switch_operations import (
+        CompleteArtifactInspector,
+        RecordingArtifactExecutor,
+    )
+
+    sessions, lifecycle, _queue, _mapping, _build, nodes = setup_services(
+        tmp_path, engine=postgres_engine
+    )
+    planner = RunSwitchOperationService(
+        sessions,
+        memory_floor_bytes=0,
+        lifecycle=lifecycle,
+        clock=lifecycle._clock,
+        artifacts=CompleteArtifactInspector(),
+        artifact_phase_executor=RecordingArtifactExecutor(),
+    )
+    clock = [NOW]
+
+    def service():
+        return build_production_fleet_profile_service(
+            sessions, clock=lambda: clock[0], run_switch_operations=planner
+        )
+
+    with sessions() as session:
+        recipe = session.scalar(
+            select(CatalogDocumentRevision).where(
+                CatalogDocumentRevision.kind == "recipe"
+            )
+        )
+        assert recipe is not None
+        selector = f"{recipe.publisher}/{recipe.slug}"
+    profile = service().create(
+        FleetProfileInput.model_validate(
+            {
+                "name": "Recheck defect",
+                "assignments": [
+                    {"recipe_selector": selector, "spark_ids": list(nodes)}
+                ],
+            }
+        ),
+        actor="admin",
+    )
+    return sessions, planner, service, clock, profile
+
+
+def _counting_assessments(service) -> list[object]:
+    assessments: list[object] = []
+    assess = service._assessment_provider
+    assert assess is not None
+
+    def fresh_assessment(*args, **kwargs):
+        result = assess(*args, **kwargs)
+        assessments.append(result)
+        return result
+
+    service._assessment_provider = fresh_assessment
+    return assessments
+
+
+def _unbound_inventory_sample(assessment: RunSwitchAssessment) -> RunSwitchAssessment:
+    """The recheck names an inventory sample its freshness does not carry."""
+    document = assessment.model_dump()
+    sample = next(
+        item for item in assessment.freshness if item.source.endswith(":inventory")
+    )
+    document["fit_current"]["nodes"][0]["memory_usage_uncertainty"] = {
+        "source": "aggregate_inventory_without_run_usage",
+        "inventory_observed_at": sample.observed_at,
+        "inventory_evidence_digest": "0" * 64,
+        "residual_ranges": [],
+    }
+    return RunSwitchAssessment.model_validate(document)
+
+
+@pytest.mark.parametrize("initially_waiting", [False, True])
+def test_resource_recheck_contract_error_replans_then_admits(
+    tmp_path, postgres_engine, monkeypatch, initially_waiting: bool
+) -> None:
+    """Catch a stale recheck ending a valid load instead of freshly assessing it."""
+    _sessions, planner, service, clock, profile = _recheck_world(
+        tmp_path, postgres_engine
+    )
+    owner = service()
+    assert owner.preview(profile.id).allowed
+    recheck = planner.recheck_resources_in_session
+    transient = initially_waiting
+    inject_defect = True
+    calls = 0
+
+    def injected_recheck(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if transient:
+            raise ValueError("resource observation temporarily unavailable")
+        assessment = recheck(*args, **kwargs)
+        return _unbound_inventory_sample(assessment) if inject_defect else assessment
+
+    monkeypatch.setattr(planner, "recheck_resources_in_session", injected_recheck)
+    application = owner.apply(profile.id, request_key=str(uuid4()), actor="admin")
+    if initially_waiting:
+        assert application.state == LifecycleState.QUEUED
+        assert application.next_attempt_at is not None
+        transient = False
+        clock[0] += timedelta(minutes=1)
+        owner = service()
+        assert owner.tick()
+        application = owner.application(application.id)
+
+    assert application.state == LifecycleState.QUEUED
+    assert application.progress.admission_pending
+    assert any(
+        reason.code == ProfileReasonCode.STALE_PLAN
+        for reason in application.progress.blockers
+    )
+    observed_calls = calls
+    inject_defect = False
+    restarted = service()
+    assessments = _counting_assessments(restarted)
+    # The stored review is re-planned once, then the fresh plan is admitted.
+    for _ in range(3):
+        assert restarted.tick()
+        application = restarted.application(application.id)
+        if not application.progress.admission_pending:
+            break
+    assert not application.progress.admission_pending
+    assert application.state != LifecycleState.FAILED
+    assert calls > observed_calls
+    assert len(assessments) == 1
+    assert not any(
+        reason.code == ProfileReasonCode.ADMISSION_DEFECT
+        for reason in application.progress.blockers
+    )
+
+
+def test_persistent_recheck_contract_defect_ends_after_one_fresh_review(
+    tmp_path, postgres_engine, monkeypatch
+) -> None:
+    """Catch a recheck defect re-planning and re-locking every tick for ever."""
+    sessions, planner, service, clock, profile = _recheck_world(
+        tmp_path, postgres_engine
+    )
+    recheck = planner.recheck_resources_in_session
+    inject_defect = True
+    calls = 0
+
+    def injected_recheck(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        assessment = recheck(*args, **kwargs)
+        return _unbound_inventory_sample(assessment) if inject_defect else assessment
+
+    monkeypatch.setattr(planner, "recheck_resources_in_session", injected_recheck)
+    owner = service()
+    application = owner.apply(profile.id, request_key=str(uuid4()), actor="admin")
+    assert application.state == LifecycleState.QUEUED
+    assert application.progress.admission_pending
+    restarted = service()
+    assessments = _counting_assessments(restarted)
+    for _ in range(5):
+        clock[0] += timedelta(minutes=1)
+        restarted.tick()
+    ended = restarted.application(application.id)
+    assert ended.state == LifecycleState.FAILED
+    assert not ended.progress.admission_pending
+    assert ended.next_attempt_at is None
+    # One fresh review and its recheck, after the stored review's recheck.
+    assert len(assessments) == 1
+    assert calls == 2
+    (defect,) = ended.progress.blockers
+    assert defect.code == ProfileReasonCode.ADMISSION_DEFECT
+    assert "bind the node inventory sample" in defect.detail
+    inject_defect = False
+
+    def assert_defect(view) -> None:
+        assert any(
+            item.code == ProfileReasonCode.ADMISSION_DEFECT
+            for item in view.progress.blockers
+        )
+
+    _ended, fresh = assert_ended_without_blocking(
+        SimpleNamespace(sessions=sessions),
+        ended,
+        end=lambda view: view,
+        assert_reason=assert_defect,
+        fresh=lambda _: restarted.apply(
+            profile.id, request_key=str(uuid4()), actor="admin"
+        ),
+    )
+    assert not fresh.progress.admission_pending
+    assert fresh.state != LifecycleState.FAILED
+
+
+def test_deferred_target_builder_review_refreshes_inventory_before_admission(
+    tmp_path, postgres_engine
+) -> None:
+    """Catch t0 builder freshness overriding t1 residual evidence on resume."""
+    from vonk_agent_protocol.agent_words import ProfileOperationKind
+    from vonk_control.models import FleetProfile
+    from vonk_control.recipe_execution_contract import parse_stored_installation_plan
+
+    from .test_profile_build_memory import _accepted_build_profile
+
+    sessions, profiles, planner, node_id, _application, build = _accepted_build_profile(
+        tmp_path, postgres_engine, accept_profile=False
+    )
+    lifecycle = planner._lifecycle
+    assert lifecycle is not None
+    with sessions.begin() as session:
+        profile = session.scalar(select(FleetProfile))
+        installation = session.scalar(select(RecipeInstallation))
+        sample = session.scalar(select(NodeInventorySnapshot))
+        assert profile is not None and installation is not None and sample is not None
+        profile_id, installation_id = profile.id, installation.id
+        installed = parse_stored_installation_plan(installation.plan)
+        image = next(iter(installed.compiled_execution_plans.values())).runtime_image
+        sample.host_memory_free_bytes = sample.gpu_memory_free_bytes = 8_000
+    run_plan = lifecycle._run_admission.plan_run(
+        installation_id, "old", now=profiles._clock()
+    )
+    run_id = lifecycle._run_admission.accept_run(
+        run_plan, actor="admin", now=profiles._clock()
+    )
+    with sessions.begin() as session:
+        run = session.get(RecipeRun, run_id)
+        assert run is not None
+        run.state = LifecycleState.RUNNING
+        for rank in session.scalars(select(RunNode).where(RunNode.run_id == run_id)):
+            rank.state = LifecycleState.RUNNING
+    # Cache-repair review binds the already accepted exact image while its
+    # source build is pending, just as a recovering application does.
+    assess = profiles._assessment_provider
+    assert assess is not None
+
+    def recovering_review(session, assignment, expected_nodes, **kwargs):
+        kwargs["expected_runtime_image"] = image
+        return assess(session, assignment, expected_nodes, **kwargs)
+
+    profiles._assessment_provider = recovering_review
+    reviewed = profiles.preview(profile_id, allow_pending_cache_rebuild=True)
+    assert reviewed.allowed, [item.assessment.blockers for item in reviewed.assessments]
+    assessment = reviewed.assessments[0].assessment
+    uncertainty = assessment.fit_current.nodes[0].memory_usage_uncertainty
+    assert uncertainty is not None
+    assert assessment.preparation is not None
+    assert build.builder_node_id == node_id
+    pending = profiles._create_pending_application(
+        reviewed,
+        request_key=str(uuid4()),
+        actor="admin",
+        operation_kind=ProfileOperationKind.APPLY.value,
+        select_profile=True,
+    )
+    profiles._defer_pending_application(
+        pending.id, "Admission lock contention", retry_delay=timedelta(0)
+    )
+    with sessions.begin() as session:
+        sample = session.scalar(select(NodeInventorySnapshot))
+        assert sample is not None
+        values = {
+            attribute.key: getattr(sample, attribute.key)
+            for attribute in NodeInventorySnapshot.__mapper__.column_attrs
+            if attribute.key != "id"
+        }
+        values.update(
+            id=str(uuid4()),
+            observed_at=sample.observed_at + timedelta(seconds=1),
+            evidence_digest="b" * 64,
+        )
+        session.add(NodeInventorySnapshot(**values))
+    checked = []
+    recheck = planner.recheck_resources_in_session
+
+    def observe_recheck(*args, **kwargs):
+        result = recheck(*args, **kwargs)
+        checked.append(result)
+        return result
+
+    planner.recheck_resources_in_session = observe_recheck
+    assert profiles._observe_pending_admissions(profiles._clock())
+    admitted = profiles.application(pending.id)
+    assert not admitted.progress.admission_pending
+    assert admitted.state != LifecycleState.FAILED
+    assert len(checked) == 1
+    fresh_uncertainty = checked[0].fit_current.nodes[0].memory_usage_uncertainty
+    assert fresh_uncertainty is not None
+    assert fresh_uncertainty.inventory_evidence_digest == "b" * 64
