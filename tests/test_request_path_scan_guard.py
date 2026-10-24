@@ -134,6 +134,12 @@ def test_controller_sessions_end_before_suspension_and_api_reads_buffer():
         "reconcile_storage",
         "_stored_object",
         "lstat",
+        "stat",
+        "storage_summary",
+        "iterdir",
+        "scandir",
+        "os.walk",
+        "disk_usage",
     ],
 )
 @pytest.mark.parametrize(
@@ -150,7 +156,8 @@ def test_library_storage_walks_are_rejected_on_added_lines(provider, path):
     """A new direct storage provider in a view must fail the patch gate."""
     from control.tests.added_line_guards import check_source
 
-    source = f"def models(self):\n    return self.{provider}()\n"
+    target = provider if "." in provider else f"self.{provider}"
+    source = f"def models(self):\n    return {target}()\n"
     assert check_source(path, source, {2}, modes=("request-scans",))
     assert not check_source(path, source, {1}, modes=("request-scans",))
     assert not scan_tree(

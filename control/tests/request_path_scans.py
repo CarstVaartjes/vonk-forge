@@ -103,6 +103,12 @@ def scan_tree(tree: ast.Module, *, path: str) -> list[int]:
                 "reconcile_storage",
                 "_stored_object",
                 "lstat",
+                "stat",
+                "storage_summary",
+                "iterdir",
+                "scandir",
+                "walk",
+                "disk_usage",
             }:
                 sites.append(call.lineno)
             if (

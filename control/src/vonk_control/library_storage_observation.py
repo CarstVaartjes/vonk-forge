@@ -14,6 +14,8 @@ from .model_cache_contract import (
 )
 from .settings import RECIPE_LIBRARY_SYNC_INTERVAL_SECONDS
 
+STORAGE_OBSERVATION_DEADLINE_SECONDS = RECIPE_LIBRARY_SYNC_INTERVAL_SECONDS
+
 
 class LibraryStorageObserver:
     def __init__(
@@ -72,7 +74,7 @@ class LibraryStorageObserver:
         observation = snapshot.observation
         now = self._clock()
         if started is not None:
-            deadline = started + timedelta(seconds=RECIPE_LIBRARY_SYNC_INTERVAL_SECONDS)
+            deadline = started + timedelta(seconds=STORAGE_OBSERVATION_DEADLINE_SECONDS)
             observation = observation.model_copy(
                 update={"storage_deadline_at": deadline}
             )
@@ -87,7 +89,10 @@ class LibraryStorageObserver:
             and observation.storage_observed_at is not None
             and now
             >= observation.storage_observed_at
-            + timedelta(seconds=RECIPE_LIBRARY_SYNC_INTERVAL_SECONDS)
+            + timedelta(
+                seconds=RECIPE_LIBRARY_SYNC_INTERVAL_SECONDS
+                + STORAGE_OBSERVATION_DEADLINE_SECONDS
+            )
         ):
             observation = observation.model_copy(
                 update={

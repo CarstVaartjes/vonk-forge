@@ -30,6 +30,9 @@ from vonk_control.library_assessment import LibraryAssessment
 from vonk_control.library_contract import ModelDetailResponse, ModelLibraryResponse
 from vonk_control.library_image_presence import ImagePresenceIndex
 from vonk_control.library_projection import LibraryProjection
+from vonk_control.library_storage_observation import (
+    STORAGE_OBSERVATION_DEADLINE_SECONDS,
+)
 from vonk_control.model_cache_contract import (
     CacheOperationKind,
     ModelCacheUsage,
@@ -730,6 +733,15 @@ def test_model_reads_never_invoke_storage_provider(assessed_library):  # noqa: F
             assert detail.storage_observed_at == NOW
         clock[0] += timedelta(seconds=RECIPE_LIBRARY_SYNC_INTERVAL_SECONDS)
         pages, detail = _model_reads(client, model.selector)
+        assert detail.storage_reason is None
+        assert all(page.storage_reason is None for page in pages)
+        # A completed walk stays fresh for the cadence plus the next walk's
+        # deadline; its timestamp is the start, not the completion time.
+        clock[0] = NOW + timedelta(
+            seconds=RECIPE_LIBRARY_SYNC_INTERVAL_SECONDS
+            + STORAGE_OBSERVATION_DEADLINE_SECONDS
+        )
+        pages, detail = _model_reads(client, model.selector)
         assert detail.storage_reason == ModelStorageObservationReason.STALE
         assert all(page.storage_reason == detail.storage_reason for page in pages)
         assert detail.storage_observed_at == NOW
@@ -979,3 +991,85 @@ def test_completed_cache_change_is_visible_without_storage_refresh(
                 == LibraryCacheState.CACHED
             )
         assert calls == [True]
+
+
+@pytest.mark.parametrize("references", [[{"retired_shape": True}], "damaged"])
+def test_damaged_verified_references_do_not_hide_healthy_cached_model(
+    assessed_library,  # noqa: F811
+    references,
+):
+    """One bad manifest must not turn unrelated cached rows into unknown state."""
+    from vonk_control.library_contract import LibraryCacheState
+    from vonk_control.model_cache_contract import CacheManifest
+    from vonk_control.stored_json import write_guard_mode
+
+    projection, sessions, *_ = assessed_library
+    healthy = projection.models().models[0]
+    damaged_digest = _hex("damaged-model")
+    manifest = CacheManifest(
+        schema_version=2,
+        source_policy="nas-first",
+        model_content_sha256=healthy.identity.content_sha256,
+        recipe_revision_sha256=None,
+        model_definition_ref=None,
+        model_content_digests=[healthy.identity.content_sha256],
+        artifacts=[],
+    )
+    with write_guard_mode(strict=False), sessions.begin() as session:
+        for digest, stored in (
+            (healthy.identity.content_sha256, manifest.model_dump(mode="json")),
+            (
+                damaged_digest,
+                {**manifest.model_dump(mode="json"), "verified_models": references},
+            ),
+        ):
+            session.add(
+                ModelCacheSet(
+                    artifact_set_sha256=_hex(digest),
+                    schema_version=2,
+                    model_content_sha256=digest,
+                    recipe_revision_sha256=None,
+                    manifest=stored,
+                    expected_bytes=0,
+                    verified_bytes=0,
+                    state=LibraryCacheState.CACHED.value,
+                    created_at=NOW,
+                    updated_at=NOW,
+                    last_accessed_at=NOW,
+                )
+            )
+    snapshot = projection._local_state_snapshot(
+        [damaged_digest, healthy.identity.content_sha256]
+    )
+    assert snapshot is not None
+    assert (
+        snapshot[healthy.identity.content_sha256].controller == LibraryCacheState.CACHED
+    )
+
+
+@pytest.mark.parametrize(
+    "reason",
+    [
+        ModelStorageObservationReason.STALE,
+        ModelStorageObservationReason.DEADLINE_EXCEEDED,
+    ],
+)
+def test_storage_age_reason_does_not_claim_endpoint_unavailable(reason, capsys):
+    """A reason without an exception class must not acquire an unavailable suffix."""
+    from cluster_profiles.cli_render import render_payload
+
+    render_payload(
+        {
+            "models": [],
+            "storage_observed_at": "2026-10-24T12:00:00Z",
+            "generated_at": "2026-10-24T12:03:00Z",
+            "storage_reason": reason.value,
+            "storage_error_type": None,
+        },
+        "model",
+        action="library",
+    )
+    output = capsys.readouterr().out
+    assert f"Storage reason: {reason.value}\n" in output
+    assert "unavailable" not in output
+    assert "Storage observation:" not in output

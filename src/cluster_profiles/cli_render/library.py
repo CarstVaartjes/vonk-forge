@@ -268,12 +268,12 @@ def _library(
             if observed
             else "not observed",
         )
-        _field("Storage observation", _time(observed))
         reason = payload.get("storage_reason")
         if reason:
+            error_type = payload.get("storage_error_type")
             _field(
                 "Storage reason",
-                f"{_text(reason)}: {_text(payload.get('storage_error_type'))}",
+                _text(reason) + (f": {_text(error_type)}" if error_type else ""),
             )
         if payload.get("storage_refresh_seconds") is not None:
             _field(

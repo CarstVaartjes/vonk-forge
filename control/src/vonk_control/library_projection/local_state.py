@@ -6,9 +6,10 @@ import time
 from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, cast
 
-from pydantic import TypeAdapter, ValidationError
+from pydantic import ValidationError
 from sqlalchemy import String, and_, column, func, or_, select, values
 from sqlalchemy import cast as sql_cast
+from sqlalchemy.orm import load_only
 from vonk_agent_protocol import (
     AssetAvailability,
     InstallationState,
@@ -18,7 +19,6 @@ from vonk_agent_protocol import (
     adopt_machine_state,
     canonical_message,
 )
-from vonk_forge_contracts.model import ModelReference
 
 from .. import model_cache_states
 from ..api_availability import AVAILABILITY_ERRORS
@@ -32,7 +32,11 @@ from ..library_contract import (
     LibraryRecipeProjection,
 )
 from ..library_image_presence import ImageKey
-from ..model_cache_contract import CacheOperationKind, ModelCacheOperationProgress
+from ..model_cache_contract import (
+    CacheManifest,
+    CacheOperationKind,
+    ModelCacheOperationProgress,
+)
 from ..models import (
     CatalogDocumentRevision,
     ModelCacheOperation,
@@ -44,6 +48,7 @@ from ..models import (
 )
 from ..operator_receipt_contract import ReceiptOwner
 from ..revision_images import revision_images
+from ..stored_json import read_row_column
 from .common import (
     _ACTIVE_RUN_STATES,
     _RUN_STATES,
@@ -51,8 +56,6 @@ from .common import (
     _controller_state,
     _note_unreadable,
 )
-
-_MODEL_REFERENCES = TypeAdapter(list[ModelReference])
 
 if TYPE_CHECKING:
     from .service import LibraryProjection
@@ -155,10 +158,9 @@ def _database_local_state(
     local revision remains visible even when the active catalog pointer has
     moved on; the immutable catalog row supplies its canonical document.
 
-    Every table is read by the few columns the projection uses.  The JSON
-    documents (compiled plans, artifact manifests, per-artifact progress)
-    are large and grow with the catalog and the operation history; none of
-    them is transferred or decoded here.
+    Read only the scoped rows and columns the projection uses. Cache manifests
+    use the shared row reader so damage cannot discard unrelated local state;
+    compiled plans and per-artifact progress are not transferred here.
     """
     if not digests:
         return {}
@@ -169,26 +171,38 @@ def _database_local_state(
             .data([(digest,) for digest in sorted(set(digests))])
             .cte()
         )
-        # Fetch only the small verified-reference projection, never artifact
-        # manifests. Text membership is a SQL prefilter; canonical references
-        # below decide exact content membership, including shared-set aliases.
+        # Text membership is a SQL prefilter; the shared manifest reader below
+        # decides exact content membership, including shared-set aliases.
         verified_models = ModelCacheSet.manifest["verified_models"].as_json()
         reference_match = sql_cast(verified_models, String).contains(requested.c.digest)
-        cache_sets = session.execute(
-            select(
-                ModelCacheSet.artifact_set_sha256,
-                ModelCacheSet.model_content_sha256,
-                ModelCacheSet.recipe_revision_sha256,
-                ModelCacheSet.state,
-                verified_models,
-            ).where(
-                or_(
-                    ModelCacheSet.model_content_sha256.in_(digests),
-                    ModelCacheSet.recipe_revision_sha256.in_(digests),
-                    select(requested.c.digest).where(reference_match).exists(),
+        cache_sets = [
+            (
+                row.artifact_set_sha256,
+                row.model_content_sha256,
+                row.recipe_revision_sha256,
+                row.state,
+                read_row_column(row, "manifest"),
+            )
+            for row in session.scalars(
+                select(ModelCacheSet)
+                .options(
+                    load_only(
+                        ModelCacheSet.artifact_set_sha256,
+                        ModelCacheSet.model_content_sha256,
+                        ModelCacheSet.recipe_revision_sha256,
+                        ModelCacheSet.state,
+                        ModelCacheSet.manifest,
+                    )
+                )
+                .where(
+                    or_(
+                        ModelCacheSet.model_content_sha256.in_(digests),
+                        ModelCacheSet.recipe_revision_sha256.in_(digests),
+                        select(requested.c.digest).where(reference_match).exists(),
+                    )
                 )
             )
-        ).all()
+        ]
         # One latest request per requested content identity. An index on creation
         # time and the existing artifact-set index bound the history lookup; UUID
         # is only a deterministic tie-break after durable request time.
@@ -334,12 +348,8 @@ def _database_local_state(
     head_digests = {digest for _, digest, is_head in revisions if is_head}
     result: dict[str, LibraryLocalState] = {}
     reference_digests: dict[str, set[str]] = {}
-    for set_id, model_digest, recipe_digest, set_state, references in cache_sets:
-        bound = (
-            _MODEL_REFERENCES.validate_json(canonical_message(references))
-            if references is not None
-            else []
-        )
+    for set_id, model_digest, recipe_digest, set_state, manifest in cache_sets:
+        bound = manifest.verified_models if isinstance(manifest, CacheManifest) else []
         reference_digests[set_id] = {reference.content_sha256 for reference in bound}
         controller = _controller_state(
             {
