@@ -859,10 +859,24 @@ def planner_defect_waits(source: str) -> list[int]:
         "_preview_run",
         "_resource_fits",
         "preview_run",
-        "preview",
-        "assess",
         "_replan_pending_application",
     }
+    # Other services (upgrades, cluster mappings) have their own ``preview``:
+    # these generic names are the planner's only on the planner's own receiver.
+    own_planners = {"preview", "assess"}
+
+    def planner_call(part: ast.Call) -> bool:
+        if isinstance(part.func, ast.Name):
+            return part.func.id in planners
+        return isinstance(part.func, ast.Attribute) and (
+            part.func.attr in planners
+            or (
+                part.func.attr in own_planners
+                and isinstance(part.func.value, ast.Name)
+                and part.func.value.id in {"self", "service"}
+            )
+        )
+
     sites = []
     for node in ast.walk(ast.parse(source)):
         if not isinstance(node, ast.Try):
@@ -871,10 +885,7 @@ def planner_defect_waits(source: str) -> list[int]:
             part
             for statement in node.body
             for part in ast.walk(statement)
-            if isinstance(part, ast.Call)
-            and isinstance(part.func, (ast.Name, ast.Attribute))
-            and (part.func.id if isinstance(part.func, ast.Name) else part.func.attr)
-            in planners
+            if isinstance(part, ast.Call) and planner_call(part)
         ]
         if not calls:
             continue
@@ -897,7 +908,7 @@ def planner_defect_waits(source: str) -> list[int]:
                         or (
                             isinstance(part.exc, ast.Call)
                             and isinstance(part.exc.func, ast.Name)
-                            and part.exc.func.id == "FleetProfileStalePlanConflict"
+                            and part.exc.func.id == "FleetProfileRecheckContractDefect"
                         )
                     )
                     or (

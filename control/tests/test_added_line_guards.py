@@ -978,7 +978,7 @@ def test_planner_defects_cannot_be_added_as_preparation_waits(call, caught):
     assert not check_source(PATH, source, {1}, modes=("planner-defects",))
     for verdict in (
         "raise planner_contract_defect(assignment.id, error) from error",
-        "raise FleetProfileStalePlanConflict('stale review') from error",
+        "raise FleetProfileRecheckContractDefect('recheck failed') from error",
         "raise",
     ):
         separated = source.replace(
@@ -988,3 +988,12 @@ def test_planner_defects_cannot_be_added_as_preparation_waits(call, caught):
         assert not check_source(
             PATH, separated, set(range(1, 8)), modes=("planner-defects",)
         )
+
+
+@pytest.mark.parametrize(
+    "call", ["fleet_services.upgrades.preview", "service._mappings.preview"]
+)
+def test_planner_defect_guard_ignores_other_services_previews(call):
+    """Catch the planner guard flagging another service's same-named preview."""
+    source = f"try:\n    plan = {call}(request)\nexcept ValueError:\n    wait()\n"
+    assert not check_source(PATH, source, {2, 3}, modes=("planner-defects",))

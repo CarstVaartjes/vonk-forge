@@ -89,11 +89,15 @@ class ResourceAdmissionMixin:
             )
             for reason in resolution.reasons
         )
+        now = _now(service._clock)
         resources = service._resource_fits(
             session,
             revision,
             request,
-            now=_now(service._clock),
+            now=now,
+            inventory=PlanInventory(
+                session, now=now, maximum_age_seconds=service._inventory_max_age
+            ),
             stops=reviewed.stops,
             placement_blockers=blockers,
             effective_settings=resolution.settings,
@@ -143,7 +147,7 @@ class ResourceAdmissionMixin:
         request: RunSwitchPreviewRequest,
         *,
         now: datetime,
-        inventory: PlanInventory | None = None,
+        inventory: PlanInventory,
         stops: Sequence[StopImpact],
         placement_blockers: Sequence[RunSwitchReason],
         effective_settings: object | None,
@@ -162,10 +166,6 @@ class ResourceAdmissionMixin:
         adds no demand either: nothing new starts.
         """
         service = typing_cast("RunSwitchOperationService", self)
-        if inventory is None:
-            inventory = PlanInventory(
-                session, now=now, maximum_age_seconds=service._inventory_max_age
-            )
         kept = kept_runs(session, kept_run_ids, profile_application_id)
         already_kept = _serves_as_kept_run(session, kept, request)
         serving = request.action != "install" and not already_kept

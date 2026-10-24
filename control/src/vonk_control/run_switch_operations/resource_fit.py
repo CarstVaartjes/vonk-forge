@@ -94,7 +94,7 @@ class ResourceFitMixin:
         group: SparkGroup,
         *,
         now: datetime,
-        inventory: PlanInventory | None = None,
+        inventory: PlanInventory,
         excluded_run_ids: Sequence[str],
         kept_run_ids: Collection[str] = (),
         effective_settings: object | None = None,
@@ -113,10 +113,6 @@ class ResourceFitMixin:
         dict[str, frozenset[str]],
     ]:
         service = typing_cast("RunSwitchOperationService", self)
-        if inventory is None:
-            inventory = PlanInventory(
-                session, now=now, maximum_age_seconds=service._inventory_max_age
-            )
         freshness: list[FreshnessEvidence] = []
         nodes: list[SparkFitNode] = []
         blockers: list[RunSwitchReason] = []

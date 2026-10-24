@@ -49,7 +49,7 @@ class BuildSelectionMixin:
         group: SparkGroup,
         *,
         now: datetime,
-        inventory: PlanInventory | None = None,
+        inventory: PlanInventory,
         create_build: bool = True,
     ) -> _BuildSelection:
         """Resolve an immutable build or create a pending Controller build.
@@ -63,10 +63,6 @@ class BuildSelectionMixin:
         receipt; bytes are produced by ``recipe.build.v1`` during apply.
         """
         service = typing_cast("RunSwitchOperationService", self)
-        if inventory is None:
-            inventory = PlanInventory(
-                session, now=now, maximum_age_seconds=service._inventory_max_age
-            )
 
         if build is not None:
             return _BuildSelection(build=build, candidate=build)
@@ -81,7 +77,7 @@ class BuildSelectionMixin:
         ):
             builder = session.get(AgentNode, candidate.builder_node_id)
             freshness, admissible = service._builder_admission(
-                session, builder, now=now, inventory=inventory
+                session, builder, inventory=inventory
             )
             if admissible:
                 return _BuildSelection(
@@ -127,7 +123,7 @@ class BuildSelectionMixin:
         saw_builder = False
         for node in ordered_nodes:
             freshness, admissible = service._builder_admission(
-                session, node, now=now, inventory=inventory
+                session, node, inventory=inventory
             )
             if not admissible:
                 continue
@@ -246,16 +242,9 @@ class BuildSelectionMixin:
         session: Session,
         node: AgentNode | None,
         *,
-        now: datetime,
-        inventory: PlanInventory | None = None,
+        inventory: PlanInventory,
     ) -> tuple[FreshnessEvidence | None, bool]:
         """Return fresh builder evidence and whether it can run recipe.build.v1."""
-        service = typing_cast("RunSwitchOperationService", self)
-        if inventory is None:
-            inventory = PlanInventory(
-                session, now=now, maximum_age_seconds=service._inventory_max_age
-            )
-
         if node is None:
             return None, False
         snapshot, freshness = inventory.read(node.node_id)

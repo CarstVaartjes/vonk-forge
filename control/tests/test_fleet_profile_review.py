@@ -677,11 +677,8 @@ def test_review_binds_effects_but_not_readiness_counters_or_blockers():
     assert review.effects_digest == reusable.effects_digest == refused.effects_digest
 
 
-@pytest.mark.parametrize("initially_waiting", [False, True])
-def test_resource_recheck_contract_error_replans_then_admits(
-    tmp_path, postgres_engine, monkeypatch, initially_waiting: bool
-) -> None:
-    """Catch a stale recheck ending a valid load instead of freshly assessing it."""
+def _recheck_world(tmp_path, postgres_engine):
+    """A real planner and profile service over PostgreSQL, with a movable clock."""
     from vonk_control.run_switch_operations import RunSwitchOperationService
 
     from .test_recipe_operations import setup_services
@@ -708,7 +705,6 @@ def test_resource_recheck_contract_error_replans_then_admits(
             sessions, clock=lambda: clock[0], run_switch_operations=planner
         )
 
-    owner = service()
     with sessions() as session:
         recipe = session.scalar(
             select(CatalogDocumentRevision).where(
@@ -717,7 +713,7 @@ def test_resource_recheck_contract_error_replans_then_admits(
         )
         assert recipe is not None
         selector = f"{recipe.publisher}/{recipe.slug}"
-    profile = owner.create(
+    profile = service().create(
         FleetProfileInput.model_validate(
             {
                 "name": "Recheck defect",
@@ -728,8 +724,48 @@ def test_resource_recheck_contract_error_replans_then_admits(
         ),
         actor="admin",
     )
-    reviewed = owner.preview(profile.id)
-    assert reviewed.allowed
+    return sessions, planner, service, clock, profile
+
+
+def _counting_assessments(service) -> list[object]:
+    assessments: list[object] = []
+    assess = service._assessment_provider
+    assert assess is not None
+
+    def fresh_assessment(*args, **kwargs):
+        result = assess(*args, **kwargs)
+        assessments.append(result)
+        return result
+
+    service._assessment_provider = fresh_assessment
+    return assessments
+
+
+def _unbound_inventory_sample(assessment: RunSwitchAssessment) -> RunSwitchAssessment:
+    """The recheck names an inventory sample its freshness does not carry."""
+    document = assessment.model_dump()
+    sample = next(
+        item for item in assessment.freshness if item.source.endswith(":inventory")
+    )
+    document["fit_current"]["nodes"][0]["memory_usage_uncertainty"] = {
+        "source": "aggregate_inventory_without_run_usage",
+        "inventory_observed_at": sample.observed_at,
+        "inventory_evidence_digest": "0" * 64,
+        "residual_ranges": [],
+    }
+    return RunSwitchAssessment.model_validate(document)
+
+
+@pytest.mark.parametrize("initially_waiting", [False, True])
+def test_resource_recheck_contract_error_replans_then_admits(
+    tmp_path, postgres_engine, monkeypatch, initially_waiting: bool
+) -> None:
+    """Catch a stale recheck ending a valid load instead of freshly assessing it."""
+    _sessions, planner, service, clock, profile = _recheck_world(
+        tmp_path, postgres_engine
+    )
+    owner = service()
+    assert owner.preview(profile.id).allowed
     recheck = planner.recheck_resources_in_session
     transient = initially_waiting
     inject_defect = True
@@ -741,11 +777,7 @@ def test_resource_recheck_contract_error_replans_then_admits(
         if transient:
             raise ValueError("resource observation temporarily unavailable")
         assessment = recheck(*args, **kwargs)
-        if inject_defect:
-            return RunSwitchAssessment.model_validate(
-                {**assessment.model_dump(), "allowed": False}
-            )
-        return assessment
+        return _unbound_inventory_sample(assessment) if inject_defect else assessment
 
     monkeypatch.setattr(planner, "recheck_resources_in_session", injected_recheck)
     application = owner.apply(profile.id, request_key=str(uuid4()), actor="admin")
@@ -767,18 +799,8 @@ def test_resource_recheck_contract_error_replans_then_admits(
     observed_calls = calls
     inject_defect = False
     restarted = service()
-    assessments = []
-    assess = restarted._assessment_provider
-    assert assess is not None
-
-    def fresh_assessment(*args, **kwargs):
-        result = assess(*args, **kwargs)
-        assessments.append(result)
-        return result
-
-    restarted._assessment_provider = fresh_assessment
-    # The fresh assessment may have the same digest: the stored-plan error is
-    # not proof of a defect in a fresh plan. Re-plan, then admit next tick.
+    assessments = _counting_assessments(restarted)
+    # The stored review is re-planned once, then the fresh plan is admitted.
     for _ in range(3):
         assert restarted.tick()
         application = restarted.application(application.id)
@@ -792,6 +814,64 @@ def test_resource_recheck_contract_error_replans_then_admits(
         reason.code == ProfileReasonCode.ADMISSION_DEFECT
         for reason in application.progress.blockers
     )
+
+
+def test_persistent_recheck_contract_defect_ends_after_one_fresh_review(
+    tmp_path, postgres_engine, monkeypatch
+) -> None:
+    """Catch a recheck defect re-planning and re-locking every tick for ever."""
+    sessions, planner, service, clock, profile = _recheck_world(
+        tmp_path, postgres_engine
+    )
+    recheck = planner.recheck_resources_in_session
+    inject_defect = True
+    calls = 0
+
+    def injected_recheck(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        assessment = recheck(*args, **kwargs)
+        return _unbound_inventory_sample(assessment) if inject_defect else assessment
+
+    monkeypatch.setattr(planner, "recheck_resources_in_session", injected_recheck)
+    owner = service()
+    application = owner.apply(profile.id, request_key=str(uuid4()), actor="admin")
+    assert application.state == LifecycleState.QUEUED
+    assert application.progress.admission_pending
+    restarted = service()
+    assessments = _counting_assessments(restarted)
+    for _ in range(5):
+        clock[0] += timedelta(minutes=1)
+        restarted.tick()
+    ended = restarted.application(application.id)
+    assert ended.state == LifecycleState.FAILED
+    assert not ended.progress.admission_pending
+    assert ended.next_attempt_at is None
+    # One fresh review and its recheck, after the stored review's recheck.
+    assert len(assessments) == 1
+    assert calls == 2
+    (defect,) = ended.progress.blockers
+    assert defect.code == ProfileReasonCode.ADMISSION_DEFECT
+    assert "bind the node inventory sample" in defect.detail
+    inject_defect = False
+
+    def assert_defect(view) -> None:
+        assert any(
+            item.code == ProfileReasonCode.ADMISSION_DEFECT
+            for item in view.progress.blockers
+        )
+
+    _ended, fresh = assert_ended_without_blocking(
+        SimpleNamespace(sessions=sessions),
+        ended,
+        end=lambda view: view,
+        assert_reason=assert_defect,
+        fresh=lambda _: restarted.apply(
+            profile.id, request_key=str(uuid4()), actor="admin"
+        ),
+    )
+    assert not fresh.progress.admission_pending
+    assert fresh.state != LifecycleState.FAILED
 
 
 def test_deferred_target_builder_review_refreshes_inventory_before_admission(

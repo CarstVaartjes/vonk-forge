@@ -886,7 +886,10 @@ def test_a_stale_plan_refusal_a_fresh_review_cannot_change_ends_the_load(
         raise FleetProfileStalePlanConflict("reviewed effects differ")
 
     monkeypatch.setattr(profiles, "_queue_application", refuse)
-    assert profiles._observe_pending_admissions(profiles._clock())
+    # The first refusal marks the plan stale; the next observation reviews it
+    # afresh once, and the identical refusal of that review ends the load.
+    for _ in range(2):
+        assert profiles._observe_pending_admissions(profiles._clock())
 
     with sessions() as session:
         row = session.get(FleetProfileApplication, pending.id)

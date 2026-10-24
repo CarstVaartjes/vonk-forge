@@ -292,6 +292,12 @@ class FleetProfileStalePlanConflict(InvalidRequestError, FleetProfileConflict):
         super().__init__(*args, reason=reason)
 
 
+class FleetProfileRecheckContractDefect(FleetProfileStalePlanConflict):
+    """The resource recheck could not combine the reviewed assessment with
+    current facts into a valid contract: stale for a stored review, a defect
+    for a plan reviewed afresh."""
+
+
 class FleetProfileReviewStale(FleetProfileStalePlanConflict):
     """The reviewed effects differ from the current plan; nothing was accepted."""
 
