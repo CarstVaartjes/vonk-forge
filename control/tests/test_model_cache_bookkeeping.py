@@ -57,7 +57,7 @@ def test_a_vanished_operation_is_skipped_not_raised(cache):
     missing = "00000000-0000-4000-8000-00000000b001"
     assert service._start_transfer(missing, force=False) is None
     service._run_download(missing, force=False)  # returns: nothing left to run
-    service._schedule_background_download(missing, force=False, capacity=1)
+    service._schedule_background_download(missing, force=False)
     service._set_operation_progress(
         missing,
         None,  # type: ignore[arg-type] - never reached for a vanished operation

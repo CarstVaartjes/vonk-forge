@@ -183,7 +183,8 @@ class ModelCacheService(
         )
         self._upstream_slots = threading.BoundedSemaphore(_UPSTREAM_CHECK_WORKERS)
         self._background_operations: dict[str, _BackgroundTransfer] = {}
-        self._active_digests: set[str] = set()
+        # Object digest -> the operation whose transfer in this process writes it.
+        self._active_digests: dict[str, str] = {}
         self._hf_cooldown_until: datetime | None = None
         self._progress_checkpoint_at: dict[str, datetime] = {}
         self._cancel_events: dict[str, threading.Event] = {}

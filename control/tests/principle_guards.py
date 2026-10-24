@@ -480,11 +480,37 @@ def proves_fresh_completion(
     return False
 
 
+_HTTP_CLIENTS = ("httpx", "httpx2")
+_HTTP_TIMEOUT_FIELDS = {"timeout", "connect", "read", "write", "pool"}
+
+
+def unbounded_http_timeout(node: ast.Call, aliases: dict[str, str]) -> bool:
+    """An HTTP client, request or timeout that disables a timeout with None.
+
+    A read that never times out keeps its thread (and any pool slot) forever
+    when the peer stops sending; the client defaults are bounded. Only called
+    for modules that import an HTTP client, so a request on a client instance
+    (whose type the scan cannot see) is covered too.
+    """
+    func = ast.unparse(node.func)
+    head, dot, tail = func.partition(".")
+    module, _, attribute = (aliases.get(head, head) + dot + tail).rpartition(".")
+
+    def none(value: ast.expr) -> bool:
+        return isinstance(value, ast.Constant) and value.value is None
+
+    timeout = module in _HTTP_CLIENTS and attribute == "Timeout"
+    fields = _HTTP_TIMEOUT_FIELDS if timeout else {"timeout"}
+    return (timeout and bool(node.args) and none(node.args[0])) or any(
+        keyword.arg in fields and none(keyword.value) for keyword in node.keywords
+    )
+
+
 def scan_source(
     source: str, *, path: str, mode: str, tree: ast.Module | None = None
 ) -> list[Site]:
     candidates = {
-        "waits": r"\b(?:while|subprocess|urllib)\b|\b(?:run|call|check_call|check_output|urlopen|wait|communicate|join|poll)\s*\(|deadline|timedelta|\w_(?:at|since)\b",
+        "waits": r"\b(?:while|subprocess|urllib|httpx2?)\b|\b(?:run|call|check_call|check_output|urlopen|wait|communicate|join|poll)\s*\(|deadline|timedelta|\w_(?:at|since)\b",
         "reads": r"\.(?:get|route|api_route)\s*\(",
         "tests": r"\bassert\b|\bdef\s+test_",
         "raises": r"\braise\b",
@@ -570,6 +596,7 @@ def scan_source(
         if isinstance(imported, ast.ImportFrom) and imported.module in {
             "subprocess",
             "urllib.request",
+            *_HTTP_CLIENTS,
         }:
             aliases.update(
                 {
@@ -580,6 +607,14 @@ def scan_source(
         elif isinstance(imported, ast.Import):
             aliases.update({a.asname: a.name for a in imported.names if a.asname})
 
+    http_module = any(
+        (isinstance(imported, ast.ImportFrom) and imported.module in _HTTP_CLIENTS)
+        or (
+            isinstance(imported, ast.Import)
+            and any(alias.name in _HTTP_CLIENTS for alias in imported.names)
+        )
+        for imported in ast.walk(tree)
+    )
     resource_errors = {
         alias.asname or alias.name
         for imported in tree.body
@@ -754,6 +789,12 @@ def scan_source(
             self.generic_visit(node)
 
         def visit_Call(self, node: ast.Call):
+            if (
+                mode == "waits"
+                and http_module
+                and unbounded_http_timeout(node, aliases)
+            ):
+                self.add(node, "call-without-timeout")
             if mode == "waits":
                 if name(node.func) not in {
                     "run",
