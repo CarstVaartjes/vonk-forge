@@ -97,6 +97,61 @@ def test_a_stored_download_completes_on_its_tick_while_hung_transfers_hold_the_p
     client.close()
 
 
+def test_after_a_restart_a_stored_download_completes_on_its_first_claim(
+    tmp_path: Path,
+) -> None:
+    gates = {"/weights-hog": threading.Event()}
+    started: list[str] = []
+    sessions = _database(tmp_path)
+    before, before_client = _service(
+        tmp_path, sessions, maximum=1, handler=_serve({}, [])
+    )
+    stored = [
+        _artifact(f"s{index}", f"/weights-s{index}".encode()) for index in range(4)
+    ]
+    first = _start(before, stored, "00000000-0000-4000-8000-000000002501")
+    _drain(before, first.id)
+    hog = _start(
+        before,
+        [_artifact("hog", b"/weights-hog")],
+        "00000000-0000-4000-8000-000000002502",
+    )
+    again = _start(before, stored, "00000000-0000-4000-8000-000000002503")
+    assert before.get_operation(again.id).state == LifecycleState.QUEUED
+    before.close()
+    assert before_client is not None
+    before_client.close()
+
+    # A new Controller on the same root and database; its first tick gives the
+    # only transfer slot to the older download, which does not return.
+    service, client = _service(
+        tmp_path, sessions, maximum=1, handler=_serve(gates, started)
+    )
+    service.tick()
+    _wait_for(lambda: "/weights-hog" in started)
+    assert service.get_operation(again.id).state == LifecycleState.QUEUED
+
+    # The stored download's first claim completes it, though the pool is full.
+    service.tick()
+    assert service.get_operation(again.id).state == LifecycleState.SUCCEEDED
+    assert service.get_operation(hog.id).state == LifecycleState.RUNNING
+
+    # Once the fault is released, a fresh download is admitted and completes.
+    gates["/weights-hog"].set()
+    _drain(service, hog.id)
+    fresh = _start(
+        service,
+        [_artifact("fresh", b"/weights-fresh")],
+        "00000000-0000-4000-8000-000000002504",
+    )
+    _drain(service, fresh.id)
+    assert service.get_operation(fresh.id).state == LifecycleState.SUCCEEDED
+    assert started[-1] == "/weights-fresh"
+    service.close()
+    assert client is not None
+    client.close()
+
+
 def test_freed_slots_go_to_waiting_downloads_before_a_large_one_refills(
     tmp_path: Path,
 ) -> None:

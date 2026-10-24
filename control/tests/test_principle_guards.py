@@ -206,6 +206,13 @@ def test_an_http_read_without_a_timeout_is_a_wait_without_a_bound():
     assert scan_source(imported, path="x.py", mode="waits")
 
 
+def test_every_pool_capacity_gate_ahead_of_a_claim_has_a_verdict():
+    found = {
+        (site.path, site.function) for site in principle_guards.capacity_gate_sites()
+    }
+    assert found == set(principle_guards.CAPACITY_GATE_VERDICTS)
+
+
 def test_remedy_literals_are_decoded_before_matching():
     assert scan_source('message = "\\u0052etry"', path="reason.py", mode="remedies")
     assert scan_source(

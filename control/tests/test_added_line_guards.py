@@ -1030,3 +1030,53 @@ def test_planner_defect_guard_ignores_other_services_previews(call):
     """Catch the planner guard flagging another service's same-named preview."""
     source = f"try:\n    plan = {call}(request)\nexcept ValueError:\n    wait()\n"
     assert not check_source(PATH, source, {2, 3}, modes=("planner-defects",))
+
+
+_CLAIM = "    claimed = cache._claim_operations(limit=requested)\n"
+
+
+@pytest.mark.parametrize(
+    "gate",
+    [
+        # The main-era model-cache tick: a full pool skipped the claim, so a
+        # download whose bytes were all stored waited behind a hung transfer.
+        "    capacity = cache._available_transfer_slots()\n    if not capacity:\n        return 0\n",
+        "    if slots <= 0:\n        return 0\n",
+        "    if self.free_workers == 0:\n        return 0\n",
+        "    if available < 1:\n        return 0\n",
+        "    if not cache._available_transfer_slots():\n        return 0\n",
+        "    if len(inflight) >= self._parallelism:\n        return 0\n",
+    ],
+)
+def test_capacity_gate_ahead_of_a_claim_is_flagged(gate: str) -> None:
+    source = "def tick(cache):\n" + gate + _CLAIM
+    gate_line = next(n for n, t in enumerate(source.splitlines(), 1) if "if " in t)
+    assert check_source(PATH, source, {gate_line}, modes=("capacity-gates",))
+    submit = source.replace(_CLAIM, "    pool.submit(run)\n")
+    assert check_source(PATH, submit, {gate_line}, modes=("capacity-gates",))
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        # Claim first; only the transfer waits for a slot.
+        "def tick(cache):\n" + _CLAIM + "    if not capacity:\n        return 0\n",
+        # A gate that does not stop the function before its claim.
+        "def tick(cache):\n    if not capacity:\n        note_full()\n" + _CLAIM,
+        # No claim or submit in the function.
+        "def tick(cache):\n    if not capacity:\n        return 0\n",
+        # A capacity read that is not a full-pool test.
+        "def tick(cache):\n    if capacity > 0:\n        return 0\n" + _CLAIM,
+    ],
+)
+def test_capacity_guard_allows_claim_first_and_non_gates(source: str) -> None:
+    lines = set(range(1, len(source.splitlines()) + 1))
+    assert not check_source(PATH, source, lines, modes=("capacity-gates",))
+
+
+def test_capacity_guard_allows_reviewed_gates_and_tests() -> None:
+    source = "def tick(self):\n    if capacity <= 0:\n        return 0\n" + _CLAIM
+    reviewed = "control/src/vonk_control/availability_production.py"
+    assert not check_source(reviewed, source, {2}, modes=("capacity-gates",))
+    test = "control/tests/test_example.py"
+    assert not check_source(test, source, {2}, modes=("capacity-gates",))

@@ -506,6 +506,105 @@ def unbounded_http_timeout(node: ast.Call, aliases: dict[str, str]) -> bool:
     )
 
 
+CAPACITY_GATE_KIND = "pool-capacity gate ahead of a claim"
+_CAPACITY = re.compile(r"capacity|slots|available|free", re.IGNORECASE)
+_LIMIT = re.compile(r"capacity|slots|parallelism|max_workers", re.IGNORECASE)
+_CLAIM_CALL = re.compile(r"^_?claim|^submit$")
+#: Reviewed gates, keyed ``(path, function)``: why skipping the claim while the
+#: pool is full cannot starve work that needs no pool slot.
+CAPACITY_GATE_VERDICTS: dict[tuple[str, str], str] = {
+    (
+        "control/src/vonk_control/availability_production.py",
+        "tick",
+    ): "FIFO, one job per worker: every claim needs a worker, and a full pool "
+    "records the typed WAITING_FOR_WORKER blocker on queued work",
+    (
+        "control/src/vonk_control/distribution_executor/preparation.py",
+        "execute",
+    ): "single active job: the runtime-image phase always needs a pool thread, "
+    "and the parent waits visibly and re-observes",
+}
+
+
+def _capacity_test(test: ast.expr) -> bool:
+    """``capacity <= 0``, ``slots == 0``, ``free < 1``, ``not available``, or
+    ``len(in_flight) >= parallelism``: the pool reads as full."""
+
+    def subject(node: ast.expr, pattern: re.Pattern[str]) -> bool:
+        if isinstance(node, ast.Call):
+            node = node.func
+        return bool(pattern.search(name(node)))
+
+    if isinstance(test, ast.UnaryOp) and isinstance(test.op, ast.Not):
+        return subject(test.operand, _CAPACITY)
+    if not isinstance(test, ast.Compare) or len(test.ops) != 1:
+        return False
+    op, right = test.ops[0], test.comparators[0]
+    constant = right.value if isinstance(right, ast.Constant) else None
+    return (
+        subject(test.left, _CAPACITY)
+        and (
+            (isinstance(op, ast.LtE | ast.Eq) and constant == 0)
+            or (isinstance(op, ast.Lt) and constant == 1)
+        )
+    ) or (
+        isinstance(op, ast.GtE)
+        and isinstance(test.left, ast.Call)
+        and name(test.left.func) == "len"
+        and subject(right, _LIMIT)
+    )
+
+
+def capacity_gates_before_claims(
+    source: str, *, path: str, tree: ast.Module | None = None
+) -> list[Site]:
+    """A pool-capacity gate that returns before the function claims work.
+
+    Skipping the claim while the pool is full starves work that needs no pool
+    slot (a download whose bytes are all stored): it stays queued behind a hung
+    transfer. Claim first and let only the transfer wait for a slot.
+    """
+    if not re.search(r"\b(?:claim\w*|_claim\w*|submit)\s*\(", source):
+        return []
+    tree = ast.parse(source) if tree is None else tree
+    sites = []
+    for function in ast.walk(tree):
+        if not isinstance(function, ast.FunctionDef | ast.AsyncFunctionDef):
+            continue
+        scope = list(local_nodes(function))
+        claims = [
+            node.lineno
+            for node in scope
+            if isinstance(node, ast.Call) and _CLAIM_CALL.search(name(node.func))
+        ]
+        sites.extend(
+            Site(path, function.name, CAPACITY_GATE_KIND, node.lineno)
+            for node in scope
+            if isinstance(node, ast.If)
+            and _capacity_test(node.test)
+            and any(node.lineno < line for line in claims)
+            and any(
+                isinstance(part, ast.Return | ast.Continue | ast.Break)
+                for statement in node.body
+                for part in local_nodes(statement)
+            )
+        )
+    return sites
+
+
+def capacity_gate_sites() -> list[Site]:
+    """Every pool-capacity gate ahead of a claim in the Controller."""
+    sites = []
+    for path in sorted((ROOT / "control/src").rglob("*.py")):
+        parsed = parse_file(path)
+        sites.extend(
+            capacity_gates_before_claims(
+                parsed.source, path=path.relative_to(ROOT).as_posix(), tree=parsed.tree
+            )
+        )
+    return sites
+
+
 def scan_source(
     source: str, *, path: str, mode: str, tree: ast.Module | None = None
 ) -> list[Site]:
