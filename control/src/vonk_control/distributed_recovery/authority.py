@@ -156,6 +156,7 @@ def _recovery_authority(
     failed_rank: int,
     *,
     stop_run_generation: int,
+    start_timeout_seconds: int,
 ) -> _RecoveryAuthority | Residue | None:
     installation = session.get(RecipeInstallation, run.installation_id)
     resolved = (
@@ -256,12 +257,17 @@ def _recovery_authority(
                 reason=WaitReason.OBSERVATION_UNAVAILABLE,
             )
         presences[node.node_id] = presence.management_address
-    original = _original_start_authority(session, run, revision.content_digest)
-    if isinstance(original, Residue):
-        return original
-    start_job, startup_budget = original
-    # Rank reload/JIT needs its accepted startup duration, not the short health
-    # probe timeout. Ordered stops have their own per-role execution budget.
+    start_job = _original_start_authority(session, run)
+    if isinstance(start_job, Residue):
+        return start_job
+    # Rank reload/JIT needs the configured startup budget, not the short health
+    # probe timeout; the singleton path grants the same.  The accepted Start's
+    # stored deadline is no measure of it: the first claim re-anchors that
+    # deadline to the claim time.  Ordered stops have their own per-role
+    # execution budget.
+    startup_budget = timedelta(
+        seconds=validate_distributed_start_timeout_seconds(start_timeout_seconds)
+    )
     # Persist the total once: phase advances, retries and route publication all
     # retain this exact deadline instead of granting time again after each stop.
     stop_order = topology.stop_order
@@ -495,10 +501,8 @@ def _enqueue_recovery_stop(
     return job
 
 
-def _original_start_authority(
-    session: Session, run: RecipeRun, recipe_digest: str | None
-) -> tuple[Job, timedelta] | Residue:
-    """Read the exact accepted start's budget; configuration is not a fallback."""
+def _original_start_authority(session: Session, run: RecipeRun) -> Job | Residue:
+    """The exact accepted Start of the run's current plan that recovery replays."""
 
     starts = tuple(
         session.scalars(
@@ -524,9 +528,6 @@ def _original_start_authority(
         )
     start = starts[-1]
     parent = _parent(start)
-    deadline_value = (
-        parent.start_deadline if isinstance(parent, RecipeStartParent) else None
-    )
     ordinal = (
         parent.workload_intent_ordinal
         if isinstance(parent, RecipeStartParent)
@@ -535,38 +536,8 @@ def _original_start_authority(
     targets = sorted(
         session.scalars(select(RunNode.node_id).where(RunNode.run_id == run.id))
     )
-    if (
-        type(ordinal) is not int
-        or ordinal < 1
-        or start.targets != targets
-        or deadline_value is None
-    ):
+    if type(ordinal) is not int or ordinal < 1 or start.targets != targets:
         return _unproven(
             run.id, _DAMAGED, "distributed recovery start authority is invalid"
         )
-    try:
-        parsed_deadline = deadline_value
-        if parsed_deadline.utcoffset() is None:
-            # A stored deadline without a zone is damaged bookkeeping, not a
-            # clock fault.
-            return _unproven(
-                run.id, _DAMAGED, "distributed recovery start authority is invalid"
-            )
-        deadline = _aware(parsed_deadline)
-        # PostgreSQL returns an aware UTC value; SQLite's test adapter drops
-        # its timezone from this database-owned timestamp.
-        created = start.created_at
-        if created.tzinfo is None:
-            created = created.replace(tzinfo=UTC)
-        duration = deadline - _aware(created)
-        seconds = duration.total_seconds()
-        if not seconds.is_integer():
-            return _unproven(
-                run.id, _DAMAGED, "distributed recovery start authority is invalid"
-            )
-        validate_distributed_start_timeout_seconds(int(seconds))
-    except ValueError as error:
-        return _unproven(
-            run.id, _DAMAGED, "distributed recovery start authority is invalid", error
-        )
-    return start, duration
+    return start

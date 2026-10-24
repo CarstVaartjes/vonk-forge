@@ -655,7 +655,7 @@ def assemble_production_worker(
             agent_jobs=agent_jobs,
             clock=clock,
             recovery_run_stops=lifecycle,
-            singleton_start_timeout_seconds=distributed_start_timeout_seconds,
+            start_timeout_seconds=distributed_start_timeout_seconds,
         ),
     )
     worker_background_services = tuple(background_services)

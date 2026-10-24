@@ -119,7 +119,7 @@ def _singleton_recovery_process_tick(database_url: str, now_value: str) -> None:
         agent_jobs=jobs,
         clock=lambda: now,
         recovery_run_stops=lifecycle,
-        singleton_start_timeout_seconds=60,
+        start_timeout_seconds=60,
     )
     worked = recovery.tick()
     engine.dispose()
@@ -790,7 +790,7 @@ def test_singleton_absence_reboots_through_new_controller_processes(
         agent_jobs=queue,
         clock=lambda: now[0],
         recovery_run_stops=bound_service,
-        singleton_start_timeout_seconds=60,
+        start_timeout_seconds=60,
     )
     assert recovery.tick() is True
     with sessions() as session:
@@ -856,7 +856,7 @@ def test_singleton_recovery_stop_grant_survives_start_deadline(
         agent_jobs=queue,
         clock=lambda: now[0],
         recovery_run_stops=bound_service,
-        singleton_start_timeout_seconds=60,
+        start_timeout_seconds=60,
     )
     assert recovery.tick()
 
@@ -934,7 +934,7 @@ def test_newer_workload_intent_wins_over_singleton_reboot_recovery(
         agent_jobs=queue,
         clock=lambda: now[0],
         recovery_run_stops=bound_service,
-        singleton_start_timeout_seconds=60,
+        start_timeout_seconds=60,
     )
 
     assert recovery.tick() is True
@@ -1003,7 +1003,7 @@ def test_uncertain_singleton_recovery_stop_retains_run_claims(
         agent_jobs=queue,
         clock=lambda: now[0],
         recovery_run_stops=bound_service,
-        singleton_start_timeout_seconds=60,
+        start_timeout_seconds=60,
     )
     assert recovery.tick() is True
     with sessions() as session:
@@ -1078,7 +1078,7 @@ def test_singleton_recovery_enters_cooldown_then_resumes_automatically(
         agent_jobs=queue,
         clock=lambda: now[0],
         recovery_run_stops=bound_service,
-        singleton_start_timeout_seconds=60,
+        start_timeout_seconds=60,
     )
 
     assert recovery.tick() is True
@@ -1141,7 +1141,7 @@ def test_stale_singleton_absence_can_be_refreshed_read_only_and_recovered(
         agent_jobs=queue,
         clock=lambda: now[0],
         recovery_run_stops=bound_service,
-        singleton_start_timeout_seconds=60,
+        start_timeout_seconds=60,
     )
 
     # The first exact proof aged beyond the route evidence window. The run
@@ -1229,7 +1229,7 @@ def test_stale_presence_waits_then_recovery_resumes_without_new_run(
         agent_jobs=queue,
         clock=lambda: now[0],
         recovery_run_stops=bound_service,
-        singleton_start_timeout_seconds=60,
+        start_timeout_seconds=60,
     )
 
     assert recovery.tick() is True
@@ -1355,7 +1355,7 @@ def test_stale_singleton_wait_does_not_starve_later_recovery_or_hot_loop(
         agent_jobs=queue,
         clock=lambda: now[0],
         recovery_run_stops=bound_service,
-        singleton_start_timeout_seconds=60,
+        start_timeout_seconds=60,
     )
 
     assert recovery.tick() is True
@@ -1467,7 +1467,7 @@ def test_singleton_recovery_checks_compiled_lifecycle_authority(
         agent_jobs=queue,
         clock=lambda: now[0],
         recovery_run_stops=bound_service,
-        singleton_start_timeout_seconds=60,
+        start_timeout_seconds=60,
     )
 
     assert recovery.tick() is True
@@ -1558,7 +1558,7 @@ def test_singleton_recovery_refuses_per_node_start_for_another_plan(
         agent_jobs=queue,
         clock=lambda: now[0],
         recovery_run_stops=bound_service,
-        singleton_start_timeout_seconds=60,
+        start_timeout_seconds=60,
     )
 
     assert recovery.tick() is True

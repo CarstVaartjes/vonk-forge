@@ -4882,7 +4882,11 @@ def _queued_distributed_recovery_stop(
     failure_observed_at = NOW + timedelta(seconds=1)
     record_exact_empty_snapshot(sessions, nodes[1], failure_observed_at)
     recovery = DistributedRecoveryCoordinator(
-        sessions, routes=routes, agent_jobs=queue, clock=lambda: NOW
+        sessions,
+        routes=routes,
+        agent_jobs=queue,
+        clock=lambda: NOW,
+        start_timeout_seconds=startup_budget,
     )
     assert recovery.tick() is True
     with sessions() as session:

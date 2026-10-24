@@ -81,9 +81,8 @@ _UNCONFIRMED_TICK_RAISE = (
     " another plan'. The root cause is not isolated."
 )
 _LOST_RUN_STOP_REFUSED = (
-    "When one Spark's processes of a two-Spark run die before its load ends,"
-    " the run is lost; a newer load that must stop it is refused on every"
-    " retry with 'current profile Stop identity is stale': the profile Stop"
+    "When a two-Spark run is lost, a newer load that must stop it is refused"
+    " on every retry with 'current profile Stop identity is stale': the profile Stop"
     " authority accepts a lost run only under a run-switch parent, not under"
     " the recipe.stop.v2 parent this Stop has (profile_stop_authority.py). A"
     " load that goes on retrying then meets 'Profile child Stop exceeds its"
@@ -401,10 +400,16 @@ def _run_states(world: ReachWorld) -> set[str]:
 # A repro drives the whole worker loop, the cache and the queue for up to
 # about seventy minutes of fake time over PostgreSQL.
 @pytest.mark.slow(30)
-@pytest.mark.xfail(strict=True, raises=SimulationFailure, reason=_LOST_RUN_STOP_REFUSED)
-def test_a_load_stops_a_run_lost_before_its_load_ended(
+def test_a_run_that_lost_a_rank_before_its_load_ended_recovers(
     tmp_path, postgres_engine
 ) -> None:
+    """A rank lost right after its two-phase start is recovered in place.
+
+    Wrong implementation: distributed recovery re-derived the start budget from
+    the accepted Start's deadline, which the first claim had re-anchored, and
+    refused it as invalid authority: the run was settled lost instead.
+    """
+
     world = build_reach_world(tmp_path, postgres_engine)
     try:
         sim = reach_simulation(world, seed=0)
@@ -417,7 +422,8 @@ def test_a_load_stops_a_run_lost_before_its_load_ended(
         sim.sparks.crash(1)
         for _ in range(4):
             sim.round()
-        assert RunState.LOST in _run_states(world)
+        assert RunState.LOST not in _run_states(world)
+        assert sim.serving_everywhere()
 
         solo = _apply(sim, "solo", [world.assignment(SOLO, world.nodes[:1])])
         assert sim.settle(solo) == "succeeded"

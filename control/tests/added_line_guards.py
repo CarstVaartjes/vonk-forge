@@ -59,6 +59,7 @@ MODES = (
     "contact-clocks",
     "planner-defects",
     "capacity-gates",
+    "start-budgets",
 )
 # The agent's messages a Controller test may send only as the stand-in pinned
 # to the agent's shared vector; built by hand they are the Controller's idea of
@@ -425,6 +426,80 @@ def controller_contact_clock_checks(source: str) -> list[int]:
         if isinstance(node, ast.Attribute) and node.attr == "LAST_SEEN_IN_FUTURE"
     )
     return sorted(found)
+
+
+# A start budget is the span the Controller accepted when it queued the start
+# (``settings.DISTRIBUTED_START_TIMEOUT_SECONDS``).  Deriving it again from a
+# stored deadline minus the row's ``created_at`` silently shrinks or grows it
+# once the deadline was anchored at dispatch (#1896).  Reviewed sites only.
+START_BUDGET_VERDICTS: dict[tuple[str, str], str] = {
+    (
+        "control/src/vonk_control/agent_jobs/predicates.py",
+        "_anchor_start_budget",
+    ): "the anchoring itself: reads the queue-time budget exactly once, before "
+    "the deadline moves, and stamps start_anchored_at so it never re-derives",
+    (
+        "control/src/vonk_control/run_switch_operations/phase_dispatch.py",
+        "_execute_checkpoint",
+    ): "display only (startup_budget_seconds); overstates by the queue wait "
+    "once anchored, follow-up",
+}
+_START_STAMPS = ("start_deadline", "start_anchored_at")
+
+
+def start_budget_derivations(source: str) -> list[tuple[int, str]]:
+    """``start_deadline``/``start_anchored_at`` minus ``created_at``, per function.
+
+    Reads through attributes, string subscripts, helper calls such as
+    ``_aware(...)`` and local aliases.  Returns (line, enclosing function).
+    """
+    tree = ast.parse(source)
+    found: dict[int, str] = {}
+    for scope in ast.walk(tree):
+        if not isinstance(scope, ast.FunctionDef | ast.AsyncFunctionDef):
+            continue
+        stamps: set[str] = set()
+        creations: set[str] = set()
+
+        def reads(value: ast.AST, words: tuple[str, ...], aliases: set[str]) -> bool:
+            for part in ast.walk(value):
+                name = (
+                    part.id
+                    if isinstance(part, ast.Name)
+                    else part.attr
+                    if isinstance(part, ast.Attribute)
+                    else part.value
+                    if isinstance(part, ast.Constant) and isinstance(part.value, str)
+                    else None
+                )
+                if name is not None and (
+                    name in aliases or any(word in name for word in words)
+                ):
+                    return True
+            return False
+
+        for _ in range(2):
+            for node in ast.walk(scope):
+                if isinstance(node, ast.Assign | ast.AnnAssign) and node.value:
+                    targets = (
+                        node.targets if isinstance(node, ast.Assign) else [node.target]
+                    )
+                    names = {t.id for t in targets if isinstance(t, ast.Name)}
+                    if reads(node.value, _START_STAMPS, stamps):
+                        stamps.update(names)
+                    elif reads(node.value, ("created_at",), creations):
+                        creations.update(names)
+        for node in ast.walk(scope):
+            if not (isinstance(node, ast.BinOp) and isinstance(node.op, ast.Sub)):
+                continue
+            sides = (node.left, node.right)
+            if any(
+                reads(one, _START_STAMPS, stamps)
+                and reads(other, ("created_at",), creations)
+                for one, other in (sides, sides[::-1])
+            ):
+                found[node.lineno] = scope.name
+    return sorted(found.items())
 
 
 def check_source(
@@ -817,6 +892,17 @@ def check_source(
             (site.line, site.kind)
             for site in principles.capacity_gates_before_claims(source, path=path)
             if (site.path, site.function) not in principles.CAPACITY_GATE_VERDICTS
+        )
+    if (
+        python
+        and not is_test
+        and "start-budgets" in modes
+        and path.startswith("control/src/")
+    ):
+        hits.extend(
+            (line, "start budget derived from a stored start timestamp")
+            for line, function in start_budget_derivations(source)
+            if (path, function) not in START_BUDGET_VERDICTS
         )
     if python and is_test and "clocks" in modes:
         hits.extend(
