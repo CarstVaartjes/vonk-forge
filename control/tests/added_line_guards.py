@@ -796,7 +796,7 @@ def check_source(
         )
     if python and not is_test and "planner-defects" in modes:
         hits.extend(
-            (line, "planner contract defect hidden by ValueError wait")
+            (line, "planner contract defect hidden by broad wait")
             for line in planner_defect_waits(source)
         )
     if python and is_test and "clocks" in modes:
@@ -851,13 +851,17 @@ def check_source(
 
 
 def planner_defect_waits(source: str) -> list[int]:
-    """A ValueError wait around a planner must first separate contract defects."""
+    """Planner wrappers must propagate, classify or re-plan contract defects."""
     planners = {
         "_assessment_provider",
         "inspect_request",
         "recheck_resources_in_session",
         "_preview_run",
         "_resource_fits",
+        "preview_run",
+        "preview",
+        "assess",
+        "_replan_pending_application",
     }
     sites = []
     for node in ast.walk(ast.parse(source)):
@@ -887,12 +891,26 @@ def planner_defect_waits(source: str) -> list[int]:
             )
             if caught == {"ValidationError"}:
                 protected = any(
-                    isinstance(part, ast.Call)
-                    and isinstance(part.func, ast.Name)
-                    and part.func.id == "planner_contract_defect"
+                    isinstance(part, ast.Raise)
+                    and (
+                        part.exc is None
+                        or (
+                            isinstance(part.exc, ast.Call)
+                            and isinstance(part.exc.func, ast.Name)
+                            and part.exc.func.id == "FleetProfileStalePlanConflict"
+                        )
+                    )
+                    or (
+                        isinstance(part, ast.Call)
+                        and isinstance(part.func, ast.Name)
+                        and part.func.id == "planner_contract_defect"
+                    )
                     for part in ast.walk(handler)
                 )
-            if "ValueError" in caught and not protected:
+            if (
+                handler.type is None
+                or caught & {"ValueError", "Exception", "BaseException"}
+            ) and not protected:
                 sites.extend([handler.lineno, *(call.lineno for call in calls)])
     return sites
 

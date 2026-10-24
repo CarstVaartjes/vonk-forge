@@ -8,7 +8,7 @@ from typing import cast as _typing_cast
 
 from pydantic import ValidationError
 from sqlalchemy import func, or_, select, true
-from vonk_agent_protocol import LifecycleState
+from vonk_agent_protocol import LifecycleState, ProfileReasonCode
 from vonk_agent_protocol.agent_words import (
     ProfileCancellationCause,
     ProfileOperationKind,
@@ -80,7 +80,7 @@ class FleetProfileService:
         """Reconcile reviewed applications that could not acquire admission locks."""
         self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
 
-        candidate: tuple[str, str, str, FleetProfilePreview, int] | None = None
+        candidate: tuple[str, str, str, FleetProfilePreview, int, bool] | None = None
         retirements: list[str] = []
         # A waiting load follows a newer recipe revision at once, not when its
         # own retry backoff falls due.
@@ -173,6 +173,10 @@ class FleetProfileService:
                         row.actor,
                         plan,
                         progress.admission_attempt,
+                        any(
+                            blocker.code == ProfileReasonCode.STALE_PLAN
+                            for blocker in progress.blockers
+                        ),
                     )
         for application_id in retirements:
             self._finish_pending_admission(
@@ -182,11 +186,10 @@ class FleetProfileService:
             )
         if candidate is None:
             return bool(retirements)
-        application_id, request_key, actor, plan, refused = candidate
-        if not plan.allowed:
-            # The accepted intent was blocked when it was reviewed: plan it
-            # again against current conditions (asking for the preparation it
-            # needs) instead of replaying a plan that could never be admitted.
+        application_id, request_key, actor, plan, refused, stale = candidate
+        if not plan.allowed or stale:
+            # Blocked or stale reviewed evidence must be assessed afresh before
+            # another admission attempt, including after a Controller restart.
             replanned = self._replan_pending_application(application_id, plan, actor)
             if replanned is None:
                 return True
@@ -278,7 +281,12 @@ class FleetProfileService:
             replanned = self._replan_pending_application(application_id, plan, actor)
             if replanned is None:
                 return True
-            if replanned.plan_digest == plan.plan_digest:
+            # A stored-review validation error says nothing about the fresh
+            # planner output, even if its digest matches. Assessment owns any
+            # deterministic defect in that fresh output.
+            if replanned.plan_digest == plan.plan_digest and not isinstance(
+                error.__cause__, ValidationError
+            ):
                 self._finish_pending_admission(
                     application_id,
                     state=LifecycleState.FAILED,

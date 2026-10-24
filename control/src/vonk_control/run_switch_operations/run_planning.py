@@ -7,6 +7,7 @@ from typing import (
 )
 from typing import cast as typing_cast
 
+from pydantic import ValidationError
 from vonk_agent_protocol import (
     InstallationState,
     RunAdmissionCode,
@@ -321,8 +322,11 @@ class RunPlanningMixin:
             fit_after_stop = resource_fits.after_stop
             blockers.extend(resource_fits.blockers)
             warnings.extend(resource_fits.warnings)
-            if build_selection.builder_freshness is not None:
-                freshness.append(build_selection.builder_freshness)
+            builder_freshness = build_selection.builder_freshness
+            if builder_freshness is not None and not any(
+                item.source == builder_freshness.source for item in freshness
+            ):
+                freshness.append(builder_freshness)
             start_plan_digest: str | None = None
             recipe_build_id = (
                 build.id
@@ -399,6 +403,10 @@ class RunPlanningMixin:
                         released_run_ids=planned_stop_ids,
                         kept_run_ids=resource_fits.kept_run_ids,
                     )
+                except ValidationError:
+                    # A freshly built contract defect belongs to assessment,
+                    # not the availability blocker below.
+                    raise
                 except (
                     KeyError,
                     RecipeOperationConflict,

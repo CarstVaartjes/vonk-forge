@@ -72,6 +72,7 @@ from vonk_control.operation_contract import (
     OperationRecoveryAction,
 )
 from vonk_control.operation_item_contract import OperationItem, operation_item
+from vonk_control.preparation_contract import RuntimeImageIdentity
 from vonk_control.recipe_build_cancellation import (
     lock_build_dependency,
 )
@@ -90,6 +91,7 @@ from vonk_control.run_admission import RunAdmissionBusy
 from vonk_control.run_switch_contract import (
     InvocationMetadata,
     RunSwitchApplyRequest,
+    RunSwitchAssessment,
     RunSwitchCleanupApplyRequest,
     RunSwitchCleanupPreviewRequest,
     RunSwitchCleanupResult,
@@ -134,6 +136,7 @@ from vonk_control.runtime_image_preparation import (
     prepare_runtime_image,
 )
 from vonk_control.runtime_preflight import latest_result
+from vonk_forge_contracts import RecipeDefinition, document_sha256
 
 from .inventory_artifact_support import (
     all_inventory_artifacts,
@@ -548,7 +551,7 @@ class RecordingArtifactExecutor:
 class SynchronousPhaseExecutor:
     def execute(
         self,
-        _plan,
+        plan,
         phase,
         *,
         item_index,
@@ -556,7 +559,7 @@ class SynchronousPhaseExecutor:
         request_key,
         progress,
     ) -> PhaseExecution:
-        return _fixture_execution(_plan, phase, result={"phase": phase.kind})
+        return _fixture_execution(plan, phase, result={"phase": phase.kind})
 
 
 class PendingBuilds(RecipeBuildService):
@@ -7224,13 +7227,10 @@ def test_plan_reuses_inventory_when_a_new_sample_lands_between_read_points(
     assert len(reads) == 1
     assert plan.stops
     sample = reads[0]
-    for fit in (plan.fit_current, plan.fit_after_stop):
-        if fit is None:
-            continue
-        uncertainty = fit.nodes[0].memory_usage_uncertainty
-        if uncertainty is not None:
-            assert uncertainty.inventory_observed_at == sample.observed_at
-            assert uncertainty.inventory_evidence_digest == sample.evidence_digest
+    uncertainty = plan.fit_current.nodes[0].memory_usage_uncertainty
+    assert uncertainty is not None
+    assert uncertainty.inventory_observed_at == sample.observed_at
+    assert uncertainty.inventory_evidence_digest == sample.evidence_digest
     assert {
         item.evidence_digest for item in plan.freshness if item.source == sample.source
     } == {sample.evidence_digest}
@@ -7239,3 +7239,62 @@ def test_plan_reuses_inventory_when_a_new_sample_lands_between_read_points(
     monkeypatch.setattr(planning_helpers, "_latest_inventory", read)
     newer = service.preview(request, actor="admin")
     assert any(item.evidence_digest == "b" * 64 for item in newer.freshness)
+    if during_builder:
+        assert plan.build.build_id == build_id
+        assert plan.build.image_digest is None
+        assert plan.build.builder_node_id == node_id
+        reviewed = plan.assessment()
+        with sessions() as session:
+            refreshed = service.recheck_resources_in_session(session, request, reviewed)
+        assert refreshed.allowed
+        assert sum(item.source == sample.source for item in plan.freshness) == 1
+        uncertainty = refreshed.fit_current.nodes[0].memory_usage_uncertainty
+        assert uncertainty is not None
+        assert uncertainty.inventory_evidence_digest == "b" * 64
+        # Previously stored reviews can already contain the duplicate. Every
+        # occurrence must refresh, so a last-wins consumer cannot retain t0.
+        duplicate = reviewed.model_copy(
+            update={"freshness": [*reviewed.freshness, sample]}
+        )
+        with sessions() as session:
+            refreshed = service.recheck_resources_in_session(
+                session, request, duplicate
+            )
+        assert refreshed.allowed
+        assert all(
+            item.evidence_digest == "b" * 64
+            for item in refreshed.freshness
+            if item.source == sample.source
+        )
+
+
+@pytest.mark.parametrize("contract_error", [False, True])
+def test_low_level_run_preview_propagates_contract_defects(
+    tmp_path: Path, monkeypatch, contract_error: bool
+) -> None:
+    """Catch low-level planner defects being mislabeled as unavailable evidence."""
+    sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
+    installed_recipe(
+        lifecycle, mapping_id, build_id, nodes, request_id=str(uuid.uuid4())
+    )
+    service = _service(sessions, NOW, lifecycle, RecordingArtifactExecutor())
+    request = _request(sessions, nodes[0])
+    valid = service.preview(request, actor="admin").assessment()
+
+    def defective(*_args, **_kwargs):
+        if contract_error:
+            return RunSwitchAssessment.model_validate(
+                {**valid.model_dump(), "allowed": False}
+            )
+        raise ValueError("run evidence temporarily unavailable")
+
+    monkeypatch.setattr(lifecycle, "preview_run", defective)
+    if contract_error:
+        with pytest.raises(ValidationError, match="admission verdict"):
+            service.preview(request, actor="admin")
+    else:
+        plan = service.preview(request, actor="admin")
+        assert any(
+            item.code == RunSwitchCode.RUN_ADMISSION_UNAVAILABLE
+            for item in plan.blockers
+        )

@@ -960,20 +960,31 @@ def test_contact_clock_guard_preserves_staleness_and_security_and_agent_freshnes
         "self._assessment_provider",
         "self._run_switch.inspect_request",
         "self._run_switch.recheck_resources_in_session",
+        "service._lifecycle.preview_run",
+        "self.preview",
+        "self.assess",
+        "self._replan_pending_application",
     ],
 )
-@pytest.mark.parametrize("caught", ["ValueError", "(KeyError, TypeError, ValueError)"])
+@pytest.mark.parametrize(
+    "caught", ["ValueError", "(KeyError, TypeError, ValueError)", "Exception", ""]
+)
 def test_planner_defects_cannot_be_added_as_preparation_waits(call, caught):
     """Catch a new planner call or broad handler swallowing ValidationError."""
-    source = f"try:\n    plan = {call}(request)\nexcept {caught}:\n    wait()\n"
+    handler = f"except {caught}:" if caught else "except:"
+    source = f"try:\n    plan = {call}(request)\n{handler}\n    wait()\n"
     for line in (2, 3):
         assert check_source(PATH, source, {line}, modes=("planner-defects",))
     assert not check_source(PATH, source, {1}, modes=("planner-defects",))
-    separated = source.replace(
-        f"except {caught}:",
-        "except ValidationError as error:\n    raise planner_contract_defect(assignment.id, error) from error\n"
-        + f"except {caught}:",
-    )
-    assert not check_source(
-        PATH, separated, set(range(1, 8)), modes=("planner-defects",)
-    )
+    for verdict in (
+        "raise planner_contract_defect(assignment.id, error) from error",
+        "raise FleetProfileStalePlanConflict('stale review') from error",
+        "raise",
+    ):
+        separated = source.replace(
+            handler,
+            f"except ValidationError as error:\n    {verdict}\n" + handler,
+        )
+        assert not check_source(
+            PATH, separated, set(range(1, 8)), modes=("planner-defects",)
+        )

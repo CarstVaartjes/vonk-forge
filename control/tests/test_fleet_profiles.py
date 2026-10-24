@@ -4663,6 +4663,7 @@ def test_planner_validation_defect_ends_load_with_evidence_after_restart(
         owner = service()
         assert owner.tick()
         application = owner.application(application.id)
+    assert len(calls) == (2 if initially_waiting else 1)
     assert application.state == LifecycleState.FAILED
     reason = next(
         item

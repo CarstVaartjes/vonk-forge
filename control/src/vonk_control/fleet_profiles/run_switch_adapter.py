@@ -65,7 +65,7 @@ from .contracts import (
     FleetProfileAdmissionEffectBusy,
     FleetProfileInvalid,
     FleetProfileResourceRecheckUnavailable,
-    planner_contract_defect,
+    FleetProfileStalePlanConflict,
 )
 from .dependencies import _LOGGER
 from .persistence import (
@@ -600,7 +600,13 @@ class RunSwitchFleetProfileAdapter(
                     kept_run_ids=plan_kept_runs(reviewed.effects),
                 )
             except ValidationError as error:
-                raise planner_contract_defect(assignment.id, error) from error
+                # This refresh combines a stored review with current facts.
+                # Discard it and assess afresh; only a fresh planner contract
+                # defect can end admission at the assessment boundary.
+                raise FleetProfileStalePlanConflict(
+                    f"Stored resource review for assignment {assignment.id} "
+                    f"is stale ({_error_summary(error)}); re-planning"
+                ) from error
             except (
                 RunSwitchOperationConflict,
                 KeyError,
