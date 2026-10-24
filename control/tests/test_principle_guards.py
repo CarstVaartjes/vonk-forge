@@ -192,6 +192,27 @@ def test_imported_subprocess_calls_cannot_escape_the_timeout_guard():
         )
 
 
+def test_an_http_read_without_a_timeout_is_a_wait_without_a_bound():
+    for bad, good in (
+        ("httpx2.Client(timeout=None)", "httpx2.Client(timeout=httpx2.Timeout(30.0))"),
+        ("httpx2.Timeout(None)", "httpx2.Timeout(30.0)"),
+        ("httpx2.Timeout(30.0, read=None)", "httpx2.Timeout(30.0, read=60.0)"),
+        ("client.stream('GET', url, timeout=None)", "client.stream('GET', url)"),
+    ):
+        source = "import httpx2\n{}"
+        assert scan_source(source.format(bad), path="x.py", mode="waits"), bad
+        assert not scan_source(source.format(good), path="x.py", mode="waits"), good
+    imported = "from httpx2 import Client as HttpClient\nHttpClient(timeout=None)"
+    assert scan_source(imported, path="x.py", mode="waits")
+
+
+def test_every_pool_capacity_gate_ahead_of_a_claim_has_a_verdict():
+    found = {
+        (site.path, site.function) for site in principle_guards.capacity_gate_sites()
+    }
+    assert found == set(principle_guards.CAPACITY_GATE_VERDICTS)
+
+
 def test_remedy_literals_are_decoded_before_matching():
     assert scan_source('message = "\\u0052etry"', path="reason.py", mode="remedies")
     assert scan_source(

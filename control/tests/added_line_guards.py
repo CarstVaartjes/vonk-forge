@@ -58,6 +58,7 @@ MODES = (
     "progress",
     "contact-clocks",
     "planner-defects",
+    "capacity-gates",
 )
 # The agent's messages a Controller test may send only as the stand-in pinned
 # to the agent's shared vector; built by hand they are the Controller's idea of
@@ -805,6 +806,17 @@ def check_source(
         hits.extend(
             (line, "planner contract defect hidden by broad wait")
             for line in planner_defect_waits(source)
+        )
+    if (
+        python
+        and not is_test
+        and "capacity-gates" in modes
+        and path.startswith("control/src/")
+    ):
+        hits.extend(
+            (site.line, site.kind)
+            for site in principles.capacity_gates_before_claims(source, path=path)
+            if (site.path, site.function) not in principles.CAPACITY_GATE_VERDICTS
         )
     if python and is_test and "clocks" in modes:
         hits.extend(

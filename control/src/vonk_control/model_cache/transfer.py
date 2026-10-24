@@ -485,9 +485,10 @@ class TransferMixin:
     ) -> None:
         cache = cast("ModelCacheService", self)
         with cache._lock:
-            if spec.sha256 in cache._active_digests:
-                raise _ArtifactWriterBusy(spec.sha256)
-            cache._active_digests.add(spec.sha256)
+            holder = cache._active_digests.get(spec.sha256)
+            if holder is not None:
+                raise _ArtifactWriterBusy(spec.sha256, holder=holder)
+            cache._active_digests[spec.sha256] = operation_id
         try:
             # Neither local nor cross-process contention can park a transfer
             # slot. The durable operation is rescheduled after releasing it.
@@ -495,7 +496,11 @@ class TransferMixin:
                 try:
                     fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
                 except BlockingIOError:
-                    raise _ArtifactWriterBusy(spec.sha256) from None
+                    lock_file.seek(0)
+                    holder = lock_file.read(36).decode("ascii", errors="ignore")
+                    raise _ArtifactWriterBusy(
+                        spec.sha256, holder=holder, recorded=True
+                    ) from None
                 # This small owner hint lets cancellation distinguish this
                 # operation's issued effects from another consumer sharing
                 # the same artifact lock. The flock remains the authority;
@@ -517,7 +522,7 @@ class TransferMixin:
             raise
         finally:
             with cache._lock:
-                cache._active_digests.discard(spec.sha256)
+                cache._active_digests.pop(spec.sha256, None)
 
     def _download_locked(
         self,
