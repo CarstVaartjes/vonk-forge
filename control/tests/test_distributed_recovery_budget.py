@@ -1,10 +1,12 @@
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 import pytest
 from sqlalchemy import select
+from vonk_agent_protocol import AgentResult, canonical_message
 from vonk_agent_protocol.route_activation import ROUTE_EVIDENCE_MAX_AGE_SECONDS
+from vonk_control.agent_jobs import AgentJobService
 from vonk_control.distributed_recovery import (
     DistributedRecoveryCoordinator,
     _recovery_marker,
@@ -12,6 +14,7 @@ from vonk_control.distributed_recovery import (
 )
 from vonk_control.models import AgentNode, AgentOperation, Job, RecipeRun, RunNode
 
+from .runtime_identity_support import claim_agent
 from .test_recipe_operations import (
     NOW,
     ConcurrentPublisher,
@@ -27,6 +30,145 @@ from .test_recipe_operations import (
     start_evidence,
     started_recipe,
 )
+
+
+class _AdvancingClock:
+    """A clock that moves on every read, as a real one does between calls."""
+
+    def __init__(self, start: datetime) -> None:
+        self.now = start
+
+    def __call__(self) -> datetime:
+        self.now += timedelta(microseconds=1_337)
+        return self.now
+
+    def advance(self, seconds: float) -> None:
+        self.now += timedelta(seconds=seconds)
+
+
+def test_distributed_recovery_admits_after_a_start_that_waited_for_its_claim(
+    tmp_path,
+):
+    """A rank loss after a real two-phase start queues recovery, then a fresh start.
+
+    Wrong implementation: recovery re-derived the accepted budget as the start
+    job's deadline minus its creation time.  On a real clock the child order is
+    created after its job and claimed later still, so the first claim
+    re-anchors the deadline and the derived span is no longer the whole,
+    bounded budget it once was: every distributed recovery settled the run
+    ``lost`` with "start authority is invalid".  A frozen test clock hid it.
+    """
+
+    clock = _AdvancingClock(NOW)
+    budget = 600
+    sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
+        tmp_path,
+        nodes=2,
+        distributed_lifecycle=True,
+        distributed_start_timeout_seconds=budget,
+    )
+    installed = installed_recipe(
+        service, mapping_id, build_id, nodes, request_id="i" * 36
+    )
+    jobs = AgentJobService(sessions, clock=clock)
+    service._clock = clock
+    service._agent_jobs = jobs
+    jobs.set_result_consumer(service.consume_agent_result)
+    plan = service.preview_run(installed.owner_id, "anchored")
+    started = service.start(
+        plan, plan_digest=plan.plan_digest, actor="admin", request_id="r" * 36
+    )
+    with sessions() as session:
+        job = session.get(Job, started.id)
+        children = tuple(
+            session.scalars(
+                select(AgentOperation).where(AgentOperation.parent_job_id == started.id)
+            )
+        )
+        assert job is not None and children
+        # The child orders carry their own, later clock reading.
+        assert all(child.created_at > job.created_at for child in children)
+
+    def claim_and_succeed(node_id: str) -> None:
+        claim = claim_agent(jobs, node_id, f"serial-{nodes.index(node_id)}")
+        assert claim is not None and claim.operation.value == "recipe.start"
+        jobs.record_result(
+            AgentResult.model_validate_json(
+                canonical_message(
+                    {
+                        "fence": claim.fence,
+                        "state": "succeeded",
+                        "result": start_evidence(claim.payload),
+                    }
+                )
+            )
+        )
+
+    # The orders wait in the queue before any Spark claims them; the first
+    # claim anchors the budget to the claim time.
+    clock.advance(20.25)
+    for node_id in nodes:
+        claim_and_succeed(node_id)
+    with sessions() as session:
+        job = session.get(Job, started.id)
+        assert job is not None and job.payload.get("start_anchored_at") is not None
+    claim_and_succeed(nodes[0])
+    assert service.get(started.id).state == "succeeded"
+    mark_current_exact_observations(sessions, started.owner_id, clock.now)
+    service, routes = bind_route_publications(sessions, service, ConcurrentPublisher())
+    service._clock = clock
+    routes._clock = clock
+    routes.publish_run(started.owner_id)
+
+    # Rank 1 is lost; the Sparks still report their presence.
+    clock.advance(5.5)
+    record_exact_empty_snapshot(sessions, nodes[1], clock.now)
+    with sessions.begin() as session:
+        for presence in session.scalars(select(AgentNode)):
+            presence.management_observed_at = clock.now
+    recovery = DistributedRecoveryCoordinator(
+        sessions,
+        routes=routes,
+        agent_jobs=jobs,
+        clock=clock,
+        start_timeout_seconds=budget,
+    )
+    assert recovery.tick() is True
+    with sessions() as session:
+        run = session.get(RecipeRun, started.owner_id)
+        assert run is not None
+        assert run.state != "lost", run.route_error
+        stop = session.scalar(
+            select(Job).where(
+                Job.kind == "recipe.stop",
+                Job.payload["owner_id"].as_string() == started.owner_id,
+            )
+        )
+        assert stop is not None
+        # The recovery's start window is the configured budget plus the
+        # ordered stops, counted from the recovery decision.
+        deadline = _recovery_deadline(stop)
+        assert (
+            NOW
+            < deadline - timedelta(seconds=budget)
+            <= clock.now + timedelta(seconds=2 * 30)
+        )
+    for node_id in nodes:
+        service.record_node_result(stop.id, node_id, succeeded=True, evidence={})
+    with sessions() as session:
+        restart = session.scalar(
+            select(Job).where(
+                Job.kind == "recipe.start",
+                Job.payload["owner_id"].as_string() == started.owner_id,
+                Job.id != started.id,
+            )
+        )
+        assert restart is not None and restart.state == "running"
+        assert tuple(
+            session.scalars(
+                select(AgentOperation).where(AgentOperation.parent_job_id == restart.id)
+            )
+        )
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
@@ -337,9 +479,7 @@ def test_one_shot_recovery_reports_why_replay_is_unsafe(tmp_path):
         assert "submit a new authorized run" in (run.route_error or "")
 
 
-@pytest.mark.parametrize(
-    "invalid", ["missing", "missing-job", "malformed", "unbounded", "wrong-plan"]
-)
+@pytest.mark.parametrize("invalid", ["missing-job", "wrong-plan"])
 @pytest.mark.usefixtures("damaged_json_rows")
 def test_recovery_refuses_missing_or_invalid_original_start_authority(
     tmp_path, invalid
@@ -357,14 +497,8 @@ def test_recovery_refuses_missing_or_invalid_original_start_authority(
         job = session.get(Job, started.id)
         assert job is not None
         payload = dict(job.payload)
-        if invalid == "missing":
-            payload.pop("start_deadline")
-        elif invalid == "missing-job":
+        if invalid == "missing-job":
             payload["owner_id"] = "missing"
-        elif invalid == "malformed":
-            payload["start_deadline"] = "tomorrow"
-        elif invalid == "unbounded":
-            payload["start_deadline"] = (NOW + timedelta(days=1)).isoformat()
         else:
             payload["plan_digest"] = "0" * 64
         job.payload = payload

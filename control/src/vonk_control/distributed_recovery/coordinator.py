@@ -71,15 +71,15 @@ class DistributedRecoveryCoordinator:
         agent_jobs: _RecoveryJobQueue,
         clock: Callable[[], datetime],
         recovery_run_stops: _RecoveryRunStops | None = None,
-        singleton_start_timeout_seconds: int = 3600,
+        start_timeout_seconds: int = 3600,
     ) -> None:
         self._sessions = sessions
         self._routes = routes
         self._agent_jobs = agent_jobs
         self._clock = clock
         self._recovery_run_stops = recovery_run_stops
-        self._singleton_start_timeout_seconds = (
-            validate_distributed_start_timeout_seconds(singleton_start_timeout_seconds)
+        self._start_timeout_seconds = validate_distributed_start_timeout_seconds(
+            start_timeout_seconds
         )
 
     def tick(self, run_id: str | None = None) -> bool:
@@ -217,9 +217,7 @@ class DistributedRecoveryCoordinator:
                             run_nodes[0],
                             now,
                             next_run_generation=run.run_generation + 1,
-                            start_timeout_seconds=(
-                                self._singleton_start_timeout_seconds
-                            ),
+                            start_timeout_seconds=self._start_timeout_seconds,
                         )
                     else:
                         previous_run_generation = run.run_generation
@@ -250,6 +248,7 @@ class DistributedRecoveryCoordinator:
                                 now,
                                 failed[0].rank,
                                 stop_run_generation=previous_run_generation,
+                                start_timeout_seconds=self._start_timeout_seconds,
                             )
                         except _RecoveryDependencyPending:
                             # A pending wait must not outlive this generation
