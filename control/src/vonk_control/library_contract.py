@@ -36,7 +36,11 @@ from .machine_states import (
     RouteStateField,
     RunStateField,
 )
-from .model_cache_contract import ModelCacheOperationState, ModelCacheUsage
+from .model_cache_contract import (
+    ModelCacheOperationState,
+    ModelCacheUsage,
+    ModelStorageObservation,
+)
 from .run_switch_contract import RunSwitchReason, SparkFit, SparkGroup
 from .strict_json import StrictModel
 
@@ -268,7 +272,7 @@ class LibraryFilterValues(StrictModel):
     fits_fleet: bool | None = None
 
 
-class ModelLibraryResponse(StrictModel):
+class ModelLibraryResponse(ModelStorageObservation):
     catalog_observed_at: datetime | None = None
     generated_at: datetime
     library: LibraryRelease | None = None
@@ -279,7 +283,8 @@ class ModelLibraryResponse(StrictModel):
     freshness_policy: FreshnessPolicy
 
 
-class ModelDetailResponse(LibraryModelProjection):
+class ModelDetailResponse(LibraryModelProjection, ModelStorageObservation):
+    generated_at: datetime
     document: ModelDefinition
 
 

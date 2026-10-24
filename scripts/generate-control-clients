@@ -90,7 +90,10 @@ def typescript_vocabulary() -> str:
         FleetRemovalDisposition,
         FleetRemovalReason,
     )
-    from vonk_control.model_cache_contract import CacheOperationKind
+    from vonk_control.model_cache_contract import (
+        CacheOperationKind,
+        ModelStorageObservationReason,
+    )
 
     word_types = [
         field.annotation
@@ -103,6 +106,7 @@ def typescript_vocabulary() -> str:
             FleetRemovalReason,
             CacheAssetDisposition,
             CacheOperationKind,
+            ModelStorageObservationReason,
         )
     )
     for words in word_types:

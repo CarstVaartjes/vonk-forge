@@ -813,7 +813,7 @@ export function LibraryWorkcell({
                     {(selectedModel.cacheUsage.retained_revisions ?? []).map((revision) => (
                       <span key={revision.content_sha256}>
                         Previous revision retained because {revision.owners.join(", ")};{" "}
-                        {formatBytes(revision.unique_bytes)} unique; rechecked every 30s
+                        {formatBytes(revision.unique_bytes)} unique
                       </span>
                     ))}
                   </span>

@@ -72,7 +72,7 @@ def models(
         if cached
         else None
     )
-    storage = self._model_storage() if self._model_storage is not None else None
+    storage = self._storage_observer.snapshot()
     alignment_by_model = self._alignment_by_model(
         document for _, document in recipe_rows
     )
@@ -190,6 +190,7 @@ def models(
             )
         ]
     response = ModelLibraryResponse(
+        **storage.observation.model_dump(),
         catalog_observed_at=_utc(self._catalog_observed_at),
         generated_at=_utc(self._clock()),
         library=self._library_release(),
@@ -272,12 +273,14 @@ def model_detail(self: LibraryProjection, selector: str) -> ModelDetailResponse:
         (model.identity.publisher, model.identity.slug), ()
     )
     snapshot = self._local_state_snapshot((digest,))
-    storage = self._model_storage() if self._model_storage is not None else None
+    storage = self._storage_observer.snapshot()
     entry = self._model_projection(
         row, model, snapshot, alignment=sorted(alignment), storage=storage
     )
     return ModelDetailResponse.model_validate(
-        entry.model_dump(mode="python") | {"document": model}
+        entry.model_dump(mode="python")
+        | storage.observation.model_dump()
+        | {"document": model, "generated_at": _utc(self._clock())}
     )
 
 

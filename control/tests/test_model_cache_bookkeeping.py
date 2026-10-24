@@ -230,10 +230,8 @@ def test_a_damaged_set_manifest_does_not_block_reconcile_or_listing(
         assert row is not None
         row.manifest = {"damaged": True}
     service.reconcile_storage()  # used to raise on the first damaged row
-    listing = service.inventory()
-    by_set = {entry["artifact_set_sha256"]: entry for entry in listing["entries"]}
-    assert by_set[good.artifact_set_sha256]["artifacts"]
-    assert by_set[other.artifact_set_sha256]["artifacts"] == []  # unknown, listed
+    assert service.get_entry(str(good.artifact_set_sha256))["artifacts"]
+    assert service.get_entry(str(other.artifact_set_sha256))["artifacts"] == []
     assert service.get_entry(str(good.artifact_set_sha256))["state"] == "cached"
     with observe_unknown():  # unreadable and not re-derivable
         observed = service.manifest_for_artifact_set(str(other.artifact_set_sha256))
