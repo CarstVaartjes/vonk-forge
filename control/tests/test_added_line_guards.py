@@ -831,6 +831,8 @@ def test_guard_rejects_a_durable_policy_call_without_ongoing_intent() -> None:
         "if RECOVERY.exhausted(repeats):\n    return None\n",
         "if not row.cancel_requested and row.retry_count >= 5:\n    return None\n",
         "if row.cancel_requested or row.retry_count >= 5:\n    return None\n",
+        "seen[key] = attempt + 1\nif seen[key] >= 3:\n    return None\n",
+        "seen, other = attempt + 1, 0\nif seen >= 3:\n    return None\n",
     ],
 )
 def test_count_guard_catches_aliases_and_does_not_treat_active_intent_as_cancelled(

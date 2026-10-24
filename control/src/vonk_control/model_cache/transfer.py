@@ -498,7 +498,9 @@ class TransferMixin:
                 except BlockingIOError:
                     lock_file.seek(0)
                     holder = lock_file.read(36).decode("ascii", errors="ignore")
-                    raise _ArtifactWriterBusy(spec.sha256, holder=holder) from None
+                    raise _ArtifactWriterBusy(
+                        spec.sha256, holder=holder, recorded=True
+                    ) from None
                 # This small owner hint lets cancellation distinguish this
                 # operation's issued effects from another consumer sharing
                 # the same artifact lock. The flock remains the authority;

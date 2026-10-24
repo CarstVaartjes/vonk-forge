@@ -36,7 +36,12 @@ from .constants import (
     SCHEMA_VERSION,
 )
 from .errors import _ArtifactWriterBusy
-from .persistence import _cache_failure, _manifest_of
+from .persistence import (
+    _cache_failure,
+    _manifest_of,
+    _store_operation_payload,
+    _updated,
+)
 from .views import _BackgroundTransfer
 
 if TYPE_CHECKING:
@@ -183,14 +188,11 @@ class SchedulerMixin:
         if transfer_attempt is None:
             return
         specs = list(_unique_artifacts(manifest.artifacts).values())
-        if (
-            not force
-            and planned_total == 0
-            and all(cache._object_is_stored(spec) for spec in specs)
-        ):
-            # Every object is published with its receipt (verified at ingress,
-            # never re-hashed): there is nothing to transfer or re-record, so
-            # the download ends here instead of queueing behind the pool.
+        if not force and planned_total == 0:
+            # The claim just confirmed every object's receipt and size (bytes
+            # are verified at ingress, never re-hashed): there is nothing to
+            # transfer or re-record, so the download ends here instead of
+            # queueing behind the pool. Publication still checks the gates.
             cache._finish_background_success(
                 operation_id, set_digest, manifest, planned_total
             )
@@ -219,13 +221,18 @@ class SchedulerMixin:
 
         Every operation waiting at zero is served before any takes another
         slot, so a large model never refills its own freed slots ahead of a
-        model that has none. Each pass submits one file, so the loop ends once
-        the pool is full or no operation has a file left to start.
+        model that has none; a newly claimed operation is served first, so a
+        claim never holds a lease without a transfer. Each pass submits one
+        file, so the loop ends once the pool is full or no operation has a
+        file left to start.
         """
         cache = cast("ModelCacheService", self)
         while cache._available_transfer_slots() > 0:
+            # Ties go to the operation that has started the fewest files, so
+            # a large download back at zero in flight never takes a slot ahead
+            # of one that has not started; the id only orders equals.
             waiting = [
-                (record.pending(), operation_id)
+                (record.pending(), record.next_index, operation_id)
                 for operation_id, record in cache._background_operations.items()
                 if record.failure is None
                 and record.next_index < len(record.specs)
@@ -233,7 +240,7 @@ class SchedulerMixin:
             ]
             if not waiting:
                 return
-            _pending, operation_id = min(waiting)
+            *_served, operation_id = min(waiting)
             record = cache._background_operations[operation_id]
             spec = record.specs[record.next_index]
             record.next_index += 1
@@ -416,7 +423,7 @@ class SchedulerMixin:
         """Claim up to ``limit`` due operations.
 
         With ``transfer_slots``, at most that many claims may need a transfer;
-        a download whose planned bytes are zero needs none and is always due.
+        a download whose objects are all stored needs none and is always due.
         """
         cache = cast("ModelCacheService", self)
         now = cache._clock()
@@ -578,6 +585,21 @@ class SchedulerMixin:
                     or payload.force_refresh
                     or payload.transfer.total_bytes > 0
                 )
+                if not transfers_bytes and not all(
+                    cache._object_is_stored(spec)
+                    for spec in _unique_artifacts(manifest.artifacts).values()
+                ):
+                    # The plan found every object stored, but one has gone
+                    # since: re-plan its bytes, and it takes a transfer slot
+                    # like any other download.
+                    payload = _updated(
+                        payload,
+                        transfer=cache._transfer_state_for_manifest(
+                            manifest, force=False
+                        ),
+                    )
+                    _store_operation_payload(operation, operation.kind, payload)
+                    transfers_bytes = True
                 if (
                     transfers_bytes
                     and transfer_slots is not None

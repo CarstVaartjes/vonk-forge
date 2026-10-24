@@ -410,6 +410,18 @@ def _request_or_cancel(test: ast.AST) -> bool:
     )
 
 
+def _assigned(target: ast.expr) -> list[ast.expr]:
+    """The named stores of a target: ``seen[key]`` counts as ``seen``."""
+
+    if isinstance(target, (ast.Tuple, ast.List)):
+        return [named for element in target.elts for named in _assigned(element)]
+    if isinstance(target, ast.Starred):
+        return _assigned(target.value)
+    while isinstance(target, ast.Subscript):
+        target = target.value
+    return [target]
+
+
 def scan_count_endings(source: str) -> list[int]:
     """Attempt/repetition comparisons that terminate work or remove its action.
 
@@ -475,9 +487,13 @@ def scan_count_endings(source: str) -> list[int]:
             if isinstance(assignment, ast.Assign) and _counter(
                 assignment.value, _REPETITION
             ):
-                counters.update(_name(target) for target in assignment.targets)
-        # A subscript or tuple target has no name; it must not make every
-        # unnamed operand (a constant) count as a repetition.
+                counters.update(
+                    _name(named)
+                    for target in assignment.targets
+                    for named in _assigned(target)
+                )
+        # A target with no name must not make every unnamed operand (a
+        # constant) count as a repetition.
         counters.discard("")
         comparisons = [
             part for part in ast.walk(branch.test) if isinstance(part, ast.Compare)

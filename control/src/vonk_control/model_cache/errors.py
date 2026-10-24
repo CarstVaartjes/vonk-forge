@@ -267,10 +267,19 @@ class _ArtifactWriterBusy(_CacheUnknown):
 
     disposition = Disposition.WAIT  # type: ignore[assignment]
 
-    def __init__(self, digest: str, *, holder: str | None = None) -> None:
-        # The holder is the operation the lock file names, so the wait says
-        # whose transfer it follows instead of only that one exists.
-        writer = "" if not holder else f" (operation {holder})"
+    def __init__(
+        self, digest: str, *, holder: str | None = None, recorded: bool = False
+    ) -> None:
+        # An in-process holder is the live writer. The lock file only names the
+        # last download that wrote it: removal and cancellation probes take
+        # the same lock without writing, so that name is a hint, not the owner.
+        writer = (
+            ""
+            if not holder
+            else f" (last recorded writer: operation {holder})"
+            if recorded
+            else f" (operation {holder})"
+        )
         super().__init__(
             ModelCacheCode.OBJECT_BUSY,
             f"waiting for the managed-cache writer{writer} of object {digest}; resumes after that writer releases its lock",
