@@ -7085,9 +7085,7 @@ def planner_world(
 
 @pytest.mark.parametrize("memory", ("none", "conditional", "infeasible"))
 @pytest.mark.parametrize("missing_ranks", (0, 1))
-@pytest.mark.parametrize(
-    "lifecycle_result", ("allowed", "disallowed", "conflict", "mismatched")
-)
+@pytest.mark.parametrize("lifecycle_result", ("allowed", "disallowed", "conflict"))
 @pytest.mark.parametrize("stoppable", (False, True))
 def test_planner_entrypoints_return_valid_contracts(
     planner_world: _PlannerWorld,
@@ -7101,6 +7099,14 @@ def test_planner_entrypoints_return_valid_contracts(
 
     The PostgreSQL matrix below owns end-to-end admission proof. This Cartesian
     property guards every planner's producer/JSON/consumer boundary in memory.
+
+    Only real events are faked. ``disallowed`` is the lifecycle's own refusal
+    when a declared-missing rank re-enrols (rank membership changed), and
+    ``conflict`` its planning conflict. The alternating ``observed_role_peaks``
+    fake models peak rows that disappear between two fits of one preview: each
+    fit reads them in its own READ COMMITTED statement, so a concurrent
+    retention delete can leave the current fit infeasible while the after-Stop
+    fit is conditional.
     """
     from vonk_control.recipe_action_plans import StopPlan
     from vonk_control.run_switch_operations import resource_fit
@@ -7137,8 +7143,6 @@ def test_planner_entrypoints_return_valid_contracts(
         plan = preview_stop(run_id, profile_target_node_ids=profile_target_node_ids)
         if lifecycle_result == "disallowed":
             return replace(plan, allowed=False)
-        if lifecycle_result == "mismatched":
-            return replace(plan, missing_node_ids=())
         return plan
 
     monkeypatch.setattr(world.lifecycle, "preview_stop", lifecycle_stop)
@@ -7193,11 +7197,8 @@ def test_planner_entrypoints_return_valid_contracts(
 def test_profile_partial_stop_waits_with_lifecycle_scope_blocker(
     tmp_path: Path,
     postgres_engine,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A re-enrolled rank must produce a typed wait, not a validator exception."""
-    from vonk_control.recipe_action_plans import StopPlan
-
     sessions, lifecycle, _, mapping_id, build_id, nodes = setup_services(
         tmp_path, nodes=2, engine=postgres_engine
     )
@@ -7217,17 +7218,8 @@ def test_profile_partial_stop_waits_with_lifecycle_scope_blocker(
     scope = RunSwitchProfileStopScope(
         original_group=group, target_node_ids=[nodes[0]], missing_node_ids=[nodes[1]]
     )
-    preview_stop = lifecycle.preview_stop
-
-    def rejoined_stop(
-        run_id: str, *, profile_target_node_ids: Sequence[str] | None = None
-    ) -> StopPlan:
-        return replace(
-            preview_stop(run_id, profile_target_node_ids=profile_target_node_ids),
-            missing_node_ids=(),
-        )
-
-    monkeypatch.setattr(lifecycle, "preview_stop", rejoined_stop)
+    # nodes[1] was declared missing but is enrolled (revoked_at is None): the
+    # real lifecycle reports the changed rank membership as a disallowed Stop.
     plan = planner.preview_profile_stop(run.owner_id, scope, actor="admin")
     assert not plan.allowed and not plan.stops
     assert [reason.code for reason in plan.blockers] == [
@@ -7250,15 +7242,32 @@ def test_profile_partial_stop_waits_with_lifecycle_scope_blocker(
     assert child.blockers[0].detail == RunSwitchCode.STOP_PLAN_UNAVAILABLE
     assert child.next_attempt_at is not None and child.next_attempt_at > NOW
     assert _result(child).observation_deadline_at is not None
-    # A blocked partial Stop must not poison the next authorized workload request.
+    # A blocked partial Stop must not poison the next workload request on the
+    # same Sparks. The switch below replaces this run on both of the child's
+    # Sparks, so it is exactly what a child holding them would block. A Stop
+    # takes no reservations: the child's only claim is the Sparks' workload-
+    # intent ordinal (1). The switch is admitted without a blocker and moves
+    # both Sparks to ordinal 2, so `_apply_plan`'s ordinal fence now refuses
+    # the child's ordinal (SUPERSEDED), not the switch: the latest request steers.
+    switch = _request(sessions, nodes[0], action="switch").model_copy(
+        update={"spark_group": group}
+    )
     fresh = planner.apply(
-        RunSwitchApplyRequest(
-            **_request(sessions, nodes[0], action="switch").model_dump(),
-            request_key=str(uuid.uuid4()),
-        ),
+        RunSwitchApplyRequest(**switch.model_dump(), request_key=str(uuid.uuid4())),
         actor="admin",
     )
     assert fresh.operation_id != child.operation_id
+    assert fresh.state == LifecycleState.QUEUED and not fresh.blockers
+    assert sorted(fresh.node_ids) == sorted(nodes)
+    with sessions() as session:
+        child_job = session.get(Job, child.operation_id)
+        fresh_job = session.get(Job, fresh.operation_id)
+        assert child_job is not None and fresh_job is not None
+        assert child_job.payload["workload_intent_ordinal"] == 1
+        assert fresh_job.payload["workload_intent_ordinal"] == 2
+        assert {
+            node.workload_intent_ordinal for node in session.scalars(select(AgentNode))
+        } == {2}
 
 
 @pytest.mark.parametrize(
