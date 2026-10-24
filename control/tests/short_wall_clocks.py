@@ -7,8 +7,11 @@ behaviour (a lock-wait probe, a fake clock, event order) and bound a hang
 guard generously. An ``Event.wait`` the test expects to expire (``not
 done.wait(0.1)``) or a polling interval in a loop (``while not stop.wait(1)``)
 is not a limit on work. ``assert elapsed < 0.5`` is the same limit after the
-fact: prove the order (the work returned while the blocker still held) instead. A deliberate short limit names its reason on the call:
-``# wall-clock: <reason>``.
+fact: prove the order (the work returned while the blocker still held) instead.
+Shortening a production budget (``monkeypatch.setattr(owner, "X_SECONDS",
+0.1)``) is the same limit inside the code under test: freeze or advance the
+module's clock instead (``pass_budget_clocks``). A deliberate short limit names
+its reason on the call: ``# wall-clock: <reason>``.
 """
 
 from __future__ import annotations
@@ -64,6 +67,20 @@ def _limit(node: ast.Call) -> ast.expr | None:
     index = TIMEOUT_ARGUMENT.get(name)
     if index is not None and len(node.args) > index:
         return node.args[index]
+    return None
+
+
+def _patched_budget(node: ast.Call) -> ast.expr | None:
+    """The value a ``setattr``/``patch`` call gives a ``*_SECONDS`` constant."""
+    if _name(node) not in {"setattr", "object", "patch"}:
+        return None
+    for index, argument in enumerate(node.args[:-1]):
+        if (
+            isinstance(argument, ast.Constant)
+            and isinstance(argument.value, str)
+            and argument.value.endswith("_SECONDS")
+        ):
+            return node.args[index + 1]
     return None
 
 
@@ -127,7 +144,7 @@ def scan_source(source: str) -> list[int]:
         if isinstance(node, ast.Call):
             if id(node) in exempt and _name(node) == "wait":
                 continue
-            limit = _limit(node)
+            limit = _limit(node) or _patched_budget(node)
         elif (
             isinstance(node, ast.BinOp)
             and isinstance(node.op, ast.Add)

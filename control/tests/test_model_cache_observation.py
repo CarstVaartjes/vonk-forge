@@ -6,7 +6,6 @@ import hashlib
 import json
 import multiprocessing
 import os
-import time
 import uuid
 from collections import Counter
 from datetime import UTC, datetime, timedelta
@@ -32,6 +31,8 @@ from vonk_control.models import (
 from vonk_control.profile_read_observation import profile_read
 from vonk_control.run_switch_operations import DatabaseRunSwitchArtifactInspector
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
+
+from .pass_budget_clocks import completing_wait, expiring_wait
 
 
 @pytest.fixture
@@ -169,33 +170,40 @@ def _inspect(cache, *, sessions, manifest):
 
 
 def test_slow_nas_observation_converges_beyond_ten_request_budgets(
-    observed_cache, monkeypatch
+    observed_cache, monkeypatch, frozen_pass_budgets
 ):
     """Catches nested request deadlines aborting a large set on every retry."""
     cache, _sessions, manifest, _now = observed_cache
-    normal_budget = profile_read_observation.PROFILE_READ_STORAGE_SECONDS
-    monkeypatch.setattr(profile_read_observation, "PROFILE_READ_STORAGE_SECONDS", 0.1)
+    budget = profile_read_observation.PROFILE_READ_STORAGE_SECONDS
     calls = Counter()
     original = cache._read_object_receipt
+    answered, stalled = Event(), []
 
     def slow(digest, expected):
+        # Objects are read only after the request answered with progress. The
+        # observer logs its own errors, so record a scan the request waited on.
+        if not answered.wait(30):
+            stalled.append(digest)
+            raise OSError("the request waited for the NAS scan")
         calls[digest] += 1
-        time.sleep(0.01)  # 146 files take >10 x the 100 ms request budget
+        frozen_pass_budgets.advance(budget)  # every object outlasts a request
         return original(digest, expected)
 
     monkeypatch.setattr(cache, "_read_object_receipt", slow)
     read = profile_read(
         lambda: cache.download_preview(artifact_set_sha256=manifest.digest)
     )
-    started = time.monotonic()
-    with pytest.raises(BookkeepingUnknown) as pending:
-        read()
+    try:
+        with pytest.raises(BookkeepingUnknown) as pending:
+            read()
+    finally:
+        answered.set()
+    assert not stalled, "the request waited for the NAS scan"
     assert pending.value.typed_reason is WaitReason.OBSERVATION_UNAVAILABLE
     assert "objects checked" in str(pending.value)
     assert "next check" in str(pending.value)
     _finish(cache, manifest)
-    elapsed = time.monotonic() - started
-    assert elapsed > 10 * profile_read_observation.PROFILE_READ_STORAGE_SECONDS
+    assert frozen_pass_budgets.seconds > 10 * budget
     result = read()
     assert result["already_cached_bytes"] == manifest.expected_bytes
     assert result["new_bytes"] == 0
@@ -205,19 +213,10 @@ def test_slow_nas_observation_converges_beyond_ten_request_budgets(
 
     monkeypatch.setattr(cache._storage_observer, "_read", request_must_not_touch_nas)
     monkeypatch.setattr(cache, "free_bytes", request_must_not_touch_nas)
-    # The reduced budget above tests storage convergence. Run the complete
-    # SQL/catalog consumer with its real budget, rather than timing unrelated
-    # queries against 100 ms under full-suite contention. NAS reads still fail.
-    monkeypatch.setattr(
-        profile_read_observation, "PROFILE_READ_STORAGE_SECONDS", normal_budget
-    )
     inspection = _inspect(cache, sessions=_sessions, manifest=manifest)
     assert inspection.missing_nas_bytes == 0
     assert not inspection.blockers
     assert calls == Counter({spec.sha256: 1 for spec in manifest.artifacts})
-    print(
-        f"146-object observation: {elapsed:.3f}s vs 0.100s request budget; no restarted objects"
-    )
 
 
 def test_observer_corrects_stale_cached_rows_and_missing_objects(observed_cache):
@@ -343,13 +342,15 @@ def test_restart_resumes_checkpoint_without_reobserving_completed_objects(
         restarted.close()
 
 
-def test_nested_observation_outlives_request_deadline(monkeypatch):
+def test_nested_observation_outlives_request_deadline(monkeypatch, frozen_pass_budgets):
     """Fails on main: nested probes stop at the expired parent request budget."""
     from vonk_control.profile_read_observation import observe_storage
 
-    monkeypatch.setattr(profile_read_observation, "PROFILE_READ_STORAGE_SECONDS", 0.01)
     entered, release, finished = Event(), Event(), Event()
     calls = []
+    monkeypatch.setattr(
+        profile_read_observation, "wait", expiring_wait(frozen_pass_budgets, entered)
+    )
 
     @observe_storage
     def object_read(index):
@@ -367,14 +368,20 @@ def test_nested_observation_outlives_request_deadline(monkeypatch):
             finished.set()
 
     read = profile_read(batch)
+    started = frozen_pass_budgets.seconds
     try:
         with pytest.raises(BookkeepingUnknown):
             read()
-        assert entered.wait(30)
     finally:
         release.set()
+    # The request answers within its own deadline, not the nested probe's.
+    assert (
+        frozen_pass_budgets.seconds - started
+        <= profile_read_observation.PROFILE_READ_STORAGE_SECONDS
+    )
     assert finished.wait(30)
     assert calls == list(range(146))
+    monkeypatch.setattr(profile_read_observation, "wait", completing_wait)
     assert read() == tuple(range(146))
 
 
@@ -597,7 +604,7 @@ def test_cold_api_preparation_collects_worker_checkpoint_on_first_review(
 
 
 def test_cold_checkpoint_collection_outlives_a_timed_out_reader(
-    observed_cache, monkeypatch
+    observed_cache, monkeypatch, frozen_pass_budgets
 ):
     """Catches an unbounded cold read or restarting its collection on every retry."""
     cache, sessions, manifest, now = observed_cache
@@ -621,12 +628,20 @@ def test_cold_checkpoint_collection_outlives_a_timed_out_reader(
         return original(manifest)
 
     monkeypatch.setattr(api._storage_observer, "_read", slow)
-    monkeypatch.setattr(profile_read_observation, "PROFILE_READ_STORAGE_SECONDS", 0.02)
+
+    @profile_read
+    def spent_request():
+        # The request's budget is spent before it reaches the cold collection.
+        frozen_pass_budgets.advance(
+            profile_read_observation.PROFILE_READ_STORAGE_SECONDS
+        )
+        return api._storage_observer.read(manifest)
+
     api._storage_observer.schedule(manifest)
     try:
         assert entered.wait(30)
         with pytest.raises(BookkeepingUnknown):
-            profile_read(api._storage_observer.read)(manifest)
+            spent_request()
         assert not release.is_set()
         release.set()
         _finish(api, manifest)

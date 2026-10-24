@@ -733,6 +733,10 @@ GATEWAY_WAIT = (
         "for child in children:\n    child.wait(timeout=5)\n",
         # The opt-out must name its reason.
         "future.result(timeout=1)  # wall-clock:\n",
+        # A shortened production budget expires on a loaded runner.
+        'monkeypatch.setattr(observation, "PROFILE_READ_STORAGE_SECONDS", 0.1)\n',
+        'monkeypatch.setattr("vonk_control.owner.BUDGET_SECONDS", 2)\n',
+        'with patch.object(owner, "_LOCK_BUDGET_SECONDS", 0.2):\n    pass\n',
     ],
 )
 def test_a_new_short_wall_clock_limit_on_work_fails(source):
@@ -756,6 +760,9 @@ def test_a_new_short_wall_clock_limit_on_work_fails(source):
         "assert 0.3 <= elapsed\n",
         "assert time.monotonic() - started < 30\n",
         "future.result(timeout=1)  # wall-clock: proves the stub's own deadline\n",
+        'monkeypatch.setattr(route_runtime, "_PUBLICATION_LOCK_BUDGET_SECONDS", 0)\n',
+        'monkeypatch.setattr(observation, "PROFILE_READ_STORAGE_SECONDS", 60)\n',
+        'monkeypatch.setattr(store, "_RETRY_SECONDS", 0.01)  # wall-clock: interval\n',
     ],
 )
 def test_a_generous_bound_expected_expiry_or_named_reason_is_allowed(source):
@@ -790,6 +797,8 @@ def test_count_cannot_end_standing_intent(ending: str) -> None:
         "if row.cancel_requested and row.observe_count >= STOP_BUDGET:\n    return replace(row, state=State.CANCELLED)\n",
         "if not ongoing_intent and failed_attempts >= self.max_failures:\n    return None\n",
         "if row.retry_count >= 5:\n    return replace(row, next_action_at=now + cooldown)\n",
+        # A subscript target beside an attempt is not a counter of constants.
+        "def run(attempt):\n    records[key] = attempt\n    if size == 0:\n        return None\n",
     ],
 )
 def test_count_guard_allows_evidence_backoff_cancel_and_request_local_retry(
@@ -829,6 +838,8 @@ def test_guard_rejects_a_durable_policy_call_without_ongoing_intent() -> None:
         "if RECOVERY.exhausted(repeats):\n    return None\n",
         "if not row.cancel_requested and row.retry_count >= 5:\n    return None\n",
         "if row.cancel_requested or row.retry_count >= 5:\n    return None\n",
+        "seen[key] = attempt + 1\nif seen[key] >= 3:\n    return None\n",
+        "seen, other = attempt + 1, 0\nif seen >= 3:\n    return None\n",
     ],
 )
 def test_count_guard_catches_aliases_and_does_not_treat_active_intent_as_cancelled(
@@ -1026,3 +1037,53 @@ def test_planner_defect_guard_ignores_other_services_previews(call):
     """Catch the planner guard flagging another service's same-named preview."""
     source = f"try:\n    plan = {call}(request)\nexcept ValueError:\n    wait()\n"
     assert not check_source(PATH, source, {2, 3}, modes=("planner-defects",))
+
+
+_CLAIM = "    claimed = cache._claim_operations(limit=requested)\n"
+
+
+@pytest.mark.parametrize(
+    "gate",
+    [
+        # The main-era model-cache tick: a full pool skipped the claim, so a
+        # download whose bytes were all stored waited behind a hung transfer.
+        "    capacity = cache._available_transfer_slots()\n    if not capacity:\n        return 0\n",
+        "    if slots <= 0:\n        return 0\n",
+        "    if self.free_workers == 0:\n        return 0\n",
+        "    if available < 1:\n        return 0\n",
+        "    if not cache._available_transfer_slots():\n        return 0\n",
+        "    if len(inflight) >= self._parallelism:\n        return 0\n",
+    ],
+)
+def test_capacity_gate_ahead_of_a_claim_is_flagged(gate: str) -> None:
+    source = "def tick(cache):\n" + gate + _CLAIM
+    gate_line = next(n for n, t in enumerate(source.splitlines(), 1) if "if " in t)
+    assert check_source(PATH, source, {gate_line}, modes=("capacity-gates",))
+    submit = source.replace(_CLAIM, "    pool.submit(run)\n")
+    assert check_source(PATH, submit, {gate_line}, modes=("capacity-gates",))
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        # Claim first; only the transfer waits for a slot.
+        "def tick(cache):\n" + _CLAIM + "    if not capacity:\n        return 0\n",
+        # A gate that does not stop the function before its claim.
+        "def tick(cache):\n    if not capacity:\n        note_full()\n" + _CLAIM,
+        # No claim or submit in the function.
+        "def tick(cache):\n    if not capacity:\n        return 0\n",
+        # A capacity read that is not a full-pool test.
+        "def tick(cache):\n    if capacity > 0:\n        return 0\n" + _CLAIM,
+    ],
+)
+def test_capacity_guard_allows_claim_first_and_non_gates(source: str) -> None:
+    lines = set(range(1, len(source.splitlines()) + 1))
+    assert not check_source(PATH, source, lines, modes=("capacity-gates",))
+
+
+def test_capacity_guard_allows_reviewed_gates_and_tests() -> None:
+    source = "def tick(self):\n    if capacity <= 0:\n        return 0\n" + _CLAIM
+    reviewed = "control/src/vonk_control/availability_production.py"
+    assert not check_source(reviewed, source, {2}, modes=("capacity-gates",))
+    test = "control/tests/test_example.py"
+    assert not check_source(test, source, {2}, modes=("capacity-gates",))

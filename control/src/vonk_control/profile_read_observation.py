@@ -10,7 +10,7 @@ from __future__ import annotations
 import time
 from collections import OrderedDict
 from collections.abc import Callable
-from concurrent.futures import Future, ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor, wait
 from contextvars import ContextVar, copy_context
 from dataclasses import dataclass, field
 from functools import wraps
@@ -185,10 +185,10 @@ def observe_storage[**P, T](
                 completed(future)
         else:
             future.add_done_callback(completed)
-        try:
-            return future.result(timeout=max(0.0, read.deadline - time.monotonic()))
-        except TimeoutError:
-            raise _pending() from None
+        wait((future,), timeout=max(0.0, read.deadline - time.monotonic()))
+        if not future.done():
+            raise _pending()
+        return future.result()
 
     return wrapped
 
