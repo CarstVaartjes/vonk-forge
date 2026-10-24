@@ -476,6 +476,9 @@ def scan_count_endings(source: str) -> list[int]:
                 assignment.value, _REPETITION
             ):
                 counters.update(_name(target) for target in assignment.targets)
+        # A subscript or tuple target has no name; it must not make every
+        # unnamed operand (a constant) count as a repetition.
+        counters.discard("")
         comparisons = [
             part for part in ast.walk(branch.test) if isinstance(part, ast.Compare)
         ]

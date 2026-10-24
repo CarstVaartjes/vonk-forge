@@ -790,6 +790,8 @@ def test_count_cannot_end_standing_intent(ending: str) -> None:
         "if row.cancel_requested and row.observe_count >= STOP_BUDGET:\n    return replace(row, state=State.CANCELLED)\n",
         "if not ongoing_intent and failed_attempts >= self.max_failures:\n    return None\n",
         "if row.retry_count >= 5:\n    return replace(row, next_action_at=now + cooldown)\n",
+        # A subscript target beside an attempt is not a counter of constants.
+        "def run(attempt):\n    records[key] = attempt\n    if size == 0:\n        return None\n",
     ],
 )
 def test_count_guard_allows_evidence_backoff_cancel_and_request_local_retry(

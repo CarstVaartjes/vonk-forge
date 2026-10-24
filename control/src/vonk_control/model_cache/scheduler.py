@@ -157,7 +157,7 @@ class SchedulerMixin:
                     )
                     refresh = stored is not None and stored.force_refresh
                 cache._schedule_background_download(
-                    operation_id, force=kind == "repair" or refresh
+                    operation_id, force=kind == CacheOperationKind.REPAIR or refresh
                 )
             cache._share_transfer_slots()
             return completed + len(claimed) + removal_steps
