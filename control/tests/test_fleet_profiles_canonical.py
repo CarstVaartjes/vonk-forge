@@ -1383,10 +1383,9 @@ def test_profile_read_observes_distinct_content_once(
 @pytest.mark.parametrize("endpoint", ["get", "list", "preview"])
 @pytest.mark.parametrize("asset", ["model", "image"])
 def test_profile_storage_wait_is_bounded_and_recovers(
-    monkeypatch, postgres_engine, tmp_path, endpoint, asset
+    monkeypatch, postgres_engine, tmp_path, endpoint, asset, frozen_pass_budgets
 ):
     """A stalled receipt cannot hold a profile response or be called per assignment."""
-    import time
     from threading import Event
 
     from vonk_agent_protocol import ProfileReasonCode
@@ -1411,8 +1410,9 @@ def test_profile_storage_wait_is_bounded_and_recovers(
     def delayed(digest, *args):
         storage_calls.append(digest)
         entered.set()
-        assert release.wait(30), "test did not release its injected storage fault"
+        released = release.wait(30)
         try:
+            assert released, "test did not release its injected storage fault"
             return original(digest, *args)
         finally:
             completed.set()
@@ -1461,16 +1461,23 @@ def test_profile_storage_wait_is_bounded_and_recovers(
             return service.list().profiles[0]
         return service.read_number(1)
 
+    from vonk_control import profile_read_observation
+
+    from .pass_budget_clocks import completing_wait, expiring_wait
+
+    # The request budget runs out while the receipt is stalled, never by load.
+    monkeypatch.setattr(
+        profile_read_observation, "wait", expiring_wait(frozen_pass_budgets, entered)
+    )
     try:
         # Establish the stalled I/O before measuring the profile projection.
         with pytest.raises(BookkeepingUnknown):
             profile_read(stored)()
         assert entered.wait(30)
-        started = time.monotonic()
         result = read()
-        elapsed = time.monotonic() - started
         assert entered.is_set()
-        assert elapsed < 5.0  # wall-clock: injected receipt stall budget
+        # The stalled receipt completes only after release: order, not latency.
+        assert not completed.is_set(), "the response waited for the stalled receipt"
         assert not release.is_set(), "the response waited for the fault to clear"
         assert storage_calls == ["a" * 64]
         if endpoint == "preview":
@@ -1485,12 +1492,10 @@ def test_profile_storage_wait_is_bounded_and_recovers(
             assert isinstance(result, FleetProfileView)
             assert result.cache_summary.unknown == 34
             assert any("pending" in warning for warning in result.warnings)
-        print(
-            f"{endpoint} stalled {asset} receipt: {elapsed:.3f}s storage={len(storage_calls)}"
-        )
     finally:
         release.set()
         assert completed.wait(30)
+    monkeypatch.setattr(profile_read_observation, "wait", completing_wait)
     # A new observation uses the storage owner again after the fault clears.
     result = read()
     if endpoint == "preview":

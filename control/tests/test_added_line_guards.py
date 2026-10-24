@@ -733,6 +733,10 @@ GATEWAY_WAIT = (
         "for child in children:\n    child.wait(timeout=5)\n",
         # The opt-out must name its reason.
         "future.result(timeout=1)  # wall-clock:\n",
+        # A shortened production budget expires on a loaded runner.
+        'monkeypatch.setattr(observation, "PROFILE_READ_STORAGE_SECONDS", 0.1)\n',
+        'monkeypatch.setattr("vonk_control.owner.BUDGET_SECONDS", 2)\n',
+        'with patch.object(owner, "_LOCK_BUDGET_SECONDS", 0.2):\n    pass\n',
     ],
 )
 def test_a_new_short_wall_clock_limit_on_work_fails(source):
@@ -756,6 +760,9 @@ def test_a_new_short_wall_clock_limit_on_work_fails(source):
         "assert 0.3 <= elapsed\n",
         "assert time.monotonic() - started < 30\n",
         "future.result(timeout=1)  # wall-clock: proves the stub's own deadline\n",
+        'monkeypatch.setattr(route_runtime, "_PUBLICATION_LOCK_BUDGET_SECONDS", 0)\n',
+        'monkeypatch.setattr(observation, "PROFILE_READ_STORAGE_SECONDS", 60)\n',
+        'monkeypatch.setattr(store, "_RETRY_SECONDS", 0.01)  # wall-clock: interval\n',
     ],
 )
 def test_a_generous_bound_expected_expiry_or_named_reason_is_allowed(source):
