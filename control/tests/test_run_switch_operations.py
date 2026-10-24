@@ -6,7 +6,8 @@ import hashlib
 import json
 import re
 import uuid
-from dataclasses import replace
+from collections.abc import Iterator, Sequence
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -15,12 +16,13 @@ from typing import Literal, cast
 import httpx2
 import pytest
 from pydantic import TypeAdapter, ValidationError
-from sqlalchemy import select, update
-from sqlalchemy.orm import Session
+from sqlalchemy import create_engine, select, update
+from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
     FailureCode,
     LifecycleState,
     ReservationState,
+    RunState,
     RunSwitchCode,
     canonical_message,
 )
@@ -79,6 +81,7 @@ from vonk_control.recipe_build_cancellation import (
 from vonk_control.recipe_builds import RecipeBuildPlan
 from vonk_control.recipe_operations import (
     RecipeBuildService,
+    RecipeOperationConflict,
     RecipeOperationService,
     RecipeOperationView,
 )
@@ -105,6 +108,8 @@ from vonk_control.run_switch_contract import (
     RunSwitchPhaseResult,
     RunSwitchPlan,
     RunSwitchPreviewRequest,
+    RunSwitchProfileStopScope,
+    RunSwitchReason,
     RunSwitchRetention,
     RunSwitchRuntimeInstallResult,
     RunSwitchRuntimePlanResult,
@@ -3733,13 +3738,6 @@ def test_exact_stop_reservation_budget_needs_a_fresh_post_stop_check(
     bad_stop["post_stop_memory_check"] = {"stop_run_ids": [str(uuid.uuid4())]}
     with pytest.raises(Exception):  # noqa: B017 -- observable effects and recovery establish the rejection
         RunSwitchPlan.model_validate(bad_stop)
-    impossible_capacity = plan.model_dump(mode="python")
-    fit_node = impossible_capacity["fit_current"]["nodes"][0]
-    fit_node["memory_capacity_bytes"] = (
-        fit_node["memory_required_bytes"] + fit_node["memory_floor_bytes"] - 1
-    )
-    with pytest.raises(Exception):  # noqa: B017 -- observable effects and recovery establish the rejection
-        RunSwitchPlan.model_validate(impossible_capacity)
     # No Spark build needs the old workload's memory, so it keeps serving
     # through preparation and stops only right before start.
     assert [phase.kind for phase in plan.phases] == [
@@ -7139,3 +7137,298 @@ def test_planner_outputs_validate_across_stop_and_load_topologies(
         RunSwitchAssessment.model_validate_json(refreshed.model_dump_json())
         == refreshed
     )
+
+
+@dataclass
+class _PlannerWorld:
+    sessions: sessionmaker[Session]
+    lifecycle: RecipeOperationService
+    planner: RunSwitchOperationService
+    request: RunSwitchPreviewRequest
+    run_id: str
+    installation_id: str
+    original_group: SparkGroup
+
+
+@pytest.fixture(
+    scope="module", params=[(old, new) for old in (1, 2, 3) for new in (1, 2)]
+)
+def planner_world(
+    request: pytest.FixtureRequest, tmp_path_factory
+) -> Iterator[_PlannerWorld]:
+    """Real planner/storage in memory; only mutable lifecycle observations are faked."""
+    running_count, load_count = request.param
+    engine = create_engine("sqlite://")
+    sessions, lifecycle, _, mapping_id, build_id, nodes = setup_services(
+        tmp_path_factory.mktemp("planner-world"),
+        nodes=3,
+        mapping_node_count=running_count,
+        engine=engine,
+    )
+    installed = installed_recipe(
+        lifecycle,
+        mapping_id,
+        build_id,
+        nodes[:running_count],
+        request_id=str(uuid.uuid4()),
+    )
+    run_plan = lifecycle._run_admission.plan_run(installed.owner_id, "old", now=NOW)
+    run_id = lifecycle._run_admission.accept_run(run_plan, actor="admin", now=NOW)
+    planner = _service(
+        sessions,
+        NOW,
+        lifecycle,
+        RecordingArtifactExecutor(),
+        phase_executor=SynchronousPhaseExecutor(),
+    )
+    original_group = planner.preview_stop(run_id, actor="admin").spark_group
+    incoming = _request(sessions, nodes[0], action="switch")
+    with sessions.begin() as session:
+        original = session.get(CatalogDocumentRevision, incoming.recipe_revision_id)
+        assert original is not None
+        recipe = RecipeDefinition.model_validate(original.document)
+        entry = recipe.topology.roles[0].model_copy(update={"count": 1})
+        roles = [entry]
+        if load_count == 2:
+            roles.append(
+                entry.model_copy(update={"name": "worker", "endpoint_owner": False})
+            )
+        topology = recipe.topology.model_copy(
+            update={
+                "node_count": load_count,
+                "roles": roles,
+                "parallelism": recipe.topology.parallelism.model_copy(
+                    update={"tensor": load_count}
+                ),
+                "start_order": [role.name for role in reversed(roles)],
+            }
+        )
+        recipe = recipe.model_copy(update={"topology": topology})
+        document = recipe.model_dump(mode="json")
+        # A model file follows the current recipe's declared roles.
+        for model in document["models"]:
+            for file in model["files"]:
+                file["roles"] = [role.name for role in roles]
+        recipe = RecipeDefinition.model_validate(document)
+        target = CatalogDocumentRevision(
+            document_id=original.document_id,
+            kind=original.kind,
+            publisher=original.publisher,
+            slug=original.slug,
+            revision_number=2,
+            schema_version=2,
+            state=original.state,
+            document=recipe.model_dump(mode="json"),
+            content_digest=document_sha256(recipe.model_dump(mode="json")),
+            projected={},
+            created_by="admin",
+            created_at=NOW,
+        )
+        session.add(target)
+        session.flush()
+        incoming = incoming.model_copy(
+            update={
+                "recipe_revision_id": target.id,
+                "spark_group": SparkGroup(
+                    nodes=[
+                        SparkGroupNode(
+                            node_id=node,
+                            rank=rank,
+                            role=roles[rank].name,
+                            endpoint_owner=rank == 0,
+                        )
+                        for rank, node in enumerate(nodes[:load_count])
+                    ]
+                ),
+            }
+        )
+    try:
+        yield _PlannerWorld(
+            sessions,
+            lifecycle,
+            planner,
+            incoming,
+            run_id,
+            installed.owner_id,
+            original_group,
+        )
+    finally:
+        engine.dispose()
+
+
+@pytest.mark.parametrize("memory", ("none", "conditional", "infeasible"))
+@pytest.mark.parametrize("missing_ranks", (0, 1))
+@pytest.mark.parametrize(
+    "lifecycle_result", ("allowed", "disallowed", "conflict", "mismatched")
+)
+@pytest.mark.parametrize("stoppable", (False, True))
+def test_planner_entrypoints_return_valid_contracts(
+    planner_world: _PlannerWorld,
+    monkeypatch: pytest.MonkeyPatch,
+    memory: str,
+    missing_ranks: int,
+    lifecycle_result: str,
+    stoppable: bool,
+) -> None:
+    """Catch policy validators rejecting blocked plans or independently sampled fits.
+
+    The PostgreSQL matrix above owns end-to-end admission proof. This Cartesian
+    property guards every planner's producer/JSON/consumer boundary in memory.
+    """
+    from vonk_control.recipe_action_plans import StopPlan
+    from vonk_control.run_switch_operations import resource_fit
+
+    world = planner_world
+    with world.sessions.begin() as session:
+        run = session.get(RecipeRun, world.run_id)
+        assert run is not None
+        run.state = RunState.RUNNING if stoppable else RunState.STOPPED
+        for rank in session.scalars(select(RunNode)):
+            rank.state = run.state
+        for node in session.scalars(select(AgentNode)):
+            node.revoked_at = (
+                NOW
+                if missing_ranks
+                and node.node_id == world.original_group.nodes[-1].node_id
+                else None
+            )
+        for snapshot in session.scalars(select(NodeInventorySnapshot)):
+            total, free = (
+                (100, 50)
+                if memory == "infeasible"
+                else (10_000, 100 if memory == "conditional" else 8_000)
+            )
+            snapshot.host_memory_total_bytes = snapshot.gpu_memory_total_bytes = total
+            snapshot.host_memory_free_bytes = snapshot.gpu_memory_free_bytes = free
+    preview_stop = world.lifecycle.preview_stop
+
+    def lifecycle_stop(
+        run_id: str, *, profile_target_node_ids: Sequence[str] | None = None
+    ) -> StopPlan:
+        if lifecycle_result == "conflict":
+            raise RecipeOperationConflict("Injected lifecycle planning conflict")
+        plan = preview_stop(run_id, profile_target_node_ids=profile_target_node_ids)
+        if lifecycle_result == "disallowed":
+            return replace(plan, allowed=False)
+        if lifecycle_result == "mismatched":
+            return replace(plan, missing_node_ids=())
+        return plan
+
+    monkeypatch.setattr(world.lifecycle, "preview_stop", lifecycle_stop)
+    fits = 0
+
+    def observed_peaks(_session: Session, _digest: str) -> dict[str, int]:
+        nonlocal fits
+        fits += 1
+        # Each _fit reads this owner independently. A changed observation can
+        # make current demand infeasible while the after-stop fit is conditional.
+        return (
+            {node.role: 20_000 for node in world.request.spark_group.nodes}
+            if memory == "conditional" and fits % 2
+            else {}
+        )
+
+    monkeypatch.setattr(resource_fit, "observed_role_peaks", observed_peaks)
+    fits = 0
+    plan = world.planner.preview(world.request, actor="admin")
+    outputs: list[RunSwitchAssessment] = [plan]
+    with world.sessions() as session:
+        fits = 0
+        outputs.append(
+            world.planner.recheck_resources_in_session(
+                session, world.request, plan.assessment()
+            )
+        )
+    outputs.append(world.planner.preview_stop(world.run_id, actor="admin"))
+    if len(world.original_group.nodes) > 1:
+        scope = RunSwitchProfileStopScope(
+            original_group=world.original_group,
+            target_node_ids=sorted(
+                node.node_id for node in world.original_group.nodes[:-1]
+            ),
+            missing_node_ids=[world.original_group.nodes[-1].node_id],
+        )
+        outputs.append(
+            world.planner.preview_profile_stop(world.run_id, scope, actor="admin")
+        )
+    outputs.append(world.planner.preview_cleanup(world.installation_id, actor="admin"))
+    fits = 0
+    outputs.append(world.planner.inspect_request(world.request, actor="admin"))
+    for output in outputs:
+        assert output.allowed == (not output.blockers)
+        assert all(isinstance(reason, RunSwitchReason) for reason in output.blockers)
+        contract = (
+            RunSwitchPlan if isinstance(output, RunSwitchPlan) else RunSwitchAssessment
+        )
+        assert contract.model_validate_json(output.model_dump_json()) == output
+
+
+def test_profile_partial_stop_waits_with_lifecycle_scope_blocker(
+    tmp_path: Path,
+    postgres_engine,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A re-enrolled rank must produce a typed wait, not a validator exception."""
+    from vonk_control.recipe_action_plans import StopPlan
+
+    sessions, lifecycle, _, mapping_id, build_id, nodes = setup_services(
+        tmp_path, nodes=2, engine=postgres_engine
+    )
+    installed = installed_recipe(
+        lifecycle, mapping_id, build_id, nodes, request_id=str(uuid.uuid4())
+    )
+    run = started_recipe(
+        sessions,
+        lifecycle,
+        installed.owner_id,
+        nodes,
+        request_id=str(uuid.uuid4()),
+        alias="old",
+    )
+    planner = _service(sessions, NOW, lifecycle, RecordingArtifactExecutor())
+    group = planner.preview_stop(run.owner_id, actor="admin").spark_group
+    scope = RunSwitchProfileStopScope(
+        original_group=group, target_node_ids=[nodes[0]], missing_node_ids=[nodes[1]]
+    )
+    preview_stop = lifecycle.preview_stop
+
+    def rejoined_stop(
+        run_id: str, *, profile_target_node_ids: Sequence[str] | None = None
+    ) -> StopPlan:
+        return replace(
+            preview_stop(run_id, profile_target_node_ids=profile_target_node_ids),
+            missing_node_ids=(),
+        )
+
+    monkeypatch.setattr(lifecycle, "preview_stop", rejoined_stop)
+    plan = planner.preview_profile_stop(run.owner_id, scope, actor="admin")
+    assert not plan.allowed and not plan.stops
+    assert [reason.code for reason in plan.blockers] == [
+        RunSwitchCode.STOP_PLAN_UNAVAILABLE
+    ]
+    with sessions.begin() as session:
+        for node in session.scalars(select(AgentNode)):
+            node.workload_intent_ordinal = 1
+    child = planner.apply_profile_stop(
+        run.owner_id,
+        scope,
+        plan_digest=plan.plan_digest,
+        request_key=str(uuid.uuid4()),
+        actor="admin",
+        workload_intent_ordinal=1,
+        profile_application_id=str(uuid.uuid4()),
+    )
+    assert child.state == LifecycleState.OBSERVING
+    assert _result(child).retry_reason == RunSwitchCode.STOP_PLAN_UNAVAILABLE
+    assert child.blockers[0].detail == RunSwitchCode.STOP_PLAN_UNAVAILABLE
+    assert child.next_attempt_at is not None and child.next_attempt_at > NOW
+    assert _result(child).observation_deadline_at is not None
+    # A blocked partial Stop must not poison the next authorized workload request.
+    fresh = planner.apply(
+        RunSwitchApplyRequest(
+            **_request(sessions, nodes[0], action="switch").model_dump(),
+            request_key=str(uuid.uuid4()),
+        ),
+        actor="admin",
+    )
+    assert fresh.operation_id != child.operation_id

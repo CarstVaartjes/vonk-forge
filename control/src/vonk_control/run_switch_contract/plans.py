@@ -102,21 +102,6 @@ class RunSwitchAssessment(StrictModel):
                 raise ValueError(
                     "conditional memory check cannot claim measured after-stop capacity"
                 )
-            if any(
-                node.memory_required_bytes is None
-                or node.memory_kind is None
-                or node.memory_pool is None
-                or node.memory_floor_bytes is None
-                or node.memory_capacity_bytes is None
-                or node.memory_available_bytes is None
-                or node.resource_demand is None
-                or node.memory_capacity_bytes
-                < node.memory_required_bytes + node.memory_floor_bytes
-                for node in self.fit_current.nodes
-            ):
-                raise ValueError(
-                    "conditional memory check requires known feasible demand and capacity"
-                )
             # StopImpact owns the reviewed whole-run scope. A replaced run may
             # span more Sparks than the incoming workload: stopping it frees
             # memory on all ranks, while fit describes only the new demand.
@@ -169,22 +154,17 @@ class RunSwitchPlan(RunSwitchAssessment):
     @model_validator(mode="after")
     def cleanup_authority_matches_effect(self) -> RunSwitchPlan:
         scope = self.profile_stop_scope
-        if scope is not None:
-            target_ids = scope.target_node_ids
-            if (
-                self.action != "stop"
-                or self.run_id is None
-                or self.spark_group != scope.original_group
-                or len(self.stops) != 1
-                or self.stops[0].run_id != self.run_id
-                or self.stops[0].node_ids != target_ids
-                or self.mapping is None
-                or [node.model_dump(mode="json") for node in self.mapping.nodes]
-                != [node.model_dump(mode="json") for node in scope.original_group.nodes]
-            ):
-                raise ValueError(
-                    "profile partial Stop plan does not match its reviewed scope"
-                )
+        if scope is not None and (
+            self.action != "stop"
+            or self.run_id is None
+            or self.spark_group != scope.original_group
+            or self.mapping is None
+            or [node.model_dump(mode="json") for node in self.mapping.nodes]
+            != [node.model_dump(mode="json") for node in scope.original_group.nodes]
+        ):
+            raise ValueError(
+                "profile partial Stop plan does not match its reviewed scope"
+            )
         if self.cleanup_mode == "uninstall":
             if self.reconciliation_authority is not None:
                 raise ValueError(
