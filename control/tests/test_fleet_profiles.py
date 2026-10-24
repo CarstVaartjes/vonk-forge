@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
     DesiredAssignmentState,
     LifecycleState,
+    ProfileReasonCode,
     SupersedeCode,
     canonical_message,
 )
@@ -4615,3 +4616,85 @@ def test_exhausted_preparation_ends_and_a_fresh_load_is_admitted(
     )
     assert scopes == [ended.id] * (1 if end_path == "admission" else 2) + [fresh.id]
     assert fresh.id != ended.id
+
+
+@pytest.mark.parametrize("initially_waiting", [False, True])
+def test_planner_validation_defect_ends_load_with_evidence_after_restart(
+    initially_waiting: bool,
+) -> None:
+    """Catch internal contract errors being requeued as missing cache evidence."""
+    from types import SimpleNamespace
+
+    from .non_blocking import assert_ended_without_blocking
+
+    sessions = _database()
+    _recipe_id, revision_id = _seed(sessions)
+    inject_defect = not initially_waiting
+    cache_missing = initially_waiting
+    calls: list[str] = []
+    clock = [NOW]
+
+    def assess(_session, _assignment, _nodes, **_kwargs):
+        calls.append(_assignment.id)
+        valid = _assessment(_exact_preparation((_node_id(1),)))
+        if inject_defect:
+            return RunSwitchAssessment.model_validate(
+                {**valid.model_dump(), "allowed": False}
+            )
+        if cache_missing:
+            raise ValueError("runtime image is still preparing")
+        return valid
+
+    def service():
+        return FleetProfileService(
+            sessions,
+            clock=lambda: clock[0],
+            assessment_provider=assess,
+            switch_adapter=_SwitchAdapter(),
+        )
+
+    owner = service()
+    profile = owner.create(_input(revision_id), actor="admin")
+    application = owner.apply(profile.id, request_key=_uuid(930), actor="admin")
+    if initially_waiting:
+        assert application.state == LifecycleState.QUEUED
+        inject_defect = True
+        clock[0] += timedelta(minutes=1)
+        owner = service()
+        assert owner.tick()
+        application = owner.application(application.id)
+    assert len(calls) == (2 if initially_waiting else 1)
+    assert application.state == LifecycleState.FAILED
+    reason = next(
+        item
+        for item in application.progress.blockers
+        if item.code == ProfileReasonCode.ADMISSION_DEFECT
+    )
+    assert "RunSwitchAssessment" in reason.detail
+    assert "admission verdict" in reason.detail
+    assert application.next_attempt_at is None
+    observed_calls = len(calls)
+    restarted = service()
+    for _ in range(3):
+        restarted.tick()
+    assert len(calls) == observed_calls
+    assert restarted.application(application.id).state == LifecycleState.FAILED
+    inject_defect = cache_missing = False
+
+    def assert_defect(view) -> None:
+        assert any(
+            item.code == ProfileReasonCode.ADMISSION_DEFECT
+            for item in view.progress.blockers
+        )
+
+    ended, fresh = assert_ended_without_blocking(
+        SimpleNamespace(sessions=sessions),
+        application,
+        end=lambda view: view,
+        assert_reason=assert_defect,
+        fresh=lambda _: restarted.apply(
+            profile.id, request_key=_uuid(931), actor="admin"
+        ),
+    )
+    assert fresh.id != ended.id
+    assert not fresh.progress.admission_pending

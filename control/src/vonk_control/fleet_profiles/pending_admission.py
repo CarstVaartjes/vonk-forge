@@ -8,7 +8,7 @@ from typing import cast as _typing_cast
 
 from pydantic import ValidationError
 from sqlalchemy import func, or_, select, true
-from vonk_agent_protocol import LifecycleState
+from vonk_agent_protocol import LifecycleState, ProfileReasonCode
 from vonk_agent_protocol.agent_words import (
     ProfileCancellationCause,
     ProfileOperationKind,
@@ -39,12 +39,12 @@ from .contracts import (
     FleetProfileConflict,
     FleetProfilePermissionDenied,
     FleetProfilePortPromiseConflict,
+    FleetProfileRecheckContractDefect,
     FleetProfileStalePlanConflict,
     _FleetProfileSupersededIntentConflict,
 )
 from .dependencies import (
     _CANCELLED_OPERATION,
-    _LOGGER,
     _MAX_PARKED_APPLICATION_OBSERVATIONS,
 )
 from .persistence import (
@@ -80,7 +80,9 @@ class FleetProfileService:
         """Reconcile reviewed applications that could not acquire admission locks."""
         self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
 
-        candidate: tuple[str, str, str, FleetProfilePreview, int] | None = None
+        candidate: tuple[str, str, str, FleetProfilePreview, int, str | None] | None = (
+            None
+        )
         retirements: list[str] = []
         # A waiting load follows a newer recipe revision at once, not when its
         # own retry backoff falls due.
@@ -167,12 +169,23 @@ class FleetProfileService:
                 ) > _aware(now):
                     continue
                 if candidate is None:
+                    # The review a stale refusal was made against, if any.
+                    stale_review = (
+                        progress.intended_profile.reviewed_plan_digest
+                        if progress.intended_profile is not None
+                        and any(
+                            blocker.code == ProfileReasonCode.STALE_PLAN
+                            for blocker in progress.blockers
+                        )
+                        else None
+                    )
                     candidate = (
                         row.id,
                         row.request_key,
                         row.actor,
                         plan,
                         progress.admission_attempt,
+                        stale_review,
                     )
         for application_id in retirements:
             self._finish_pending_admission(
@@ -182,11 +195,10 @@ class FleetProfileService:
             )
         if candidate is None:
             return bool(retirements)
-        application_id, request_key, actor, plan, refused = candidate
-        if not plan.allowed:
-            # The accepted intent was blocked when it was reviewed: plan it
-            # again against current conditions (asking for the preparation it
-            # needs) instead of replaying a plan that could never be admitted.
+        application_id, request_key, actor, plan, refused, stale_review = candidate
+        if not plan.allowed or stale_review is not None:
+            # Blocked or stale reviewed evidence must be assessed afresh before
+            # another admission attempt, including after a Controller restart.
             replanned = self._replan_pending_application(application_id, plan, actor)
             if replanned is None:
                 return True
@@ -249,9 +261,16 @@ class FleetProfileService:
             )
             return True
         except FleetProfileAdmissionDefect as error:
-            # A defect fails at once with its constraint; it is never retried.
+            # A defect fails at once with evidence; it is never retried.
             self._finish_pending_admission(
-                application_id, state=LifecycleState.FAILED, reason=str(error)
+                application_id,
+                state=LifecycleState.FAILED,
+                reason=str(error),
+                evidence=make_blocker(
+                    error.code,
+                    str(error),
+                    severity=ProfileReasonSeverity.ERROR.value,
+                ),
             )
             return True
         except _FleetProfileSupersededIntentConflict as error:
@@ -265,34 +284,38 @@ class FleetProfileService:
             return True
         except FleetProfileStalePlanConflict as error:
             # What the plan was reviewed against changed before admission bound
-            # it: review the same intent again, as for a taken port. A fresh
-            # review identical to the refused one cannot change the outcome, so
-            # the refusal is deterministic and ends the load with it.
-            replanned = self._replan_pending_application(application_id, plan, actor)
-            if replanned is None:
-                return True
-            if replanned.plan_digest == plan.plan_digest:
+            # it. The stale mark makes the next tick review the same intent
+            # afresh, once, before admitting it. A plan reviewed afresh this
+            # tick that is refused again ends the load when another review
+            # cannot change it: its recheck contract failed, or the fresh
+            # review is identical to the refused one.
+            if stale_review is not None and (
+                isinstance(error, FleetProfileRecheckContractDefect)
+                or plan.plan_digest == stale_review
+            ):
+                code = (
+                    ProfileReasonCode.ADMISSION_DEFECT
+                    if isinstance(error, FleetProfileRecheckContractDefect)
+                    else error.code
+                )
                 self._finish_pending_admission(
                     application_id,
                     state=LifecycleState.FAILED,
-                    reason=error.code,
+                    reason=code,
                     evidence=make_blocker(
-                        error.code,
+                        code,
                         str(error),
                         severity=ProfileReasonSeverity.ERROR.value,
                     ),
                 )
                 return True
-            _LOGGER.info(
-                "profile application %s re-planned after a stale plan (%s): "
-                "plan %s -> %s",
-                application_id,
-                error,
-                plan.plan_digest,
-                replanned.plan_digest,
-            )
+            if self._superseded_by_saved_profile(application_id):
+                return True
             self._defer_pending_application(
-                application_id, str(error), code=error.code, retry_delay=timedelta(0)
+                application_id,
+                str(error),
+                code=ProfileReasonCode.STALE_PLAN,
+                retry_delay=timedelta(0),
             )
             return True
         except (FleetProfileConflict, KeyError) as error:
@@ -320,15 +343,22 @@ class FleetProfileService:
         replaced. Every re-plan in the admission observer goes through here.
         """
         self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
-        if self._profile_saved_since_accepted(application_id):
-            self._finish_pending_admission(
-                application_id,
-                state=LifecycleState.SUPERSEDED,
-                reason=FleetProfileSupersedeCode.SUPERSEDED_BY_INTENT,
-                code=FleetProfileSupersedeCode.SUPERSEDED_BY_INTENT,
-            )
+        if self._superseded_by_saved_profile(application_id):
             return None
         return self._replan_blocked_application(application_id, plan, actor)
+
+    def _superseded_by_saved_profile(self, application_id: str) -> bool:
+        """End a waiting load a newer profile save replaced; the newest steers."""
+        self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
+        if not self._profile_saved_since_accepted(application_id):
+            return False
+        self._finish_pending_admission(
+            application_id,
+            state=LifecycleState.SUPERSEDED,
+            reason=FleetProfileSupersedeCode.SUPERSEDED_BY_INTENT,
+            code=FleetProfileSupersedeCode.SUPERSEDED_BY_INTENT,
+        )
+        return True
 
     def _profile_saved_since_accepted(self, application_id: str) -> bool:
         """Whether the saved profile is no longer the one this load accepted."""

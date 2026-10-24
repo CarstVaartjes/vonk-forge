@@ -551,7 +551,7 @@ class RecordingArtifactExecutor:
 class SynchronousPhaseExecutor:
     def execute(
         self,
-        _plan,
+        plan,
         phase,
         *,
         item_index,
@@ -559,7 +559,7 @@ class SynchronousPhaseExecutor:
         request_key,
         progress,
     ) -> PhaseExecution:
-        return _fixture_execution(_plan, phase, result={"phase": phase.kind})
+        return _fixture_execution(plan, phase, result={"phase": phase.kind})
 
 
 class PendingBuilds(RecipeBuildService):
@@ -7139,3 +7139,162 @@ def test_planner_outputs_validate_across_stop_and_load_topologies(
         RunSwitchAssessment.model_validate_json(refreshed.model_dump_json())
         == refreshed
     )
+
+
+@pytest.mark.parametrize("during_builder", [True, False])
+def test_plan_reuses_inventory_when_a_new_sample_lands_between_read_points(
+    tmp_path: Path, postgres_engine, monkeypatch, during_builder: bool
+) -> None:
+    """Catch READ COMMITTED mixing builder/current/post-stop inventory samples."""
+    from vonk_control.recipe_builds.common import _reopen_build_attempt
+    from vonk_control.run_switch_operations import (
+        build_selection,
+        planning_helpers,
+        resource_fit,
+    )
+
+    sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(
+        tmp_path, engine=postgres_engine
+    )
+    node_id = nodes[0]
+    installed = installed_recipe(
+        lifecycle, mapping_id, build_id, nodes, request_id=str(uuid.uuid4())
+    )
+    admission = lifecycle._run_admission.plan_run(installed.owner_id, "old", now=NOW)
+    run_id = lifecycle._run_admission.accept_run(admission, actor="admin", now=NOW)
+    with sessions.begin() as session:
+        run = session.get(RecipeRun, run_id)
+        node = session.get(AgentNode, node_id)
+        build = session.get(RecipeBuild, build_id)
+        snapshot = session.scalar(select(NodeInventorySnapshot))
+        assert (
+            run is not None
+            and node is not None
+            and build is not None
+            and snapshot is not None
+        )
+        run.state = LifecycleState.RUNNING
+        for rank in session.scalars(select(RunNode).where(RunNode.run_id == run_id)):
+            rank.state = LifecycleState.RUNNING
+        set_inventory_identity(node, binary_digest="a" * 64)
+        snapshot.capabilities = [*snapshot.capabilities, "recipe.build.v1"]
+        if during_builder:
+            _reopen_build_attempt(build, now=NOW)
+
+    service = _service(
+        sessions,
+        NOW,
+        lifecycle,
+        RecordingArtifactExecutor(),
+        phase_executor=SynchronousPhaseExecutor(),
+    )
+    request = _request(sessions, node_id, action="switch")
+    read = planning_helpers._latest_inventory
+    reads = []
+
+    def read_then_publish(session, selected_node, **kwargs):
+        sample, evidence = read(session, selected_node, **kwargs)
+        reads.append(evidence)
+        if len(reads) == 1:
+            assert sample is not None
+            # Commit through a separate connection after the first SELECT. The
+            # old code's next SELECT sees this sample under READ COMMITTED.
+            values = {
+                attribute.key: getattr(sample, attribute.key)
+                for attribute in NodeInventorySnapshot.__mapper__.column_attrs
+                if attribute.key != "id"
+            }
+            values.update(
+                id=str(uuid.uuid4()),
+                observed_at=sample.observed_at + timedelta(seconds=1),
+                evidence_digest="b" * 64,
+                disk_free_bytes=sample.disk_free_bytes - 1,
+            )
+            with sessions.begin() as writer:
+                writer.add(NodeInventorySnapshot(**values))
+        return sample, evidence
+
+    # Cover the old imports too so reverting the production fix demonstrates
+    # the validator error, rather than silently disabling fault injection.
+    monkeypatch.setattr(planning_helpers, "_latest_inventory", read_then_publish)
+    monkeypatch.setattr(
+        build_selection, "_latest_inventory", read_then_publish, raising=False
+    )
+    monkeypatch.setattr(
+        resource_fit, "_latest_inventory", read_then_publish, raising=False
+    )
+    plan = service.preview(request, actor="admin")
+    assert len(reads) == 1
+    assert plan.stops
+    sample = reads[0]
+    uncertainty = plan.fit_current.nodes[0].memory_usage_uncertainty
+    assert uncertainty is not None
+    assert uncertainty.inventory_observed_at == sample.observed_at
+    assert uncertainty.inventory_evidence_digest == sample.evidence_digest
+    assert {
+        item.evidence_digest for item in plan.freshness if item.source == sample.source
+    } == {sample.evidence_digest}
+    assert RunSwitchPlan.model_validate_json(plan.model_dump_json()) == plan
+    # A new plan has a new sample scope and observes the newly committed row.
+    monkeypatch.setattr(planning_helpers, "_latest_inventory", read)
+    newer = service.preview(request, actor="admin")
+    assert any(item.evidence_digest == "b" * 64 for item in newer.freshness)
+    if during_builder:
+        assert plan.build.build_id == build_id
+        assert plan.build.image_digest is None
+        assert plan.build.builder_node_id == node_id
+        reviewed = plan.assessment()
+        with sessions() as session:
+            refreshed = service.recheck_resources_in_session(session, request, reviewed)
+        assert refreshed.allowed
+        assert sum(item.source == sample.source for item in plan.freshness) == 1
+        uncertainty = refreshed.fit_current.nodes[0].memory_usage_uncertainty
+        assert uncertainty is not None
+        assert uncertainty.inventory_evidence_digest == "b" * 64
+        # Previously stored reviews can already contain the duplicate. Every
+        # occurrence must refresh, so a last-wins consumer cannot retain t0.
+        duplicate = reviewed.model_copy(
+            update={"freshness": [*reviewed.freshness, sample]}
+        )
+        with sessions() as session:
+            refreshed = service.recheck_resources_in_session(
+                session, request, duplicate
+            )
+        assert refreshed.allowed
+        assert all(
+            item.evidence_digest == "b" * 64
+            for item in refreshed.freshness
+            if item.source == sample.source
+        )
+
+
+@pytest.mark.parametrize("contract_error", [False, True])
+def test_low_level_run_preview_propagates_contract_defects(
+    tmp_path: Path, monkeypatch, contract_error: bool
+) -> None:
+    """Catch low-level planner defects being mislabeled as unavailable evidence."""
+    sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
+    installed_recipe(
+        lifecycle, mapping_id, build_id, nodes, request_id=str(uuid.uuid4())
+    )
+    service = _service(sessions, NOW, lifecycle, RecordingArtifactExecutor())
+    request = _request(sessions, nodes[0])
+    valid = service.preview(request, actor="admin").assessment()
+
+    def defective(*_args, **_kwargs):
+        if contract_error:
+            return RunSwitchAssessment.model_validate(
+                {**valid.model_dump(), "allowed": False}
+            )
+        raise ValueError("run evidence temporarily unavailable")
+
+    monkeypatch.setattr(lifecycle, "preview_run", defective)
+    if contract_error:
+        with pytest.raises(ValidationError, match="admission verdict"):
+            service.preview(request, actor="admin")
+    else:
+        plan = service.preview(request, actor="admin")
+        assert any(
+            item.code == RunSwitchCode.RUN_ADMISSION_UNAVAILABLE
+            for item in plan.blockers
+        )

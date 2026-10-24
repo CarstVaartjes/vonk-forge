@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, ClassVar, Literal, Protocol
 
+from pydantic import ValidationError
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
     Disposition,
@@ -30,7 +31,7 @@ from ..fleet_profile_contract import (
     FleetProfileSupersedeCode,
 )
 from ..lifecycle.evidence import Residue
-from ..operation_blockers import OperationBlocker
+from ..operation_blockers import OperationBlocker, make_blocker
 from ..preparation_contract import RuntimeImageIdentity
 from ..run_switch_contract import RunSwitchAssessment
 from ..run_switch_operations import RunSwitchOperationConflict
@@ -229,8 +230,8 @@ class FleetProfileAdmissionBusy(UnknownOutcomeError, FleetProfileConflict):
 
 
 class FleetProfileAdmissionDefect(InvalidRequestError, FleetProfileConflict):
-    """An unregistered database constraint refused admission: the load fails at
-    once, naming the constraint, and is never retried as it stands."""
+    """An internal contract or database constraint refused admission: the load
+    fails at once with evidence and is never retried as it stands."""
 
     code = ProfileReasonCode.ADMISSION_DEFECT
 
@@ -291,6 +292,12 @@ class FleetProfileStalePlanConflict(InvalidRequestError, FleetProfileConflict):
         super().__init__(*args, reason=reason)
 
 
+class FleetProfileRecheckContractDefect(FleetProfileStalePlanConflict):
+    """The resource recheck could not combine the reviewed assessment with
+    current facts into a valid contract: stale for a stored review, a defect
+    for a plan reviewed afresh."""
+
+
 class FleetProfileReviewStale(FleetProfileStalePlanConflict):
     """The reviewed effects differ from the current plan; nothing was accepted."""
 
@@ -344,3 +351,15 @@ class SavedProfileDocument(FleetProfileDefinition):
     id: str
     number: int
     revision: int
+
+
+def planner_contract_defect(
+    assignment_id: str, error: ValidationError
+) -> FleetProfileAdmissionDefect:
+    """Translate a planner contract defect at the profile admission boundary."""
+    return FleetProfileAdmissionDefect(
+        make_blocker(
+            ProfileReasonCode.ADMISSION_DEFECT,
+            f"Planner contract failed for assignment {assignment_id}: {error}",
+        ).detail
+    )

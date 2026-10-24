@@ -981,3 +981,48 @@ def test_visible_classified_wait_is_not_counted_as_repeated_failure(
         PATH, source, set(range(1, len(source.splitlines()) + 1)), modes=("repeats",)
     )
     assert bool(hits) == (not typed or verdict == "FAIL")
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        "self._assessment_provider",
+        "self._run_switch.inspect_request",
+        "self._run_switch.recheck_resources_in_session",
+        "service._lifecycle.preview_run",
+        "self.preview",
+        "self.assess",
+        "self._replan_pending_application",
+    ],
+)
+@pytest.mark.parametrize(
+    "caught", ["ValueError", "(KeyError, TypeError, ValueError)", "Exception", ""]
+)
+def test_planner_defects_cannot_be_added_as_preparation_waits(call, caught):
+    """Catch a new planner call or broad handler swallowing ValidationError."""
+    handler = f"except {caught}:" if caught else "except:"
+    source = f"try:\n    plan = {call}(request)\n{handler}\n    wait()\n"
+    for line in (2, 3):
+        assert check_source(PATH, source, {line}, modes=("planner-defects",))
+    assert not check_source(PATH, source, {1}, modes=("planner-defects",))
+    for verdict in (
+        "raise planner_contract_defect(assignment.id, error) from error",
+        "raise FleetProfileRecheckContractDefect('recheck failed') from error",
+        "raise",
+    ):
+        separated = source.replace(
+            handler,
+            f"except ValidationError as error:\n    {verdict}\n" + handler,
+        )
+        assert not check_source(
+            PATH, separated, set(range(1, 8)), modes=("planner-defects",)
+        )
+
+
+@pytest.mark.parametrize(
+    "call", ["fleet_services.upgrades.preview", "service._mappings.preview"]
+)
+def test_planner_defect_guard_ignores_other_services_previews(call):
+    """Catch the planner guard flagging another service's same-named preview."""
+    source = f"try:\n    plan = {call}(request)\nexcept ValueError:\n    wait()\n"
+    assert not check_source(PATH, source, {2, 3}, modes=("planner-defects",))

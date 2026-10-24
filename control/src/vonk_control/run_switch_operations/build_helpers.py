@@ -30,8 +30,9 @@ def _refreshed_freshness(
     """The reviewed evidence, with each source the recheck read replaced by it."""
 
     current = {item.source: item for item in fresh}
-    kept = [current.pop(item.source, item) for item in reviewed]
-    return [*kept, *current.values()]
+    kept = [current.get(item.source, item) for item in reviewed]
+    reviewed_sources = {item.source for item in reviewed}
+    return [*kept, *(item for item in fresh if item.source not in reviewed_sources)]
 
 
 def _recipe_model_digests(revision: CatalogDocumentRevision | None) -> frozenset[str]:
