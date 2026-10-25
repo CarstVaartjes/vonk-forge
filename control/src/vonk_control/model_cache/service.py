@@ -172,10 +172,11 @@ class ModelCacheService(
         self._lock = threading.RLock()
         self._closed = threading.Event()
         self._revision_scan_at: datetime | None = None
-        # Each unbound current model digest's artifact set (None: its content
-        # never resolves), and when one not yet observable is observed again.
-        self._resolved_model_sets: dict[str, str | None] = {}
-        self._unresolved_model_retry_at: dict[str, datetime] = {}
+        # Each unbound model digest's last resolved set (None: it did not
+        # resolve) and when it is observed again; and each set whose stored
+        # manifest did not rebuild, by its row version and next attempt.
+        self._model_rechecks: dict[str, tuple[str | None, datetime]] = {}
+        self._damaged_manifest_rechecks: dict[str, tuple[datetime, datetime]] = {}
         self._claim_owner = uuid.uuid4().hex
         self._storage_observer = StorageObserver(self)
         self._executor = ThreadPoolExecutor(

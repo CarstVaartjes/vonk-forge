@@ -7,7 +7,7 @@ import stat
 import uuid
 from collections import defaultdict
 from dataclasses import replace
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, cast
 
 from sqlalchemy import func, select
@@ -44,26 +44,57 @@ class _RevisionChanged(Exception):
     """Re-plan on the next worker pass; no removal was accepted."""
 
 
-#: Each cached set's row and stored manifest, by set digest.
-type _StoredSets = dict[str, tuple[ModelCacheSet, ArtifactSetManifest]]
+#: Each set's row and stored manifest (None: damaged and not re-derived), by digest.
+type _StoredSets = dict[str, tuple[ModelCacheSet, ArtifactSetManifest | None]]
+#: Re-observation backoffs, in revision scans: an outcome that may clear soon
+#: (an unreadable row, a missing dependency) and a settled one (a resolved set
+#: that is not held, invalid content) that only an in-place repair can change.
+_OBSERVE_RECHECK_SCANS = (2.0, 3.0)
+_SETTLED_RECHECK_SCANS = (20.0, 40.0)
+
+
+def _recheck_at(now: datetime, scans: tuple[float, float]) -> datetime:
+    """A jittered re-observation time ``scans`` revision scans from ``now``."""
+    low, high = scans
+    return now + _REVISION_SCAN_INTERVAL * (low + (high - low) * random.random())
 
 
 class RevisionsMixin:
     def _stored_sets(self) -> _StoredSets:
-        """Every set row's manifest, parsed once per scan.
+        """Every set row with its manifest, parsed once per scan.
 
         The rows are read in one short session and parsed after it closed: a
         damaged manifest is rebuilt from the catalog (with the resolver's retry
-        pauses) without holding a read transaction open.
+        pauses) without holding a read transaction open. One that does not
+        rebuild is tried again after a backoff, or as soon as its row changes.
         """
         cache = cast("ModelCacheService", self)
         with cache._session() as session:
             rows = list(session.scalars(select(ModelCacheSet)))
-        return {
-            row.artifact_set_sha256: (row, manifest)
-            for row in rows
-            if (manifest := cache._stored_manifest(row)) is not None
-        }
+        now = cache._clock()
+        known = cache._damaged_manifest_rechecks
+        damaged: dict[str, tuple[datetime, datetime]] = {}
+        stored: _StoredSets = {}
+        for row in rows:
+            digest = row.artifact_set_sha256
+            previous = known.get(digest)
+            if (
+                previous is not None
+                and previous[0] == row.updated_at
+                and now < previous[1]
+            ):
+                damaged[digest] = previous
+                stored[digest] = (row, None)
+                continue
+            manifest = cache._stored_manifest(row)
+            if manifest is None:
+                damaged[digest] = (
+                    row.updated_at,
+                    _recheck_at(now, _OBSERVE_RECHECK_SCANS),
+                )
+            stored[digest] = (row, manifest)
+        cache._damaged_manifest_rechecks = damaged
+        return stored
 
     def _model_revision_sets(
         self,
@@ -96,6 +127,8 @@ class RevisionsMixin:
         bindings: dict[str, set[str]] = defaultdict(set)
         result = []
         for row, manifest in stored.values():
+            if manifest is None:
+                continue
             bindings[row.artifact_set_sha256].update(
                 reference.content_sha256 for reference in manifest.verified_models
             )
@@ -263,15 +296,15 @@ class RevisionsMixin:
     def _adopt_current_model_bindings(self, stored: _StoredSets) -> bool:
         """Recover editorial bindings by exact canonical identity, not history.
 
-        This only updates an existing verified set; it cannot resurrect a
-        removed cache entry, transfer bytes or authorize a workload. True when
-        it adopted a set.
+        This only updates an existing verified set (a damaged stored manifest
+        is replaced by the resolved one); it cannot resurrect a removed cache
+        entry, transfer bytes or authorize a workload. True when it adopted a
+        set.
 
-        A model digest's set is fixed by its content and its dependencies'
-        digests, so each one is resolved once, not on every pass. One that
-        cannot be observed yet is observed again after a jittered backoff of a
-        few scans (the catalog can repair a row in place); one whose content
-        is invalid never resolves and is not retried.
+        Each unbound model digest is resolved on a jittered re-observation
+        schedule, not on every pass: soon after an outcome that may clear, much
+        later after a settled one (the catalog can repair a row in place), and
+        at once when the set it resolved to becomes held.
         """
         cache = cast("ModelCacheService", self)
         held = {
@@ -293,63 +326,53 @@ class RevisionsMixin:
         bound = {
             reference.content_sha256
             for _row, manifest in stored.values()
+            if manifest is not None
             for reference in manifest.verified_models
         }
         unbound = current - bound
-        resolved: dict[str, str | None] = {
-            digest: set_digest
-            for digest, set_digest in cache._resolved_model_sets.items()
+        rechecks = {
+            digest: known
+            for digest, known in cache._model_rechecks.items()
             if digest in unbound
         }
-        retry_at = {
-            digest: due
-            for digest, due in cache._unresolved_model_retry_at.items()
-            if digest in unbound
-        }
-        cache._resolved_model_sets = resolved
-        cache._unresolved_model_retry_at = retry_at
+        cache._model_rechecks = rechecks
         now = cache._clock()
         adopted = False
         for digest in unbound:
-            if digest in resolved and resolved[digest] not in held:
-                continue
-            if digest in retry_at and now < retry_at[digest]:
+            known = rechecks.get(digest)
+            if known is not None and now < known[1] and known[0] not in held:
                 continue
             try:
                 manifest = cache.resolve_artifact_set(model_content_sha256=digest)
-                resolved[digest] = manifest.digest
-                retry_at.pop(digest, None)
+                rechecks[digest] = (
+                    manifest.digest,
+                    _recheck_at(now, _SETTLED_RECHECK_SCANS),
+                )
                 if manifest.digest in held and cache._manifest_coverage_complete(
                     manifest
                 ):
                     cache.adopt_verified_set(manifest)
                     adopted = True
             except ModelCacheError as error:
-                if disposition(error) in {Disposition.WAIT, Disposition.OBSERVE}:
-                    retry_at[digest] = now + _REVISION_SCAN_INTERVAL * (
-                        2 + random.random()
-                    )
-                    log_event(
-                        _LOGGER,
-                        "model_cache.binding_recheck",
-                        service="control-worker",
-                        model_content_sha256=digest,
-                        code=error.code,
-                        reason=wait_reason(error),
-                        detail=error.detail,
-                        retry_at=retry_at[digest],
-                    )
-                else:
-                    # Fixed by the digest's content: it never resolves.
-                    resolved[digest] = None
-                    log_event(
-                        _LOGGER,
-                        "model_cache.binding_unresolvable",
-                        service="control-worker",
-                        model_content_sha256=digest,
-                        code=error.code,
-                        detail=error.detail,
-                    )
+                verdict = disposition(error)
+                due = _recheck_at(
+                    now,
+                    _OBSERVE_RECHECK_SCANS
+                    if verdict in {Disposition.WAIT, Disposition.OBSERVE}
+                    else _SETTLED_RECHECK_SCANS,
+                )
+                rechecks[digest] = (None, due)
+                log_event(
+                    _LOGGER,
+                    "model_cache.binding_recheck",
+                    service="control-worker",
+                    model_content_sha256=digest,
+                    code=error.code,
+                    disposition=verdict,
+                    reason=wait_reason(error),
+                    detail=error.detail,
+                    retry_at=due,
+                )
         return adopted
 
     def reconcile_model_revisions(self) -> None:
