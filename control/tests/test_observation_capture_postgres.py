@@ -24,7 +24,7 @@ from vonk_control.api import create_app
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.db import connections as connection_owner
 from vonk_control.fleet_projection import FleetNode, FleetProjection, FleetSnapshot
-from vonk_control.models import AgentNode, AgentNodeProfile, Base
+from vonk_control.models import AgentNode, AgentNodeContact, AgentNodeProfile, Base
 from vonk_control.observation_transfer import ObservationTransferRecord
 from vonk_control.platform_observation import PlatformObservation, PlatformObserver
 from vonk_control.strict_json import serialize_json_value
@@ -42,7 +42,11 @@ def _seed(engine):
     sessions = sessionmaker(engine, expire_on_commit=False)
     with sessions.begin() as session:
         session.add(
-            AgentNode(node_id=NODE, state="active", last_seen_at=datetime.now(UTC))
+            AgentNode(
+                node_id=NODE,
+                state="active",
+                contact=AgentNodeContact(last_seen_at=datetime.now(UTC)),
+            )
         )
         session.flush()
         session.add(AgentNodeProfile(node_id=NODE, display_name="before"))

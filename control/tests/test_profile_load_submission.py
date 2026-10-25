@@ -34,6 +34,7 @@ from vonk_control.fleet_profiles import (
 from vonk_control.lifecycle.types import State as LifecycleState
 from vonk_control.models import (
     AgentNode,
+    AgentNodeContact,
     AgentOperation,
     Base,
     CatalogDocumentRevision,
@@ -196,8 +197,6 @@ def test_accepted_profile_roster_maintenance_survives_actor_revocation(postgres_
             AgentNode(
                 node_id="spk_" + "3" * 32,
                 state="active",
-                protocol_version=2,
-                last_seen_at=NOW,
                 inventory_snapshot=inventory_items_fixture(
                     "spk_" + "3" * 32,
                     observed_at=NOW,
@@ -205,6 +204,7 @@ def test_accepted_profile_roster_maintenance_survives_actor_revocation(postgres_
                         {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
                     ),
                 ),
+                contact=AgentNodeContact(protocol_version=2, last_seen_at=NOW),
             )
         )
     # The worker maintains the accepted snapshot without a new user decision.
@@ -386,8 +386,6 @@ def test_admission_change_preserves_consent_and_supersedes_a_newer_save(
                     AgentNode(
                         node_id="spk_" + "3" * 32,
                         state="active",
-                        protocol_version=2,
-                        last_seen_at=NOW,
                         inventory_snapshot=inventory_items_fixture(
                             "spk_" + "3" * 32,
                             observed_at=NOW,
@@ -398,6 +396,7 @@ def test_admission_change_preserves_consent_and_supersedes_a_newer_save(
                                 }
                             ),
                         ),
+                        contact=AgentNodeContact(protocol_version=2, last_seen_at=NOW),
                     )
                 )
             elif change == "authority":
@@ -521,8 +520,6 @@ def test_admission_serializes_insertion_of_a_previously_unknown_spark(postgres_e
                 AgentNode(
                     node_id="spk_" + "3" * 32,
                     state="active",
-                    protocol_version=2,
-                    last_seen_at=NOW,
                     inventory_snapshot=inventory_items_fixture(
                         "spk_" + "3" * 32,
                         observed_at=NOW,
@@ -530,6 +527,7 @@ def test_admission_serializes_insertion_of_a_previously_unknown_spark(postgres_e
                             {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
                         ),
                     ),
+                    contact=AgentNodeContact(protocol_version=2, last_seen_at=NOW),
                 )
             )
 

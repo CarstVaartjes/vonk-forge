@@ -148,7 +148,7 @@ RECIPE_RUN_WRITE_VERDICTS: dict[str, dict[str, tuple[str, str]]] = {
     },
     "recipe_operations/start.py": {
         "_start_once": (
-            "23a7b52f4272c6ca8dffb9ef65011dec7bfedc29900d155705f26c881e1a4594",
+            "da4713c8a01bf0dc2f2fa45528addee37c826a6ef936f6d96e8855a439038ac3",
             "retain: Start admission binds run and capacity",
         ),
     },

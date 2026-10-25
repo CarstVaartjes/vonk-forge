@@ -28,6 +28,7 @@ from ..admission_locking import (
     is_admission_contention,
     node_admission_key,
 )
+from ..agent_contacts import last_seen
 from ..job_documents import (
     RecipeStopParent,
 )
@@ -248,8 +249,8 @@ class OfflineStopMixin:
                         if node_id in nodes
                         and nodes[node_id].revoked_at is None
                         and (
-                            (last_seen := nodes[node_id].last_seen_at) is None
-                            or _aware(now) - _aware(last_seen) > timedelta(seconds=150)
+                            (seen := last_seen(nodes[node_id])) is None
+                            or _aware(now) - _aware(seen) > timedelta(seconds=150)
                         )
                     )
                     if not offline:

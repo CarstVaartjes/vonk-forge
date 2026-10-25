@@ -248,11 +248,12 @@ def resolve_agent_receipt(
             _require(isinstance(body, ClaimRequest) and isinstance(result, Response))
             assert isinstance(body, ClaimRequest)
             node = session.get(AgentNode, identity.node_id)
-            _require(node is not None)
-            assert node is not None
+            contact = None if node is None else node.contact
+            _require(node is not None and contact is not None)
+            assert node is not None and contact is not None
             _require(
-                node.contact_certificate_serial == identity.certificate_serial
-                and node.last_seen_at is not None
+                contact.contact_certificate_serial == identity.certificate_serial
+                and contact.last_seen_at is not None
                 and runtime_value(node, lambda identity: identity.binary_digest)
                 == body.runtime_identity.binary_digest
                 and runtime_value(node, lambda identity: identity.build_digest)
@@ -267,7 +268,7 @@ def resolve_agent_receipt(
                     owner=ReceiptOwner.NODE,
                     id=identity.node_id,
                     href=href,
-                    content_digest=node.contact_observation_digest,
+                    content_digest=contact.contact_observation_digest,
                 )
             claim = AgentClaim.model_validate_json(bytes(result.body))
             fence = claim.fence

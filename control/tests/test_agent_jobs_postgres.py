@@ -38,6 +38,7 @@ from vonk_control.pki import IssuedCertificate
 
 from .agent_fences import fenced_attempt, fenced_operation, park_for_operator
 from .ca_test_authority import FixtureCertificateAuthority
+from .node_contacts import contact_row
 from .recipe_stop_fixtures import recipe_stop_payload
 from .runtime_identity_support import claim_agent
 from .test_agent_jobs import (
@@ -415,20 +416,21 @@ def test_postgres_revocation_serializes_agent_work_and_contact(
     with sessions.begin() as session:
         node = session.get(AgentNode, NODE_A)
         assert node is not None
-        node.last_seen_at = None
+        contact_row(node).last_seen_at = None
 
     revocation_locked = threading.Event()
     release_revocation = threading.Event()
     revocation_errors: list[Exception] = []
     action_results: list[object] = []
 
-    def pause_after_node_lock(
+    def pause_after_certificate_lock(
         _conn, _cursor, statement, _parameters, _context, _many
     ) -> None:
+        # Agent contact reads the node; the certificate lock is its fence.
         if (
             threading.current_thread().name == "revoker"
-            and "FROM agent_nodes" in statement
-            and "FOR UPDATE OF agent_nodes" in statement
+            and "FROM agent_certificates" in statement
+            and "FOR UPDATE OF agent_certificates" in statement
         ):
             revocation_locked.set()
             assert release_revocation.wait(timeout=30)
@@ -467,7 +469,7 @@ def test_postgres_revocation_serializes_agent_work_and_contact(
         ) as error:
             action_results.append(error)
 
-    event.listen(postgres_engine, "after_cursor_execute", pause_after_node_lock)
+    event.listen(postgres_engine, "after_cursor_execute", pause_after_certificate_lock)
     try:
         revoker = threading.Thread(target=revoke, name="revoker")
         worker = threading.Thread(target=act, name="agent-worker")
@@ -476,14 +478,16 @@ def test_postgres_revocation_serializes_agent_work_and_contact(
         worker.start()
         time.sleep(0.25)
         assert worker.is_alive(), (
-            "agent work must wait for the revocation identity lock"
+            "agent work must wait for the revocation certificate lock"
         )
         release_revocation.set()
         revoker.join(timeout=30)
         worker.join(timeout=30)
     finally:
         release_revocation.set()
-        event.remove(postgres_engine, "after_cursor_execute", pause_after_node_lock)
+        event.remove(
+            postgres_engine, "after_cursor_execute", pause_after_certificate_lock
+        )
 
     assert not revoker.is_alive() and not worker.is_alive()
     assert not revocation_errors
@@ -497,7 +501,9 @@ def test_postgres_revocation_serializes_agent_work_and_contact(
         certificate = session.get(AgentCertificate, "serial-a")
         stored_operation = session.get(AgentOperation, operation.id)
         assert (
-            node is not None and node.state == "retired" and node.last_seen_at is None
+            node is not None
+            and node.state == "retired"
+            and contact_row(node).last_seen_at is None
         )
         assert certificate is not None and certificate.state == "revoked"
         assert stored_operation is not None
@@ -769,7 +775,7 @@ def test_postgres_enqueue_cannot_race_parent_finalization(
     assert child_count == 1
 
 
-def test_postgres_enqueue_locks_node_before_completion_and_parent_aggregation(
+def test_postgres_enqueue_locks_parent_before_completion_and_parent_aggregation(
     service, postgres_engine
 ) -> None:
     sessions, clock = service
@@ -781,20 +787,21 @@ def test_postgres_enqueue_locks_node_before_completion_and_parent_aggregation(
     )
     claim = claim_agent(finishing, NODE_A, "serial-a")
     assert claim is not None
-    node_locked = threading.Event()
+    parent_locked = threading.Event()
     release_enqueue = threading.Event()
     enqueue_results: list[object] = []
     finish_errors: list[Exception] = []
 
-    def pause_after_enqueue_node_lock(
+    def pause_after_enqueue_parent_lock(
         _conn, _cursor, statement, _parameters, _context, _many
     ) -> None:
+        # Completion reads the node; the parent Job lock orders it.
         if (
             threading.current_thread().name == "enqueuer"
-            and "FROM agent_nodes" in statement
-            and "FOR UPDATE OF agent_nodes" in statement
+            and "FROM jobs" in statement
+            and "FOR UPDATE OF jobs" in statement
         ):
-            node_locked.set()
+            parent_locked.set()
             assert release_enqueue.wait(timeout=30)
 
     def enqueue() -> None:
@@ -825,22 +832,24 @@ def test_postgres_enqueue_locks_node_before_completion_and_parent_aggregation(
         ) as error:
             finish_errors.append(error)
 
-    event.listen(postgres_engine, "after_cursor_execute", pause_after_enqueue_node_lock)
+    event.listen(
+        postgres_engine, "after_cursor_execute", pause_after_enqueue_parent_lock
+    )
     try:
         enqueuer = threading.Thread(target=enqueue, name="enqueuer")
         finisher = threading.Thread(target=finish, name="finisher")
         enqueuer.start()
-        assert node_locked.wait(timeout=30)
+        assert parent_locked.wait(timeout=30)
         finisher.start()
         time.sleep(0.25)
-        assert finisher.is_alive(), "completion must order behind enqueue's node lock"
+        assert finisher.is_alive(), "completion must order behind enqueue's parent lock"
         release_enqueue.set()
         enqueuer.join(timeout=30)
         finisher.join(timeout=30)
     finally:
         release_enqueue.set()
         event.remove(
-            postgres_engine, "after_cursor_execute", pause_after_enqueue_node_lock
+            postgres_engine, "after_cursor_execute", pause_after_enqueue_parent_lock
         )
 
     assert not enqueuer.is_alive() and not finisher.is_alive()

@@ -23,7 +23,7 @@ from vonk_agent_protocol import (
 )
 from vonk_control.fleet_projection import FleetProjection
 from vonk_control.host_helper_authority import HostHelperAuthorityError
-from vonk_control.models import AgentNode
+from vonk_control.models import AgentNode, AgentNodeContact
 from vonk_control.recovery_policy import RECOVERY
 from vonk_control.settings import PROFILE_STALL_WINDOW_SECONDS
 
@@ -63,7 +63,13 @@ def test_a_profile_retry_declined_the_same_way_is_attention_until_one_is_admitte
     now = lifecycle._clock()
     # A Spark joins the fleet: the accepted scope changed, every retry declines.
     with sessions.begin() as session:
-        session.add(AgentNode(node_id=EXTRA, state="active", last_seen_at=now))
+        session.add(
+            AgentNode(
+                node_id=EXTRA,
+                state="active",
+                contact=AgentNodeContact(last_seen_at=now),
+            )
+        )
     for attempt in range(LIMIT):
         assert _repeating(sessions, nodes[0], now) == []
         declined = service.retry(
@@ -155,7 +161,7 @@ def test_unreadable_contact_evidence_does_not_block_command_history(
     client, services, _codec, clock = make_agent_system(tmp_path)
     with services.sessions.begin() as session:
         session.execute(
-            text("UPDATE agent_nodes SET contact_repeated_evidence = :invalid"),
+            text("UPDATE agent_node_contacts SET contact_repeated_evidence = :invalid"),
             {"invalid": '"damaged"'},
         )
     failed = {

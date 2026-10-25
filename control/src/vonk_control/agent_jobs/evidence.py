@@ -23,6 +23,7 @@ from vonk_agent_protocol.contracts import AgentFailureResult
 from vonk_agent_protocol.recipe_operations import RecipeStartPayload, RecipeStopPayload
 
 from .. import agent_operation_states
+from ..agent_contacts import last_seen
 from ..agent_operation_facts import aware as _aware
 from ..failure_evidence import safe_text, sanitize_diagnostics
 from ..models import AgentNode, AgentOperationAttempt, Job, RecipeRun, RunNode
@@ -115,8 +116,8 @@ def _lease_expiry_reason(
         parts.append(f"lease deadline {_aware(previous.lease_deadline).isoformat()}")
     parts.append(
         "last accepted contact never observed"
-        if node.last_seen_at is None
-        else f"last accepted contact {_aware(node.last_seen_at).isoformat()}"
+        if (seen := last_seen(node)) is None
+        else f"last accepted contact {_aware(seen).isoformat()}"
     )
     parts.append(f"expired at {_aware(now).isoformat()}")
     return ("; ".join(parts) + "; the effect is unobserved")[:512]
@@ -143,8 +144,8 @@ def _reconciled_dead_attempt_reason(
         return _lease_expiry_reason(operation, attempt, node, now)
     contact = (
         "last accepted contact never observed"
-        if node.last_seen_at is None
-        else f"last accepted contact {_aware(node.last_seen_at).isoformat()}"
+        if (seen := last_seen(node)) is None
+        else f"last accepted contact {_aware(seen).isoformat()}"
     )
     return (
         f"{detail}; {contact}; reconciled at {_aware(now).isoformat()}; "

@@ -19,8 +19,10 @@ from vonk_control.admission_locking import (
     node_admission_key,
     patient_admission,
 )
-from vonk_control.models import AgentNode, Base, NodeTelemetrySample
+from vonk_control.models import AgentNode, AgentNodeContact, Base, NodeTelemetrySample
 from vonk_control.observation_delivery import ObservationDeliveryMiddleware
+
+from .node_contacts import contact_row
 
 NODE = "spk_" + "a" * 32
 NOW = datetime(2026, 10, 5, tzinfo=UTC)
@@ -35,8 +37,8 @@ def sessions(postgres_engine):
             AgentNode(
                 node_id=NODE,
                 state="active",
-                protocol_version=3,
                 workload_intent_ordinal=1,
+                contact=AgentNodeContact(protocol_version=3),
             )
         )
     return factory
@@ -193,8 +195,12 @@ def test_changed_contact_skips_busy_admission_then_recovers(sessions) -> None:
     delivery._record(NODE, 204, NOW)
     with sessions() as session:
         node = session.get(AgentNode, NODE)
-        assert node is not None and node.recipe_observation_http_status == 422
+        assert (
+            node is not None and contact_row(node).recipe_observation_http_status == 422
+        )
     delivery._record(NODE, 204, NOW + timedelta(seconds=2))
     with sessions() as session:
         node = session.get(AgentNode, NODE)
-        assert node is not None and node.recipe_observation_http_status == 204
+        assert (
+            node is not None and contact_row(node).recipe_observation_http_status == 204
+        )

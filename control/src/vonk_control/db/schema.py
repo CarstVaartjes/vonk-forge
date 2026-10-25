@@ -130,10 +130,6 @@ def reconcile_schema(connection: Connection) -> None:
                     error,
                 )
 
-    from .node_facts import move_contact_facts
-
-    move_contact_facts(connection)
-
     # Change types/defaults/nullability before constraint installation. A
     # PostgreSQL cast failure is scoped to that column and does not poison startup.
     for table_name, table in Base.metadata.tables.items():
@@ -469,11 +465,15 @@ def reconcile_schema(connection: Connection) -> None:
 
     from .node_facts import (
         move_artifact_facts,
+        move_contact_facts,
         move_repeated_evidence,
         move_resource_facts,
         move_runtime_facts,
     )
 
+    # Contact first: the runtime move reads the contact clock from its owner,
+    # and repeated evidence adopts contact summaries onto contact rows.
+    move_contact_facts(connection)
     move_runtime_facts(connection)
     move_artifact_facts(connection)
     move_repeated_evidence(connection)

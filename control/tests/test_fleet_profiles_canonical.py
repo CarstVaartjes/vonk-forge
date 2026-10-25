@@ -29,6 +29,7 @@ from vonk_control.model_cache_contract import (
 )
 from vonk_control.models import (
     AgentNode,
+    AgentNodeContact,
     AgentNodeProfile,
     Base,
     CatalogDocument,
@@ -111,8 +112,6 @@ def _seed(sessions: sessionmaker, *, options: bool = False) -> None:
                 AgentNode(
                     node_id=node_id,
                     state="active",
-                    protocol_version=2,
-                    last_seen_at=NOW,
                     inventory_snapshot=inventory_items_fixture(
                         node_id,
                         observed_at=NOW,
@@ -120,6 +119,7 @@ def _seed(sessions: sessionmaker, *, options: bool = False) -> None:
                             {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
                         ),
                     ),
+                    contact=AgentNodeContact(protocol_version=2, last_seen_at=NOW),
                 )
                 for node_id in (NODE_1, NODE_2)
             ]

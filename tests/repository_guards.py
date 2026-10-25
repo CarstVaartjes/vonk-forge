@@ -54,6 +54,10 @@ SCOPED: tuple[tuple[str, str], ...] = (
         "Concurrent PostgreSQL insert, replay and row-lock fault injection at content and request boundaries.",
     ),
     (
+        "control/tests/test_agent_contact_locks_postgres.py",
+        "Real PostgreSQL contact hammering against admission, publication and Job-then-nodes order; no busy refusal or deadlock.",
+    ),
+    (
         "control/tests/test_optimistic_postgres.py",
         "PostgreSQL optimistic Job races, child rollback, contention recovery and startup column adoption.",
     ),

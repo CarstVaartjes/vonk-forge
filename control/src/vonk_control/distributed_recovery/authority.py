@@ -25,6 +25,7 @@ from ..lifecycle.evidence import Residue
 from ..lifecycle.job import JobAdapter
 from ..models import (
     AgentNode,
+    AgentNodeContact,
     AgentOperation,
     CatalogDocumentRevision,
     Job,
@@ -232,12 +233,7 @@ def _recovery_authority(
         return _unproven(run.id, _DAMAGED, "distributed recovery rendezvous is invalid")
     presences: dict[str, str] = {}
     for node in nodes:
-        presence = session.scalar(
-            select(AgentNode)
-            .where(AgentNode.node_id == node.node_id)
-            .order_by(AgentNode.management_observed_at.desc())
-            .limit(1)
-        )
+        presence = session.get(AgentNodeContact, node.node_id)
         observed_at = None if presence is None else presence.management_observed_at
         # Stored timestamps can come back naive (SQLite); they are UTC either
         # way, matching the other stored-observation readers in this module.

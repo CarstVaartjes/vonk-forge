@@ -66,7 +66,11 @@ def test_bookkeeping_adoption_failure_preserves_current_schema(
 def test_contact_move_rolls_back_on_interruption_and_restarts(
     postgres_engine: Engine, monkeypatch: MonkeyPatch
 ) -> None:
-    """Catches dropping the old owner before a durable copy or skipping replay."""
+    """Catches dropping the old owner before a durable copy or skipping replay.
+
+    An upgraded Controller adopts contact facts still on agent_nodes into
+    agent_node_contacts, so a running fleet keeps its last contact and address.
+    """
     import pytest
     from sqlalchemy import event, insert, inspect
     from vonk_control.db import node_facts
@@ -74,6 +78,11 @@ def test_contact_move_rolls_back_on_interruption_and_restarts(
 
     Base.metadata.create_all(postgres_engine)
     with postgres_engine.begin() as connection:
+        connection.exec_driver_sql("DROP TABLE agent_node_contacts")
+        connection.exec_driver_sql("""ALTER TABLE agent_nodes
+            ADD COLUMN protocol_version integer,
+            ADD COLUMN management_address varchar(45),
+            ADD COLUMN last_seen_at timestamptz""")
         connection.execute(
             insert(AgentNode),
             [
@@ -81,25 +90,15 @@ def test_contact_move_rolls_back_on_interruption_and_restarts(
                 {"node_id": "empty", "state": NodeIdentityState.ACTIVE},
             ],
         )
-        connection.exec_driver_sql(
-            "ALTER TABLE agent_nodes DROP COLUMN management_address"
-        )
-        connection.exec_driver_sql(
-            "ALTER TABLE agent_nodes DROP COLUMN management_observed_at"
-        )
-        connection.exec_driver_sql("""CREATE TABLE agent_presence (
-            node_id varchar(36) PRIMARY KEY, certificate_serial varchar(128),
-            certificate_fingerprint varchar(128), management_address varchar(45),
-            observed_at timestamptz)""")
-        connection.exec_driver_sql("""INSERT INTO agent_presence VALUES
-            ('legacy', 'old-certificate', 'derived-not-copied', '10.0.0.42',
-             '2026-10-22T12:00:00Z')""")
+        connection.exec_driver_sql("""UPDATE agent_nodes SET protocol_version = 4,
+            management_address = '10.0.0.42', last_seen_at = '2026-10-25T12:00:00Z'
+            WHERE node_id = 'legacy'""")
 
     original_move = node_facts.move_contact_facts
 
     def interrupted_move(connection: Connection) -> None:
         def interrupt(_conn, _cursor, statement, _parameters, _context, _many):
-            if statement == "DROP TABLE agent_presence":
+            if statement.startswith("ALTER TABLE agent_nodes DROP COLUMN"):
                 raise InterruptedError(
                     "Controller stopped after copy, before retirement"
                 )
@@ -116,19 +115,26 @@ def test_contact_move_rolls_back_on_interruption_and_restarts(
         with pytest.raises(InterruptedError):
             initialize_database(url)
     with postgres_engine.connect() as connection:
-        assert "agent_presence" in inspect(connection).get_table_names()
-        assert "management_address" not in {
+        # The old owner survives an interrupted move; the copy is repeatable.
+        assert "last_seen_at" in {
             column["name"] for column in inspect(connection).get_columns("agent_nodes")
         }
     initialize_database(url)
     initialize_database(url)
     with postgres_engine.connect() as connection:
-        assert "agent_presence" not in inspect(connection).get_table_names()
+        assert not {
+            "protocol_version",
+            "management_address",
+            "last_seen_at",
+        }.intersection(
+            column["name"] for column in inspect(connection).get_columns("agent_nodes")
+        )
+        assert connection.exec_driver_sql("""SELECT protocol_version,
+            management_address, last_seen_at IS NOT NULL
+            FROM agent_node_contacts WHERE node_id='legacy'
+        """).one() == (4, "10.0.0.42", True)
         assert connection.exec_driver_sql("""SELECT management_address,
-            contact_certificate_serial FROM agent_nodes WHERE node_id='legacy'
-        """).one() == ("10.0.0.42", "old-certificate")
-        assert connection.exec_driver_sql("""SELECT management_address,
-            management_observed_at FROM agent_nodes WHERE node_id='empty'
+            last_seen_at FROM agent_node_contacts WHERE node_id='empty'
         """).one() == (None, None)
 
 

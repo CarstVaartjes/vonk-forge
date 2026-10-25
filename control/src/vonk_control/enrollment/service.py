@@ -7,7 +7,7 @@ from collections.abc import Mapping
 from datetime import datetime, timedelta
 
 from cryptography import x509
-from sqlalchemy import select, true, update
+from sqlalchemy import delete, select, true, update
 from sqlalchemy.exc import SQLAlchemyError
 from vonk_agent_protocol import ErrorCategory, LifecycleState, UnknownError, WaitReason
 from vonk_agent_protocol.enrollment import ExpiredRenewRequest
@@ -51,6 +51,7 @@ from ..models import (
     AgentEnrollment,
     AgentIssuedCertificateRevocation,
     AgentNode,
+    AgentNodeContact,
     AgentOperation,
     AgentOperationAttempt,
     Job,
@@ -476,6 +477,10 @@ class EnrollmentService(RotationService):
             if node is not None:
                 node.state = NodeIdentityState.RETIRED
                 node.revoked_at = node.revoked_at or now
+                # A retired identity has no contact; re-enrollment starts anew.
+                session.execute(
+                    delete(AgentNodeContact).where(AgentNodeContact.node_id == node_id)
+                )
             serials = [
                 certificate.serial
                 for certificate in certificates

@@ -13,6 +13,7 @@ from vonk_control.fleet_profile_contract import FleetProfileInput
 from vonk_control.fleet_profiles import FleetProfileService
 from vonk_control.models import (
     AgentNode,
+    AgentNodeContact,
     FleetProfileApplication,
     FleetProfileSelection,
 )
@@ -28,8 +29,6 @@ def _world():
             AgentNode(
                 node_id=_node_id(2),
                 state="active",
-                protocol_version=1,
-                last_seen_at=NOW,
                 inventory_snapshot=inventory_items_fixture(
                     _node_id(2),
                     observed_at=NOW,
@@ -37,6 +36,7 @@ def _world():
                         {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
                     ),
                 ),
+                contact=AgentNodeContact(protocol_version=1, last_seen_at=NOW),
             )
         )
     adapter = _SwitchAdapter()

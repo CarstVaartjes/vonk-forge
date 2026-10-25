@@ -53,6 +53,7 @@ from ..models import (
     AgentEnrollment,
     AgentEnrollmentGrant,
     AgentNode,
+    AgentNodeContact,
     AgentNodeProfile,
 )
 from ..pki import IssuedCertificate
@@ -104,6 +105,9 @@ def _persist_issued_enrollment(
                 labels={},
             )
         )
+        # The contact row exists from enrollment on, so steady-state contact is
+        # an UPDATE that never takes a key-share lock on the new node row.
+        session.add(AgentNodeContact(node_id=enrollment.node_id))
         generation = 1
     else:
         if purpose != EnrollmentPurpose.RE_ENROLL:

@@ -81,6 +81,21 @@ SECURITY_EDGES = frozenset(
 )
 
 
+# Controller-observed contact facts have one writer: an upsert in agent_contacts.
+CONTACT_WRITERS = frozenset(
+    {
+        "control/src/vonk_control/agent_contacts.py",
+        "control/src/vonk_control/db/node_facts.py",
+    }
+)
+CONTACT_WRITE = re.compile(
+    r"\.(?:last_seen_at|protocol_version|contact_certificate_serial"
+    r"|contact_observation_digest|management_address|management_observed_at"
+    r"|recipe_observation_http_status|recipe_observation_status_at)\s*=(?!=)"
+    r"|\b(?:insert|update)\(\s*AgentNodeContact\b"
+)
+
+
 @cache
 def security_refusals() -> frozenset[str]:
     """Derive refusal subclasses, including imported aliases, from current code."""
@@ -707,6 +722,19 @@ def check_source(
     hits: list[tuple[int, str]] = []
     if "optimistic" in modes and python and path.startswith("control/src/"):
         hits.extend((line, optimistic.KIND) for line in optimistic.scan_source(source))
+        if not is_security_edge(path) and not path.startswith(
+            "control/src/vonk_control/enrollment/"
+        ):
+            hits.extend(
+                (line, optimistic.NODE_KIND)
+                for line in optimistic.scan_agent_node_locks(source)
+            )
+        if path not in CONTACT_WRITERS:
+            hits.extend(
+                (line, "contact fact written outside agent_contacts (one upsert path)")
+                for line, text in enumerate(source.splitlines(), 1)
+                if CONTACT_WRITE.search(text)
+            )
         classified = classified_write_lines(path, source)
         hits.extend(
             (line, optimistic.WRITE_KIND)

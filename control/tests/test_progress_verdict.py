@@ -9,6 +9,7 @@ from vonk_control.models import AgentNode, Job
 from vonk_control.reservation_owners import OwnerKind, OwnerRef, owner
 from vonk_control.stall_window import Verdict, Wait, progress_deadline, progress_verdict
 
+from .node_contacts import contact_row
 from .test_recipe_operations import setup_services
 
 START = datetime(2026, 10, 13, 12, tzinfo=UTC)
@@ -84,7 +85,7 @@ def test_owner_arms_name_live_and_ended_owners(tmp_path: Path):
         assert spark.live
         spark_row = session.get(AgentNode, nodes[0])
         assert spark_row is not None
-        spark_row.last_seen_at = now
+        contact_row(spark_row).last_seen_at = now
         assert not owner(session, OwnerRef(OwnerKind.SPARK_RETURN, nodes[0]), now).live
         assert owner(
             session,

@@ -5,22 +5,29 @@ from sqlalchemy.engine import Connection
 
 
 def move_contact_facts(connection: Connection) -> None:
-    """Copy before dropping; a crash rolls back both effects for startup retry."""
-    if "agent_presence" not in inspect(connection).get_table_names():
-        return
-    connection.execute(
-        text("""
-        UPDATE agent_nodes AS node
-        SET management_address = presence.management_address,
-            management_observed_at = presence.observed_at,
-            contact_certificate_serial = presence.certificate_serial
-        FROM agent_presence AS presence
-        WHERE node.node_id = presence.node_id
-          AND (node.management_observed_at IS NULL
-               OR presence.observed_at > node.management_observed_at)
-    """)
+    """Give every node its contact row, adopting facts still on agent_nodes.
+
+    Copy before dropping, in startup's one transaction: a crash rolls back
+    both effects and the next start repeats the move. A node without a row
+    reads as never seen until its next contact, which re-creates the facts.
+    """
+    from ..models import AgentNodeContact
+
+    # Contact facts lived on agent_nodes until owner-approved lock-reduction
+    # step 1 moved them; their names are the contact row's columns.
+    old = {column["name"] for column in inspect(connection).get_columns("agent_nodes")}
+    retired = sorted(
+        old.intersection(AgentNodeContact.__table__.columns.keys()) - {"node_id"}
     )
-    connection.execute(text("DROP TABLE agent_presence"))
+    names = ", ".join(["node_id", *retired])
+    connection.execute(
+        text(
+            f"INSERT INTO agent_node_contacts ({names}) "
+            f"SELECT {names} FROM agent_nodes ON CONFLICT (node_id) DO NOTHING"
+        )
+    )
+    for name in retired:
+        connection.execute(text(f"ALTER TABLE agent_nodes DROP COLUMN {name}"))
 
 
 def move_runtime_facts(connection: Connection) -> None:
@@ -99,9 +106,10 @@ def move_runtime_facts(connection: Connection) -> None:
         text("""
         SELECT node.node_id, node.architecture, node.semantic_version,
             node.build_digest, node.binary_digest, node.preflight_fingerprint,
-            node.last_seen_at, profile.hostname
+            contact.last_seen_at, profile.hostname
         FROM agent_nodes AS node LEFT JOIN agent_node_profiles AS profile
           ON profile.node_id = node.node_id
+        LEFT JOIN agent_node_contacts AS contact ON contact.node_id = node.node_id
     """)
     ).mappings()
     for row in rows:
@@ -271,7 +279,7 @@ def move_repeated_evidence(connection: Connection) -> None:
     from ..evidence_repeats import _utc, load_subject
     from ..models import (
         REPEATED_EVIDENCE_SEQUENCE,
-        AgentNode,
+        AgentNodeContact,
         AgentOperation,
         FleetProfileApplication,
     )
@@ -305,9 +313,9 @@ def move_repeated_evidence(connection: Connection) -> None:
         operation_owned = False
         if is_contact_subject(evidence.subject):
             target, key, field = (
-                AgentNode,
-                AgentNode.node_id,
-                AgentNode.contact_repeated_evidence,
+                AgentNodeContact,
+                AgentNodeContact.node_id,
+                AgentNodeContact.contact_repeated_evidence,
             )
             statement = select(key.label("identity"), field.label("evidence")).where(
                 key == evidence.node_id

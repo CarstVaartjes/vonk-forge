@@ -43,6 +43,7 @@ from vonk_control.run_switch_contract import (
 )
 from vonk_control.run_switch_operations import PhaseExecution, RunSwitchOperationService
 
+from .node_contacts import contact_row
 from .runtime_identity_support import claim_agent
 from .test_lifecycle_preflight import _finish
 from .test_recipe_operations import (
@@ -420,7 +421,7 @@ def test_worker_reobserves_retained_success_after_controller_restart(
     with sessions() as session:
         node = session.get(AgentNode, current.node_ids[0])
         assert node is not None
-        last_contact = node.last_seen_at
+        last_contact = contact_row(node).last_seen_at
     restarted_jobs = AgentJobService(sessions, clock=lambda: now[0])
     # No agent connects or resends. The first worker tick reads durable SQL.
     restarted_jobs.reconcile_orders()
@@ -432,7 +433,7 @@ def test_worker_reobserves_retained_success_after_controller_restart(
         order = session.scalar(
             select(AgentOperation).where(AgentOperation.parent_job_id == child_id)
         )
-        assert node is not None and node.last_seen_at == last_contact
+        assert node is not None and contact_row(node).last_seen_at == last_contact
         assert order is not None and order.current_attempt == 1
     world = (
         sessions,

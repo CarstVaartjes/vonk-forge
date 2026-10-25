@@ -25,6 +25,7 @@ from vonk_control.inventory_repository import (
 )
 from vonk_control.models import (
     AgentNode,
+    AgentNodeContact,
     Base,
     CatalogDocumentRevision,
     RecipeSourceBundle,
@@ -165,7 +166,6 @@ def test_canonical_synthetic_nested_source_path_lists_and_fetches(
             AgentNode(
                 node_id=node_id,
                 state="active",
-                last_seen_at=now,
                 inventory_snapshot=inventory_items_fixture(
                     node_id,
                     observed_at=now,
@@ -179,6 +179,7 @@ def test_canonical_synthetic_nested_source_path_lists_and_fetches(
                         }
                     ),
                 ),
+                contact=AgentNodeContact(last_seen_at=now),
             )
         )
         session.add(

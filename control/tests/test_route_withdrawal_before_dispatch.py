@@ -35,6 +35,7 @@ from vonk_control.route_runtime import (
     AtomicRouteBundlePublisher,
 )
 
+from .node_contacts import contact_row
 from .non_blocking import assert_ended_without_blocking
 from .test_recipe_operations import (
     NOW,
@@ -311,8 +312,8 @@ def _failed_rank_world(tmp_path: Path, engine=None):
     record_exact_empty_snapshot(sessions, nodes[1], NOW + timedelta(seconds=1))
     with sessions.begin() as session:
         for node in session.scalars(select(AgentNode)):
-            node.management_address = None
-            node.management_observed_at = None
+            contact_row(node).management_address = None
+            contact_row(node).management_observed_at = None
     recovery = DistributedRecoveryCoordinator(
         sessions, routes=routes, agent_jobs=queue, clock=lambda: NOW
     )

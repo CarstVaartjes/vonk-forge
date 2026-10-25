@@ -6,15 +6,14 @@ import asyncio
 import logging
 from datetime import UTC, datetime
 
-from sqlalchemy import or_, select, update
 from sqlalchemy.exc import SQLAlchemyError
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from vonk_agent_protocol import WaitReason
 
 from .agent_api import AgentApiServices
+from .agent_contacts import record_observation_delivery
 from .auth import agent_identity_from_scope
 from .logging import log_event
-from .models import AgentNode
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -77,26 +76,7 @@ class ObservationDeliveryMiddleware:
     def _record(self, node_id: str, status: int, started: datetime) -> None:
         assert self.services is not None
         with self.services.sessions.begin() as session:
-            # This is a Controller contact verdict, not agent-reported data.
-            # Never queue behind capacity admission for diagnostic bookkeeping;
-            # a later report reobserves it. A delayed response cannot overwrite
-            # a newer verdict.
-            writable = (
-                select(AgentNode.node_id)
-                .where(
-                    AgentNode.node_id == node_id,
-                    or_(
-                        AgentNode.recipe_observation_status_at.is_(None),
-                        AgentNode.recipe_observation_status_at <= started,
-                    ),
-                )
-                .with_for_update(of=AgentNode, skip_locked=True)
-            )
-            session.execute(
-                update(AgentNode)
-                .where(AgentNode.node_id.in_(writable))
-                .values(
-                    recipe_observation_http_status=status,
-                    recipe_observation_status_at=started,
-                )
-            )
+            # A Controller contact verdict, not agent-reported data: one upsert
+            # of the contact row, never a lock on the node admission takes. A
+            # delayed response cannot overwrite a newer verdict.
+            record_observation_delivery(session, node_id, status, started)

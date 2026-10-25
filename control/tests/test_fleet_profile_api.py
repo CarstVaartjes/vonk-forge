@@ -23,7 +23,13 @@ from vonk_control.auth import MUTATION_ROLES, Actor, TokenCodec
 from vonk_control.fleet_profile_contract import FleetProfileApplicationView
 from vonk_control.fleet_profiles import FleetProfileConflict, FleetProfileService
 from vonk_control.jobs import JobService
-from vonk_control.models import AgentNode, Base, FleetProfileApplication, User
+from vonk_control.models import (
+    AgentNode,
+    AgentNodeContact,
+    Base,
+    FleetProfileApplication,
+    User,
+)
 from vonk_control.strict_json import route_endpoint
 
 from cluster_profiles import cli
@@ -58,14 +64,16 @@ def _client(
                 AgentNode(
                     node_id="spk_" + "1" * 32,
                     state="active",
-                    protocol_version=1,
-                    last_seen_at=datetime(2026, 9, 10, tzinfo=UTC),
                     inventory_snapshot=inventory_items_fixture(
                         "spk_" + "1" * 32,
                         observed_at=datetime(2026, 9, 10, tzinfo=UTC),
                         identity=AgentRuntimeIdentity.model_validate(
                             {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
                         ),
+                    ),
+                    contact=AgentNodeContact(
+                        protocol_version=1,
+                        last_seen_at=datetime(2026, 9, 10, tzinfo=UTC),
                     ),
                 )
             )

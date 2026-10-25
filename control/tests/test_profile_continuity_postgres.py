@@ -34,6 +34,7 @@ from vonk_control.fleet_profiles.persistence import _kept_fence_ordinal
 from vonk_control.models import (
     AgentCertificate,
     AgentNode,
+    AgentNodeContact,
     Base,
     FleetProfileApplication,
     Job,
@@ -90,8 +91,6 @@ def test_postgres_partial_adoption_preserves_promises_and_waits_exact_issued_cle
             AgentNode(
                 node_id=_node_id(2),
                 state="active",
-                protocol_version=2,
-                last_seen_at=NOW,
                 inventory_snapshot=inventory_items_fixture(
                     _node_id(2),
                     observed_at=NOW,
@@ -99,6 +98,7 @@ def test_postgres_partial_adoption_preserves_promises_and_waits_exact_issued_cle
                         {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
                     ),
                 ),
+                contact=AgentNodeContact(protocol_version=2, last_seen_at=NOW),
             )
         )
         session.flush()  # Materialize the node before its certificate FK.
@@ -368,8 +368,6 @@ def test_postgres_new_profile_never_adopts_half_of_a_dual_spark_effect(postgres_
             AgentNode(
                 node_id=_node_id(3),
                 state="active",
-                protocol_version=2,
-                last_seen_at=NOW,
                 inventory_snapshot=inventory_items_fixture(
                     _node_id(3),
                     observed_at=NOW,
@@ -377,6 +375,7 @@ def test_postgres_new_profile_never_adopts_half_of_a_dual_spark_effect(postgres_
                         {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
                     ),
                 ),
+                contact=AgentNodeContact(protocol_version=2, last_seen_at=NOW),
             )
         )
     boundary = _SQLCancellationAdapter()
@@ -448,8 +447,6 @@ def _waiting_continuation(postgres_engine, request_key: int) -> _WaitingContinua
             AgentNode(
                 node_id=_node_id(2),
                 state="active",
-                protocol_version=2,
-                last_seen_at=NOW,
                 inventory_snapshot=inventory_items_fixture(
                     _node_id(2),
                     observed_at=NOW,
@@ -457,6 +454,7 @@ def _waiting_continuation(postgres_engine, request_key: int) -> _WaitingContinua
                         {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
                     ),
                 ),
+                contact=AgentNodeContact(protocol_version=2, last_seen_at=NOW),
             )
         )
         session.flush()  # Materialize the node before its certificate FK.

@@ -51,6 +51,7 @@ from vonk_control.fleet_profiles import (
 from vonk_control.lifecycle.evidence import Residue
 from vonk_control.models import (
     AgentNode,
+    AgentNodeContact,
     Base,
     CatalogDocument,
     CatalogDocumentRevision,
@@ -624,8 +625,6 @@ def _seed(sessions: sessionmaker[Session]) -> tuple[str, str]:
             AgentNode(
                 node_id=_node_id(1),
                 state="active",
-                protocol_version=1,
-                last_seen_at=NOW,
                 inventory_snapshot=inventory_items_fixture(
                     _node_id(1),
                     observed_at=NOW,
@@ -633,6 +632,7 @@ def _seed(sessions: sessionmaker[Session]) -> tuple[str, str]:
                         {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
                     ),
                 ),
+                contact=AgentNodeContact(protocol_version=1, last_seen_at=NOW),
             )
         )
         # Both documents must be persisted: the revisions below reference these
@@ -762,8 +762,6 @@ def _seed_dual_solo_without_runtime_state(
             AgentNode(
                 node_id=_node_id(2),
                 state="active",
-                protocol_version=1,
-                last_seen_at=NOW,
                 inventory_snapshot=inventory_items_fixture(
                     _node_id(2),
                     observed_at=NOW,
@@ -771,6 +769,7 @@ def _seed_dual_solo_without_runtime_state(
                         {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
                     ),
                 ),
+                contact=AgentNodeContact(protocol_version=1, last_seen_at=NOW),
             )
         )
         session.execute(
@@ -1118,8 +1117,6 @@ def test_profile_switch_delegates_non_idle_assignment_and_surfaces_child_progres
             AgentNode(
                 node_id=_node_id(2),
                 state="active",
-                protocol_version=1,
-                last_seen_at=NOW,
                 inventory_snapshot=inventory_items_fixture(
                     _node_id(2),
                     observed_at=NOW,
@@ -1127,6 +1124,7 @@ def test_profile_switch_delegates_non_idle_assignment_and_surfaces_child_progres
                         {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
                     ),
                 ),
+                contact=AgentNodeContact(protocol_version=1, last_seen_at=NOW),
             )
         )
     now = [NOW]
@@ -1803,8 +1801,6 @@ def test_profile_switch_adapter_plans_disjoint_assignments_once_and_resumes() ->
             AgentNode(
                 node_id=_node_id(3),
                 state="active",
-                protocol_version=1,
-                last_seen_at=NOW,
                 inventory_snapshot=inventory_items_fixture(
                     _node_id(3),
                     observed_at=NOW,
@@ -1812,6 +1808,7 @@ def test_profile_switch_adapter_plans_disjoint_assignments_once_and_resumes() ->
                         {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
                     ),
                 ),
+                contact=AgentNodeContact(protocol_version=1, last_seen_at=NOW),
             )
         )
     now = [NOW]
@@ -2105,8 +2102,6 @@ def test_all_idle_profile_has_explicit_scope_and_no_preparation() -> None:
             AgentNode(
                 node_id=_node_id(2),
                 state="active",
-                protocol_version=1,
-                last_seen_at=NOW,
                 inventory_snapshot=inventory_items_fixture(
                     _node_id(2),
                     observed_at=NOW,
@@ -2114,6 +2109,7 @@ def test_all_idle_profile_has_explicit_scope_and_no_preparation() -> None:
                         {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
                     ),
                 ),
+                contact=AgentNodeContact(protocol_version=1, last_seen_at=NOW),
             )
         )
     adapter = _SwitchAdapter()
@@ -3009,8 +3005,6 @@ def test_profile_preparations_are_stably_ordered_and_reuse_identity() -> None:
             AgentNode(
                 node_id=_node_id(2),
                 state="active",
-                protocol_version=1,
-                last_seen_at=NOW,
                 inventory_snapshot=inventory_items_fixture(
                     _node_id(2),
                     observed_at=NOW,
@@ -3018,6 +3012,7 @@ def test_profile_preparations_are_stably_ordered_and_reuse_identity() -> None:
                         {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
                     ),
                 ),
+                contact=AgentNodeContact(protocol_version=1, last_seen_at=NOW),
             )
         )
         session.add(
@@ -3212,8 +3207,6 @@ def test_profile_validation_rejects_rank_order_that_mapping_would_rewrite() -> N
             AgentNode(
                 node_id=_node_id(2),
                 state="active",
-                protocol_version=1,
-                last_seen_at=NOW,
                 inventory_snapshot=inventory_items_fixture(
                     _node_id(2),
                     observed_at=NOW,
@@ -3221,6 +3214,7 @@ def test_profile_validation_rejects_rank_order_that_mapping_would_rewrite() -> N
                         {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
                     ),
                 ),
+                contact=AgentNodeContact(protocol_version=1, last_seen_at=NOW),
             )
         )
 
@@ -3333,8 +3327,6 @@ def test_profile_scope_reconciles_idle_member_and_retains_reusable_installation(
             AgentNode(
                 node_id=_node_id(2),
                 state="active",
-                protocol_version=1,
-                last_seen_at=NOW,
                 inventory_snapshot=inventory_items_fixture(
                     _node_id(2),
                     observed_at=NOW,
@@ -3342,6 +3334,7 @@ def test_profile_scope_reconciles_idle_member_and_retains_reusable_installation(
                         {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
                     ),
                 ),
+                contact=AgentNodeContact(protocol_version=1, last_seen_at=NOW),
             )
         )
         session.execute(

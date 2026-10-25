@@ -21,7 +21,7 @@ from alembic.autogenerate import compare_metadata
 from alembic.config import Config
 from alembic.migration import MigrationContext
 from cryptography.hazmat.primitives.asymmetric import ed25519
-from sqlalchemy import create_engine, event, inspect, select, text, update
+from sqlalchemy import create_engine, event, inspect, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
@@ -46,6 +46,7 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol import AgentOperation as WireAgentOperation
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.host_helper import HostRuntimeRequest
+from vonk_control.agent_contacts import record_contact
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.agent_operation_facts import SUPERSEDED_CANCELLATION_SECONDS
 from vonk_control.bounded_json import require_mapping, require_sequence
@@ -144,6 +145,7 @@ from .canonical_recipe_fixtures import canonical_example
 from .inventory_artifact_support import (
     seed_inventory_artifact,
 )
+from .node_contacts import contact_row
 from .preflight_fixtures import record_passing_preflight
 from .runtime_identity_support import (
     PACKAGED_RUNTIME_IDENTITY,
@@ -473,14 +475,12 @@ def setup_services(
                     not_after=datetime(2027, 8, 7, 12, tzinfo=UTC),
                 )
             )
-            session.execute(
-                update(AgentNode)
-                .where(AgentNode.node_id == node_id)
-                .values(
-                    contact_certificate_serial=serial,
-                    management_address=f"192.168.1.{211 + index}",
-                    management_observed_at=NOW,
-                )
+            record_contact(
+                session,
+                node_id,
+                contact_certificate_serial=serial,
+                management_address=f"192.168.1.{211 + index}",
+                management_observed_at=NOW,
             )
     inventory = InventoryRepository(sessions, clock=lambda: NOW)
     capabilities = (
@@ -2376,7 +2376,7 @@ def test_singleton_start_grants_time_for_first_exact_observation(
     # first telemetry is late (an away Spark would be waited for).
     with sessions.begin() as session:
         for agent in session.scalars(select(AgentNode)):
-            agent.last_seen_at = started_at + timedelta(seconds=120)
+            contact_row(agent).last_seen_at = started_at + timedelta(seconds=120)
     expired = RecipeOperationWorker(
         sessions, routes, clock=lambda: started_at + timedelta(seconds=120)
     )

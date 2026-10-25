@@ -71,7 +71,12 @@ def test_mapper_graph_matches_pre_split_snapshot() -> None:
 
 
 FACT_TABLES = frozenset(
-    {"agent_nodes", "node_inventory_snapshots", "node_telemetry_samples"}
+    {
+        "agent_nodes",
+        "agent_node_contacts",
+        "node_inventory_snapshots",
+        "node_telemetry_samples",
+    }
 )
 AUDITED_OUTSIDE_COLUMNS: dict[str, frozenset[str]] = {
     # Build operation, provenance and results; builder_node_id is placement.
@@ -370,13 +375,23 @@ def node_fact_violations(
     claimed_fields = set(AgentRuntimeIdentity.model_fields) | set(
         AgentInventoryItems.model_fields
     )
-    for name in ("agent_nodes", "agent_node_profiles"):
+    for name in ("agent_nodes", "agent_node_contacts", "agent_node_profiles"):
         table = metadata.tables.get(name)
         if table is not None:
             for field in claimed_fields.intersection(table.columns.keys()):
                 problems.append(
                     f"{name}.{field}: agent report belongs in typed inventory"
                 )
+    # Contact facts have one owner row; agent_nodes is the identity/intent row
+    # admission locks, so a contact column there brings the lock back.
+    nodes = metadata.tables.get("agent_nodes")
+    if nodes is not None:
+        problems.extend(
+            f"agent_nodes.{name}: contact fact belongs in agent_node_contacts"
+            for name in set(models.AgentNodeContact.__table__.columns.keys())
+            .difference({"node_id"})
+            .intersection(nodes.columns.keys())
+        )
     telemetry = metadata.tables.get("node_telemetry_samples")
     if telemetry is not None:
         for field in set(HostResourceSample.model_fields).intersection(
@@ -463,6 +478,22 @@ def test_guard_rejects_runtime_claim_columns_on_contact_owner(field: str) -> Non
     assert any(
         f"agent_nodes.{field}:" in problem
         for problem in node_fact_violations(metadata, {})
+    )
+
+
+@pytest.mark.parametrize("field", ["last_seen_at", "management_address"])
+def test_guard_rejects_contact_columns_on_the_node_identity_row(field: str) -> None:
+    # Wrong implementation: letting a contact fact return to agent_nodes, so
+    # every agent request writes the row admission locks again.
+    metadata = MetaData()
+    Table(
+        "agent_nodes",
+        metadata,
+        Column("node_id", String, primary_key=True),
+        Column(field, String),
+    )
+    assert f"agent_nodes.{field}: contact fact belongs in agent_node_contacts" in (
+        node_fact_violations(metadata, {})
     )
 
 

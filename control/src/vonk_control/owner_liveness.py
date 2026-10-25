@@ -45,6 +45,7 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol.state_machines import EnrollmentRecordState
 
 from . import agent_operation_states, job_states, model_cache_states
+from .agent_contacts import last_seen
 from .fleet_profile_contract import (
     FLEET_PROFILE_ENDED_STATES,
     FleetProfileApplicationProgress,
@@ -216,7 +217,7 @@ def _spark_return(session: Session, ref: OwnerRef, now: datetime | None) -> Owne
         return Owner(
             ref, False, "Spark is revoked", _aware(node.revoked_at), node.state
         )
-    seen = node.last_seen_at
+    seen = last_seen(node)
     away = (
         now is None
         or seen is None

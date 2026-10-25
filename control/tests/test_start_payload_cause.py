@@ -15,7 +15,7 @@ from vonk_agent_protocol import (
     UnknownOutcomeError,
 )
 from vonk_control.failure_classification import error_detail, is_definite
-from vonk_control.models import AgentNode, Job, RecipeRun
+from vonk_control.models import AgentNodeContact, Job, RecipeRun
 
 from .test_artifact_jobs import _configure_artifact_recipe
 from .test_recipe_operations import installed_recipe, setup_services
@@ -62,7 +62,7 @@ def test_missing_endpoint_presence_waits_and_names_the_node(tmp_path):
     plan = service.preview_run(installed.owner_id, "qwen")
     with sessions.begin() as session:
         session.execute(
-            update(AgentNode).values(
+            update(AgentNodeContact).values(
                 management_address=None, management_observed_at=None
             )
         )

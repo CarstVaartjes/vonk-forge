@@ -30,6 +30,7 @@ from vonk_control.agent_jobs.contracts import _GRANT_LIFETIME
 from vonk_control.models import AgentCertificate, AgentNode, Job
 
 from .agent_fences import fenced_operation
+from .node_contacts import contact_row
 from .recipe_stop_fixtures import recipe_stop_payload
 from .runtime_identity_support import claim_agent
 from .test_agent_jobs import NODE_A, parent
@@ -43,7 +44,7 @@ def _present(sessions, now) -> None:
     with sessions.begin() as session:
         node = session.get(AgentNode, NODE_A)
         assert node is not None
-        node.last_seen_at = now
+        contact_row(node).last_seen_at = now
 
 
 def exercise_unknown_cleanup(

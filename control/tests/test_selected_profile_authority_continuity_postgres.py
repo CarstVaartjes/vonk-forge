@@ -6,7 +6,7 @@ from datetime import timedelta
 from types import SimpleNamespace
 
 import pytest
-from sqlalchemy import select, update
+from sqlalchemy import select
 from vonk_agent_protocol import (
     AgentResult,
     AgentResultState,
@@ -23,6 +23,7 @@ from vonk_agent_protocol.runtime_preflight import (
     RuntimePreflightResult,
 )
 from vonk_control import terminal_history_collection
+from vonk_control.agent_contacts import record_contact
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.cluster_mappings import ClusterMappingService
 from vonk_control.fleet_profile_contract import FleetProfileInput
@@ -38,6 +39,7 @@ from vonk_control.inventory_repository import (
 from vonk_control.models import (
     AgentCertificate,
     AgentNode,
+    AgentNodeContact,
     AgentOperation,
     AgentOperationAttempt,
     CatalogDocumentRevision,
@@ -175,8 +177,6 @@ def test_serving_selection_completes_stop_and_cleanup_after_author_loses_authori
             AgentNode(
                 node_id=node_b,
                 state="active",
-                protocol_version=2,
-                last_seen_at=NOW,
                 inventory_snapshot=inventory_items_fixture(
                     node_b,
                     observed_at=NOW,
@@ -184,6 +184,7 @@ def test_serving_selection_completes_stop_and_cleanup_after_author_loses_authori
                         {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
                     ),
                 ),
+                contact=AgentNodeContact(protocol_version=2, last_seen_at=NOW),
             )
         )
         session.flush()
@@ -196,14 +197,12 @@ def test_serving_selection_completes_stop_and_cleanup_after_author_loses_authori
                 not_after=NOW + timedelta(days=1),
             )
         )
-        session.execute(
-            update(AgentNode)
-            .where(AgentNode.node_id == node_b)
-            .values(
-                contact_certificate_serial="serial-b",
-                management_address="192.168.1.212",
-                management_observed_at=NOW,
-            )
+        record_contact(
+            session,
+            node_b,
+            contact_certificate_serial="serial-b",
+            management_address="192.168.1.212",
+            management_observed_at=NOW,
         )
         revision = session.scalar(
             select(CatalogDocumentRevision).where(

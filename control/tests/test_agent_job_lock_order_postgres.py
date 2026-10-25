@@ -17,6 +17,7 @@ from vonk_control.agent_jobs import AgentJobService
 from vonk_control.models import (
     AgentCertificate,
     AgentNode,
+    AgentNodeContact,
     AgentOperation,
     Base,
     Job,
@@ -41,8 +42,8 @@ def queue(postgres_engine):
                 AgentNode(
                     node_id=node,
                     state="active",
-                    protocol_version=3,
                     workload_intent_ordinal=1,
+                    contact=AgentNodeContact(protocol_version=3),
                 )
             )
         session.flush()
@@ -93,14 +94,22 @@ def _claim(service, index):
     )
 
 
+def _is_row_lock(statement: str) -> bool:
+    return "FOR UPDATE" in statement
+
+
 def _concurrent_node_lock_calls(engine, calls):
-    """Force both transactions to reach their first node lock together."""
+    """Force both transactions to reach their first row lock together.
+
+    Agent contact paths read the nodes and lock the parent Job first; workers
+    lock the nodes first. Either way both must serialize, not cross.
+    """
     barrier = threading.Barrier(2)
     seen = set()
     guard = threading.Lock()
 
     def before(_conn, _cursor, statement, _parameters, context, _many):
-        if "FROM agent_nodes" not in statement or "FOR UPDATE" not in statement:
+        if not _is_row_lock(statement):
             return
         identity = threading.get_ident()
         with guard:
@@ -224,7 +233,10 @@ def test_a_reconcile_pass_and_a_claim_on_the_other_node_do_not_deadlock(
         [lambda: services[0].reconcile_orders(), lambda: _claim(services[1], 1)],
     )
 
-    assert results[1] is not None  # the claim on the other node still succeeds
+    # The claim on the other node still succeeds. A claim no longer waits on
+    # node locks, so the pass's queue-wait bookkeeping (SKIP LOCKED over queued
+    # orders) can hold its candidate for that one poll; the next poll claims.
+    assert results[1] is not None or _claim(services[1], 1) is not None
     # The pass never queues for a node another transaction holds (a queued
     # writer would refuse every admission behind it): it either decided the
     # order or skipped it because the claim held the other node.  A skipped
@@ -241,11 +253,13 @@ class _Clock:
         return self.now
 
 
-def _before_first_node_lock(engine, mutation):
+def _before_first_parent_lock(engine, mutation):
+    """Mutate between a claim's unlocked hint and its parent Job lock."""
+
     def before(_conn, _cursor, statement, _parameters, _context, _many):
         if (
-            "FROM agent_nodes" in statement
-            and "FOR UPDATE" in statement
+            "FROM jobs" in statement
+            and "FOR UPDATE OF jobs" in statement
             and not before.done
         ):
             before.done = True
@@ -263,7 +277,7 @@ def test_changed_target_scope_is_rejected_after_unlocked_hint(queue, postgres_en
         with sessions.begin() as session:
             session.get(Job, parent.id).targets = [NODES[0]]
 
-    hook = _before_first_node_lock(postgres_engine, change_scope)
+    hook = _before_first_parent_lock(postgres_engine, change_scope)
     try:
         assert _claim(services[0], 0) is None
     finally:
@@ -287,7 +301,7 @@ def test_changed_candidate_does_not_claim_another_operation(queue, postgres_engi
             )
         )
 
-    hook = _before_first_node_lock(postgres_engine, replace_candidate)
+    hook = _before_first_parent_lock(postgres_engine, replace_candidate)
     try:
         assert _claim(services[0], 0) is None
     finally:
@@ -304,7 +318,7 @@ def test_revocation_between_hint_and_lock_stays_fail_closed(queue, postgres_engi
         with sessions.begin() as session:
             session.get(AgentNode, NODES[0]).revoked_at = NOW
 
-    hook = _before_first_node_lock(postgres_engine, revoke)
+    hook = _before_first_parent_lock(postgres_engine, revoke)
     try:
         assert _claim(services[0], 0) is None
     finally:

@@ -7,11 +7,14 @@ from vonk_control.metrics import MetricsRegistry, OperationalMetricsCollector
 from vonk_control.models import (
     AgentCertificate,
     AgentNode,
+    AgentNodeContact,
     AgentOperation,
     AgentOperationAttempt,
     Base,
     Job,
 )
+
+from .node_contacts import contact_row
 
 NOW = datetime(2026, 8, 5, 12, tzinfo=UTC)
 NODE = "spk_00000000000000000000000000000001"
@@ -30,23 +33,24 @@ def _sessions(tmp_path):
                 AgentNode(
                     node_id=NODE,
                     state="active",
-                    protocol_version=4,
-                    last_seen_at=NOW - timedelta(seconds=90),
+                    contact=AgentNodeContact(
+                        protocol_version=4, last_seen_at=NOW - timedelta(seconds=90)
+                    ),
                 ),
                 AgentNode(
                     node_id=NEW_NODE,
                     state="retired",
-                    protocol_version=5,
+                    contact=AgentNodeContact(protocol_version=5),
                 ),
                 AgentNode(
                     node_id=OLD_NODE,
                     state="active",
-                    protocol_version=3,
+                    contact=AgentNodeContact(protocol_version=3),
                 ),
                 AgentNode(
                     node_id=UNKNOWN_NODE,
                     state="database-value-that-must-not-be-a-label",
-                    protocol_version=None,
+                    contact=AgentNodeContact(protocol_version=None),
                 ),
             ]
         )
@@ -215,7 +219,7 @@ def test_operational_metrics_scrape_reads_current_contact_and_lease_owners(
         node = session.get(AgentNode, NODE)
         assert node is not None
         node.state = "retired"
-        node.last_seen_at = NOW - timedelta(seconds=5)
+        contact_row(node).last_seen_at = NOW - timedelta(seconds=5)
         operation = session.get(AgentOperation, "running-operation-id-secret")
         assert operation is not None
         operation.updated_at = NOW - timedelta(seconds=2)

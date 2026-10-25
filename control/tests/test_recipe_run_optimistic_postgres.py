@@ -21,6 +21,7 @@ from vonk_control.optimistic import Applied, transition
 from vonk_control.recipe_operation_worker import RecipeOperationWorker
 from vonk_control.recovery_policy import ROUTE_RECOVERY, WAIT_STEP
 
+from .node_contacts import contact_row
 from .test_recipe_routes import NOW, MutableClock, setup
 
 
@@ -298,7 +299,7 @@ def test_deadline_contention_is_visible_wait_and_heals_next_tick(
             rank.observed_run_generation = None
             rank.observation_observed_at = None
         for node in session.scalars(select(AgentNode)):
-            node.last_seen_at = NOW
+            contact_row(node).last_seen_at = NOW
     worker = RecipeOperationWorker(
         routes.sessions, routes, clock=lambda: now[0], reconcile_routes=False
     )
@@ -617,7 +618,7 @@ def test_due_route_recovery_contention_is_typed_wait_and_redrives(
             rank.observed_run_generation = None
             rank.observation_observed_at = None
         for node in session.scalars(select(AgentNode)):
-            node.last_seen_at = NOW
+            contact_row(node).last_seen_at = NOW
     worker = RecipeOperationWorker(
         routes.sessions, routes, clock=lambda: now[0], reconcile_routes=False
     )

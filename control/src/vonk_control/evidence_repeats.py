@@ -14,9 +14,10 @@ from vonk_agent_protocol import OutcomeUnknown, WaitReason
 from vonk_agent_protocol.contracts import AgentFailureResult, AgentUpgradePayload
 
 from . import agent_operation_states
+from .agent_contacts import lock_contact
 from .models import (
     REPEATED_EVIDENCE_SEQUENCE,
-    AgentNode,
+    AgentNodeContact,
     AgentOperation,
     AgentOperationAttempt,
     FleetProfileApplication,
@@ -33,7 +34,7 @@ from .stored_json import read_row_column
 _LOGGER = logging.getLogger(__name__)
 _SHOWN_FOR = timedelta(seconds=PROFILE_STALL_WINDOW_SECONDS)
 _LOAD = RepeatedEvidenceSubject.PROFILE_LOAD.value.format(application_id="")
-type EvidenceOwner = AgentNode | AgentOperation | FleetProfileApplication
+type EvidenceOwner = AgentNodeContact | AgentOperation | FleetProfileApplication
 
 
 def load_subject(application_id: str) -> str:
@@ -49,7 +50,7 @@ def _utc(value: datetime) -> datetime:
 def owner_evidence(row: EvidenceOwner) -> list[RepeatedEvidence] | None:
     value = (
         row.contact_repeated_evidence
-        if isinstance(row, AgentNode)
+        if isinstance(row, AgentNodeContact)
         else row.repeated_evidence
     )
     if value is None:
@@ -61,7 +62,7 @@ def owner_evidence(row: EvidenceOwner) -> list[RepeatedEvidence] | None:
             "Repeated evidence on its owner is unreadable: %s", type(row).__name__
         )
         return None
-    if isinstance(row, AgentNode):
+    if isinstance(row, AgentNodeContact):
         bound = all(
             item.node_id == row.node_id
             and is_contact_subject(item.subject)
@@ -92,7 +93,7 @@ def owner_evidence(row: EvidenceOwner) -> list[RepeatedEvidence] | None:
 
 
 def _write(row: EvidenceOwner, evidence: list[RepeatedEvidence]) -> None:
-    if isinstance(row, AgentNode):
+    if isinstance(row, AgentNodeContact):
         row.contact_repeated_evidence = evidence or None
     else:
         row.repeated_evidence = evidence or None
@@ -102,11 +103,8 @@ def _owner(
     session: Session, subject: str, node_id: str, operation: AgentOperation | None
 ) -> EvidenceOwner | None:
     if is_contact_subject(subject):
-        return session.scalar(
-            select(AgentNode)
-            .where(AgentNode.node_id == node_id)
-            .with_for_update(of=AgentNode)
-        )
+        # Contact evidence lives on the contact row; never lock agent_nodes.
+        return lock_contact(session, node_id)
     if subject.startswith(_LOAD):
         return session.get(
             FleetProfileApplication, subject[len(_LOAD) :], with_for_update=True
@@ -302,10 +300,10 @@ def repeating_evidence(
 ) -> dict[str, tuple[str, ...]]:
     """Project summaries from contact and their exact operation owners; never mutate."""
     summaries: list[RepeatedEvidence] = []
-    for node in session.scalars(
-        select(AgentNode).where(AgentNode.node_id.in_(node_ids))
+    for contact in session.scalars(
+        select(AgentNodeContact).where(AgentNodeContact.node_id.in_(node_ids))
     ):
-        summaries.extend(owner_evidence(node) or [])
+        summaries.extend(owner_evidence(contact) or [])
     for application in session.scalars(
         select(FleetProfileApplication).where(
             FleetProfileApplication.repeated_evidence.is_not(None)

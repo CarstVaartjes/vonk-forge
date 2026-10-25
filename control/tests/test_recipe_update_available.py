@@ -18,6 +18,7 @@ from vonk_control.fleet_projection import FleetProjection
 from vonk_control.lifecycle.evidence import Residue
 from vonk_control.models import (
     AgentNode,
+    AgentNodeContact,
     Base,
     CatalogDocument,
     CatalogDocumentRevision,
@@ -66,7 +67,6 @@ def _seed(
             AgentNode(
                 node_id=NODE_A,
                 state="active",
-                last_seen_at=NOW,
                 inventory_snapshot=inventory_items_fixture(
                     NODE_A,
                     observed_at=NOW,
@@ -74,6 +74,7 @@ def _seed(
                         {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
                     ),
                 ),
+                contact=AgentNodeContact(last_seen_at=NOW),
             )
         )
         session.flush()

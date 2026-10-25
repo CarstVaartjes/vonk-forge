@@ -1,4 +1,3 @@
-from sqlalchemy import update
 from vonk_control.inventory_items import runtime_value
 
 from .runtime_identity_support import set_inventory_identity
@@ -15,6 +14,7 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import select
 from vonk_agent_protocol import CompiledExecutionPlan, LifecycleState, RunSwitchCode
+from vonk_control.agent_contacts import record_contact
 from vonk_control.availability_production import build_recipe_image_availability
 from vonk_control.catalog_entities import CatalogEntityService
 from vonk_control.cluster_mappings import ClusterMappingService
@@ -314,14 +314,12 @@ def test_editorial_successor_installs_and_starts_without_any_record_of_the_image
             snapshot.host_memory_free_bytes = 10**12
             snapshot.gpu_memory_total_bytes = 10**12
             snapshot.gpu_memory_free_bytes = 10**12
-        session.execute(
-            update(AgentNode)
-            .where(AgentNode.node_id == plan.nodes[0].node_id)
-            .values(
-                contact_certificate_serial="revision-reuse-preflight",
-                management_address="192.168.1.211",
-                management_observed_at=now,
-            )
+        record_contact(
+            session,
+            plan.nodes[0].node_id,
+            contact_certificate_serial="revision-reuse-preflight",
+            management_address="192.168.1.211",
+            management_observed_at=now,
         )
     run_plan = service.preview_run(installed.id, "qwen")
     start = service.start(

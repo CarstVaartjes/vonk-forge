@@ -20,6 +20,7 @@ from vonk_control.fleet_profiles import (
 )
 from vonk_control.models import (
     AgentNode,
+    AgentNodeContact,
     CatalogDocumentRevision,
     FleetProfileApplication,
     Job,
@@ -248,7 +249,13 @@ def test_retry_requires_preparation_only_when_an_assignment_needs_work(
     )
     other_node = "spk_" + "2" * 32
     with sessions.begin() as session:
-        session.add(AgentNode(node_id=other_node, state="active", last_seen_at=NOW))
+        session.add(
+            AgentNode(
+                node_id=other_node,
+                state="active",
+                contact=AgentNodeContact(last_seen_at=NOW),
+            )
+        )
         revision = session.scalar(
             select(CatalogDocumentRevision).where(
                 CatalogDocumentRevision.kind == "recipe",

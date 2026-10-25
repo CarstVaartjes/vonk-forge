@@ -22,6 +22,7 @@ from vonk_control.models import AgentNode, Job, RecipeInstallation
 from vonk_control.models import AgentOperation as StoredOperation
 
 from .agent_fences import fenced_operation
+from .node_contacts import contact_row
 from .runtime_identity_support import claim_agent
 from .test_agent_restart_recovery_wire_bridge import (
     _probe_request,
@@ -149,7 +150,7 @@ def test_uninstall_executor_repairs_discovery_without_bypassing_cleanup_authorit
         with sessions.begin() as session:
             spark = session.get(AgentNode, nodes[0])
             assert spark is not None
-            spark.last_seen_at = clock.now
+            contact_row(spark).last_seen_at = clock.now
         jobs.reconcile_orders()
         with sessions() as session:
             ended = session.get(Job, owner.id)

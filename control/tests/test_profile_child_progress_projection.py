@@ -8,9 +8,10 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import select, update
+from sqlalchemy import select
 from vonk_agent_protocol import LifecycleState, OperationProgress, canonical_message
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
+from vonk_control.agent_contacts import record_contact
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.execution_plan_service import (
     ControllerExecutionPlanService,
@@ -33,6 +34,7 @@ from vonk_control.lifecycle.evidence import Residue
 from vonk_control.models import (
     AgentCertificate,
     AgentNode,
+    AgentNodeContact,
     AgentOperation,
     AgentOperationAttempt,
     CatalogDocumentRevision,
@@ -64,6 +66,7 @@ from vonk_control.stored_json import write_guard_mode
 
 from cluster_profiles.control_client import validate_control_document
 
+from .node_contacts import contact_row
 from .preflight_fixtures import record_passing_preflight
 from .runtime_identity_support import (
     PACKAGED_RUNTIME_IDENTITY,
@@ -536,8 +539,6 @@ def test_disjoint_child_samples_remain_distinct_after_restart(
             AgentNode(
                 node_id=second,
                 state="active",
-                protocol_version=2,
-                last_seen_at=NOW,
                 inventory_snapshot=inventory_items_fixture(
                     second,
                     observed_at=NOW,
@@ -545,6 +546,7 @@ def test_disjoint_child_samples_remain_distinct_after_restart(
                         {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
                     ),
                 ),
+                contact=AgentNodeContact(protocol_version=2, last_seen_at=NOW),
             )
         )
         session.flush()
@@ -557,14 +559,12 @@ def test_disjoint_child_samples_remain_distinct_after_restart(
                 not_after=NOW + timedelta(days=1),
             )
         )
-        session.execute(
-            update(AgentNode)
-            .where(AgentNode.node_id == second)
-            .values(
-                contact_certificate_serial="serial-b",
-                management_address="192.168.1.212",
-                management_observed_at=NOW,
-            )
+        record_contact(
+            session,
+            second,
+            contact_certificate_serial="serial-b",
+            management_address="192.168.1.212",
+            management_observed_at=NOW,
         )
         revision = session.scalar(
             select(CatalogDocumentRevision).where(
@@ -839,7 +839,7 @@ def test_dual_agent_loss_mid_load_keeps_bounded_wait_visible_after_return(
     assert all(claim is not None for claim in claims)
     with sessions.begin() as session:
         for node in session.scalars(select(AgentNode)):
-            node.last_seen_at = clock[0] - timedelta(minutes=10)
+            contact_row(node).last_seen_at = clock[0] - timedelta(minutes=10)
     # No completion/heartbeat from either agent: let the real order reconciler
     # fence their lapsed attempts, then restart the Controller services.
     clock[0] += timedelta(minutes=3)
@@ -847,7 +847,7 @@ def test_dual_agent_loss_mid_load_keeps_bounded_wait_visible_after_return(
     service, planner = _measured_profile_service(sessions, lifecycle)
     with sessions.begin() as session:
         for node in session.scalars(select(AgentNode)):
-            node.last_seen_at = clock[0]
+            contact_row(node).last_seen_at = clock[0]
     for _ in range(6):
         _follow_saved_due(sessions, service, application.id, clock)
         planner.tick()

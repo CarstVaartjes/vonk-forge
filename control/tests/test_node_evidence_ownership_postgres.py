@@ -20,7 +20,11 @@ from vonk_control.fleet_profile_contract import (
     FleetProfileAssignmentInput,
     FleetProfileInput,
 )
-from vonk_control.models import AgentNode, AgentOperation, FleetProfileApplication
+from vonk_control.models import (
+    AgentNodeContact,
+    AgentOperation,
+    FleetProfileApplication,
+)
 from vonk_control.repeated_evidence_contract import RepeatedEvidenceSubject
 
 from .lifecycle_simulation.world import SOLO, build_world
@@ -71,7 +75,7 @@ def test_repeat_adoption_restarts_and_preserves_classified_owners(
             subjects.append("detached legacy observation")
         with postgres_engine.begin() as connection:
             for table, column in (
-                ("agent_nodes", "contact_repeated_evidence"),
+                ("agent_node_contacts", "contact_repeated_evidence"),
                 ("agent_operations", "repeated_evidence"),
                 ("fleet_profile_applications", "repeated_evidence"),
             ):
@@ -125,7 +129,7 @@ def test_repeat_adoption_restarts_and_preserves_classified_owners(
         initialize_database(url)
         initialize_database(url)
         with world.sessions() as session:
-            node = session.get(AgentNode, world.nodes[0])
+            node = session.get(AgentNodeContact, world.nodes[0])
             operation = session.get(AgentOperation, operation_id)
             application_owner = session.get(FleetProfileApplication, application.id)
             assert (
@@ -178,7 +182,7 @@ def test_concurrent_contact_notes_do_not_lose_counts(tmp_path, postgres_engine):
     with ThreadPoolExecutor(max_workers=2) as pool:
         list(pool.map(observe, range(2)))
     with services.sessions() as session:
-        node = session.get(AgentNode, NODE_A)
+        node = session.get(AgentNodeContact, NODE_A)
         assert node is not None
         assert [item.repeats for item in owner_evidence(node) or []] == [16]
 

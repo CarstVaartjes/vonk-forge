@@ -8,6 +8,7 @@ from vonk_agent_protocol import (
     InvalidRequestReason,
 )
 
+from ..agent_contacts import last_seen as contact_last_seen
 from ..agent_upgrade_contract import (
     AgentUpgradePackage,
     AgentUpgradeRepairManifest,
@@ -81,7 +82,7 @@ class EligibilityMixin:
         if reason is not None:
             return reason
         current = now if now.tzinfo is not None else now.replace(tzinfo=UTC)
-        last_seen = node.last_seen_at
+        last_seen = contact_last_seen(node)
         if last_seen is None:
             return "has never reported online"
         seen = (

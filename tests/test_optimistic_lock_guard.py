@@ -444,3 +444,74 @@ def test_added_run_bump_continuation_line_is_guarded() -> None:
     assert check_source(
         "control/src/vonk_control/new_owner.py", source, {6}, modes=("optimistic",)
     )
+
+
+@pytest.mark.parametrize(
+    "statement",
+    [
+        "select(AgentNode).where(AgentNode.node_id == node_id).with_for_update()",
+        "select(AgentNode.node_id).with_for_update(of=AgentNode, skip_locked=True)",
+        "session.get(AgentNode, node_id, with_for_update=True)",
+        "update(AgentNode).where(AgentNode.node_id == node_id).values(state=state)",
+    ],
+)
+def test_new_agent_node_lock_or_write_fails_outside_admission_and_security(
+    statement: str,
+) -> None:
+    # Wrong implementation: a contact writer locking or updating the node row
+    # admission locks (production 2026-10-25: capacity_busy, DeadlockDetected).
+    source = f"from vonk_control.models import AgentNode\n{statement}\n"
+    path = "control/src/vonk_control/agent_jobs/identity.py"
+    assert check_source(path, source, {2}, modes=("optimistic",))
+    assert not check_source(path, source, {1}, modes=("optimistic",))
+
+
+@pytest.mark.parametrize(
+    ("path", "statement"),
+    [
+        (
+            "control/src/vonk_control/run_admission.py",
+            'AdmissionRowLock("nodes", AgentNode, select(AgentNode))',
+        ),
+        (
+            "control/src/vonk_control/enrollment/service.py",
+            "select(AgentNode).with_for_update(of=AgentNode)",
+        ),
+        (
+            "control/src/vonk_control/agent_jobs/identity.py",
+            "session.get(AgentNode, node_id, populate_existing=True)",
+        ),
+    ],
+)
+def test_admission_rows_security_edges_and_plain_reads_may_touch_agent_nodes(
+    path: str, statement: str
+) -> None:
+    source = f"from vonk_control.models import AgentNode\n{statement}\n"
+    assert not check_source(path, source, {2}, modes=("optimistic",))
+
+
+@pytest.mark.parametrize(
+    "statement",
+    [
+        "contact.last_seen_at = now",
+        "node.contact.management_address = address",
+        "session.execute(update(AgentNodeContact).values(last_seen_at=now))",
+    ],
+)
+def test_contact_facts_have_one_upsert_writer(statement: str) -> None:
+    source = f"{statement}\n"
+    assert check_source(
+        "control/src/vonk_control/presence.py", source, {1}, modes=("optimistic",)
+    )
+    assert not check_source(
+        "control/src/vonk_control/agent_contacts.py",
+        source,
+        {1},
+        modes=("optimistic",),
+    )
+    assert not check_source(
+        "control/src/vonk_control/presence.py",
+        "if contact.last_seen_at == now:\n    pass\n",
+        {1},
+        modes=("optimistic",),
+    )

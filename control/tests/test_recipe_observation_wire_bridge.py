@@ -53,6 +53,7 @@ from vonk_control.source_bundles import SourceBundleStore
 
 from tests.wire_probes import prebuilt_probe
 
+from .node_contacts import contact_row
 from .test_recipe_operations import (
     NOW,
     ConcurrentPublisher,
@@ -1172,7 +1173,7 @@ def test_stale_singleton_absence_can_be_refreshed_read_only_and_recovered(
     with sessions.begin() as session:
         presence = session.get(AgentNode, node_id)
         assert presence is not None
-        presence.management_observed_at = now[0]
+        contact_row(presence).management_observed_at = now[0]
     now[0] = NOW + timedelta(seconds=126)
 
     assert recovery.tick() is True
@@ -1221,7 +1222,7 @@ def test_stale_presence_waits_then_recovery_resumes_without_new_run(
     with sessions.begin() as session:
         presence = session.get(AgentNode, node_id)
         assert presence is not None
-        presence.management_observed_at = NOW - timedelta(minutes=10)
+        contact_row(presence).management_observed_at = NOW - timedelta(minutes=10)
     now[0] = NOW + timedelta(seconds=4)
     recovery = DistributedRecoveryCoordinator(
         sessions,
@@ -1257,7 +1258,7 @@ def test_stale_presence_waits_then_recovery_resumes_without_new_run(
     with sessions.begin() as session:
         presence = session.get(AgentNode, node_id)
         assert presence is not None
-        presence.management_observed_at = now[0]
+        contact_row(presence).management_observed_at = now[0]
 
     assert recovery.tick() is True
 

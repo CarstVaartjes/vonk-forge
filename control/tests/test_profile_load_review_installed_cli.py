@@ -12,6 +12,7 @@ from vonk_control.fleet_profile_contract import FleetProfileInput
 from vonk_control.fleet_profiles import build_production_fleet_profile_service
 from vonk_control.models import (
     AgentNode,
+    AgentNodeContact,
     AgentNodeProfile,
     CatalogDocumentRevision,
     RecipeRun,
@@ -67,14 +68,15 @@ def test_installed_cli_reviews_real_whole_fleet_effects_before_prompt(
             AgentNode(
                 node_id=idle_node,
                 state="active",
-                protocol_version=2,
-                last_seen_at=lifecycle._clock(),
                 inventory_snapshot=inventory_items_fixture(
                     idle_node,
                     observed_at=lifecycle._clock(),
                     identity=AgentRuntimeIdentity.model_validate(
                         {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
                     ),
+                ),
+                contact=AgentNodeContact(
+                    protocol_version=2, last_seen_at=lifecycle._clock()
                 ),
             )
         )

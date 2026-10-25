@@ -336,7 +336,9 @@ class _DurableOperationProjection:
             latest_certificates.setdefault(certificate.node_id, certificate)
         projected: list[AgentSummary] = []
         for node in nodes:
-            last_seen = None if node.last_seen_at is None else _aware(node.last_seen_at)
+            contact = node.contact
+            seen = None if contact is None else contact.last_seen_at
+            last_seen = None if seen is None else _aware(seen)
             age = (
                 None
                 if last_seen is None
@@ -352,7 +354,9 @@ class _DurableOperationProjection:
                     last_seen_age_seconds=age,
                     last_seen_at=None if last_seen is None else last_seen.isoformat(),
                     node_id=node.node_id,
-                    protocol_version=node.protocol_version,
+                    protocol_version=(
+                        None if contact is None else contact.protocol_version
+                    ),
                     semantic_version=runtime_value(
                         node, lambda identity: identity.semantic_version
                     ),

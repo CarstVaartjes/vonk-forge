@@ -228,8 +228,9 @@ class DispatchMixin:
         package: AgentUpgradePackage,
         message: AgentResult,
     ) -> bool:
-        last_seen = node.last_seen_at
-        if last_seen is None:
+        contact = node.contact
+        last_seen = None if contact is None else contact.last_seen_at
+        if contact is None or last_seen is None:
             return False
         observed = (
             last_seen if last_seen.tzinfo is not None else last_seen.replace(tzinfo=UTC)
@@ -259,7 +260,7 @@ class DispatchMixin:
             observed >= dispatched
             and node.state == "active"
             and node.revoked_at is None
-            and node.protocol_version == AGENT_PROTOCOL_VERSION
+            and contact.protocol_version == AGENT_PROTOCOL_VERSION
             and runtime_value(node, lambda identity: identity.architecture)
             == package.architecture
             # Signed package and binary/build digests are the compatibility

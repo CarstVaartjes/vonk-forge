@@ -78,6 +78,7 @@ from vonk_control.run_admission import RunAdmissionService
 from vonk_control.runtime_adapters import resolve_runtime_adapter
 
 from .agent_fences import fenced_attempt, fenced_operation
+from .node_contacts import contact_row
 from .recipe_stop_fixtures import recipe_stop_payload
 from .runtime_identity_support import (
     PACKAGED_RUNTIME_IDENTITY,
@@ -866,7 +867,7 @@ def test_rust_claim_updates_current_contact(service) -> None:
         node = session.get(AgentNode, NODE_A)
         assert node is not None
         assert inventory_items(node).preflight_fingerprint == "e" * 64
-        assert node.protocol_version == 4
+        assert contact_row(node).protocol_version == 4
 
 
 def test_service_claim_requires_packaged_runtime_identity(
@@ -2003,8 +2004,9 @@ def test_claim_persists_authenticated_running_release_identity(service) -> None:
                 node, lambda identity: identity.semantic_version
             ),
         } == runtime_identity.model_dump(exclude={"package_activation"})
-        assert node.contact_observation_digest is not None
-        assert re.fullmatch(r"[0-9a-f]{64}", node.contact_observation_digest)
+        digest = contact_row(node).contact_observation_digest
+        assert digest is not None
+        assert re.fullmatch(r"[0-9a-f]{64}", digest)
 
 
 @pytest.mark.parametrize("architecture", ("linux-riscv64", True, 7))
@@ -2062,7 +2064,7 @@ def test_retired_identity_cannot_mutate_active_attempt_or_record_contact(
         assert node is not None and certificate is not None
         node.state = "retired"
         node.revoked_at = clock.now
-        node.last_seen_at = None
+        contact_row(node).last_seen_at = None
         certificate.state = "revoked"
         certificate.revoked_at = clock.now
 
@@ -2082,8 +2084,8 @@ def test_retired_identity_cannot_mutate_active_attempt_or_record_contact(
                 == fenced_attempt(sessions, claim).attempt,
             )
         )
-        assert node is not None and node.last_seen_at is None
-        assert node.protocol_version == 4
+        assert node is not None and contact_row(node).last_seen_at is None
+        assert contact_row(node).protocol_version == 4
         assert stored_operation is not None and stored_operation.state == "running"
         assert attempt is not None and attempt.state == "running"
         assert attempt.progress is None and attempt.result is None
@@ -4933,12 +4935,13 @@ def test_controller_clock_rollback_replaces_pinned_contact(
     with sessions.begin() as session:
         node = session.get(AgentNode, NODE_A)
         assert node is not None
-        node.last_seen_at = clock() + timedelta(hours=1)
+        contact_row(node).last_seen_at = clock() + timedelta(hours=1)
     if claim is None:
         claim_agent(jobs, NODE_A, "serial-a")
     else:
         jobs.heartbeat(claim, None, 30)
     with sessions() as session:
         node = session.get(AgentNode, NODE_A)
-        assert node is not None and node.last_seen_at is not None
-        assert node.last_seen_at.replace(tzinfo=UTC) == clock()
+        assert node is not None
+        seen = contact_row(node).last_seen_at
+        assert seen is not None and seen.replace(tzinfo=UTC) == clock()

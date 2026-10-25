@@ -7,7 +7,12 @@ from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import LifecycleState
 from vonk_control.fleet_profile_contract import FleetProfileChildOperation
 from vonk_control.fleet_profiles import FleetProfileService
-from vonk_control.models import AgentNode, Base, FleetProfileApplication
+from vonk_control.models import (
+    AgentNode,
+    AgentNodeContact,
+    Base,
+    FleetProfileApplication,
+)
 
 from .test_fleet_profiles import (
     NOW,
@@ -28,7 +33,13 @@ def test_new_whole_fleet_profile_supersedes_a_parked_parent(
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)
     _recipe_id, revision_id = _seed(sessions)
     with sessions.begin() as session:
-        session.add(AgentNode(node_id=_node_id(2), state="active", last_seen_at=NOW))
+        session.add(
+            AgentNode(
+                node_id=_node_id(2),
+                state="active",
+                contact=AgentNodeContact(last_seen_at=NOW),
+            )
+        )
     adapter = _SwitchAdapter()
     clock = [NOW]
     service = FleetProfileService(
