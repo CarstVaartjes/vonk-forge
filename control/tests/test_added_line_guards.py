@@ -120,6 +120,23 @@ PATH = "control/src/vonk_control/example.py"
         ("reasons", 'settle(job, CancelRequested(None, "superseded"), now)\n', 1),
         ("reasons", 'why = reason or row.reason or "cancelled"\n', 1),
         ("reasons", 'def _default_reason(row):\n    return "recipe job failed"\n', 2),
+        # Movement is forward-only, never "differs from the previous sample".
+        (
+            "movement",
+            (
+                "def moved(current, previous):\n"
+                "    return current.phase != previous.phase\n"
+            ),
+            2,
+        ),
+        (
+            "movement",
+            (
+                "def moved(now, before):\n"
+                "    return (now.completed_items or 0) > (before.completed_items or 0)\n"
+            ),
+            2,
+        ),
     ],
 )
 def test_new_occurrence_fails_untouched_occurrence_does_not(mode, source, line):
@@ -1239,3 +1256,16 @@ def test_added_line_guard_checks_a_direct_multiline_call_in_a_paginating_file():
             assert check_source(
                 "scripts/example.py", source, {line}, modes=("listings",)
             )
+
+
+def test_the_classified_pairwise_progress_check_is_allowed():
+    source = (
+        "def progress_advanced(previous, current):\n"
+        "    return current.phase != previous.phase\n"
+    )
+    assert not check_source(
+        "control/src/vonk_control/stall_window.py", source, {2}, modes=("movement",)
+    )
+    assert check_source(
+        "control/src/vonk_control/other.py", source, {2}, modes=("movement",)
+    )

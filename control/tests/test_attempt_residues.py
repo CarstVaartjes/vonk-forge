@@ -52,7 +52,7 @@ from .test_run_switch_operations import (
 )
 
 
-def _load(tmp_path: Path):
+def _load(tmp_path: Path, *, executor=None, artifacts=None):
     sessions, lifecycle, _queue, _mapping, _build, nodes = setup_services(
         tmp_path, nodes=2
     )
@@ -70,8 +70,8 @@ def _load(tmp_path: Path):
         sessions,
         lifecycle=lifecycle,
         clock=lifecycle._clock,
-        artifacts=CompleteArtifactInspector(),
-        artifact_phase_executor=RecordingArtifactExecutor(),
+        artifacts=artifacts or CompleteArtifactInspector(),
+        artifact_phase_executor=executor or RecordingArtifactExecutor(),
         memory_floor_bytes=50,
     )
     profiles = build_production_fleet_profile_service(

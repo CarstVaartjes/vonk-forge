@@ -39,6 +39,7 @@ from vonk_agent_protocol.agent_words import (
 )
 from vonk_agent_protocol.inventory import MemoryPool as MemoryPool
 
+from ..child_phases import FleetProfileChildPhase as FleetProfileChildPhase
 from ..endpoint_contract import EndpointResponse as EndpointResponse
 from ..integer_domains import MAX_DATABASE_INTEGER as MAX_DATABASE_INTEGER
 from ..model_cache_contract import CachedResourceEstimate as CachedResourceEstimate
@@ -185,7 +186,6 @@ from .vocabulary import Digest as Digest
 from .vocabulary import FleetProfileAction as FleetProfileAction
 from .vocabulary import FleetProfileAssignmentState as FleetProfileAssignmentState
 from .vocabulary import FleetProfileCancellationState as FleetProfileCancellationState
-from .vocabulary import FleetProfileChildPhase as FleetProfileChildPhase
 from .vocabulary import FleetProfileEndpointState as FleetProfileEndpointState
 from .vocabulary import FleetProfileInstallationPolicy as FleetProfileInstallationPolicy
 from .vocabulary import FleetProfileOperationKind as FleetProfileOperationKind
