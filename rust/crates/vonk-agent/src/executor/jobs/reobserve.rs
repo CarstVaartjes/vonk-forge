@@ -248,11 +248,23 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         };
         let job_scope = request.job_id.to_string();
         // Asked again on every look until it holds; the stop is exact and
-        // idempotent.
-        let stop = self
-            .stop_job(claim, &stop_plan, &job_scope)
+        // idempotent. It reports no progress phase: the observed fence is not
+        // the order whose progress this agent is reporting.
+        let request_root = self.runtime_root.join("runtime-requests");
+        let boundary = HostRuntimeBoundary {
+            client: self.client,
+            request_root: &request_root,
+            helper_socket: self.helper_socket,
+        };
+        let stop = match boundary
+            .execute_plan(claim, Vec::new(), HostRuntimePlan::Stop(stop_plan.clone()))
             .await
-            .unwrap_or_else(|| "job stopped".to_owned());
+        {
+            Ok(outcome) if !outcome.stop_uncertain => self.record_job_stop(&job_scope),
+            Ok(_) => Some("job stop unconfirmed: its removal is uncertain".to_owned()),
+            Err(error) => Some(format!("job stop unconfirmed: {}", error.cause())),
+        }
+        .unwrap_or_else(|| "job stopped".to_owned());
         if now < deadline + seconds(stop_grace(request)) {
             return progressing(format!(
                 "job deadline {} passed while it was running; {stop}",

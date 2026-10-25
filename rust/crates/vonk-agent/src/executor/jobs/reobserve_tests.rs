@@ -582,7 +582,14 @@ async fn a_job_past_its_own_deadline_is_stopped_and_reported() {
         .stop_timeout_seconds;
     let ago = ChronoDuration::seconds(i64::from(job.timeout_seconds + grace) + 1);
     let mut agent = Restarted::new(vec![Answer::Running], ago);
+    // Another order is executing: the observer's stop must not take over the
+    // progress this agent reports for it.
+    let executing = Uuid::new_v4();
+    agent
+        .client
+        .set_progress_phase(executing, ProgressPhase::Preparing);
     agent.pass(Utc::now()).await;
+    assert!(agent.client.progress_snapshot(executing).is_some());
     let Some(AgentResultResult::OutcomeFailed(failure)) = agent.result() else {
         panic!("a job past its deadline ends failed: {:?}", agent.result());
     };
