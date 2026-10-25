@@ -14,7 +14,7 @@ from vonk_agent_protocol import LifecycleState, canonical_message
 from vonk_agent_protocol.agent_words import ProfileChildPhase
 from vonk_control.distribution_executor.receipts import _ChildView
 from vonk_control.models import (
-    AgentNode,
+    AgentNodeContact,
     Job,
     NodeInventorySnapshot,
     RecipeRun,
@@ -449,7 +449,9 @@ def test_transfer_that_keeps_copying_outlives_the_recovery_window(tmp_path, copy
                     observed_at=now[0], received_at=now[0]
                 )
             )
-            session.execute(update(AgentNode).values(management_observed_at=now[0]))
+            session.execute(
+                update(AgentNodeContact).values(management_observed_at=now[0])
+            )
     service.tick()
     held = service.get(operation.operation_id)
     assert held.result is not None

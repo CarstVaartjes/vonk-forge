@@ -14,6 +14,7 @@ from vonk_control.distributed_recovery import (
 )
 from vonk_control.models import AgentNode, AgentOperation, Job, RecipeRun, RunNode
 
+from .node_contacts import contact_row
 from .runtime_identity_support import claim_agent
 from .test_recipe_operations import (
     NOW,
@@ -125,7 +126,7 @@ def test_distributed_recovery_admits_after_a_start_that_waited_for_its_claim(
     record_exact_empty_snapshot(sessions, nodes[1], clock.now)
     with sessions.begin() as session:
         for presence in session.scalars(select(AgentNode)):
-            presence.management_observed_at = clock.now
+            contact_row(presence).management_observed_at = clock.now
     recovery = DistributedRecoveryCoordinator(
         sessions,
         routes=routes,
@@ -321,7 +322,7 @@ def test_distributed_recovery_waits_for_fresh_presence_then_resumes(
     stale_at = NOW - timedelta(seconds=ROUTE_EVIDENCE_MAX_AGE_SECONDS + 1)
     with sessions.begin() as session:
         for presence in session.scalars(select(AgentNode)):
-            presence.management_observed_at = stale_at
+            contact_row(presence).management_observed_at = stale_at
     now = [NOW]
     recovery = DistributedRecoveryCoordinator(
         sessions, routes=routes, agent_jobs=queue, clock=lambda: now[0]
@@ -343,7 +344,7 @@ def test_distributed_recovery_waits_for_fresh_presence_then_resumes(
 
     with sessions.begin() as session:
         for presence in session.scalars(select(AgentNode)):
-            presence.management_observed_at = now[0]
+            contact_row(presence).management_observed_at = now[0]
     # The pending wait scheduled its next check; recovery resumes once due.
     with sessions() as session:
         run = session.get(RecipeRun, started.owner_id)
@@ -380,7 +381,7 @@ def test_distributed_recovery_backoff_survives_restart_and_resumes(
     stale_at = NOW - timedelta(seconds=ROUTE_EVIDENCE_MAX_AGE_SECONDS + 1)
     with sessions.begin() as session:
         for presence in session.scalars(select(AgentNode)):
-            presence.management_observed_at = stale_at
+            contact_row(presence).management_observed_at = stale_at
     now = [NOW]
     recovery = DistributedRecoveryCoordinator(
         sessions, routes=routes, agent_jobs=queue, clock=lambda: now[0]
@@ -428,7 +429,7 @@ def test_distributed_recovery_backoff_survives_restart_and_resumes(
         now[0] = run.next_action_at.replace(tzinfo=NOW.tzinfo)
     with sessions.begin() as session:
         for presence in session.scalars(select(AgentNode)):
-            presence.management_observed_at = now[0]
+            contact_row(presence).management_observed_at = now[0]
     recovery = DistributedRecoveryCoordinator(
         sessions, routes=routes, agent_jobs=queue, clock=lambda: now[0]
     )

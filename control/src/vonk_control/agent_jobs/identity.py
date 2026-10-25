@@ -19,12 +19,12 @@ from vonk_agent_protocol import (
 )
 from vonk_agent_protocol.claims import AGENT_PROTOCOL_VERSION, AgentRuntimeIdentity
 
+from ..agent_contacts import record_contact
 from ..agent_operation_facts import aware as _aware
 from ..agent_operation_facts import lapsed_renewal_allowed as _lapsed_renewal_allowed
 from ..auth import AgentSource
 from ..categorized_errors import InvalidValue
 from ..inventory_items import record_runtime
-from ..lifecycle.evidence import BookkeepingReason, retire_as_unknown
 from ..logging import redact_text
 from ..models import (
     AgentCertificate,
@@ -92,7 +92,7 @@ def _active(
             reason=SecurityRefusalReason.STALE_FENCE,
         )
     node, certificate = identity
-    self._consume_contact(session, source, node, certificate)
+    self._verify_contact_source(source, node, certificate)
     parent = session.scalar(
         select(Job).where(Job.id == parent_job_id).with_for_update(of=Job)
     )
@@ -186,7 +186,7 @@ def _active(
             "agent operation lease, certificate, or fence is stale",
             reason=SecurityRefusalReason.STALE_FENCE,
         )
-    self._record_contact(session, node, certificate, now, None, None, None)
+    self._record_contact(session, node, certificate, now, None, None, None, source)
     return operation, attempt
 
 
@@ -198,28 +198,46 @@ def _record_contact(
     runtime_identity: AgentRuntimeIdentity | None,
     preflight_fingerprint: str | None,
     hostname: str | None,
+    source: AgentSource | None = None,
 ) -> None:
+    """Record this contact with one upsert of the contact row.
+
+    One write per transaction: PostgreSQL re-checks the foreign key of a row
+    written twice in one transaction, taking KEY SHARE on the node row that
+    admission locks FOR UPDATE NOWAIT.
+    """
     # A new accepted contact replaces the old stamp even after clock rollback.
     contact_time = _aware(now)
-    node.last_seen_at = contact_time
+    digest = None
     if runtime_identity is not None:
-        node.protocol_version = AGENT_PROTOCOL_VERSION
         record_runtime(
             node, runtime_identity, preflight_fingerprint, hostname, contact_time
         )
-        node.contact_certificate_serial = certificate.serial
-        node.contact_observation_digest = hashlib.sha256(
+        digest = hashlib.sha256(
             canonical_message(
                 {
                     "certificate_fingerprint": certificate.fingerprint,
                     "certificate_serial": certificate.serial,
                     "node_id": node.node_id,
-                    "observed_at": _aware(contact_time).isoformat(),
+                    "observed_at": contact_time.isoformat(),
                     "hostname": hostname,
                     "runtime_identity": runtime_identity,
                 }
             )
         ).hexdigest()
+    record_contact(
+        session,
+        node.node_id,
+        last_seen_at=contact_time,
+        protocol_version=None if digest is None else AGENT_PROTOCOL_VERSION,
+        contact_certificate_serial=(
+            None if digest is None and source is None else certificate.serial
+        ),
+        contact_observation_digest=digest,
+        # The address was validated against the management policy at ingress.
+        management_address=None if source is None else source.management_address,
+        management_observed_at=None if source is None else contact_time,
+    )
 
 
 def _runtime_identity(
@@ -239,9 +257,7 @@ def _runtime_identity(
         ) from error
 
 
-def _consume_contact(
-    self: AgentJobService,
-    session: Session,
+def _verify_contact_source(
     source: AgentSource | None,
     node: AgentNode,
     certificate: AgentCertificate,
@@ -259,18 +275,6 @@ def _consume_contact(
             "agent contact source does not match its locked identity",
             reason=SecurityRefusalReason.AGENT_IDENTITY_MISMATCH,
         )
-    if self._contact_consumer is None:
-        # The contact was authenticated above; only its persistence is
-        # unavailable, and that is bookkeeping, not a reason to refuse the
-        # Spark.  It is recorded and the next contact is stored normally.
-        retire_as_unknown(
-            "agent-job.contact",
-            node.node_id,
-            BookkeepingReason.EVIDENCE_UNAVAILABLE,
-            "no contact consumer is configured",
-        )
-        return
-    self._contact_consumer(session, source)
 
 
 def _fence_token(fence: AgentFence) -> str:
@@ -297,10 +301,13 @@ def _lock_identity(
     node_id: str,
     certificate_serial: str,
 ) -> tuple[AgentNode, AgentCertificate] | None:
+    # The identity/intent row is read, never locked: contact traffic must not
+    # hold the row admission and publication lock. The certificate lock is the
+    # revocation fence (revocation locks every certificate of the node).
     node = session.scalar(
         select(AgentNode)
         .where(AgentNode.node_id == node_id)
-        .with_for_update(of=AgentNode)
+        .execution_options(populate_existing=True)
     )
     if node is None:
         return None

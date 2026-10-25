@@ -126,6 +126,7 @@ def _fail(
     if isinstance(step, str) and step.strip():
         detail = f"{step.strip()}: {detail}"
     excerpt = _log_excerpt(error)
+    settled_build_id = getattr(error, "settled_build_operation_id", None)
     with self._sessions.begin() as session:
         operation = self._claim_operation(session, claim)
         if operation is None:
@@ -225,6 +226,9 @@ def _fail(
                     ),
                     "retry_after_seconds": retry_after,
                     "log_excerpt": excerpt,
+                    "build_operation_id": settled_build_id
+                    if isinstance(settled_build_id, str)
+                    else None,
                     "required_bytes": required_bytes
                     if type(required_bytes) is int and required_bytes >= 0
                     else None,
@@ -266,7 +270,6 @@ def _fail(
             # retry downloads or builds them again.
             payload = payload.model_copy(update={"force_rebuild": True})
         dependency = payload.build_dependency
-        settled_build_id = getattr(error, "settled_build_operation_id", None)
         exact_build_settled = (
             isinstance(settled_build_id, str)
             and dependency is not None

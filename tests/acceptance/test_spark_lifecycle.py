@@ -4950,7 +4950,7 @@ class SparkLifecycle:
                 lambda: self._psql(
                     "SELECT n.contact_certificate_serial,c.state,"
                     "(c.revoked_at IS NOT NULL)::int "
-                    "FROM agent_nodes n JOIN agent_certificates c "
+                    "FROM agent_node_contacts n JOIN agent_certificates c "
                     f"ON c.serial='{serial_before}' WHERE n.node_id='{node_id}'"
                 ),
                 deadline,
@@ -5172,7 +5172,7 @@ class SparkLifecycle:
                     )
                 rows = self._psql(
                     "SELECT contact_certificate_serial "
-                    f"FROM agent_nodes WHERE node_id='{node_id}'"
+                    f"FROM agent_node_contacts WHERE node_id='{node_id}'"
                 )
                 row_mismatches = []
                 if len(rows) != 1:

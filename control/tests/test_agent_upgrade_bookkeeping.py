@@ -28,6 +28,7 @@ from vonk_control.agent_upgrades import (
 from vonk_control.bounded_json import require_mapping
 from vonk_control.models import AgentNode, Base, Job
 
+from .node_contacts import contact_row
 from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
 from .test_agent_upgrades import (  # noqa: F401  (the autouse fixture pins the rollback source)
     NODE_A,
@@ -243,7 +244,7 @@ def test_a_rollout_with_a_damaged_source_skips_that_spark_and_finishes(
         parent.payload = payload
         node_b = session.get(AgentNode, NODE_B)
         assert node_b is not None
-        node_b.last_seen_at = datetime(2026, 8, 27, tzinfo=UTC)
+        contact_row(node_b).last_seen_at = datetime(2026, 8, 27, tzinfo=UTC)
 
     _upgrade_node(operations, NODE_A, "serial-a")
 

@@ -33,6 +33,7 @@ from vonk_control.offline_stops import is_deferred_stop
 from vonk_control.run_switch_contract import RunSwitchApplyRequest, RunSwitchOperation
 
 from .agent_fences import fenced_operation
+from .node_contacts import contact_row
 from .non_blocking import assert_ended_without_blocking
 from .test_fleet_profiles import _uuid
 from .test_profile_continuity_postgres import (
@@ -69,8 +70,8 @@ def test_offline_stop_ends_admits_healthy_work_and_reconciles_exact_stop(
         offline = session.get(AgentNode, nodes[0])
         healthy = session.get(AgentNode, nodes[1])
         assert offline is not None and healthy is not None
-        offline.last_seen_at = NOW - timedelta(hours=2)
-        healthy.last_seen_at = NOW
+        contact_row(offline).last_seen_at = NOW - timedelta(hours=2)
+        contact_row(healthy).last_seen_at = NOW
     coordinator = _service(sessions, NOW, lifecycle, RecordingArtifactExecutor())
     coordinator._clock = lambda: clock[0]
     profiles = FleetProfileService(

@@ -21,7 +21,6 @@ from vonk_agent_protocol import (
 )
 
 from .. import agent_operation_states, job_states
-from ..auth import AgentSource
 from ..lifecycle.agent_operation import AGGREGATE_FINAL_STATES
 from ..models import AgentOperation as StoredOperation
 from ..models import AgentOperationAttempt
@@ -36,9 +35,6 @@ AgentFence = str | AgentClaim | AgentProgress | AgentResult
 ResultConsumer = Callable[
     [Session, StoredOperation, AgentOperationAttempt, AgentResult], None
 ]
-
-
-ContactConsumer = Callable[[Session, AgentSource], None]
 
 
 @dataclass(frozen=True, slots=True)

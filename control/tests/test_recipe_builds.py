@@ -40,6 +40,7 @@ from vonk_control.inventory_repository import (
 from vonk_control.models import (
     AgentCertificate,
     AgentNode,
+    AgentNodeContact,
     AgentOperation,
     Base,
     CatalogDocumentRevision,
@@ -211,7 +212,6 @@ def setup(
                 AgentNode(
                     node_id=node_id,
                     state="active",
-                    last_seen_at=now,
                     inventory_snapshot=inventory_items_fixture(
                         node_id,
                         observed_at=now,
@@ -225,6 +225,7 @@ def setup(
                             }
                         ),
                     ),
+                    contact=AgentNodeContact(last_seen_at=now),
                 )
             )
         # Another recipe on an existing builder may share the same bundle.
@@ -947,7 +948,6 @@ def test_resolution_reuses_the_present_receipt_for_the_shared_identity(
             AgentNode(
                 node_id=second_node,
                 state="active",
-                last_seen_at=now,
                 inventory_snapshot=inventory_items_fixture(
                     second_node,
                     observed_at=now,
@@ -961,6 +961,7 @@ def test_resolution_reuses_the_present_receipt_for_the_shared_identity(
                         }
                     ),
                 ),
+                contact=AgentNodeContact(last_seen_at=now),
             )
         )
     InventoryRepository(sessions, clock=lambda: now).record(

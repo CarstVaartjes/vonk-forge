@@ -125,7 +125,9 @@ class FleetProjection:
                 id=node_id,
                 display_name=profile.display_name,
                 hostname=inventory_items(node).hostname or "",
-                ip_address=node.management_address,
+                ip_address=(
+                    None if node.contact is None else node.contact.management_address
+                ),
             )
 
     def read_at(self, event_cursor: int | None) -> FleetSnapshot:

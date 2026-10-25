@@ -25,6 +25,7 @@ from vonk_control.jobs import JobService
 from vonk_control.models import (
     AgentCertificate,
     AgentNode,
+    AgentNodeContact,
     AgentOperation,
     AgentOperationAttempt,
     Base,
@@ -59,7 +60,6 @@ def test_installed_fleet_resume_rechecks_role_and_preserves_exact_job_attempt(
                 AgentNode(
                     node_id=node_id,
                     state="active",
-                    last_seen_at=now,
                     inventory_snapshot=inventory_items_fixture(
                         node_id,
                         observed_at=now,
@@ -73,6 +73,7 @@ def test_installed_fleet_resume_rechecks_role_and_preserves_exact_job_attempt(
                             }
                         ),
                     ),
+                    contact=AgentNodeContact(last_seen_at=now),
                 )
             )
             session.flush()

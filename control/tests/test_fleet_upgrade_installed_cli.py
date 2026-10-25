@@ -20,7 +20,14 @@ from vonk_control.api import create_app
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.fleet_projection import FleetProjection
 from vonk_control.jobs import JobService
-from vonk_control.models import AgentCertificate, AgentNode, AgentOperation, Base, Job
+from vonk_control.models import (
+    AgentCertificate,
+    AgentNode,
+    AgentNodeContact,
+    AgentOperation,
+    Base,
+    Job,
+)
 from vonk_control.operation_api import durable_operation_services
 from vonk_control.operator_projection_api import FleetOperatorServices
 
@@ -43,7 +50,6 @@ def test_installed_upgrade_reconnects_and_moves_past_a_failed_spark(
                 AgentNode(
                     node_id=node_id,
                     state="active",
-                    last_seen_at=now,
                     inventory_snapshot=inventory_items_fixture(
                         node_id,
                         observed_at=now,
@@ -57,6 +63,7 @@ def test_installed_upgrade_reconnects_and_moves_past_a_failed_spark(
                             }
                         ),
                     ),
+                    contact=AgentNodeContact(last_seen_at=now),
                 )
             )
             session.flush()

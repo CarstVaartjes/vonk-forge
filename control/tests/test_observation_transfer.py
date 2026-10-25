@@ -27,7 +27,7 @@ from vonk_control.fleet_projection import (
     UnavailableRecipePresence,
 )
 from vonk_control.fleet_stream_contract import FleetRefreshEvent
-from vonk_control.models import AgentNode, Base
+from vonk_control.models import AgentNode, AgentNodeContact, Base
 from vonk_control.observation_transfer import (
     ObservationTransferChunk,
     ObservationTransferComplete,
@@ -60,7 +60,11 @@ def _large_snapshot(tmp_path: Path) -> FleetSnapshot:
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
     with sessions.begin() as session:
-        session.add(AgentNode(node_id=NODE, state="active", last_seen_at=NOW))
+        session.add(
+            AgentNode(
+                node_id=NODE, state="active", contact=AgentNodeContact(last_seen_at=NOW)
+            )
+        )
     snapshot = FleetProjection(sessions, clock=lambda: NOW).read()
     engine.dispose()
     # Legal single-row canonical membership exceeds one reader record. It must

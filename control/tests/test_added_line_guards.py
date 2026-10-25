@@ -717,6 +717,44 @@ def test_an_exclusive_flock_is_taken_only_through_a_held_lock():
     assert not check_source(agent, unit, {4}, modes=("locks",))
 
 
+@pytest.mark.parametrize(
+    "source",
+    [
+        # The two shapes #1905 removed from the build failure summary.
+        "tail = safe_text(diagnostics.stderr.text or diagnostics.stdout.text)\n",
+        "kept = log_excerpt[:1024]\n",
+        "shown = redact_text(stderr)[:512]\n",
+        "text = diagnostics.stdout.text[:256]\n",
+    ],
+)
+def test_output_bounded_from_its_front_or_one_preferred_stream_fails(source):
+    path = "control/src/vonk_control/availability_production.py"
+    assert check_source(path, source, {1}, modes=("excerpts",))
+    assert not check_source(
+        "control/tests/test_availability_production.py",
+        source,
+        {1},
+        modes=("excerpts",),
+    )
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "tail = log_excerpt[-1024:]\n",
+        "detail = detail[:128]\n",
+        "streams = (diagnostics.stdout.text, diagnostics.stderr.text)\n",
+        # A raw tool's own error stream, not a retained tail.
+        'detail = (result.stderr or result.stdout or "skopeo copy failed").strip()\n',
+        "page = catalog[:20]\n",
+        "shown = dialog[:3] + login[:8] + logs[:10]\n",
+    ],
+)
+def test_output_kept_from_its_end_from_both_streams_is_allowed(source):
+    path = "control/src/vonk_control/availability_production.py"
+    assert not check_source(path, source, {1}, modes=("excerpts",))
+
+
 # The CI failure on #1735: keep_default_key outlived 1 s on a loaded runner.
 GATEWAY_WAIT = (
     "async def observe():\n"
@@ -1268,4 +1306,43 @@ def test_the_classified_pairwise_progress_check_is_allowed():
     )
     assert check_source(
         "control/src/vonk_control/other.py", source, {2}, modes=("movement",)
+    )
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        # The literal parse #1906 removed from the job failure.
+        '.any(|token| token == "exit_cause=host_memory_exhausted")\n',
+        'if detail.contains("exit_cause=oom_killed") {\n',
+        'Some(cause) if cause == "python_exception" => {}\n',
+    ],
+)
+def test_a_new_exit_cause_literal_fails_outside_its_owner(source):
+    agent = "rust/crates/vonk-agent/src/executor/jobs.rs"
+    assert check_source(agent, source, {1}, modes=("exit-causes",))
+    # The enum spells its own tokens; tests may build any summary.
+    assert not check_source(
+        "rust/crates/vonk-agent-protocol/src/failure_evidence.rs",
+        source,
+        {1},
+        modes=("exit-causes",),
+    )
+    unit = "#[cfg(test)]\nmod tests {\n    fn t() {\n        " + source + "    }\n}\n"
+    assert not check_source(agent, unit, {4}, modes=("exit-causes",))
+    typed = (
+        "if ExitCause::of_summary(detail) == Some(ExitCause::HostMemoryExhausted) {\n"
+    )
+    assert not check_source(agent, typed, {1}, modes=("exit-causes",))
+
+
+def test_a_new_exit_cause_literal_fails_in_controller_code():
+    path = "control/src/vonk_control/agent_api/observations.py"
+    for source in (
+        'if item.value == "host_memory_exhausted":\n    pass\n',
+        'if "exit_cause=oom_killed" in detail:\n    pass\n',
+    ):
+        assert check_source(path, source, {1}, modes=("exit-causes",))
+    assert not check_source(
+        path, 'if item.name == "trigger":\n    pass\n', {1}, modes=("exit-causes",)
     )

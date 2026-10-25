@@ -55,11 +55,8 @@ class RecoveryMixin:
         package = _stored_package(parent)
         if package is None:
             return
-        node = session.scalar(
-            select(AgentNode)
-            .where(AgentNode.node_id == operation.node_id)
-            .with_for_update(of=AgentNode)
-        )
+        # Read, never locked: this runs inside the agent's result contact.
+        node = session.get(AgentNode, operation.node_id, populate_existing=True)
         if message.state == "succeeded" and (
             node is not None
             and service._contact_proves_target(node, operation, package, message)

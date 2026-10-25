@@ -30,6 +30,7 @@ from vonk_control.fleet_profiles import (
 )
 from vonk_control.models import (
     AgentNode,
+    AgentNodeContact,
     AgentOperation,
     Base,
     CatalogDocumentRevision,
@@ -41,6 +42,7 @@ from vonk_control.run_switch_contract import RunSwitchMemberProgress
 from vonk_control.run_switch_operations import RunSwitchOperationService
 
 from .agent_fences import fenced_operation
+from .node_contacts import contact_row
 from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
 from .test_fleet_profiles import (
     NOW,
@@ -72,8 +74,6 @@ def _parallel_world(engine: Engine, *, gang: bool = False):
             AgentNode(
                 node_id=_node_id(3 if gang else 2),
                 state="active",
-                protocol_version=2,
-                last_seen_at=NOW,
                 inventory_snapshot=inventory_items_fixture(
                     _node_id(3 if gang else 2),
                     observed_at=NOW,
@@ -81,6 +81,7 @@ def _parallel_world(engine: Engine, *, gang: bool = False):
                         {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
                     ),
                 ),
+                contact=AgentNodeContact(protocol_version=2, last_seen_at=NOW),
             )
         )
     clock = [NOW]
@@ -310,8 +311,6 @@ def test_postgres_real_pending_stop_allows_disjoint_load_and_reconnects_after_re
             AgentNode(
                 node_id=_node_id(2),
                 state="active",
-                protocol_version=2,
-                last_seen_at=NOW,
                 inventory_snapshot=inventory_items_fixture(
                     _node_id(2),
                     observed_at=NOW,
@@ -319,6 +318,7 @@ def test_postgres_real_pending_stop_allows_disjoint_load_and_reconnects_after_re
                         {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
                     ),
                 ),
+                contact=AgentNodeContact(protocol_version=2, last_seen_at=NOW),
             )
         )
         revision = session.scalar(
@@ -416,7 +416,7 @@ def test_postgres_real_pending_stop_allows_disjoint_load_and_reconnects_after_re
     with sessions.begin() as session:
         node = session.get(AgentNode, nodes[0])
         assert node is not None
-        node.last_seen_at = NOW - timedelta(hours=1)
+        contact_row(node).last_seen_at = NOW - timedelta(hours=1)
     claims = _claims(sessions, app.id)
     restarted_coordinator = _service(
         sessions, NOW, lifecycle, RecordingArtifactExecutor()

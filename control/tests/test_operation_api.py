@@ -38,6 +38,7 @@ from vonk_control.jobs import JobService
 from vonk_control.models import (
     AgentCertificate,
     AgentNode,
+    AgentNodeContact,
     AgentOperation,
     AgentOperationAttempt,
     Base,
@@ -848,8 +849,8 @@ def test_resume_action_disappearing_after_preflight_is_refused(
             AgentNode(
                 node_id=other_node_id,
                 state="active",
-                protocol_version=3,
                 workload_intent_ordinal=1,
+                contact=AgentNodeContact(protocol_version=3),
             )
         )
         parent = session.get(Job, job_id)
@@ -1850,7 +1851,6 @@ def _parked_stop_services(tmp_path, *, clock: MutableClock, engine=None):
             AgentNode(
                 node_id=PARKED_NODE_ID,
                 state="active",
-                protocol_version=3,
                 workload_intent_ordinal=1,
                 inventory_snapshot=inventory_items_fixture(
                     PARKED_NODE_ID,
@@ -1865,6 +1865,7 @@ def _parked_stop_services(tmp_path, *, clock: MutableClock, engine=None):
                         }
                     ),
                 ),
+                contact=AgentNodeContact(protocol_version=3),
             )
         )
         session.flush()

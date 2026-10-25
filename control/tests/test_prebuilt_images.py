@@ -35,6 +35,7 @@ from vonk_control.inventory_repository import (
 )
 from vonk_control.models import (
     AgentNode,
+    AgentNodeContact,
     AgentOperation,
     Base,
     CatalogDocumentRevision,
@@ -161,7 +162,6 @@ def _published_library(
             AgentNode(
                 node_id=NODE,
                 state="active",
-                last_seen_at=NOW,
                 inventory_snapshot=inventory_items_fixture(
                     NODE,
                     observed_at=NOW,
@@ -175,6 +175,7 @@ def _published_library(
                         }
                     ),
                 ),
+                contact=AgentNodeContact(last_seen_at=NOW),
             )
         )
         revision = session.scalar(

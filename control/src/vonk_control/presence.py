@@ -12,9 +12,10 @@ from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import ErrorCategory, UnknownError, WaitReason
+from vonk_agent_protocol.state_machines import CertificateRecordState, NodeIdentityState
 
 from .auth import AgentIdentity, AgentSource, AuthError
-from .models import AgentCertificate, AgentNode
+from .models import AgentCertificate, AgentNode, AgentNodeContact
 
 type _Network = ipaddress.IPv4Network | ipaddress.IPv6Network
 type _Address = ipaddress.IPv4Address | ipaddress.IPv6Address
@@ -163,7 +164,11 @@ class ManagementAddressObservation:
 
 
 class AgentPresenceService:
-    """Persist and retrieve certificate-bound management addresses."""
+    """Validate management addresses and read the certificate-bound presence.
+
+    Authenticated agent requests record presence with their contact upsert
+    (``agent_jobs.identity._record_contact``); this service only reads it.
+    """
 
     def __init__(
         self,
@@ -177,70 +182,32 @@ class AgentPresenceService:
         self._clock = clock
 
     @staticmethod
-    def _lock_active_node(
-        session: Session, node_id: str, *, nowait: bool = False
-    ) -> AgentNode | None:
+    def _active_node(session: Session, node_id: str) -> AgentNode | None:
         return session.scalar(
             select(AgentNode)
             .where(
                 AgentNode.node_id == node_id,
-                AgentNode.state == "active",
+                AgentNode.state == NodeIdentityState.ACTIVE,
                 AgentNode.revoked_at.is_(None),
             )
-            .with_for_update(of=AgentNode, nowait=nowait)
+            .execution_options(populate_existing=True)
         )
 
     @staticmethod
-    def _lock_active_certificate(
-        session: Session,
-        identity: AgentIdentity,
-        now: datetime,
-        *,
-        nowait: bool = False,
+    def _active_certificate(
+        session: Session, identity: AgentIdentity, now: datetime
     ) -> AgentCertificate | None:
         return session.scalar(
-            select(AgentCertificate)
-            .where(
+            select(AgentCertificate).where(
                 AgentCertificate.serial == identity.certificate_serial,
                 AgentCertificate.node_id == identity.node_id,
                 AgentCertificate.fingerprint == identity.certificate_fingerprint,
-                AgentCertificate.state == "active",
+                AgentCertificate.state == CertificateRecordState.ACTIVE,
                 AgentCertificate.revoked_at.is_(None),
                 AgentCertificate.ca_revoked_at.is_(None),
                 AgentCertificate.not_before <= now,
                 AgentCertificate.not_after > now,
             )
-            .with_for_update(of=AgentCertificate, nowait=nowait)
-        )
-
-    def observe(self, source: AgentSource) -> ManagementAddressObservation:
-        with self._sessions.begin() as session:
-            return self.observe_in_session(session, source)
-
-    def observe_in_session(
-        self,
-        session: Session,
-        source: AgentSource,
-    ) -> ManagementAddressObservation:
-        """Persist presence using a caller-owned, Node-first transaction."""
-        now = _utc(self._clock(), label="presence clock")
-        address = self.validate(source).management_address
-        node = self._lock_active_node(session, source.identity.node_id)
-        if node is None:
-            raise PresenceError("agent node is not active")
-        certificate = self._lock_active_certificate(session, source.identity, now)
-        if certificate is None:
-            raise PresenceError("agent certificate is not active")
-        row = node
-        row.contact_certificate_serial = certificate.serial
-        row.management_address = address
-        row.management_observed_at = now
-        certificate_serial = certificate.serial
-        return ManagementAddressObservation(
-            node_id=source.identity.node_id,
-            certificate_serial=certificate_serial,
-            address=address,
-            observed_at=now,
         )
 
     def validate(self, source: AgentSource) -> AgentSource:
@@ -275,92 +242,50 @@ class AgentPresenceService:
             raise PresenceError("node ID is invalid")
         if maximum_age_seconds <= 0:
             raise PresenceError("maximum age must be positive")
+        unavailable = UnknownError(
+            category=ErrorCategory.UNKNOWN,
+            reason=WaitReason.OBSERVATION_UNAVAILABLE,
+        )
         try:
-            # A failed nonblocking lookup rolls back only this observation.
-            with session.begin_nested():
-                now = _utc(self._clock(), label="presence clock")
-                row = session.get(AgentNode, node_id)
-                if (
-                    row is None
-                    or row.contact_certificate_serial is None
-                    or row.management_address is None
-                    or row.management_observed_at is None
-                ):
-                    return UnknownError(
-                        category=ErrorCategory.UNKNOWN,
-                        reason=WaitReason.OBSERVATION_UNAVAILABLE,
-                    )
-                certificate = session.get(
-                    AgentCertificate, row.contact_certificate_serial
+            # Plain reads: one contact row is one consistent statement snapshot.
+            now = _utc(self._clock(), label="presence clock")
+            row = session.get(AgentNodeContact, node_id, populate_existing=True)
+            if (
+                row is None
+                or row.contact_certificate_serial is None
+                or row.management_address is None
+                or row.management_observed_at is None
+                or self._active_node(session, node_id) is None
+            ):
+                return unavailable
+            certificate = session.get(AgentCertificate, row.contact_certificate_serial)
+            if certificate is None:
+                return unavailable
+            try:
+                identity = AgentIdentity(
+                    node_id=row.node_id,
+                    certificate_serial=row.contact_certificate_serial,
+                    certificate_fingerprint=certificate.fingerprint,
+                    verified=True,
                 )
-                if certificate is None:
-                    return UnknownError(
-                        category=ErrorCategory.UNKNOWN,
-                        reason=WaitReason.OBSERVATION_UNAVAILABLE,
-                    )
-                try:
-                    identity = AgentIdentity(
-                        node_id=row.node_id,
-                        certificate_serial=row.contact_certificate_serial,
-                        certificate_fingerprint=certificate.fingerprint,
-                        verified=True,
-                    )
-                except AuthError:
-                    return UnknownError(
-                        category=ErrorCategory.UNKNOWN,
-                        reason=WaitReason.OBSERVATION_UNAVAILABLE,
-                    )
-                if (
-                    self._lock_active_node(session, node_id, nowait=True) is None
-                    or self._lock_active_certificate(
-                        session, identity, now, nowait=True
-                    )
-                    is None
-                ):
-                    return UnknownError(
-                        category=ErrorCategory.UNKNOWN,
-                        reason=WaitReason.OBSERVATION_UNAVAILABLE,
-                    )
-                original_binding = (
-                    row.contact_certificate_serial,
-                    row.management_observed_at,
-                )
-                session.refresh(row, with_for_update={"nowait": True})
-                if original_binding != (
-                    row.contact_certificate_serial,
-                    row.management_observed_at,
-                ):
-                    return UnknownError(
-                        category=ErrorCategory.UNKNOWN,
-                        reason=WaitReason.OBSERVATION_UNAVAILABLE,
-                    )
-                observed_at = _stored_utc(row.management_observed_at)
-                try:
-                    address = self._policy.validate(row.management_address)
-                except PresenceError:
-                    return UnknownError(
-                        category=ErrorCategory.UNKNOWN,
-                        reason=WaitReason.OBSERVATION_UNAVAILABLE,
-                    )
-                certificate_serial = row.contact_certificate_serial
-                if observed_at > now:
-                    return UnknownError(
-                        category=ErrorCategory.UNKNOWN,
-                        reason=WaitReason.OBSERVATION_UNAVAILABLE,
-                    )
-                if now - observed_at > timedelta(seconds=maximum_age_seconds):
-                    return UnknownError(
-                        category=ErrorCategory.UNKNOWN,
-                        reason=WaitReason.OBSERVATION_UNAVAILABLE,
-                    )
-                return ManagementAddressObservation(
-                    node_id=node_id,
-                    certificate_serial=certificate_serial,
-                    address=address,
-                    observed_at=observed_at,
-                )
-        except (SQLAlchemyError, OSError, ValueError, TypeError, AttributeError):
-            return UnknownError(
-                category=ErrorCategory.UNKNOWN,
-                reason=WaitReason.OBSERVATION_UNAVAILABLE,
+            except AuthError:
+                return unavailable
+            if self._active_certificate(session, identity, now) is None:
+                return unavailable
+            observed_at = _stored_utc(row.management_observed_at)
+            try:
+                address = self._policy.validate(row.management_address)
+            except PresenceError:
+                return unavailable
+            if observed_at > now or now - observed_at > timedelta(
+                seconds=maximum_age_seconds
+            ):
+                return unavailable
+            return ManagementAddressObservation(
+                node_id=node_id,
+                certificate_serial=row.contact_certificate_serial,
+                address=address,
+                observed_at=observed_at,
             )
+        except (SQLAlchemyError, OSError, ValueError, TypeError, AttributeError):
+            return unavailable

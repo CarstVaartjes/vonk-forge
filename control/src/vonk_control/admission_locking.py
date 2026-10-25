@@ -46,6 +46,12 @@ _ROW_LOCK_ORDER = (
     "agent_operation_attempts",
 )
 _ROW_LOCK_RANK = {table: rank for rank, table in enumerate(_ROW_LOCK_ORDER)}
+# Rows whose key never changes and which agent traffic references through
+# foreign keys. They are locked FOR NO KEY UPDATE: that excludes every other
+# updater but never the KEY SHARE a child row's foreign-key check takes (a
+# child insert, or a child row written twice in one transaction), so contact,
+# result, snapshot and telemetry writes cannot refuse admission.
+_KEY_STABLE_TABLES = frozenset({"agent_nodes"})
 
 
 class AdmissionLockBusy(UnknownOutcomeError, RuntimeError):
@@ -505,7 +511,9 @@ def lock_admission_rows(
         statement = request.statement.order_by(None).order_by(*primary_key)
         if postgres:
             statement = statement.with_for_update(
-                of=request.model, nowait=not _patient()
+                of=request.model,
+                nowait=not _patient(),
+                key_share=request.model.__tablename__ in _KEY_STABLE_TABLES,
             )
         statement = statement.execution_options(populate_existing=True)
         try:
@@ -549,6 +557,8 @@ def _key_holder(session: Session, key: AdmissionLockKey) -> str | None:
                     "SELECT a.pid, a.application_name FROM pg_locks l "
                     "JOIN pg_stat_activity a ON a.pid = l.pid "
                     "WHERE l.locktype = 'advisory' AND l.granted "
+                    # Advisory keys are per database; pg_locks lists every one.
+                    "AND a.datname = current_database() "
                     "AND l.pid <> pg_backend_pid() AND l.objsubid = 1 "
                     "AND ((l.classid::bigint << 32) | l.objid::bigint) "
                     "= hashtextextended(:key, 0) "

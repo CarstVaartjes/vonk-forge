@@ -34,6 +34,7 @@ from vonk_control.jobs import AttemptFence, JobService, StaleAttempt
 from vonk_control.models import (
     AgentCertificate,
     AgentNode,
+    AgentNodeContact,
     AgentOperation,
     AgentOperationAttempt,
     Base,
@@ -42,6 +43,7 @@ from vonk_control.models import (
 )
 
 from .agent_fences import fenced_attempt, fenced_operation
+from .node_contacts import contact_row
 from .recipe_stop_fixtures import recipe_stop_payload
 from .runtime_identity_support import (
     PACKAGED_RUNTIME_IDENTITY,
@@ -176,7 +178,6 @@ def test_repair_plan_binds_manifest_but_dispatches_current_source_bound_package_
             AgentNode(
                 node_id=NODE_A,
                 state="active",
-                last_seen_at=now,
                 inventory_snapshot=inventory_items_fixture(
                     NODE_A,
                     observed_at=now,
@@ -190,6 +191,7 @@ def test_repair_plan_binds_manifest_but_dispatches_current_source_bound_package_
                         }
                     ),
                 ),
+                contact=AgentNodeContact(last_seen_at=now),
             )
         )
     operations = AgentJobService(sessions, clock=lambda: now)
@@ -267,7 +269,6 @@ def test_repair_manifest_requires_canonical_immutable_url_and_latest_request_lea
             AgentNode(
                 node_id=NODE_A,
                 state="active",
-                last_seen_at=now,
                 inventory_snapshot=inventory_items_fixture(
                     NODE_A,
                     observed_at=now,
@@ -281,6 +282,7 @@ def test_repair_manifest_requires_canonical_immutable_url_and_latest_request_lea
                         }
                     ),
                 ),
+                contact=AgentNodeContact(last_seen_at=now),
             )
         )
     operations = AgentJobService(sessions, clock=lambda: now)
@@ -1409,7 +1411,7 @@ def test_offline_spark_is_deferred_and_upgraded_when_it_reconnects(tmp_path) -> 
         for node_id in (NODE_A, NODE_B):
             node = session.get(AgentNode, node_id)
             assert node is not None
-            node.last_seen_at = clock() - timedelta(minutes=10)
+            contact_row(node).last_seen_at = clock() - timedelta(minutes=10)
     assert upgrades.preview([NODE_B], PACKAGE_MODEL).node_ids == (NODE_B,)
     plan = upgrades.preview(None, PACKAGE_MODEL)
     assert plan.node_ids == (NODE_A, NODE_B)
@@ -1772,9 +1774,6 @@ def _rollout(
                 AgentNode(
                     node_id=node_id,
                     state="active",
-                    last_seen_at=now - timedelta(hours=1)
-                    if node_id in offline
-                    else now,
                     inventory_snapshot=inventory_items_fixture(
                         node_id,
                         observed_at=now - timedelta(hours=1)
@@ -1789,6 +1788,11 @@ def _rollout(
                                 "binary_digest": OLD_IDENTITY["binary_digest"],
                             }
                         ),
+                    ),
+                    contact=AgentNodeContact(
+                        last_seen_at=now - timedelta(hours=1)
+                        if node_id in offline
+                        else now
                     ),
                 )
             )
@@ -2341,10 +2345,10 @@ def test_idle_worker_adopts_only_exact_retained_upgrade_receipt(
         # committed before the previous Controller worker died.
         set_inventory_identity(node, binary_digest=result.binary_digest)
         set_inventory_identity(node, build_digest=result.build_digest)
-        node.protocol_version = AGENT_PROTOCOL_VERSION
-        node.last_seen_at = clock()
+        contact_row(node).protocol_version = AGENT_PROTOCOL_VERSION
+        contact_row(node).last_seen_at = clock()
         schedule_agent_upgrade_retry(operation, attempt, clock())
-        contact, deadline = node.last_seen_at, attempt.lease_deadline
+        contact, deadline = contact_row(node).last_seen_at, attempt.lease_deadline
         operation.state = LifecycleState.OBSERVING
         attempt.state = LifecycleState.OBSERVING
         attempt.observation_cause = ObservationCause.LEASE_LAPSED
@@ -2379,7 +2383,7 @@ def test_idle_worker_adopts_only_exact_retained_upgrade_receipt(
         )
         assert operation is not None and node is not None and attempt is not None
         assert (operation.state == LifecycleState.SUCCEEDED) is (change is None)
-        assert node.last_seen_at == contact
+        assert contact_row(node).last_seen_at == contact
         assert attempt.lease_deadline == deadline
         if change is None:
             assert attempt.state == AgentResultState.SUCCEEDED
@@ -2394,7 +2398,7 @@ def test_upgrade_dispatch_accepts_controller_contact_ahead_of_clock(tmp_path) ->
     with sessions.begin() as session:
         node = session.get(AgentNode, NODE_A)
         assert node is not None
-        node.last_seen_at = clock() + timedelta(seconds=2)
+        contact_row(node).last_seen_at = clock() + timedelta(seconds=2)
     plan = upgrades.preview([NODE_A], PACKAGE_MODEL)
     assert plan.node_ids == (NODE_A,)
     job = upgrades.apply(

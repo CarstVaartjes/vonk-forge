@@ -3,6 +3,7 @@
 from pathlib import Path
 
 import pytest
+from sqlalchemy.exc import SQLAlchemyError
 from vonk_agent_protocol import (
     LifecycleState,
     SecurityRefusalReason,
@@ -147,3 +148,51 @@ def test_wait_reason_preserves_contention_and_typed_evidence(cause, wrapped):
         outer.__cause__ = error
         error = outer
     assert wait_reason(error) == expected
+
+
+class _CodedError(Exception):
+    def __init__(self, code: str) -> None:
+        super().__init__("coded")
+        self.code = code
+
+
+def _database_errors() -> list[SQLAlchemyError]:
+    from sqlalchemy.exc import DBAPIError, IntegrityError, OperationalError
+
+    return [
+        OperationalError("select 1", {}, Exception("connection refused")),
+        DBAPIError("select 1", {}, Exception("x"), connection_invalidated=True),
+        DBAPIError("select 1", {}, Exception("x")),
+        IntegrityError("insert", {}, Exception("duplicate")),
+    ]
+
+
+def test_database_errors_never_leak_sqlalchemy_documentation_codes() -> None:
+    """Catches `run-switch.phase-retry: e3q8`: SQLAlchemy's `.code` anchor
+    surfaced as the reason. Every code classification produces from a database
+    error is a contract reason, never the library's own word."""
+    from vonk_agent_protocol import ControllerErrorCode
+    from vonk_control.failure_classification import disposition, error_code
+    from vonk_control.profile_error_summary import _error_summary
+
+    for error in _database_errors():
+        assert getattr(error, "code", None), "SQLAlchemy errors carry a docs code"
+        code = error_code(error)
+        assert code is None or code in {c.value for c in ControllerErrorCode}, error
+        assert not _error_summary(error).startswith(str(error.code))
+        wrapped = RuntimeError("phase failed")
+        wrapped.__cause__ = error
+        assert error_code(wrapped) is None or error_code(wrapped) in {
+            c.value for c in ControllerErrorCode
+        }
+    transient = _database_errors()[0]
+    assert error_code(transient) == ControllerErrorCode.UNAVAILABLE.value
+    assert disposition(transient).value == "wait"
+
+
+def test_generic_typed_code_is_preserved() -> None:
+    from vonk_agent_protocol import ControllerErrorCode
+    from vonk_control.failure_classification import error_code
+
+    typed = ControllerErrorCode.TIMEOUT.value
+    assert error_code(_CodedError(typed)) == typed

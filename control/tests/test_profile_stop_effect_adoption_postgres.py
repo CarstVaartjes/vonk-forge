@@ -32,6 +32,7 @@ from vonk_control.inventory_repository import (
 )
 from vonk_control.models import (
     AgentNode,
+    AgentNodeContact,
     AgentOperation,
     CatalogDocumentRevision,
     FleetProfileApplication,
@@ -42,6 +43,7 @@ from vonk_control.recipe_operations import RecipeOperationService
 from vonk_control.stored_json import write_guard_mode
 
 from .agent_fences import fenced_attempt, fenced_operation
+from .node_contacts import contact_row
 from .profile_stop_readmission_support import start_on_released_gang
 from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
 from .test_fleet_profiles import NOW, _node_id, _uuid
@@ -116,8 +118,6 @@ def _pending_stop(
             AgentNode(
                 node_id=_node_id(2),
                 state="active",
-                protocol_version=2,
-                last_seen_at=clock[0],
                 inventory_snapshot=inventory_items_fixture(
                     _node_id(2),
                     observed_at=clock[0],
@@ -125,6 +125,7 @@ def _pending_stop(
                         {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
                     ),
                 ),
+                contact=AgentNodeContact(protocol_version=2, last_seen_at=clock[0]),
             )
         )
         revision = session.scalar(
@@ -280,7 +281,7 @@ def _pending_stop(
     with sessions.begin() as session:
         node = session.get(AgentNode, nodes[0])
         assert node is not None
-        node.last_seen_at = clock[0] - timedelta(hours=1)
+        contact_row(node).last_seen_at = clock[0] - timedelta(hours=1)
     return (
         sessions,
         profiles,

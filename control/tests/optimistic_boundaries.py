@@ -17,6 +17,7 @@ def scan_source(
     versioned: frozenset[str] = frozenset({"Job", "RecipeRun"}),
     *,
     include_claims: bool = False,
+    include_admission: bool = True,
 ) -> list[int]:
     tree = ast.parse(source)
     aliases = {
@@ -159,7 +160,7 @@ def scan_source(
             isinstance(node.func, ast.Name)
             and aliases.get(node.func.id, node.func.id) == "AdmissionRowLock"
         ):
-            if len(node.args) > 1 and model(node.args[1]):
+            if include_admission and len(node.args) > 1 and model(node.args[1]):
                 report(node)
         elif (
             isinstance(node.func, ast.Name)
@@ -171,6 +172,27 @@ def scan_source(
             if references(node.func.value):
                 report(node)
     return found
+
+
+NODE_KIND = (
+    "agent_nodes lock or bulk write outside admission/security; record contact "
+    "with agent_contacts and admit through lock_admission_rows"
+)
+
+
+def scan_agent_node_locks(source: str) -> list[int]:
+    """New AgentNode locks/updates; ``lock_admission_rows`` is admission's own path.
+
+    Agent requests must never hold the identity/intent row admission locks.
+    """
+    if "AgentNode" not in source:
+        return []
+    return scan_source(
+        source,
+        frozenset({"AgentNode"}),
+        include_claims=True,
+        include_admission=False,
+    )
 
 
 WRITE_KIND = "RecipeRun write outside transition; classify the caller-owned transaction"

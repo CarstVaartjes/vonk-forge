@@ -32,6 +32,7 @@ from vonk_control.fleet_profiles import (
 from vonk_control.lifecycle.evidence import Residue
 from vonk_control.models import (
     AgentNode,
+    AgentNodeContact,
     CatalogDocumentRevision,
     FleetProfile,
     FleetProfileApplication,
@@ -147,8 +148,6 @@ def test_a_retry_whose_fleet_scope_changed_is_declined_not_refused() -> None:
             AgentNode(
                 node_id=_node_id(9),
                 state="active",
-                protocol_version=1,
-                last_seen_at=NOW,
                 inventory_snapshot=inventory_items_fixture(
                     _node_id(9),
                     observed_at=NOW,
@@ -156,6 +155,7 @@ def test_a_retry_whose_fleet_scope_changed_is_declined_not_refused() -> None:
                         {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
                     ),
                 ),
+                contact=AgentNodeContact(protocol_version=1, last_seen_at=NOW),
             )
         )
     declined = service.retry(application.id, request_key=_uuid(1005), actor="admin")

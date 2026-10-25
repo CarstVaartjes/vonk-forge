@@ -25,7 +25,6 @@ from .contracts import AgentConfigurationConflict as AgentConfigurationConflict
 from .contracts import AgentContactIdentityMismatch as AgentContactIdentityMismatch
 from .contracts import AgentFence as AgentFence
 from .contracts import AgentResultRefused as AgentResultRefused
-from .contracts import ContactConsumer as ContactConsumer
 from .contracts import OperatorRetirementRefused as OperatorRetirementRefused
 from .contracts import ResultConsumer as ResultConsumer
 from .contracts import StaleAgentAttempt as StaleAgentAttempt

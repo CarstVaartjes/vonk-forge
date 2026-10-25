@@ -87,7 +87,6 @@ from .contracts import (
     AgentConfigurationConflict,
     AgentFence,
     AgentResultRefused,
-    ContactConsumer,
     ResultConsumer,
     SupersededAgentEffect,
 )
@@ -96,13 +95,13 @@ from .evidence import sanitized_failure_report
 from .heartbeat import heartbeat, known_superseded_cancellation
 from .identity import (
     _active,
-    _consume_contact,
     _fence_token,
     _identity_is_active,
     _lock_identity,
     _reason,
     _record_contact,
     _runtime_identity,
+    _verify_contact_source,
 )
 from .orchestration import enqueue, enqueue_in_session, notify_available
 from .predicates import _document
@@ -134,7 +133,6 @@ class AgentJobService:
         *,
         clock: Callable[[], datetime],
         result_consumer: ResultConsumer | None = None,
-        contact_consumer: ContactConsumer | None = None,
         monotonic: Callable[[], float] = time.monotonic,
     ) -> None:
         if result_consumer is not None and not callable(result_consumer):
@@ -142,16 +140,10 @@ class AgentJobService:
                 "agent result consumer must be callable",
                 reason=InvalidRequestReason.MALFORMED,
             )
-        if contact_consumer is not None and not callable(contact_consumer):
-            raise InvalidType(
-                "agent contact consumer must be callable",
-                reason=InvalidRequestReason.MALFORMED,
-            )
         self._sessions = sessions
         self._clock = clock
         self._monotonic = monotonic
         self._result_consumer = result_consumer
-        self._contact_consumer = contact_consumer
         self._preflight_completed: Callable[[str, str], object] | None = None
         self._advance_rollout: Callable[[Session, Job], None] | None = None
         self._reconcile_rollouts: Callable[[int], bool] | None = None
@@ -266,27 +258,6 @@ class AgentJobService:
                     reason=InvalidRequestReason.IMMUTABLE,
                 )
             self._result_consumer = consumer
-
-    def set_contact_consumer(self, consumer: ContactConsumer) -> None:
-        """Bind atomic authenticated contact persistence before serving work."""
-
-        if not callable(consumer):
-            raise InvalidType(
-                "agent contact consumer must be callable",
-                reason=InvalidRequestReason.MALFORMED,
-            )
-        with self._configuration_lock:
-            if self._contact_consumer is not None:
-                raise AgentConfigurationConflict(
-                    "agent contact consumer is already configured",
-                    reason=InvalidRequestReason.IMMUTABLE,
-                )
-            if self._started:
-                raise AgentConfigurationConflict(
-                    "agent job service has already started",
-                    reason=InvalidRequestReason.IMMUTABLE,
-                )
-            self._contact_consumer = consumer
 
     def set_rollout_owner(
         self,
@@ -553,8 +524,11 @@ class AgentJobService:
         node_id: str,
         *,
         nowait: bool = False,
+        lock_nodes: bool = True,
     ) -> bool:
-        return _lock_target_scopes(cls, session, scopes, node_id, nowait=nowait)
+        return _lock_target_scopes(
+            cls, session, scopes, node_id, nowait=nowait, lock_nodes=lock_nodes
+        )
 
     def heartbeat(
         self,
@@ -808,6 +782,7 @@ class AgentJobService:
         runtime_identity: AgentRuntimeIdentity | None,
         preflight_fingerprint: str | None,
         hostname: str | None,
+        source: AgentSource | None = None,
     ) -> None:
         return _record_contact(
             session,
@@ -817,6 +792,7 @@ class AgentJobService:
             runtime_identity,
             preflight_fingerprint,
             hostname,
+            source,
         )
 
     @staticmethod
@@ -825,14 +801,13 @@ class AgentJobService:
     ) -> AgentRuntimeIdentity:
         return _runtime_identity(value)
 
-    def _consume_contact(
-        self,
-        session: Session,
+    @staticmethod
+    def _verify_contact_source(
         source: AgentSource | None,
         node: AgentNode,
         certificate: AgentCertificate,
     ) -> None:
-        return _consume_contact(self, session, source, node, certificate)
+        return _verify_contact_source(source, node, certificate)
 
     @staticmethod
     def _fence_token(fence: AgentFence) -> str:
