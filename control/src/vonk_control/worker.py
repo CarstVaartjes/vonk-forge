@@ -38,6 +38,7 @@ from .jobs import JobService
 from .logging import log_event, redact_text
 from .operator_receipt_contract import ReceiptOwner
 from .resource_planning import PLATFORM_MEMORY_FLOOR_BYTES
+from .stall_window import Verdict
 from .worker_memory_contract import WorkerMemoryComponent
 
 if TYPE_CHECKING:
@@ -50,6 +51,9 @@ _LOGGER = logging.getLogger("vonk-control-worker")
 _WORKER_WATCHDOG_TIMEOUT_SECONDS = 180
 #: How long one pass waits for one step before it moves on to the next.
 _STEP_BUDGET_SECONDS = 10.0
+#: How often the readiness heartbeat is written between steps of a long pass,
+#: so a pass with several slow steps stays inside the 30 s readiness window.
+_READINESS_BEAT_SECONDS = 10.0
 
 
 @cache
@@ -97,8 +101,66 @@ class WorkerWatchdog:
         # Sampling the clock cannot hold the watchdog's observation hostage.
         self._last_completed = self._clock()
 
+    @property
+    def timeout_seconds(self) -> float:
+        return self._timeout_seconds
+
+    def expired(self, since: float) -> bool:
+        """Whether ``since`` (on this watchdog's clock) is older than the timeout."""
+        return self._clock() - since > self._timeout_seconds
+
     def stalled(self) -> bool:
-        return self._clock() - self._last_completed > self._timeout_seconds
+        return self.expired(self._last_completed)
+
+    def verdict(self, oldest_step_since: float | None) -> Verdict:
+        """``STALLED`` when the pass stopped turning or its oldest step hangs."""
+        if self.stalled() or (
+            oldest_step_since is not None and self.expired(oldest_step_since)
+        ):
+            return Verdict.STALLED
+        return Verdict.PROGRESSING
+
+
+def watch_worker(
+    watchdog: WorkerWatchdog,
+    worker: Worker,
+    stop: threading.Event,
+    *,
+    exit_process: Callable[[int], object] = os._exit,
+    interval_seconds: float = 5.0,
+) -> None:
+    """The one bound on a stuck worker: restart when it cannot heal itself.
+
+    The process exits non-zero for a container restart when the pass stops
+    turning, or when one step has been running longer than the watchdog
+    timeout (a hang); a slow step that finishes within it only yields.
+    """
+    while not stop.wait(interval_seconds):
+        oldest = worker.oldest_step()
+        if (
+            watchdog.verdict(None if oldest is None else oldest[1])
+            is not Verdict.STALLED
+        ):
+            continue
+        if oldest is not None and watchdog.expired(oldest[1]):
+            log_event(
+                _LOGGER,
+                "worker.step_hung",
+                service="control-worker",
+                step=oldest[0],
+                timeout_seconds=watchdog.timeout_seconds,
+                action="exiting non-zero for container restart",
+            )
+        else:
+            log_event(
+                _LOGGER,
+                "worker.watchdog_stalled",
+                service="control-worker",
+                timeout_seconds=watchdog.timeout_seconds,
+                action="exiting non-zero for container restart",
+            )
+        exit_process(70)
+        return
 
 
 class StepOverBudget(TimeoutError):
@@ -268,7 +330,6 @@ class Worker:
         loop_heartbeat: Callable[[], object] | None = None,
         memory_sources: Sequence[object] = (),
         due_waits: Callable[[], object] | None = None,
-        step_budget_seconds: float = _STEP_BUDGET_SECONDS,
         step_heartbeat: Callable[[], object] | None = None,
     ) -> None:
         self._jobs = jobs
@@ -287,8 +348,8 @@ class Worker:
         self._closed = False
         self._failures = coordinator_failures
         self._cadence_at: dict[str, float] = {}
-        self._step_budget_seconds = step_budget_seconds
         self._step_heartbeat = step_heartbeat
+        self._readiness_at = time.monotonic()
         # The running step of each name; one at a time, across passes.
         self._steps: dict[str, _Step] = {}
         self._steps_lock = threading.Lock()
@@ -392,26 +453,36 @@ class Worker:
                 self._source_cursor = (index + 1) % len(sources)
                 advanced = True
                 break
+        self._readiness_at = time.monotonic()
         self._run_housekeeping(LifecycleEventKind.HEARTBEAT, self._loop_heartbeat)
         return advanced
 
-    def _bounded[Result](self, name: str, call: Callable[[], Result]) -> Result:
+    def _bounded[Result](
+        self, name: str, call: Callable[[], Result], *, defer_if_running: bool = False
+    ) -> Result:
         """Run one step for at most the step budget, then give the pass back.
 
         The step runs on its own thread, one at a time per name. One still
         running when its budget ends keeps running there, is reported by name
         and raises :class:`StepOverBudget`, so the pass goes on with the other
         steps and the watchdog keeps seeing a live loop. The first pass after
-        it finishes takes its outcome; the pass after that runs it again.
+        it finishes takes its outcome; the pass after that runs it again. A
+        step that never finishes is bounded by the watchdog (``watch_worker``).
+
+        ``defer_if_running``: a due-wait redrive of a service whose step is
+        running raises :class:`StepOverBudget` instead of running beside it.
         """
+        budget = _STEP_BUDGET_SECONDS
         with self._steps_lock:
             running = self._steps.get(name)
+            if running is not None and defer_if_running:
+                raise StepOverBudget(
+                    f"worker step {name} is still running; its redrive waits for it"
+                )
             if running is None:
                 running = self._steps[name] = _Step(name, call)
                 running.start()
-        running.join(
-            max(0.0, running.started_at + self._step_budget_seconds - time.monotonic())
-        )
+        running.join(max(0.0, running.started_at + budget - time.monotonic()))
         if running.is_alive():
             elapsed = time.monotonic() - running.started_at
             log_event(
@@ -419,13 +490,13 @@ class Worker:
                 "worker.step_over_budget",
                 service="control-worker",
                 step=name,
-                budget_seconds=self._step_budget_seconds,
+                budget_seconds=budget,
                 elapsed_seconds=round(elapsed, 1),
                 resume="the first pass after the step has finished",
             )
             raise StepOverBudget(
                 f"worker step {name} is still running after {elapsed:.0f}s "
-                f"(budget {self._step_budget_seconds:g}s); "
+                f"(budget {budget:g}s); "
                 "the pass goes on and takes its outcome once it finishes"
             )
         with self._steps_lock:
@@ -433,10 +504,29 @@ class Worker:
                 del self._steps[name]
         return cast("Result", running.outcome())
 
+    def oldest_step(self) -> tuple[str, float] | None:
+        """The longest-running step (name, monotonic start), for the watchdog."""
+        with self._steps_lock:
+            running = [(step.started_at, name) for name, step in self._steps.items()]
+        if not running:
+            return None
+        started_at, name = min(running)
+        return name, started_at
+
     def _beat(self) -> None:
-        """Tell the watchdog the pass is turning: after every step, not per pass."""
+        """Before every step, from the pass thread: the pass is turning.
+
+        A pass with several slow steps also writes the readiness heartbeat
+        between them, so it never looks unavailable while it turns.
+        """
         if self._step_heartbeat is not None:
             self._step_heartbeat()
+        if (
+            self._loop_heartbeat is not None
+            and time.monotonic() - self._readiness_at >= _READINESS_BEAT_SECONDS
+        ):
+            self._readiness_at = time.monotonic()
+            self._run_housekeeping(LifecycleEventKind.HEARTBEAT, self._loop_heartbeat)
 
     def _run_housekeeping(
         self,
@@ -508,7 +598,7 @@ class Worker:
         if not self._failures.ready(source):
             return
         try:
-            self._bounded(source, task)
+            self._bounded(source, task, defer_if_running=True)
         except Exception as error:  # noqa: BLE001 - same source custody as normal dispatch
             self._failures.failed(source, error, disposition(error))
         else:
@@ -935,41 +1025,79 @@ def assemble_production_worker(
             return unavailable(kind)
         return catalog_sync.redrive(str(key[0]), RECIPE_LIBRARY_SYNC_INTERVAL_SECONDS)
 
+    def exclusive(name: str, advance: AdvanceWait) -> AdvanceWait:
+        """Redrive under the step name of the service it drives, so one
+        service's work never overlaps itself (it defers while that step runs)."""
+        return lambda key, kind: worker._bounded(
+            name, lambda: advance(key, kind), defer_if_running=True
+        )
+
+    def own(kind: WaitOwnerKind) -> str:
+        """A redrive whose service is no worker step of its own."""
+        return f"due-wait:{kind.value}"
+
+    images_step = (
+        _background_source_name(image_production.scheduler.tick)
+        if image_production is not None and image_production.scheduler is not None
+        else own(WaitOwnerKind.IMAGE_AVAILABILITY)
+    )
+    prebuilt_step = (
+        _background_source_name(prebuilt_importer.tick)
+        if prebuilt_importer is not None
+        else own(WaitOwnerKind.PREBUILT_IMAGE)
+    )
+    storage_step = _background_source_name(storage_collector.tick)
+    certificate_step = own(WaitOwnerKind.CERTIFICATE)
     advancers: dict[WaitOwnerKind, AdvanceWait] = {
+        # Each coordinator source already runs under its own step name.
         WaitOwnerKind.COORDINATOR: lambda key, wait: worker.redrive_coordinator(
             str(key[0])
         ),
-        WaitOwnerKind.AGENT_OPERATION: agent_order,
-        WaitOwnerKind.AGENT_UPGRADE: lambda key, wait: upgrades.heal_rollouts(
-            1, str(key[0])
+        WaitOwnerKind.AGENT_OPERATION: exclusive("recipes", agent_order),
+        WaitOwnerKind.AGENT_UPGRADE: exclusive(
+            own(WaitOwnerKind.AGENT_UPGRADE),
+            lambda key, wait: upgrades.heal_rollouts(1, str(key[0])),
         ),
-        WaitOwnerKind.ARTIFACT_JOB: lambda key, wait: ArtifactJobAdapter(
-            sessions=sessions, clock=clock
-        ).redrive(str(key[0])),
-        WaitOwnerKind.FLEET_PROFILE: lambda key, wait: fleet_profiles.tick(str(key[0])),
-        WaitOwnerKind.IMAGE_AVAILABILITY: images,
-        WaitOwnerKind.PREBUILT_IMAGE: prebuilt,
-        WaitOwnerKind.JOB: lambda key, wait: worker._run_generic(str(key[0])),
-        WaitOwnerKind.MODEL_CACHE: cache,
-        WaitOwnerKind.RECIPE_OPERATION: recipe,
-        WaitOwnerKind.RECIPE_UPDATE_BATCH: images,
-        WaitOwnerKind.RUN_SWITCH: lambda key, wait: run_switch_operations.redrive(
-            str(key[0])
+        WaitOwnerKind.ARTIFACT_JOB: exclusive(
+            own(WaitOwnerKind.ARTIFACT_JOB),
+            lambda key, wait: ArtifactJobAdapter(
+                sessions=sessions, clock=clock
+            ).redrive(str(key[0])),
         ),
-        WaitOwnerKind.SELECTED_PROFILE: lambda key, wait: (
-            fleet_profiles._reconcile_selected_roster(clock())
+        WaitOwnerKind.FLEET_PROFILE: exclusive(
+            "recipes", lambda key, wait: fleet_profiles.tick(str(key[0]))
         ),
-        WaitOwnerKind.ROUTE_PUBLICATION: lambda key, wait: recipe_routes.maintain(),
-        WaitOwnerKind.ROUTE_RECOVERY: lambda key, wait: recipe_operations.redrive_run(
-            str(key[0])
+        WaitOwnerKind.IMAGE_AVAILABILITY: exclusive(images_step, images),
+        WaitOwnerKind.PREBUILT_IMAGE: exclusive(prebuilt_step, prebuilt),
+        WaitOwnerKind.JOB: exclusive(
+            "jobs", lambda key, wait: worker._run_generic(str(key[0]))
         ),
-        WaitOwnerKind.STORAGE_RELIEF: lambda key, wait: (
-            storage_collector.redrive_artifact(str(key[0]), str(key[1]))
+        WaitOwnerKind.MODEL_CACHE: exclusive(WaitOwnerKind.MODEL_CACHE, cache),
+        WaitOwnerKind.RECIPE_OPERATION: exclusive("recipes", recipe),
+        WaitOwnerKind.RECIPE_UPDATE_BATCH: exclusive(images_step, images),
+        WaitOwnerKind.RUN_SWITCH: exclusive(
+            "recipes", lambda key, wait: run_switch_operations.redrive(str(key[0]))
         ),
-        WaitOwnerKind.CLEANUP: cleanup,
-        WaitOwnerKind.CATALOG_SYNC: catalog,
-        WaitOwnerKind.CERTIFICATE: certificate,
-        WaitOwnerKind.CERTIFICATE_REVOCATION: certificate,
+        WaitOwnerKind.SELECTED_PROFILE: exclusive(
+            "recipes",
+            lambda key, wait: fleet_profiles._reconcile_selected_roster(clock()),
+        ),
+        WaitOwnerKind.ROUTE_PUBLICATION: exclusive(
+            "recipes", lambda key, wait: recipe_routes.maintain()
+        ),
+        WaitOwnerKind.ROUTE_RECOVERY: exclusive(
+            "recipes", lambda key, wait: recipe_operations.redrive_run(str(key[0]))
+        ),
+        WaitOwnerKind.STORAGE_RELIEF: exclusive(
+            storage_step,
+            lambda key, wait: storage_collector.redrive_artifact(
+                str(key[0]), str(key[1])
+            ),
+        ),
+        WaitOwnerKind.CLEANUP: exclusive(storage_step, cleanup),
+        WaitOwnerKind.CATALOG_SYNC: exclusive(own(WaitOwnerKind.CATALOG_SYNC), catalog),
+        WaitOwnerKind.CERTIFICATE: exclusive(certificate_step, certificate),
+        WaitOwnerKind.CERTIFICATE_REVOCATION: exclusive(certificate_step, certificate),
     }
     backstop = DueWaitBackstop(sessions, wait_sources(advancers), clock=clock)
     worker._due_waits = backstop.tick
@@ -1185,20 +1313,11 @@ if __name__ == "__main__":
         stop=watchdog_stop,
     )
 
-    def monitor_worker_loop() -> None:
-        while not watchdog_stop.wait(5):
-            if watchdog.stalled():
-                log_event(
-                    _LOGGER,
-                    "worker.watchdog_stalled",
-                    service="control-worker",
-                    timeout_seconds=_WORKER_WATCHDOG_TIMEOUT_SECONDS,
-                    action="exiting non-zero for container restart",
-                )
-                os._exit(70)
-
     watchdog_thread = threading.Thread(
-        target=monitor_worker_loop, name="worker-watchdog", daemon=True
+        target=watch_worker,
+        args=(watchdog, worker, watchdog_stop),
+        name="worker-watchdog",
+        daemon=True,
     )
     watchdog_thread.start()
     try:
