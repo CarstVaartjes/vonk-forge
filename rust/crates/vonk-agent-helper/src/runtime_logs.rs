@@ -64,17 +64,35 @@ const FAILURE_HEADERS: [&str; 12] = [
     "ERROR:",
 ];
 
-/// A block that names itself as a summary of a cause printed above it.
+/// Words that send the reader elsewhere for a failure's cause: a pointer
+/// (`see`, `check`), a direction (`above`, `earlier`) and a record that holds
+/// a cause (`root cause`, `stack trace`).  Matched as whole lowercase words.
+const POINTERS: [&str; 2] = ["see", "check"];
+const DIRECTIONS: [&str; 4] = ["above", "earlier", "preceding", "previous"];
+const RECORDS: [&str; 4] = ["root cause", "trace", "traceback", "stacktrace"];
+
+/// Whether a line names itself as a summary of a cause printed elsewhere.
 ///
-/// vLLM's executor ends a worker failure with "See stack trace for root cause."
-/// and its engine ends with "See root cause above.".  A window that keeps such a
-/// block keeps a pointer instead of the cause, so it ends at the start of the
-/// block and carries what the block reports.
-const SELF_REFERENTIAL: [&str; 3] = [
-    "see stack trace for root cause",
-    "see root cause above",
-    "see above",
-];
+/// vLLM's executor ends a worker failure with "See stack trace for root
+/// cause.", its engine with "See root cause above." and its engine core with
+/// "please check the stack trace above for the root cause".  The phrasing is
+/// the engine's to change, so the decision is by shape: any two of a pointer,
+/// a direction and a record in one line.  An exception that names its own
+/// cause has none of these pairs:
+/// `ValueError: 8192 is above the limit` is a direction alone, and the
+/// chaining sentence "The above exception was the direct cause" names no
+/// record.
+fn points_elsewhere(line: &[u8]) -> bool {
+    let text = String::from_utf8_lossy(line).to_lowercase();
+    let words: Vec<&str> = text
+        .split(|character: char| !(character.is_alphanumeric() || character == '_'))
+        .filter(|word| !word.is_empty())
+        .collect();
+    let words = format!(" {} ", words.join(" "));
+    let names = |set: &[&str]| set.iter().any(|word| words.contains(&format!(" {word} ")));
+    let (pointer, direction, record) = (names(&POINTERS), names(&DIRECTIONS), names(&RECORDS));
+    (pointer && (direction || record)) || (direction && record)
+}
 
 /// What a line reporting a failure contains, matched case-sensitively so that
 /// ordinary words (`error_rate`, `errors=0`) do not count.
@@ -93,14 +111,6 @@ const TRACEBACK: &[u8] = b"Traceback (most recent call last)";
 
 fn contains(line: &[u8], needle: &[u8]) -> bool {
     line.len() >= needle.len() && line.windows(needle.len()).any(|window| window == needle)
-}
-
-fn contains_ascii_case(text: &[u8], needle: &str) -> bool {
-    let needle = needle.as_bytes();
-    text.len() >= needle.len()
-        && text
-            .windows(needle.len())
-            .any(|window| window.eq_ignore_ascii_case(needle))
 }
 
 /// The last line that reports a failure: its start, its end, the start of the
@@ -313,9 +323,9 @@ fn window(stream: &[u8]) -> (Vec<Range<usize>>, Range<usize>) {
     } else {
         header_end
     };
-    let points_above = SELF_REFERENTIAL
-        .iter()
-        .any(|marker| contains_ascii_case(&stream[block_start..header_end], marker));
+    let points_above = stream[block_start..header_end]
+        .split_inclusive(|byte| *byte == b'\n')
+        .any(points_elsewhere);
     if header_start > block_start && cause_above.is_some() && points_above {
         return (
             Vec::new(),
@@ -513,22 +523,27 @@ impl ExitCause {
 /// The uncaught exception a workload printed last, as one bounded line: the
 /// closing `<ExceptionType>: <message>` line of its last complete traceback and
 /// the lines its message continues on.  stderr is read first because that is
-/// where Python writes a traceback.
+/// where Python writes a traceback, unless its exception only points at a cause
+/// printed elsewhere and stdout's names one: vLLM logs a worker's traceback to
+/// stdout while its engine core's uncaught pointer to it ends stderr.
 pub fn python_exception(logs: &HostHelperProcessLogs) -> Option<String> {
-    [&logs.stderr.text, &logs.stdout.text]
+    let found: Vec<(String, bool)> = [&logs.stderr.text, &logs.stdout.text]
         .into_iter()
-        .find_map(|text| {
+        .filter_map(|text| {
             let stream = text.as_bytes();
             let (start, end) = closing_exception(stream)?;
-            let mut message = line_content(&stream[start..end]).trim().to_owned();
+            let exception = &stream[start..end];
+            let mut message = line_content(exception).trim().to_owned();
             for line in stream[end..].split_inclusive(|byte| *byte == b'\n') {
                 let content = line_content(line);
                 let content = content.trim();
                 // The message ends where other output begins: a blank line, a
-                // timestamped or prefixed log line, a new traceback, or a line
-                // that names its own class (`INFO: ...`, a chained exception).
+                // timestamped log line, a line another process or log record
+                // wrote, a new traceback, or a line that names its own class
+                // (`INFO: ...`, a chained exception).
                 if content.is_empty()
                     || content.starts_with('[')
+                    || line_prefix(line) != line_prefix(exception)
                     || contains(line, TRACEBACK)
                     || is_frame(line)
                     || names_an_exception(line)
@@ -539,8 +554,24 @@ pub fn python_exception(logs: &HostHelperProcessLogs) -> Option<String> {
                 message.push(' ');
                 message.push_str(content);
             }
-            Some(message.chars().take(EXCEPTION_CHARS).collect())
+            Some((
+                message.chars().take(EXCEPTION_CHARS).collect(),
+                points_elsewhere(exception),
+            ))
         })
+        .collect();
+    found
+        .iter()
+        .find(|(_, points)| !points)
+        .or(found.first())
+        .map(|(message, _)| message.clone())
+}
+
+/// What `line_content` strips from a line: the process and log-record prefix.
+fn line_prefix(line: &[u8]) -> String {
+    let text = String::from_utf8_lossy(line);
+    let text = text.trim_end_matches(['\r', '\n']);
+    text[..text.len() - line_content(line).len()].to_owned()
 }
 
 fn has(text: &str, needles: &[&str]) -> bool {
@@ -941,6 +972,169 @@ mod tests {
             tail.text
         );
         assert!(tail.text.len() <= RETAINED_BYTES);
+    }
+
+    /// The production shape of 2026-10-25 (operation f16a8f17, a dual-Spark
+    /// vLLM start): a worker dies in a Triton kernel and the engine core
+    /// reports it in a block that closes "please check the stack trace above
+    /// for the root cause".  These are the captured engine-core lines; `engine`
+    /// is the prefix they carry on this stream and `opener` the line printed
+    /// before the traceback.
+    fn triton_engine_core(engine: &str, opener: &str) -> String {
+        let mut stream = String::new();
+        for line in [
+            opener,
+            "Traceback (most recent call last):",
+            "  File \"/usr/local/lib/python3.12/dist-packages/vllm/v1/engine/core.py\", line 1346, in run_engine_core",
+            "    engine_core = EngineCoreProc(*args, **kwargs)",
+            "                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^",
+            "  File \"/usr/local/lib/python3.12/dist-packages/vllm/v1/engine/core.py\", line 1110, in __init__",
+            "    super().__init__(",
+            "  File \"/usr/local/lib/python3.12/dist-packages/vllm/v1/engine/core.py\", line 118, in __init__",
+            "    kv_cache_config = self._initialize_kv_caches(vllm_config)",
+            "                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^",
+            "  File \"/usr/local/lib/python3.12/dist-packages/vllm/v1/engine/core.py\", line 331, in _initialize_kv_caches",
+            "    self.model_executor.initialize_from_config(kv_cache_configs)",
+            "  File \"/usr/local/lib/python3.12/dist-packages/vllm/v1/executor/abstract.py\", line 124, in initialize_from_config",
+            "    compilation_times: list[CompilationTimes] = self.collective_rpc(",
+            "                                                ^^^^^^^^^^^^^^^^^^^^",
+            "  File \"/usr/local/lib/python3.12/dist-packages/vllm/v1/executor/multiproc_executor.py\", line 416, in collective_rpc",
+            "    return future if non_block else future.result()",
+            "                                    ^^^^^^^^^^^^^^^",
+            "  File \"/usr/local/lib/python3.12/dist-packages/vllm/v1/executor/multiproc_executor.py\", line 91, in result",
+            "    return super().result()",
+            "           ^^^^^^^^^^^^^^^^",
+            "  File \"/usr/lib/python3.12/concurrent/futures/_base.py\", line 449, in result",
+            "    return self.__get_result()",
+            "           ^^^^^^^^^^^^^^^^^^^",
+            "  File \"/usr/lib/python3.12/concurrent/futures/_base.py\", line 401, in __get_result",
+            "    raise self._exception",
+            "  File \"/usr/local/lib/python3.12/dist-packages/vllm/v1/executor/multiproc_executor.py\", line 95, in _wait_for_response",
+            "    response = self.aggregate(self.get_response())",
+            "                              ^^^^^^^^^^^^^^^^^^^",
+            "  File \"/usr/local/lib/python3.12/dist-packages/vllm/v1/executor/multiproc_executor.py\", line 405, in get_response",
+            "    raise RuntimeError(",
+            "RuntimeError: Worker failed with error 'Triton Error [CUDA]: an illegal memory access was encountered', please check the stack trace above for the root cause",
+        ] {
+            stream.push_str(&format!("{engine}{line}\n"));
+        }
+        stream
+    }
+
+    /// The worker's own report, which vLLM logs to stdout.  The production
+    /// capture dropped it from the retained window, so it is written in vLLM's
+    /// worker-log form.
+    fn triton_worker() -> String {
+        let worker = "(Worker_TP0 pid=512) ERROR 10-25 09:45:46 [multiproc_executor.py:752] ";
+        let mut stream = String::new();
+        for index in 0..20 {
+            stream.push_str(&format!("(EngineCore pid=403) INFO 10-25 09:45:{index:02} [gpu_model_runner.py:4210] Capturing CUDA graphs\n"));
+        }
+        for line in [
+            "WorkerProc hit an exception.",
+            "Traceback (most recent call last):",
+            "  File \"/usr/local/lib/python3.12/dist-packages/vllm/v1/executor/multiproc_executor.py\", line 747, in worker_busy_loop",
+            "    output = func(*args, **kwargs)",
+            "  File \"/usr/local/lib/python3.12/dist-packages/vllm/v1/worker/gpu_worker.py\", line 431, in compile_or_warm_up_model",
+            "    self.model_runner.capture_model()",
+            "  File \"/usr/local/lib/python3.12/dist-packages/triton/backends/nvidia/driver.py\", line 713, in __call__",
+            "    self.launch(gridX, gridY, gridZ, stream, function, *args)",
+            "RuntimeError: Triton Error [CUDA]: an illegal memory access was encountered",
+        ] {
+            stream.push_str(&format!("{worker}{line}\n"));
+        }
+        stream
+    }
+
+    const TRITON_NCCL_AFTER: &str = "NCCL version 2.30.7+cuda13.0\n\n[2026-10-25 09:45:47] spark-3542:512:754 [0] misc/strongstream.cc:424 (ncclStrongStreamSynchronize) NCCL WARN Cuda failure 'an illegal memory access was encountered'\n\n[2026-10-25 09:45:47] spark-3542:512:754 [0] init.cc:2742 (commDestroySync) NCCL WARN commDestroySync: comm 0x3f51d530 rank 0 sync hostStream error 1\n\n[2026-10-25 09:45:47] spark-3542:512:754 [0] allocator.cc:132 (ncclMemFree) NCCL WARN Cuda failure 'an illegal memory access was encountered'\n\n[2026-10-25 09:45:48] spark-3542:512:594 [0] include/alloc.h:166 (ncclCudaHostFree) NCCL WARN Cuda failure 'an illegal memory access was encountered'\n(EngineCore pid=403) ERROR 10-25 09:45:51 [multiproc_executor.py:295] Worker proc VllmWorker-0 died unexpectedly (exit code: None), shutting down executor.\n";
+
+    #[test]
+    fn a_summary_that_asks_to_check_the_trace_above_yields_to_the_worker() {
+        // Wrong implementation this catches: the pointer was a list of exact
+        // phrases, so vLLM's "please check the stack trace above for the root
+        // cause" read as a cause.  Production evidence kept 2048 bytes of the
+        // engine core's own frames on both streams and dropped the worker's
+        // Triton error that it pointed at.
+        let worker_cause = "(Worker_TP0 pid=512) ERROR 10-25 09:45:46 [multiproc_executor.py:752] RuntimeError: Triton Error [CUDA]: an illegal memory access was encountered\n";
+        let stdout = triton_worker()
+            + &triton_engine_core(
+                "(EngineCore pid=403) ERROR 10-25 09:45:46 [core.py:1355] ",
+                "EngineCore failed to start.",
+            )
+            + TRITON_NCCL_AFTER;
+        let stdout = stdout.as_bytes();
+        let plain = String::from_utf8_lossy(&stdout[stdout.len() - RETAINED_BYTES..]);
+        assert!(!plain.contains(worker_cause));
+        let tail = retain(stdout);
+        assert!(tail.text.contains(worker_cause), "{}", tail.text);
+        assert!(tail.text.len() <= RETAINED_BYTES);
+        // stderr holds only the engine core's uncaught pointer; with no cause
+        // above it, it keeps ending on that pointer.
+        let stderr = "(EngineCore pid=403) /usr/local/lib/python3.12/dist-packages/torch/cuda/__init__.py:63: FutureWarning: The pynvml package is deprecated.\n".repeat(4)
+            + &triton_engine_core("(EngineCore pid=403) ", "Process EngineCore_DP0:");
+        let logs = retain_container(stdout, stderr.as_bytes());
+        assert!(
+            logs.stderr
+                .text
+                .ends_with("please check the stack trace above for the root cause\n")
+        );
+        // The exit summary names the worker's exception, not the engine's
+        // pointer to it, and stops where the engine core's next record begins.
+        let summary = exit_summary(Ok(&exit(1, false, "")), Some(&logs), None);
+        assert!(
+            summary.ends_with(" exception=\"RuntimeError: Triton Error [CUDA]: an illegal memory access was encountered\""),
+            "{summary}"
+        );
+    }
+
+    #[test]
+    fn a_pointer_is_decided_by_shape_not_by_phrase() {
+        // Wrong implementations this catches: a phrase list misses a new
+        // wording of the same pointer, and a single word such as "above"
+        // would treat an exception that names its own cause as a pointer.
+        for pointer in [
+            "Exception: WorkerProc initialization failed. See stack trace for root cause.",
+            "RuntimeError: Engine core initialization failed. See root cause above.",
+            "RuntimeError: see above",
+            "RuntimeError: Worker failed with error 'x', please check the stack trace above for the root cause",
+            "RuntimeError: the scheduler died; the root cause is in the traceback printed earlier",
+        ] {
+            assert!(points_elsewhere(pointer.as_bytes()), "{pointer}");
+        }
+        for cause in [
+            "ValueError: max_model_len 8192 is above the maximum 4096 derived from the model",
+            "The above exception was the direct cause of the following exception:",
+            "During handling of the above exception, another exception occurred:",
+            "Traceback (most recent call last):",
+            "RuntimeError: CUDA error: an illegal memory access was encountered",
+            "CUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.",
+            "ValueError: please check your tensor_parallel_size",
+        ] {
+            assert!(!points_elsewhere(cause.as_bytes()), "{cause}");
+        }
+    }
+
+    #[test]
+    fn an_exception_that_only_says_above_keeps_its_own_cause() {
+        // The shape rule must not make an ordinary exception give way to an
+        // earlier, unrelated traceback because its message says "above".
+        let mut stream = b"Traceback (most recent call last):\n  File \"warmup.py\", line 3, in probe\nKeyError: 'optional_feature'\n".to_vec();
+        stream.extend(b"Traceback (most recent call last):\n");
+        for index in 0..40 {
+            stream.extend(format!("  File \"/usr/lib/vllm/config.py\", line {index}, in verify\n    self._verify()\n").into_bytes());
+        }
+        stream.extend(
+            b"ValueError: max_model_len 8192 is above the maximum 4096 derived from the model\n",
+        );
+        let tail = retain(&stream);
+        assert!(
+            tail.text.ends_with(
+                "ValueError: max_model_len 8192 is above the maximum 4096 derived from the model\n"
+            ),
+            "{}",
+            tail.text
+        );
+        assert!(!tail.text.contains("optional_feature"), "{}", tail.text);
     }
 
     #[test]
