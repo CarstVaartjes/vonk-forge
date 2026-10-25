@@ -1153,7 +1153,28 @@ def test_added_line_guard_rejects_a_one_page_artifact_listing(text):
         'f"repos/{repo}/actions/runs/{run_id}/artifacts?per_page=100&page={page}"\n',
         'f"repos/{repo}/actions/runs/{run_id}/artifacts"\n    f"?per_page=100&page={page}"\n',
         "gh api repos/$REPO/actions/artifacts?name=agent-package\n",
+        "gh api repos/$REPO/actions/artifacts/$ID/zip > artifact.zip\n",
     ],
 )
 def test_added_line_guard_allows_paged_or_named_artifact_listings(text):
     assert not check_source("scripts/example.sh", text, {1}, modes=("listings",))
+
+
+def test_added_line_guard_allows_a_paginating_wrapper_and_workflow_continuations():
+    wrapper = (
+        "def gh(endpoint):\n"
+        '    return run(["gh", "api", "--paginate", "--slurp", endpoint])\n'
+        'pages = gh(f"/repos/{repo}/actions/runs/{run_id}/artifacts?per_page=100")\n'
+    )
+    assert not check_source("scripts/example.py", wrapper, {3}, modes=("listings",))
+    workflow = (
+        "        run: |\n"
+        "          gh api --paginate \\\n"
+        "            -H 'Accept: application/vnd.github+json' \\\n"
+        "            -H 'X-GitHub-Api-Version: 2022-11-28' \\\n"
+        '            "/repos/$REPO/actions/runs/$RUN/artifacts" --jq .artifacts[]\n'
+    )
+    path = ".github/workflows/example.yml"
+    assert not check_source(path, workflow, {5}, modes=("listings",))
+    one_page = workflow.replace("--paginate ", "")
+    assert check_source(path, one_page, {5}, modes=("listings",))

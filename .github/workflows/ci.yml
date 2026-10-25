@@ -130,7 +130,7 @@ jobs:
           # the merge base: the two trees are enough, no history is read.
           git fetch --no-tags --depth=1 origin "$BASE_SHA"
           git -c core.quotePath=false diff --no-ext-diff --unified=0 "$BASE_SHA" -- \
-            control agent_protocol src scripts rust deploy packaging tests |
+            control agent_protocol src scripts rust deploy packaging tests .github |
             scripts/check-added-lines
 
       - name: Run Ruff

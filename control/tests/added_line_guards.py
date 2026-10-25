@@ -597,15 +597,19 @@ def check_source(
     if "listings" in modes and not is_test:
         # GitHub lists a run's artifacts 30 to a page; a reader of one page
         # silently misses the rest (shard timings, #1900). Read every page or
-        # ask for the one artifact by name.
+        # ask for the one artifact by name. A file whose own gh wrapper passes
+        # --paginate pages every call; a download by id is not a listing.
         rows = source.splitlines()
+        wrapped = re.search(r"[\"']--paginate[\"']", source) is not None
         noexit_hits.extend(
             f"{path}:{line}: artifact listing reads one page"
             for line, text in enumerate(rows, 1)
             if line in added
-            and re.search(r"actions/(?:runs/[^\s\"']*/)?artifacts\b", text)
+            and not wrapped
+            and re.search(r"actions/(?:runs/[^\s\"']*/)?artifacts(?![/\w])", text)
             and not re.search(
-                r"--paginate|\bpage=|[?&]name=", " ".join(rows[line - 1 : line + 1])
+                r"--paginate|\bpage=|[?&]name=",
+                " ".join(rows[max(line - 4, 0) : line + 1]),
             )
         )
     if (
