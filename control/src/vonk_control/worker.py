@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import contextvars
 import hashlib
 import logging
 import os
@@ -15,7 +14,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from functools import cache
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from vonk_agent_protocol import (
     ControllerErrorCode,
@@ -48,11 +47,13 @@ if TYPE_CHECKING:
 _PROCESS_INSTANCE = re.compile(r"[0-9a-f]{64}\Z")
 
 _LOGGER = logging.getLogger("vonk-control-worker")
+#: The longest one step may run (the pass beats before every step) before the
+#: worker restarts: a hang, not a slow pass.
 _WORKER_WATCHDOG_TIMEOUT_SECONDS = 180
-#: How long one pass waits for one step before it moves on to the next.
+#: A step that takes longer is named by the over-budget alarm.
 _STEP_BUDGET_SECONDS = 10.0
-#: How often the readiness heartbeat is written between steps of a long pass,
-#: so a pass with several slow steps stays inside the 30 s readiness window.
+#: How often the readiness heartbeat is written between the steps of a long
+#: pass, so the pass stays inside the 30 s readiness window.
 _READINESS_BEAT_SECONDS = 10.0
 
 
@@ -82,7 +83,7 @@ def _background_source_name(service: Callable[[], object]) -> str:
 
 
 class WorkerWatchdog:
-    """Track completed scheduler loops and detect a stalled main thread."""
+    """Track the pass thread's steps and detect one that hangs."""
 
     def __init__(
         self,
@@ -95,106 +96,62 @@ class WorkerWatchdog:
         self._timeout_seconds = timeout_seconds
         self._clock = clock
         self._last_completed = clock()
+        self._step: str | None = None
 
-    def beat(self) -> None:
+    def beat(self, step: str | None = None) -> None:
+        """The pass is turning; ``step`` is the step it starts now, if any."""
         # One writer publishes one timestamp; readers need no coordination lock.
         # Sampling the clock cannot hold the watchdog's observation hostage.
         self._last_completed = self._clock()
+        self._step = step
 
     @property
     def timeout_seconds(self) -> float:
         return self._timeout_seconds
 
-    def expired(self, since: float) -> bool:
-        """Whether ``since`` (on this watchdog's clock) is older than the timeout."""
-        return self._clock() - since > self._timeout_seconds
+    @property
+    def step(self) -> str | None:
+        """The step that started at the last beat, if one did."""
+        return self._step
 
     def stalled(self) -> bool:
-        return self.expired(self._last_completed)
+        return self._clock() - self._last_completed > self._timeout_seconds
 
-    def verdict(self, oldest_step_since: float | None) -> Verdict:
-        """``STALLED`` when the pass stopped turning or its oldest step hangs."""
-        if self.stalled() or (
-            oldest_step_since is not None and self.expired(oldest_step_since)
-        ):
-            return Verdict.STALLED
-        return Verdict.PROGRESSING
+    def verdict(self) -> Verdict:
+        """``STALLED`` once one step (or the gap between beats) outlives the timeout."""
+        return Verdict.STALLED if self.stalled() else Verdict.PROGRESSING
 
 
 def watch_worker(
     watchdog: WorkerWatchdog,
-    worker: Worker,
     stop: threading.Event,
     *,
     exit_process: Callable[[int], object] = os._exit,
     interval_seconds: float = 5.0,
 ) -> None:
-    """The one bound on a stuck worker: restart when it cannot heal itself.
-
-    The process exits non-zero for a container restart when the pass stops
-    turning, or when one step has been running longer than the watchdog
-    timeout (a hang); a slow step that finishes within it only yields.
-    """
+    """Restart the worker (exit 70) when one step hangs past the timeout."""
     while not stop.wait(interval_seconds):
-        oldest = worker.oldest_step()
-        if (
-            watchdog.verdict(None if oldest is None else oldest[1])
-            is not Verdict.STALLED
-        ):
+        if watchdog.verdict() is not Verdict.STALLED:
             continue
-        if oldest is not None and watchdog.expired(oldest[1]):
-            log_event(
-                _LOGGER,
-                "worker.step_hung",
-                service="control-worker",
-                step=oldest[0],
-                timeout_seconds=watchdog.timeout_seconds,
-                action="exiting non-zero for container restart",
-            )
-        else:
-            log_event(
-                _LOGGER,
-                "worker.watchdog_stalled",
-                service="control-worker",
-                timeout_seconds=watchdog.timeout_seconds,
-                action="exiting non-zero for container restart",
-            )
+        log_event(
+            _LOGGER,
+            "worker.step_hung"
+            if watchdog.step is not None
+            else "worker.watchdog_stalled",
+            service="control-worker",
+            step=watchdog.step,
+            timeout_seconds=watchdog.timeout_seconds,
+            action="exiting non-zero for container restart",
+        )
         exit_process(70)
         return
 
 
 class StepOverBudget(TimeoutError):
-    """A step still running when its budget ended; the pass went on without it."""
+    """A step that finished, but took longer than the step budget."""
 
     code = ControllerErrorCode.TIMEOUT.value
     disposition = Disposition.WAIT
-
-
-class _Step(threading.Thread):
-    """One step on its own thread, so a slow step cannot hold the pass."""
-
-    def __init__(self, name: str, call: Callable[[], object]) -> None:
-        # A fresh context, like the loop's own: a copied one would hand the
-        # caller's context-bound session (model_cache._CACHE_SESSION) to a
-        # second thread.
-        super().__init__(
-            name=f"worker-step:{name}", daemon=True, context=contextvars.Context()
-        )
-        self._call = call
-        self.started_at = time.monotonic()
-        self.result: object = None
-        self.error: Exception | None = None
-
-    def run(self) -> None:
-        try:
-            self.result = self._call()
-        except Exception as error:  # noqa: BLE001 - handed to the pass that owns the step
-            self.error = error
-
-    def outcome(self) -> object:
-        if self.error is not None:
-            raise self.error
-        return self.result
 
 
 def current_worker_instance_id(proc_root: Path = Path("/proc"), pid: int = 1) -> str:
@@ -330,7 +287,7 @@ class Worker:
         loop_heartbeat: Callable[[], object] | None = None,
         memory_sources: Sequence[object] = (),
         due_waits: Callable[[], object] | None = None,
-        step_heartbeat: Callable[[], object] | None = None,
+        step_heartbeat: Callable[[str], object] | None = None,
     ) -> None:
         self._jobs = jobs
         self._worker_id = worker_id
@@ -350,9 +307,6 @@ class Worker:
         self._cadence_at: dict[str, float] = {}
         self._step_heartbeat = step_heartbeat
         self._readiness_at = time.monotonic()
-        # The running step of each name; one at a time, across passes.
-        self._steps: dict[str, _Step] = {}
-        self._steps_lock = threading.Lock()
 
     def close(self) -> None:
         """Close worker-owned executors while leaving durable work resumable."""
@@ -425,14 +379,10 @@ class Worker:
         for offset in range(len(sources)):
             index = (self._source_cursor + offset) % len(sources)
             name, source = sources[index]
-            self._beat()
             if not self._failures.ready(name):
                 continue
             try:
-                progressed = self._bounded(name, source)
-            except StepOverBudget as error:
-                self._failures.failed(name, error, disposition(error))
-                continue
+                progressed, slow = self._timed(name, source)
             except Exception as error:  # noqa: BLE001 - isolate one owner, report its fault
                 # A source that keeps failing must not starve the others: the
                 # failure stays visible, the turn moves on, and the failed
@@ -448,7 +398,7 @@ class Worker:
                     traceback=redact_text(traceback.format_exc()),
                 )
                 continue
-            self._failures.succeeded(name)
+            self._settle(name, slow)
             if progressed:
                 self._source_cursor = (index + 1) % len(sources)
                 advanced = True
@@ -457,76 +407,49 @@ class Worker:
         self._run_housekeeping(LifecycleEventKind.HEARTBEAT, self._loop_heartbeat)
         return advanced
 
-    def _bounded[Result](
-        self, name: str, call: Callable[[], Result], *, defer_if_running: bool = False
-    ) -> Result:
-        """Run one step for at most the step budget, then give the pass back.
+    def _timed[Result](
+        self, name: str, call: Callable[[], Result]
+    ) -> tuple[Result, StepOverBudget | None]:
+        """Run one step in the pass thread and time it.
 
-        The step runs on its own thread, one at a time per name. One still
-        running when its budget ends keeps running there, is reported by name
-        and raises :class:`StepOverBudget`, so the pass goes on with the other
-        steps and the watchdog keeps seeing a live loop. The first pass after
-        it finishes takes its outcome; the pass after that runs it again. A
-        step that never finishes is bounded by the watchdog (``watch_worker``).
-
-        ``defer_if_running``: a due-wait redrive of a service whose step is
-        running raises :class:`StepOverBudget` instead of running beside it.
-        """
-        budget = _STEP_BUDGET_SECONDS
-        with self._steps_lock:
-            running = self._steps.get(name)
-            if running is not None and defer_if_running:
-                raise StepOverBudget(
-                    f"worker step {name} is still running; its redrive waits for it"
-                )
-            if running is None:
-                running = self._steps[name] = _Step(name, call)
-                running.start()
-        running.join(max(0.0, running.started_at + budget - time.monotonic()))
-        if running.is_alive():
-            elapsed = time.monotonic() - running.started_at
-            log_event(
-                _LOGGER,
-                "worker.step_over_budget",
-                service="control-worker",
-                step=name,
-                budget_seconds=budget,
-                elapsed_seconds=round(elapsed, 1),
-                resume="the first pass after the step has finished",
-            )
-            raise StepOverBudget(
-                f"worker step {name} is still running after {elapsed:.0f}s "
-                f"(budget {budget:g}s); "
-                "the pass goes on and takes its outcome once it finishes"
-            )
-        with self._steps_lock:
-            if self._steps.get(name) is running:
-                del self._steps[name]
-        return cast("Result", running.outcome())
-
-    def oldest_step(self) -> tuple[str, float] | None:
-        """The longest-running step (name, monotonic start), for the watchdog."""
-        with self._steps_lock:
-            running = [(step.started_at, name) for name, step in self._steps.items()]
-        if not running:
-            return None
-        started_at, name = min(running)
-        return name, started_at
-
-    def _beat(self) -> None:
-        """Before every step, from the pass thread: the pass is turning.
-
-        A pass with several slow steps also writes the readiness heartbeat
-        between them, so it never looks unavailable while it turns.
+        The watchdog beats first, naming the step, so only one step that
+        outlives its timeout restarts the worker, never a long pass of short
+        steps. A step slower than the budget is returned as an alarm that names
+        it; a pass with several slow steps writes the readiness heartbeat
+        between them.
         """
         if self._step_heartbeat is not None:
-            self._step_heartbeat()
+            self._step_heartbeat(name)
         if (
             self._loop_heartbeat is not None
             and time.monotonic() - self._readiness_at >= _READINESS_BEAT_SECONDS
         ):
             self._readiness_at = time.monotonic()
             self._run_housekeeping(LifecycleEventKind.HEARTBEAT, self._loop_heartbeat)
+        started = time.monotonic()
+        result = call()
+        elapsed = time.monotonic() - started
+        if elapsed <= _STEP_BUDGET_SECONDS:
+            return result, None
+        log_event(
+            _LOGGER,
+            "worker.step_over_budget",
+            service="control-worker",
+            step=name,
+            budget_seconds=_STEP_BUDGET_SECONDS,
+            elapsed_seconds=round(elapsed, 1),
+        )
+        return result, StepOverBudget(
+            f"worker step {name} took {elapsed:.0f}s "
+            f"(budget {_STEP_BUDGET_SECONDS:g}s); it delays every other step"
+        )
+
+    def _settle(self, name: str, slow: StepOverBudget | None) -> None:
+        """A step that finished: clear its wait, or keep the over-budget alarm."""
+        if slow is None:
+            self._failures.succeeded(name)
+        else:
+            self._failures.failed(name, slow, disposition(slow))
 
     def _run_housekeeping(
         self,
@@ -538,14 +461,11 @@ class Worker:
         if task is None:
             return
         key = f"housekeeping:{name}"
-        self._beat()
         now = time.monotonic()
         if now < self._cadence_at.get(key, now) or not self._failures.ready(key):
             return
         try:
-            self._bounded(key, task)
-        except StepOverBudget as error:
-            self._failures.failed(key, error, disposition(error))
+            _result, slow = self._timed(key, task)
         except Exception as error:  # noqa: BLE001 - isolate one owner, report its fault
             self._failures.failed(key, error, disposition(error))
             log_event(
@@ -558,14 +478,11 @@ class Worker:
                 traceback=redact_text(traceback.format_exc()),
             )
         else:
-            self._failures.succeeded(key)
+            self._settle(key, slow)
             if minimum_interval:
                 self._cadence_at[key] = now + minimum_interval
 
     def redrive_coordinator(self, source: str) -> None:
-        # Runs inside the due-wait step's thread: it never beats the watchdog,
-        # which only the pass thread may do.
-        task: Callable[[], object] | None
         if source.startswith("housekeeping:"):
             name = source.removeprefix("housekeeping:")
             task = {
@@ -575,34 +492,36 @@ class Worker:
                 LifecycleEventKind.HEARTBEAT: self._loop_heartbeat,
             }.get(name)
             # The due backstop is already executing; its outer caller owns recovery.
-            if task is not None and name == "due-waits":
-                return
-        else:
-            sources: dict[str, Callable[[], bool]] = {"jobs": self._run_generic}
-            if self._recipes is not None:
-                sources["recipes"] = self._recipes.tick
-            if self._model_cache is not None:
-                sources[WaitOwnerKind.MODEL_CACHE] = self._run_model_cache
-            sources.update(
-                {
-                    _background_source_name(service): lambda service=service: bool(
-                        service()
-                    )
-                    for service in self._background_services
-                }
-            )
-            task = sources.get(source)
+            if task is None:
+                self._failures.succeeded(source)
+            elif name != "due-waits":
+                self._run_housekeeping(name, task)
+            return
+        sources: dict[str, Callable[[], bool]] = {"jobs": self._run_generic}
+        if self._recipes is not None:
+            sources["recipes"] = self._recipes.tick
+        if self._model_cache is not None:
+            sources[WaitOwnerKind.MODEL_CACHE] = self._run_model_cache
+        sources.update(
+            {
+                _background_source_name(service): lambda service=service: bool(
+                    service()
+                )
+                for service in self._background_services
+            }
+        )
+        task = sources.get(source)
         if task is None:
             self._failures.succeeded(source)
             return
         if not self._failures.ready(source):
             return
         try:
-            self._bounded(source, task, defer_if_running=True)
+            _result, slow = self._timed(source, task)
         except Exception as error:  # noqa: BLE001 - same source custody as normal dispatch
             self._failures.failed(source, error, disposition(error))
         else:
-            self._failures.succeeded(source)
+            self._settle(source, slow)
 
     def _run_model_cache(self) -> bool:
         # The model cache is consumed structurally, like the distribution
@@ -669,7 +588,7 @@ def assemble_production_worker(
     | None = None,
     runtime_image_preparer: Callable[..., object] | None = None,
     loop_heartbeat: Callable[[], object] | None = None,
-    step_heartbeat: Callable[[], object] | None = None,
+    step_heartbeat: Callable[[str], object] | None = None,
     capabilities: CapabilityRegistry | None = None,
     catalog_sync: ManagedRecipeCatalogSyncService | None = None,
     enrollment: EnrollmentService | None = None,
@@ -1025,79 +944,41 @@ def assemble_production_worker(
             return unavailable(kind)
         return catalog_sync.redrive(str(key[0]), RECIPE_LIBRARY_SYNC_INTERVAL_SECONDS)
 
-    def exclusive(name: str, advance: AdvanceWait) -> AdvanceWait:
-        """Redrive under the step name of the service it drives, so one
-        service's work never overlaps itself (it defers while that step runs)."""
-        return lambda key, kind: worker._bounded(
-            name, lambda: advance(key, kind), defer_if_running=True
-        )
-
-    def own(kind: WaitOwnerKind) -> str:
-        """A redrive whose service is no worker step of its own."""
-        return f"due-wait:{kind.value}"
-
-    images_step = (
-        _background_source_name(image_production.scheduler.tick)
-        if image_production is not None and image_production.scheduler is not None
-        else own(WaitOwnerKind.IMAGE_AVAILABILITY)
-    )
-    prebuilt_step = (
-        _background_source_name(prebuilt_importer.tick)
-        if prebuilt_importer is not None
-        else own(WaitOwnerKind.PREBUILT_IMAGE)
-    )
-    storage_step = _background_source_name(storage_collector.tick)
-    certificate_step = own(WaitOwnerKind.CERTIFICATE)
     advancers: dict[WaitOwnerKind, AdvanceWait] = {
-        # Each coordinator source already runs under its own step name.
         WaitOwnerKind.COORDINATOR: lambda key, wait: worker.redrive_coordinator(
             str(key[0])
         ),
-        WaitOwnerKind.AGENT_OPERATION: exclusive("recipes", agent_order),
-        WaitOwnerKind.AGENT_UPGRADE: exclusive(
-            own(WaitOwnerKind.AGENT_UPGRADE),
-            lambda key, wait: upgrades.heal_rollouts(1, str(key[0])),
+        WaitOwnerKind.AGENT_OPERATION: agent_order,
+        WaitOwnerKind.AGENT_UPGRADE: lambda key, wait: upgrades.heal_rollouts(
+            1, str(key[0])
         ),
-        WaitOwnerKind.ARTIFACT_JOB: exclusive(
-            own(WaitOwnerKind.ARTIFACT_JOB),
-            lambda key, wait: ArtifactJobAdapter(
-                sessions=sessions, clock=clock
-            ).redrive(str(key[0])),
+        WaitOwnerKind.ARTIFACT_JOB: lambda key, wait: ArtifactJobAdapter(
+            sessions=sessions, clock=clock
+        ).redrive(str(key[0])),
+        WaitOwnerKind.FLEET_PROFILE: lambda key, wait: fleet_profiles.tick(str(key[0])),
+        WaitOwnerKind.IMAGE_AVAILABILITY: images,
+        WaitOwnerKind.PREBUILT_IMAGE: prebuilt,
+        WaitOwnerKind.JOB: lambda key, wait: worker._run_generic(str(key[0])),
+        WaitOwnerKind.MODEL_CACHE: cache,
+        WaitOwnerKind.RECIPE_OPERATION: recipe,
+        WaitOwnerKind.RECIPE_UPDATE_BATCH: images,
+        WaitOwnerKind.RUN_SWITCH: lambda key, wait: run_switch_operations.redrive(
+            str(key[0])
         ),
-        WaitOwnerKind.FLEET_PROFILE: exclusive(
-            "recipes", lambda key, wait: fleet_profiles.tick(str(key[0]))
+        WaitOwnerKind.SELECTED_PROFILE: lambda key, wait: (
+            fleet_profiles._reconcile_selected_roster(clock())
         ),
-        WaitOwnerKind.IMAGE_AVAILABILITY: exclusive(images_step, images),
-        WaitOwnerKind.PREBUILT_IMAGE: exclusive(prebuilt_step, prebuilt),
-        WaitOwnerKind.JOB: exclusive(
-            "jobs", lambda key, wait: worker._run_generic(str(key[0]))
+        WaitOwnerKind.ROUTE_PUBLICATION: lambda key, wait: recipe_routes.maintain(),
+        WaitOwnerKind.ROUTE_RECOVERY: lambda key, wait: recipe_operations.redrive_run(
+            str(key[0])
         ),
-        WaitOwnerKind.MODEL_CACHE: exclusive(WaitOwnerKind.MODEL_CACHE, cache),
-        WaitOwnerKind.RECIPE_OPERATION: exclusive("recipes", recipe),
-        WaitOwnerKind.RECIPE_UPDATE_BATCH: exclusive(images_step, images),
-        WaitOwnerKind.RUN_SWITCH: exclusive(
-            "recipes", lambda key, wait: run_switch_operations.redrive(str(key[0]))
+        WaitOwnerKind.STORAGE_RELIEF: lambda key, wait: (
+            storage_collector.redrive_artifact(str(key[0]), str(key[1]))
         ),
-        WaitOwnerKind.SELECTED_PROFILE: exclusive(
-            "recipes",
-            lambda key, wait: fleet_profiles._reconcile_selected_roster(clock()),
-        ),
-        WaitOwnerKind.ROUTE_PUBLICATION: exclusive(
-            "recipes", lambda key, wait: recipe_routes.maintain()
-        ),
-        WaitOwnerKind.ROUTE_RECOVERY: exclusive(
-            "recipes", lambda key, wait: recipe_operations.redrive_run(str(key[0]))
-        ),
-        WaitOwnerKind.STORAGE_RELIEF: exclusive(
-            storage_step,
-            lambda key, wait: storage_collector.redrive_artifact(
-                str(key[0]), str(key[1])
-            ),
-        ),
-        WaitOwnerKind.CLEANUP: exclusive(storage_step, cleanup),
-        WaitOwnerKind.CATALOG_SYNC: exclusive(own(WaitOwnerKind.CATALOG_SYNC), catalog),
-        WaitOwnerKind.CERTIFICATE: exclusive(certificate_step, certificate),
-        WaitOwnerKind.CERTIFICATE_REVOCATION: exclusive(certificate_step, certificate),
+        WaitOwnerKind.CLEANUP: cleanup,
+        WaitOwnerKind.CATALOG_SYNC: catalog,
+        WaitOwnerKind.CERTIFICATE: certificate,
+        WaitOwnerKind.CERTIFICATE_REVOCATION: certificate,
     }
     backstop = DueWaitBackstop(sessions, wait_sources(advancers), clock=clock)
     worker._due_waits = backstop.tick
@@ -1315,7 +1196,7 @@ if __name__ == "__main__":
 
     watchdog_thread = threading.Thread(
         target=watch_worker,
-        args=(watchdog, worker, watchdog_stop),
+        args=(watchdog, watchdog_stop),
         name="worker-watchdog",
         daemon=True,
     )
