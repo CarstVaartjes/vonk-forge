@@ -45,6 +45,17 @@ impl OutputBreach {
     /// The definite failure of a job whose outputs broke their contract. The
     /// exit and the process logs travel with it; nothing is uploaded.
     pub(in crate::executor) fn failure(self, receipt: &RecipeJobRunResult) -> ExecutionResult {
+        // A process that exited nonzero by a cause its helper named (the host
+        // memory guard's kill among them) failed by that cause: what it left
+        // behind, such as scratch a kill gave no chance to clean up, is its
+        // consequence, not a breach of the output contract.
+        if receipt.exit_code != 0
+            && receipt_exit_account(receipt)
+                .and_then(ExitCause::of_summary)
+                .is_some()
+        {
+            return job_failure(receipt.clone());
+        }
         let mut diagnostic = format!("exit_code={} rule={}", receipt.exit_code, self.rule);
         if let Some((limit, observed)) = self.bound {
             diagnostic.push_str(&format!(" limit={limit} observed={observed}"));
@@ -113,7 +124,7 @@ fn named_entries(entries: &[String]) -> String {
     format!(" entries={} [{named}]", entries.len())
 }
 
-fn process_logs(
+pub(super) fn process_logs(
     receipt: &RecipeJobRunResult,
 ) -> Option<crate::failure_evidence::FailureProcessLogs> {
     receipt

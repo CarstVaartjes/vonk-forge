@@ -19,8 +19,8 @@ const TRUNCATED_LOG_MARKER: &[u8] = b"[earlier diagnostic output truncated]";
 
 use vonk_agent_protocol::failure_evidence::is_omission_marker;
 pub use vonk_agent_protocol::failure_evidence::{
-    EXIT_SUMMARY_EXCEPTION_FIELD, FailureCategory, FailureDiagnostics, FailureLogTail,
-    FailureProperty,
+    EXIT_CAUSE_FIELD, EXIT_SUMMARY_EXCEPTION_FIELD, ExitCause, FailureCategory, FailureDiagnostics,
+    FailureLogTail, FailureProperty,
 };
 
 pub use vonk_agent_protocol::generated::HostHelperProcessLogs as FailureProcessLogs;
@@ -157,7 +157,7 @@ pub fn exit_facts(text: &str) -> impl Iterator<Item = (&str, &str)> {
             matches!(
                 *key,
                 "exit_code"
-                    | "exit_cause"
+                    | EXIT_CAUSE_FIELD
                     | "oom_killed"
                     | "reason"
                     | "trigger"
@@ -175,6 +175,31 @@ pub fn exit_facts(text: &str) -> impl Iterator<Item = (&str, &str)> {
                     || c == '+'
             })
         })
+}
+
+/// The name under which a job receipt keeps its helper's exit account, so the
+/// exit is judged by the same account after a restart re-reads the receipt.
+pub const EXIT_ACCOUNT_PROPERTY: &str = "exit_account";
+
+/// A helper's process-exit summary as one bounded receipt property: its typed
+/// facts only, cause and code first so the bound never cuts them.
+pub fn exit_account_property(summary: &str) -> Option<FailureProperty> {
+    let mut facts: Vec<_> = exit_facts(summary).collect();
+    facts.sort_by_key(|(key, _)| !matches!(*key, EXIT_CAUSE_FIELD | "exit_code"));
+    let mut value = String::new();
+    for (key, fact) in facts {
+        if value.len() + key.len() + fact.len() + 2 > 256 {
+            break;
+        }
+        if !value.is_empty() {
+            value.push(' ');
+        }
+        value.push_str(&format!("{key}={fact}"));
+    }
+    (!value.is_empty()).then(|| FailureProperty {
+        name: EXIT_ACCOUNT_PROPERTY.into(),
+        value,
+    })
 }
 
 /// Sanitize a helper's process-exit summary.  The uncaught exception it ends
@@ -650,9 +675,13 @@ pub fn from_failure(operation: &AgentOperation, failure: &Failure) -> FailureDia
             value.preflight.push(property);
         }
     }
-    if failure.diagnostic.as_deref().is_some_and(|text| {
-        text.contains("exit_cause=oom_killed") || text.contains("exit_cause=host_memory_exhausted")
-    }) {
+    if matches!(
+        failure
+            .diagnostic
+            .as_deref()
+            .and_then(ExitCause::of_summary),
+        Some(ExitCause::OomKilled | ExitCause::HostMemoryExhausted)
+    ) {
         value.category = FailureCategory::Capacity;
     }
     value

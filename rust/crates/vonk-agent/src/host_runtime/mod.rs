@@ -391,11 +391,11 @@ impl HostRuntimeBoundary<'_> {
         // A tail was never volunteered: only a request that asked for it may
         // receive one, and the reason it is missing is typed.
         let safety_stop = !running
-            && response.diagnostic.as_deref().is_some_and(|detail| {
-                detail
-                    .split_whitespace()
-                    .any(|token| token == "exit_cause=host_memory_exhausted")
-            });
+            && response
+                .diagnostic
+                .as_deref()
+                .and_then(crate::failure_evidence::ExitCause::of_summary)
+                == Some(crate::failure_evidence::ExitCause::HostMemoryExhausted);
         if !include_logs
             && (response.process_logs.is_some() || response.diagnostic.is_some() && !safety_stop)
         {

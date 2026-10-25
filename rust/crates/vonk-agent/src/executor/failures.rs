@@ -235,11 +235,11 @@ pub(super) fn runtime_observation_failure(
         error.process_logs(),
         diagnostic.as_deref(),
     ));
-    if diagnostic.as_deref().is_some_and(|detail| {
-        detail
-            .split_whitespace()
-            .any(|token| token == "exit_cause=host_memory_exhausted")
-    }) {
+    if diagnostic
+        .as_deref()
+        .and_then(crate::failure_evidence::ExitCause::of_summary)
+        == Some(crate::failure_evidence::ExitCause::HostMemoryExhausted)
+    {
         failure = failure.code(FailureCode::WorkloadHostMemoryExhausted);
     }
     if let Some(diagnostic) = &diagnostic {
