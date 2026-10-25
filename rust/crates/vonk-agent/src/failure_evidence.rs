@@ -369,7 +369,10 @@ const ECHOED_STEP_BYTES: usize = 160;
 /// a step without one (COPY, ADD) at the first `": `. Every reader of the
 /// echo (the compaction, `exit_properties`) ends the step by this rule.
 fn echoed_step_end(rest: &[u8]) -> Option<usize> {
-    let find = |needle: &[u8]| rest.windows(needle.len()).position(|window| window == needle);
+    let find = |needle: &[u8]| {
+        rest.windows(needle.len())
+            .position(|window| window == needle)
+    };
     find(PODMAN_RUN_CLOSE).or_else(|| find(b"\": "))
 }
 
