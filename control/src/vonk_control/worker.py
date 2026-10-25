@@ -35,6 +35,8 @@ from .jobs import JobService
 from .logging import log_event, redact_text
 from .operator_receipt_contract import ReceiptOwner
 from .resource_planning import PLATFORM_MEMORY_FLOOR_BYTES
+from .stall_window import Verdict
+from .worker_healthcheck import WORKER_READINESS_WINDOW_SECONDS
 from .worker_memory_contract import WorkerMemoryComponent
 
 if TYPE_CHECKING:
@@ -44,7 +46,14 @@ if TYPE_CHECKING:
 _PROCESS_INSTANCE = re.compile(r"[0-9a-f]{64}\Z")
 
 _LOGGER = logging.getLogger("vonk-control-worker")
+#: The longest one step may run (the pass beats before every step) before the
+#: worker restarts: a hang, not a slow pass.
 _WORKER_WATCHDOG_TIMEOUT_SECONDS = 180
+#: A step that takes longer is named by the over-budget alarm.
+_STEP_BUDGET_SECONDS = 10.0
+#: How often the readiness heartbeat is written between the steps of a long
+#: pass, so the pass stays inside the readiness window.
+_READINESS_BEAT_SECONDS = WORKER_READINESS_WINDOW_SECONDS / 3
 
 
 @cache
@@ -73,7 +82,7 @@ def _background_source_name(service: Callable[[], object]) -> str:
 
 
 class WorkerWatchdog:
-    """Track completed scheduler loops and detect a stalled main thread."""
+    """Track the pass thread's steps and detect one that hangs."""
 
     def __init__(
         self,
@@ -86,14 +95,55 @@ class WorkerWatchdog:
         self._timeout_seconds = timeout_seconds
         self._clock = clock
         self._last_completed = clock()
+        self._step: str | None = None
 
-    def beat(self) -> None:
+    def beat(self, step: str | None = None) -> None:
+        """The pass is turning; ``step`` is the step it starts now, if any."""
         # One writer publishes one timestamp; readers need no coordination lock.
         # Sampling the clock cannot hold the watchdog's observation hostage.
         self._last_completed = self._clock()
+        self._step = step
+
+    @property
+    def timeout_seconds(self) -> float:
+        return self._timeout_seconds
+
+    @property
+    def step(self) -> str | None:
+        """The step that started at the last beat, if one did."""
+        return self._step
 
     def stalled(self) -> bool:
         return self._clock() - self._last_completed > self._timeout_seconds
+
+    def verdict(self) -> Verdict:
+        """``STALLED`` once one step (or the gap between beats) outlives the timeout."""
+        return Verdict.STALLED if self.stalled() else Verdict.PROGRESSING
+
+
+def watch_worker(
+    watchdog: WorkerWatchdog,
+    stop: threading.Event,
+    *,
+    exit_process: Callable[[int], object] = os._exit,
+    interval_seconds: float = 5.0,
+) -> None:
+    """Restart the worker (exit 70) when one step hangs past the timeout."""
+    while not stop.wait(interval_seconds):
+        if watchdog.verdict() is not Verdict.STALLED:
+            continue
+        log_event(
+            _LOGGER,
+            "worker.step_hung"
+            if watchdog.step is not None
+            else "worker.watchdog_stalled",
+            service="control-worker",
+            step=watchdog.step,
+            timeout_seconds=watchdog.timeout_seconds,
+            action="exiting non-zero for container restart",
+        )
+        exit_process(70)
+        return
 
 
 def current_worker_instance_id(proc_root: Path = Path("/proc"), pid: int = 1) -> str:
@@ -229,6 +279,7 @@ class Worker:
         loop_heartbeat: Callable[[], object] | None = None,
         memory_sources: Sequence[object] = (),
         due_waits: Callable[[], object] | None = None,
+        step_heartbeat: Callable[[str], object] | None = None,
     ) -> None:
         self._jobs = jobs
         self._worker_id = worker_id
@@ -246,6 +297,11 @@ class Worker:
         self._closed = False
         self._failures = coordinator_failures
         self._cadence_at: dict[str, float] = {}
+        self._step_heartbeat = step_heartbeat
+        self._readiness_at = time.monotonic()
+        # The steps running now, outermost first (a redrive runs inside the
+        # due-wait step), so the watchdog names the innermost one.
+        self._running_steps: list[str] = []
 
     def close(self) -> None:
         """Close worker-owned executors while leaving durable work resumable."""
@@ -321,7 +377,7 @@ class Worker:
             if not self._failures.ready(name):
                 continue
             try:
-                progressed = source()
+                progressed = self._timed(name, source)
             except Exception as error:  # noqa: BLE001 - isolate one owner, report its fault
                 # A source that keeps failing must not starve the others: the
                 # failure stays visible, the turn moves on, and the failed
@@ -342,8 +398,49 @@ class Worker:
                 self._source_cursor = (index + 1) % len(sources)
                 advanced = True
                 break
+        self._readiness_at = time.monotonic()
         self._run_housekeeping(LifecycleEventKind.HEARTBEAT, self._loop_heartbeat)
         return advanced
+
+    def _timed[Result](self, name: str, call: Callable[[], Result]) -> Result:
+        """Run one step in the pass thread and time it.
+
+        The watchdog beats first, naming the step, so only one step that
+        outlives its timeout restarts the worker, never a long pass of short
+        steps. A step slower than the budget is named by an alarm (observation
+        only: it is scheduled like any other step). A long pass writes the
+        readiness heartbeat between steps, before naming the next one.
+        """
+        if (
+            self._loop_heartbeat is not None
+            and time.monotonic() - self._readiness_at >= _READINESS_BEAT_SECONDS
+        ):
+            self._readiness_at = time.monotonic()
+            self._run_housekeeping(LifecycleEventKind.HEARTBEAT, self._loop_heartbeat)
+        self._running_steps.append(name)
+        self._beat(name)
+        started = time.monotonic()
+        try:
+            result = call()
+        finally:
+            self._running_steps.pop()
+            if self._running_steps:
+                self._beat(self._running_steps[-1])
+        elapsed = time.monotonic() - started
+        if elapsed > _STEP_BUDGET_SECONDS:
+            log_event(
+                _LOGGER,
+                "worker.step_over_budget",
+                service="control-worker",
+                step=name,
+                budget_seconds=_STEP_BUDGET_SECONDS,
+                elapsed_seconds=round(elapsed, 1),
+            )
+        return result
+
+    def _beat(self, step: str) -> None:
+        if self._step_heartbeat is not None:
+            self._step_heartbeat(step)
 
     def _run_housekeeping(
         self,
@@ -359,7 +456,7 @@ class Worker:
         if now < self._cadence_at.get(key, now) or not self._failures.ready(key):
             return
         try:
-            task()
+            self._timed(key, task)
         except Exception as error:  # noqa: BLE001 - isolate one owner, report its fault
             self._failures.failed(key, error, disposition(error))
             log_event(
@@ -411,7 +508,7 @@ class Worker:
         if not self._failures.ready(source):
             return
         try:
-            task()
+            self._timed(source, task)
         except Exception as error:  # noqa: BLE001 - same source custody as normal dispatch
             self._failures.failed(source, error, disposition(error))
         else:
@@ -482,6 +579,7 @@ def assemble_production_worker(
     | None = None,
     runtime_image_preparer: Callable[..., object] | None = None,
     loop_heartbeat: Callable[[], object] | None = None,
+    step_heartbeat: Callable[[str], object] | None = None,
     capabilities: CapabilityRegistry | None = None,
     catalog_sync: ManagedRecipeCatalogSyncService | None = None,
     enrollment: EnrollmentService | None = None,
@@ -778,6 +876,7 @@ def assemble_production_worker(
         background_services=worker_background_services,
         background_closers=worker_background_closers,
         loop_heartbeat=loop_heartbeat,
+        step_heartbeat=step_heartbeat,
         memory_sources=memory_sources,
     )
 
@@ -1035,6 +1134,7 @@ if __name__ == "__main__":
             clock=clock,
         ),
     )
+    watchdog = WorkerWatchdog(timeout_seconds=_WORKER_WATCHDOG_TIMEOUT_SECONDS)
     worker = assemble_production_worker(
         catalog_sync=catalog_sync,
         enrollment=enrollment,
@@ -1065,8 +1165,8 @@ if __name__ == "__main__":
             process_instance_id=current_worker_instance_id(),
             clock=clock,
         ).completed_loop,
+        step_heartbeat=watchdog.beat,
     )
-    watchdog = WorkerWatchdog(timeout_seconds=_WORKER_WATCHDOG_TIMEOUT_SECONDS)
     watchdog_stop = threading.Event()
     memory_monitor = WorkerMemoryMonitor(
         report_path=worker_memory_report_path(settings.state_path),
@@ -1085,20 +1185,11 @@ if __name__ == "__main__":
         stop=watchdog_stop,
     )
 
-    def monitor_worker_loop() -> None:
-        while not watchdog_stop.wait(5):
-            if watchdog.stalled():
-                log_event(
-                    _LOGGER,
-                    "worker.watchdog_stalled",
-                    service="control-worker",
-                    timeout_seconds=_WORKER_WATCHDOG_TIMEOUT_SECONDS,
-                    action="exiting non-zero for container restart",
-                )
-                os._exit(70)
-
     watchdog_thread = threading.Thread(
-        target=monitor_worker_loop, name="worker-watchdog", daemon=True
+        target=watch_worker,
+        args=(watchdog, watchdog_stop),
+        name="worker-watchdog",
+        daemon=True,
     )
     watchdog_thread.start()
     try:

@@ -841,3 +841,381 @@ def test_durable_fault_stays_with_its_source_when_optional_services_reorder(tmp_
         coordinator_failures=_failures(tmp_path),
     ).run_once()
     assert calls == ["broken", "healthy", "healthy"]
+
+
+def test_a_long_pass_of_short_steps_never_trips_the_watchdog(tmp_path) -> None:
+    """Catches a watchdog bounded by the whole pass: a pass of many short steps
+    that outlasts the timeout restarts the worker, dropping in-process
+    transfers (production: a 110-150 s pass was killed every ~8 minutes)."""
+    now = [0.0]
+    watchdog = WorkerWatchdog(timeout_seconds=180, clock=lambda: now[0])
+    observed: list[bool] = []
+
+    def step() -> bool:
+        now[0] += 100  # each step well inside the timeout, together past it
+        observed.append(watchdog.stalled())  # what the monitor thread would see
+        return False
+
+    worker = Worker(
+        _service(tmp_path),
+        "worker-1",
+        {},
+        background_services=(step, lambda: step(), lambda: step()),
+        coordinator_failures=_failures(tmp_path),
+        step_heartbeat=watchdog.beat,
+    )
+
+    assert worker.run_once() is False
+
+    assert observed == [False, False, False]
+
+
+def test_hung_step_restarts_the_worker_and_a_fresh_request_is_served(
+    tmp_path, caplog
+) -> None:
+    """Catches a hang that nothing bounds: one step longer than the watchdog
+    timeout must restart the worker, naming the step."""
+    from vonk_control.worker import _background_source_name, watch_worker
+
+    now = [0.0]
+    watchdog = WorkerWatchdog(timeout_seconds=180, clock=lambda: now[0])
+    jobs = _service(tmp_path)
+    release = threading.Event()
+
+    def hung() -> bool:
+        now[0] += 181
+        release.wait(60)
+        return False
+
+    worker = Worker(
+        jobs,
+        "worker-1",
+        {},
+        background_services=(hung,),
+        coordinator_failures=_failures(tmp_path),
+        step_heartbeat=watchdog.beat,
+    )
+    stop = threading.Event()
+    exits: list[int] = []
+
+    def exit_process(code: int) -> None:
+        exits.append(code)
+        release.set()
+
+    monitor = threading.Thread(
+        target=watch_worker,
+        args=(watchdog, stop),
+        kwargs={"exit_process": exit_process, "interval_seconds": 0.01},
+        daemon=True,
+    )
+    with caplog.at_level(logging.INFO, logger="vonk-control-worker"):
+        monitor.start()
+        worker.run_once()
+        monitor.join(60)
+    stop.set()
+    assert exits == [70]
+    assert "worker.step_hung" in caplog.text
+    assert _background_source_name(hung) in caplog.text
+
+    # The restarted process serves a fresh request.
+    job = jobs.enqueue("probe", "admin", "a" * 64, [], {})
+    restarted = Worker(
+        jobs,
+        "worker-2",
+        {"probe": lambda _request: {"done": True}},
+        coordinator_failures=_failures(tmp_path),
+    )
+    assert restarted.run_once() is True
+    assert jobs.get(job.id).result == {"done": True}
+
+
+def test_a_hang_after_a_readiness_write_is_named_by_its_own_step(
+    tmp_path, caplog, monkeypatch
+) -> None:
+    """Catches the watchdog naming the readiness heartbeat (written between
+    steps) instead of the step that then hangs."""
+    from vonk_control.worker import _background_source_name, watch_worker
+
+    now = [0.0]
+    monkeypatch.setattr("vonk_control.worker.time.monotonic", lambda: now[0])
+    watchdog = WorkerWatchdog(timeout_seconds=180, clock=lambda: now[0])
+    release = threading.Event()
+
+    def slow() -> bool:
+        now[0] += 11  # past the readiness interval: a write precedes the next step
+        return False
+
+    def hung() -> bool:
+        now[0] += 181
+        release.wait(60)
+        return False
+
+    worker = Worker(
+        _service(tmp_path),
+        "worker-1",
+        {},
+        background_services=(slow, hung),
+        coordinator_failures=_failures(tmp_path),
+        loop_heartbeat=lambda: None,
+        step_heartbeat=watchdog.beat,
+    )
+    stop = threading.Event()
+    monitor = threading.Thread(
+        target=watch_worker,
+        args=(watchdog, stop),
+        kwargs={"exit_process": lambda _code: release.set(), "interval_seconds": 0.01},
+        daemon=True,
+    )
+    with caplog.at_level(logging.INFO, logger="vonk-control-worker"):
+        monitor.start()
+        worker.run_once()
+        monitor.join(60)
+    stop.set()
+    hung_lines = [
+        record.getMessage()
+        for record in caplog.records
+        if "worker.step_hung" in record.getMessage()
+    ]
+    assert len(hung_lines) == 1
+    assert _background_source_name(hung) in hung_lines[0]
+
+
+def test_watchdog_names_the_outer_step_again_after_a_nested_redrive(tmp_path) -> None:
+    """Catches the watchdog keeping the name of a redrive that already returned
+    while the due-wait step that ran it goes on."""
+    names: list[str] = []
+    worker = Worker(
+        _service(tmp_path),
+        "worker-1",
+        {},
+        housekeeping=lambda: names.append("telemetry-ran"),
+        coordinator_failures=_failures(tmp_path),
+        step_heartbeat=names.append,
+    )
+
+    def due_waits() -> None:
+        worker.redrive_coordinator("housekeeping:telemetry")
+
+    worker._timed("housekeeping:due-waits", due_waits)
+
+    assert names == [
+        "housekeeping:due-waits",
+        "housekeeping:telemetry",
+        "telemetry-ran",
+        "housekeeping:due-waits",
+    ]
+
+
+def test_slow_step_is_named_but_scheduled_like_any_other(
+    tmp_path, caplog, monkeypatch
+) -> None:
+    """Catches the over-budget alarm changing scheduling: a slow success that
+    parks its source (or creates a due-wait row) delays the very work it
+    names."""
+    from vonk_control.models import CoordinatorFailure
+    from vonk_control.worker import _STEP_BUDGET_SECONDS, _background_source_name
+
+    monotonic = [1000.0]
+    monkeypatch.setattr("vonk_control.worker.time.monotonic", lambda: monotonic[0])
+    runs: list[int] = []
+
+    def step() -> bool:
+        runs.append(1)
+        monotonic[0] += _STEP_BUDGET_SECONDS + 1
+        return False
+
+    failures = _failures(tmp_path)
+    worker = Worker(
+        _service(tmp_path),
+        "worker-1",
+        {},
+        background_services=(step,),
+        coordinator_failures=failures,
+    )
+    name = _background_source_name(step)
+    with caplog.at_level(logging.INFO, logger="vonk-control-worker"):
+        worker.run_once()
+    alarm = next(
+        record.getMessage()
+        for record in caplog.records
+        if "worker.step_over_budget" in record.getMessage()
+    )
+    assert name in alarm
+    assert '"budget_seconds":' in alarm and '"elapsed_seconds":' in alarm
+    assert failures.ready(name)
+    sessions = sessionmaker(create_engine(f"sqlite:///{tmp_path / 'worker.sqlite'}"))
+    with sessions() as session:
+        assert session.scalars(select(CoordinatorFailure)).all() == []
+    worker.run_once()
+    assert runs == [1, 1]
+
+
+def test_a_long_pass_writes_readiness_between_its_steps(tmp_path, monkeypatch) -> None:
+    """Catches readiness written only at the end of a pass: a pass of several
+    slow steps would look unavailable (``workers: null``) while it turns."""
+    from vonk_control.worker import _READINESS_BEAT_SECONDS
+    from vonk_control.worker_healthcheck import WORKER_READINESS_WINDOW_SECONDS
+
+    now = [0.0]
+    monkeypatch.setattr("vonk_control.worker.time.monotonic", lambda: now[0])
+    events: list[tuple[str, float]] = []
+
+    def step() -> bool:
+        events.append(("step", now[0]))
+        now[0] += 6
+        return False
+
+    worker = Worker(
+        _service(tmp_path),
+        "worker-1",
+        {},
+        background_services=(step, lambda: step(), lambda: step(), lambda: step()),
+        coordinator_failures=_failures(tmp_path),
+        loop_heartbeat=lambda: events.append(("readiness", now[0])),
+    )
+
+    worker.run_once()
+
+    written = [at for kind, at in events if kind == "readiness"]
+    assert written == [12.0, 24.0, 24.0]  # two between steps, one at the end
+    gaps = [later - earlier for earlier, later in zip([0.0, *written], written)]
+    assert max(gaps) < WORKER_READINESS_WINDOW_SECONDS
+    assert _READINESS_BEAT_SECONDS < WORKER_READINESS_WINDOW_SECONDS
+
+
+def test_production_worker_beats_the_watchdog_it_is_watched_by() -> None:
+    """Catches the production loop not handing the watchdog's beat to the
+    worker (the watchdog would again bound a whole pass)."""
+    import ast
+    import inspect
+
+    from vonk_control import worker as module
+
+    tree = ast.parse(inspect.getsource(module))
+    main = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.If) and "__main__" in ast.unparse(node.test)
+    )
+    calls = {
+        ast.unparse(call.func): call
+        for call in ast.walk(main)
+        if isinstance(call, ast.Call)
+    }
+    assembly = calls["assemble_production_worker"]
+    beat = next(
+        keyword.value
+        for keyword in assembly.keywords
+        if keyword.arg == "step_heartbeat"
+    )
+    assert ast.unparse(beat) == "watchdog.beat"
+    monitor = calls["threading.Thread"]
+    target = next(
+        keyword.value for keyword in monitor.keywords if keyword.arg == "target"
+    )
+    args = next(keyword.value for keyword in monitor.keywords if keyword.arg == "args")
+    assert ast.unparse(target) == "watch_worker"
+    assert ast.unparse(args).startswith("(watchdog,")
+
+
+def test_production_assembly_hands_the_step_heartbeat_to_the_worker(
+    tmp_path, request
+) -> None:
+    """Catches assemble_production_worker dropping the step heartbeat."""
+    from vonk_control.agent_jobs import AgentJobService
+    from vonk_control.model_cache import ModelCacheService
+    from vonk_control.presence import ManagementAddressPolicy
+    from vonk_control.route_runtime import AtomicRouteBundlePublisher
+    from vonk_control.worker import assemble_production_worker
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'builder.sqlite'}")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    clock = lambda: datetime(2026, 8, 6, tzinfo=UTC)
+    model_cache = ModelCacheService(sessions, tmp_path / "models", clock=clock)
+    request.addfinalizer(model_cache.close)
+    beats: list[str] = []
+    worker = assemble_production_worker(
+        jobs=JobService(sessions, clock=clock),
+        sessions=sessions,
+        agent_jobs=AgentJobService(sessions, clock=clock),
+        publisher=AtomicRouteBundlePublisher(tmp_path / "routes"),
+        management_policy=ManagementAddressPolicy.parse("10.0.0.0/24"),
+        clock=clock,
+        worker_id="control-worker-test",
+        artifact_job_root=tmp_path / "artifact-jobs" / "blobs",
+        artifact_job_storage_max_bytes=16 * 1024**3,
+        artifact_job_retention_seconds=7 * 24 * 60 * 60,
+        artifact_job_reconcile_interval_seconds=3600,
+        artifact_job_reconcile_batch_limit=1000,
+        model_cache=model_cache,
+        agent_artifact_root=tmp_path / "agent-artifacts",
+        recipe_image_artifact_root=tmp_path / "agent-artifacts",
+        step_heartbeat=beats.append,
+    )
+    request.addfinalizer(worker.close)
+
+    worker._timed("probe", lambda: None)
+
+    assert beats == ["probe"]
+
+
+def test_every_worker_step_runs_through_the_one_timing_wrapper() -> None:
+    """Catches a new step that bypasses the step timing: it would hide from the
+    over-budget alarm and from the watchdog's per-step bound."""
+    import ast
+    import inspect
+
+    from vonk_control import worker as module
+
+    # Everything the pass methods may call outside a lambda (a lambda builds a
+    # step that _timed runs later): the timing wrapper, failure custody,
+    # logging and plain value helpers. Any other call is work outside _timed.
+    allowed = {
+        "self._timed",
+        "self._run_housekeeping",
+        "self._failures.ready",
+        "self._failures.failed",
+        "self._failures.succeeded",
+        "self._cadence_at.get",
+        "log_event",
+        "disposition",
+        "redact_text",
+        "traceback.format_exc",
+        "time.monotonic",
+        "_background_source_name",
+        "sources.append",
+        "sources.get",
+        "sources.update",
+        "source.startswith",
+        "source.removeprefix",
+        "type",
+        "len",
+        "range",
+    }
+    tree = ast.parse(inspect.getsource(module))
+    methods = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef)
+        and node.name in {"run_once", "_run_housekeeping", "redrive_coordinator"}
+    ]
+    assert len(methods) == 3
+
+    def outside_lambdas(node: ast.AST):
+        for child in ast.iter_child_nodes(node):
+            if not isinstance(child, ast.Lambda):
+                yield child
+                yield from outside_lambdas(child)
+
+    for method in methods:
+        called = {
+            ast.unparse(call.func)
+            for call in outside_lambdas(method)
+            if isinstance(call, ast.Call)
+        }
+        # A dict literal's lookup in redrive_coordinator picks the task to time.
+        called = {name for name in called if not name.startswith("{")}
+        assert called <= allowed, (
+            f"{method.name} calls {called - allowed} outside _timed"
+        )
