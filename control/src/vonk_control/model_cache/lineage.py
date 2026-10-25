@@ -10,6 +10,7 @@ so it removes the sets the listing shows, never a narrower exact-digest view.
 from __future__ import annotations
 
 from collections.abc import Collection, Iterable
+from typing import NamedTuple
 
 from sqlalchemy import (
     Exists,
@@ -104,17 +105,29 @@ def lineage_contents(session: Session, digest: str) -> frozenset[str]:
     )
 
 
-def model_sets(session: Session, contents: Collection[str]) -> tuple[str, ...]:
+class ModelSets(NamedTuple):
+    """The cached sets bound to a model, split by who else they serve."""
+
+    #: Bound to this model's contents and to no other catalog model: removal
+    #: removes them.
+    owned: tuple[str, ...]
+    #: Also bound to another catalog model: removal retains them, and says so.
+    shared: tuple[str, ...]
+
+
+def model_sets(session: Session, contents: Collection[str]) -> ModelSets:
     """The cached sets bound to any of ``contents``, in digest order.
 
     A set's binding is its first requester's content or a verified binding in
     its stored manifest; a manifest that does not read binds only through its
-    first requester.
+    first requester. A binding the catalog does not know (a collected
+    revision) belongs to nobody else, so it never makes a set shared.
     """
 
     if not contents:
-        return ()
-    found: set[str] = set()
+        return ModelSets((), ())
+    wanted = set(contents)
+    bound: dict[str, frozenset[str]] = {}
     for row in session.scalars(
         select(ModelCacheSet)
         .options(
@@ -126,8 +139,8 @@ def model_sets(session: Session, contents: Collection[str]) -> tuple[str, ...]:
         )
         .where(
             or_(
-                ModelCacheSet.model_content_sha256.in_(tuple(contents)),
-                verifies_model(session, contents),
+                ModelCacheSet.model_content_sha256.in_(tuple(wanted)),
+                verifies_model(session, wanted),
             )
         )
     ):
@@ -135,6 +148,39 @@ def model_sets(session: Session, contents: Collection[str]) -> tuple[str, ...]:
         verified = (
             manifest.verified_models if isinstance(manifest, CacheManifest) else ()
         )
-        if set_bindings(row.model_content_sha256, verified) & set(contents):
-            found.add(row.artifact_set_sha256)
-    return tuple(sorted(found))
+        bindings = set_bindings(row.model_content_sha256, verified)
+        if bindings & wanted:
+            bound[row.artifact_set_sha256] = bindings
+    others = {content for bindings in bound.values() for content in bindings} - wanted
+    catalogued = (
+        set(
+            session.scalars(
+                select(CatalogDocumentRevision.content_digest).where(
+                    CatalogDocumentRevision.kind == RunSwitchReasonScopeName.MODEL,
+                    CatalogDocumentRevision.content_digest.in_(tuple(others)),
+                )
+            )
+        )
+        if others
+        else set()
+    )
+    return ModelSets(
+        owned=tuple(sorted(d for d, b in bound.items() if not b & catalogued)),
+        shared=tuple(sorted(d for d, b in bound.items() if b & catalogued)),
+    )
+
+
+def first_requested_sets(session: Session, digest: str) -> tuple[str, ...]:
+    """The sets first downloaded under exactly ``digest``: retention's unit.
+
+    Retention measures, protects and evicts per first requester; it removes
+    exactly what it measured, never the model's wider Library attribution.
+    """
+
+    return tuple(
+        session.scalars(
+            select(ModelCacheSet.artifact_set_sha256)
+            .where(ModelCacheSet.model_content_sha256 == digest)
+            .order_by(ModelCacheSet.artifact_set_sha256)
+        )
+    )

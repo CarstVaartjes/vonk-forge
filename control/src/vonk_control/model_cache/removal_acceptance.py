@@ -164,7 +164,7 @@ class RemovalAcceptanceMixin:
                 if model_content_sha256 is None
                 else model_sets(
                     session, lineage_contents(session, model_content_sha256)
-                )
+                ).owned
             )
         else:
             supplied = tuple(selected_sets)

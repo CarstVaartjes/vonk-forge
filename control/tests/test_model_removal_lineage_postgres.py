@@ -18,6 +18,7 @@ from vonk_control.models import CatalogDocument
 from vonk_forge_contracts import document_sha256
 
 from .removal_settle import advance_until_ended
+from .test_fleet_model_removal_postgres import submit_model_download
 from .test_model_cache import _canonical_model
 from .test_model_cache_revisions import _contains, _content_keys, _revision
 from .test_model_removal_reference_lifecycle import _removal_service
@@ -141,5 +142,46 @@ def test_listed_bytes_kept_for_another_model_are_never_reviewed_as_unused(
         for data in (b"old", b"shared"):
             path = service._object_path(hashlib.sha256(data).hexdigest())
             assert path.read_bytes() == data
+    finally:
+        service.close()
+
+
+@pytest.mark.parametrize("fleet", [True, False])
+def test_a_set_another_model_also_serves_is_retained_with_its_bytes(
+    postgres_engine, tmp_path: Path, monkeypatch, fleet: bool
+) -> None:
+    """Catches removal crossing into another catalog model's cache entry.
+
+    test/aa first downloaded the files; test/bb's verified download of the same
+    files binds the same set. Removing bb names a typed reason and leaves aa's
+    entry and bytes alone, through the fleet and the request-led path.
+    """
+    service, sessions = _removal_service(postgres_engine, tmp_path)
+    _content_keys(service, monkeypatch)
+    try:
+        kept_model, kept_set, _ = _revision(
+            service, sessions, tmp_path / "files", slug="aa"
+        )
+        _, again, _ = _revision(service, sessions, tmp_path / "files", slug="bb")
+        assert again == kept_set
+        if fleet:
+            review = service.review_fleet_model_removal("test/bb")
+            assert not [item for item in review.assets if item.kind == "model-set"]
+            assert review.fleet is not None
+            assert review.fleet.nas_reason == FleetRemovalReason.SHARED
+            result = _removed(service, "test/bb", review.review_digest)
+            assert result.removed_entries == [] and result.reclaimed_bytes == 0
+        else:
+            accepted = service.remove_model_selector(
+                "test/bb", actor="operator", request_key=str(uuid4())
+            )
+            advance_until_ended(service, accepted.id)
+        assert _contains(sessions, kept_set)
+        assert service.model_storage()[kept_model].disk_bytes > 0
+        for data in (b"old", b"shared"):
+            path = service._object_path(hashlib.sha256(data).hexdigest())
+            assert path.read_bytes() == data
+        # The ended removal leaves no fence: a fresh download is admitted.
+        submit_model_download(service, tmp_path)
     finally:
         service.close()

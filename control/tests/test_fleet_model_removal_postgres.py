@@ -247,12 +247,39 @@ def test_shared_content_is_retained_on_nas_and_spark(
         cache.close()
 
 
-@pytest.mark.parametrize("installation_count", [1, 2])
+def _refreshed_model(sessions, document_id: str, stored: object, digest: str) -> str:
+    """Publish a metadata-only revision of a model; returns the new head digest."""
+    from vonk_control.catalog_entities import CatalogEntityService
+    from vonk_forge_contracts import ModelDefinition, document_sha256
+
+    definition = ModelDefinition.model_validate(stored)
+    document = definition.model_copy(
+        update={
+            "metadata": definition.metadata.model_copy(
+                update={"description": "refreshed"}
+            )
+        }
+    ).model_dump(mode="json")
+    catalog = CatalogEntityService(sessions, clock=lambda: NOW)
+    revised = catalog.revise(document_id, document, actor="admin")
+    catalog.resolve(revised.id, actor="admin")
+    head = document_sha256(document)
+    assert head != digest
+    return head
+
+
+@pytest.mark.parametrize(
+    ("installation_count", "refreshed"), [(1, False), (2, False), (1, True)]
+)
 def test_unused_installation_uninstalls_through_existing_job(
-    postgres_engine, tmp_path: Path, installation_count: int
+    postgres_engine, tmp_path: Path, installation_count: int, refreshed: bool
 ) -> None:
     """Catches a parallel deleter and siblings competing with their own parent
     for the same model. Every uninstall uses the real job and result path.
+
+    ``refreshed`` removes the model by a newer catalog revision: an
+    installation of the earlier revision holds the same lineage's files and is
+    uninstalled too, so the removal ends instead of waiting out its deadline.
     """
     from vonk_control.cluster_mappings import ClusterMappingService
 
@@ -269,6 +296,15 @@ def test_unused_installation_uninstalls_through_existing_job(
         )
         selector = installation.model_content_sha256
         revision_id = installation.recipe_revision_id
+        model = session.scalar(
+            select(CatalogDocumentRevision).where(
+                CatalogDocumentRevision.content_digest == selector
+            )
+        )
+        assert model is not None
+        model_row = (model.document_id, model.document, model.content_digest)
+    if refreshed:
+        selector = _refreshed_model(sessions, *model_row)
     if installation_count == 2:
         mappings = ClusterMappingService(sessions)
         mapped = mappings.preview(revision_id, nodes[1:], {}, "admin")

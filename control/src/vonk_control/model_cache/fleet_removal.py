@@ -223,7 +223,7 @@ class FleetRemovalMixin:
         # a subset of its files and sets first downloaded under an earlier
         # revision of it.
         contents = lineage_contents(session, digest)
-        sets = model_sets(session, contents)
+        sets, kept_sets = model_sets(session, contents)
         names = target_objects | contents | set(sets)
         protected = bool(
             names & (evidence.operations | evidence.pointed_models | evidence.pinned)
@@ -261,7 +261,7 @@ class FleetRemovalMixin:
                 for compiled in plan.compiled_execution_plans.values()
                 for artifact in compiled.artifacts
             )
-            if digest not in models:
+            if models.isdisjoint(contents):
                 continue
             detail = _installation_kept(session, installation.id, evidence)
             saved = _installation_pointing(
@@ -401,8 +401,14 @@ class FleetRemovalMixin:
             nas_reason, nas_detail = R.OBSERVATION_UNAVAILABLE, keep_detail
         elif protected:
             nas_reason, nas_detail = R.REFERENCED, keep_detail
-        elif not sets:
+        elif not sets and not kept_sets:
             nas_detail = "No NAS copy of this model is stored."
+        elif not sets:
+            nas_reason = R.SHARED
+            nas_detail = (
+                "The NAS copy of this model is also another model's; "
+                "removal retains it."
+            )
         elif cache._exclusive_nas_objects(session, sets, shared) == set():
             # "Unused" promises NAS bytes to reclaim: sets whose objects are
             # all kept for another model say so instead of removing nothing.
