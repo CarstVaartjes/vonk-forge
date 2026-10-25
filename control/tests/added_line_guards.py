@@ -60,6 +60,7 @@ MODES = (
     "planner-defects",
     "capacity-gates",
     "start-budgets",
+    "listings",
 )
 # The agent's messages a Controller test may send only as the stand-in pinned
 # to the agent's shared vector; built by hand they are the Controller's idea of
@@ -593,6 +594,20 @@ def check_source(
                 )
             ):
                 noexit_hits.append(f"{path}:{line}: exit code invented, not measured")
+    if "listings" in modes and not is_test:
+        # GitHub lists a run's artifacts 30 to a page; a reader of one page
+        # silently misses the rest (shard timings, #1900). Read every page or
+        # ask for the one artifact by name.
+        rows = source.splitlines()
+        noexit_hits.extend(
+            f"{path}:{line}: artifact listing reads one page"
+            for line, text in enumerate(rows, 1)
+            if line in added
+            and re.search(r"actions/(?:runs/[^\s\"']*/)?artifacts\b", text)
+            and not re.search(
+                r"--paginate|\bpage=|[?&]name=", " ".join(rows[line - 1 : line + 1])
+            )
+        )
     if (
         "locks" in modes
         and not is_test

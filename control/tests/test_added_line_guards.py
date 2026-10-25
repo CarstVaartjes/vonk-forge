@@ -1128,3 +1128,32 @@ def test_start_budget_guard_allows_reviewed_sites_settings_and_other_clocks():
         "    return timedelta(seconds=settings.DISTRIBUTED_START_TIMEOUT_SECONDS)\n"
     )
     assert not check_source(PATH, other, set(range(1, 5)), modes=("start-budgets",))
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        'artifacts = _gh("api", f"repos/{repo}/actions/runs/{run_id}/artifacts")\n',
+        "gh api repos/$REPO/actions/runs/$RUN/artifacts --jq '.artifacts[]'\n",
+        "gh api repos/$REPO/actions/artifacts\n",
+    ],
+)
+def test_added_line_guard_rejects_a_one_page_artifact_listing(text):
+    """A run holds more artifacts than one default page (#1900)."""
+    path = "scripts/example.sh"
+    assert check_source(path, text, {1}, modes=("listings",))
+    assert not check_source(path, text, {2}, modes=("listings",))
+    assert not check_source("tests/example.sh", text, {1}, modes=("listings",))
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "gh api --paginate repos/$REPO/actions/runs/$RUN/artifacts\n",
+        'f"repos/{repo}/actions/runs/{run_id}/artifacts?per_page=100&page={page}"\n',
+        'f"repos/{repo}/actions/runs/{run_id}/artifacts"\n    f"?per_page=100&page={page}"\n',
+        "gh api repos/$REPO/actions/artifacts?name=agent-package\n",
+    ],
+)
+def test_added_line_guard_allows_paged_or_named_artifact_listings(text):
+    assert not check_source("scripts/example.sh", text, {1}, modes=("listings",))
