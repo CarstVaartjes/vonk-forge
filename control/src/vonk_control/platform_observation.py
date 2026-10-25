@@ -26,6 +26,7 @@ from .persisted_waits import read_wait
 from .platform_observation_errors import ObservationCaptureUnavailable
 from .progress_stall import WAITING_STATES, is_stalled, read_stall
 from .strict_json import StrictModel
+from .worker_healthcheck import WORKER_READINESS_WINDOW_SECONDS
 
 Source = Annotated[str, Field(pattern=r"^[0-9a-f]{40}$")]
 Digest = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
@@ -118,7 +119,7 @@ class PlatformObserver:
                         ControlProcessHeartbeat.process_kind == "worker",
                         ControlProcessHeartbeat.loop_sequence >= 1,
                         ControlProcessHeartbeat.completed_at
-                        >= now - timedelta(seconds=30),
+                        >= now - timedelta(seconds=WORKER_READINESS_WINDOW_SECONDS),
                     )
                     .order_by(ControlProcessHeartbeat.process_instance_id)
                 )

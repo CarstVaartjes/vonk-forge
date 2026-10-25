@@ -17,8 +17,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from vonk_agent_protocol import (
-    ControllerErrorCode,
-    Disposition,
     LifecycleEventKind,
     UnknownOutcomeError,
     WaitOwnerKind,
@@ -38,6 +36,7 @@ from .logging import log_event, redact_text
 from .operator_receipt_contract import ReceiptOwner
 from .resource_planning import PLATFORM_MEMORY_FLOOR_BYTES
 from .stall_window import Verdict
+from .worker_healthcheck import WORKER_READINESS_WINDOW_SECONDS
 from .worker_memory_contract import WorkerMemoryComponent
 
 if TYPE_CHECKING:
@@ -53,8 +52,8 @@ _WORKER_WATCHDOG_TIMEOUT_SECONDS = 180
 #: A step that takes longer is named by the over-budget alarm.
 _STEP_BUDGET_SECONDS = 10.0
 #: How often the readiness heartbeat is written between the steps of a long
-#: pass, so the pass stays inside the 30 s readiness window.
-_READINESS_BEAT_SECONDS = 10.0
+#: pass, so the pass stays inside the readiness window.
+_READINESS_BEAT_SECONDS = WORKER_READINESS_WINDOW_SECONDS / 3
 
 
 @cache
@@ -145,13 +144,6 @@ def watch_worker(
         )
         exit_process(70)
         return
-
-
-class StepOverBudget(TimeoutError):
-    """A step that finished, but took longer than the step budget."""
-
-    code = ControllerErrorCode.TIMEOUT.value
-    disposition = Disposition.WAIT
 
 
 def current_worker_instance_id(proc_root: Path = Path("/proc"), pid: int = 1) -> str:
@@ -307,6 +299,9 @@ class Worker:
         self._cadence_at: dict[str, float] = {}
         self._step_heartbeat = step_heartbeat
         self._readiness_at = time.monotonic()
+        # The steps running now, outermost first (a redrive runs inside the
+        # due-wait step), so the watchdog names the innermost one.
+        self._running_steps: list[str] = []
 
     def close(self) -> None:
         """Close worker-owned executors while leaving durable work resumable."""
@@ -382,7 +377,7 @@ class Worker:
             if not self._failures.ready(name):
                 continue
             try:
-                progressed, slow = self._timed(name, source)
+                progressed = self._timed(name, source)
             except Exception as error:  # noqa: BLE001 - isolate one owner, report its fault
                 # A source that keeps failing must not starve the others: the
                 # failure stays visible, the turn moves on, and the failed
@@ -398,7 +393,7 @@ class Worker:
                     traceback=redact_text(traceback.format_exc()),
                 )
                 continue
-            self._settle(name, slow)
+            self._failures.succeeded(name)
             if progressed:
                 self._source_cursor = (index + 1) % len(sources)
                 advanced = True
@@ -407,49 +402,45 @@ class Worker:
         self._run_housekeeping(LifecycleEventKind.HEARTBEAT, self._loop_heartbeat)
         return advanced
 
-    def _timed[Result](
-        self, name: str, call: Callable[[], Result]
-    ) -> tuple[Result, StepOverBudget | None]:
+    def _timed[Result](self, name: str, call: Callable[[], Result]) -> Result:
         """Run one step in the pass thread and time it.
 
         The watchdog beats first, naming the step, so only one step that
         outlives its timeout restarts the worker, never a long pass of short
-        steps. A step slower than the budget is returned as an alarm that names
-        it; a pass with several slow steps writes the readiness heartbeat
-        between them.
+        steps. A step slower than the budget is named by an alarm (observation
+        only: it is scheduled like any other step). A long pass writes the
+        readiness heartbeat between steps, before naming the next one.
         """
-        if self._step_heartbeat is not None:
-            self._step_heartbeat(name)
         if (
             self._loop_heartbeat is not None
             and time.monotonic() - self._readiness_at >= _READINESS_BEAT_SECONDS
         ):
             self._readiness_at = time.monotonic()
             self._run_housekeeping(LifecycleEventKind.HEARTBEAT, self._loop_heartbeat)
+        self._running_steps.append(name)
+        self._beat(name)
         started = time.monotonic()
-        result = call()
+        try:
+            result = call()
+        finally:
+            self._running_steps.pop()
+            if self._running_steps:
+                self._beat(self._running_steps[-1])
         elapsed = time.monotonic() - started
-        if elapsed <= _STEP_BUDGET_SECONDS:
-            return result, None
-        log_event(
-            _LOGGER,
-            "worker.step_over_budget",
-            service="control-worker",
-            step=name,
-            budget_seconds=_STEP_BUDGET_SECONDS,
-            elapsed_seconds=round(elapsed, 1),
-        )
-        return result, StepOverBudget(
-            f"worker step {name} took {elapsed:.0f}s "
-            f"(budget {_STEP_BUDGET_SECONDS:g}s); it delays every other step"
-        )
+        if elapsed > _STEP_BUDGET_SECONDS:
+            log_event(
+                _LOGGER,
+                "worker.step_over_budget",
+                service="control-worker",
+                step=name,
+                budget_seconds=_STEP_BUDGET_SECONDS,
+                elapsed_seconds=round(elapsed, 1),
+            )
+        return result
 
-    def _settle(self, name: str, slow: StepOverBudget | None) -> None:
-        """A step that finished: clear its wait, or keep the over-budget alarm."""
-        if slow is None:
-            self._failures.succeeded(name)
-        else:
-            self._failures.failed(name, slow, disposition(slow))
+    def _beat(self, step: str) -> None:
+        if self._step_heartbeat is not None:
+            self._step_heartbeat(step)
 
     def _run_housekeeping(
         self,
@@ -465,7 +456,7 @@ class Worker:
         if now < self._cadence_at.get(key, now) or not self._failures.ready(key):
             return
         try:
-            _result, slow = self._timed(key, task)
+            self._timed(key, task)
         except Exception as error:  # noqa: BLE001 - isolate one owner, report its fault
             self._failures.failed(key, error, disposition(error))
             log_event(
@@ -478,7 +469,7 @@ class Worker:
                 traceback=redact_text(traceback.format_exc()),
             )
         else:
-            self._settle(key, slow)
+            self._failures.succeeded(key)
             if minimum_interval:
                 self._cadence_at[key] = now + minimum_interval
 
@@ -517,11 +508,11 @@ class Worker:
         if not self._failures.ready(source):
             return
         try:
-            _result, slow = self._timed(source, task)
+            self._timed(source, task)
         except Exception as error:  # noqa: BLE001 - same source custody as normal dispatch
             self._failures.failed(source, error, disposition(error))
         else:
-            self._settle(source, slow)
+            self._failures.succeeded(source)
 
     def _run_model_cache(self) -> bool:
         # The model cache is consumed structurally, like the distribution
