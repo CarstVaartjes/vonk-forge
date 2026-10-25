@@ -557,6 +557,8 @@ def _key_holder(session: Session, key: AdmissionLockKey) -> str | None:
                     "SELECT a.pid, a.application_name FROM pg_locks l "
                     "JOIN pg_stat_activity a ON a.pid = l.pid "
                     "WHERE l.locktype = 'advisory' AND l.granted "
+                    # Advisory keys are per database; pg_locks lists every one.
+                    "AND a.datname = current_database() "
                     "AND l.pid <> pg_backend_pid() AND l.objsubid = 1 "
                     "AND ((l.classid::bigint << 32) | l.objid::bigint) "
                     "= hashtextextended(:key, 0) "
