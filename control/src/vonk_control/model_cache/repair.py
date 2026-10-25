@@ -22,6 +22,7 @@ from ..categorized_errors import InvalidValue
 from ..lifecycle import Reported
 from ..lifecycle.model_cache import ModelCacheAdapter
 from ..model_cache_contract import (
+    CacheOperationKind,
     ModelCacheDownloadPayload,
     ModelCacheOperationPayload,
     ModelCacheRepairCheckpoint,
@@ -36,7 +37,6 @@ from .artifacts import (
     ArtifactSetManifest,
     _optional_digest,
     _sha256_json,
-    _split_transient_bytes,
     _unique_artifacts,
 )
 from .catalog_helpers import _datetime, _iso
@@ -48,6 +48,7 @@ from .errors import (
 )
 from .persistence import _cache_failure, _manifest_of, _write_operation_payload
 from .source_helpers import _is_hf_authority, _request_key
+from .storage import RunningTransfers
 from .views import CacheOperationView
 
 if TYPE_CHECKING:
@@ -174,13 +175,13 @@ class RepairMixin:
                 return cache._operation_view(existing)
         manifest = cache._manifest_for_set(digest)
         transfer = cache._transfer_state_for_manifest(manifest, force=True)
-        repair_bytes = transfer.total_bytes + _split_transient_bytes(manifest, None)
-        waiting_for = ""
-        if repair_bytes > cache.free_bytes():
-            cache._request_storage(
-                repair_bytes, ModelCacheBlockerCode.INSUFFICIENT_RESERVED_STORAGE
-            )
-            waiting_for = ModelCacheBlockerCode.INSUFFICIENT_RESERVED_STORAGE
+        with cache._session() as session:
+            running = cache._running_transfers(session)
+        waiting_for = (
+            ""
+            if cache._storage_fits(manifest, transfer, running, replaces=True)
+            else ModelCacheBlockerCode.INSUFFICIENT_RESERVED_STORAGE
+        )
         capacity = cache._capacity_wait(waiting_for)
         wait_until = None if capacity is None else capacity[1]
         payload = _write_operation_payload(
@@ -271,40 +272,47 @@ class RepairMixin:
         operation: ModelCacheOperation,
         payload: ModelCacheDownloadPayload,
         now: datetime,
+        running: RunningTransfers,
     ) -> bool:
-        """Whether a capacity-blocked operation still lacks the space it needs.
+        """Whether a transfer must wait for NAS space before it is claimed.
 
-        If so the core reschedules it (bounded backoff, never an operator wait).
+        The claim is where bytes start to flow, so every transfer is checked
+        here next to the running ones, however its admission went. A shortfall
+        is a queued wait: the typed ``download_blocked`` reason with the shared
+        retry clock (bounded backoff, never an operator wait), and the storage
+        demand is filed so retention frees the space.
         """
         cache = cast("ModelCacheService", self)
 
-        failure = payload.failure
-        if failure is None or failure.code not in {
-            ModelCacheCode.DOWNLOAD_BLOCKED,
-            ModelCacheCode.CAPACITY,
-        }:
-            return False
         try:
-            needed = payload.transfer.total_bytes + _split_transient_bytes(
-                _manifest_of(payload), None
+            fits = cache._storage_fits(
+                _manifest_of(payload),
+                payload.transfer,
+                running,
+                operation_id=operation.id,
+                replaces=operation.kind == CacheOperationKind.REPAIR
+                or payload.force_refresh,
             )
         except (TypeError, ValueError, ModelCacheError):
             return False
-        if needed <= cache.free_bytes():
+        if fits:
             return False
-        cache._request_storage(
-            needed, ModelCacheBlockerCode.INSUFFICIENT_RESERVED_STORAGE
+        capacity = cache._capacity_wait(
+            ModelCacheBlockerCode.INSUFFICIENT_RESERVED_STORAGE
         )
+        assert capacity is not None
+        failure, due = capacity
         cache._lifecycle.complete(
             operation,
             Reported.failed(
                 Disposition.WAIT,
-                retry_after=now + timedelta(seconds=_RETRY_BASE_SECONDS),
+                retry_after=due,
                 reason=ModelCacheBlockerCode.INSUFFICIENT_RESERVED_STORAGE,
             ),
             now,
             interrupted=False,
         )
+        cache._store_failure(operation, failure)
         return True
 
     def _manifest_for_set(self, digest: str) -> ArtifactSetManifest:

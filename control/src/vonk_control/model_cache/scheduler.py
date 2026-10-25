@@ -445,6 +445,9 @@ class SchedulerMixin:
                     )
                 )
                 cache._refresh_huggingface_cooldown(cooldown_rows, now)
+            # Each claim reserves its remaining bytes in this pass, so the pass
+            # never admits more downloads than the disk holds between them.
+            running = cache._running_transfers(session)
             candidate_ids = list(
                 session.scalars(
                     select(ModelCacheOperation.id)
@@ -578,8 +581,6 @@ class SchedulerMixin:
                         ),
                     )
                     continue
-                if cache._capacity_holds(operation, payload, now):
-                    continue
                 transfers_bytes = (
                     operation.kind == CacheOperationKind.REPAIR
                     or payload.force_refresh
@@ -606,6 +607,10 @@ class SchedulerMixin:
                     and transfers >= transfer_slots
                 ):
                     continue  # due again once a transfer slot is free
+                if transfers_bytes and cache._capacity_holds(
+                    operation, payload, now, running
+                ):
+                    continue
                 if not cache._lifecycle.claim(
                     operation,
                     cache._claim_owner,
@@ -616,4 +621,8 @@ class SchedulerMixin:
                     continue
                 claimed.append((operation.id, operation.kind))
                 transfers += int(transfers_bytes)
+                if transfers_bytes:
+                    running[operation.id] = cache._remaining_bytes(
+                        manifest, payload.transfer
+                    )
         return claimed

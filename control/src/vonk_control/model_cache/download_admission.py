@@ -396,21 +396,25 @@ class DownloadAdmissionMixin:
                     for digest, entry in observation.objects.items()
                 },
             )
+            # A split file is assembled part by part, each part deleted once
+            # appended: the disk peaks at the file plus its largest part.
+            needed = transfer.total_bytes + _split_transient_bytes(manifest, cached)
+            fits = needed <= available_bytes
+            if not fits:
+                cache._request_storage(
+                    needed, ModelCacheBlockerCode.INSUFFICIENT_RESERVED_STORAGE
+                )
         else:
-            available_bytes = cache.free_bytes()
             transfer = cache._transfer_state_for_manifest(
                 manifest, force=False, cached=cached
             )
+            with cache._session() as session:
+                running = cache._running_transfers(session)
+            fits = cache._storage_fits(manifest, transfer, running, cached=cached)
         new_bytes = transfer.total_bytes
-        # A split file is assembled part by part, each part deleted once
-        # appended: the disk peaks at the file plus its largest part.
-        needed = new_bytes + _split_transient_bytes(manifest, cached)
         blockers = []
-        if needed > available_bytes:
+        if not fits:
             blockers.append(ModelCacheBlockerCode.INSUFFICIENT_RESERVED_STORAGE)
-            cache._request_storage(
-                needed, ModelCacheBlockerCode.INSUFFICIENT_RESERVED_STORAGE
-            )
         # Bind reusable content, not the first requester's provenance or the
         # verified-model bindings publication adds to the stored manifest.
         # Observation and live admission may see different transfer checkpoints;
