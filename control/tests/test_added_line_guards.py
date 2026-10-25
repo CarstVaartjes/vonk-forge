@@ -1190,3 +1190,35 @@ def test_added_line_guard_scopes_the_wrapper_and_flags_a_bare_trailing_slash():
     assert check_source("scripts/example.py", mixed, {7}, modes=("listings",))
     slash = 'gh(f"repos/o/r/actions/runs/{run_id}/artifacts/")\n'
     assert check_source("scripts/example.py", slash, {1}, modes=("listings",))
+
+
+def test_added_line_guard_needs_the_wrapper_itself_to_paginate():
+    per_call = (
+        "def gh(*args):\n"
+        '    return run(["gh", "api", *args])\n'
+        'runs = gh("--paginate", "repos/o/r/actions/runs")\n'
+        + "pass\n" * 5
+        + 'listing = gh(f"/repos/o/r/actions/runs/{run_id}/artifacts")\n'
+    )
+    assert check_source("scripts/example.py", per_call, {9}, modes=("listings",))
+    original = (
+        'flags = ["--paginate"]\n'
+        + "pass\n" * 5
+        + 'artifacts = _gh("api", f"repos/{repo}/actions/runs/{run_id}/artifacts")\n'
+    )
+    assert check_source("scripts/example.py", original, {7}, modes=("listings",))
+
+
+def test_added_line_guard_checks_a_direct_multiline_call_in_a_paginating_file():
+    source = (
+        "subprocess.run(\n"
+        '    ["gh", "api", "--paginate", f"/repos/o/r/actions/runs/{run_id}/jobs"]\n'
+        ")\n" + "pass\n" * 5 + "subprocess.run(\n"
+        "    [\n"
+        '        "gh",\n'
+        '        "api",\n'
+        '        f"/repos/o/r/actions/runs/{run_id}/artifacts",\n'
+        "    ]\n"
+        ")\n"
+    )
+    assert check_source("scripts/example.py", source, {13}, modes=("listings",))

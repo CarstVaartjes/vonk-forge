@@ -598,17 +598,25 @@ def check_source(
         # GitHub lists a run's artifacts 30 to a page; a reader of one page
         # silently misses the rest (shard timings, #1900). Read every page or
         # ask for the one artifact by name. A call through a file's own gh
-        # wrapper that passes --paginate pages every page; a download by id is
+        # wrapper whose argv passes --paginate reads every page; a download by id is
         # not a listing. The window is four lines before (workflow
         # continuations) and one after (a split URL).
         rows = source.splitlines()
-        wrapped = re.search(r"[\"']--paginate[\"']", source) is not None
+        # A wrapper: its own argv pages and takes the endpoint as a variable.
+        wrapped = (
+            re.search(
+                r"[\"']gh[\"'],\s*[\"']api[\"'],\s*(?:[\"'][^\"']*[\"'],\s*)*"
+                r"[\"']--paginate[\"'],\s*(?:[\"'][^\"']*[\"'],\s*)*\*?[A-Za-z_]\w*,?\s*\]",
+                source,
+            )
+            is not None
+        )
         noexit_hits.extend(
             f"{path}:{line}: artifact listing reads one page"
             for line, text in enumerate(rows, 1)
             if line in added
             and re.search(r"actions/(?:runs/[^\s\"']*/)?artifacts(?!\w|/[\w{$])", text)
-            and not (wrapped and not re.search(r"\bgh\b[\"',\s]+api\b", text))
+            and not (wrapped and not re.search(r"[\"']gh[\"'],\s*[\"']api[\"']", text))
             and not re.search(
                 r"--paginate|\bpage=|[?&]name=",
                 " ".join(rows[max(line - 5, 0) : line + 1]),
