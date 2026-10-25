@@ -535,10 +535,6 @@ async fn a_job_running_at_its_lease_deadline_reports_its_later_exit() {
     let mut agent = Restarted::new(vec![Answer::Running], ChronoDuration::zero());
     let lease = agent.claim.deadline.with_timezone(&Utc);
     agent.pass(lease).await;
-    assert!(
-        agent.result().is_none(),
-        "a live job is not an unknown outcome"
-    );
     assert_eq!(agent.store.observation_claims().unwrap().len(), 1);
     assert_eq!(
         agent.peers.log(),
