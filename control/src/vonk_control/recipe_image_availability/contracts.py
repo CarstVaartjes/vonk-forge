@@ -625,7 +625,8 @@ def _log_excerpt(error: BaseException | BuildUnsettled) -> str | None:
         value = _failure_detail(error)
     if not isinstance(value, str) or not value.strip():
         return None
-    return value[:1024]
+    # An excerpt is the end of the output: that is where a failure is printed.
+    return value[-1024:]
 
 
 def _recovery_actions(code: str, retryable: bool) -> list[str]:
