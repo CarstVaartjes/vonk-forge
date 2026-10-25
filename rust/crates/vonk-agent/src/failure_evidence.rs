@@ -158,7 +158,7 @@ pub fn exit_facts(text: &str) -> impl Iterator<Item = (&str, &str)> {
                 *key,
                 "exit_code"
                     | EXIT_CAUSE_FIELD
-                    | "oom_killed"
+                    | vonk_agent_protocol::failure_evidence::OOM_KILLED_FIELD
                     | "reason"
                     | "trigger"
                     | "mem_available_bytes"
@@ -646,7 +646,7 @@ pub fn from_failure(operation: &AgentOperation, failure: &Failure) -> FailureDia
         value.preflight.push(property);
     }
     for property in exit_properties(failure) {
-        if value.preflight.len() < 8 {
+        if value.preflight.len() < vonk_agent_protocol::failure_evidence::MAX_PREFLIGHT_PROPERTIES {
             value.preflight.push(property);
         }
     }

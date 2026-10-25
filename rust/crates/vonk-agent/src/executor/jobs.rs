@@ -192,7 +192,9 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                 ),
                 ("exit_code", code.to_string()),
             ] {
-                if diagnostics.preflight.len() < MAX_PREFLIGHT_PROPERTIES {
+                if diagnostics.preflight.len()
+                    < vonk_agent_protocol::failure_evidence::MAX_PREFLIGHT_PROPERTIES
+                {
                     diagnostics
                         .preflight
                         .push(crate::failure_evidence::FailureProperty {
@@ -738,9 +740,6 @@ pub fn prepare_job_invocation(
     job_placement(&plan)?;
     Ok(plan)
 }
-
-/// The preflight slots a diagnostics document holds (its wire bound).
-const MAX_PREFLIGHT_PROPERTIES: usize = 8;
 
 /// The exit cause the helper named for this receipt's process, when it named one.
 pub(super) fn receipt_exit_cause(receipt: &RecipeJobRunResult) -> Option<ExitCause> {

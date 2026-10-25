@@ -45,13 +45,14 @@ impl OutputBreach {
     /// The definite failure of a job whose outputs broke their contract. The
     /// exit and the process logs travel with it; nothing is uploaded.
     pub(in crate::executor) fn failure(self, receipt: &RecipeJobRunResult) -> ExecutionResult {
-        // A process that was killed (the host memory guard, the OOM killer, a
-        // signal) failed by that kill: what it left behind, such as scratch
-        // the kill gave it no chance to clean up, is the kill's consequence,
-        // not a breach of the output contract. Any other ending is judged by
-        // its outputs, and its exit cause is reported beside the breach.
+        // A process whose ending skipped its own cleanup (a SIGKILL from the
+        // host memory guard or the OOM killer, a native crash) failed by that
+        // ending: what it left behind, such as scratch it had no chance to
+        // remove, is the ending's consequence, not a breach of the output
+        // contract. Any other ending is judged by its outputs, and its exit
+        // cause is reported beside the breach.
         let cause = receipt_exit_cause(receipt);
-        if receipt.exit_code != 0 && cause.is_some_and(ExitCause::is_kill) {
+        if receipt.exit_code != 0 && cause.is_some_and(ExitCause::skipped_cleanup) {
             return job_failure(receipt.clone());
         }
         let mut diagnostic = format!("exit_code={}", receipt.exit_code);
