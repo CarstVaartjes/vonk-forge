@@ -307,7 +307,7 @@ def test_agent_identity_wait_requires_current_identity_and_builder_capability(
     from sqlalchemy import create_engine, insert, text
     from vonk_agent_protocol.claims import AgentRuntimeIdentity
     from vonk_agent_protocol.state_machines import NodeIdentityState
-    from vonk_control.models import AgentNode, Base
+    from vonk_control.models import AgentNode, AgentNodeContact, Base
 
     lifecycle = _module()
     node_id = "spk_" + "1" * 32
@@ -372,7 +372,11 @@ def test_agent_identity_wait_requires_current_identity_and_builder_capability(
             insert(AgentNode).values(
                 node_id=node_id,
                 state=NodeIdentityState.ACTIVE,
-                contact_certificate_serial="1234567890",
+            )
+        )
+        connection.execute(
+            insert(AgentNodeContact).values(
+                node_id=node_id, contact_certificate_serial="1234567890"
             )
         )
 
