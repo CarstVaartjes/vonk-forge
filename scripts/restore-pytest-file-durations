@@ -16,6 +16,7 @@ from typing import Any
 SCHEMA_VERSION = 1
 MAX_RUNS = 10
 MAX_ARTIFACTS = 10
+ARTIFACT_PAGE = 100
 MAX_REPORT_BYTES = 1_000_000
 MAX_AGE = timedelta(days=30)
 
@@ -52,12 +53,22 @@ def _valid_files(payload: Any, *, now: datetime) -> dict[str, float]:
 
 def _artifact_names(run_id: str, suite: str, repo: str) -> list[str]:
     prefix = f"pytest-file-durations-{suite}-"
-    artifacts = _gh("api", f"repos/{repo}/actions/runs/{run_id}/artifacts")
     names = []
-    for artifact in artifacts.get("artifacts", []):
-        name = artifact.get("name") if isinstance(artifact, dict) else None
-        if isinstance(name, str) and name.startswith(prefix) and "/" not in name:
-            names.append(name)
+    page = 1
+    # A CI run holds more artifacts than one default page; a shard missing from
+    # the listing would leave the next split unbalanced. Each call has _gh's
+    # timeout and the walk ends at the run's last, short page.
+    while page:
+        artifacts = _gh(
+            "api",
+            f"repos/{repo}/actions/runs/{run_id}/artifacts"
+            f"?per_page={ARTIFACT_PAGE}&page={page}",
+        ).get("artifacts", [])
+        for artifact in artifacts:
+            name = artifact.get("name") if isinstance(artifact, dict) else None
+            if isinstance(name, str) and name.startswith(prefix) and "/" not in name:
+                names.append(name)
+        page = page + 1 if len(artifacts) == ARTIFACT_PAGE else 0
     return sorted(names)[:MAX_ARTIFACTS]
 
 
