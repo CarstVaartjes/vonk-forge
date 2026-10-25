@@ -152,7 +152,7 @@ async fn process_death_at_four_boundaries_recovers_on_an_idle_tick_without_execu
                 results.is_empty(),
                 "missing effect is unknown, not restart failure or completion"
             );
-            assert_eq!(state.observation_claims().unwrap().len(), 1);
+            assert_eq!(state.observation_claims(Utc::now()).unwrap().len(), 1);
             assert!(
                 !root.join("installations").exists(),
                 "observer cannot install"
@@ -161,7 +161,7 @@ async fn process_death_at_four_boundaries_recovers_on_an_idle_tick_without_execu
             assert_eq!(results.len(), 1);
             assert_eq!(results[0].fence, claim.fence);
             assert_eq!(results[0].state, AgentResultState::Succeeded);
-            assert!(state.observation_claims().unwrap().is_empty());
+            assert!(state.observation_claims(Utc::now()).unwrap().is_empty());
             assert!(state.pending_results().unwrap().is_empty());
             if point == 3 {
                 let sent: AgentResult = vonk_agent_protocol::parse_strict(

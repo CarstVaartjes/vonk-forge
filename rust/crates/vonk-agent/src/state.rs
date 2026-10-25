@@ -1038,7 +1038,16 @@ impl StateStore {
     }
 
     /// Reopen exact accepted requests for the shared startup/tick observer.
-    pub fn observation_claims(&mut self) -> Result<Vec<AgentClaim>, StateError> {
+    ///
+    /// A running claim is always observed: its pass at or after the deadline
+    /// makes the final unknown durable. A recorded unknown is observed only
+    /// while its deadline is ahead of `now`; past it the stored unknown is
+    /// final and stays in the delivery spool, so observation ends instead of
+    /// re-probing it on every pass.
+    pub fn observation_claims(
+        &mut self,
+        now: DateTime<Utc>,
+    ) -> Result<Vec<AgentClaim>, StateError> {
         // One maximum-sized accepted claim per pass bounds memory and probe
         // latency. Rotate independently of claim/heartbeat traffic.
         let row = self
@@ -1046,13 +1055,15 @@ impl StateStore {
             .query_row(
                 "SELECT rowid,fence,operation,CASE WHEN length(claim_json)<=?4 THEN claim_json END,deadline FROM operations
              WHERE claim_json IS NOT NULL AND (state=?3 OR
-                (json_valid(CAST(result_json AS TEXT)) AND json_extract(CAST(result_json AS TEXT),'$.result.kind')=?2))
+                (json_valid(CAST(result_json AS TEXT)) AND json_extract(CAST(result_json AS TEXT),'$.result.kind')=?2
+                 AND julianday(deadline) > julianday(?5)))
              ORDER BY (rowid <= ?1),rowid LIMIT 1",
                 params![
                     self.observation_cursor,
                     OutcomeUnknownKind::Unknown.as_str(),
                     LifecycleState::Running.as_str(),
-                    vonk_agent_protocol::MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES as i64
+                    vonk_agent_protocol::MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES as i64,
+                    now.to_rfc3339()
                 ],
                 |row| {
                     Ok((

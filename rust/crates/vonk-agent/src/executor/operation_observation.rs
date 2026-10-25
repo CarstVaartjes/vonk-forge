@@ -422,7 +422,7 @@ pub async fn reobserve_operations<E: Executor>(
     executing: Option<uuid::Uuid>,
     now: DateTime<Utc>,
 ) -> Result<(), StateError> {
-    for claim in state.observation_claims()? {
+    for claim in state.observation_claims(now)? {
         if executing == Some(claim.fence) {
             continue;
         }

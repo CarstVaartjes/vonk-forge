@@ -257,7 +257,7 @@ async fn upgrade_process_death_at_every_custody_seam_reobserves_without_installi
                 client.results.lock().unwrap().is_empty(),
                 "disappearance cannot complete an upgrade"
             );
-            assert_eq!(store.observation_claims().unwrap().len(), 1);
+            assert_eq!(store.observation_claims(Utc::now()).unwrap().len(), 1);
             assert!(
                 matches!(store.begin(&accepted, Utc::now()), Err(StateError::Busy)),
                 "same fence cannot reinstall"
