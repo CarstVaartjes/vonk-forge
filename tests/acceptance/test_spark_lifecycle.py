@@ -4948,10 +4948,10 @@ class SparkLifecycle:
         while time.monotonic() < deadline:
             rows = self._renewal_read(
                 lambda: self._psql(
-                    "SELECT n.contact_certificate_serial,c.state,"
-                    "(c.revoked_at IS NOT NULL)::int "
-                    "FROM agent_node_contacts n JOIN agent_certificates c "
-                    f"ON c.serial='{serial_before}' WHERE n.node_id='{node_id}'"
+                    "SELECT a.serial,c.state,(c.revoked_at IS NOT NULL)::int "
+                    "FROM agent_certificates a JOIN agent_certificates c "
+                    f"ON c.serial='{serial_before}' WHERE a.node_id='{node_id}' "
+                    "AND a.state='active' AND a.revoked_at IS NULL"
                 ),
                 deadline,
             )
@@ -5170,17 +5170,25 @@ class SparkLifecycle:
                         "controller runtime identity differs: "
                         + ",".join(identity_mismatches)
                     )
+                # The serial the renewal proof starts from is the node's one
+                # active certificate in the Controller's identity owner, the
+                # same table on the baseline and the candidate (contact facts
+                # moved tables in between; the Fleet API names no serial). The
+                # Fleet snapshot above proves that certificate is accepted.
                 rows = self._psql(
-                    "SELECT contact_certificate_serial "
-                    f"FROM agent_node_contacts WHERE node_id='{node_id}'"
+                    "SELECT serial FROM agent_certificates "
+                    f"WHERE node_id='{node_id}' AND state='active' "
+                    "AND revoked_at IS NULL"
                 )
                 row_mismatches = []
+                if agent["connection"].get("certificate_state") != "valid":
+                    row_mismatches.append("certificate_state")
                 if len(rows) != 1:
                     row_mismatches.append("row_count")
                 elif len(rows[0]) != 1:
                     row_mismatches.append("column_count")
                 elif SERIAL.fullmatch(rows[0][0]) is None:
-                    row_mismatches.append("contact_certificate_serial")
+                    row_mismatches.append("active_certificate_serial")
                 if row_mismatches:
                     raise LifecycleError(
                         "controller runtime identity is incomplete: "
