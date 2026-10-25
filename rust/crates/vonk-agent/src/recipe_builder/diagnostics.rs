@@ -246,9 +246,7 @@ pub(super) fn sanitized_process_logs(
         stdout: crate::failure_evidence::log_tail(&output.stdout),
         // The tail is taken after Podman's echo of the failed step is bounded,
         // so the step's own error lines above it are what the tail keeps.
-        stderr: crate::failure_evidence::log_tail(&crate::failure_evidence::compact_echoed_step(
-            &output.stderr,
-        )),
+        stderr: crate::failure_evidence::podman_stderr_tail(&output.stderr),
     }
 }
 
@@ -409,6 +407,9 @@ mod tests {
                 .contains("error: subprocess-exited-with-error")
         );
         assert!(evidence.stderr.text.len() < 1024);
+        // The cut echo is reported as dropped, not hidden.
+        assert!(evidence.stderr.truncated);
+        assert!(evidence.stderr.dropped_bytes.unwrap() > 2 * 1024);
         let property = |name: &str| {
             evidence
                 .preflight
@@ -423,6 +424,89 @@ mod tests {
                 .starts_with("RUN apt-get update && curl")
         );
         evidence.validate().unwrap();
+    }
+
+    /// The retained stderr and properties of a failed Podman build.
+    fn build_evidence(stderr: String) -> vonk_agent_protocol::failure_evidence::FailureDiagnostics {
+        let output = ProcessOutput {
+            exit_code: Some(125),
+            success: false,
+            stdout: Vec::new(),
+            stderr: stderr.into_bytes(),
+        };
+        let error = RecipeBuildError::ImageBuild {
+            diagnostic: podman_build_diagnostic(&output),
+            logs: Box::new(sanitized_process_logs(&output)),
+        };
+        let evidence = crate::failure_evidence::from_failure(
+            &vonk_agent_protocol::generated::AgentOperation::RecipeBuildV1,
+            &error.failure_evidence(),
+        );
+        evidence.validate().unwrap();
+        evidence
+    }
+
+    #[test]
+    fn a_long_copy_step_keeps_the_missing_source_its_cause_names() {
+        // Buildah names the missing source after the echoed step: the cause
+        // runs past further `": ` separators and must survive whole.
+        let sources = (0..20)
+            .map(|index| format!("patches/fix-{index:02}-attention-backend.patch"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let evidence = build_evidence(format!(
+            "Error: building at STEP \"COPY {sources} /patches/\": checking on sources under \
+             \"/var/lib/vonk-forge-agent/builds/context\": copier: stat: \
+             \"/patches/fix-07-attention-backend.patch\": no such file or directory\n"
+        ));
+        assert!(
+            evidence.stderr.text.contains(
+                "copier: stat: \"/patches/fix-07-attention-backend.patch\": no such file or directory"
+            ),
+            "{}",
+            evidence.stderr.text
+        );
+        let step = evidence
+            .preflight
+            .iter()
+            .find(|property| property.name == "build_step")
+            .unwrap();
+        assert!(
+            step.value.starts_with("COPY patches/fix-00"),
+            "{}",
+            step.value
+        );
+        assert!(!step.value.contains("copier"), "{}", step.value);
+    }
+
+    #[test]
+    fn a_long_heredoc_step_keeps_the_error_above_it_on_one_line() {
+        let script = (0..120)
+            .map(|index| format!("echo configuring stage {index}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let evidence = build_evidence(format!(
+            "make: *** [Makefile:35: pkg.debian.build] Error 2\n\
+             Error: building at STEP \"RUN <<EOF\n{script}\nEOF\": while running runtime: exit status 2\n"
+        ));
+        let text = &evidence.stderr.text;
+        assert!(
+            text.contains("make: *** [Makefile:35: pkg.debian.build] Error 2"),
+            "{text}"
+        );
+        assert!(
+            text.contains("while running runtime: exit status 2"),
+            "{text}"
+        );
+        assert!(!text.contains("configuring stage 119"), "{text}");
+        // The echo is one line: the heredoc's lines are not the tail's lines.
+        assert_eq!(
+            text.lines()
+                .filter(|line| line.contains("configuring"))
+                .count(),
+            1
+        );
+        assert!(evidence.stderr.truncated);
     }
 
     #[test]

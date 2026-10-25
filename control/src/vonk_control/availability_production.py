@@ -1342,24 +1342,69 @@ def _prebuilt_choice(
     return _recorded_decision(build.policy_report), policy.prebuilt_image
 
 
-#: Podman closes a failed build's stderr by echoing the step it ended at; the
-#: agent reports that step as its own ``build_step`` diagnostic property.
-_PODMAN_STEP_ECHO = "building at STEP "
+#: Podman closes a failed build's stderr by echoing the step it ended at,
+#: ``building at STEP "<step>": <cause>``; the agent reports the step as its
+#: own ``build_step`` property. A RUN step's echo ends ``": while running
+#: runtime:``, which is all that is left of it once an older agent's tail clipped
+#: the front of a long echo.
+_PODMAN_STEP_ECHO = 'building at STEP "'
+_PODMAN_RUN_CLOSE = '": while running runtime:'
 
 
-def _step_output_tail(diagnostics: FailureDiagnostics) -> str:
-    """The failed step's own last output lines, from both streams.
+def _without_step_echo(text: str, *, clipped: bool) -> str:
+    """``text`` with Podman's echo of the failed step reduced to its cause.
+
+    The step ends at the first ``": `` after the marker (the agent's rule), and
+    the cause after it is kept: a COPY names its missing source there. A tail
+    whose front was clipped may hold only the end of a long or heredoc echo;
+    everything up to its RUN close is the echo.
+    """
+    marker = text.rfind(_PODMAN_STEP_ECHO)
+    if marker >= 0:
+        start = text.rfind("\n", 0, marker) + 1
+        close = text.find('": ', marker + len(_PODMAN_STEP_ECHO))
+        return text[:start] + (text[close + 3 :] if close >= 0 else "")
+    close = text.find(_PODMAN_RUN_CLOSE)
+    if clipped and close >= 0:
+        return text[close + 3 :]
+    return text
+
+
+def _keep_end(text: str, limit: int) -> str:
+    """The end of ``text`` within ``limit`` characters, from a line start."""
+    if len(text) <= limit:
+        return text
+    end = text[-limit:]
+    newline = end.find("\n")
+    return end[newline + 1 :] if 0 <= newline < len(end) - 1 else end
+
+
+def _step_output_tail(diagnostics: FailureDiagnostics, limit: int) -> str:
+    """The failed step's own last output, each stream with its own share.
 
     A step prints to stdout and stderr, and Podman then echoes the whole step on
     stderr. Choosing stderr because it was present kept that echo and none of
-    the lines the step printed (a pip error on stdout, a make error above it).
+    the lines the step printed; one joined tail let either stream's noise crowd
+    out the other's cause (pip's error is on stdout, its noise on stderr).
     """
-    return "\n".join(
-        line
-        for text in (diagnostics.stdout.text, diagnostics.stderr.text)
-        for line in safe_text(text).splitlines()
-        if line.strip() and _PODMAN_STEP_ECHO not in line
-    )
+    streams = [
+        "\n".join(line for line in text.splitlines() if line.strip())
+        for text in (
+            safe_text(diagnostics.stdout.text),
+            _without_step_echo(
+                safe_text(diagnostics.stderr.text),
+                clipped=diagnostics.stderr.truncated,
+            ),
+        )
+    ]
+    streams = [text for text in streams if text]
+    if len(streams) < 2:
+        return _keep_end(streams[0], limit) if streams else ""
+    stdout, stderr = streams
+    # Each stream gets half; one shorter than its half leaves the rest to the other.
+    stdout_share = max((limit - 1) // 2, limit - 1 - len(stderr))
+    stderr_share = limit - 1 - min(len(stdout), stdout_share)
+    return f"{_keep_end(stdout, stdout_share)}\n{_keep_end(stderr, stderr_share)}"
 
 
 def _observe_build(
@@ -1455,18 +1500,17 @@ def _observe_build(
         diagnostic = failure.diagnostic
         if failure.diagnostics is not None:
             diagnostics = failure.diagnostics
-            tail = _step_output_tail(diagnostics)
             # The preparation detail is what acceptance and blockers surface.
             # Reserve room within its 512 characters for the exit and final
             # output, including the stage prefix added by failure projection.
             parts: list[str] = []
             if diagnostics.process_exit_code is not None:
                 parts.append(f"exit code {diagnostics.process_exit_code}")
-            if tail:
-                parts.append(tail[-256:])
+            if tail := _step_output_tail(diagnostics, 256):
+                parts.append(tail)
             if parts:
                 detail = "; ".join([detail[:128], *parts])
-            diagnostic = tail[-1024:] or diagnostic
+            diagnostic = _step_output_tail(diagnostics, 1024) or diagnostic
         return BuildUnsettled(
             failure.error_code or RecipeImageCode.BUILD_FAILED,
             detail,

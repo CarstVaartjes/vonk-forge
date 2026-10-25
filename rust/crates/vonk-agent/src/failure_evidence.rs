@@ -16,12 +16,6 @@ use vonk_agent_protocol::generated::AgentOperation;
 const LOG_BYTES: usize = 2048;
 const LOG_LINES: usize = 32;
 const TRUNCATED_LOG_MARKER: &[u8] = b"[earlier diagnostic output truncated]";
-/// How Podman names the step a failed build ended at, as the closing line of its
-/// stderr: `Error: building at STEP "<the whole RUN command>": <cause>`.
-const PODMAN_STEP_ECHO: &str = "building at STEP ";
-/// The bytes of the echoed command kept on that line; the step is reported as
-/// the `build_step` property (bounded to 256 characters) as well.
-const ECHOED_STEP_BYTES: usize = 160;
 
 use vonk_agent_protocol::failure_evidence::is_omission_marker;
 pub use vonk_agent_protocol::failure_evidence::{
@@ -361,41 +355,70 @@ pub fn log_tail(bytes: &[u8]) -> FailureLogTail {
     }
 }
 
-/// Bound the command Podman echoes on the closing `building at STEP "…": <cause>`
-/// line of a failed build's stderr, before the stream's tail is taken.
+/// How Podman names the step a failed build ended at, as the closing line of its
+/// stderr: `Error: building at STEP "<the whole RUN command>": <cause>`.
+const PODMAN_STEP_ECHO: &str = "building at STEP ";
+/// The bytes of the echoed command kept on that line; the step is reported as
+/// the `build_step` property (bounded to 256 characters) as well.
+const ECHOED_STEP_BYTES: usize = 160;
+
+/// The retained tail of a Podman build's stderr, taken after the command
+/// Podman echoes on its closing `building at STEP "…": <cause>` line is bounded.
 ///
-/// Podman repeats the whole RUN command there, and a long one fills the retained
-/// tail by itself: the step's own error lines printed above it were dropped and
-/// the evidence was the echoed command. The cut is at a word boundary so a
-/// redactable value is never split into an unredactable remainder; a heredoc's
-/// line breaks become spaces so the step stays one line.
-pub fn compact_echoed_step(stream: &[u8]) -> std::borrow::Cow<'_, [u8]> {
+/// Podman repeats the whole step there, and a long RUN fills the retained tail
+/// by itself: the step's own error lines printed above it were dropped and the
+/// evidence was the echoed command. The bytes cut from the echo count as
+/// dropped, so the tail's bounds stay truthful.
+pub fn podman_stderr_tail(stream: &[u8]) -> FailureLogTail {
+    let (compacted, cut) = compact_echoed_step(stream);
+    let mut tail = log_tail(&compacted);
+    if cut > 0 {
+        tail.truncated = true;
+        tail.dropped_bytes = tail
+            .dropped_bytes
+            .map(|known| known.saturating_add(cut as u64));
+    }
+    tail
+}
+
+/// The stream with the echoed step's command bounded, and the bytes it cut.
+///
+/// The command ends at the first `": ` after the marker, the rule
+/// `exit_properties` reads the step by: what follows is Podman's cause (a COPY
+/// names the missing source there), and it is kept whole. The cut falls on a
+/// word boundary so a redactable value is never split into an unredactable
+/// remainder; a heredoc's line breaks become spaces so the step stays one line.
+fn compact_echoed_step(stream: &[u8]) -> (std::borrow::Cow<'_, [u8]>, usize) {
     use std::borrow::Cow;
     let marker = format!("{PODMAN_STEP_ECHO}\"");
     let Some(start) = find_last(stream, marker.as_bytes()) else {
-        return Cow::Borrowed(stream);
+        return (Cow::Borrowed(stream), 0);
     };
     let command_start = start + marker.len();
-    let Some(close) = find_last(&stream[command_start..], b"\": ") else {
-        return Cow::Borrowed(stream);
+    let Some(close) = stream[command_start..]
+        .windows(3)
+        .position(|window| window == b"\": ")
+    else {
+        return (Cow::Borrowed(stream), 0);
     };
     if close <= ECHOED_STEP_BYTES {
-        return Cow::Borrowed(stream);
+        return (Cow::Borrowed(stream), 0);
     }
     let command = &stream[command_start..command_start + close];
     let kept = command[..=ECHOED_STEP_BYTES]
         .iter()
         .rposition(u8::is_ascii_whitespace)
         .map_or(&command[..0], |cut| &command[..cut]);
-    let mut compacted = Vec::with_capacity(stream.len() - close + kept.len() + 4);
+    let ellipsis = " …".as_bytes();
+    let mut compacted = Vec::with_capacity(stream.len() - close + kept.len() + ellipsis.len());
     compacted.extend_from_slice(&stream[..command_start]);
     compacted.extend(kept.iter().map(|&byte| match byte {
         b'\n' | b'\r' => b' ',
         byte => byte,
     }));
-    compacted.extend_from_slice(" …".as_bytes());
+    compacted.extend_from_slice(ellipsis);
     compacted.extend_from_slice(&stream[command_start + close..]);
-    Cow::Owned(compacted)
+    (Cow::Owned(compacted), close - kept.len())
 }
 
 fn find_last(haystack: &[u8], needle: &[u8]) -> Option<usize> {

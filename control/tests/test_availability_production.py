@@ -24,6 +24,7 @@ from vonk_agent_protocol import (
     canonical_message,
 )
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
+from vonk_agent_protocol.failure_evidence import FailureDiagnostics
 from vonk_control import availability_production
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.availability_production import (
@@ -1740,6 +1741,95 @@ def test_builder_parent_preserves_typed_failure_and_retry_policy(
     production.close()
 
 
+def _build_diagnostics(
+    stdout: str, stderr: str, *, stderr_truncated: bool = False
+) -> FailureDiagnostics:
+    def tail(text: str, truncated: bool) -> dict[str, object]:
+        return {
+            "text": text,
+            "truncated": truncated,
+            "dropped_bytes": None if truncated else 0,
+            "dropped_lines": None if truncated else 0,
+        }
+
+    return FailureDiagnostics.model_validate(
+        {
+            "process_exit_code": 1,
+            "schema_version": 1,
+            "collected_at": datetime.now(UTC).isoformat(),
+            "phase": "image-build",
+            "category": "runtime",
+            "stdout": tail(stdout, False),
+            "stderr": tail(stderr, stderr_truncated),
+            "versions": [],
+            "sandbox": [],
+            "storage": [],
+            "preflight": [],
+            "collector_errors": [],
+        }
+    )
+
+
+_LONG_RUN = "RUN apt-get update && " + "curl --fail https://example.org/a.tgz && " * 60
+
+
+def test_a_noisy_stream_cannot_crowd_out_the_others_cause() -> None:
+    """skintokens shape: pip's cause ends stdout, 1 KB of noise fills stderr."""
+    noise = "".join(
+        f"  warning: deprecated build backend option {i}\n" for i in range(40)
+    )
+    diagnostics = _build_diagnostics(
+        "Building wheel for flash-attn (setup.py): finished with status 'error'\n"
+        "Failed to build flash-attn\n",
+        noise
+        + f'Error: building at STEP "{_LONG_RUN[:150]} …": while running runtime: '
+        "exit status 1\n",
+    )
+    assert len(noise) > 1024
+    for limit in (256, 1024):
+        tail = availability_production._step_output_tail(diagnostics, limit)
+        assert len(tail) <= limit
+        assert "Failed to build flash-attn" in tail
+        assert tail.endswith("while running runtime: exit status 1")
+        assert "apt-get" not in tail
+
+
+@pytest.mark.parametrize(
+    ("stderr", "truncated", "cause"),
+    [
+        # An older agent's tail: only the end of a 2 KB echo, its marker cut.
+        (_LONG_RUN[-2000:] + '": while running runtime: exit status 1', True, None),
+        # An older agent's multi-line heredoc echo.
+        (
+            "make: *** [Makefile:35: pkg.debian.build] Error 2\n"
+            'Error: building at STEP "RUN <<EOF\n'
+            + "".join(f"echo configuring stage {i}\n" for i in range(20))
+            + 'EOF": while running runtime: exit status 2',
+            False,
+            "make: *** [Makefile:35: pkg.debian.build] Error 2",
+        ),
+        # A COPY names its missing source after the echoed step: kept whole.
+        (
+            (
+                'Error: building at STEP "COPY patches/ /patches/": checking on sources '
+                'under "/ctx": copier: stat: "/patches/x.patch": no such file or directory'
+            ),
+            False,
+            'copier: stat: "/patches/x.patch": no such file or directory',
+        ),
+    ],
+)
+def test_podman_echo_of_the_step_never_stands_in_for_its_cause(
+    stderr: str, truncated: bool, cause: str | None
+) -> None:
+    diagnostics = _build_diagnostics("", stderr, stderr_truncated=truncated)
+    tail = availability_production._step_output_tail(diagnostics, 1024)
+    for fragment in ("curl --fail", "configuring stage", "building at STEP"):
+        assert fragment not in tail, tail
+    if cause is not None:
+        assert cause in tail
+
+
 def test_a_failed_build_step_keeps_its_own_error_lines_and_names_its_spark(
     tmp_path, monkeypatch
 ) -> None:
@@ -1952,7 +2042,8 @@ def test_a_failed_build_step_keeps_its_own_error_lines_and_names_its_spark(
     excerpt = failed.failure["log_excerpt"]
     assert isinstance(detail, str) and isinstance(excerpt, str)
     assert "exit code 1" in detail
-    assert detail.endswith("ERROR: Failed to build installable wheels (flash-attn)")
+    assert "ERROR: Failed to build installable wheels (flash-attn)" in detail
+    assert detail.endswith("while running runtime: exit status 1")
     for text in (detail, excerpt):
         assert "Failed to build flash-attn" in text
         assert "pip install flash-attn" not in text

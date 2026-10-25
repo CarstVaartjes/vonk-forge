@@ -717,6 +717,40 @@ def test_an_exclusive_flock_is_taken_only_through_a_held_lock():
     assert not check_source(agent, unit, {4}, modes=("locks",))
 
 
+@pytest.mark.parametrize(
+    "source",
+    [
+        # The two shapes #1905 removed from the build failure summary.
+        "tail = safe_text(diagnostics.stderr.text or diagnostics.stdout.text)\n",
+        "kept = log_excerpt[:1024]\n",
+        "shown = redact_text(stderr)[:512]\n",
+        "text = diagnostics.stdout.text[:256]\n",
+    ],
+)
+def test_output_bounded_from_its_front_or_one_preferred_stream_fails(source):
+    path = "control/src/vonk_control/availability_production.py"
+    assert check_source(path, source, {1}, modes=("excerpts",))
+    assert not check_source(
+        "control/tests/test_availability_production.py",
+        source,
+        {1},
+        modes=("excerpts",),
+    )
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "tail = log_excerpt[-1024:]\n",
+        "detail = detail[:128]\n",
+        "streams = (diagnostics.stdout.text, diagnostics.stderr.text)\n",
+    ],
+)
+def test_output_kept_from_its_end_from_both_streams_is_allowed(source):
+    path = "control/src/vonk_control/availability_production.py"
+    assert not check_source(path, source, {1}, modes=("excerpts",))
+
+
 # The CI failure on #1735: keep_default_key outlived 1 s on a loaded runner.
 GATEWAY_WAIT = (
     "async def observe():\n"

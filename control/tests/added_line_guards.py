@@ -54,6 +54,7 @@ MODES = (
     "locks",
     "optimistic",
     "clocks",
+    "excerpts",
     "collections",
     "progress",
     "contact-clocks",
@@ -681,6 +682,21 @@ def check_source(
                 )
             ):
                 noexit_hits.append(f"{path}:{line}: artifact listing reads one page")
+    if "excerpts" in modes and not is_test and path.endswith(".py"):
+        # A process's output is bounded from its end, where a failure is
+        # printed, and both streams are read: a log, excerpt or stream text
+        # cut from the front, or ``stderr or stdout`` choosing one stream by
+        # presence, kept a build's echoed command instead of its error (#1905).
+        spelled = re.compile(
+            r"\b\w*(?:log|excerpt|stderr|stdout)\w*(?:\.text)?\)?\[\s*:\s*[\w.]+\s*\]"
+            r"|\bstderr[\w.]*\s+or\s+[\w.()]*stdout"
+            r"|\bstdout[\w.]*\s+or\s+[\w.()]*stderr"
+        )
+        noexit_hits.extend(
+            f"{path}:{line}: output bounded from its front or one stream preferred"
+            for line, text in enumerate(source.splitlines(), 1)
+            if line in added and spelled.search(text)
+        )
     if (
         "locks" in modes
         and not is_test
