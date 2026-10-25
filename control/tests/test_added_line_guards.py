@@ -744,6 +744,10 @@ def test_output_bounded_from_its_front_or_one_preferred_stream_fails(source):
         "tail = log_excerpt[-1024:]\n",
         "detail = detail[:128]\n",
         "streams = (diagnostics.stdout.text, diagnostics.stderr.text)\n",
+        # A raw tool's own error stream, not a retained tail.
+        'detail = (result.stderr or result.stdout or "skopeo copy failed").strip()\n',
+        "page = catalog[:20]\n",
+        "shown = dialog[:3] + login[:8] + logs[:10]\n",
     ],
 )
 def test_output_kept_from_its_end_from_both_streams_is_allowed(source):

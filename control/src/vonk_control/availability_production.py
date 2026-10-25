@@ -1354,15 +1354,21 @@ _PODMAN_RUN_CLOSE = '": while running runtime:'
 def _without_step_echo(text: str, *, clipped: bool) -> str:
     """``text`` with Podman's echo of the failed step reduced to its cause.
 
-    The step ends at the first ``": `` after the marker (the agent's rule), and
-    the cause after it is kept: a COPY names its missing source there. A tail
+    A RUN step ends at its ``": while running runtime:`` close, any other at
+    the first ``": `` after the marker (the agent's rule), and the cause after
+    it is kept: a COPY names its missing source there. A tail
     whose front was clipped may hold only the end of a long or heredoc echo;
     everything up to its RUN close is the echo.
     """
     marker = text.rfind(_PODMAN_STEP_ECHO)
     if marker >= 0:
         start = text.rfind("\n", 0, marker) + 1
-        close = text.find('": ', marker + len(_PODMAN_STEP_ECHO))
+        # A RUN echo ends at its close (a heredoc may hold ``": `` itself);
+        # a step without one (COPY, ADD) at the first ``": ``.
+        command = marker + len(_PODMAN_STEP_ECHO)
+        close = text.find(_PODMAN_RUN_CLOSE, command)
+        if close < 0:
+            close = text.find('": ', command)
         return text[:start] + (text[close + 3 :] if close >= 0 else "")
     close = text.find(_PODMAN_RUN_CLOSE)
     if clipped and close >= 0:

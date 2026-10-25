@@ -1808,6 +1808,18 @@ def test_a_noisy_stream_cannot_crowd_out_the_others_cause() -> None:
             False,
             "make: *** [Makefile:35: pkg.debian.build] Error 2",
         ),
+        # A heredoc writing JSON holds ``": `` in its script: still the echo.
+        (
+            "jq: error: Could not open file /etc/vonk/base.json\n"
+            'Error: building at STEP "RUN <<EOF\n'
+            + "".join(
+                f"echo '{{\"configuring stage {i}\": true}}' >> /etc/vonk/c.json\n"
+                for i in range(20)
+            )
+            + 'EOF": while running runtime: exit status 2',
+            False,
+            "jq: error: Could not open file /etc/vonk/base.json",
+        ),
         # A COPY names its missing source after the echoed step: kept whole.
         (
             (

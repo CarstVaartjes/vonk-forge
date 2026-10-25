@@ -684,13 +684,17 @@ def check_source(
                 noexit_hits.append(f"{path}:{line}: artifact listing reads one page")
     if "excerpts" in modes and not is_test and path.endswith(".py"):
         # A process's output is bounded from its end, where a failure is
-        # printed, and both streams are read: a log, excerpt or stream text
-        # cut from the front, or ``stderr or stdout`` choosing one stream by
-        # presence, kept a build's echoed command instead of its error (#1905).
+        # printed, and a retained diagnostic tail is read from both streams: a
+        # log, excerpt or stream value cut from the front, or a tail's
+        # ``stderr.text or stdout.text`` choosing one stream by presence, kept a
+        # build's echoed command instead of its error (#1905). A raw tool's
+        # ``stderr or stdout`` (skopeo prints its errors on stderr) is not a
+        # retained tail and is not matched.
+        name = r"\b(?:\w+_)?(?:log|excerpt|stderr|stdout)(?:_\w+)?\b"
         spelled = re.compile(
-            r"\b\w*(?:log|excerpt|stderr|stdout)\w*(?:\.text)?\)?\[\s*:\s*[\w.]+\s*\]"
-            r"|\bstderr[\w.]*\s+or\s+[\w.()]*stdout"
-            r"|\bstdout[\w.]*\s+or\s+[\w.()]*stderr"
+            name + r"(?:\.text)?\)?\[\s*:\s*[\w.]+\s*\]"
+            r"|\bstderr\.text\s+or\s+[\w.()]*stdout\.text"
+            r"|\bstdout\.text\s+or\s+[\w.()]*stderr\.text"
         )
         noexit_hits.extend(
             f"{path}:{line}: output bounded from its front or one stream preferred"

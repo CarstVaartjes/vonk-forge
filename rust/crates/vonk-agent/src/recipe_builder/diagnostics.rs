@@ -510,6 +510,35 @@ mod tests {
     }
 
     #[test]
+    fn a_heredoc_whose_script_has_its_own_separator_still_ends_at_the_run_close() {
+        // Catalog heredocs write JSON: `"key": value` inside the script must
+        // not end the echoed step there and leave the script as the "cause".
+        let script = (0..60)
+            .map(|index| format!("echo '{{\"option_{index}\": true}}' >> /etc/vonk/config.json"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let evidence = build_evidence(format!(
+            "jq: error: Could not open file /etc/vonk/base.json\n\
+             Error: building at STEP \"RUN <<EOF\n{script}\nEOF\": while running runtime: exit status 2\n"
+        ));
+        let text = &evidence.stderr.text;
+        assert!(text.contains("jq: error: Could not open file"), "{text}");
+        assert!(!text.contains("option_59"), "{text}");
+        assert!(evidence.stderr.dropped_bytes.unwrap() > 2048);
+        let property = |name: &str| {
+            evidence
+                .preflight
+                .iter()
+                .find(|property| property.name == name)
+                .map(|property| property.value.clone())
+                .unwrap()
+        };
+        assert_eq!(property("exit_code"), "2");
+        assert!(property("build_step").starts_with("RUN <<EOF"));
+        assert!(property("build_step").len() <= 170);
+    }
+
+    #[test]
     fn package_output_and_echoed_steps_cannot_invent_a_host_denial() {
         // Wrong implementation: search the whole build transcript for unrelated
         // AppArmor/permission words instead of Podman's actual failure cause.

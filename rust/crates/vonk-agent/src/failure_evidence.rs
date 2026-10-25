@@ -358,9 +358,20 @@ pub fn log_tail(bytes: &[u8]) -> FailureLogTail {
 /// How Podman names the step a failed build ended at, as the closing line of its
 /// stderr: `Error: building at STEP "<the whole RUN command>": <cause>`.
 const PODMAN_STEP_ECHO: &str = "building at STEP ";
-/// The bytes of the echoed command kept on that line; the step is reported as
-/// the `build_step` property (bounded to 256 characters) as well.
+/// How Podman closes the echo of a failed RUN step; a heredoc's script may
+/// itself contain `": `, so a RUN step ends here, not at the first `": `.
+const PODMAN_RUN_CLOSE: &[u8] = b"\": while running runtime:";
+/// The bytes of the echoed command kept on that line, so the `build_step`
+/// property read from it holds at most about 164 bytes (with the ellipsis).
 const ECHOED_STEP_BYTES: usize = 160;
+
+/// Where the echoed step that starts `rest` ends: at a RUN step's close, or for
+/// a step without one (COPY, ADD) at the first `": `. Every reader of the
+/// echo (the compaction, `exit_properties`) ends the step by this rule.
+fn echoed_step_end(rest: &[u8]) -> Option<usize> {
+    let find = |needle: &[u8]| rest.windows(needle.len()).position(|window| window == needle);
+    find(PODMAN_RUN_CLOSE).or_else(|| find(b"\": "))
+}
 
 /// The retained tail of a Podman build's stderr, taken after the command
 /// Podman echoes on its closing `building at STEP "…": <cause>` line is bounded.
@@ -383,9 +394,9 @@ pub fn podman_stderr_tail(stream: &[u8]) -> FailureLogTail {
 
 /// The stream with the echoed step's command bounded, and the bytes it cut.
 ///
-/// The command ends at the first `": ` after the marker, the rule
-/// `exit_properties` reads the step by: what follows is Podman's cause (a COPY
-/// names the missing source there), and it is kept whole. The cut falls on a
+/// The command ends by [`echoed_step_end`], the rule `exit_properties` reads
+/// the step by: what follows is Podman's cause (a COPY names the missing source
+/// there), and it is kept whole. The cut falls on a
 /// word boundary so a redactable value is never split into an unredactable
 /// remainder; a heredoc's line breaks become spaces so the step stays one line.
 fn compact_echoed_step(stream: &[u8]) -> (std::borrow::Cow<'_, [u8]>, usize) {
@@ -395,10 +406,7 @@ fn compact_echoed_step(stream: &[u8]) -> (std::borrow::Cow<'_, [u8]>, usize) {
         return (Cow::Borrowed(stream), 0);
     };
     let command_start = start + marker.len();
-    let Some(close) = stream[command_start..]
-        .windows(3)
-        .position(|window| window == b"\": ")
-    else {
+    let Some(close) = echoed_step_end(&stream[command_start..]) else {
         return (Cow::Borrowed(stream), 0);
     };
     if close <= ECHOED_STEP_BYTES {
@@ -755,7 +763,9 @@ fn exit_properties(failure: &Failure) -> Vec<FailureProperty> {
             .find_map(|line| line.split_once(PODMAN_STEP_ECHO).map(|(_, rest)| rest))
         {
             // `"RUN python3 x.py": while running runtime: exit status 1`
-            let command = step.split("\": ").next().unwrap_or(step).trim_matches('"');
+            let command = echoed_step_end(step.as_bytes())
+                .map_or(step, |end| &step[..end])
+                .trim_matches('"');
             push("build_step", command.to_owned());
             if let Some((_, status)) = step.rsplit_once("exit status ") {
                 let digits: String = status.chars().take_while(char::is_ascii_digit).collect();
