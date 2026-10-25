@@ -246,6 +246,9 @@ class RevisionsMixin:
 
         This only updates an existing verified set; it cannot resurrect a
         removed cache entry, transfer bytes or authorize a workload.
+
+        Each current digest is resolved once, not on every pass: the work of a
+        pass is proportional to what changed in the catalog, not to its size.
         """
         cache = cast("ModelCacheService", self)
         with cache._session() as session:
@@ -258,6 +261,13 @@ class RevisionsMixin:
             )
             if not held:
                 return
+            catalog = frozenset(
+                session.scalars(
+                    select(CatalogDocumentRevision.id).where(
+                        CatalogDocumentRevision.kind == RunSwitchReasonScopeName.MODEL
+                    )
+                )
+            )
             current = list(
                 session.execute(
                     select(CatalogDocumentRevision.content_digest).where(
@@ -272,14 +282,30 @@ class RevisionsMixin:
                 if (manifest := cache._stored_manifest(row)) is not None
                 for reference in manifest.verified_models
             }
-        for digest in set(current) - bound:
+        unbound = set(current) - bound
+        # A resolved set is fixed by the model's content digest and its
+        # dependencies' digests; an unresolvable digest is retried when the
+        # catalog's model revisions change.
+        known_catalog, known = cache._model_set_resolutions
+        resolved = {
+            digest: known[digest]
+            for digest in unbound
+            if digest in known
+            and (known[digest] is not None or known_catalog == catalog)
+        }
+        cache._model_set_resolutions = (catalog, resolved)
+        for digest in unbound:
+            if digest in resolved and resolved[digest] not in held:
+                continue
             try:
                 manifest = cache.resolve_artifact_set(model_content_sha256=digest)
+                resolved[digest] = manifest.digest
                 if manifest.digest in held and cache._manifest_coverage_complete(
                     manifest
                 ):
                     cache.adopt_verified_set(manifest)
             except ModelCacheError as error:
+                resolved[digest] = None
                 log_event(
                     _LOGGER,
                     "model_cache.binding_recheck",
@@ -287,9 +313,7 @@ class RevisionsMixin:
                     model_content_sha256=digest,
                     code=error.code,
                     detail=error.detail,
-                    next_attempt_at=cache._revision_scan_at.isoformat()
-                    if cache._revision_scan_at is not None
-                    else None,
+                    resume="when the catalog's model revisions change",
                 )
 
     def reconcile_model_revisions(self) -> None:

@@ -172,6 +172,12 @@ class ModelCacheService(
         self._lock = threading.RLock()
         self._closed = threading.Event()
         self._revision_scan_at: datetime | None = None
+        # The catalog's model revision ids at the last revision scan, and each
+        # unbound current model digest's artifact set (None: unresolvable).
+        self._model_set_resolutions: tuple[frozenset[str], dict[str, str | None]] = (
+            frozenset(),
+            {},
+        )
         self._claim_owner = uuid.uuid4().hex
         self._storage_observer = StorageObserver(self)
         self._executor = ThreadPoolExecutor(
