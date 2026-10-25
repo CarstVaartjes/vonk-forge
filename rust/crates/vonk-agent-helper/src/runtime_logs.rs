@@ -64,17 +64,53 @@ const FAILURE_HEADERS: [&str; 12] = [
     "ERROR:",
 ];
 
-/// A block that names itself as a summary of a cause printed above it.
+/// The imperative that sends a reader elsewhere for a failure's cause, and
+/// what it sends them to: a place (`above`, `earlier`) or a record that holds
+/// a cause (`root cause`, `stack trace`).  Matched as whole lowercase words.
+const POINTERS: [&str; 3] = ["see", "check", "refer"];
 ///
-/// vLLM's executor ends a worker failure with "See stack trace for root cause."
-/// and its engine ends with "See root cause above.".  A window that keeps such a
-/// block keeps a pointer instead of the cause, so it ends at the start of the
-/// block and carries what the block reports.
-const SELF_REFERENTIAL: [&str; 3] = [
-    "see stack trace for root cause",
-    "see root cause above",
-    "see above",
+/// `previous` is not a place: it qualifies another noun far more often than it
+/// points back (vLLM's "check the difference ... between the current run and
+/// the previous run", sglang's "since previous check").
+const TARGETS: [&str; 7] = [
+    "above",
+    "earlier",
+    "preceding",
+    "root cause",
+    "trace",
+    "traceback",
+    "stacktrace",
 ];
+
+/// Whether a line names itself as a summary of a cause printed elsewhere.
+///
+/// vLLM ends a worker failure with "See stack trace for root cause.", its
+/// engine with "See root cause above." and its executor with "please check
+/// the stack trace above for the root cause"; sglang, torch and others word the
+/// same pointer their own way.  The decision is therefore by shape: a pointer
+/// followed, in the same sentence, by a place or a record.  The order is what
+/// separates a pointer from a cause that uses the same words: sglang's
+/// `kernel_run_counter did not increase since previous check` and `Trace file
+/// integrity check failed` put the place or record before `check`, and
+/// `ValueError: 8192 is above the limit` has no pointer at all.
+fn points_elsewhere(line: &[u8]) -> bool {
+    let text = String::from_utf8_lossy(line).to_lowercase();
+    text.split(['.', ';', '!', '?']).any(|sentence| {
+        let words: Vec<&str> = sentence
+            .split(|character: char| !(character.is_alphanumeric() || character == '_'))
+            .filter(|word| !word.is_empty())
+            .collect();
+        words
+            .iter()
+            .position(|word| POINTERS.contains(word))
+            .is_some_and(|pointer| {
+                let after = format!(" {} ", words[pointer + 1..].join(" "));
+                TARGETS
+                    .iter()
+                    .any(|target| after.contains(&format!(" {target} ")))
+            })
+    })
+}
 
 /// What a line reporting a failure contains, matched case-sensitively so that
 /// ordinary words (`error_rate`, `errors=0`) do not count.
@@ -93,14 +129,6 @@ const TRACEBACK: &[u8] = b"Traceback (most recent call last)";
 
 fn contains(line: &[u8], needle: &[u8]) -> bool {
     line.len() >= needle.len() && line.windows(needle.len()).any(|window| window == needle)
-}
-
-fn contains_ascii_case(text: &[u8], needle: &str) -> bool {
-    let needle = needle.as_bytes();
-    text.len() >= needle.len()
-        && text
-            .windows(needle.len())
-            .any(|window| window.eq_ignore_ascii_case(needle))
 }
 
 /// The last line that reports a failure: its start, its end, the start of the
@@ -141,8 +169,11 @@ fn last_failure_line(stream: &[u8]) -> Option<(usize, usize, usize, Option<usize
 fn line_content(line: &[u8]) -> String {
     let text = String::from_utf8_lossy(line);
     let mut rest: &str = text.trim_end_matches(['\r', '\n']);
+    // Only a `(Name pid=N) ` opener is a process prefix; a message line such as
+    // `(4, 8) vs (8, 4)` is content.
     if rest.starts_with('(')
         && let Some(index) = rest.find(") ")
+        && rest[..index].contains(" pid=")
     {
         rest = &rest[index + 2..];
     }
@@ -313,9 +344,9 @@ fn window(stream: &[u8]) -> (Vec<Range<usize>>, Range<usize>) {
     } else {
         header_end
     };
-    let points_above = SELF_REFERENTIAL
-        .iter()
-        .any(|marker| contains_ascii_case(&stream[block_start..header_end], marker));
+    let points_above = stream[block_start..header_end]
+        .split_inclusive(|byte| *byte == b'\n')
+        .any(points_elsewhere);
     if header_start > block_start && cause_above.is_some() && points_above {
         return (
             Vec::new(),
@@ -513,22 +544,27 @@ impl ExitCause {
 /// The uncaught exception a workload printed last, as one bounded line: the
 /// closing `<ExceptionType>: <message>` line of its last complete traceback and
 /// the lines its message continues on.  stderr is read first because that is
-/// where Python writes a traceback.
+/// where Python writes a traceback, unless its exception is a pointer that
+/// quotes stdout's: vLLM logs a worker's traceback to stdout while its engine
+/// core's uncaught pointer to it, quoting the worker's message, ends stderr.
 pub fn python_exception(logs: &HostHelperProcessLogs) -> Option<String> {
-    [&logs.stderr.text, &logs.stdout.text]
+    let found: Vec<(String, String)> = [&logs.stderr.text, &logs.stdout.text]
         .into_iter()
-        .find_map(|text| {
+        .filter_map(|text| {
             let stream = text.as_bytes();
             let (start, end) = closing_exception(stream)?;
-            let mut message = line_content(&stream[start..end]).trim().to_owned();
+            let exception = &stream[start..end];
+            let mut message = line_content(exception).trim().to_owned();
             for line in stream[end..].split_inclusive(|byte| *byte == b'\n') {
                 let content = line_content(line);
                 let content = content.trim();
                 // The message ends where other output begins: a blank line, a
-                // timestamped or prefixed log line, a new traceback, or a line
-                // that names its own class (`INFO: ...`, a chained exception).
+                // timestamped log line, a line another process or log record
+                // wrote, a new traceback, or a line that names its own class
+                // (`INFO: ...`, a chained exception).
                 if content.is_empty()
                     || content.starts_with('[')
+                    || line_prefix(line) != line_prefix(exception)
                     || contains(line, TRACEBACK)
                     || is_frame(line)
                     || names_an_exception(line)
@@ -539,8 +575,38 @@ pub fn python_exception(logs: &HostHelperProcessLogs) -> Option<String> {
                 message.push(' ');
                 message.push_str(content);
             }
-            Some(message.chars().take(EXCEPTION_CHARS).collect())
+            Some((
+                message.chars().take(EXCEPTION_CHARS).collect::<String>(),
+                line_content(exception),
+            ))
         })
+        .collect();
+    let (message, line) = found.first()?;
+    // A pointer that quotes another stream's exception (vLLM's "Worker failed
+    // with error '<message>'") yields to that exception; any other exception
+    // on that stream is unrelated output and the pointer stands.  The quotes
+    // are part of the match, so a one-token message (`KeyError: 0`) cannot be
+    // found inside the pointer's other text.
+    let named = points_elsewhere(line.as_bytes())
+        .then(|| {
+            found[1..].iter().find(|(_, other)| {
+                other.split_once(": ").is_some_and(|(_, said)| {
+                    let said = said.trim();
+                    !said.is_empty()
+                        && (line.contains(&format!("'{said}'"))
+                            || line.contains(&format!("\"{said}\"")))
+                })
+            })
+        })
+        .flatten();
+    Some(named.map_or(message, |(other, _)| other).clone())
+}
+
+/// What `line_content` strips from a line: the process and log-record prefix.
+fn line_prefix(line: &[u8]) -> String {
+    let text = String::from_utf8_lossy(line);
+    let text = text.trim_end_matches(['\r', '\n']);
+    text[..text.len() - line_content(line).len()].to_owned()
 }
 
 fn has(text: &str, needles: &[&str]) -> bool {
@@ -941,6 +1007,240 @@ mod tests {
             tail.text
         );
         assert!(tail.text.len() <= RETAINED_BYTES);
+    }
+
+    /// The production shape of 2026-10-25 (operation f16a8f17, a dual-Spark
+    /// vLLM v0.27.0 start): a worker dies in a Triton kernel and the engine
+    /// core reports it in a block that closes "please check the stack trace
+    /// above for the root cause".  From `_initialize_kv_caches` down these are
+    /// the captured lines; the three frames above it were not retained and
+    /// carry v0.27.0's line numbers.  `engine` is the prefix the lines carry on
+    /// this stream and `opener` the line printed before the traceback.
+    fn triton_engine_core(engine: &str, opener: &str) -> String {
+        let mut stream = String::new();
+        for line in [
+            opener,
+            "Traceback (most recent call last):",
+            "  File \"/usr/local/lib/python3.12/dist-packages/vllm/v1/engine/core.py\", line 1318, in run_engine_core",
+            "    engine_core = EngineCoreProc(*args, engine_index=dp_rank, **kwargs)",
+            "  File \"/usr/local/lib/python3.12/dist-packages/vllm/v1/engine/core.py\", line 1074, in __init__",
+            "    super().__init__(",
+            "  File \"/usr/local/lib/python3.12/dist-packages/vllm/v1/engine/core.py\", line 143, in __init__",
+            "    kv_cache_config = self._initialize_kv_caches(vllm_config)",
+            "  File \"/usr/local/lib/python3.12/dist-packages/vllm/v1/engine/core.py\", line 331, in _initialize_kv_caches",
+            "    self.model_executor.initialize_from_config(kv_cache_configs)",
+            "  File \"/usr/local/lib/python3.12/dist-packages/vllm/v1/executor/abstract.py\", line 124, in initialize_from_config",
+            "    compilation_times: list[CompilationTimes] = self.collective_rpc(",
+            "                                                ^^^^^^^^^^^^^^^^^^^^",
+            "  File \"/usr/local/lib/python3.12/dist-packages/vllm/v1/executor/multiproc_executor.py\", line 416, in collective_rpc",
+            "    return future if non_block else future.result()",
+            "                                    ^^^^^^^^^^^^^^^",
+            "  File \"/usr/local/lib/python3.12/dist-packages/vllm/v1/executor/multiproc_executor.py\", line 91, in result",
+            "    return super().result()",
+            "           ^^^^^^^^^^^^^^^^",
+            "  File \"/usr/lib/python3.12/concurrent/futures/_base.py\", line 449, in result",
+            "    return self.__get_result()",
+            "           ^^^^^^^^^^^^^^^^^^^",
+            "  File \"/usr/lib/python3.12/concurrent/futures/_base.py\", line 401, in __get_result",
+            "    raise self._exception",
+            "  File \"/usr/local/lib/python3.12/dist-packages/vllm/v1/executor/multiproc_executor.py\", line 95, in _wait_for_response",
+            "    response = self.aggregate(self.get_response())",
+            "                              ^^^^^^^^^^^^^^^^^^^",
+            "  File \"/usr/local/lib/python3.12/dist-packages/vllm/v1/executor/multiproc_executor.py\", line 405, in get_response",
+            "    raise RuntimeError(",
+            "RuntimeError: Worker failed with error 'Triton Error [CUDA]: an illegal memory access was encountered', please check the stack trace above for the root cause",
+        ] {
+            stream.push_str(&format!("{engine}{line}\n"));
+        }
+        stream
+    }
+
+    /// The worker's own report in vLLM v0.27.0's shape.  `worker_busy_loop`
+    /// adds `traceback.format_exc()` to the exception as a note and then calls
+    /// `logger.exception("WorkerProc hit an exception.")`
+    /// (multiproc_executor.py:1018), so stdout carries the traceback twice,
+    /// every line under the log record's prefix, and a bare prefix last.  The
+    /// production capture never retained this block, and the failing worker
+    /// may have been rank 1's, so this is a reconstruction: the vLLM and torch
+    /// frames are v0.27.0's and torch 2.14.0's, and the model and Triton frames
+    /// below `_dummy_run` are left out.
+    fn triton_worker() -> String {
+        let worker = "(Worker_TP0 pid=512) ERROR 10-25 09:45:46 [multiproc_executor.py:1018] ";
+        let traceback = [
+            "Traceback (most recent call last):",
+            "  File \"/usr/local/lib/python3.12/dist-packages/vllm/v1/executor/multiproc_executor.py\", line 1010, in worker_busy_loop",
+            "    output = func(*args, **kwargs)",
+            "             ^^^^^^^^^^^^^^^^^^^^^",
+            "  File \"/usr/local/lib/python3.12/dist-packages/vllm/v1/worker/gpu_worker.py\", line 708, in compile_or_warm_up_model",
+            "    self.model_runner._dummy_run(size, skip_eplb=True, remove_lora=False)",
+            "  File \"/usr/local/lib/python3.12/dist-packages/torch/utils/_contextlib.py\", line 124, in decorate_context",
+            "    return func(*args, **kwargs)",
+            "           ^^^^^^^^^^^^^^^^^^^^^",
+            "  File \"/usr/local/lib/python3.12/dist-packages/vllm/v1/worker/gpu_model_runner.py\", line 6156, in _dummy_run",
+            "    outputs = self.model(",
+            "              ^^^^^^^^^^^",
+            "RuntimeError: Triton Error [CUDA]: an illegal memory access was encountered",
+        ];
+        let mut stream = String::new();
+        for index in 0..20 {
+            stream.push_str(&format!("(EngineCore pid=403) INFO 10-25 09:45:{index:02} [gpu_worker.py:707] Compile and warming up model for size {}\n", 8192 >> (index % 8)));
+        }
+        stream.push_str(&format!("{worker}WorkerProc hit an exception.\n"));
+        for line in traceback.iter().chain(&traceback) {
+            stream.push_str(&format!("{worker}{line}\n"));
+        }
+        stream.push_str(&format!("{worker}\n"));
+        stream
+    }
+
+    const TRITON_NCCL_AFTER: &str = "NCCL version 2.30.7+cuda13.0\n\n[2026-10-25 09:45:47] spark-3542:512:754 [0] misc/strongstream.cc:424 (ncclStrongStreamSynchronize) NCCL WARN Cuda failure 'an illegal memory access was encountered'\n\n[2026-10-25 09:45:47] spark-3542:512:754 [0] init.cc:2742 (commDestroySync) NCCL WARN commDestroySync: comm 0x3f51d530 rank 0 sync hostStream error 1\n\n[2026-10-25 09:45:47] spark-3542:512:754 [0] allocator.cc:132 (ncclMemFree) NCCL WARN Cuda failure 'an illegal memory access was encountered'\n\n[2026-10-25 09:45:48] spark-3542:512:594 [0] include/alloc.h:166 (ncclCudaHostFree) NCCL WARN Cuda failure 'an illegal memory access was encountered'\n(EngineCore pid=403) ERROR 10-25 09:45:51 [multiproc_executor.py:295] Worker proc VllmWorker-0 died unexpectedly (exit code: None), shutting down executor.\n";
+
+    #[test]
+    fn a_summary_that_asks_to_check_the_trace_above_yields_to_the_worker() {
+        // Wrong implementation this catches: the pointer was a list of exact
+        // phrases, so vLLM's "please check the stack trace above for the root
+        // cause" read as a cause.  Production evidence kept 2048 bytes of the
+        // engine core's own frames on both streams and its exit summary named
+        // the pointer, not the worker's Triton error that it pointed at.
+        let worker_cause = "(Worker_TP0 pid=512) ERROR 10-25 09:45:46 [multiproc_executor.py:1018] RuntimeError: Triton Error [CUDA]: an illegal memory access was encountered\n";
+        let stdout = triton_worker()
+            + &triton_engine_core(
+                "(EngineCore pid=403) ERROR 10-25 09:45:46 [core.py:1355] ",
+                "EngineCore failed to start.",
+            )
+            + TRITON_NCCL_AFTER;
+        let stdout = stdout.as_bytes();
+        let plain = String::from_utf8_lossy(&stdout[stdout.len() - RETAINED_BYTES..]);
+        assert!(!plain.contains(worker_cause));
+        let tail = retain(stdout);
+        assert!(tail.text.contains(worker_cause), "{}", tail.text);
+        assert!(tail.text.len() <= RETAINED_BYTES);
+        // stderr holds only the engine core's uncaught pointer; with no cause
+        // above it, it keeps ending on that pointer.
+        let stderr = "(EngineCore pid=403) /usr/local/lib/python3.12/dist-packages/torch/cuda/__init__.py:63: FutureWarning: The pynvml package is deprecated.\n".repeat(4)
+            + &triton_engine_core("(EngineCore pid=403) ", "Process EngineCore_DP0:");
+        let logs = retain_container(stdout, stderr.as_bytes());
+        assert!(
+            logs.stderr
+                .text
+                .ends_with("please check the stack trace above for the root cause\n")
+        );
+        // The pointer quotes the worker's message, so the exit summary names
+        // the worker's exception, and stops where the next log record begins.
+        let summary = exit_summary(Ok(&exit(1, false, "")), Some(&logs), None);
+        assert!(
+            summary.ends_with(" exception=\"RuntimeError: Triton Error [CUDA]: an illegal memory access was encountered\""),
+            "{summary}"
+        );
+    }
+
+    #[test]
+    fn a_pointer_keeps_the_exit_summary_when_the_other_stream_is_unrelated() {
+        // Wrong implementation this catches: preferring any exception on the
+        // other stream over a pointer named vLLM's caught, non-fatal registry
+        // KeyError as the reason a start failed.
+        let mut stdout = String::from(
+            "(APIServer pid=55) ERROR 10-25 09:40:02 [registry.py:1033] Error in loading model architecture 'InklingForCausalLM'\n",
+        );
+        for line in [
+            "Traceback (most recent call last):",
+            "  File \"/usr/local/lib/python3.12/dist-packages/vllm/model_executor/models/registry.py\", line 1031, in _try_load_model_cls",
+            "    return model.load_model_cls()",
+            "KeyError: 'model_type'",
+        ] {
+            stdout.push_str(&format!(
+                "(APIServer pid=55) ERROR 10-25 09:40:02 [registry.py:1033] {line}\n"
+            ));
+        }
+        let stderr = "(APIServer pid=55) Traceback (most recent call last):\n(APIServer pid=55)   File \"/usr/local/lib/python3.12/dist-packages/vllm/v1/engine/utils.py\", line 1250, in wait_for_engine_startup\n(APIServer pid=55)     raise RuntimeError(\n(APIServer pid=55) RuntimeError: Engine core initialization failed. See root cause above. Failed core proc(s): {}\n";
+        let logs = retain_container(stdout.as_bytes(), stderr.as_bytes());
+        let summary = exit_summary(Ok(&exit(1, false, "")), Some(&logs), None);
+        assert!(
+            summary.ends_with(" exception=\"RuntimeError: Engine core initialization failed. See root cause above. Failed core proc(s): {}\""),
+            "{summary}"
+        );
+    }
+
+    #[test]
+    fn a_one_token_exception_is_not_read_into_a_pointer() {
+        // Wrong implementation this catches: matching the other stream's
+        // message anywhere in the pointer let `RuntimeError: 1` take over the
+        // summary because vLLM's pointer lists `{'EngineCore_DP0': 1}`.
+        let stdout = "(APIServer pid=55) Traceback (most recent call last):\n(APIServer pid=55)   File \"/app/probe.py\", line 9, in probe\n(APIServer pid=55) RuntimeError: 1\n";
+        let stderr = "(APIServer pid=55) Traceback (most recent call last):\n(APIServer pid=55)   File \"/usr/local/lib/python3.12/dist-packages/vllm/v1/engine/utils.py\", line 1250, in wait_for_engine_startup\n(APIServer pid=55)     raise RuntimeError(\n(APIServer pid=55) RuntimeError: Engine core initialization failed. See root cause above. Failed core proc(s): {'EngineCore_DP0': 1}\n";
+        let logs = retain_container(stdout.as_bytes(), stderr.as_bytes());
+        let summary = exit_summary(Ok(&exit(1, false, "")), Some(&logs), None);
+        assert!(
+            summary.ends_with("Failed core proc(s): {'EngineCore_DP0': 1}\""),
+            "{summary}"
+        );
+    }
+
+    #[test]
+    fn a_parenthesised_message_line_is_not_a_process_prefix() {
+        // Wrong implementation this catches: any `(...) ` opener was stripped
+        // as a process prefix, so a message continuing on `(4, 8) vs (8, 4)`
+        // looked like another process's line and was cut off.
+        let stderr = "Traceback (most recent call last):\n  File \"/app/load.py\", line 3, in load\nValueError: weight shape mismatch for lm_head:\n(4, 8) vs (8, 4)\n";
+        let exception = python_exception(&logs("", stderr)).expect("an exception");
+        assert_eq!(
+            exception,
+            "ValueError: weight shape mismatch for lm_head: (4, 8) vs (8, 4)"
+        );
+    }
+
+    #[test]
+    fn a_pointer_is_decided_by_shape_not_by_phrase() {
+        // Wrong implementations this catches: a phrase list misses another
+        // wording of the same pointer, a rule that ignores word order reads a
+        // cause as a pointer, and `previous` as a place reads vLLM's OOM hint
+        // ("check ... the previous run") as one.  Every line is a real upstream message
+        // (vLLM v0.27.0, sglang main, torch 2.14.0, CPython).
+        for pointer in [
+            "Exception: WorkerProc initialization failed due to an exception in a background process. See stack trace for root cause.",
+            "RuntimeError: Engine core initialization failed. See root cause above. Failed core proc(s): {}",
+            "RuntimeError: Worker failed with error 'x', please check the stack trace above for the root cause",
+            "EngineDeadError: EngineCore encountered an issue. See stack trace (above) for the root cause.",
+            "RuntimeError: Initialization failed. Please see the error messages above.",
+            "the kernels failed to build, see the warning above",
+            "RuntimeError: We ran into an error when deserializing the saved file. Please check the warnings above for possible errors.",
+            "(Refer to the full stack trace above for more information.)",
+        ] {
+            assert!(points_elsewhere(pointer.as_bytes()), "{pointer}");
+        }
+        for cause in [
+            "RuntimeError: kv-canary: kernel_run_counter did not increase since previous check for tags=[DECODE] at step=128; canary path is not executing",
+            "Trace file integrity check failed: Expecting value: line 1 column 1 (char 0)",
+            "RuntimeError: vLLM failed to compile the model. The most likely reason for this is that a previous compilation failed, leading to a corrupted compilation artifact. We recommend trying to remove ~/.cache/vllm/torch_compile_cache and try again to see the real issue.",
+            "Use `torch._assert()` to raise a hard AssertionError when the check fails. This error will propagate back the user code that called the compiled function (i.e. Dynamo will not trace any exception handling).",
+            "To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html",
+            "Initial free memory 101.2 GiB, reserved 80.0 GiB memory for KV Cache as specified by kv_cache_memory_bytes config and skipped memory profiling. This does not respect the gpu_memory_utilization config. Only use kv_cache_memory_bytes config when you want manual control of KV cache memory size. If OOM'ed, check the difference of initial free memory between the current run and the previous run where kv_cache_memory_bytes is suggested and update it correspondingly.",
+            "Previous Traceback:",
+            "ValueError: Should be unreachable - `return params` above must be reached: params=None",
+            "The above exception was the direct cause of the following exception:",
+            "During handling of the above exception, another exception occurred:",
+            "CUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.",
+        ] {
+            assert!(!points_elsewhere(cause.as_bytes()), "{cause}");
+        }
+    }
+
+    #[test]
+    fn a_cause_that_says_previous_check_is_not_a_pointer() {
+        // Wrong implementation this catches: an order-blind rule read sglang's
+        // kv-canary failure ("check" and "previous") as a pointer, so with an
+        // earlier traceback in the capture the window gave way to it and kept
+        // neither error.
+        let canary = "RuntimeError: kv-canary: kernel_run_counter did not increase since previous check for tags=[DECODE] at step=128; canary path is not executing\n";
+        let mut stream = b"Traceback (most recent call last):\n  File \"warmup.py\", line 3, in probe\nKeyError: 'optional_feature'\n".to_vec();
+        stream.extend(b"Traceback (most recent call last):\n");
+        for _ in 0..30 {
+            stream.extend(b"  File \"/sgl-workspace/sglang/python/sglang/srt/kv_canary/runner/health_checker.py\", line 73, in _postprocess_on_host\n    raise RuntimeError(\n");
+        }
+        stream.extend(canary.as_bytes());
+        let tail = retain(&stream);
+        assert!(tail.text.ends_with(canary), "{}", tail.text);
+        assert!(!tail.text.contains("optional_feature"), "{}", tail.text);
     }
 
     #[test]
