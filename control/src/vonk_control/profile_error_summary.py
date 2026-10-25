@@ -4,14 +4,14 @@ from __future__ import annotations
 
 import re
 
+from .failure_classification import error_code
 from .logging import redact_text
 
 
 def _error_summary(error: BaseException) -> str:
     """A short, safe description of an error: its type and the start of its text."""
 
-    code = getattr(error, "code", None)
-    name = code if isinstance(code, str) and code else type(error).__name__
+    name = error_code(error) or type(error).__name__
     text = redact_text(" ".join(str(error).split()))[:160]
     return f"{name}: {text}" if text else name
 

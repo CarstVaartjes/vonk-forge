@@ -26,7 +26,7 @@ import errno
 import httpx2
 from psycopg.errors import DeadlockDetected, LockNotAvailable
 from pydantic import ValidationError
-from sqlalchemy.exc import DBAPIError
+from sqlalchemy.exc import DBAPIError, SQLAlchemyError
 from sqlalchemy.exc import OperationalError as DatabaseOperationalError
 from sqlalchemy.exc import TimeoutError as DatabasePoolTimeout
 from sqlalchemy.orm.exc import StaleDataError
@@ -35,6 +35,7 @@ from vonk_agent_protocol import (
     SECURITY_REFUSAL_SUFFIXES,
     WAIT_REASON_DISPOSITION,
     AgentFailureKind,
+    ControllerErrorCode,
     Disposition,
     SecurityRefusalError,
     UnknownOutcomeError,
@@ -80,9 +81,24 @@ def is_redownload(code: str | None) -> bool:
     }
 
 
+def _is_transient_database_error(error: SQLAlchemyError) -> bool:
+    if isinstance(error, (DatabaseOperationalError, DatabasePoolTimeout)):
+        return True
+    return isinstance(error, DBAPIError) and error.connection_invalidated
+
+
 def _own_code(error: BaseException) -> str | None:
     if isinstance(error, SecurityRefusalError) and error.typed_reason is not None:
         return error.typed_reason.value
+    if isinstance(error, SQLAlchemyError):
+        # SQLAlchemy's `.code` is its documentation anchor (`e3q8`), not our
+        # contract. A database fault that clears by itself is the typed
+        # unavailable code; any other database error names no code.
+        return (
+            ControllerErrorCode.UNAVAILABLE.value
+            if _is_transient_database_error(error)
+            else None
+        )
     code = getattr(error, "code", None)
     if isinstance(code, str) and code:
         return code
@@ -148,12 +164,10 @@ def _own_disposition(error: BaseException) -> Disposition | None:
         return (
             None if isinstance(error, httpx2.UnsupportedProtocol) else Disposition.WAIT
         )
-    if isinstance(
-        error, (DatabaseOperationalError, DatabasePoolTimeout, StaleDataError)
-    ):
+    if isinstance(error, StaleDataError):
         return Disposition.WAIT
-    if isinstance(error, DBAPIError):
-        return Disposition.WAIT if error.connection_invalidated else None
+    if isinstance(error, SQLAlchemyError) and _is_transient_database_error(error):
+        return Disposition.WAIT
     if isinstance(error, (ConnectionError, TimeoutError, BlockingIOError)):
         return Disposition.WAIT
     if isinstance(error, OSError) and error.errno in _TRANSIENT_ERRNOS:
