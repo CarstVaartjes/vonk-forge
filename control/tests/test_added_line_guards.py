@@ -1307,3 +1307,42 @@ def test_the_classified_pairwise_progress_check_is_allowed():
     assert check_source(
         "control/src/vonk_control/other.py", source, {2}, modes=("movement",)
     )
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        # The literal parse #1906 removed from the job failure.
+        '.any(|token| token == "exit_cause=host_memory_exhausted")\n',
+        'if detail.contains("exit_cause=oom_killed") {\n',
+        'Some(cause) if cause == "python_exception" => {}\n',
+    ],
+)
+def test_a_new_exit_cause_literal_fails_outside_its_owner(source):
+    agent = "rust/crates/vonk-agent/src/executor/jobs.rs"
+    assert check_source(agent, source, {1}, modes=("exit-causes",))
+    # The enum spells its own tokens; tests may build any summary.
+    assert not check_source(
+        "rust/crates/vonk-agent-protocol/src/failure_evidence.rs",
+        source,
+        {1},
+        modes=("exit-causes",),
+    )
+    unit = "#[cfg(test)]\nmod tests {\n    fn t() {\n        " + source + "    }\n}\n"
+    assert not check_source(agent, unit, {4}, modes=("exit-causes",))
+    typed = (
+        "if ExitCause::of_summary(detail) == Some(ExitCause::HostMemoryExhausted) {\n"
+    )
+    assert not check_source(agent, typed, {1}, modes=("exit-causes",))
+
+
+def test_a_new_exit_cause_literal_fails_in_controller_code():
+    path = "control/src/vonk_control/agent_api/observations.py"
+    for source in (
+        'if item.value == "host_memory_exhausted":\n    pass\n',
+        'if "exit_cause=oom_killed" in detail:\n    pass\n',
+    ):
+        assert check_source(path, source, {1}, modes=("exit-causes",))
+    assert not check_source(
+        path, 'if item.name == "trigger":\n    pass\n', {1}, modes=("exit-causes",)
+    )

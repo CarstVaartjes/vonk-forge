@@ -63,6 +63,7 @@ MODES = (
     "start-budgets",
     "listings",
     "movement",
+    "exit-causes",
 )
 # The agent's messages a Controller test may send only as the stand-in pinned
 # to the agent's shared vector; built by hand they are the Controller's idea of
@@ -80,6 +81,19 @@ SECURITY_EDGES = frozenset(
         "control/src/vonk_control/agent_api/authority.py",
     }
 )
+
+
+# The one owner of how a container's exit cause is spelled and read.
+EXIT_CAUSE_OWNER = "rust/crates/vonk-agent-protocol/src/failure_evidence.rs"
+
+
+@cache
+def exit_cause_tokens() -> frozenset[str]:
+    """The ``ExitCause`` tokens, read from the enum's own ``token`` mapping."""
+    source = (ROOT / EXIT_CAUSE_OWNER).read_text()
+    body = source[source.index("pub fn token(self)") :]
+    body = body[: body.index("\n    }\n")]
+    return frozenset(re.findall(r'Self::\w+ => "([a-z_]+)"', body))
 
 
 @cache
@@ -650,6 +664,26 @@ def check_source(
                 )
             ):
                 noexit_hits.append(f"{path}:{line}: exit code invented, not measured")
+    if (
+        "exit-causes" in modes
+        and not is_test
+        and path.endswith((".rs", ".py"))
+        and path != EXIT_CAUSE_OWNER
+    ):
+        # P10: a container's exit cause is decided through ``ExitCause``
+        # (``of_summary``/``from_token``/``token``), never by matching its
+        # ``exit_cause=`` text or spelling a cause token: five such literal
+        # parses let a job's host-memory kill report an output breach (#1906).
+        test_lines = rust_test_lines(source) if path.endswith(".rs") else set()
+        spelled = re.compile(
+            r"exit_cause="
+            r"|[\"'](?:" + "|".join(sorted(exit_cause_tokens())) + r")[\"']"
+        )
+        noexit_hits.extend(
+            f"{path}:{line}: exit cause spelled outside ExitCause"
+            for line, text in enumerate(source.splitlines(), 1)
+            if line in added and line not in test_lines and spelled.search(text)
+        )
     if "listings" in modes and not is_test:
         # GitHub lists a run's artifacts 30 to a page; a reader of one page
         # silently misses the rest (shard timings, #1900). Read every page or

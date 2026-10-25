@@ -367,7 +367,7 @@ impl<R> RecipeExecutor<'_, R> {
                     })?;
                 let process_running = inspection.running;
                 let failure_diagnostics = inspection.log_error.as_deref()
-                    .filter(|detail| !process_running && detail.split_whitespace().any(|token| token == "exit_cause=host_memory_exhausted"))
+                    .filter(|detail| !process_running && crate::failure_evidence::ExitCause::of_summary(detail) == Some(crate::failure_evidence::ExitCause::HostMemoryExhausted))
                     .map(|detail| {
                     crate::failure_evidence::from_failure(&AgentOperation::RecipeStart, &Failure::new(FailureCode::WorkloadHostMemoryExhausted.as_str()).diagnostic(detail))
                 });

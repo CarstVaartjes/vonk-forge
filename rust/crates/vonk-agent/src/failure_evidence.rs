@@ -19,8 +19,8 @@ const TRUNCATED_LOG_MARKER: &[u8] = b"[earlier diagnostic output truncated]";
 
 use vonk_agent_protocol::failure_evidence::is_omission_marker;
 pub use vonk_agent_protocol::failure_evidence::{
-    EXIT_SUMMARY_EXCEPTION_FIELD, FailureCategory, FailureDiagnostics, FailureLogTail,
-    FailureProperty,
+    EXIT_CAUSE_FIELD, EXIT_SUMMARY_EXCEPTION_FIELD, ExitCause, FailureCategory, FailureDiagnostics,
+    FailureLogTail, FailureProperty,
 };
 
 pub use vonk_agent_protocol::generated::HostHelperProcessLogs as FailureProcessLogs;
@@ -157,8 +157,8 @@ pub fn exit_facts(text: &str) -> impl Iterator<Item = (&str, &str)> {
             matches!(
                 *key,
                 "exit_code"
-                    | "exit_cause"
-                    | "oom_killed"
+                    | EXIT_CAUSE_FIELD
+                    | vonk_agent_protocol::failure_evidence::OOM_KILLED_FIELD
                     | "reason"
                     | "trigger"
                     | "mem_available_bytes"
@@ -729,13 +729,17 @@ pub fn from_failure(operation: &AgentOperation, failure: &Failure) -> FailureDia
         value.preflight.push(property);
     }
     for property in exit_properties(failure) {
-        if value.preflight.len() < 8 {
+        if value.preflight.len() < vonk_agent_protocol::failure_evidence::MAX_PREFLIGHT_PROPERTIES {
             value.preflight.push(property);
         }
     }
-    if failure.diagnostic.as_deref().is_some_and(|text| {
-        text.contains("exit_cause=oom_killed") || text.contains("exit_cause=host_memory_exhausted")
-    }) {
+    if matches!(
+        failure
+            .diagnostic
+            .as_deref()
+            .and_then(ExitCause::of_summary),
+        Some(ExitCause::OomKilled | ExitCause::HostMemoryExhausted)
+    ) {
         value.category = FailureCategory::Capacity;
     }
     value

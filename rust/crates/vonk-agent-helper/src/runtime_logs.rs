@@ -25,7 +25,8 @@
 //!   ahead of the tail, with the omitted middle marked.
 
 use std::ops::Range;
-use vonk_agent_protocol::failure_evidence::omission_marker;
+pub use vonk_agent_protocol::failure_evidence::ExitCause;
+use vonk_agent_protocol::failure_evidence::{EXIT_CAUSE_FIELD, omission_marker};
 use vonk_agent_protocol::generated::{FailureLogTail, HostHelperProcessLogs};
 
 /// Bytes retained per container stream: the protocol's bound for this field.
@@ -509,38 +510,6 @@ pub fn parse_exit(output: &[u8]) -> Option<ContainerExit> {
     })
 }
 
-/// Why a container exited, as a stable token the Controller can show and group.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ExitCause {
-    OomKilled,
-    HostMemoryExhausted,
-    BadArguments,
-    MissingFile,
-    UnsupportedGpuArch,
-    ImageArchMismatch,
-    StartRefused,
-    CrashedBySignal,
-    PythonException,
-    Unclassified,
-}
-
-impl ExitCause {
-    pub fn token(self) -> &'static str {
-        match self {
-            Self::OomKilled => "oom_killed",
-            Self::HostMemoryExhausted => "host_memory_exhausted",
-            Self::BadArguments => "bad_arguments",
-            Self::MissingFile => "missing_file",
-            Self::UnsupportedGpuArch => "unsupported_gpu_arch",
-            Self::ImageArchMismatch => "image_arch_mismatch",
-            Self::StartRefused => "start_refused",
-            Self::CrashedBySignal => "crashed_by_signal",
-            Self::PythonException => "python_exception",
-            Self::Unclassified => "unclassified",
-        }
-    }
-}
-
 /// The uncaught exception a workload printed last, as one bounded line: the
 /// closing `<ExceptionType>: <message>` line of its last complete traceback and
 /// the lines its message continues on.  stderr is read first because that is
@@ -723,7 +692,7 @@ pub fn exit_summary(
         }
         Err(reason) => parts.push(format!("exit_state_unavailable={reason:?}")),
     }
-    parts.push(format!("exit_cause={}", cause.token()));
+    parts.push(format!("{EXIT_CAUSE_FIELD}={}", cause.token()));
     match (logs, log_error) {
         (Some(logs), _) if logs.stdout.text.is_empty() && logs.stderr.text.is_empty() => {
             parts.push("no_output=true".to_owned())

@@ -28,7 +28,6 @@ pub use vonk_agent_protocol::host_memory_guard_policy::{
 fn failure_reason() -> &'static str {
     vonk_agent_protocol::generated::FailureCode::WorkloadHostMemoryExhausted.as_str()
 }
-const EXIT_CAUSE: &str = "host_memory_exhausted";
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Sample {
@@ -166,7 +165,10 @@ fn evidence(sample: Sample, trigger: &str, duration: Duration) -> FailureDiagnos
         collector_errors: vec![],
         preflight: vec![
             property("reason", failure_reason()),
-            property("exit_cause", EXIT_CAUSE),
+            property(
+                vonk_agent_protocol::failure_evidence::EXIT_CAUSE_FIELD,
+                vonk_agent_protocol::failure_evidence::ExitCause::HostMemoryExhausted.token(),
+            ),
             property("trigger", trigger),
             property(
                 "mem_available_bytes",

@@ -1,6 +1,7 @@
 //! Jobs.
 
 use super::*;
+use crate::failure_evidence::ExitCause;
 
 impl<'runtime, 'data, R: ProcessRunner> JobScopeCleanup<'runtime, 'data, R> {
     pub(super) fn new(runtime: &'runtime OciRuntime<'data, R>, job_scope: &'runtime str) -> Self {
@@ -153,8 +154,14 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         // The exit is observed; the stop record is bookkeeping, and a
         // failure to retire it is journaled with its cause.
         self.record_job_stop(job.job_scope);
+        let cause = outcome
+            .diagnostic
+            .as_deref()
+            .and_then(ExitCause::of_summary);
         let reason = if code as u32 == JOB_CANCEL_EXIT_CODE {
             Some("job adapter exited after interruption")
+        } else if cause == Some(ExitCause::HostMemoryExhausted) {
+            Some("the host memory guard stopped the job: host memory exhausted")
         } else {
             (code != 0).then_some("job adapter exited unsuccessfully")
         };
@@ -172,6 +179,30 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         if let Some(logs) = outcome.process_logs {
             diagnostics.stdout = logs.stdout.clone();
             diagnostics.stderr = logs.stderr.clone();
+        }
+        // The helper's exit cause travels in the receipt as the same typed
+        // properties the failure evidence reports: every later judgement of
+        // this exit, after a restart too, reads it from there. The cause is
+        // what the agent decides by; the code only takes a free slot.
+        if let Some(cause) = cause {
+            for (name, value) in [
+                (
+                    crate::failure_evidence::EXIT_CAUSE_FIELD,
+                    cause.token().to_owned(),
+                ),
+                ("exit_code", code.to_string()),
+            ] {
+                if diagnostics.preflight.len()
+                    < vonk_agent_protocol::failure_evidence::MAX_PREFLIGHT_PROPERTIES
+                {
+                    diagnostics
+                        .preflight
+                        .push(crate::failure_evidence::FailureProperty {
+                            name: name.to_owned(),
+                            value,
+                        });
+                }
+            }
         }
         receipt.diagnostics = Some(diagnostics);
         // Publish the real exit independently from output observation.
@@ -614,14 +645,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         if receipt.exit_code == 0 {
             ExecutionResult::done(receipt)
         } else {
-            let logs = receipt.diagnostics.as_ref().map(|diagnostics| {
-                Box::new(crate::failure_evidence::FailureProcessLogs {
-                    exit_code: None,
-                    stdout: diagnostics.stdout.clone(),
-                    stderr: diagnostics.stderr.clone(),
-                })
-            });
-            job_failure(receipt, Some((None, logs)))
+            job_failure(receipt)
         }
     }
 }
@@ -717,41 +741,54 @@ pub fn prepare_job_invocation(
     Ok(plan)
 }
 
-/// A measured nonzero process exit retains its real output and exit account.
-pub(super) fn job_failure(
-    receipt: RecipeJobRunResult,
-    evidence: Option<(
-        Option<String>,
-        Option<Box<crate::failure_evidence::FailureProcessLogs>>,
-    )>,
-) -> ExecutionResult {
+/// The exit cause the helper named for this receipt's process, when it named one.
+pub(super) fn receipt_exit_cause(receipt: &RecipeJobRunResult) -> Option<ExitCause> {
+    receipt
+        .diagnostics
+        .as_ref()?
+        .preflight
+        .iter()
+        .find(|property| property.name == crate::failure_evidence::EXIT_CAUSE_FIELD)
+        .and_then(|property| ExitCause::from_token(&property.value))
+}
+
+/// A measured nonzero process exit retains its real output and exit account,
+/// both read from its receipt, so a restart reports the same failure.
+pub(super) fn job_failure(receipt: RecipeJobRunResult) -> ExecutionResult {
     let reason = receipt
         .reason
         .clone()
         .unwrap_or_else(|| "job adapter exited unsuccessfully".to_owned());
-    let (diagnostic, logs) = evidence.unwrap_or((None, None));
     // A failed job always says what it knows: its output and exit account, or
     // the typed reason there are none.
-    let diagnostic = diagnostic.unwrap_or_else(|| {
-        "exit_state_unavailable=\"helper reported no detail\" logs_unavailable=\"not captured\""
-            .to_owned()
-    });
-    let code = if diagnostic
-        .split_whitespace()
-        .any(|token| token == "exit_cause=host_memory_exhausted")
-    {
+    let cause = receipt_exit_cause(&receipt);
+    let diagnostic = cause.map_or_else(
+        || {
+            "exit_state_unavailable=\"helper reported no detail\" logs_unavailable=\"not captured\""
+                .to_owned()
+        },
+        |cause| {
+            format!(
+                "exit_code={} {}={}",
+                receipt.exit_code,
+                crate::failure_evidence::EXIT_CAUSE_FIELD,
+                cause.token()
+            )
+        },
+    );
+    let code = if cause == Some(ExitCause::HostMemoryExhausted) {
         FailureCode::WorkloadHostMemoryExhausted
     } else {
         FailureCode::RecipeJobRunFailed
     };
-    let mut failure = Failure::new(reason)
-        .code(code)
-        .diagnostic(diagnostic.chars().take(480).collect::<String>())
-        .receipt(receipt);
-    if let Some(logs) = logs {
-        failure = failure.process_logs(Some(*logs));
-    }
-    ExecutionResult::Failed(failure)
+    let logs = outputs::process_logs(&receipt);
+    ExecutionResult::Failed(
+        Failure::new(reason)
+            .code(code)
+            .diagnostic(diagnostic)
+            .process_logs(logs)
+            .receipt(receipt),
+    )
 }
 
 pub(super) fn cancelled_job(
@@ -930,7 +967,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         OperationObservation::confirmed(if receipt.exit_code == 0 {
             ExecutionResult::done(receipt)
         } else {
-            job_failure(receipt, None)
+            job_failure(receipt)
         })
     }
 
