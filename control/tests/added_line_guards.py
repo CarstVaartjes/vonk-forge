@@ -96,6 +96,73 @@ def exit_cause_tokens() -> frozenset[str]:
     return frozenset(re.findall(r'Self::\w+ => "([a-z_]+)"', body))
 
 
+# Controller-observed contact facts have one writer: an upsert in agent_contacts.
+CONTACT_WRITERS = frozenset(
+    {
+        "control/src/vonk_control/agent_contacts.py",
+        "control/src/vonk_control/db/node_facts.py",
+    }
+)
+# Facts only the contact row has; ``last_seen_at``, ``protocol_version`` and
+# ``management_address`` also name unrelated fields, so for those only a
+# receiver named for the contact row counts.
+_CONTACT_ONLY = frozenset(
+    {
+        "contact_certificate_serial",
+        "contact_observation_digest",
+        "contact_repeated_evidence",
+        "management_observed_at",
+        "recipe_observation_http_status",
+        "recipe_observation_status_at",
+    }
+)
+_CONTACT_SHARED = frozenset({"last_seen_at", "protocol_version", "management_address"})
+
+
+def contact_writes(source: str) -> list[int]:
+    """Lines writing a contact fact outside the one writer module."""
+    if "contact" not in source and "AgentNodeContact" not in source:
+        return []
+    found: set[int] = set()
+    tree = ast.parse(source)
+    # Names bound to a contact row: ``row = session.get(AgentNodeContact, ...)``.
+    rows = {
+        target.id
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Assign | ast.AnnAssign)
+        and node.value is not None
+        and "AgentNodeContact" in ast.unparse(node.value)
+        for target in (node.targets if isinstance(node, ast.Assign) else [node.target])
+        if isinstance(target, ast.Name)
+    }
+    for node in ast.walk(tree):
+        targets: list[ast.expr] = []
+        if isinstance(node, ast.Assign):
+            targets = list(node.targets)
+        elif isinstance(node, ast.AugAssign | ast.AnnAssign):
+            targets = [node.target]
+        for target in targets:
+            if isinstance(target, ast.Attribute) and (
+                target.attr in _CONTACT_ONLY
+                or target.attr in _CONTACT_SHARED
+                and (
+                    "contact" in ast.unparse(target.value).lower()
+                    or isinstance(target.value, ast.Name)
+                    and target.value.id in rows
+                )
+            ):
+                found.add(target.lineno)
+        if isinstance(node, ast.Call):
+            name = ast.unparse(node.func).split(".")[-1]
+            if name == "AgentNodeContact" or (
+                name in {"insert", "update", "delete"}
+                and node.args
+                and ast.unparse(node.args[0]).split(".")[-1] == "AgentNodeContact"
+            ):
+                found.add(node.lineno)
+    return sorted(found)
+
+
 @cache
 def security_refusals() -> frozenset[str]:
     """Derive refusal subclasses, including imported aliases, from current code."""
@@ -761,6 +828,18 @@ def check_source(
     hits: list[tuple[int, str]] = []
     if "optimistic" in modes and python and path.startswith("control/src/"):
         hits.extend((line, optimistic.KIND) for line in optimistic.scan_source(source))
+        if not is_security_edge(path) and not path.startswith(
+            "control/src/vonk_control/enrollment/"
+        ):
+            hits.extend(
+                (line, optimistic.NODE_KIND)
+                for line in optimistic.scan_agent_node_locks(source)
+            )
+        if path not in CONTACT_WRITERS:
+            hits.extend(
+                (line, "contact fact written outside agent_contacts (one upsert path)")
+                for line in contact_writes(source)
+            )
         classified = classified_write_lines(path, source)
         hits.extend(
             (line, optimistic.WRITE_KIND)

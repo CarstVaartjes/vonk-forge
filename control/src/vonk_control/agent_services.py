@@ -9,7 +9,6 @@ from typing import Any
 from sqlalchemy.orm import Session, sessionmaker
 
 from .agent_api import AgentApiServices
-from .auth import AgentSource
 from .capabilities import CapabilityRegistry
 from .capability_contract import ControllerCapability
 from .enrollment import EnrollmentService
@@ -149,11 +148,6 @@ def build_agent_services(
         sessions,
         clock=clock,
     )
-
-    def observe_contact(session: Session, source: AgentSource) -> None:
-        presence.observe_in_session(session, source)
-
-    operations.set_contact_consumer(observe_contact)
 
     def build_host_authority() -> HostRuntimeAuthorityService:
         host_runtime_key_path = settings.host_runtime_grant_private_key_path

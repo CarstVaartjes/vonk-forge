@@ -160,7 +160,7 @@ def test_slow_ingress_finishes_once_and_dual_previews_become_loadable(
 def test_profile_observation_cannot_turn_statement_reads_into_writes(postgres_engine):
     """Catches a new projection writer silently committing in autocommit mode."""
     from sqlalchemy.orm import sessionmaker
-    from vonk_control.models import AgentNode, Base
+    from vonk_control.models import AgentNode, AgentNodeContact, Base
     from vonk_control.profile_read_observation import profile_read
 
     Base.metadata.create_all(postgres_engine)
@@ -172,7 +172,7 @@ def test_profile_observation_cannot_turn_statement_reads_into_writes(postgres_en
         with sessions() as session:
             assert session.get(AgentNode, node_id) is None
             with pytest.raises(RuntimeError, match="database write"):
-                session.execute(update(AgentNode).values(last_seen_at=None))
+                session.execute(update(AgentNodeContact).values(last_seen_at=None))
             session.add(AgentNode(node_id=node_id))
             with pytest.raises(RuntimeError, match="database flush"):
                 session.flush()

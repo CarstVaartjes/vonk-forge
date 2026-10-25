@@ -25,7 +25,7 @@ from cryptography.x509.oid import NameOID
 from fastapi.testclient import TestClient
 from httpx2 import ASGITransport, AsyncClient, Response
 from sqlalchemy import create_engine, delete, event, select
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import sessionmaker
 from starlette.types import Message
 from vonk_agent_protocol import CompiledExecutionPlan as AgentCompiledExecutionPlan
 from vonk_agent_protocol import (
@@ -70,7 +70,7 @@ from vonk_control.agent_api import (
 )
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.api import create_app
-from vonk_control.auth import Actor, AgentSource, TokenCodec
+from vonk_control.auth import Actor, TokenCodec
 from vonk_control.ca_issuance_contract import CertificateIssuanceBinding
 from vonk_control.enrollment import EnrollmentService
 from vonk_control.enrollment_bootstrap import EnrollmentBootstrapConfig
@@ -105,6 +105,7 @@ from vonk_forge_contracts import RecipeDefinition, document_sha256
 
 from .agent_fences import fenced_attempt, fenced_operation
 from .ca_test_authority import FixtureCertificateAuthority
+from .node_contacts import contact_row
 from .stored_documents_support import valid_policy_report
 from .test_agent_jobs import canonical_start_payload
 from .test_catalog_revision_collection import Catalog
@@ -397,11 +398,6 @@ def make_agent_system(tmp_path, *, engine=None, authority=None):
         clock=clock,
     )
     operations = AgentJobService(sessions, clock=clock)
-
-    def observe_contact(session: Session, source: AgentSource) -> None:
-        presence.observe_in_session(session, source)
-
-    operations.set_contact_consumer(observe_contact)
     controller_ca_pem, controller_ca_fingerprint = _controller_ca()
     services = AgentApiServices(
         enrollment=EnrollmentService(sessions, authority or Authority(), clock=clock),
@@ -2137,8 +2133,10 @@ def test_claim_requires_a_trusted_policy_bounded_source(agent_system) -> None:
     )
     assert outside.status_code == 422
     with services.sessions() as session:
-        assert session.get(AgentNode, NODE_A).management_observed_at is None
-        assert session.get(AgentNode, NODE_A).last_seen_at is None
+        assert (
+            contact_row(session.get(AgentNode, NODE_A)).management_observed_at is None
+        )
+        assert contact_row(session.get(AgentNode, NODE_A)).last_seen_at is None
 
 
 def test_authenticated_claim_persists_certificate_bound_source(agent_system) -> None:
@@ -2150,33 +2148,16 @@ def test_authenticated_claim_persists_certificate_bound_source(agent_system) -> 
     with services.sessions() as session:
         presence = session.get(AgentNode, NODE_A)
         assert presence is not None
-        assert presence.contact_certificate_serial == "serial-a"
+        assert contact_row(presence).contact_certificate_serial == "serial-a"
         assert (
             session.get(
-                AgentCertificate, presence.contact_certificate_serial
+                AgentCertificate, contact_row(presence).contact_certificate_serial
             ).fingerprint
             == "fingerprint-serial-a"
         )
-        assert presence.management_address == "10.0.0.42"
-        assert presence.management_observed_at.replace(tzinfo=UTC) == clock.now
-
-
-def test_claim_uses_atomic_presence_consumer_not_post_commit(
-    agent_system,
-    monkeypatch,
-) -> None:
-    client, services, _, _ = agent_system
-
-    def reject_post_commit(_source) -> None:
-        raise AssertionError("presence must be written inside the queue transaction")
-
-    monkeypatch.setattr(services.presence, "observe", reject_post_commit)
-
-    response = client.post("/agent/claim", headers=agent_headers(NODE_A, "serial-a"))
-
-    assert response.status_code == 204
-    with services.sessions() as session:
-        assert session.get(AgentNode, NODE_A) is not None
+        assert contact_row(presence).management_address == "10.0.0.42"
+        observed = contact_row(presence).management_observed_at
+        assert observed is not None and observed.replace(tzinfo=UTC) == clock.now
 
 
 @pytest.mark.parametrize(
@@ -2373,7 +2354,6 @@ def test_claim_rejects_string_encoded_numeric_fields(
 
 def test_authenticated_heartbeat_preserves_claim_advertised_protocol_after_exact_fence_validation(
     agent_system,
-    monkeypatch,
 ) -> None:
     client, services, _, clock = agent_system
     services.operations.enqueue(
@@ -2391,16 +2371,11 @@ def test_authenticated_heartbeat_preserves_claim_advertised_protocol_after_exact
     with services.sessions.begin() as session:
         node = session.get(AgentNode, NODE_A)
         assert node is not None
-        node.last_seen_at = None
+        contact_row(node).last_seen_at = None
     clock.now += timedelta(seconds=5)
     progress = {key: claim[key] for key in ("fence",)} | {
         "progress": {"phase": "checking"}
     }
-
-    def reject_post_commit(_source) -> None:
-        raise AssertionError("presence must be written inside the queue transaction")
-
-    monkeypatch.setattr(services.presence, "observe", reject_post_commit)
 
     response = client.post(
         "/agent/heartbeat",
@@ -2415,17 +2390,18 @@ def test_authenticated_heartbeat_preserves_claim_advertised_protocol_after_exact
     with services.sessions() as session:
         node = session.get(AgentNode, NODE_A)
         assert node is not None
-        assert node.last_seen_at.replace(tzinfo=UTC) == clock.now
-        assert node.protocol_version == 4
+        seen = contact_row(node).last_seen_at
+        assert seen is not None and seen.replace(tzinfo=UTC) == clock.now
+        assert contact_row(node).protocol_version == 4
         presence = session.get(AgentNode, NODE_A)
         assert presence is not None
-        assert presence.management_address == "10.0.0.43"
-        assert presence.management_observed_at.replace(tzinfo=UTC) == clock.now
+        assert contact_row(presence).management_address == "10.0.0.43"
+        observed = contact_row(presence).management_observed_at
+        assert observed is not None and observed.replace(tzinfo=UTC) == clock.now
 
 
 def test_authenticated_result_preserves_claim_advertised_protocol_after_exact_fence_validation(
     agent_system,
-    monkeypatch,
 ) -> None:
     client, services, _, clock = agent_system
     services.operations.enqueue(
@@ -2443,17 +2419,12 @@ def test_authenticated_result_preserves_claim_advertised_protocol_after_exact_fe
     with services.sessions.begin() as session:
         node = session.get(AgentNode, NODE_A)
         assert node is not None
-        node.last_seen_at = None
+        contact_row(node).last_seen_at = None
     clock.now += timedelta(seconds=5)
     result = {key: claim[key] for key in ("fence",)} | {
         "state": "succeeded",
         "result": {},
     }
-
-    def reject_post_commit(_source) -> None:
-        raise AssertionError("presence must be written inside the queue transaction")
-
-    monkeypatch.setattr(services.presence, "observe", reject_post_commit)
 
     response = client.post(
         "/agent/result",
@@ -2468,12 +2439,14 @@ def test_authenticated_result_preserves_claim_advertised_protocol_after_exact_fe
     with services.sessions() as session:
         node = session.get(AgentNode, NODE_A)
         assert node is not None
-        assert node.last_seen_at.replace(tzinfo=UTC) == clock.now
-        assert node.protocol_version == 4
+        seen = contact_row(node).last_seen_at
+        assert seen is not None and seen.replace(tzinfo=UTC) == clock.now
+        assert contact_row(node).protocol_version == 4
         presence = session.get(AgentNode, NODE_A)
         assert presence is not None
-        assert presence.management_address == "10.0.0.44"
-        assert presence.management_observed_at.replace(tzinfo=UTC) == clock.now
+        assert contact_row(presence).management_address == "10.0.0.44"
+        observed = contact_row(presence).management_observed_at
+        assert observed is not None and observed.replace(tzinfo=UTC) == clock.now
 
 
 def test_failed_stop_result_never_writes_health_observation(agent_system) -> None:
@@ -2516,8 +2489,8 @@ def test_untrusted_and_stale_requests_do_not_record_agent_contact(agent_system) 
     with services.sessions() as session:
         node = session.get(AgentNode, NODE_A)
         assert node is not None
-        assert node.last_seen_at is None
-        assert node.protocol_version is None
+        assert contact_row(node).last_seen_at is None
+        assert contact_row(node).protocol_version is None
 
     services.operations.enqueue(
         parent(services.sessions, clock).id,
@@ -2532,9 +2505,11 @@ def test_untrusted_and_stale_requests_do_not_record_agent_contact(agent_system) 
         presence = session.get(AgentNode, NODE_A)
         assert node is not None
         assert presence is not None
-        observed_at = presence.management_observed_at.replace(tzinfo=UTC)
-        node.last_seen_at = None
-        node.protocol_version = None
+        recorded = contact_row(presence).management_observed_at
+        assert recorded is not None
+        observed_at = recorded.replace(tzinfo=UTC)
+        contact_row(node).last_seen_at = None
+        contact_row(node).protocol_version = None
     clock.now += timedelta(seconds=5)
     stale = {
         "fence": str(uuid.uuid4()),
@@ -2555,12 +2530,13 @@ def test_untrusted_and_stale_requests_do_not_record_agent_contact(agent_system) 
     with services.sessions() as session:
         node = session.get(AgentNode, NODE_A)
         assert node is not None
-        assert node.last_seen_at is None
-        assert node.protocol_version is None
+        assert contact_row(node).last_seen_at is None
+        assert contact_row(node).protocol_version is None
         presence = session.get(AgentNode, NODE_A)
         assert presence is not None
-        assert presence.management_address == "10.0.0.42"
-        assert presence.management_observed_at.replace(tzinfo=UTC) == observed_at
+        assert contact_row(presence).management_address == "10.0.0.42"
+        observed = contact_row(presence).management_observed_at
+        assert observed is not None and observed.replace(tzinfo=UTC) == observed_at
 
 
 @pytest.mark.parametrize("version", (True, 3, 5))
@@ -2582,8 +2558,8 @@ def test_unsupported_protocol_version_is_rejected_without_recording_contact(
     with services.sessions() as session:
         node = session.get(AgentNode, NODE_A)
         assert node is not None
-        assert node.last_seen_at is None
-        assert node.protocol_version is None
+        assert contact_row(node).last_seen_at is None
+        assert contact_row(node).protocol_version is None
 
 
 @pytest.mark.parametrize("mutation", ("revoked", "retired", "expired", "fingerprint"))

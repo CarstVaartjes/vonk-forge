@@ -26,6 +26,7 @@ from vonk_control.job_documents import RunSwitchJobPayload
 from vonk_control.lifecycle.evidence import Residue
 from vonk_control.models import (
     AgentNode,
+    AgentNodeContact,
     CatalogDocumentRevision,
     FleetProfile,
     FleetProfileApplication,
@@ -193,8 +194,6 @@ def test_selected_profile_reconciles_a_newly_enrolled_spark(
             AgentNode(
                 node_id=_node_id(99),
                 state="active",
-                protocol_version=1,
-                last_seen_at=NOW,
                 inventory_snapshot=inventory_items_fixture(
                     _node_id(99),
                     observed_at=NOW,
@@ -202,6 +201,7 @@ def test_selected_profile_reconciles_a_newly_enrolled_spark(
                         {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
                     ),
                 ),
+                contact=AgentNodeContact(protocol_version=1, last_seen_at=NOW),
             )
         )
     with sessions.begin() as session:

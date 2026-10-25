@@ -29,6 +29,7 @@ from vonk_control.run_switch_contract import (
     RunSwitchCleanupPreviewRequest,
 )
 
+from .node_contacts import contact_row
 from .test_recipe_operations import NOW, installed_recipe, setup_services
 from .test_run_switch_operations import (
     RecordingArtifactExecutor,
@@ -67,7 +68,9 @@ def _record_original_install_attempts(sessions, installation_id: str) -> None:
                     attempt=1,
                     fence=str(uuid.uuid4()),
                     lease_deadline=NOW,
-                    agent_certificate_serial=presence.contact_certificate_serial,
+                    agent_certificate_serial=contact_row(
+                        presence
+                    ).contact_certificate_serial,
                     state="succeeded",
                     result=evidence,
                 )
@@ -223,7 +226,9 @@ def test_postgres_new_review_keeps_the_reconciled_rank_after_a_cancelled_rank(
                 attempt=1,
                 fence=fence,
                 lease_deadline=deadline,
-                agent_certificate_serial=presence.contact_certificate_serial,
+                agent_certificate_serial=contact_row(
+                    presence
+                ).contact_certificate_serial,
                 state="running",
             )
         )

@@ -14,7 +14,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import update
 from vonk_control.fleet_projection import FleetProjection
 from vonk_control.fleet_stream import FleetStream
-from vonk_control.models import AgentNode, FleetStreamEvent
+from vonk_control.models import AgentNode, AgentNodeContact, FleetStreamEvent
 from vonk_control.observation_transfer import (
     ObservationTransferResponse,
     observation_response,
@@ -43,7 +43,13 @@ def _export_saved_event_recovery(output: Path) -> None:
     engine, sessions, repository = _production_stream_store()
     try:
         with sessions.begin() as session:
-            session.add(AgentNode(node_id=NODE_ID, state="active", last_seen_at=NOW))
+            session.add(
+                AgentNode(
+                    node_id=NODE_ID,
+                    state="active",
+                    contact=AgentNodeContact(last_seen_at=NOW),
+                )
+            )
             event = repository.append_in_session(session, _operation_draft(1))
             payload = _operation_draft(1).payload.model_dump(mode="json")
             # Keep the SQL size/type/identity constraints enabled. An integer

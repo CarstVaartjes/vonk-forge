@@ -17,6 +17,7 @@ from vonk_control.fleet_profiles import (
 )
 from vonk_control.models import (
     AgentNode,
+    AgentNodeContact,
     Base,
     CatalogDocumentRevision,
     FleetProfileApplication,
@@ -28,6 +29,7 @@ from vonk_control.profile_port_promises import PortPromiseTaken
 from vonk_control.recipe_operation_worker import RecipeOperationWorker
 from vonk_forge_contracts import RecipeDefinition, document_sha256
 
+from .node_contacts import contact_row
 from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
 from .test_fleet_profiles import (
     _assessment,
@@ -213,8 +215,6 @@ def test_selected_empty_profile_keeps_new_spark_idle_after_restart_and_saved_edi
             AgentNode(
                 node_id=joined_node,
                 state="active",
-                protocol_version=1,
-                last_seen_at=NOW,
                 inventory_snapshot=inventory_items_fixture(
                     joined_node,
                     observed_at=NOW,
@@ -222,6 +222,7 @@ def test_selected_empty_profile_keeps_new_spark_idle_after_restart_and_saved_edi
                         {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
                     ),
                 ),
+                contact=AgentNodeContact(protocol_version=1, last_seen_at=NOW),
             )
         )
     # Editing a saved profile is authoring only. Even an edit that assigns the
@@ -297,8 +298,6 @@ def test_blocked_roster_preview_retries_without_advancing_selection(
             AgentNode(
                 node_id=joined_node,
                 state="active",
-                protocol_version=1,
-                last_seen_at=NOW,
                 inventory_snapshot=inventory_items_fixture(
                     joined_node,
                     observed_at=NOW,
@@ -306,6 +305,7 @@ def test_blocked_roster_preview_retries_without_advancing_selection(
                         {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
                     ),
                 ),
+                contact=AgentNodeContact(protocol_version=1, last_seen_at=NOW),
             )
         )
 
@@ -368,8 +368,6 @@ def test_revoked_selected_actor_does_not_block_sibling_worker_and_roster_recover
             AgentNode(
                 node_id=joined_node,
                 state="active",
-                protocol_version=1,
-                last_seen_at=NOW,
                 inventory_snapshot=inventory_items_fixture(
                     joined_node,
                     observed_at=NOW,
@@ -377,6 +375,7 @@ def test_revoked_selected_actor_does_not_block_sibling_worker_and_roster_recover
                         {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
                     ),
                 ),
+                contact=AgentNodeContact(protocol_version=1, last_seen_at=NOW),
             )
         )
         author = session.scalar(select(User).where(User.subject == "admin"))
@@ -869,13 +868,13 @@ def test_dual_spark_loss_during_load_exposes_recovery_admission_and_heals(
     # return must not require another profile load or a roster change.
     with sessions.begin() as session:
         for node in session.scalars(select(AgentNode)):
-            node.last_seen_at = clock[0] - timedelta(minutes=10)
+            contact_row(node).last_seen_at = clock[0] - timedelta(minutes=10)
     clock[0] += timedelta(minutes=2)
     service.tick()
     with sessions.begin() as session:
         for node in session.scalars(select(AgentNode)):
             node.state = NodeIdentityState.ACTIVE.value
-            node.last_seen_at = clock[0]
+            contact_row(node).last_seen_at = clock[0]
     for _ in range(8):
         if service.application(accepted.id).state == LifecycleState.SUCCEEDED:
             break

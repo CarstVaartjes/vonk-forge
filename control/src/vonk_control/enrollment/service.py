@@ -17,6 +17,7 @@ from vonk_agent_protocol.state_machines import (
     NodeIdentityState,
 )
 
+from ..agent_contacts import retire_contact
 from ..enrollment_contract import (
     EnrollmentObservationOutcome,
     EnrollmentRevocationStatus,
@@ -476,6 +477,7 @@ class EnrollmentService(RotationService):
             if node is not None:
                 node.state = NodeIdentityState.RETIRED
                 node.revoked_at = node.revoked_at or now
+                retire_contact(session, node_id)
             serials = [
                 certificate.serial
                 for certificate in certificates

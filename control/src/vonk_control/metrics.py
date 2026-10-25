@@ -27,6 +27,7 @@ from .jobs import without_agent_operation
 from .models import (
     AgentCertificate,
     AgentNode,
+    AgentNodeContact,
     AgentOperation,
     AgentOperationAttempt,
     Job,
@@ -844,9 +845,13 @@ class OperationalMetricsCollector:
                     select(
                         AgentNode.node_id,
                         AgentNode.state,
-                        AgentNode.protocol_version,
-                        AgentNode.last_seen_at,
-                    ).order_by(AgentNode.node_id)
+                        AgentNodeContact.protocol_version,
+                        AgentNodeContact.last_seen_at,
+                    )
+                    .outerjoin(
+                        AgentNodeContact, AgentNodeContact.node_id == AgentNode.node_id
+                    )
+                    .order_by(AgentNode.node_id)
                 )
             )
             certificates = list(

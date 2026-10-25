@@ -18,6 +18,7 @@ from vonk_control.fleet_profiles.contracts import _SelectedProfileSnapshot
 from vonk_control.fleet_profiles.projection_support import _digest, _roster_digest
 from vonk_control.models import (
     AgentNode,
+    AgentNodeContact,
     Base,
     FleetProfileApplication,
     FleetProfileSelection,
@@ -48,8 +49,6 @@ def test_roster_request_survives_repreview_and_worker_restart(
             AgentNode(
                 node_id=_node_id(2),
                 state=session.get_one(AgentNode, _node_id(1)).state,
-                protocol_version=1,
-                last_seen_at=NOW,
                 inventory_snapshot=inventory_items_fixture(
                     _node_id(2),
                     observed_at=NOW,
@@ -57,6 +56,7 @@ def test_roster_request_survives_repreview_and_worker_restart(
                         {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
                     ),
                 ),
+                contact=AgentNodeContact(protocol_version=1, last_seen_at=NOW),
             )
         )
 

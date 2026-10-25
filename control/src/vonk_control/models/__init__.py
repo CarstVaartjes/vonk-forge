@@ -47,6 +47,7 @@ from .fleet import AgentEnrollment as AgentEnrollment
 from .fleet import AgentEnrollmentGrant as AgentEnrollmentGrant
 from .fleet import AgentIssuedCertificateRevocation as AgentIssuedCertificateRevocation
 from .fleet import AgentNode as AgentNode
+from .fleet import AgentNodeContact as AgentNodeContact
 from .fleet import AgentNodeProfile as AgentNodeProfile
 from .fleet import FleetProfile as FleetProfile
 from .fleet import FleetProfileApplication as FleetProfileApplication

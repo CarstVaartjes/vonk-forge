@@ -18,7 +18,14 @@ from vonk_control.api import create_app
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.fleet_projection import FleetProjection
 from vonk_control.jobs import JobService
-from vonk_control.models import AgentNode, Base, FleetProfileApplication, Job, RecipeRun
+from vonk_control.models import (
+    AgentNode,
+    AgentNodeContact,
+    Base,
+    FleetProfileApplication,
+    Job,
+    RecipeRun,
+)
 
 from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
 from .test_profile_load_installed_cli import _https_api_peer, _process_environment
@@ -71,7 +78,6 @@ def test_installed_no_input_fleet_json_pipeline_is_read_only(
             AgentNode(
                 node_id="spk_" + "1" * 32,
                 state="active",
-                last_seen_at=now,
                 inventory_snapshot=inventory_items_fixture(
                     "spk_" + "1" * 32,
                     observed_at=now,
@@ -79,6 +85,7 @@ def test_installed_no_input_fleet_json_pipeline_is_read_only(
                         {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
                     ),
                 ),
+                contact=AgentNodeContact(last_seen_at=now),
             )
         )
     tokens = TokenCodec(b"installed-fleet-json-pipeline-key-32")

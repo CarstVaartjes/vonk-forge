@@ -28,6 +28,7 @@ from vonk_control.models import (
     RunNode,
 )
 
+from .node_contacts import contact_row
 from .non_blocking import assert_ended_without_blocking
 from .runtime_image_fixtures import refresh_inventory
 from .test_recipe_operations import (
@@ -440,7 +441,7 @@ def test_pending_stop_waits_past_the_old_budget_and_completes_when_it_can(
     service._clock = lambda: later
     with sessions.begin() as session:
         for node in session.scalars(select(AgentNode)):
-            node.last_seen_at = later
+            contact_row(node).last_seen_at = later
     service.reconcile_pending_service_stops()
     assert service.get(stop.id).state == LifecycleState.RUNNING
     with sessions() as session:

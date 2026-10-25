@@ -42,6 +42,7 @@ from vonk_control.recipe_operations.observation_helpers import (
     prepare_exact_recipe_run_observation_nodes,
 )
 
+from ..node_contacts import contact_row
 from ..test_lifecycle_preflight import _finish as complete_preflight
 from ..test_recipe_operations import start_evidence
 from .world import World
@@ -201,7 +202,7 @@ class Sparks:
         with self.world.sessions.begin() as session:
             presence = session.get(AgentNode, spark.node_id)
             if presence is not None:
-                presence.management_observed_at = now
+                contact_row(presence).management_observed_at = now
 
     def _held(self, spark: Spark) -> int:
         """What the runs this Spark serves hold: a share of their declared peak."""

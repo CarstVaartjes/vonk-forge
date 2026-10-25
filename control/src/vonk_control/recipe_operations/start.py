@@ -33,7 +33,7 @@ from ..lifecycle.evidence import (
     Residue,
 )
 from ..models import (
-    AgentNode,
+    AgentNodeContact,
     Job,
     RecipeInstallation,
     RecipeRun,
@@ -143,9 +143,13 @@ class StartMixin:
             presences = {
                 node_id: address
                 for node_id, address in session.execute(
-                    select(AgentNode.node_id, AgentNode.management_address).where(
-                        AgentNode.node_id.in_([node.node_id for node in plan.nodes]),
-                        AgentNode.management_address.is_not(None),
+                    select(
+                        AgentNodeContact.node_id, AgentNodeContact.management_address
+                    ).where(
+                        AgentNodeContact.node_id.in_(
+                            [node.node_id for node in plan.nodes]
+                        ),
+                        AgentNodeContact.management_address.is_not(None),
                     )
                 )
             }
