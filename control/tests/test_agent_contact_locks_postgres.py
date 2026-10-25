@@ -237,11 +237,21 @@ def _agent_write(sessions, service, claims, kind: str) -> Callable[[], object]:
     return lambda: _deliver_observation(sessions, NODES[0])
 
 
-def _paused_at_commit(
+class AgentWriteRefused(RuntimeError):
+    """The probed agent write was refused before it reached COMMIT."""
+
+
+class NodeLockHeld(Exception):
+    """An open agent transaction holds a node-row lock admission waits for."""
+
+
+def _assert_admission_free(
     postgres_engine, action: Callable[[], object], admit: Callable[[], None]
-) -> tuple[set[str], Exception | None]:
-    """Hold one agent transaction just before COMMIT; return what it holds on
-    the node rows and whether admission's NOWAIT node lock was refused."""
+) -> None:
+    """Hold one agent transaction just before COMMIT; raise ``NodeLockHeld``
+    when it holds more than a foreign-key check on the node rows or admission's
+    NOWAIT node lock is refused, ``AgentWriteRefused`` when the write itself
+    failed (so a refused input can never pass for a lock)."""
     paused, release = threading.Event(), threading.Event()
     agent_thread: list[int] = []
 
@@ -262,9 +272,13 @@ def _paused_at_commit(
 
     worker = threading.Thread(target=agent)
     worker.start()
-    refused: Exception | None = None
     try:
-        assert paused.wait(timeout=15), "agent transaction never reached commit"
+        while not paused.wait(timeout=0.05):
+            if not worker.is_alive():
+                break
+        if not paused.is_set():
+            worker.join(timeout=30)
+            raise AgentWriteRefused(f"agent write ended before commit: {errors!r}")
         with postgres_engine.connect() as probe:
             held = {
                 mode
@@ -273,6 +287,7 @@ def _paused_at_commit(
                 )
                 for mode in modes
             }
+        refused: Exception | None = None
         try:
             admit()
         except AdmissionLockBusy as error:
@@ -281,8 +296,10 @@ def _paused_at_commit(
         release.set()
         worker.join(timeout=30)
         event.remove(postgres_engine, "commit", hold_before_commit)
-    assert not errors, errors
-    return held, refused
+    if errors:
+        raise AgentWriteRefused(f"agent write failed: {errors!r}")
+    if not held <= {_FK_CHECK} or refused is not None:
+        raise NodeLockHeld(f"node-row locks {sorted(held)}; admission: {refused!r}")
 
 
 @pytest.mark.parametrize(
@@ -293,15 +310,13 @@ def test_open_agent_transaction_leaves_admission_and_publication_free(
 ):
     """Fails on main: every agent transaction held its nodes FOR UPDATE."""
     sessions, service, _, claims = fleet
-    held, refused = _paused_at_commit(
+    # The agent transaction holds everything it took. On the node rows that is
+    # at most a foreign-key check, which NO KEY admission never waits on.
+    _assert_admission_free(
         postgres_engine,
         _agent_write(sessions, service, claims, kind),
         lambda: _admit(sessions),
     )
-    # The agent transaction holds everything it took. On the node rows that is
-    # at most a foreign-key check, which NO KEY admission never waits on.
-    assert held <= {_FK_CHECK}
-    assert refused is None
 
 
 # The production result consumer on real recipe.start / recipe.stop parents.
@@ -408,13 +423,17 @@ def _recipe_write(world, kind: str) -> Callable[[], object]:
         request_id=str(uuid.uuid4()),
     )
     claim = _recipe_claim(sessions, jobs, nodes[0])
-    return lambda: jobs.record_result(
-        AgentResult(
-            fence=claim.fence,
-            state=AgentResultState.CANCELLED,
-            result=RecipeStopResult(),
-        )
+    cancelled = AgentResult.model_validate(
+        {
+            "fence": claim.fence,
+            "state": AgentResultState.CANCELLED,
+            "result": {
+                "error_code": "operation_cancelled",
+                "reason": "the agent cancelled the stop",
+            },
+        }
     )
+    return lambda: jobs.record_result(cancelled)
 
 
 @pytest.mark.parametrize("kind", ("claim", "heartbeat", "succeed"))
@@ -423,34 +442,48 @@ def test_recipe_agent_writes_through_the_production_consumer_leave_admission_fre
 ):
     """Fails on main: the start claim, its heartbeat and result locked nodes."""
     sessions, *_, nodes = recipe_world
-    held, refused = _paused_at_commit(
+    _assert_admission_free(
         postgres_engine,
         _recipe_write(recipe_world, kind),
         _admit_recipe_nodes(sessions, nodes),
     )
-    assert held <= {_FK_CHECK}
-    assert refused is None
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=AssertionError,
-    reason="lock plan step 4: _intent_is_current (recipe_operations/intent.py:107)",
+_STEP_4 = {
+    "failed-start": (
+        "lock plan step 4: _intent_is_current (recipe_operations/intent.py:107) "
+        "and the cleanup Stop's enqueue: terminal_projection.py:369 -> "
+        "persistence.py:432/245 _admit_workload_intent -> lock_admission_rows, "
+        "and persistence.py:536 -> orchestration.py:101 -> scope.py:90"
+    ),
+    "cancelled-stop": (
+        "lock plan step 4: _intent_is_current (recipe_operations/intent.py:107)"
+    ),
+}
+
+
+@pytest.mark.parametrize(
+    "kind",
+    [
+        pytest.param(
+            kind,
+            marks=pytest.mark.xfail(strict=True, raises=NodeLockHeld, reason=reason),
+        )
+        for kind, reason in _STEP_4.items()
+    ],
 )
-@pytest.mark.parametrize("kind", ("failed-start", "cancelled-stop"))
 def test_recipe_intent_check_in_a_result_leaves_admission_free(
     recipe_world, postgres_engine, kind
 ):
     """Known: a failed or cancelled start/stop result still checks the workload
-    intent under FOR UPDATE on its target nodes (lock plan step 4 flips this)."""
+    intent under FOR UPDATE on its target nodes, and a failed start enqueues its
+    cleanup Stop under admission's node lock (lock plan step 4 flips both)."""
     sessions, *_, nodes = recipe_world
-    held, refused = _paused_at_commit(
+    _assert_admission_free(
         postgres_engine,
         _recipe_write(recipe_world, kind),
         _admit_recipe_nodes(sessions, nodes),
     )
-    assert held <= {_FK_CHECK}
-    assert refused is None
 
 
 def test_hammered_agent_traffic_never_refuses_admission_or_deadlocks(

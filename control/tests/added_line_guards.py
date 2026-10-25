@@ -109,7 +109,18 @@ def contact_writes(source: str) -> list[int]:
     if "contact" not in source and "AgentNodeContact" not in source:
         return []
     found: set[int] = set()
-    for node in ast.walk(ast.parse(source)):
+    tree = ast.parse(source)
+    # Names bound to a contact row: ``row = session.get(AgentNodeContact, ...)``.
+    rows = {
+        target.id
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Assign | ast.AnnAssign)
+        and node.value is not None
+        and "AgentNodeContact" in ast.unparse(node.value)
+        for target in (node.targets if isinstance(node, ast.Assign) else [node.target])
+        if isinstance(target, ast.Name)
+    }
+    for node in ast.walk(tree):
         targets: list[ast.expr] = []
         if isinstance(node, ast.Assign):
             targets = list(node.targets)
@@ -119,7 +130,11 @@ def contact_writes(source: str) -> list[int]:
             if isinstance(target, ast.Attribute) and (
                 target.attr in _CONTACT_ONLY
                 or target.attr in _CONTACT_SHARED
-                and "contact" in ast.unparse(target.value).lower()
+                and (
+                    "contact" in ast.unparse(target.value).lower()
+                    or isinstance(target.value, ast.Name)
+                    and target.value.id in rows
+                )
             ):
                 found.add(target.lineno)
         if isinstance(node, ast.Call):

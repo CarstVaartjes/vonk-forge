@@ -144,10 +144,11 @@ Pydantic contract per item in a typed column of `node_inventory_snapshots` or
 `agent_node_contacts`, written only through `agent_contacts.py`. Contact,
 claim and result recording take no explicit lock on `agent_nodes` and never
 update it; admission locks that identity/intent row FOR NO KEY UPDATE, which a
-child row's foreign-key KEY SHARE never blocks. The recipe intent check on
-start/stop results (`recipe_operations/intent.py`) and an enqueue inside a
-phase-advance result still lock target nodes until lock-plan step 4 removes
-them; do not add others. Do not add per-feature fact tables, ad hoc JSON, duplicate fact
+child row's foreign-key KEY SHARE never blocks. Until lock-plan step 4, three
+result paths still lock target nodes: the recipe intent check on failed or
+cancelled start/stop results (`recipe_operations/intent.py`), the cleanup Stop
+a failed start enqueues, and an enqueue inside a phase-advance result; do not
+add others. Do not add per-feature fact tables, ad hoc JSON, duplicate fact
 owners, or authoritative in-memory copies. Operation intent/history, grants,
 and desired configuration are distinct from observed Spark facts. Existing
 misplaced fields require an owner-approved move; do not extend them. The
