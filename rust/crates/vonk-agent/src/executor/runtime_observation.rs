@@ -1,6 +1,8 @@
-//! Runtime custody probes never start, stop, upload, or renew an effect.
-//! A measured job exit enters the existing output ledger; the Controller can
-//! authorize delivery-only recovery under a fresh fence.
+//! Runtime custody probes never start, upload, or renew an effect. The one
+//! stop is a job's own deadline: with no execution waiting for it, the probe
+//! holds that bound (`observe_running_job`). A measured job exit enters the
+//! existing output ledger; the Controller can authorize delivery-only
+//! recovery under a fresh fence.
 use super::operation_observation::{OperationObservation, PendingObservation};
 use super::*;
 use crate::host_runtime::RuntimeReobservation;
@@ -117,6 +119,10 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
             (RecipeOperationRequest::JobRun(job), RuntimeReobservation::Exited(outcome)) => {
                 self.observe_job_exit(claim, &job, outcome)
             }
+            (
+                RecipeOperationRequest::JobRun(job),
+                RuntimeReobservation::Running { progressed_at },
+            ) => self.observe_running_job(claim, &job, progressed_at).await,
             (_, RuntimeReobservation::Running { .. }) => {
                 OperationObservation::Progressing(PendingObservation::new(
                     claim,

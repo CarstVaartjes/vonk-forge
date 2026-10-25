@@ -311,7 +311,7 @@ async fn runtime_process_death_at_every_custody_seam_recovers_without_new_claims
                     results.is_empty(),
                     "missing receipt is not restart failure or renewed execution"
                 );
-                assert_eq!(state.observation_claims(Utc::now()).unwrap().len(), 1);
+                assert_eq!(state.observation_claims().unwrap().len(), 1);
             } else {
                 assert_eq!(results.len(), 1);
                 assert_eq!(

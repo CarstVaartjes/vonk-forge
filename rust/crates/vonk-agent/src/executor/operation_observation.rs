@@ -415,14 +415,15 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
 }
 
 /// Runs before receipt delivery and claims, including an entirely idle fleet.
-/// Startup reaches this same pass through run_once; it never dispatches effects.
+/// Startup reaches this same pass through run_once; it never dispatches effects
+/// (a job past its own deadline is stopped, as its execution would stop it).
 pub async fn reobserve_operations<E: Executor>(
     state: &mut StateStore,
     executor: &E,
     executing: Option<uuid::Uuid>,
     now: DateTime<Utc>,
 ) -> Result<(), StateError> {
-    for claim in state.observation_claims(now)? {
+    for claim in state.observation_claims()? {
         if executing == Some(claim.fence) {
             continue;
         }
@@ -433,20 +434,18 @@ pub async fn reobserve_operations<E: Executor>(
             OperationObservation::Confirmed(result) => {
                 state.finish(&claim, *result)?;
             }
-            OperationObservation::Progressing(pending)
-            | OperationObservation::Blocked(pending)
-            | OperationObservation::Unknown(pending) => {
-                eprintln!(
-                    "vonk-agent: observing fence={} owner={} dependency={} cause={} next_check={} deadline={}: {}",
-                    claim.fence,
-                    pending.owner,
-                    pending.dependency,
-                    pending.cause,
-                    pending.next_check,
-                    pending.deadline,
-                    pending.reason
-                );
+            OperationObservation::Progressing(pending) => {
+                // A live owned unit is still observed past the lease: its exit
+                // replaces any recorded unknown. Its own bound ends it (a job
+                // is stopped and reported at its job deadline).
+                log_pending(&claim, &pending);
+            }
+            OperationObservation::Blocked(pending) | OperationObservation::Unknown(pending) => {
+                log_pending(&claim, &pending);
                 if now >= pending.deadline {
+                    // Nothing live remains past the deadline: the unknown is
+                    // final, stays in the delivery spool, and is not probed
+                    // again.
                     state.finish(
                         &claim,
                         ExecutionResult::unknown(
@@ -455,11 +454,25 @@ pub async fn reobserve_operations<E: Executor>(
                             UnknownEvidence::at(FailureStage::AgentRestart),
                         ),
                     )?;
+                    state.end_observation(claim.fence)?;
                 }
             }
         }
     }
     Ok(())
+}
+
+fn log_pending(claim: &AgentClaim, pending: &PendingObservation) {
+    eprintln!(
+        "vonk-agent: observing fence={} owner={} dependency={} cause={} next_check={} deadline={}: {}",
+        claim.fence,
+        pending.owner,
+        pending.dependency,
+        pending.cause,
+        pending.next_check,
+        pending.deadline,
+        pending.reason
+    );
 }
 
 /// Keep the same owner probe and spool delivery moving through long polls and

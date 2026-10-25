@@ -468,3 +468,136 @@ async fn an_unsupported_probe_never_authorizes_fresh_inference() {
     );
     assert_eq!(log, ["refused"]);
 }
+
+/// A restarted agent whose job outlives its lease: the shared observer and a
+/// real journal, the job's container answered by the test helper.
+struct Restarted {
+    peers: Peers,
+    data: tempfile::TempDir,
+    client: AgentHttpClient,
+    store: StateStore,
+    claim: AgentClaim,
+    request: vonk_agent_protocol::RecipeJobRunRequest,
+}
+
+impl Restarted {
+    fn new(script: Vec<Answer>, lease_ago: ChronoDuration) -> Self {
+        let (mut claim, request) = job_claim();
+        claim.deadline = (Utc::now() - lease_ago).fixed_offset();
+        let peers = peers(request.job_id, script);
+        let data = tempdir().unwrap();
+        let client = AgentHttpClient::for_http_test(&peers.controller, NODE_ID);
+        let mut store = StateStore::open(&data.path().join("state.sqlite"), NODE_ID).unwrap();
+        let accepted_at = claim.deadline.with_timezone(&Utc) - ChronoDuration::seconds(1);
+        store.begin(&claim, accepted_at).unwrap();
+        Self {
+            peers,
+            data,
+            client,
+            store,
+            claim,
+            request,
+        }
+    }
+
+    async fn pass(&mut self, now: DateTime<Utc>) {
+        let executor = RecipeExecutor {
+            client: &self.client,
+            helper_socket: &self.peers.socket,
+            runtime: OciRuntime {
+                runner: &NoProcess,
+                data_root: self.data.path(),
+            },
+            runtime_root: self.peers.runtime_root.path(),
+        };
+        crate::executor::operation_observation::reobserve_operations(
+            &mut self.store,
+            &executor,
+            None,
+            now,
+        )
+        .await
+        .unwrap();
+    }
+
+    fn result(&self) -> Option<AgentResultResult> {
+        self.store
+            .pending_results()
+            .unwrap()
+            .into_iter()
+            .find(|(_, result)| result.fence == self.claim.fence)
+            .map(|(_, result)| result.result)
+    }
+}
+
+#[tokio::test]
+async fn a_job_running_at_its_lease_deadline_reports_its_later_exit() {
+    let mut agent = Restarted::new(vec![Answer::Running], ChronoDuration::zero());
+    let lease = agent.claim.deadline.with_timezone(&Utc);
+    agent.pass(lease).await;
+    assert!(
+        agent.result().is_none(),
+        "a live job is not an unknown outcome"
+    );
+    assert_eq!(agent.store.observation_claims().unwrap().len(), 1);
+    assert_eq!(
+        agent.peers.log(),
+        ["running"],
+        "nothing stops a job within its deadline"
+    );
+
+    // The job exits and its measured exit is retained.
+    let runtime = OciRuntime {
+        runner: &NoProcess,
+        data_root: agent.data.path(),
+    };
+    let scope = agent
+        .data
+        .path()
+        .join("runs")
+        .join(agent.request.job_id.to_string());
+    fs::create_dir_all(scope.join("outputs")).unwrap();
+    runtime.persist_job_intent(&agent.request).unwrap();
+    runtime
+        .persist_job_completion(&job_receipt(
+            &agent.request,
+            0,
+            Instant::now(),
+            empty_job_output_manifest(),
+            None,
+        ))
+        .unwrap();
+    agent.pass(lease + ChronoDuration::minutes(10)).await;
+    assert!(
+        matches!(agent.result(), Some(AgentResultResult::OutcomeDone(_))),
+        "the job's exit is reported: {:?}",
+        agent.result()
+    );
+    assert!(agent.store.observation_claims().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn a_job_past_its_own_deadline_is_stopped_and_reported() {
+    let (_claim, request) = job_claim();
+    let job = request.compiled_execution_plan.job.as_ref().unwrap();
+    let grace = request
+        .compiled_execution_plan
+        .lifecycle
+        .stop_timeout_seconds;
+    let ago = ChronoDuration::seconds(i64::from(job.timeout_seconds + grace) + 1);
+    let mut agent = Restarted::new(vec![Answer::Running], ago);
+    agent.pass(Utc::now()).await;
+    let Some(AgentResultResult::OutcomeFailed(failure)) = agent.result() else {
+        panic!("a job past its deadline ends failed: {:?}", agent.result());
+    };
+    let diagnostic = format!("{failure:?}");
+    assert!(
+        diagnostic.contains("deadline and stop grace"),
+        "{diagnostic}"
+    );
+    // The test Controller refuses every grant, so the stop stays unconfirmed
+    // and the end says so.
+    assert!(diagnostic.contains("stop unconfirmed"), "{diagnostic}");
+    assert_eq!(agent.peers.log(), ["running", "grant"]);
+    assert!(agent.store.observation_claims().unwrap().is_empty());
+}

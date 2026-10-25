@@ -188,7 +188,7 @@ fn interrupted_mutation_is_not_executed_twice_after_restart() {
         Err(vonk_agent::state::StateError::Busy)
     ));
     assert_eq!(
-        restarted.observation_claims(Utc::now()).unwrap(),
+        restarted.observation_claims().unwrap(),
         vec![claim.clone()],
         "restart retains accepted custody for the shared exact probe"
     );

@@ -10,23 +10,30 @@
 //! for the job's stop grace; then the job ends failed with what was seen.
 
 use super::*;
+use crate::executor::operation_observation::{OperationObservation, PendingObservation};
 use crate::host_runtime::{HostRuntimeError, RuntimeReobservation};
 
 /// The first pause between two re-observations; it doubles up to the cap.
 pub(super) const FIRST_PAUSE: Duration = Duration::from_millis(100);
 pub(super) const MAX_PAUSE: Duration = Duration::from_secs(10);
 
+/// The job's own timeout.
+fn job_timeout(request: &vonk_agent_protocol::RecipeJobRunRequest) -> Duration {
+    Duration::from_secs(
+        request
+            .compiled_execution_plan
+            .job
+            .as_ref()
+            .map_or(0, |job| u64::from(job.timeout_seconds)),
+    )
+}
+
 /// The job's own deadline, counted from `from`.
 pub(super) fn job_deadline(
     from: Instant,
     request: &vonk_agent_protocol::RecipeJobRunRequest,
 ) -> Instant {
-    let timeout = request
-        .compiled_execution_plan
-        .job
-        .as_ref()
-        .map_or(0, |job| u64::from(job.timeout_seconds));
-    from + Duration::from_secs(timeout)
+    from + job_timeout(request)
 }
 
 /// How long a job is given to cease after it is asked to stop.
@@ -204,6 +211,66 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
             FailureStage::JobState,
             format!("job record absent; {seen}"),
         )))
+    }
+
+    /// A job still running while no execution in this process waits for it
+    /// (the agent restarted, or the lease lapsed). The shared observer holds
+    /// the job's own bound, as `reobserve_job` does for a lost helper answer:
+    /// past its deadline the job is stopped, and past its stop grace as well
+    /// it ends failed with what was seen. The dispatch instant did not survive
+    /// the restart, so the deadline counts from the later of the job's last
+    /// progress and the lease deadline, which is never earlier than the bound
+    /// its execution held.
+    pub(in crate::executor) async fn observe_running_job(
+        &self,
+        claim: &AgentClaim,
+        request: &vonk_agent_protocol::RecipeJobRunRequest,
+        progressed_at: Option<DateTime<FixedOffset>>,
+    ) -> OperationObservation {
+        let progressing = |reason: String| {
+            OperationObservation::Progressing(PendingObservation::new(
+                claim,
+                WaitReason::RuntimeEffectUnconfirmed,
+                reason,
+            ))
+        };
+        let seconds = |duration: Duration| {
+            chrono::Duration::seconds(i64::try_from(duration.as_secs()).unwrap_or(i64::MAX / 1000))
+        };
+        let from = progressed_at.map_or(claim.deadline, |stamp| stamp.max(claim.deadline));
+        let deadline = from.with_timezone(&Utc) + seconds(job_timeout(request));
+        let now = Utc::now();
+        if now < deadline {
+            return progressing("exact runtime is still running".to_owned());
+        }
+        let Some(stop_plan) = job_run_stop_plan(claim, request) else {
+            return OperationObservation::confirmed(failed("job observation identity is invalid"));
+        };
+        let job_scope = request.job_id.to_string();
+        // Asked again on every look until it holds; the stop is exact and
+        // idempotent.
+        let stop = self
+            .stop_job(claim, &stop_plan, &job_scope)
+            .await
+            .unwrap_or_else(|| "job stopped".to_owned());
+        if now < deadline + seconds(stop_grace(request)) {
+            return progressing(format!(
+                "job deadline {} passed while it was running; {stop}",
+                deadline.to_rfc3339()
+            ));
+        }
+        let job = DispatchedJob {
+            claim,
+            request,
+            stop_plan: &stop_plan,
+            job_scope: &job_scope,
+            started: Instant::now(),
+        };
+        OperationObservation::confirmed(*job.unobserved_failure(
+            FailureStage::AgentRestart,
+            "no execution waited for the job after an agent restart or lease lapse",
+            &format!("job deadline and stop grace passed while it was running; {stop}"),
+        ))
     }
 
     /// The job's exact Stop; its record is retired by the caller.

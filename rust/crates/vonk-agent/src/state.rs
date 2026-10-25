@@ -146,7 +146,8 @@ impl StateStore {
             connection.execute_batch(
                 "DROP TABLE IF EXISTS operations;
                  DROP TABLE IF EXISTS result_reconciliation;
-                 DROP TABLE IF EXISTS result_rejections;",
+                 DROP TABLE IF EXISTS result_rejections;
+                 DROP TABLE IF EXISTS observation_ended;",
             )?;
             connection.execute(
                 "INSERT INTO metadata(key, value) VALUES ('schema_version', ?1)
@@ -166,6 +167,9 @@ impl StateStore {
                CHECK ((state = 'running' AND result_json IS NULL) OR (state = 'completed' AND result_json IS NOT NULL))
              ) STRICT;
              CREATE TABLE IF NOT EXISTS result_reconciliation (
+               fence TEXT PRIMARY KEY NOT NULL
+             ) STRICT;
+             CREATE TABLE IF NOT EXISTS observation_ended (
                fence TEXT PRIMARY KEY NOT NULL
              ) STRICT;
              CREATE TABLE IF NOT EXISTS result_rejections (
@@ -1038,32 +1042,24 @@ impl StateStore {
     }
 
     /// Reopen exact accepted requests for the shared startup/tick observer.
-    ///
-    /// A running claim is always observed: its pass at or after the deadline
-    /// makes the final unknown durable. A recorded unknown is observed only
-    /// while its deadline is ahead of `now`; past it the stored unknown is
-    /// final and stays in the delivery spool, so observation ends instead of
-    /// re-probing it on every pass.
-    pub fn observation_claims(
-        &mut self,
-        now: DateTime<Utc>,
-    ) -> Result<Vec<AgentClaim>, StateError> {
+    /// A claim leaves this set once [`Self::end_observation`] records that
+    /// its final outcome is durable and nothing live remains to observe.
+    pub fn observation_claims(&mut self) -> Result<Vec<AgentClaim>, StateError> {
         // One maximum-sized accepted claim per pass bounds memory and probe
         // latency. Rotate independently of claim/heartbeat traffic.
         let row = self
             .connection
             .query_row(
-                "SELECT rowid,fence,operation,CASE WHEN length(claim_json)<=?4 THEN claim_json END,deadline FROM operations
-             WHERE claim_json IS NOT NULL AND (state=?3 OR
-                (json_valid(CAST(result_json AS TEXT)) AND json_extract(CAST(result_json AS TEXT),'$.result.kind')=?2
-                 AND julianday(deadline) > julianday(?5)))
-             ORDER BY (rowid <= ?1),rowid LIMIT 1",
+                "SELECT o.rowid,o.fence,o.operation,CASE WHEN length(o.claim_json)<=?4 THEN o.claim_json END,o.deadline
+             FROM operations o LEFT JOIN observation_ended e ON e.fence=o.fence
+             WHERE o.claim_json IS NOT NULL AND e.fence IS NULL AND (o.state=?3 OR
+                (json_valid(CAST(o.result_json AS TEXT)) AND json_extract(CAST(o.result_json AS TEXT),'$.result.kind')=?2))
+             ORDER BY (o.rowid <= ?1),o.rowid LIMIT 1",
                 params![
                     self.observation_cursor,
                     OutcomeUnknownKind::Unknown.as_str(),
                     LifecycleState::Running.as_str(),
-                    vonk_agent_protocol::MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES as i64,
-                    now.to_rfc3339()
+                    vonk_agent_protocol::MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES as i64
                 ],
                 |row| {
                     Ok((
@@ -1083,12 +1079,31 @@ impl StateStore {
         let body = body.ok_or(StateError::ResultState)?;
         let mut claim: AgentClaim = parse_strict(&body)?;
         claim.validate()?;
-        claim.deadline =
-            DateTime::parse_from_rfc3339(&deadline).map_err(|_| StateError::Identity)?;
+        // The stored deadline is renewable bookkeeping. A damaged one falls
+        // back to the accepted claim's own deadline instead of failing every
+        // pass on this row.
+        match DateTime::parse_from_rfc3339(&deadline) {
+            Ok(stored) => claim.deadline = stored,
+            Err(error) => eprintln!(
+                "vonk-agent: stored deadline of fence {fence} is unreadable ({error}); observing until the accepted deadline {}",
+                claim.deadline.to_rfc3339()
+            ),
+        }
         if claim.fence.to_string() != fence || claim.operation.as_str() != operation {
             return Err(StateError::Identity);
         }
         Ok(vec![claim])
+    }
+
+    /// Record that observation of this fence has ended: its final outcome is
+    /// durable in the delivery spool and its last probe saw nothing live.
+    pub fn end_observation(&mut self, fence: uuid::Uuid) -> Result<(), StateError> {
+        self.connection.execute(
+            "INSERT OR IGNORE INTO observation_ended(fence)
+             SELECT fence FROM operations WHERE fence=?1 AND state=?2",
+            params![fence.to_string(), ProgressPhase::Completed.as_str()],
+        )?;
+        Ok(())
     }
 
     pub fn recover_interrupted(&mut self) -> Result<(), StateError> {

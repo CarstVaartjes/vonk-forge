@@ -85,7 +85,7 @@ fn claims_fail_closed_on_deadline_and_preserve_custody_until_receipt() {
     let live = claim(2, "2099-01-01T00:00:00+00:00");
     assert_eq!(state.begin(&live, now).unwrap(), BeginDecision::Execute);
     assert!(matches!(state.begin(&live, now), Err(StateError::Busy)));
-    assert_eq!(state.observation_claims(now).unwrap(), vec![live.clone()]);
+    assert_eq!(state.observation_claims().unwrap(), vec![live.clone()]);
     assert!(state.pending_results().unwrap().is_empty());
     let result = state
         .finish(&live, ExecutionResult::done(RecipeStopResult::default()))
