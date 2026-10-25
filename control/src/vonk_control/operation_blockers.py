@@ -21,6 +21,7 @@ from vonk_agent_protocol import (
     RunSwitchCode,
     adopt_reason_code,
 )
+from vonk_agent_protocol.agent_words import ProfileChildPhase, ProfileReportedPhase
 from vonk_agent_protocol.contracts import DigestText
 
 from .strict_json import StrictJSONModel
@@ -81,15 +82,32 @@ class OperationBlocker(StrictJSONModel):
     )
 
 
+class StallMark(StrictJSONModel):
+    """The highest counters one child phase reached while the wait lasted."""
+
+    phase: ProfileChildPhase | ProfileReportedPhase
+    child_bytes: int = Field(default=0, ge=0)
+    operation_bytes: int = Field(default=0, ge=0)
+    operation_items: int = Field(default=0, ge=0)
+    activity: int = Field(default=0, ge=0)
+
+
 class ProgressStall(StrictJSONModel):
     """The wait an operation keeps repeating, and how often it was seen."""
 
     signature: Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
     #: The leading blocker of the repeated wait, as the operation recorded it.
     detail: Annotated[str, StringConstraints(min_length=1, max_length=512)]
+    #: When the wait last moved forward (the stall window runs from here).
     first_seen_at: datetime
     last_seen_at: datetime
     repeats: int = Field(ge=1)
+    #: Each child phase seen during this wait with its high-water marks: only a
+    #: phase not seen yet or a new high is movement.  One per phase of the
+    #: closed phase vocabulary, so it never grows with history.
+    marks: list[StallMark] = Field(default_factory=list)
+    #: The latest progress of a preparation working for the wait.
+    preparation_progressed_at: datetime | None = None
 
 
 def make_blocker(

@@ -25,6 +25,7 @@ from vonk_agent_protocol import (
     WaitReason,
     WaitResumeCondition,
 )
+from vonk_agent_protocol.agent_words import ProfileReasonSeverity
 from vonk_control.fleet_profile_contract import FleetProfileApplicationProgress
 from vonk_control.fleet_profiles import FleetProfileService
 from vonk_control.models import (
@@ -186,6 +187,21 @@ def test_a_load_waiting_only_on_a_missing_child_receipt_is_stalled_with_the_work
     assert application.blockers[0].code == WaitReason.RECEIPT_MISSING
     (alarm,) = _alarm(load)
     assert stall.detail in alarm.detail
+    # Its shape: appended last, after the wait it repeats, to the view's
+    # progress blockers, its wait's blockers and its blockers alike; the row
+    # stores only the stall, never the alarm.
+    assert alarm.severity == ProfileReasonSeverity.ERROR.value
+    assert application.wait is not None
+    for shown in (
+        application.blockers,
+        application.progress.blockers,
+        application.wait.blockers,
+    ):
+        assert [item.code for item in shown] == [
+            WaitReason.RECEIPT_MISSING,
+            ProgressAlarmCode.STALLED,
+        ]
+    assert not _stored(load)[0].blockers
     (listed,) = _platform_stalled(load)
     assert listed.application_id == load.application.id
 

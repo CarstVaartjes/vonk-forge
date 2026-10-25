@@ -14,6 +14,7 @@ from vonk_agent_protocol import (
     RecipeImageCode,
     WaitReason,
 )
+from vonk_agent_protocol.agent_words import ProfileChildPhase
 from vonk_control.fleet_profile_contract import FleetProfileApplicationProgress
 from vonk_control.lifecycle.image_availability import PREPARATION_STALL_WINDOW
 from vonk_control.operation_blockers import ProgressAlarmCode, make_blocker
@@ -308,6 +309,119 @@ def test_any_movement_starts_over() -> None:
         stall = _observe(_repeat(9), progress, later, state=state, step=step)
         assert stall is not None, case
         assert (stall.repeats, stall.first_seen_at) == (1, later), case
+
+
+def _child_at(attempt: int, phase: str, copied: int, at: datetime):
+    """The load waiting while its child reports ``phase`` with ``copied`` bytes,
+    its operation's last-progress time fresh at ``at``."""
+
+    child = {
+        "phase": phase,
+        "bytes": copied,
+        "node_ids": [],
+        "retry_attempt": attempt,
+        "operation": {
+            "phase": phase,
+            "completed_bytes": copied,
+            "total_bytes_known": False,
+            "last_progress_at": at.isoformat(),
+            "activity": "active",
+            "members": [],
+        },
+    }
+    return _waiting(child_progress=child)
+
+
+def _follow(samples):
+    """Observe ``(at, progress)`` samples in order, each a new retry attempt."""
+
+    stall, before = None, None
+    for at, progress in samples:
+        stall = _observe(stall, progress, at, before=before)
+        before = progress
+        yield at, stall
+
+
+def test_a_copy_retried_from_zero_below_its_old_mark_is_stalled() -> None:
+    # Production 2026-10-24 class: the child retries its copy, bytes fall back
+    # to zero and rise again, never past what the first try reached.  Every
+    # sample changed the bytes and the last-progress time, so the old
+    # signature started the stall over each time and it never alarmed.
+    def samples():
+        attempt = 2
+        for minute in range(11):  # the first try reaches 100 bytes
+            attempt += 1
+            at = START + timedelta(minutes=minute)
+            yield (
+                at,
+                _child_at(
+                    attempt, ProfileChildPhase.TARGET_COPY.value, minute * 10, at
+                ),
+            )
+        for minute in range(11, 3 * 60):  # retried: 0..90, over and over
+            attempt += 1
+            at = START + timedelta(minutes=minute)
+            yield (
+                at,
+                _child_at(
+                    attempt, ProfileChildPhase.TARGET_COPY.value, (minute % 10) * 10, at
+                ),
+            )
+
+    last_high = START + timedelta(minutes=10)
+    for at, stall in _follow(samples()):
+        assert stall is not None
+        assert is_stalled(stall, now=at) == (at >= last_high + PROGRESS_STALL_WINDOW)
+    assert stall.first_seen_at == last_high
+
+
+def test_a_child_flapping_between_two_phases_is_stalled() -> None:
+    # The child alternates between two phases it already showed (each with a
+    # fresh last-progress time): no phase is new, so the wait does not move.
+    def samples():
+        for index in range(60):
+            at = START + timedelta(minutes=3 * index)
+            phase = (
+                ProfileChildPhase.PREPARE.value
+                if index % 2 == 0
+                else ProfileChildPhase.RUNTIME_INSTALL.value
+            )
+            yield at, _child_at(index + 3, phase, 0, at)
+
+    second_phase = START + timedelta(minutes=3)
+    for at, stall in _follow(samples()):
+        assert stall is not None
+        assert is_stalled(stall, now=at) == (at >= second_phase + PROGRESS_STALL_WINDOW)
+
+
+def test_a_copy_that_keeps_reaching_new_highs_is_never_stalled() -> None:
+    # A real copy, retried once from zero: it passes its old mark and keeps
+    # rising (every ten minutes), so it waits for hours and is never stalled.
+    def samples():
+        for minute in range(4 * 60):
+            at = START + timedelta(minutes=minute)
+            copied = minute // 10 * 10 if minute != 60 else 0
+            yield (
+                at,
+                _child_at(minute + 3, ProfileChildPhase.TARGET_COPY.value, copied, at),
+            )
+
+    for at, stall in _follow(samples()):
+        assert stall is not None
+        assert not is_stalled(stall, now=at + timedelta(minutes=9)), at
+
+
+def test_a_fresh_last_progress_time_alone_is_not_movement() -> None:
+    first = _observe(None, _child_at(3, ProfileChildPhase.START.value, 0, START), START)
+    later = START + timedelta(minutes=20)
+    again = _observe(
+        first,
+        _child_at(4, ProfileChildPhase.START.value, 0, later),
+        later,
+        before=_child_at(3, ProfileChildPhase.START.value, 0, START),
+    )
+    assert again is not None and again.first_seen_at == START
+    assert again.repeats == 2
 
 
 def test_a_changing_symptom_of_the_same_wait_is_not_movement() -> None:
