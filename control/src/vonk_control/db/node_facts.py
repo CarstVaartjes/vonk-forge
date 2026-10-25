@@ -23,7 +23,9 @@ def move_contact_facts(connection: Connection) -> None:
     connection.execute(
         text(
             f"INSERT INTO agent_node_contacts ({names}) "
-            f"SELECT {names} FROM agent_nodes ON CONFLICT (node_id) DO NOTHING"
+            # WHERE true: SQLite parses ON CONFLICT after INSERT ... SELECT only so.
+            f"SELECT {names} FROM agent_nodes WHERE true "
+            "ON CONFLICT (node_id) DO NOTHING"
         )
     )
     for name in retired:
