@@ -236,3 +236,57 @@ async fn a_failed_probe_at_the_deadline_is_not_an_observed_absence() {
     ));
     assert!(store.observation_claims().unwrap().is_empty());
 }
+
+#[tokio::test]
+async fn a_probe_unavailable_for_the_whole_observation_budget_ends_with_uncertain_custody() {
+    let root = tempdir().unwrap();
+    let mut store = StateStore::open(&root.path().join("state.sqlite"), NODE_ID).unwrap();
+    let accepted = claim();
+    store.begin(&accepted, Utc::now()).unwrap();
+    let probe = ScriptedProbe::new(&[Seen::Unavailable]);
+    let deadline = accepted.deadline.with_timezone(&Utc);
+    let budget = ChronoDuration::seconds(i64::from(accepted.observation_budget_seconds));
+
+    pass(&mut store, &probe, deadline).await;
+    pass(
+        &mut store,
+        &probe,
+        deadline + budget - ChronoDuration::seconds(1),
+    )
+    .await;
+    assert_eq!(
+        store.observation_claims().unwrap().len(),
+        1,
+        "within the observation budget a failed probe keeps observing"
+    );
+    pass(&mut store, &probe, deadline + budget).await;
+    assert_eq!(probe.probes(), 3);
+    assert!(store.observation_claims().unwrap().is_empty());
+    pass(
+        &mut store,
+        &probe,
+        deadline + budget + ChronoDuration::days(49),
+    )
+    .await;
+    assert_eq!(
+        probe.probes(),
+        3,
+        "an ended observation is never probed again"
+    );
+    assert!(matches!(
+        pending(&store, accepted.fence),
+        Some(AgentResultResult::OutcomeUnknown(_))
+    ));
+
+    // A fresh claim is admitted and is the only one observed.
+    let mut fresh = claim();
+    fresh.fence = Uuid::new_v4();
+    fresh.deadline = (Utc::now() + ChronoDuration::minutes(5)).fixed_offset();
+    assert_eq!(
+        store.begin(&fresh, Utc::now()).unwrap(),
+        BeginDecision::Execute
+    );
+    let observed = store.observation_claims().unwrap();
+    assert_eq!(observed.len(), 1);
+    assert_eq!(observed[0].fence, fresh.fence);
+}

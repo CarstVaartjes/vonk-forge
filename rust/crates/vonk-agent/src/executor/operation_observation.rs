@@ -449,11 +449,15 @@ pub async fn reobserve_operations<E: Executor>(
                 log_pending(&claim, &pending);
                 if now >= pending.deadline {
                     // A probe that could not look is not an observed absence:
-                    // the unknown is recorded but the claim stays observed
-                    // (a job's own bound ends it). An observed absence is
-                    // final, stays in the delivery spool, and is not probed
-                    // again.
-                    let unavailable = pending.cause == WaitReason::ObservationUnavailable;
+                    // the unknown is recorded but the claim stays observed,
+                    // until the Controller-owned observation budget past the
+                    // deadline is spent (a job run ends at its own bound). An
+                    // observed absence is final, stays in the delivery spool,
+                    // and is not probed again.
+                    let budget = claim.deadline.with_timezone(&Utc)
+                        + chrono::Duration::seconds(i64::from(claim.observation_budget_seconds));
+                    let still_looking = pending.cause == WaitReason::ObservationUnavailable
+                        && (claim.operation == AgentOperation::RecipeJobRunV1 || now < budget);
                     state.finish(
                         &claim,
                         ExecutionResult::unknown(
@@ -462,7 +466,7 @@ pub async fn reobserve_operations<E: Executor>(
                             UnknownEvidence::at(FailureStage::AgentRestart),
                         ),
                     )?;
-                    if !unavailable {
+                    if !still_looking {
                         state.end_observation(claim.fence)?;
                     }
                 }
