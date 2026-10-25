@@ -60,6 +60,7 @@ MODES = (
     "planner-defects",
     "capacity-gates",
     "start-budgets",
+    "listings",
 )
 # The agent's messages a Controller test may send only as the stand-in pinned
 # to the agent's shared vector; built by hand they are the Controller's idea of
@@ -593,6 +594,38 @@ def check_source(
                 )
             ):
                 noexit_hits.append(f"{path}:{line}: exit code invented, not measured")
+    if "listings" in modes and not is_test:
+        # GitHub lists a run's artifacts 30 to a page; a reader of one page
+        # silently misses the rest (shard timings, #1900). Read every page or
+        # ask for the one artifact by name; a download by id is not a listing.
+        # A line that calls a function of this file whose own gh argv pages
+        # reads every page. The window is four lines before (workflow
+        # continuations) and one after (a split URL).
+        rows = source.splitlines()
+        paging = re.compile(
+            r"[\"']gh[\"'],\s*[\"']api[\"'],\s*(?:[\"'][^\"']*[\"'],\s*)*[\"']--paginate[\"']"
+        )
+        wrappers = {
+            name
+            for name, body in re.findall(
+                r"^def (\w+)\(([\s\S]*?)(?=^\S|\Z)", source, re.MULTILINE
+            )
+            if paging.search(body)
+        }
+        for line, text in enumerate(rows, 1):
+            window = " ".join(rows[max(line - 5, 0) : line + 1])
+            if (
+                line in added
+                and re.search(
+                    r"actions/(?:runs/[^\s\"']*/)?artifacts(?!\w|/[\w{$])", text
+                )
+                and not re.search(r"--paginate|\bpage=|[?&]name=", window)
+                and not (
+                    any(re.search(rf"\b{name}\(", text) for name in wrappers)
+                    and not re.search(r"[\"']gh[\"'],", window)
+                )
+            ):
+                noexit_hits.append(f"{path}:{line}: artifact listing reads one page")
     if (
         "locks" in modes
         and not is_test
