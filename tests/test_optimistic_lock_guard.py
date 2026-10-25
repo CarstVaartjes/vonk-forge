@@ -524,3 +524,10 @@ def test_contact_facts_have_one_upsert_writer(statement: str) -> None:
         {1},
         modes=("optimistic",),
     )
+    # Same-named fields of unrelated objects are not contact facts.
+    assert not check_source(
+        "control/src/vonk_control/presence.py",
+        "observation.management_address = address\n",
+        {1},
+        modes=("optimistic",),
+    )

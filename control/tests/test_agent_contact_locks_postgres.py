@@ -21,7 +21,12 @@ import pytest
 from sqlalchemy import event, select, text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import canonical_message
+from vonk_agent_protocol import (
+    AgentResult,
+    AgentResultState,
+    RecipeStartResult,
+    canonical_message,
+)
 from vonk_agent_protocol.recipe_operations import RecipeStopResult
 from vonk_agent_protocol.state_machines import NodeIdentityState
 from vonk_control.admission_locking import (
@@ -33,16 +38,26 @@ from vonk_control.admission_locking import (
 from vonk_control.agent_contacts import record_observation_delivery
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.auth import AgentIdentity, AgentSource
+from vonk_control.inventory_items import inventory_items
 from vonk_control.models import (
     AgentCertificate,
     AgentNode,
     AgentNodeContact,
+    AgentOperation,
     Base,
     Job,
 )
 
+from .agent_fences import fenced_operation
 from .recipe_stop_fixtures import recipe_stop_payload
-from .runtime_identity_support import claim_agent
+from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, claim_agent
+from .test_recipe_operations import NOW as RECIPE_NOW
+from .test_recipe_operations import (
+    installed_recipe,
+    setup_services,
+    start_evidence,
+    started_recipe,
+)
 
 NOW = datetime(2026, 10, 25, 12, tzinfo=UTC)
 # Sparks 0 and 1 keep one order running (heartbeat, re-claim, delivery);
@@ -222,15 +237,11 @@ def _agent_write(sessions, service, claims, kind: str) -> Callable[[], object]:
     return lambda: _deliver_observation(sessions, NODES[0])
 
 
-@pytest.mark.parametrize(
-    "kind", ("heartbeat", "reclaim", "fresh-claim", "succeed", "fail", "delivery")
-)
-def test_open_agent_transaction_leaves_admission_and_publication_free(
-    fleet, postgres_engine, kind
-):
-    """Fails on main: every agent transaction held its nodes FOR UPDATE."""
-    sessions, service, _, claims = fleet
-    action = _agent_write(sessions, service, claims, kind)
+def _paused_at_commit(
+    postgres_engine, action: Callable[[], object], admit: Callable[[], None]
+) -> tuple[set[str], Exception | None]:
+    """Hold one agent transaction just before COMMIT; return what it holds on
+    the node rows and whether admission's NOWAIT node lock was refused."""
     paused, release = threading.Event(), threading.Event()
     agent_thread: list[int] = []
 
@@ -251,10 +262,9 @@ def test_open_agent_transaction_leaves_admission_and_publication_free(
 
     worker = threading.Thread(target=agent)
     worker.start()
+    refused: Exception | None = None
     try:
         assert paused.wait(timeout=15), "agent transaction never reached commit"
-        # The agent transaction holds everything it took. On the node rows that
-        # is at most a foreign-key check, which NO KEY admission never waits on.
         with postgres_engine.connect() as probe:
             held = {
                 mode
@@ -263,13 +273,184 @@ def test_open_agent_transaction_leaves_admission_and_publication_free(
                 )
                 for mode in modes
             }
-        assert held <= {_FK_CHECK}
-        _admit(sessions)
+        try:
+            admit()
+        except AdmissionLockBusy as error:
+            refused = error
     finally:
         release.set()
         worker.join(timeout=30)
         event.remove(postgres_engine, "commit", hold_before_commit)
-    assert not errors
+    assert not errors, errors
+    return held, refused
+
+
+@pytest.mark.parametrize(
+    "kind", ("heartbeat", "reclaim", "fresh-claim", "succeed", "fail", "delivery")
+)
+def test_open_agent_transaction_leaves_admission_and_publication_free(
+    fleet, postgres_engine, kind
+):
+    """Fails on main: every agent transaction held its nodes FOR UPDATE."""
+    sessions, service, _, claims = fleet
+    held, refused = _paused_at_commit(
+        postgres_engine,
+        _agent_write(sessions, service, claims, kind),
+        lambda: _admit(sessions),
+    )
+    # The agent transaction holds everything it took. On the node rows that is
+    # at most a foreign-key check, which NO KEY admission never waits on.
+    assert held <= {_FK_CHECK}
+    assert refused is None
+
+
+# The production result consumer on real recipe.start / recipe.stop parents.
+_ARM64 = {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
+
+
+@pytest.fixture
+def recipe_world(tmp_path, postgres_engine):
+    sessions, lifecycle, _recorded, mapping, build, nodes = setup_services(
+        tmp_path, engine=postgres_engine
+    )
+    with postgres_engine.begin() as connection:
+        connection.exec_driver_sql("CREATE EXTENSION IF NOT EXISTS pgrowlocks")
+    jobs = AgentJobService(
+        sessions,
+        clock=lambda: RECIPE_NOW,
+        result_consumer=lifecycle.consume_agent_result,
+    )
+    lifecycle._agent_jobs = jobs  # production: one queue serves both sides
+    installation = installed_recipe(
+        lifecycle, mapping, build, nodes, request_id=str(uuid.uuid4())
+    )
+    return sessions, lifecycle, jobs, installation, nodes
+
+
+def _recipe_claim(sessions, jobs, node_id: str):
+    with sessions() as session:
+        node = session.get(AgentNode, node_id)
+        assert node is not None
+        fingerprint = inventory_items(node).preflight_fingerprint
+    claim = claim_agent(
+        jobs,
+        node_id,
+        "serial-0",
+        runtime_identity=_ARM64,
+        preflight_fingerprint=fingerprint,
+    )
+    assert claim is not None
+    return claim
+
+
+def _start(lifecycle, installation) -> None:
+    plan = lifecycle.preview_run(installation.owner_id, "contact")
+    lifecycle.start(
+        plan, plan_digest=plan.plan_digest, actor="admin", request_id=str(uuid.uuid4())
+    )
+
+
+def _admit_recipe_nodes(sessions, nodes) -> Callable[[], None]:
+    def admit() -> None:
+        with sessions.begin() as session:
+            set_admission_timeout(session)
+            lock_admission_rows(
+                session,
+                (
+                    AdmissionRowLock(
+                        "target-agent-nodes",
+                        AgentNode,
+                        select(AgentNode).where(AgentNode.node_id.in_(nodes)),
+                    ),
+                ),
+            )
+
+    return admit
+
+
+def _recipe_write(world, kind: str) -> Callable[[], object]:
+    sessions, lifecycle, jobs, installation, nodes = world
+    if kind == "claim":
+        _start(lifecycle, installation)
+        return lambda: _recipe_claim(sessions, jobs, nodes[0])
+    if kind in {"heartbeat", "succeed", "failed-start"}:
+        _start(lifecycle, installation)
+        claim = _recipe_claim(sessions, jobs, nodes[0])
+        if kind == "heartbeat":
+            return lambda: jobs.heartbeat(claim.fence, None, lease_seconds=60)
+        if kind == "succeed":
+            with sessions() as session:
+                operation = session.get(
+                    AgentOperation, fenced_operation(sessions, claim).id
+                )
+                assert operation is not None
+                evidence = start_evidence(operation.payload)
+            return lambda: jobs.record_result(
+                AgentResult(
+                    fence=claim.fence,
+                    state=AgentResultState.SUCCEEDED,
+                    result=RecipeStartResult.model_validate(evidence),
+                )
+            )
+        return lambda: jobs.fail(claim, "injected start failure")
+    run = started_recipe(
+        sessions,
+        lifecycle,
+        installation.owner_id,
+        nodes,
+        request_id=str(uuid.uuid4()),
+    )
+    plan = lifecycle.preview_stop(run.owner_id)
+    lifecycle.stop(
+        run.owner_id,
+        plan_digest=plan.plan_digest,
+        actor="admin",
+        request_id=str(uuid.uuid4()),
+    )
+    claim = _recipe_claim(sessions, jobs, nodes[0])
+    return lambda: jobs.record_result(
+        AgentResult(
+            fence=claim.fence,
+            state=AgentResultState.CANCELLED,
+            result=RecipeStopResult(),
+        )
+    )
+
+
+@pytest.mark.parametrize("kind", ("claim", "heartbeat", "succeed"))
+def test_recipe_agent_writes_through_the_production_consumer_leave_admission_free(
+    recipe_world, postgres_engine, kind
+):
+    """Fails on main: the start claim, its heartbeat and result locked nodes."""
+    sessions, *_, nodes = recipe_world
+    held, refused = _paused_at_commit(
+        postgres_engine,
+        _recipe_write(recipe_world, kind),
+        _admit_recipe_nodes(sessions, nodes),
+    )
+    assert held <= {_FK_CHECK}
+    assert refused is None
+
+
+@pytest.mark.xfail(
+    strict=True,
+    raises=AssertionError,
+    reason="lock plan step 4: _intent_is_current (recipe_operations/intent.py:107)",
+)
+@pytest.mark.parametrize("kind", ("failed-start", "cancelled-stop"))
+def test_recipe_intent_check_in_a_result_leaves_admission_free(
+    recipe_world, postgres_engine, kind
+):
+    """Known: a failed or cancelled start/stop result still checks the workload
+    intent under FOR UPDATE on its target nodes (lock plan step 4 flips this)."""
+    sessions, *_, nodes = recipe_world
+    held, refused = _paused_at_commit(
+        postgres_engine,
+        _recipe_write(recipe_world, kind),
+        _admit_recipe_nodes(sessions, nodes),
+    )
+    assert held <= {_FK_CHECK}
+    assert refused is None
 
 
 def test_hammered_agent_traffic_never_refuses_admission_or_deadlocks(

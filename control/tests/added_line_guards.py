@@ -88,14 +88,49 @@ CONTACT_WRITERS = frozenset(
         "control/src/vonk_control/db/node_facts.py",
     }
 )
-CONTACT_WRITE = re.compile(
-    r"\.(?:last_seen_at|protocol_version|contact_certificate_serial"
-    r"|contact_observation_digest|management_address|management_observed_at"
-    r"|recipe_observation_http_status|recipe_observation_status_at"
-    r"|contact_repeated_evidence)\s*=(?!=)"
-    r"|\b(?:insert|update|delete)\(\s*AgentNodeContact\b"
-    r"|(?<!class )\bAgentNodeContact\("
+# Facts only the contact row has; ``last_seen_at``, ``protocol_version`` and
+# ``management_address`` also name unrelated fields, so for those only a
+# receiver named for the contact row counts.
+_CONTACT_ONLY = frozenset(
+    {
+        "contact_certificate_serial",
+        "contact_observation_digest",
+        "contact_repeated_evidence",
+        "management_observed_at",
+        "recipe_observation_http_status",
+        "recipe_observation_status_at",
+    }
 )
+_CONTACT_SHARED = frozenset({"last_seen_at", "protocol_version", "management_address"})
+
+
+def contact_writes(source: str) -> list[int]:
+    """Lines writing a contact fact outside the one writer module."""
+    if "contact" not in source and "AgentNodeContact" not in source:
+        return []
+    found: set[int] = set()
+    for node in ast.walk(ast.parse(source)):
+        targets: list[ast.expr] = []
+        if isinstance(node, ast.Assign):
+            targets = list(node.targets)
+        elif isinstance(node, ast.AugAssign | ast.AnnAssign):
+            targets = [node.target]
+        for target in targets:
+            if isinstance(target, ast.Attribute) and (
+                target.attr in _CONTACT_ONLY
+                or target.attr in _CONTACT_SHARED
+                and "contact" in ast.unparse(target.value).lower()
+            ):
+                found.add(target.lineno)
+        if isinstance(node, ast.Call):
+            name = ast.unparse(node.func).split(".")[-1]
+            if name == "AgentNodeContact" or (
+                name in {"insert", "update", "delete"}
+                and node.args
+                and ast.unparse(node.args[0]).split(".")[-1] == "AgentNodeContact"
+            ):
+                found.add(node.lineno)
+    return sorted(found)
 
 
 @cache
@@ -734,8 +769,7 @@ def check_source(
         if path not in CONTACT_WRITERS:
             hits.extend(
                 (line, "contact fact written outside agent_contacts (one upsert path)")
-                for line, text in enumerate(source.splitlines(), 1)
-                if CONTACT_WRITE.search(text)
+                for line in contact_writes(source)
             )
         classified = classified_write_lines(path, source)
         hits.extend(
