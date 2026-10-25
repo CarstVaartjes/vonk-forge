@@ -21,9 +21,9 @@ from vonk_agent_protocol import (
     RunSwitchCode,
     adopt_reason_code,
 )
-from vonk_agent_protocol.agent_words import ProfileChildPhase, ProfileReportedPhase
 from vonk_agent_protocol.contracts import DigestText
 
+from .child_phases import FleetProfileChildPhase
 from .strict_json import StrictJSONModel
 
 MAX_BLOCKERS = 16
@@ -82,14 +82,38 @@ class OperationBlocker(StrictJSONModel):
     )
 
 
-class StallMark(StrictJSONModel):
-    """The highest counters one child phase reached while the wait lasted."""
+_OPERATION_PHASE = Annotated[str, StringConstraints(min_length=1, max_length=80)]
 
-    phase: ProfileChildPhase | ProfileReportedPhase
+
+class StallMark(StrictJSONModel):
+    """How far one child phase got while the wait lasted.
+
+    ``child_bytes`` is the child's own transfer count, kept as a maximum across
+    its retries.  The operation's counters belong to one checkpoint key (one
+    execution); ``key_attempt`` is the child's retry attempt when that key was
+    first seen, so a new key under the same attempt is a re-execution (its
+    counters start over) and a new key under a later attempt is a retry (it
+    must pass the old marks).
+    """
+
+    phase: FleetProfileChildPhase
     child_bytes: int = Field(default=0, ge=0)
+    checkpoint_key: (
+        Annotated[str, StringConstraints(min_length=1, max_length=128)] | None
+    ) = None
+    key_attempt: int | None = Field(default=None, ge=2)
     operation_bytes: int = Field(default=0, ge=0)
     operation_items: int = Field(default=0, ge=0)
     activity: int = Field(default=0, ge=0)
+    #: The operation's own phases seen under this child phase.
+    operation_phases: list[_OPERATION_PHASE] = Field(default_factory=list)
+
+
+class StallWait(StrictJSONModel):
+    """One wait seen during the stall: its code and the Sparks it concerns."""
+
+    code: OperationReason | ProgressAlarmCode
+    node_ids: list[_NODE_ID] = Field(default_factory=list, max_length=32)
 
 
 class ProgressStall(StrictJSONModel):
@@ -106,6 +130,8 @@ class ProgressStall(StrictJSONModel):
     #: phase not seen yet or a new high is movement.  One per phase of the
     #: closed phase vocabulary, so it never grows with history.
     marks: list[StallMark] = Field(default_factory=list)
+    #: Every wait seen at this place: only one not seen yet is movement.
+    waits: list[StallWait] = Field(default_factory=list)
     #: The latest progress of a preparation working for the wait.
     preparation_progressed_at: datetime | None = None
 

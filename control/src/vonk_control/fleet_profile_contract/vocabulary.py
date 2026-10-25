@@ -22,10 +22,8 @@ from vonk_agent_protocol import (
 )
 from vonk_agent_protocol.agent_words import (
     ProfileAction,
-    ProfileChildPhase,
     ProfileInstallationPolicy,
     ProfileOperationKind,
-    ProfileReportedPhase,
 )
 
 
@@ -136,28 +134,6 @@ FLEET_PROFILE_ENDED_STATES = frozenset(
         "superseded",
     }
 )
-
-if TYPE_CHECKING:
-    FleetProfileChildPhase = Literal[
-        "model-download",
-        "container-download",
-        "container-build",
-        "target-copy",
-        "runtime-install",
-        "start",
-        "final-verify",
-        "transfer",
-        "verify",
-        "prepare",
-        "cleanup",
-        "stop",
-        "uninstall",
-        "final_verify",
-    ]
-else:
-    FleetProfileChildPhase = Literal[
-        tuple(member.value for member in (*ProfileChildPhase, *ProfileReportedPhase))
-    ]
 
 DesiredAssignmentStateField = Annotated[
     DesiredAssignmentState, BeforeValidator(machine_adopter(DesiredAssignmentState))

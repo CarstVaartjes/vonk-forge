@@ -16,6 +16,8 @@ from pathlib import Path
 import pytest
 from sqlalchemy import select, update
 from vonk_agent_protocol import (
+    AdmissionCode,
+    AgentFailureKind,
     AgentOperation,
     LifecycleState,
     ObservedAssignmentState,
@@ -25,7 +27,11 @@ from vonk_agent_protocol import (
     WaitReason,
     WaitResumeCondition,
 )
-from vonk_agent_protocol.agent_words import ProfileReasonSeverity
+from vonk_agent_protocol.agent_words import (
+    ProfileChildPhase,
+    ProfileReasonSeverity,
+    ProgressPhase,
+)
 from vonk_control.fleet_profile_contract import FleetProfileApplicationProgress
 from vonk_control.fleet_profiles import FleetProfileService
 from vonk_control.models import (
@@ -46,6 +52,12 @@ from .test_attempt_residues import _load, _loop, _switch
 from .test_fleet_profile_continuity import _world
 from .test_fleet_profiles import NOW, _database, _input, _node_id, _seed, _uuid
 from .test_profile_claim_selfheal import _application, _follow_due, _settle
+from .test_run_switch_operations import (
+    CompleteArtifactInspector,
+    RecordingArtifactExecutor,
+    _ChildView,
+    _fixture_child_result,
+)
 
 
 def _alarm(load):
@@ -305,6 +317,204 @@ def test_an_unconfirmed_stop_written_only_as_the_wait_is_stalled_then_cleared(
     progress, wait = _stored(load)
     assert wait is None and progress.stall is None
     assert not _alarm(load) and not _platform_stalled(load)
+
+
+def _copying_load(tmp_path: Path):
+    """A load whose Sparks need the model copied: its distribution child is
+    driven by the test, reporting what an agent's copy reports."""
+
+    transfer: list = []
+
+    class Copy(RecordingArtifactExecutor):
+        def execute(self, plan, phase, **kwargs):
+            if phase.kind == ProfileChildPhase.TRANSFER:
+                transfer[:] = [plan, phase]
+            return super().execute(plan, phase, **kwargs)
+
+    executor = Copy(child_transfer=True)
+    load = _load(
+        tmp_path,
+        executor=executor,
+        artifacts=CompleteArtifactInspector(
+            reclaimable_bytes=30, missing_spark_bytes=1024
+        ),
+    )
+
+    def report(
+        child_id: str,
+        copied: int,
+        *,
+        key: str | None = None,
+        failed: bool = False,
+        operation_phase: str = ProgressPhase.COPYING.value,
+    ) -> None:
+        """The child's execution (``key``, by default its id) copied ``copied``."""
+
+        plan, phase = transfer
+        payload: dict = {
+            "progress": {"completed_bytes": copied, "total_bytes": 10**9},
+            "operation": {
+                "phase": operation_phase,
+                "completed_bytes": copied,
+                "total_bytes": 10**9,
+                "total_bytes_known": True,
+                "checkpoint": {"key": key or child_id, "sequence": copied},
+                # The agent's sample of a new high (``sample_progress``).
+                "last_progress_at": load.now[0].isoformat(),
+                "members": [],
+            },
+        }
+        if failed:
+            payload |= {
+                "failure_kind": AgentFailureKind.TEMPORARY_DEPENDENCY.value,
+                "error_code": AdmissionCode.CAPACITY_BUSY.value,
+                "reason": "The admission lock is held by another admission",
+            }
+        executor.children[child_id] = _ChildView(
+            state=LifecycleState.FAILED.value
+            if failed
+            else LifecycleState.RUNNING.value,
+            result=_fixture_child_result(plan, phase, payload),
+        )
+
+    return load, executor, report
+
+
+def _running_children(executor) -> list[str]:
+    return [
+        child_id
+        for child_id, child in executor.children.items()
+        if child.state in {LifecycleState.QUEUED.value, LifecycleState.RUNNING.value}
+    ]
+
+
+def test_a_copy_retried_through_phase_retries_is_stalled_one_window_later(
+    tmp_path: Path,
+) -> None:
+    """The 2026-10-24 incident through the real reconcile: the distribution
+    child copies 300 bytes and fails retryably (admission.capacity_busy);
+    each retry runs a runtime preflight and a new execution whose bytes start
+    at zero and rise to 300 again.  The load shows a different wait at each
+    step of the cycle (receipt-missing, run-switch.phase-retry, the preflight),
+    and none of it is new after the first cycle: one window later it is
+    stalled, while the cycle goes on."""
+
+    load, executor, report = _copying_load(tmp_path)
+    copied: dict[str, int] = {}
+    places: set[str] = set()
+    codes: set[str] = set()
+    for _ in range(80):
+        _loop(load, lambda: False, rounds=1)
+        load.now[0] += timedelta(minutes=1)
+        for child_id in _running_children(executor):
+            copied[child_id] = copied.get(child_id, 0) + 100
+            report(child_id, copied[child_id], failed=copied[child_id] >= 300)
+        _sparks_report(load)
+        application = _application(load)
+        stall = application.progress.stall
+        if stall is not None:
+            places.add(stall.signature)
+        codes.update(item.code for item in application.blockers)
+        if _alarm(load):
+            break
+    assert _alarm(load), application.blockers
+    assert application.state == LifecycleState.RUNNING.value  # still waiting
+    assert len(places) == 1  # one place across the child's backoff and retry
+    assert len(copied) > 3  # the child kept retrying the copy
+    assert {WaitReason.RECEIPT_MISSING, ProgressAlarmCode.STALLED} <= codes
+    # One window after the first cycle (a cycle takes about six minutes),
+    # not eventually.
+    assert load.now[0] <= application.created_at + PROGRESS_STALL_WINDOW + timedelta(
+        minutes=10
+    )
+    assert stall is not None
+    assert stall.first_seen_at + PROGRESS_STALL_WINDOW <= load.now[0]
+    (listed,) = _platform_stalled(load)
+    assert listed.application_id == load.application.id
+
+
+def test_a_re_executed_copy_resumes_without_an_alarm(tmp_path: Path) -> None:
+    """The agent restarts mid-copy (a parallel upgrade): the same execution
+    runs again under a new checkpoint key, its bytes from zero, below what it
+    had copied.  Climbing again is movement: no alarm while it climbs, and
+    the load finishes."""
+
+    load, executor, report = _copying_load(tmp_path)
+    assert _loop(load, lambda: bool(_running_children(executor)), rounds=10)
+    (child_id,) = _running_children(executor)
+    key = child_id
+    for copied in range(100, 600, 100):  # the first execution copies 500
+        load.now[0] += timedelta(minutes=5)
+        report(child_id, copied)
+        _sparks_report(load)
+        _loop(load, lambda: False, rounds=1)
+    child = _application(load).progress.child_progress
+    assert child is not None and child.retry_attempt is None  # one attempt
+    for copied in range(10, 500, 10):  # the re-execution, ten bytes a step
+        load.now[0] += timedelta(minutes=5)
+        report(child_id, copied, key=f"{key}-restarted")
+        _sparks_report(load)
+        _loop(load, lambda: False, rounds=1)
+        assert not _alarm(load), copied
+    executor.children[child_id] = _ChildView(
+        state=LifecycleState.SUCCEEDED.value, result=executor.children[child_id].result
+    )
+    _sparks_report(load)
+    assert _settle(load), _application(load).status_reason
+
+
+def test_a_load_moving_through_its_phases_for_longer_than_a_window_is_never_stalled(
+    tmp_path: Path,
+) -> None:
+    """Every running load carries a persisted receipt wait (a load holds no
+    lease), so only forward movement keeps it out of the alarm.  A load whose
+    copy takes three quarters of an hour (a new high every five minutes) and
+    whose child then goes through its install, start and verify phases and
+    the agent's sub-phases within them is never shown stalled."""
+
+    load, executor, report = _copying_load(tmp_path)
+    shown: set[tuple[str, str | None]] = set()
+
+    def observe() -> None:
+        application = _application(load)
+        child = application.progress.child_progress
+        if child is not None:
+            operation = child.operation
+            shown.add((child.phase, None if operation is None else operation.phase))
+        assert not _alarm(load), application.blockers
+
+    assert _loop(load, lambda: bool(_running_children(executor)), rounds=10)
+    (child_id,) = _running_children(executor)
+    # The agent prepares the copy first, then copies: the step into a phase
+    # of its own it has not shown yet is movement, before any byte moves.
+    load.now[0] += timedelta(minutes=5)
+    report(child_id, 0, operation_phase=ProgressPhase.PREPARING.value)
+    _loop(load, lambda: False, rounds=1)
+    observe()
+    load.now[0] += PROGRESS_STALL_WINDOW - timedelta(minutes=8)
+    _loop(load, lambda: False, rounds=1)
+    observe()
+    for copied in range(100, 1000, 100):  # 45 minutes of copying
+        load.now[0] += timedelta(minutes=5)
+        report(child_id, copied)
+        _sparks_report(load)
+        _loop(load, lambda: False, rounds=1)
+        observe()
+    executor.children[child_id] = _ChildView(
+        state=LifecycleState.SUCCEEDED.value, result=executor.children[child_id].result
+    )
+    _sparks_report(load)
+    for _ in range(40):
+        if _application(load).state == LifecycleState.SUCCEEDED.value:
+            break
+        _loop(load, lambda: False, rounds=1)
+        observe()
+    application = _application(load)
+    assert application.state == LifecycleState.SUCCEEDED.value, (
+        application.status_reason
+    )
+    assert load.now[0] - application.created_at > PROGRESS_STALL_WINDOW
+    assert len({phase for phase, _ in shown}) > 2 and len(shown) > 4, shown
 
 
 def test_a_parked_load_repeating_an_unavailable_observation_is_stalled(

@@ -15,23 +15,37 @@ queued, running or backing off and waits on something (blockers in its progress
 or in its persisted wait, such as a missing child receipt) is observed: a
 backoff whose every retry is declined the same way is a wait that does not
 move, and a newer load waiting for an older one to finish the assignments it
-continues records that wait too.  Its *signature* is which wait it is: the
-load's state, step, child operation, completed steps and admission together
-with what it waits on (each blocker's code and its Sparks).  A different
-signature is a different wait and starts a new stall.
+continues records that wait too.  A load holds no lease, so every running
+load carries such a wait (at least its child's missing receipt): only forward
+movement keeps a working load out of the alarm.
 
-Within one wait only forward movement counts, never a change: the stall keeps,
-per child phase seen, the highest bytes, items and subprocess activity reached
-(``marks``), and the latest progress of a preparation working for the wait.  A
-phase not seen yet during the wait, a new high or a later preparation progress
-restarts the window; a copy retried from zero that rises again below its old
-mark, a phase flapping between two it already showed, or a fresh last-progress
-time alone does not.  A changing symptom is not movement either: the blocker
-text (with the times and counters it quotes) and the phase of a re-check the
-child runs are outside the stall.  Retry bookkeeping (attempts, due times,
-status text) is outside it too.  A load that stops waiting or ends drops it.
-``repeats`` counts the retry attempts that saw the same wait; it is
-informative and decides nothing.
+The stall's *signature* is where the load waits: its state, step, child
+operation, completed steps and admission.  A different place starts a new
+stall.  At one place only forward movement counts, never a change, because a
+stuck child cycles through its symptoms (2026-10-24: receipt-missing,
+run-switch.phase-retry, a runtime preflight, receipt-missing again, each
+retry copying from zero).  The stall keeps what the wait has reached:
+
+* every wait seen (code and Sparks): one not seen yet is movement, one seen
+  before is not;
+* per child phase seen (``marks``): the child's own transfer bytes, the
+  operation's bytes, items and subprocess activity at their highest, and the
+  operation's own phases; a phase not seen yet or a counter past its mark is
+  movement.  The operation's counters count within one checkpoint key: a new
+  key under the child attempt that first showed the old key re-executes it
+  (an agent restart) and its counters start over, while a new key under a
+  later attempt is a retry and must pass the old marks;
+* the latest progress of a preparation working for the wait.
+
+So a copy retried from zero that rises again below its old mark, a phase
+flapping back to one it already showed, a wait recurring, or a fresh
+last-progress time alone never restarts the window.  The blocker text (with
+the times and counters it quotes) and retry bookkeeping (attempts, due times,
+status text) are outside the stall.  A load that stops waiting or ends drops
+it.  ``repeats`` counts the retry attempts that saw the same place; it is
+informative and decides nothing.  What is kept is bounded by the closed child
+phase and reason vocabularies, the Sparks and the agent's own phase names:
+seeing the same again never grows it.
 
 The stall is stored with the progress (``stall``).  Whether it is an alarm is
 decided when it is read, against :data:`PROGRESS_STALL_WINDOW` since the wait
@@ -47,14 +61,10 @@ from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from typing import TypeGuard
 
-from pydantic import TypeAdapter, ValidationError
+from pydantic import ValidationError
 from sqlalchemy import event, inspect
 from vonk_agent_protocol import LifecycleState, canonical_message
-from vonk_agent_protocol.agent_words import (
-    ProfileChildPhase,
-    ProfileReasonSeverity,
-    ProfileReportedPhase,
-)
+from vonk_agent_protocol.agent_words import ProfileReasonSeverity
 
 from .fleet_profile_contract import FleetProfileApplicationProgress
 from .models import FleetProfileApplication
@@ -63,6 +73,7 @@ from .operation_blockers import (
     ProgressAlarmCode,
     ProgressStall,
     StallMark,
+    StallWait,
     make_blocker,
 )
 from .settings import PROFILE_STALL_WINDOW_SECONDS
@@ -83,9 +94,6 @@ WAITING_STATES = frozenset(
         LifecycleState.BACKOFF.value,
     }
 )
-
-
-_PHASE = TypeAdapter(ProfileChildPhase | ProfileReportedPhase)
 
 
 def _aware(value: datetime) -> datetime:
@@ -131,13 +139,9 @@ def progress_signature(
     state: str,
     current_step: int | None,
     current_operation_id: str | None,
-    waiting: Sequence[OperationBlocker] = (),
 ) -> str:
-    """One digest of which wait this is: the load's place and what it waits on."""
+    """One digest of where the load waits: its place, never what it shows."""
 
-    waits = sorted(
-        (item.code, sorted(item.node_ids)) for item in _waits(progress, waiting)
-    )
     place = [
         state,
         current_step,
@@ -145,37 +149,73 @@ def progress_signature(
         progress.completed_steps,
         progress.admission_pending,
     ]
-    canonical = json.dumps([place, waits], sort_keys=True, default=str)
+    canonical = json.dumps(place, sort_keys=True, default=str)
     return hashlib.sha256(canonical.encode()).hexdigest()
 
 
-def _marks(
+def _advance(
     previous: Sequence[StallMark], progress: FleetProfileApplicationProgress
-) -> list[StallMark]:
-    """``previous`` raised by the child's current phase and counters."""
+) -> tuple[list[StallMark], bool]:
+    """The marks raised by the child's current phase, and whether that moved.
+
+    Moving is reaching what this wait has not reached before: a child phase or
+    an operation phase not seen yet, or a counter past its mark.  The
+    operation's counters count within one checkpoint key: a new key under the
+    attempt that first showed the old one re-executes it and starts its
+    counters over; a new key under a later attempt is a retry and must pass
+    the old marks.  An unkeyed sample keeps the key it does not name.
+    """
 
     child = progress.child_progress
     if child is None:
-        return list(previous)
+        return list(previous), False
     operation = child.operation
-    phase = _PHASE.validate_python(child.phase)
-    seen = {mark.phase: mark for mark in previous}
-    old = seen.get(phase, StallMark(phase=phase))
-    seen[phase] = StallMark(
-        phase=phase,
-        child_bytes=max(old.child_bytes, child.bytes or 0),
-        operation_bytes=max(
-            old.operation_bytes, 0 if operation is None else operation.completed_bytes
-        ),
-        operation_items=max(
-            old.operation_items,
-            0 if operation is None else operation.completed_items or 0,
-        ),
-        activity=max(
-            old.activity, 0 if operation is None else operation.activity_sequence or 0
-        ),
+    marks = {mark.phase: mark for mark in previous}
+    old = marks.get(child.phase)
+    base = old or StallMark(phase=child.phase)
+    key = (
+        None
+        if operation is None or operation.checkpoint is None
+        else operation.checkpoint.key
     )
-    return list(seen.values())
+    if key is not None and key != base.checkpoint_key:
+        if base.checkpoint_key is not None and base.key_attempt == child.retry_attempt:
+            base = base.model_copy(
+                update={"operation_bytes": 0, "operation_items": 0, "activity": 0}
+            )
+        base = base.model_copy(
+            update={"checkpoint_key": key, "key_attempt": child.retry_attempt}
+        )
+    reached = {
+        "child_bytes": child.bytes or 0,
+        "operation_bytes": 0 if operation is None else operation.completed_bytes,
+        "operation_items": 0 if operation is None else operation.completed_items or 0,
+        "activity": 0 if operation is None else operation.activity_sequence or 0,
+    }
+    raised = {
+        name: value for name, value in reached.items() if value > getattr(base, name)
+    }
+    phases = list(base.operation_phases)
+    if operation is not None and operation.phase not in phases:
+        phases.append(operation.phase)
+    marks[child.phase] = base.model_copy(update={**raised, "operation_phases": phases})
+    moved = old is None or bool(raised) or len(phases) > len(base.operation_phases)
+    return list(marks.values()), moved
+
+
+def _seen_waits(
+    previous: Sequence[StallWait], waits: Sequence[OperationBlocker]
+) -> tuple[list[StallWait], bool]:
+    """The waits seen at this place, and whether one of ``waits`` is new."""
+
+    seen = list(previous)
+    keys = {(item.code, tuple(item.node_ids)) for item in seen}
+    for item in waits:
+        nodes = sorted(item.node_ids)
+        if (item.code, tuple(nodes)) not in keys:
+            keys.add((item.code, tuple(nodes)))
+            seen.append(StallWait(code=item.code, node_ids=nodes))
+    return seen, len(seen) > len(previous)
 
 
 def _latest(first: datetime | None, second: datetime | None) -> datetime | None:
@@ -216,52 +256,57 @@ def next_stall(
     waits = _waits(progress, waiting)
     if state not in WAITING_STATES or not waits:
         return None
-    now = _aware(observed_at)
+    seen_at = _aware(observed_at)
     signature = progress_signature(
         progress,
         state=state,
         current_step=current_step,
         current_operation_id=current_operation_id,
-        waiting=waiting,
     )
     detail = f"{waits[0].code}: {waits[0].detail}"[:512]
-    if previous is not None and previous.signature == signature:
-        marks = _marks(previous.marks, progress)
-        prepared = _latest(
-            previous.preparation_progressed_at, progress.preparation_progressed_at
+    if previous is None or previous.signature != signature:
+        marks, _ = _advance((), progress)
+        seen, _ = _seen_waits((), waits)
+        return ProgressStall(
+            signature=signature,
+            detail=detail,
+            first_seen_at=seen_at,
+            last_seen_at=seen_at,
+            repeats=1,
+            marks=marks,
+            waits=seen,
+            preparation_progressed_at=_latest(None, progress.preparation_progressed_at),
         )
-        if marks != previous.marks or prepared != (
-            None
-            if previous.preparation_progressed_at is None
-            else _aware(previous.preparation_progressed_at)
-        ):
-            # Forward movement within the same wait: the window starts over,
-            # and the marks it reached are kept so that falling back is not.
-            return previous.model_copy(
-                update={
-                    "detail": detail,
-                    "first_seen_at": now,
-                    "last_seen_at": now,
-                    "repeats": 1,
-                    "marks": marks,
-                    "preparation_progressed_at": prepared,
-                }
-            )
-        if before is None or _retry_attempt(before) == _retry_attempt(progress):
-            return previous  # checked again within the same attempt
-        if now <= _aware(previous.last_seen_at):
-            return previous  # the same observation written twice
+    marks, advanced = _advance(previous.marks, progress)
+    seen, new_wait = _seen_waits(previous.waits, waits)
+    prepared = _latest(
+        previous.preparation_progressed_at, progress.preparation_progressed_at
+    )
+    if (
+        advanced
+        or new_wait
+        or prepared != _latest(None, previous.preparation_progressed_at)
+    ):
+        # Forward movement at the same place: the window starts over, and what
+        # it reached is kept, so falling back and rising again is not.
         return previous.model_copy(
-            update={"last_seen_at": now, "repeats": previous.repeats + 1}
+            update={
+                "detail": detail,
+                "first_seen_at": seen_at,
+                "last_seen_at": seen_at,
+                "repeats": 1,
+                "marks": marks,
+                "waits": seen,
+                "preparation_progressed_at": prepared,
+            }
         )
-    return ProgressStall(
-        signature=signature,
-        detail=detail,
-        first_seen_at=now,
-        last_seen_at=now,
-        repeats=1,
-        marks=_marks((), progress),
-        preparation_progressed_at=_latest(None, progress.preparation_progressed_at),
+    kept = previous.model_copy(update={"marks": marks, "waits": seen})
+    if before is None or _retry_attempt(before) == _retry_attempt(progress):
+        return kept  # checked again within the same attempt
+    if seen_at <= _aware(previous.last_seen_at):
+        return kept  # the same observation written twice
+    return kept.model_copy(
+        update={"last_seen_at": seen_at, "repeats": previous.repeats + 1}
     )
 
 
