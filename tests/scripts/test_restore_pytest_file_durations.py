@@ -96,6 +96,32 @@ def test_restore_fails_open_on_unsupported_or_stale_input(tmp_path):
     assert json.loads(output.read_text())["files"] == {}
 
 
+def test_artifact_names_read_every_page_of_a_run(monkeypatch):
+    module = _module()
+    page_size = module.ARTIFACT_PAGE
+    first = [{"name": f"other-{index}"} for index in range(page_size - 1)]
+    first.append({"name": "pytest-file-durations-control-1"})
+    pages = {
+        1: first,
+        2: [
+            {"name": "pytest-file-durations-control-5"},
+            {"name": "pytest-file-durations-control-6"},
+        ],
+    }
+
+    def fake_gh(*args):
+        assert args[0] == "api"
+        page = int(args[1].rsplit("page=", 1)[1]) if "page=" in args[1] else 1
+        return {"artifacts": pages.get(page, [])}
+
+    monkeypatch.setattr(module, "_gh", fake_gh)
+    assert module._artifact_names("7", "control", "o/r") == [
+        "pytest-file-durations-control-1",
+        "pytest-file-durations-control-5",
+        "pytest-file-durations-control-6",
+    ]
+
+
 def test_restore_cli_uses_supported_gh_commands_and_system_tempdir(tmp_path: Path):
     now = datetime.now(UTC).isoformat().replace("+00:00", "Z")
     fake_bin = tmp_path / "bin"

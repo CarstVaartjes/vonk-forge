@@ -60,6 +60,8 @@ MODES = (
     "planner-defects",
     "capacity-gates",
     "start-budgets",
+    "listings",
+    "movement",
 )
 # The agent's messages a Controller test may send only as the stand-in pinned
 # to the agent's shared vector; built by hand they are the Controller's idea of
@@ -502,6 +504,60 @@ def start_budget_derivations(source: str) -> list[tuple[int, str]]:
     return sorted(found.items())
 
 
+# Movement is forward-only: a stall's marks keep, per child phase, the highest
+# counters and the phases seen, so a copy retried from zero or a phase
+# flapping back is not progress (#1899).  A comparison of one progress field
+# against the previous sample's ("phase differs", "value higher than before")
+# is the pairwise shape that called those movement.  Reviewed sites only.
+_MOVEMENT_FIELDS = frozenset(
+    {
+        "phase",
+        "completed_bytes",
+        "completed_items",
+        "activity_sequence",
+        "bytes",
+        "last_progress_at",
+    }
+)
+MOVEMENT_VERDICTS: dict[tuple[str, str], str] = {
+    (
+        "control/src/vonk_control/stall_window.py",
+        "progress_advanced",
+    ): "agent operation progress within one attempt: forward-only marks need a "
+    "per-attempt store (an OperationProgress protocol field); owner proposal",
+}
+
+
+def pairwise_movement_checks(source: str) -> list[tuple[int, str]]:
+    """``a.field != b.field`` or ``a.field > b.field`` on a progress field.
+
+    Reads through ``x or 0`` defaults.  Returns (line, enclosing function).
+    """
+
+    def field(side: ast.expr) -> tuple[str, str] | None:
+        if isinstance(side, ast.BoolOp) and side.values:
+            side = side.values[0]
+        if isinstance(side, ast.Attribute) and side.attr in _MOVEMENT_FIELDS:
+            return side.attr, ast.unparse(side.value)
+        return None
+
+    found: dict[int, str] = {}
+    for scope in ast.walk(ast.parse(source)):
+        if not isinstance(scope, ast.FunctionDef | ast.AsyncFunctionDef):
+            continue
+        for node in ast.walk(scope):
+            if not isinstance(node, ast.Compare):
+                continue
+            sides = [node.left, *node.comparators]
+            for op, left, right in zip(node.ops, sides[:-1], sides[1:], strict=True):
+                if not isinstance(op, ast.NotEq | ast.Gt | ast.Lt | ast.GtE | ast.LtE):
+                    continue
+                one, other = field(left), field(right)
+                if one and other and one[0] == other[0] and one[1] != other[1]:
+                    found.setdefault(node.lineno, scope.name)
+    return sorted(found.items())
+
+
 def check_source(
     path: str,
     source: str,
@@ -593,6 +649,38 @@ def check_source(
                 )
             ):
                 noexit_hits.append(f"{path}:{line}: exit code invented, not measured")
+    if "listings" in modes and not is_test:
+        # GitHub lists a run's artifacts 30 to a page; a reader of one page
+        # silently misses the rest (shard timings, #1900). Read every page or
+        # ask for the one artifact by name; a download by id is not a listing.
+        # A line that calls a function of this file whose own gh argv pages
+        # reads every page. The window is four lines before (workflow
+        # continuations) and one after (a split URL).
+        rows = source.splitlines()
+        paging = re.compile(
+            r"[\"']gh[\"'],\s*[\"']api[\"'],\s*(?:[\"'][^\"']*[\"'],\s*)*[\"']--paginate[\"']"
+        )
+        wrappers = {
+            name
+            for name, body in re.findall(
+                r"^def (\w+)\(([\s\S]*?)(?=^\S|\Z)", source, re.MULTILINE
+            )
+            if paging.search(body)
+        }
+        for line, text in enumerate(rows, 1):
+            window = " ".join(rows[max(line - 5, 0) : line + 1])
+            if (
+                line in added
+                and re.search(
+                    r"actions/(?:runs/[^\s\"']*/)?artifacts(?!\w|/[\w{$])", text
+                )
+                and not re.search(r"--paginate|\bpage=|[?&]name=", window)
+                and not (
+                    any(re.search(rf"\b{name}\(", text) for name in wrappers)
+                    and not re.search(r"[\"']gh[\"'],", window)
+                )
+            ):
+                noexit_hits.append(f"{path}:{line}: artifact listing reads one page")
     if (
         "locks" in modes
         and not is_test
@@ -903,6 +991,17 @@ def check_source(
             (line, "start budget derived from a stored start timestamp")
             for line, function in start_budget_derivations(source)
             if (path, function) not in START_BUDGET_VERDICTS
+        )
+    if (
+        python
+        and not is_test
+        and "movement" in modes
+        and path.startswith("control/src/")
+    ):
+        hits.extend(
+            (line, "pairwise progress movement (compare against forward marks)")
+            for line, function in pairwise_movement_checks(source)
+            if (path, function) not in MOVEMENT_VERDICTS
         )
     if python and is_test and "clocks" in modes:
         hits.extend(

@@ -120,6 +120,23 @@ PATH = "control/src/vonk_control/example.py"
         ("reasons", 'settle(job, CancelRequested(None, "superseded"), now)\n', 1),
         ("reasons", 'why = reason or row.reason or "cancelled"\n', 1),
         ("reasons", 'def _default_reason(row):\n    return "recipe job failed"\n', 2),
+        # Movement is forward-only, never "differs from the previous sample".
+        (
+            "movement",
+            (
+                "def moved(current, previous):\n"
+                "    return current.phase != previous.phase\n"
+            ),
+            2,
+        ),
+        (
+            "movement",
+            (
+                "def moved(now, before):\n"
+                "    return (now.completed_items or 0) > (before.completed_items or 0)\n"
+            ),
+            2,
+        ),
     ],
 )
 def test_new_occurrence_fails_untouched_occurrence_does_not(mode, source, line):
@@ -1128,3 +1145,127 @@ def test_start_budget_guard_allows_reviewed_sites_settings_and_other_clocks():
         "    return timedelta(seconds=settings.DISTRIBUTED_START_TIMEOUT_SECONDS)\n"
     )
     assert not check_source(PATH, other, set(range(1, 5)), modes=("start-budgets",))
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        'artifacts = _gh("api", f"repos/{repo}/actions/runs/{run_id}/artifacts")\n',
+        "gh api repos/$REPO/actions/runs/$RUN/artifacts --jq '.artifacts[]'\n",
+        "gh api repos/$REPO/actions/artifacts\n",
+    ],
+)
+def test_added_line_guard_rejects_a_one_page_artifact_listing(text):
+    """A run holds more artifacts than one default page (#1900)."""
+    path = "scripts/example.sh"
+    assert check_source(path, text, {1}, modes=("listings",))
+    assert not check_source(path, text, {2}, modes=("listings",))
+    assert not check_source("tests/example.sh", text, {1}, modes=("listings",))
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "gh api --paginate repos/$REPO/actions/runs/$RUN/artifacts\n",
+        'f"repos/{repo}/actions/runs/{run_id}/artifacts?per_page=100&page={page}"\n',
+        'f"repos/{repo}/actions/runs/{run_id}/artifacts"\n    f"?per_page=100&page={page}"\n',
+        "gh api repos/$REPO/actions/artifacts?name=agent-package\n",
+        "gh api repos/$REPO/actions/artifacts/$ID/zip > artifact.zip\n",
+    ],
+)
+def test_added_line_guard_allows_paged_or_named_artifact_listings(text):
+    assert not check_source("scripts/example.sh", text, {1}, modes=("listings",))
+
+
+def test_added_line_guard_allows_a_paginating_wrapper_and_workflow_continuations():
+    wrapper = (
+        "def gh(endpoint):\n"
+        '    return run(["gh", "api", "--paginate", "--slurp", endpoint])\n'
+        'pages = gh(f"/repos/{repo}/actions/runs/{run_id}/artifacts?per_page=100")\n'
+    )
+    assert not check_source("scripts/example.py", wrapper, {3}, modes=("listings",))
+    workflow = (
+        "        run: |\n"
+        "          gh api --paginate \\\n"
+        "            -H 'Accept: application/vnd.github+json' \\\n"
+        "            -H 'X-GitHub-Api-Version: 2022-11-28' \\\n"
+        "            -f per_page=100 \\\n"
+        '            "/repos/$REPO/actions/runs/$RUN/artifacts" --jq .artifacts[]\n'
+    )
+    path = ".github/workflows/example.yml"
+    assert not check_source(path, workflow, {6}, modes=("listings",))
+    one_page = workflow.replace("--paginate ", "").replace("per_page", "x")
+    assert check_source(path, one_page, {6}, modes=("listings",))
+
+
+_PAGING_WRAPPER = (
+    "def gh(endpoint):\n"
+    '    return run(["gh", "api", "--paginate", "--slurp", endpoint])\n'
+    "\n"
+    "\n"
+)
+
+
+def test_added_line_guard_scopes_the_wrapper_and_flags_a_bare_trailing_slash():
+    direct = (
+        _PAGING_WRAPPER
+        + "pass\n" * 5
+        + 'run(["gh", "api", f"repos/o/r/actions/runs/{run_id}/artifacts"])\n'
+    )
+    last = direct.count("\n")
+    assert check_source("scripts/example.py", direct, {last}, modes=("listings",))
+    through = (
+        _PAGING_WRAPPER + 'pages = gh(f"/repos/o/r/actions/runs/{run_id}/artifacts")\n'
+    )
+    last = through.count("\n")
+    assert not check_source("scripts/example.py", through, {last}, modes=("listings",))
+    slash = 'gh(f"repos/o/r/actions/runs/{run_id}/artifacts/")\n'
+    assert check_source("scripts/example.py", slash, {1}, modes=("listings",))
+
+
+def test_added_line_guard_needs_the_wrapper_itself_to_paginate():
+    per_call = (
+        "def gh(*args):\n"
+        '    return run(["gh", "api", *args])\n'
+        'runs = gh("--paginate", "repos/o/r/actions/runs")\n'
+        + "pass\n" * 5
+        + 'listing = gh(f"/repos/o/r/actions/runs/{run_id}/artifacts")\n'
+    )
+    assert check_source("scripts/example.py", per_call, {9}, modes=("listings",))
+    original = (
+        'flags = ["--paginate"]\n'
+        + "pass\n" * 5
+        + 'artifacts = _gh("api", f"repos/{repo}/actions/runs/{run_id}/artifacts")\n'
+    )
+    assert check_source("scripts/example.py", original, {7}, modes=("listings",))
+
+
+def test_added_line_guard_checks_a_direct_multiline_call_in_a_paginating_file():
+    source = (
+        _PAGING_WRAPPER + "pass\n" * 5 + "subprocess.run(\n"
+        "    [\n"
+        '        "gh",\n'
+        '        "api",\n'
+        '        f"/repos/o/r/actions/runs/{run_id}/artifacts",\n'
+        "    ]\n"
+        ")\n" + 'url = f"/repos/o/r/actions/runs/{run_id}/artifacts"\n'
+    )
+    rows = source.splitlines()
+    for line, text in enumerate(rows, 1):
+        if "artifacts" in text:
+            assert check_source(
+                "scripts/example.py", source, {line}, modes=("listings",)
+            )
+
+
+def test_the_classified_pairwise_progress_check_is_allowed():
+    source = (
+        "def progress_advanced(previous, current):\n"
+        "    return current.phase != previous.phase\n"
+    )
+    assert not check_source(
+        "control/src/vonk_control/stall_window.py", source, {2}, modes=("movement",)
+    )
+    assert check_source(
+        "control/src/vonk_control/other.py", source, {2}, modes=("movement",)
+    )

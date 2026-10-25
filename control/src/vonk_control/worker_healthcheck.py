@@ -8,13 +8,16 @@ from sqlalchemy import select
 
 from .models import ControlProcessHeartbeat
 
+#: How recent the worker's readiness heartbeat must be to count as live.
+WORKER_READINESS_WINDOW_SECONDS = 30
+
 
 def verify_worker_ready(
     sessions,
     *,
     process_instance_id: str,
     now: datetime,
-    maximum_age_seconds: int = 30,
+    maximum_age_seconds: int = WORKER_READINESS_WINDOW_SECONDS,
 ) -> None:
     """Require a recent completed scheduler loop from this exact process identity."""
     if now.tzinfo is None or now.utcoffset() is None:

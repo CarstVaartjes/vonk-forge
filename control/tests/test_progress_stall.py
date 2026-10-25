@@ -8,10 +8,17 @@ import sys
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from vonk_agent_protocol import ProfileReasonCode, RecipeImageCode
+from vonk_agent_protocol import (
+    LifecycleState,
+    ProfileReasonCode,
+    RecipeImageCode,
+    WaitReason,
+)
+from vonk_agent_protocol.agent_words import ProfileChildPhase, ProgressPhase
+from vonk_agent_protocol.host_helper import ContainerRuntimeAction
 from vonk_control.fleet_profile_contract import FleetProfileApplicationProgress
 from vonk_control.lifecycle.image_availability import PREPARATION_STALL_WINDOW
-from vonk_control.operation_blockers import ProgressAlarmCode
+from vonk_control.operation_blockers import ProgressAlarmCode, make_blocker
 from vonk_control.progress_stall import (
     PROGRESS_STALL_WINDOW,
     is_stalled,
@@ -305,6 +312,198 @@ def test_any_movement_starts_over() -> None:
         assert (stall.repeats, stall.first_seen_at) == (1, later), case
 
 
+_COPY = ProfileChildPhase.TARGET_COPY.value
+_COPYING = ProgressPhase.COPYING.value
+_PREFLIGHT = ContainerRuntimeAction.RUNTIME_PREFLIGHT.value
+
+
+def _child_at(
+    *,
+    retry: int | None,
+    operation_phase: str,
+    copied: int,
+    executed: int,
+    key: str | None,
+    at: datetime,
+    activity: int | None = None,
+    phase: str = _COPY,
+):
+    """The load waiting on its child as production reports it.
+
+    ``copied`` is the child's own transfer count, which it keeps as a maximum
+    across retries; ``executed`` is the current execution's operation bytes,
+    counted from zero under its checkpoint ``key``.
+    """
+
+    operation = {
+        "phase": operation_phase,
+        "completed_bytes": executed,
+        "total_bytes_known": False,
+        "last_progress_at": at.isoformat(),
+        "activity": "active",
+        "members": [],
+    }
+    if key is not None:
+        operation["checkpoint"] = {"key": key, "sequence": executed}
+    if activity is not None:
+        operation["activity_sequence"] = activity
+    child = {"phase": phase, "bytes": copied, "node_ids": [], "operation": operation}
+    if retry is not None:
+        child["retry_attempt"] = retry
+    return _waiting(child_progress=child)
+
+
+def _follow(samples):
+    """Observe ``(at, progress)`` samples in order, each a new retry attempt."""
+
+    stall, before = None, None
+    for at, progress in samples:
+        stall = _observe(stall, progress, at, before=before)
+        before = progress
+        yield at, stall
+
+
+def test_a_copy_retried_from_zero_below_its_old_mark_is_stalled() -> None:
+    # Production 2026-10-24 (run-switch.phase-retry: admission.capacity_busy):
+    # the first try copies 300 bytes and fails retryably; every retry is a new
+    # execution (new checkpoint key, next retry attempt) after a runtime
+    # preflight, whose operation bytes start at zero and rise to 300 again.
+    # The child's own count stays at its maximum.  Nothing goes past what the
+    # first try reached, so the wait does not move.
+    def samples():
+        minute = 0
+        for retry in (None, *range(2, 40)):
+            key = f"execution-{retry}"
+            at = START + timedelta(minutes=minute)
+            yield (
+                at,
+                _child_at(
+                    retry=retry,
+                    operation_phase=_PREFLIGHT,
+                    copied=0 if retry is None else 300,
+                    executed=0,
+                    key=None,
+                    at=at,
+                ),
+            )
+            for executed in (100, 200, 300):
+                minute += 1
+                at = START + timedelta(minutes=minute)
+                yield (
+                    at,
+                    _child_at(
+                        retry=retry,
+                        operation_phase=_COPYING,
+                        copied=max(executed, 0 if retry is None else 300),
+                        executed=executed,
+                        key=key,
+                        at=at,
+                    ),
+                )
+            minute += 1
+
+    last_high = START + timedelta(minutes=3)  # the first try's 300 bytes
+    for at, stall in _follow(samples()):
+        assert stall is not None
+        assert stall.first_seen_at <= last_high
+        assert is_stalled(stall, now=at) == (at >= last_high + PROGRESS_STALL_WINDOW)
+
+
+def test_a_child_flapping_between_two_operation_phases_is_stalled() -> None:
+    # The same child phase alternating its copy and its preflight re-check,
+    # each sample with a fresh last-progress time and nothing copied.
+    def samples():
+        for index in range(60):
+            at = START + timedelta(minutes=3 * index)
+            yield (
+                at,
+                _child_at(
+                    retry=index + 2,
+                    operation_phase=_PREFLIGHT if index % 2 else _COPYING,
+                    copied=300,
+                    executed=0,
+                    key=None if index % 2 else f"execution-{index}",
+                    at=at,
+                ),
+            )
+
+    second_phase = START + timedelta(minutes=3)
+    for at, stall in _follow(samples()):
+        assert stall is not None
+        assert is_stalled(stall, now=at) == (at >= second_phase + PROGRESS_STALL_WINDOW)
+
+
+def test_a_copy_that_keeps_reaching_new_highs_is_never_stalled() -> None:
+    # A real copy, retried once from zero: its operation bytes start over,
+    # pass the old mark and keep rising (every ten minutes), so it waits for
+    # hours and is never stalled.
+    def samples():
+        for minute in range(4 * 60):
+            at = START + timedelta(minutes=minute)
+            retry = None if minute < 60 else 2
+            executed = minute // 10 * 10 if minute < 60 else (minute - 60) // 10 * 10
+            yield (
+                at,
+                _child_at(
+                    retry=retry,
+                    operation_phase=_COPYING,
+                    copied=minute // 10 * 10,
+                    executed=executed,
+                    key=f"execution-{retry}",
+                    at=at,
+                ),
+            )
+
+    for at, stall in _follow(samples()):
+        assert stall is not None
+        assert not is_stalled(stall, now=at + timedelta(minutes=9)), at
+
+
+def test_a_re_executed_operation_resumes_without_an_alarm() -> None:
+    # A parallel agent upgrade restarts the start operation: the agent runs it
+    # again under a new checkpoint key with its activity counted from zero,
+    # within the same child attempt.  Its activity climbs below the old high,
+    # and that climbing is movement: it is never stalled while it climbs.
+    start = ProfileChildPhase.START.value
+    starting = ProgressPhase.STARTING.value
+
+    def samples():
+        for minute in range(3 * 60):
+            at = START + timedelta(minutes=minute)
+            restarted = minute >= 60
+            activity = (minute - 60 if restarted else minute + 100) // 10
+            yield (
+                at,
+                _child_at(
+                    retry=None,
+                    operation_phase=starting,
+                    copied=0,
+                    executed=0,
+                    key="restarted" if restarted else "first",
+                    at=at,
+                    activity=activity,
+                    phase=start,
+                ),
+            )
+
+    for at, stall in _follow(samples()):
+        assert stall is not None
+        assert not is_stalled(stall, now=at + timedelta(minutes=9)), at
+
+
+def test_a_fresh_last_progress_time_alone_is_not_movement() -> None:
+    def sample(at):
+        return _child_at(
+            retry=3, operation_phase=_COPYING, copied=0, executed=0, key="k", at=at
+        )
+
+    first = _observe(None, sample(START), START)
+    later = START + timedelta(minutes=20)
+    again = _observe(first, sample(later), later, before=_waiting(attempt=6))
+    assert again is not None and again.first_seen_at == START
+    assert again.repeats == 2
+
+
 def test_a_changing_symptom_of_the_same_wait_is_not_movement() -> None:
     # Seen on a load stuck for disk: every few minutes its child re-checks the
     # Spark (a preflight sub-operation) and the wait's text drops its evidence
@@ -325,18 +524,24 @@ def test_a_changing_symptom_of_the_same_wait_is_not_movement() -> None:
         }
         return _waiting(detail, child_progress=child)
 
-    first = _observe(None, checking("install.capacity_busy: disk", "prepare"), START)
+    # The re-check's own phase is new the first time it shows (an operation
+    # phase not seen yet is how a working child moves); flipping back to a
+    # phase already seen, again and again, is not.
+    stall = _observe(None, checking("install.capacity_busy: disk", "prepare"), START)
+    first_check = START + timedelta(minutes=1)
     for minute, (detail, phase) in enumerate(
         [
             ("install.capacity_busy", "runtime-preflight"),
             ("install.capacity_busy: disk and stale inventory", "prepare"),
+            ("install.capacity_busy", "runtime-preflight"),
+            ("install.capacity_busy: disk", "prepare"),
         ],
         start=1,
     ):
-        again = _observe(
-            first, checking(detail, phase), START + timedelta(minutes=minute)
+        stall = _observe(
+            stall, checking(detail, phase), START + timedelta(minutes=minute)
         )
-        assert again is not None and again.first_seen_at == START
+        assert stall is not None and stall.first_seen_at == first_check
 
 
 def test_no_wait_or_an_ended_load_carries_no_stall() -> None:
@@ -354,6 +559,85 @@ def test_the_alarm_itself_is_not_part_of_the_wait() -> None:
     shown.blockers.append(stalled_blocker(stall))
     after = _observe(stall, shown, START + timedelta(hours=1))
     assert after is not None and after.first_seen_at == stall.first_seen_at
+
+
+_NODE = "spk_" + "0a1b2c3d" * 4
+
+
+def _persisted_wait(code: WaitReason, node: str = _NODE):
+    """A wait recorded only as the load's persisted wait, not in its progress."""
+
+    return [make_blocker(code, f"Awaiting the exact receipt ({code})", node_ids=[node])]
+
+
+def _wait_only(previous, progress, waiting, at, *, before):
+    return next_stall(
+        previous,
+        progress,
+        before=before,
+        state=LifecycleState.RUNNING.value,
+        current_step=0,
+        current_operation_id="op-1",
+        observed_at=at,
+        waiting=waiting,
+    )
+
+
+@pytest.mark.parametrize(
+    "code", [WaitReason.RECEIPT_MISSING, WaitReason.STOP_UNCONFIRMED]
+)
+def test_a_wait_held_only_in_the_persisted_wait_is_an_alarm_after_a_window(
+    code: WaitReason,
+) -> None:
+    # The load's progress names no blocker: its only wait is the persisted one
+    # (a missing child receipt, an unconfirmed stop).  It was never observed.
+    idle = FleetProfileApplicationProgress(attempt=1)
+    waiting = _persisted_wait(code)
+    stall = None
+    for minute in range(40):
+        stall = _wait_only(
+            stall, idle, waiting, START + timedelta(minutes=minute), before=idle
+        )
+    assert stall is not None and stall.first_seen_at == START
+    assert stall.detail.startswith(f"{code}: ")
+    assert not is_stalled(
+        stall, now=START + PROGRESS_STALL_WINDOW - timedelta(seconds=1)
+    )
+    assert is_stalled(stall, now=START + PROGRESS_STALL_WINDOW)
+    # The alarm itself in the persisted wait is not part of what it waits on.
+    shown = [*waiting, stalled_blocker(stall)]
+    again = _wait_only(stall, idle, shown, START + timedelta(hours=1), before=idle)
+    assert again == stall
+
+
+def test_movement_under_a_persisted_wait_keeps_it_from_the_alarm() -> None:
+    # The child copies bytes every ten minutes while the load waits for its
+    # receipt: it waits for hours and is never stalled.
+    waiting = _persisted_wait(WaitReason.RECEIPT_MISSING)
+    before = FleetProfileApplicationProgress(attempt=1)
+    stall = None
+    for minute in range(1, 4 * 60):
+        at = START + timedelta(minutes=minute)
+        copied = minute // 10 * 10
+        progress = _waiting(
+            blockers=[],
+            child_progress={"phase": "target-copy", "bytes": copied, "node_ids": []},
+        )
+        stall = _wait_only(stall, progress, waiting, at, before=before)
+        before = progress
+        assert not is_stalled(stall, now=at + timedelta(seconds=59)), minute
+    # A different Spark in the persisted wait is a different wait: it starts over.
+    later = START + timedelta(hours=5)
+    moved = _wait_only(
+        stall,
+        before,
+        _persisted_wait(WaitReason.RECEIPT_MISSING, "spk_" + "1" * 32),
+        later,
+        before=before,
+    )
+    assert moved is not None and moved.first_seen_at == later
+    # The wait ends: nothing is left to be stalled.
+    assert _wait_only(moved, before, [], later, before=before) is None
 
 
 def test_every_process_with_the_fleet_profile_service_counts_observations() -> None:
