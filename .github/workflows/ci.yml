@@ -894,7 +894,7 @@ jobs:
         run: scripts/test corpus
 
   control-suite:
-    name: Complete control suite (${{ matrix.shard.label }})
+    name: Complete control suite (${{ matrix.shard }}-of-${{ strategy.job-total }})
     needs: changes
     permissions:
       contents: read
@@ -907,11 +907,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard:
-          - {index: 0, label: 1-of-4}
-          - {index: 1, label: 2-of-4}
-          - {index: 2, label: 3-of-4}
-          - {index: 3, label: 4-of-4}
+        # Timing-balanced shards; the job count is the only owner of the total.
+        shard: [1, 2, 3, 4, 5, 6]
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -949,8 +946,8 @@ jobs:
       - name: Run complete control suite
         shell: bash
         env:
-          SHARD_INDEX: ${{ matrix.shard.index }}
-          SHARD_TOTAL: 4
+          SHARD: ${{ matrix.shard }}
+          SHARD_TOTAL: ${{ strategy.job-total }}
           TIMING_DATA: ${{ needs.changes.outputs.control_timings }}
           VONK_CI_PREREQUISITES: needs_skopeo
         run: |
@@ -961,7 +958,7 @@ jobs:
           if [[ -f "$RUNNER_TEMP/changed-tests.txt" ]]; then
             enforce=(--test-budget-enforce "$RUNNER_TEMP/changed-tests.txt")
           fi
-          scripts/test control --shard "$((SHARD_INDEX + 1))/$SHARD_TOTAL" \
+          scripts/test control --shard "$SHARD/$SHARD_TOTAL" \
             --durations "$timing_file" -- -vv -n 4 "${enforce[@]}" \
             -o junit_family=xunit1 --junitxml="$RUNNER_TEMP/control-junit.xml"
 
@@ -977,7 +974,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: pytest-file-durations-control-${{ matrix.shard.index }}
+          name: pytest-file-durations-control-${{ matrix.shard }}
           path: ${{ runner.temp }}/control-durations.json
           retention-days: 30
           if-no-files-found: ignore
