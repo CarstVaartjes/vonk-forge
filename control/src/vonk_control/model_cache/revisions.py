@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import random
 import stat
 import uuid
 from collections import defaultdict
@@ -11,13 +12,14 @@ from typing import TYPE_CHECKING, cast
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, defer
-from vonk_agent_protocol import LifecycleState
+from vonk_agent_protocol import Disposition, LifecycleState
 from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
 
 from ..admission_locking import AdmissionLockBusy, AdmissionRowLock, lock_admission_rows
 from ..artifact_lifecycle import ArtifactReferenceUnsettled, ArtifactReferenceUnverified
 from ..artifact_reference_scan import model_set_reference_reasons
 from ..catalog_queries import active_head_revision
+from ..failure_classification import disposition, wait_reason
 from ..logging import log_event
 from ..model_cache_contract import (
     CacheOperationKind,
@@ -42,15 +44,35 @@ class _RevisionChanged(Exception):
     """Re-plan on the next worker pass; no removal was accepted."""
 
 
+#: Each cached set's row and stored manifest, by set digest.
+type _StoredSets = dict[str, tuple[ModelCacheSet, ArtifactSetManifest]]
+
+
 class RevisionsMixin:
+    def _stored_sets(self) -> _StoredSets:
+        """Every set row's manifest, parsed once per scan.
+
+        The rows are read in one short session and parsed after it closed: a
+        damaged manifest is rebuilt from the catalog (with the resolver's retry
+        pauses) without holding a read transaction open.
+        """
+        cache = cast("ModelCacheService", self)
+        with cache._session() as session:
+            rows = list(session.scalars(select(ModelCacheSet)))
+        return {
+            row.artifact_set_sha256: (row, manifest)
+            for row in rows
+            if (manifest := cache._stored_manifest(row)) is not None
+        }
+
     def _model_revision_sets(
         self,
         session: Session,
+        stored: _StoredSets,
     ) -> tuple[
         list[tuple[CatalogDocumentRevision, ModelCacheSet, ArtifactSetManifest]],
         dict[str, set[str]],
     ]:
-        cache = cast("ModelCacheService", self)
         revisions = list(
             session.scalars(
                 select(CatalogDocumentRevision)
@@ -71,13 +93,9 @@ class RevisionsMixin:
         by_content = {}
         for revision in revisions:
             by_content.setdefault(revision.content_digest, revision)
-        rows = list(session.scalars(select(ModelCacheSet)))
         bindings: dict[str, set[str]] = defaultdict(set)
         result = []
-        for row in rows:
-            manifest = cache._stored_manifest(row)
-            if manifest is None:
-                continue
+        for row, manifest in stored.values():
             bindings[row.artifact_set_sha256].update(
                 reference.content_sha256 for reference in manifest.verified_models
             )
@@ -166,19 +184,17 @@ class RevisionsMixin:
                 updated.contract()
             ).document()
 
-    def _reconcile_verified_models(self) -> None:
+    def _reconcile_verified_models(self, stored: _StoredSets) -> bool:
         """Replay completed current downloads into the same manifest publisher.
 
         Readers only use the manifest. This repairs a missing publication;
         historical operations may subsequently disappear without losing it.
+        True when it published a binding.
         """
         cache = cast("ModelCacheService", self)
         pending: list[ArtifactSetManifest] = []
+        published = False
         with cache._session() as session:
-            rows = {
-                row.artifact_set_sha256: row
-                for row in session.scalars(select(ModelCacheSet))
-            }
             content = ModelCacheOperation.payload["manifest"][
                 "model_content_sha256"
             ].as_string()
@@ -191,7 +207,7 @@ class RevisionsMixin:
                     content,
                 )
                 .where(
-                    ModelCacheOperation.artifact_set_sha256.in_(rows),
+                    ModelCacheOperation.artifact_set_sha256.in_(stored),
                     ModelCacheOperation.kind.in_(
                         (CacheOperationKind.DOWNLOAD, CacheOperationKind.REPAIR)
                     ),
@@ -202,13 +218,14 @@ class RevisionsMixin:
             for operation_id, set_digest, digest in proofs:
                 if set_digest is None or operation_id is None or digest is None:
                     continue
-                row = rows.get(set_digest)
-                if row is None or row.state != ModelCacheSetState.CACHED:
-                    continue
-                stored = cache._stored_manifest(row)
-                if stored is None or digest in {
-                    reference.content_sha256 for reference in stored.verified_models
-                }:
+                row, held = stored.get(set_digest, (None, None))
+                if (
+                    row is None
+                    or held is None
+                    or row.state != ModelCacheSetState.CACHED
+                    or digest
+                    in {reference.content_sha256 for reference in held.verified_models}
+                ):
                     continue
                 operation = session.get(ModelCacheOperation, operation_id)
                 payload = (
@@ -228,6 +245,7 @@ class RevisionsMixin:
                     row = session.get(ModelCacheSet, manifest.digest)
                     if row is not None and row.state == ModelCacheSetState.CACHED:
                         cache._remember_verified_models(session, row, manifest)
+                        published = True
             except ModelCacheConflictUnknown as error:
                 log_event(
                     _LOGGER,
@@ -240,35 +258,31 @@ class RevisionsMixin:
                     if cache._revision_scan_at is not None
                     else None,
                 )
+        return published
 
-    def _adopt_current_model_bindings(self) -> None:
+    def _adopt_current_model_bindings(self, stored: _StoredSets) -> bool:
         """Recover editorial bindings by exact canonical identity, not history.
 
         This only updates an existing verified set; it cannot resurrect a
-        removed cache entry, transfer bytes or authorize a workload.
+        removed cache entry, transfer bytes or authorize a workload. True when
+        it adopted a set.
 
-        Each current digest is resolved once, not on every pass: the work of a
-        pass is proportional to what changed in the catalog, not to its size.
+        A model digest's set is fixed by its content and its dependencies'
+        digests, so each one is resolved once, not on every pass. One that
+        cannot be observed yet is observed again after a jittered backoff of a
+        few scans (the catalog can repair a row in place); one whose content
+        is invalid never resolves and is not retried.
         """
         cache = cast("ModelCacheService", self)
+        held = {
+            digest
+            for digest, (row, _manifest) in stored.items()
+            if row.state == ModelCacheSetState.CACHED
+        }
+        if not held:
+            return False
         with cache._session() as session:
-            held = set(
-                session.scalars(
-                    select(ModelCacheSet.artifact_set_sha256).where(
-                        ModelCacheSet.state == ModelCacheSetState.CACHED
-                    )
-                )
-            )
-            if not held:
-                return
-            catalog = frozenset(
-                session.scalars(
-                    select(CatalogDocumentRevision.id).where(
-                        CatalogDocumentRevision.kind == RunSwitchReasonScopeName.MODEL
-                    )
-                )
-            )
-            current = list(
+            current = set(
                 session.execute(
                     select(CatalogDocumentRevision.content_digest).where(
                         CatalogDocumentRevision.kind == RunSwitchReasonScopeName.MODEL,
@@ -276,45 +290,67 @@ class RevisionsMixin:
                     )
                 ).scalars()
             )
-            bound = {
-                reference.content_sha256
-                for row in session.scalars(select(ModelCacheSet))
-                if (manifest := cache._stored_manifest(row)) is not None
-                for reference in manifest.verified_models
-            }
-        unbound = set(current) - bound
-        # A resolved set is fixed by the model's content digest and its
-        # dependencies' digests; an unresolvable digest is retried when the
-        # catalog's model revisions change.
-        known_catalog, known = cache._model_set_resolutions
-        resolved = {
-            digest: known[digest]
-            for digest in unbound
-            if digest in known
-            and (known[digest] is not None or known_catalog == catalog)
+        bound = {
+            reference.content_sha256
+            for _row, manifest in stored.values()
+            for reference in manifest.verified_models
         }
-        cache._model_set_resolutions = (catalog, resolved)
+        unbound = current - bound
+        resolved: dict[str, str | None] = {
+            digest: set_digest
+            for digest, set_digest in cache._resolved_model_sets.items()
+            if digest in unbound
+        }
+        retry_at = {
+            digest: due
+            for digest, due in cache._unresolved_model_retry_at.items()
+            if digest in unbound
+        }
+        cache._resolved_model_sets = resolved
+        cache._unresolved_model_retry_at = retry_at
+        now = cache._clock()
+        adopted = False
         for digest in unbound:
             if digest in resolved and resolved[digest] not in held:
+                continue
+            if digest in retry_at and now < retry_at[digest]:
                 continue
             try:
                 manifest = cache.resolve_artifact_set(model_content_sha256=digest)
                 resolved[digest] = manifest.digest
+                retry_at.pop(digest, None)
                 if manifest.digest in held and cache._manifest_coverage_complete(
                     manifest
                 ):
                     cache.adopt_verified_set(manifest)
+                    adopted = True
             except ModelCacheError as error:
-                resolved[digest] = None
-                log_event(
-                    _LOGGER,
-                    "model_cache.binding_recheck",
-                    service="control-worker",
-                    model_content_sha256=digest,
-                    code=error.code,
-                    detail=error.detail,
-                    resume="when the catalog's model revisions change",
-                )
+                if disposition(error) in {Disposition.WAIT, Disposition.OBSERVE}:
+                    retry_at[digest] = now + _REVISION_SCAN_INTERVAL * (
+                        2 + random.random()
+                    )
+                    log_event(
+                        _LOGGER,
+                        "model_cache.binding_recheck",
+                        service="control-worker",
+                        model_content_sha256=digest,
+                        code=error.code,
+                        reason=wait_reason(error),
+                        detail=error.detail,
+                        retry_at=retry_at[digest],
+                    )
+                else:
+                    # Fixed by the digest's content: it never resolves.
+                    resolved[digest] = None
+                    log_event(
+                        _LOGGER,
+                        "model_cache.binding_unresolvable",
+                        service="control-worker",
+                        model_content_sha256=digest,
+                        code=error.code,
+                        detail=error.detail,
+                    )
+        return adopted
 
     def reconcile_model_revisions(self) -> None:
         """Reconsider retained owners every 30 seconds, including after restart.
@@ -328,10 +364,12 @@ class RevisionsMixin:
         if cache._revision_scan_at is not None and now < cache._revision_scan_at:
             return
         cache._revision_scan_at = now + _REVISION_SCAN_INTERVAL
-        cache._reconcile_verified_models()
-        cache._adopt_current_model_bindings()
+        stored = cache._stored_sets()
+        published = cache._reconcile_verified_models(stored)
+        if cache._adopt_current_model_bindings(stored) or published:
+            stored = cache._stored_sets()  # Read the bindings just published.
         with cache._session() as session:
-            sets, _bindings = cache._model_revision_sets(session)
+            sets, _bindings = cache._model_revision_sets(session, stored)
         newest: dict[
             tuple[str, str], tuple[CatalogDocumentRevision, ModelCacheSet]
         ] = {}
@@ -445,8 +483,9 @@ class RevisionsMixin:
     def model_storage(self) -> dict[str, ModelCacheUsage]:
         """Observe storage outside request handling for the disposable Library index."""
         cache = cast("ModelCacheService", self)
+        stored = cache._stored_sets()
         with cache._session() as session:
-            sets, _ = cache._model_revision_sets(session)
+            sets, _ = cache._model_revision_sets(session, stored)
             catalog_lineages = list(
                 session.execute(
                     select(
