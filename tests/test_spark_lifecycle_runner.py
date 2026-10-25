@@ -300,14 +300,19 @@ def test_fleet_snapshot_validates_the_decoded_response_as_json() -> None:
     assert run._fleet_snapshot() == expected.model_dump(mode="json")
 
 
+@pytest.mark.parametrize("schema", ["candidate", "baseline"])
 @pytest.mark.parametrize("initial_runtime_matches", [True, False])
 def test_agent_identity_wait_requires_current_identity_and_builder_capability(
-    monkeypatch, initial_runtime_matches: bool
+    monkeypatch, initial_runtime_matches: bool, schema: str
 ) -> None:
+    """Catches an identity read that depends on a table one side of the upgrade
+    carry lacks: the baseline Controller keeps contact facts on agent_nodes."""
+    from datetime import UTC, datetime
+
     from sqlalchemy import create_engine, insert, text
     from vonk_agent_protocol.claims import AgentRuntimeIdentity
     from vonk_agent_protocol.state_machines import NodeIdentityState
-    from vonk_control.models import AgentNode, AgentNodeContact, Base
+    from vonk_control.models import AgentCertificate, AgentNode, Base
 
     lifecycle = _module()
     node_id = "spk_" + "1" * 32
@@ -328,7 +333,11 @@ def test_agent_identity_wait_requires_current_identity_and_builder_capability(
                     if initial_runtime_matches
                     else runtime_identity.model_copy(update={"binary_digest": "c" * 64})
                 ).model_dump(mode="json"),
-                "connection": {"agent_state": "active", "online_state": "online"},
+                "connection": {
+                    "agent_state": "active",
+                    "online_state": "online",
+                    "certificate_state": "valid",
+                },
                 "inventory": {
                     "freshness": "fresh",
                     "capabilities": []
@@ -340,7 +349,11 @@ def test_agent_identity_wait_requires_current_identity_and_builder_capability(
                 "id": node_id,
                 "display_name": "Spark",
                 "agent_runtime": runtime_identity.model_dump(mode="json"),
-                "connection": {"agent_state": "active", "online_state": "online"},
+                "connection": {
+                    "agent_state": "active",
+                    "online_state": "online",
+                    "certificate_state": "valid",
+                },
                 "inventory": {
                     "freshness": "fresh",
                     "capabilities": ["recipe.build.v1"],
@@ -375,10 +388,21 @@ def test_agent_identity_wait_requires_current_identity_and_builder_capability(
             )
         )
         connection.execute(
-            insert(AgentNodeContact).values(
-                node_id=node_id, contact_certificate_serial="1234567890"
+            insert(AgentCertificate).values(
+                serial="1234567890",
+                node_id=node_id,
+                fingerprint="f" * 64,
+                not_before=datetime(2026, 10, 1, tzinfo=UTC),
+                not_after=datetime(2026, 11, 1, tzinfo=UTC),
             )
         )
+        if schema == "baseline":
+            # The baseline Controller: contact facts on agent_nodes, no
+            # agent_node_contacts table.
+            connection.exec_driver_sql("DROP TABLE agent_node_contacts")
+            connection.exec_driver_sql(
+                "ALTER TABLE agent_nodes ADD COLUMN contact_certificate_serial TEXT"
+            )
 
         def psql(query: str) -> list[list[str]]:
             # Exercise the actual current schema: a canned row concealed the
@@ -393,6 +417,7 @@ def test_agent_identity_wait_requires_current_identity_and_builder_capability(
 
     assert identity["node_id"] == node_id
     assert identity["package_sha256"] == "d" * 64
+    assert identity["serial"] == "1234567890"
 
 
 def test_synthetic_canary_download_uses_the_current_operator_request_shape() -> None:
