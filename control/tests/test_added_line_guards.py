@@ -1181,13 +1181,27 @@ def test_added_line_guard_allows_a_paginating_wrapper_and_workflow_continuations
     assert check_source(path, one_page, {6}, modes=("listings",))
 
 
+_PAGING_WRAPPER = (
+    "def gh(endpoint):\n"
+    '    return run(["gh", "api", "--paginate", "--slurp", endpoint])\n'
+    "\n"
+    "\n"
+)
+
+
 def test_added_line_guard_scopes_the_wrapper_and_flags_a_bare_trailing_slash():
-    mixed = (
-        'run(["gh", "api", "--paginate", "repos/o/r/pulls"])\n'
+    direct = (
+        _PAGING_WRAPPER
         + "pass\n" * 5
         + 'run(["gh", "api", f"repos/o/r/actions/runs/{run_id}/artifacts"])\n'
     )
-    assert check_source("scripts/example.py", mixed, {7}, modes=("listings",))
+    last = direct.count("\n")
+    assert check_source("scripts/example.py", direct, {last}, modes=("listings",))
+    through = (
+        _PAGING_WRAPPER + 'pages = gh(f"/repos/o/r/actions/runs/{run_id}/artifacts")\n'
+    )
+    last = through.count("\n")
+    assert not check_source("scripts/example.py", through, {last}, modes=("listings",))
     slash = 'gh(f"repos/o/r/actions/runs/{run_id}/artifacts/")\n'
     assert check_source("scripts/example.py", slash, {1}, modes=("listings",))
 
@@ -1211,14 +1225,17 @@ def test_added_line_guard_needs_the_wrapper_itself_to_paginate():
 
 def test_added_line_guard_checks_a_direct_multiline_call_in_a_paginating_file():
     source = (
-        "subprocess.run(\n"
-        '    ["gh", "api", "--paginate", f"/repos/o/r/actions/runs/{run_id}/jobs"]\n'
-        ")\n" + "pass\n" * 5 + "subprocess.run(\n"
+        _PAGING_WRAPPER + "pass\n" * 5 + "subprocess.run(\n"
         "    [\n"
         '        "gh",\n'
         '        "api",\n'
         '        f"/repos/o/r/actions/runs/{run_id}/artifacts",\n'
         "    ]\n"
-        ")\n"
+        ")\n" + 'url = f"/repos/o/r/actions/runs/{run_id}/artifacts"\n'
     )
-    assert check_source("scripts/example.py", source, {13}, modes=("listings",))
+    rows = source.splitlines()
+    for line, text in enumerate(rows, 1):
+        if "artifacts" in text:
+            assert check_source(
+                "scripts/example.py", source, {line}, modes=("listings",)
+            )
