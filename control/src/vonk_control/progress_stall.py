@@ -227,8 +227,11 @@ def observe_application_progress(
     attrs = inspect(target).attrs
     history = attrs.progress.history
     current = target.progress
-    if not (
-        history.has_changes() or attrs.wait_evidence.history.has_changes()
+    # Each write of the progress, the persisted wait or its next check is an
+    # observation (a re-check rewrites an equal wait and moves only its due).
+    if not any(
+        item.history.has_changes()
+        for item in (attrs.progress, attrs.wait_evidence, attrs.next_action_at)
     ) or not isinstance(current, dict):
         return
     progress = _read_progress(current)

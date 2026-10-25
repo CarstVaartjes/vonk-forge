@@ -14,8 +14,9 @@ from datetime import timedelta
 from pathlib import Path
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, update
 from vonk_agent_protocol import (
+    AgentOperation,
     LifecycleState,
     ObservedAssignmentState,
     ProfileReasonCode,
@@ -196,6 +197,40 @@ def test_a_load_waiting_only_on_a_missing_child_receipt_is_stalled_with_the_work
     assert _settle(load), _application(load).status_reason
 
 
+def test_a_load_already_waiting_unseen_at_upgrade_is_observed_by_its_next_check(
+    tmp_path: Path,
+) -> None:
+    """A row the previous release wrote: its receipt wait is persisted but it
+    carries no stall.  The next re-check rewrites the same wait and moves only
+    its due time (neither its evidence nor its progress changes); that check
+    observes it, and a window later it is stalled."""
+
+    load = _load(tmp_path)
+    assert _loop(load, lambda: _switch(load) is not None, complete=False, rounds=3)
+    for _ in range(4):
+        _loop(load, lambda: False, complete=False, rounds=1)
+    progress, wait = _stored(load)
+    assert wait is not None and wait.reason is WaitReason.RECEIPT_MISSING
+    stored = progress.model_dump(mode="json", exclude={"stall"})
+    with load.sessions.begin() as session:  # written below the flush hook
+        session.execute(
+            update(FleetProfileApplication)
+            .where(FleetProfileApplication.id == load.application.id)
+            .values(progress=stored)
+        )
+    assert _stored(load)[0].stall is None
+
+    with load.sessions.begin() as session:  # the reconciler's re-check
+        row = session.get(FleetProfileApplication, load.application.id)
+        assert row is not None and row.next_action_at is not None
+        schedule_wait(row, row.next_action_at + timedelta(seconds=2), now=load.now[0])
+    progress, after = _stored(load)
+    assert after is not None and after.reason is WaitReason.RECEIPT_MISSING
+    assert progress.stall is not None
+    _nothing_moves_for_the_window(load)
+    assert _alarm(load) and _platform_stalled(load)
+
+
 def test_an_unconfirmed_stop_written_only_as_the_wait_is_stalled_then_cleared(
     tmp_path: Path,
 ) -> None:
@@ -211,7 +246,9 @@ def test_an_unconfirmed_stop_written_only_as_the_wait_is_stalled_then_cleared(
     with load.sessions.begin() as session:
         row = session.get(FleetProfileApplication, load.application.id)
         assert row is not None
-        operation = BlockingOperation(id="stop-op-1", kind="recipe.stop")
+        operation = BlockingOperation(
+            id="superseded-start-1", kind=AgentOperation.RECIPE_START.value
+        )
         write_wait(
             row,
             identity=BlockingOperation(
