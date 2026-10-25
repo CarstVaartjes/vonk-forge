@@ -29,6 +29,7 @@ from vonk_agent_protocol import (
     canonical_message,
 )
 from vonk_agent_protocol import AgentOperation as WireAgentOperation
+from vonk_agent_protocol.failure_evidence import FailureDiagnostics
 from vonk_agent_protocol.wire_model import OperationProgress
 from vonk_forge_contracts import RecipeDefinition
 
@@ -1341,6 +1342,26 @@ def _prebuilt_choice(
     return _recorded_decision(build.policy_report), policy.prebuilt_image
 
 
+#: Podman closes a failed build's stderr by echoing the step it ended at; the
+#: agent reports that step as its own ``build_step`` diagnostic property.
+_PODMAN_STEP_ECHO = "building at STEP "
+
+
+def _step_output_tail(diagnostics: FailureDiagnostics) -> str:
+    """The failed step's own last output lines, from both streams.
+
+    A step prints to stdout and stderr, and Podman then echoes the whole step on
+    stderr. Choosing stderr because it was present kept that echo and none of
+    the lines the step printed (a pip error on stdout, a make error above it).
+    """
+    return "\n".join(
+        line
+        for text in (diagnostics.stdout.text, diagnostics.stderr.text)
+        for line in safe_text(text).splitlines()
+        if line.strip() and _PODMAN_STEP_ECHO not in line
+    )
+
+
 def _observe_build(
     sessions: sessionmaker[Session],
     operation: Any,
@@ -1434,7 +1455,7 @@ def _observe_build(
         diagnostic = failure.diagnostic
         if failure.diagnostics is not None:
             diagnostics = failure.diagnostics
-            tail = safe_text(diagnostics.stderr.text or diagnostics.stdout.text)
+            tail = _step_output_tail(diagnostics)
             # The preparation detail is what acceptance and blockers surface.
             # Reserve room within its 512 characters for the exit and final
             # output, including the stage prefix added by failure projection.

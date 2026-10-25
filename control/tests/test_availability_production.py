@@ -32,15 +32,18 @@ from vonk_control.availability_production import (
 )
 from vonk_control.bounded_json import require_mapping
 from vonk_control.catalog_service import CatalogService
+from vonk_control.failure_evidence import FailureEvidenceService
 from vonk_control.model_cache import ModelCacheService
 from vonk_control.models import (
     AgentNode,
+    AgentOperationAttempt,
     Base,
     CatalogDocument,
     CatalogDocumentRevision,
     Job,
     RecipeBuild,
 )
+from vonk_control.models import AgentOperation as AgentOperationRow
 from vonk_control.persisted_waits import schedule_wait
 from vonk_control.recipe_builds import (
     RecipeBuildPlan,
@@ -1735,6 +1738,232 @@ def test_builder_parent_preserves_typed_failure_and_retry_policy(
     assert production.service.run_pending() == 1
     assert operations.calls == 3
     production.close()
+
+
+def test_a_failed_build_step_keeps_its_own_error_lines_and_names_its_spark(
+    tmp_path, monkeypatch
+) -> None:
+    """A build step's own error is the preparation's evidence, not its echo.
+
+    Production shape (skintokens, 2026-10-25): pip printed its error and Podman
+    then echoed the whole RUN step on stderr. Wrong implementation caught: the
+    summary preferred stderr because it was present and kept the end of the
+    echoed command, and the preparation's evidence download named the recipe
+    revision with empty output because it never reached the build's receipt.
+    """
+    recipe = RecipeDefinition.model_validate(
+        json.loads(
+            files("vonk_forge_contracts")
+            .joinpath("examples", "recipe-source-build.json")
+            .read_text()
+        )
+    )
+    engine = create_engine(
+        f"sqlite:///{tmp_path / 'build-step.sqlite'}",
+        connect_args={"check_same_thread": False},
+    )
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    now = datetime.now(UTC)
+    revision_id = "build-step-revision"
+    builder_node_id = "spk_" + "b" * 32
+    build_job_id = "00000000-0000-4000-8000-000000000745"
+    with sessions.begin() as session:
+        session.add(
+            CatalogDocumentRevision(
+                id=revision_id,
+                document_id="build-step-document",
+                kind="recipe",
+                publisher=recipe.identity.publisher,
+                slug=recipe.identity.slug,
+                revision_number=1,
+                schema_version=2,
+                state="active",
+                document=recipe.model_dump(mode="json"),
+                content_digest=document_sha256(recipe.model_dump(mode="json")),
+                artifact_key="c" * 64,
+                execution_key="a" * 64,
+                projected={},
+                created_by="test",
+                created_at=now,
+            )
+        )
+        session.add(
+            AgentNode(
+                node_id=builder_node_id,
+                state="active",
+                inventory_snapshot=inventory_items_fixture(
+                    builder_node_id,
+                    observed_at=None,
+                    identity=AgentRuntimeIdentity.model_validate(
+                        {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
+                    ),
+                ),
+            )
+        )
+    monkeypatch.setattr(
+        availability_production,
+        "resolve_recipe_entities",
+        lambda _session, _document: {},
+    )
+    monkeypatch.setattr(
+        availability_production,
+        "_compile_consistent_runtime",
+        lambda *_args, **_kwargs: {
+            "input_intent_sha256": "a" * 64,
+            "interface": "vonk.runtime.v1",
+            "architecture": "linux/arm64",
+            "image": "sha256:" + "a" * 64,
+        },
+    )
+
+    class Builds:
+        def resolve(self, revision_id: str):
+            return RecipeBuildResolution(
+                recipe_revision_id=revision_id,
+                recipe_content_sha256=document_sha256(recipe.model_dump(mode="json")),
+                source_bundle_sha256="c" * 64,
+                input_intent_sha256="a" * 64,
+                input_intent={},
+            )
+
+        def prepare_plan(self, revision_id: str, node_id: str, **_kwargs):
+            return RecipeBuildPlan(
+                build_id="00000000-0000-4000-8000-000000000746",
+                recipe_revision_id=revision_id,
+                recipe_content_sha256=document_sha256(recipe.model_dump(mode="json")),
+                source_bundle_sha256="c" * 64,
+                agent_payload={},
+                build_input_sha256="b" * 64,
+                builder_node_id=node_id,
+            )
+
+        def persist_plan_in_session(self, _session, plan, **_kwargs):
+            return plan
+
+    def tail(text: str) -> dict[str, object]:
+        return {
+            "text": text,
+            "truncated": False,
+            "dropped_bytes": 0,
+            "dropped_lines": 0,
+        }
+
+    # The step's own words: pip's error on both streams, then Podman's echo.
+    echo = (
+        'Error: building at STEP "RUN apt-get update && '
+        + "curl --fail --location https://example.org/a.tgz --output /tmp/a.tgz && " * 3
+        + 'python3 -m pip install flash-attn": while running runtime: exit status 1'
+    )
+    receipt = AgentFailureResult.model_validate_json(
+        json.dumps(
+            {
+                "reason": "Podman recipe image build failed (build-step-failed)",
+                "status": "failed",
+                "operation": "recipe.build.v1",
+                "error_code": "recipe_build_failed",
+                "stage": FailureStage.IMAGE_BUILD.value,
+                "diagnostics": {
+                    "process_exit_code": 1,
+                    "schema_version": 1,
+                    "collected_at": now.isoformat(),
+                    "phase": "image-build",
+                    "category": "runtime",
+                    "stdout": tail("Failed to build flash-attn\n"),
+                    "stderr": tail(
+                        "ERROR: Failed to build installable wheels (flash-attn)\n"
+                        + echo
+                    ),
+                    "versions": [],
+                    "sandbox": [],
+                    "storage": [],
+                    "preflight": [],
+                    "collector_errors": [],
+                },
+            }
+        )
+    ).model_dump(mode="json", exclude_none=True)
+    with sessions.begin() as session:
+        session.add(
+            AgentOperationRow(
+                id=str(uuid.uuid4()),
+                parent_job_id=build_job_id,
+                node_id=builder_node_id,
+                kind="recipe.build.v1",
+                payload_digest="b" * 64,
+                payload={},
+                authority_revision="a" * 64,
+                state="failed",
+                status_reason="failed",
+                current_attempt=1,
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        session.flush()
+        operation_id = session.scalars(select(AgentOperationRow.id)).one()
+        session.add(
+            AgentOperationAttempt(
+                id=str(uuid.uuid4()),
+                operation_id=operation_id,
+                attempt=1,
+                fence=str(uuid.uuid4()),
+                lease_deadline=now,
+                agent_certificate_serial="test-serial",
+                state="failed",
+                progress=None,
+                result=receipt,
+            )
+        )
+
+    class Operations:
+        def build(self, plan, **_kwargs):
+            return SimpleNamespace(
+                id=build_job_id,
+                state="failed",
+                result={
+                    "successful_nodes": [],
+                    "failed_nodes": [plan.builder_node_id],
+                    "node_evidence": {plan.builder_node_id: receipt},
+                },
+            )
+
+    class Settings:
+        agent_artifact_root = tmp_path / "artifacts"
+
+    production = build_recipe_image_availability(
+        sessions,
+        settings=Settings(),
+        managed_catalog_sync=None,
+        recipe_builds=Builds(),
+        recipe_operations=Operations(),
+        clock=lambda: now,
+    )
+    queued = production.service.start(
+        revision_id, actor="operator", request_id=str(uuid.uuid4())
+    )
+    assert production.service.run_pending() == 1
+    failed = production.service.get(queued.id)
+    production.close()
+    assert failed.failure is not None
+    # A step that exited nonzero is deterministic: it ends with its evidence.
+    assert failed.failure["retryable"] is False
+    detail = failed.failure["detail"]
+    excerpt = failed.failure["log_excerpt"]
+    assert isinstance(detail, str) and isinstance(excerpt, str)
+    assert "exit code 1" in detail
+    assert detail.endswith("ERROR: Failed to build installable wheels (flash-attn)")
+    for text in (detail, excerpt):
+        assert "Failed to build flash-attn" in text
+        assert "pip install flash-attn" not in text
+
+    bundle = FailureEvidenceService(sessions, clock=lambda: now).read(
+        queued.id, failed.attempt
+    )
+    assert bundle.context.node_ids == [builder_node_id]
+    assert "Failed to build flash-attn" in bundle.diagnostics.stdout.text
+    assert "installable wheels" in bundle.diagnostics.stderr.text
+    assert "agent-observations-unavailable" not in bundle.diagnostics.collector_errors
 
 
 @pytest.mark.usefixtures("damaged_json_rows")

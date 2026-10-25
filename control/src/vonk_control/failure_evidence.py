@@ -46,6 +46,7 @@ from .models import (
 from .operation_blockers import OperationBlocker, read_blockers
 from .operation_contract import OperationEvidenceDownload
 from .operation_item_contract import OperationItem, OperationResultFacts, operation_item
+from .stored_json import read_row_column
 from .strict_json import StrictJSONModel, read_stored_model
 
 MAX_LOG_BYTES = 2048
@@ -569,9 +570,11 @@ class FailureEvidenceService:
                 and attempt in {job.current_attempt, max(1, job.current_attempt)}
             ):
                 result = OperationResultFacts.model_validate(job.result)
+                node_ids = list(job.targets)
                 if not (result.reason or result.summary) and job.status_reason:
                     result = result.model_copy(update={"reason": job.status_reason})
                 if result.diagnostics is None and not result.diagnostics_invalid:
+                    from .job_documents import AvailabilityJobPayload
                     from .lifecycle.run_switch import _stored_child
 
                     # A run-switch phase issues its Spark work through a child
@@ -580,7 +583,20 @@ class FailureEvidenceService:
                     child_job_id = _stored_child(job.result)
                     if child_job_id is not None:
                         parents.append(child_job_id)
-                    child = self._child_failure(session, parents)
+                    # A preparation's failure names the build Job that ended
+                    # it; that build's Spark receipt is the evidence.
+                    payload = read_row_column(job, "payload")
+                    if (
+                        isinstance(payload, AvailabilityJobPayload)
+                        and payload.failure is not None
+                        and payload.failure.build_operation_id is not None
+                    ):
+                        parents.append(payload.failure.build_operation_id)
+                    child, child_node_id = self._child_failure(session, parents)
+                    if child_node_id is not None:
+                        # The Spark that produced the evidence, not the Job's
+                        # targets (a preparation targets its recipe revision).
+                        node_ids = [child_node_id]
                     if child is not None:
                         result = result.model_copy(
                             update={
@@ -598,7 +614,7 @@ class FailureEvidenceService:
                     job,
                     attempt=attempt,
                     kind=job.kind,
-                    node_ids=job.targets,
+                    node_ids=node_ids,
                     source="controller",
                     progress=None,
                     result=result,
@@ -662,17 +678,18 @@ class FailureEvidenceService:
     @staticmethod
     def _child_failure(
         session: Session, job_ids: list[str]
-    ) -> OperationResultFacts | None:
+    ) -> tuple[OperationResultFacts | None, str | None]:
         """Spark-side facts, preferring the newest child with captured diagnostics.
 
         A Controller-owned parent fails because a child operation failed on a
         Spark, and that child's receipt holds the container's exit facts and
         log tails.  Reporting only the parent's reason text was how a workload
         that exited left empty stdout/stderr and category ``unknown``.  The
-        returned facts carry sanitized diagnostics and the receipt's exit code.
+        returned facts carry sanitized diagnostics and the receipt's exit code,
+        with the Spark the receipt came from when its diagnostics are readable.
         """
-        result = session.execute(
-            select(AgentOperationAttempt.result)
+        row = session.execute(
+            select(AgentOperationAttempt.result, AgentOperation.node_id)
             .join(
                 AgentOperation,
                 AgentOperationAttempt.operation_id == AgentOperation.id,
@@ -693,17 +710,20 @@ class FailureEvidenceService:
             # cause. Never cap the search behind unrelated empty receipts.
             # One persisted receipt has the producer's bounded evidence size.
             .limit(1)
-        ).scalar_one_or_none()
+        ).one_or_none()
+        if row is None:
+            return OperationResultFacts.model_validate(None), None
+        result, node_id = row
         facts = OperationResultFacts.model_validate(result)
         diagnostics = facts.diagnostics
         if diagnostics is None:
-            return facts
+            return facts, None
         try:
             sanitized = sanitize_diagnostics(diagnostics)
         except (TypeError, ValueError):
             # A damaged latest receipt is unknown, not a failure of this read.
-            return None
-        return facts.model_copy(update={"diagnostics": sanitized})
+            return None, None
+        return facts.model_copy(update={"diagnostics": sanitized}), node_id
 
     @classmethod
     def _application_child_diagnostics(

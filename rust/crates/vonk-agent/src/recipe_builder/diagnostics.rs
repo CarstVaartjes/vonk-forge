@@ -244,7 +244,11 @@ pub(super) fn sanitized_process_logs(
     crate::failure_evidence::FailureProcessLogs {
         exit_code: output.exit_code.and_then(|code| u32::try_from(code).ok()),
         stdout: crate::failure_evidence::log_tail(&output.stdout),
-        stderr: crate::failure_evidence::log_tail(&output.stderr),
+        // The tail is taken after Podman's echo of the failed step is bounded,
+        // so the step's own error lines above it are what the tail keeps.
+        stderr: crate::failure_evidence::log_tail(&crate::failure_evidence::compact_echoed_step(
+            &output.stderr,
+        )),
     }
 }
 
@@ -361,6 +365,64 @@ mod tests {
             assert!(diagnostics.stderr.text.contains("permission denied"));
             assert!(!format!("{body:?}").contains("never-persist"));
         }
+    }
+
+    #[test]
+    fn a_long_echoed_step_keeps_the_error_lines_printed_above_it() {
+        // Podman closes a failed build with the whole RUN command echoed; a long
+        // one used to fill the retained stderr tail by itself.
+        let command = format!(
+            "RUN apt-get update && {} && python3 -m pip install flash-attn==2.8.3.post1",
+            "curl --fail --location https://example.org/archive.tar.gz --output /tmp/a.tgz && "
+                .repeat(40)
+        );
+        let output = ProcessOutput {
+            exit_code: Some(1),
+            success: false,
+            stdout: b"Building wheel for flash-attn (setup.py): finished with status 'error'\n"
+                .to_vec(),
+            stderr: format!(
+                "error: subprocess-exited-with-error\nERROR: Failed to build flash-attn\n\
+                 Error: building at STEP \"{command}\": while running runtime: exit status 1\n"
+            )
+            .into_bytes(),
+        };
+        assert!(output.stderr.len() > 3 * 1024);
+        let error = RecipeBuildError::ImageBuild {
+            diagnostic: podman_build_diagnostic(&output),
+            logs: Box::new(sanitized_process_logs(&output)),
+        };
+        let evidence = crate::failure_evidence::from_failure(
+            &vonk_agent_protocol::generated::AgentOperation::RecipeBuildV1,
+            &error.failure_evidence(),
+        );
+        assert!(
+            evidence
+                .stderr
+                .text
+                .contains("ERROR: Failed to build flash-attn")
+        );
+        assert!(
+            evidence
+                .stderr
+                .text
+                .contains("error: subprocess-exited-with-error")
+        );
+        assert!(evidence.stderr.text.len() < 1024);
+        let property = |name: &str| {
+            evidence
+                .preflight
+                .iter()
+                .find(|property| property.name == name)
+                .map(|property| property.value.clone())
+        };
+        assert_eq!(property("exit_code").as_deref(), Some("1"));
+        assert!(
+            property("build_step")
+                .unwrap()
+                .starts_with("RUN apt-get update && curl")
+        );
+        evidence.validate().unwrap();
     }
 
     #[test]
