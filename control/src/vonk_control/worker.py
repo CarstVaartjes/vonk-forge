@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextvars
 import hashlib
 import logging
 import os
@@ -14,9 +15,11 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from functools import cache
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from vonk_agent_protocol import (
+    ControllerErrorCode,
+    Disposition,
     LifecycleEventKind,
     UnknownOutcomeError,
     WaitOwnerKind,
@@ -45,6 +48,8 @@ _PROCESS_INSTANCE = re.compile(r"[0-9a-f]{64}\Z")
 
 _LOGGER = logging.getLogger("vonk-control-worker")
 _WORKER_WATCHDOG_TIMEOUT_SECONDS = 180
+#: How long one pass waits for one step before it moves on to the next.
+_STEP_BUDGET_SECONDS = 10.0
 
 
 @cache
@@ -94,6 +99,40 @@ class WorkerWatchdog:
 
     def stalled(self) -> bool:
         return self._clock() - self._last_completed > self._timeout_seconds
+
+
+class StepOverBudget(TimeoutError):
+    """A step still running when its budget ended; the pass went on without it."""
+
+    code = ControllerErrorCode.TIMEOUT.value
+    disposition = Disposition.WAIT
+
+
+class _Step(threading.Thread):
+    """One step on its own thread, so a slow step cannot hold the pass."""
+
+    def __init__(self, name: str, call: Callable[[], object]) -> None:
+        # A fresh context, like the loop's own: a copied one would hand the
+        # caller's context-bound session (model_cache._CACHE_SESSION) to a
+        # second thread.
+        super().__init__(
+            name=f"worker-step:{name}", daemon=True, context=contextvars.Context()
+        )
+        self._call = call
+        self.started_at = time.monotonic()
+        self.result: object = None
+        self.error: Exception | None = None
+
+    def run(self) -> None:
+        try:
+            self.result = self._call()
+        except Exception as error:  # noqa: BLE001 - handed to the pass that owns the step
+            self.error = error
+
+    def outcome(self) -> object:
+        if self.error is not None:
+            raise self.error
+        return self.result
 
 
 def current_worker_instance_id(proc_root: Path = Path("/proc"), pid: int = 1) -> str:
@@ -229,6 +268,8 @@ class Worker:
         loop_heartbeat: Callable[[], object] | None = None,
         memory_sources: Sequence[object] = (),
         due_waits: Callable[[], object] | None = None,
+        step_budget_seconds: float = _STEP_BUDGET_SECONDS,
+        step_heartbeat: Callable[[], object] | None = None,
     ) -> None:
         self._jobs = jobs
         self._worker_id = worker_id
@@ -246,6 +287,11 @@ class Worker:
         self._closed = False
         self._failures = coordinator_failures
         self._cadence_at: dict[str, float] = {}
+        self._step_budget_seconds = step_budget_seconds
+        self._step_heartbeat = step_heartbeat
+        # The running step of each name; one at a time, across passes.
+        self._steps: dict[str, _Step] = {}
+        self._steps_lock = threading.Lock()
 
     def close(self) -> None:
         """Close worker-owned executors while leaving durable work resumable."""
@@ -318,10 +364,14 @@ class Worker:
         for offset in range(len(sources)):
             index = (self._source_cursor + offset) % len(sources)
             name, source = sources[index]
+            self._beat()
             if not self._failures.ready(name):
                 continue
             try:
-                progressed = source()
+                progressed = self._bounded(name, source)
+            except StepOverBudget as error:
+                self._failures.failed(name, error, disposition(error))
+                continue
             except Exception as error:  # noqa: BLE001 - isolate one owner, report its fault
                 # A source that keeps failing must not starve the others: the
                 # failure stays visible, the turn moves on, and the failed
@@ -345,6 +395,49 @@ class Worker:
         self._run_housekeeping(LifecycleEventKind.HEARTBEAT, self._loop_heartbeat)
         return advanced
 
+    def _bounded[Result](self, name: str, call: Callable[[], Result]) -> Result:
+        """Run one step for at most the step budget, then give the pass back.
+
+        The step runs on its own thread, one at a time per name. One still
+        running when its budget ends keeps running there, is reported by name
+        and raises :class:`StepOverBudget`, so the pass goes on with the other
+        steps and the watchdog keeps seeing a live loop. The first pass after
+        it finishes takes its outcome; the pass after that runs it again.
+        """
+        with self._steps_lock:
+            running = self._steps.get(name)
+            if running is None:
+                running = self._steps[name] = _Step(name, call)
+                running.start()
+        running.join(
+            max(0.0, running.started_at + self._step_budget_seconds - time.monotonic())
+        )
+        if running.is_alive():
+            elapsed = time.monotonic() - running.started_at
+            log_event(
+                _LOGGER,
+                "worker.step_over_budget",
+                service="control-worker",
+                step=name,
+                budget_seconds=self._step_budget_seconds,
+                elapsed_seconds=round(elapsed, 1),
+                resume="the first pass after the step has finished",
+            )
+            raise StepOverBudget(
+                f"worker step {name} is still running after {elapsed:.0f}s "
+                f"(budget {self._step_budget_seconds:g}s); "
+                "the pass goes on and takes its outcome once it finishes"
+            )
+        with self._steps_lock:
+            if self._steps.get(name) is running:
+                del self._steps[name]
+        return cast("Result", running.outcome())
+
+    def _beat(self) -> None:
+        """Tell the watchdog the pass is turning: after every step, not per pass."""
+        if self._step_heartbeat is not None:
+            self._step_heartbeat()
+
     def _run_housekeeping(
         self,
         name: str,
@@ -355,11 +448,14 @@ class Worker:
         if task is None:
             return
         key = f"housekeeping:{name}"
+        self._beat()
         now = time.monotonic()
         if now < self._cadence_at.get(key, now) or not self._failures.ready(key):
             return
         try:
-            task()
+            self._bounded(key, task)
+        except StepOverBudget as error:
+            self._failures.failed(key, error, disposition(error))
         except Exception as error:  # noqa: BLE001 - isolate one owner, report its fault
             self._failures.failed(key, error, disposition(error))
             log_event(
@@ -411,7 +507,7 @@ class Worker:
         if not self._failures.ready(source):
             return
         try:
-            task()
+            self._bounded(source, task)
         except Exception as error:  # noqa: BLE001 - same source custody as normal dispatch
             self._failures.failed(source, error, disposition(error))
         else:
@@ -482,6 +578,7 @@ def assemble_production_worker(
     | None = None,
     runtime_image_preparer: Callable[..., object] | None = None,
     loop_heartbeat: Callable[[], object] | None = None,
+    step_heartbeat: Callable[[], object] | None = None,
     capabilities: CapabilityRegistry | None = None,
     catalog_sync: ManagedRecipeCatalogSyncService | None = None,
     enrollment: EnrollmentService | None = None,
@@ -778,6 +875,7 @@ def assemble_production_worker(
         background_services=worker_background_services,
         background_closers=worker_background_closers,
         loop_heartbeat=loop_heartbeat,
+        step_heartbeat=step_heartbeat,
         memory_sources=memory_sources,
     )
 
@@ -1035,6 +1133,7 @@ if __name__ == "__main__":
             clock=clock,
         ),
     )
+    watchdog = WorkerWatchdog(timeout_seconds=_WORKER_WATCHDOG_TIMEOUT_SECONDS)
     worker = assemble_production_worker(
         catalog_sync=catalog_sync,
         enrollment=enrollment,
@@ -1065,8 +1164,8 @@ if __name__ == "__main__":
             process_instance_id=current_worker_instance_id(),
             clock=clock,
         ).completed_loop,
+        step_heartbeat=watchdog.beat,
     )
-    watchdog = WorkerWatchdog(timeout_seconds=_WORKER_WATCHDOG_TIMEOUT_SECONDS)
     watchdog_stop = threading.Event()
     memory_monitor = WorkerMemoryMonitor(
         report_path=worker_memory_report_path(settings.state_path),

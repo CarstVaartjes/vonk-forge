@@ -841,3 +841,73 @@ def test_durable_fault_stays_with_its_source_when_optional_services_reorder(tmp_
         coordinator_failures=_failures(tmp_path),
     ).run_once()
     assert calls == ["broken", "healthy", "healthy"]
+
+
+def test_source_slower_than_the_watchdog_yields_while_other_work_continues(
+    tmp_path, caplog
+) -> None:
+    """Catches a pass that waits for one slow step: the watchdog restarts the
+    worker, dropping in-process transfers, and every other source stalls."""
+    from vonk_agent_protocol import ControllerErrorCode
+    from vonk_control.models import CoordinatorFailure
+    from vonk_control.worker import _background_source_name
+
+    now = [datetime(2026, 8, 3, tzinfo=UTC)]
+    watchdog_now = [0.0]
+    jobs = _service(tmp_path)
+    release = threading.Event()
+    slow_runs: list[int] = []
+    healthy_runs: list[int] = []
+
+    def slow() -> bool:
+        # Fault: one step stays busy past the watchdog timeout.
+        slow_runs.append(1)
+        watchdog_now[0] += 181
+        release.wait(60)
+        return False
+
+    def healthy() -> bool:
+        healthy_runs.append(1)
+        return False
+
+    watchdog = WorkerWatchdog(timeout_seconds=180, clock=lambda: watchdog_now[0])
+    worker = Worker(
+        jobs,
+        "worker-1",
+        {"probe": lambda _request: {"done": True}},
+        background_services=(slow, healthy),
+        coordinator_failures=_failures(tmp_path, clock=lambda: now[0]),
+        # wall-clock: the step budget is a real-time wait on the step's thread.
+        step_budget_seconds=1.0,
+        step_heartbeat=watchdog.beat,
+    )
+    slow_source = _background_source_name(slow)
+    sessions = sessionmaker(create_engine(f"sqlite:///{tmp_path / 'worker.sqlite'}"))
+    try:
+        with caplog.at_level(logging.INFO, logger="vonk-control-worker"):
+            assert worker.run_once() is False
+            assert not watchdog.stalled()
+            job = jobs.enqueue("probe", "admin", "a" * 64, [], {})
+            assert worker.run_once() is True
+            assert worker.run_once() is False
+        assert not watchdog.stalled()
+        assert jobs.get(job.id).result == {"done": True}
+        assert len(healthy_runs) == 3
+        assert slow_runs == [1]
+        assert "worker.step_over_budget" in caplog.text
+        assert slow_source in caplog.text
+        with sessions() as session:
+            row = session.get(CoordinatorFailure, slow_source)
+            assert row is not None
+            assert row.failure.reason == ControllerErrorCode.TIMEOUT
+    finally:
+        release.set()
+
+    # Once the slow step finishes, its outcome clears the wait and it runs again.
+    worker._steps[slow_source].join(60)
+    now[0] += timedelta(seconds=5)
+    worker.run_once()
+    with sessions() as session:
+        assert session.get(CoordinatorFailure, slow_source) is None
+    worker.run_once()
+    assert slow_runs == [1, 1]
