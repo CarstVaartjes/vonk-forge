@@ -1172,9 +1172,21 @@ def test_added_line_guard_allows_a_paginating_wrapper_and_workflow_continuations
         "          gh api --paginate \\\n"
         "            -H 'Accept: application/vnd.github+json' \\\n"
         "            -H 'X-GitHub-Api-Version: 2022-11-28' \\\n"
+        "            -f per_page=100 \\\n"
         '            "/repos/$REPO/actions/runs/$RUN/artifacts" --jq .artifacts[]\n'
     )
     path = ".github/workflows/example.yml"
-    assert not check_source(path, workflow, {5}, modes=("listings",))
-    one_page = workflow.replace("--paginate ", "")
-    assert check_source(path, one_page, {5}, modes=("listings",))
+    assert not check_source(path, workflow, {6}, modes=("listings",))
+    one_page = workflow.replace("--paginate ", "").replace("per_page", "x")
+    assert check_source(path, one_page, {6}, modes=("listings",))
+
+
+def test_added_line_guard_scopes_the_wrapper_and_flags_a_bare_trailing_slash():
+    mixed = (
+        'run(["gh", "api", "--paginate", "repos/o/r/pulls"])\n'
+        + "pass\n" * 5
+        + 'run(["gh", "api", f"repos/o/r/actions/runs/{run_id}/artifacts"])\n'
+    )
+    assert check_source("scripts/example.py", mixed, {7}, modes=("listings",))
+    slash = 'gh(f"repos/o/r/actions/runs/{run_id}/artifacts/")\n'
+    assert check_source("scripts/example.py", slash, {1}, modes=("listings",))
