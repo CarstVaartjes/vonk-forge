@@ -9,6 +9,7 @@ its load out of the alarm however long it takes.
 
 from __future__ import annotations
 
+import json
 from datetime import timedelta
 from pathlib import Path
 
@@ -19,14 +20,23 @@ from vonk_agent_protocol import (
     ObservedAssignmentState,
     ProfileReasonCode,
     RecipeImageCode,
+    WaitOwnerKind,
+    WaitReason,
+    WaitResumeCondition,
 )
+from vonk_control.fleet_profile_contract import FleetProfileApplicationProgress
 from vonk_control.fleet_profiles import FleetProfileService
 from vonk_control.models import (
     FleetProfileApplication,
     NodeInventorySnapshot,
     ResourceReservation,
 )
-from vonk_control.operation_blockers import ProgressAlarmCode, make_blocker
+from vonk_control.operation_blockers import (
+    BlockingOperation,
+    ProgressAlarmCode,
+    make_blocker,
+)
+from vonk_control.persisted_waits import read_wait, schedule_wait, write_wait
 from vonk_control.platform_observation import PlatformObserver
 from vonk_control.progress_stall import PROGRESS_STALL_WINDOW
 
@@ -134,6 +144,114 @@ def test_a_repeated_wait_raises_the_alarm_and_progress_clears_it(
     assert not _alarm(load) and not _platform_stalled(load)
     assert _settle(load), _application(load).status_reason
     assert not _platform_stalled(load)
+
+
+def _stored(load):
+    """The application row's own progress and persisted wait, as stored."""
+
+    with load.sessions() as session:
+        row = session.get(FleetProfileApplication, load.application.id)
+        assert row is not None
+        progress = FleetProfileApplicationProgress.model_validate_json(
+            json.dumps(row.progress)
+        )
+        return progress, read_wait(row)
+
+
+def test_a_load_waiting_only_on_a_missing_child_receipt_is_stalled_with_the_worker_down(
+    tmp_path: Path,
+) -> None:
+    """Catches the silent receipt wait: the Run/Switch child's agent work is
+    never delivered (as when a lane Spark goes away while still enrolled), and
+    the load records that wait only as its persisted wait, never in its
+    progress blockers.  It carried no stall, so it waited unseen forever.  It is
+    now stalled one window after it last moved, decided when it is read with
+    no worker running, and the delivered work clears it."""
+
+    load = _load(tmp_path)
+    assert _loop(load, lambda: _switch(load) is not None, complete=False, rounds=3)
+    for _ in range(4):  # the child's own wait settles into one dependency
+        _loop(load, lambda: False, complete=False, rounds=1)
+    progress, wait = _stored(load)
+    assert wait is not None and wait.reason is WaitReason.RECEIPT_MISSING
+    assert not progress.blockers  # the wait lives only in the persisted wait
+    stall = progress.stall
+    assert stall is not None and stall.first_seen_at >= wait.first_blocked_at
+
+    # The worker is down: from here only the clock moves until the alarm shows.
+    _nothing_moves_for_the_window(load)
+    application = _application(load)
+    assert application.state == LifecycleState.RUNNING.value  # still waiting
+    assert application.blockers[0].code == WaitReason.RECEIPT_MISSING
+    (alarm,) = _alarm(load)
+    assert stall.detail in alarm.detail
+    (listed,) = _platform_stalled(load)
+    assert listed.application_id == load.application.id
+
+    # The Spark is back and its work is delivered: the alarm clears and the
+    # load succeeds.
+    _sparks_report(load)
+    _loop(load, lambda: not _alarm(load), rounds=20)
+    assert not _alarm(load) and not _platform_stalled(load)
+    assert _settle(load), _application(load).status_reason
+
+
+def test_an_unconfirmed_stop_written_only_as_the_wait_is_stalled_then_cleared(
+    tmp_path: Path,
+) -> None:
+    """The superseded-workload stop wait (``switch_observation``) is written
+    with ``write_wait`` alone and without touching the row's time: it starts
+    its own stall when it is written, is an alarm one window later, and a
+    cleared wait drops it."""
+
+    load = _load(tmp_path)
+    assert _loop(load, lambda: _switch(load) is not None, complete=False, rounds=3)
+    load.now[0] += timedelta(hours=1)  # the row's time is an hour old
+    node = min(load.nodes)
+    with load.sessions.begin() as session:
+        row = session.get(FleetProfileApplication, load.application.id)
+        assert row is not None
+        operation = BlockingOperation(id="stop-op-1", kind="recipe.stop")
+        write_wait(
+            row,
+            identity=BlockingOperation(
+                id=row.id, kind=WaitOwnerKind.FLEET_PROFILE.value
+            ),
+            kind=WaitOwnerKind.FLEET_PROFILE,
+            reason=WaitReason.STOP_UNCONFIRMED,
+            now=load.now[0],
+            next_check=load.now[0] + timedelta(minutes=1),
+            blockers=[
+                make_blocker(
+                    WaitReason.STOP_UNCONFIRMED,
+                    "Awaiting the exact superseded workload cancellation receipt",
+                    node_ids=[node],
+                ).model_copy(update={"operation": operation})
+            ],
+            dependency_deadline=load.now[0] + timedelta(hours=1),
+            resume_condition=WaitResumeCondition.EFFECT_OBSERVED,
+        )
+    progress, wait = _stored(load)
+    assert wait is not None and wait.reason is WaitReason.STOP_UNCONFIRMED
+    assert not progress.blockers
+    assert progress.stall is not None
+    assert progress.stall.first_seen_at == load.now[0]  # not the row's old time
+    assert progress.stall.detail.startswith(f"{WaitReason.STOP_UNCONFIRMED}: ")
+    assert not _alarm(load) and not _platform_stalled(load)
+
+    _nothing_moves_for_the_window(load)
+    (alarm,) = _alarm(load)
+    assert WaitReason.STOP_UNCONFIRMED.value in alarm.detail
+    (listed,) = _platform_stalled(load)
+    assert listed.application_id == load.application.id
+
+    with load.sessions.begin() as session:
+        row = session.get(FleetProfileApplication, load.application.id)
+        assert row is not None
+        schedule_wait(row, None)
+    progress, wait = _stored(load)
+    assert wait is None and progress.stall is None
+    assert not _alarm(load) and not _platform_stalled(load)
 
 
 def test_a_parked_load_repeating_an_unavailable_observation_is_stalled(
@@ -342,11 +460,14 @@ def test_a_load_waiting_for_the_load_it_continues_is_never_silent(monkeypatch) -
 
     now[0] = stall.first_seen_at + PROGRESS_STALL_WINDOW
     service.tick()
-    (row,) = listed()
-    assert row.application_id == newer.id
+    stalled = {row.application_id: row for row in listed()}
+    row = stalled[newer.id]
     assert row.detail.startswith(
         f"{ProfileReasonCode.CONTINUING_ASSIGNMENTS_PENDING}: "
     )
+    # The older load's child does not move either: its receipt wait is shown
+    # stalled too, never silent.
+    assert set(stalled) == {newer.id, first.id}
 
     assert service.application(newer.id).state == "running"  # waiting, not ended
 

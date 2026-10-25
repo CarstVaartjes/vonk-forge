@@ -10,8 +10,9 @@ A stall is judged by time without movement, never by how often the wait was
 retried or re-checked: a preparation, a build or an inventory that takes long
 is retried many times while it works, and a retry is not evidence of anything.
 
-Every write of an application's progress while it is queued, running or
-backing off and waits on something (it records blockers) is observed: a
+Every write of an application's progress or of its persisted wait while it is
+queued, running or backing off and waits on something (blockers in its progress
+or in its persisted wait, such as a missing child receipt) is observed: a
 backoff whose every retry is declined the same way is a wait that does not
 move, and a newer load waiting for an older one to finish the assignments it
 continues records that wait too.  Its *signature* is the
@@ -37,6 +38,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from typing import TypeGuard
 
@@ -55,6 +57,7 @@ from .operation_blockers import (
 )
 from .settings import PROFILE_STALL_WINDOW_SECONDS
 from .stall_window import Verdict, progress_verdict
+from .wait_contract import WaitEvidence
 
 #: How long a wait shows no movement before it is shown as stalled: the load's
 #: own stall window.  It is longer than a preparation's own stall window, so a
@@ -89,9 +92,23 @@ def _retry_attempt(
     )
 
 
-def _waits(progress: FleetProfileApplicationProgress) -> list[OperationBlocker]:
-    return [
+def _waits(
+    progress: FleetProfileApplicationProgress, waiting: Sequence[OperationBlocker]
+) -> list[OperationBlocker]:
+    """What the load waits on: its progress blockers, then its persisted wait's."""
+
+    causes = [
         item for item in progress.blockers if item.code != ProgressAlarmCode.STALLED
+    ]
+    seen = {(item.code, tuple(sorted(item.node_ids))) for item in causes}
+    return [
+        *causes,
+        *(
+            item
+            for item in waiting
+            if item.code != ProgressAlarmCode.STALLED
+            and (item.code, tuple(sorted(item.node_ids))) not in seen
+        ),
     ]
 
 
@@ -101,12 +118,15 @@ def progress_signature(
     state: str,
     current_step: int | None,
     current_operation_id: str | None,
+    waiting: Sequence[OperationBlocker] = (),
 ) -> str:
     """One digest of a load's movement and of what it waits on."""
 
     child = progress.child_progress
     operation = child.operation if child is not None else None
-    waits = sorted((item.code, sorted(item.node_ids)) for item in _waits(progress))
+    waits = sorted(
+        (item.code, sorted(item.node_ids)) for item in _waits(progress, waiting)
+    )
     movement = [
         state,
         current_step,
@@ -145,14 +165,17 @@ def next_stall(
     current_step: int | None,
     current_operation_id: str | None,
     observed_at: datetime,
+    waiting: Sequence[OperationBlocker] = (),
 ) -> ProgressStall | None:
     """The stall after one more observation of ``progress``, or ``None``.
 
     ``before`` is the progress this observation replaces; a repeat counts only
     when the retry attempt moved since it (``None``: unknown, not counted).
+    ``waiting`` is the load's persisted wait: a wait recorded only there (a
+    missing child receipt, an unconfirmed stop) is a wait like any other.
     """
 
-    waits = _waits(progress)
+    waits = _waits(progress, waiting)
     if state not in WAITING_STATES or not waits:
         return None
     now = _aware(observed_at)
@@ -161,6 +184,7 @@ def next_stall(
         state=state,
         current_step=current_step,
         current_operation_id=current_operation_id,
+        waiting=waiting,
     )
     if previous is not None and previous.signature == signature:
         if before is None or _retry_attempt(before) == _retry_attempt(progress):
@@ -200,9 +224,12 @@ def observe_application_progress(
     that does not read is left as it is: its own readers own that residue.
     """
 
-    history = inspect(target).attrs.progress.history
+    attrs = inspect(target).attrs
+    history = attrs.progress.history
     current = target.progress
-    if not history.has_changes() or not isinstance(current, dict):
+    if not (
+        history.has_changes() or attrs.wait_evidence.history.has_changes()
+    ) or not isinstance(current, dict):
         return
     progress = _read_progress(current)
     if progress is None:
@@ -229,7 +256,13 @@ def observe_application_progress(
             )
     old = history.deleted[0] if history.deleted else current
     previous = read_stall(old.get("stall")) if isinstance(old, dict) else None
+    wait = (
+        target.wait_evidence if isinstance(target.wait_evidence, WaitEvidence) else None
+    )
     observed_at = target.updated_at or target.created_at
+    if observed_at is not None and wait is not None:
+        # A wait written without touching the row's time began when it says.
+        observed_at = max(_aware(observed_at), _aware(wait.first_blocked_at))
     stall = (
         None
         if observed_at is None
@@ -241,6 +274,7 @@ def observe_application_progress(
             current_step=target.current_step,
             current_operation_id=target.current_operation_id,
             observed_at=observed_at,
+            waiting=() if wait is None else wait.blockers,
         )
     )
     stored = None if stall is None else stall.model_dump(mode="json")

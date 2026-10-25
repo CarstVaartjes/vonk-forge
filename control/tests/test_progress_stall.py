@@ -8,10 +8,15 @@ import sys
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from vonk_agent_protocol import ProfileReasonCode, RecipeImageCode
+from vonk_agent_protocol import (
+    LifecycleState,
+    ProfileReasonCode,
+    RecipeImageCode,
+    WaitReason,
+)
 from vonk_control.fleet_profile_contract import FleetProfileApplicationProgress
 from vonk_control.lifecycle.image_availability import PREPARATION_STALL_WINDOW
-from vonk_control.operation_blockers import ProgressAlarmCode
+from vonk_control.operation_blockers import ProgressAlarmCode, make_blocker
 from vonk_control.progress_stall import (
     PROGRESS_STALL_WINDOW,
     is_stalled,
@@ -354,6 +359,85 @@ def test_the_alarm_itself_is_not_part_of_the_wait() -> None:
     shown.blockers.append(stalled_blocker(stall))
     after = _observe(stall, shown, START + timedelta(hours=1))
     assert after is not None and after.first_seen_at == stall.first_seen_at
+
+
+_NODE = "spk_" + "0a1b2c3d" * 4
+
+
+def _persisted_wait(code: WaitReason, node: str = _NODE):
+    """A wait recorded only as the load's persisted wait, not in its progress."""
+
+    return [make_blocker(code, f"Awaiting the exact receipt ({code})", node_ids=[node])]
+
+
+def _wait_only(previous, progress, waiting, at, *, before):
+    return next_stall(
+        previous,
+        progress,
+        before=before,
+        state=LifecycleState.RUNNING.value,
+        current_step=0,
+        current_operation_id="op-1",
+        observed_at=at,
+        waiting=waiting,
+    )
+
+
+@pytest.mark.parametrize(
+    "code", [WaitReason.RECEIPT_MISSING, WaitReason.STOP_UNCONFIRMED]
+)
+def test_a_wait_held_only_in_the_persisted_wait_is_an_alarm_after_a_window(
+    code: WaitReason,
+) -> None:
+    # The load's progress names no blocker: its only wait is the persisted one
+    # (a missing child receipt, an unconfirmed stop).  It was never observed.
+    idle = FleetProfileApplicationProgress(attempt=1)
+    waiting = _persisted_wait(code)
+    stall = None
+    for minute in range(40):
+        stall = _wait_only(
+            stall, idle, waiting, START + timedelta(minutes=minute), before=idle
+        )
+    assert stall is not None and stall.first_seen_at == START
+    assert stall.detail.startswith(f"{code}: ")
+    assert not is_stalled(
+        stall, now=START + PROGRESS_STALL_WINDOW - timedelta(seconds=1)
+    )
+    assert is_stalled(stall, now=START + PROGRESS_STALL_WINDOW)
+    # The alarm itself in the persisted wait is not part of what it waits on.
+    shown = [*waiting, stalled_blocker(stall)]
+    again = _wait_only(stall, idle, shown, START + timedelta(hours=1), before=idle)
+    assert again == stall
+
+
+def test_movement_under_a_persisted_wait_keeps_it_from_the_alarm() -> None:
+    # The child copies bytes every ten minutes while the load waits for its
+    # receipt: it waits for hours and is never stalled.
+    waiting = _persisted_wait(WaitReason.RECEIPT_MISSING)
+    before = FleetProfileApplicationProgress(attempt=1)
+    stall = None
+    for minute in range(1, 4 * 60):
+        at = START + timedelta(minutes=minute)
+        copied = minute // 10 * 10
+        progress = _waiting(
+            blockers=[],
+            child_progress={"phase": "target-copy", "bytes": copied, "node_ids": []},
+        )
+        stall = _wait_only(stall, progress, waiting, at, before=before)
+        before = progress
+        assert not is_stalled(stall, now=at + timedelta(seconds=59)), minute
+    # A different Spark in the persisted wait is a different wait: it starts over.
+    later = START + timedelta(hours=5)
+    moved = _wait_only(
+        stall,
+        before,
+        _persisted_wait(WaitReason.RECEIPT_MISSING, "spk_" + "1" * 32),
+        later,
+        before=before,
+    )
+    assert moved is not None and moved.first_seen_at == later
+    # The wait ends: nothing is left to be stalled.
+    assert _wait_only(moved, before, [], later, before=before) is None
 
 
 def test_every_process_with_the_fleet_profile_service_counts_observations() -> None:
