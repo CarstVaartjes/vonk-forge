@@ -14,6 +14,8 @@ use std::sync::atomic::AtomicUsize;
 #[derive(Clone, Copy)]
 enum Seen {
     Live,
+    /// The probe itself failed: nothing was observed either way.
+    Unavailable,
     Nothing,
     Exited,
 }
@@ -53,6 +55,11 @@ impl Executor for ScriptedProbe {
             |reason| PendingObservation::new(claim, WaitReason::RuntimeEffectUnconfirmed, reason);
         Some(match seen {
             Seen::Live => OperationObservation::Progressing(pending("a live owned unit")),
+            Seen::Unavailable => OperationObservation::Unknown(PendingObservation::new(
+                claim,
+                WaitReason::ObservationUnavailable,
+                "helper unavailable",
+            )),
             Seen::Nothing => {
                 OperationObservation::Unknown(pending("no retained export or live owned unit"))
             }
@@ -200,4 +207,32 @@ fn damaged_stored_deadline_observes_until_the_accepted_deadline() {
     assert_eq!(claims.len(), 1);
     let drift = claims[0].deadline.signed_duration_since(accepted.deadline);
     assert!(drift.num_milliseconds().abs() < 1, "{drift}");
+}
+
+#[tokio::test]
+async fn a_failed_probe_at_the_deadline_is_not_an_observed_absence() {
+    let root = tempdir().unwrap();
+    let mut store = StateStore::open(&root.path().join("state.sqlite"), NODE_ID).unwrap();
+    let accepted = claim();
+    store.begin(&accepted, Utc::now()).unwrap();
+    let probe = ScriptedProbe::new(&[Seen::Unavailable, Seen::Live, Seen::Exited]);
+    let deadline = accepted.deadline.with_timezone(&Utc);
+
+    pass(&mut store, &probe, deadline).await;
+    assert!(
+        matches!(
+            pending(&store, accepted.fence),
+            Some(AgentResultResult::OutcomeUnknown(_))
+        ),
+        "the uncertainty is recorded for the Controller"
+    );
+    assert_eq!(store.observation_claims().unwrap().len(), 1);
+    pass(&mut store, &probe, deadline + ChronoDuration::minutes(1)).await;
+    pass(&mut store, &probe, deadline + ChronoDuration::minutes(2)).await;
+    assert_eq!(probe.probes(), 3);
+    assert!(matches!(
+        pending(&store, accepted.fence),
+        Some(AgentResultResult::OutcomeDone(_))
+    ));
+    assert!(store.observation_claims().unwrap().is_empty());
 }

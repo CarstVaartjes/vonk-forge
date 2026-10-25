@@ -415,8 +415,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
 }
 
 /// Runs before receipt delivery and claims, including an entirely idle fleet.
-/// Startup reaches this same pass through run_once; it never dispatches effects
-/// (a job past its own deadline is stopped, as its execution would stop it).
+/// Startup reaches this same pass through run_once; it never dispatches effects.
 pub async fn reobserve_operations<E: Executor>(
     state: &mut StateStore,
     executor: &E,
@@ -432,20 +431,29 @@ pub async fn reobserve_operations<E: Executor>(
         };
         match observation {
             OperationObservation::Confirmed(result) => {
+                // A confirmed unknown is all the probe can learn (a measured
+                // exit retained while its delivery awaits the Controller):
+                // past the deadline it is final and is not probed again.
+                let unknown = matches!(*result, ExecutionResult::Unknown(_));
                 state.finish(&claim, *result)?;
+                if unknown && now >= claim.deadline.with_timezone(&Utc) {
+                    state.end_observation(claim.fence)?;
+                }
             }
             OperationObservation::Progressing(pending) => {
                 // A live owned unit is still observed past the lease: its exit
-                // replaces any recorded unknown. Its own bound ends it (a job
-                // is stopped and reported at its job deadline).
+                // replaces any recorded unknown. Its owner's bound ends it.
                 log_pending(&claim, &pending);
             }
             OperationObservation::Blocked(pending) | OperationObservation::Unknown(pending) => {
                 log_pending(&claim, &pending);
                 if now >= pending.deadline {
-                    // Nothing live remains past the deadline: the unknown is
+                    // A probe that could not look is not an observed absence:
+                    // the unknown is recorded but the claim stays observed
+                    // (a job's own bound ends it). An observed absence is
                     // final, stays in the delivery spool, and is not probed
                     // again.
+                    let unavailable = pending.cause == WaitReason::ObservationUnavailable;
                     state.finish(
                         &claim,
                         ExecutionResult::unknown(
@@ -454,7 +462,9 @@ pub async fn reobserve_operations<E: Executor>(
                             UnknownEvidence::at(FailureStage::AgentRestart),
                         ),
                     )?;
-                    state.end_observation(claim.fence)?;
+                    if !unavailable {
+                        state.end_observation(claim.fence)?;
+                    }
                 }
             }
         }

@@ -420,7 +420,7 @@ async fn rollback_and_expired_unknown_preserve_evidence_and_recover_on_idle_tick
 }
 
 #[test]
-fn an_unconfirmed_transaction_past_its_activation_deadline_is_unknown() {
+fn an_unconfirmed_transaction_past_its_activation_deadline_is_a_final_unknown() {
     let root = tempdir().unwrap();
     let mut accepted = upgrade_claim();
     let AgentClaimPayload::AgentUpgradePayload(payload) = &mut accepted.payload else {
@@ -428,8 +428,8 @@ fn an_unconfirmed_transaction_past_its_activation_deadline_is_unknown() {
     };
     payload.rollback.activation_deadline = Utc::now().timestamp() - 1;
     let running = identity(&accepted);
-    assert!(matches!(
-        observe(root.path(), &accepted, &running),
-        OperationObservation::Unknown(_)
-    ));
+    let OperationObservation::Confirmed(result) = observe(root.path(), &accepted, &running) else {
+        panic!("past its activation deadline nothing settles the transaction");
+    };
+    assert!(matches!(*result, ExecutionResult::Unknown(_)));
 }

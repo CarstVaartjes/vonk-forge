@@ -33,14 +33,18 @@ pub(super) fn observe_upgrade(
     };
     // The helper's durable watcher owns the activation transaction until its
     // activation deadline: until then an unconfirmed transaction is live and
-    // stays observed past the claim's lease; after it, the wait is unknown.
+    // stays observed past the claim's lease. After it nothing settles the
+    // transaction, even an unreadable receipt: the unknown is final.
     let live = Utc::now().timestamp() < request.rollback.activation_deadline;
-    let waiting = |cause, reason| {
-        let wait = PendingObservation::new(claim, cause, reason);
+    let waiting = |cause, reason: String| {
         if live {
-            OperationObservation::Progressing(wait)
+            OperationObservation::Progressing(PendingObservation::new(claim, cause, reason))
         } else {
-            OperationObservation::Unknown(wait)
+            OperationObservation::confirmed(ExecutionResult::unknown(
+                cause,
+                reason,
+                UnknownEvidence::at(FailureStage::AgentRestart),
+            ))
         }
     };
     let pending = |reason| waiting(WaitReason::AgentUpgradeAwaitingIdentity, reason);
