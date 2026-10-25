@@ -45,18 +45,24 @@ impl OutputBreach {
     /// The definite failure of a job whose outputs broke their contract. The
     /// exit and the process logs travel with it; nothing is uploaded.
     pub(in crate::executor) fn failure(self, receipt: &RecipeJobRunResult) -> ExecutionResult {
-        // A process that exited nonzero by a cause its helper named (the host
-        // memory guard's kill among them) failed by that cause: what it left
-        // behind, such as scratch a kill gave no chance to clean up, is its
-        // consequence, not a breach of the output contract.
-        if receipt.exit_code != 0
-            && receipt_exit_account(receipt)
-                .and_then(ExitCause::of_summary)
-                .is_some()
-        {
+        // A process that was killed (the host memory guard, the OOM killer, a
+        // signal) failed by that kill: what it left behind, such as scratch
+        // the kill gave it no chance to clean up, is the kill's consequence,
+        // not a breach of the output contract. Any other ending is judged by
+        // its outputs, and its exit cause is reported beside the breach.
+        let cause = receipt_exit_cause(receipt);
+        if receipt.exit_code != 0 && cause.is_some_and(ExitCause::is_kill) {
             return job_failure(receipt.clone());
         }
-        let mut diagnostic = format!("exit_code={} rule={}", receipt.exit_code, self.rule);
+        let mut diagnostic = format!("exit_code={}", receipt.exit_code);
+        if let Some(cause) = cause {
+            diagnostic.push_str(&format!(
+                " {}={}",
+                crate::failure_evidence::EXIT_CAUSE_FIELD,
+                cause.token()
+            ));
+        }
+        diagnostic.push_str(&format!(" rule={}", self.rule));
         if let Some((limit, observed)) = self.bound {
             diagnostic.push_str(&format!(" limit={limit} observed={observed}"));
         }

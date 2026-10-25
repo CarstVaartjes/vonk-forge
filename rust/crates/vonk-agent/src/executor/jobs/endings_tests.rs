@@ -216,3 +216,72 @@ fn a_job_the_host_memory_guard_killed_fails_by_that_cause_not_by_what_it_left() 
         .expect("the exit account was persisted");
     judged(executor.observe_job_outputs(&claim, &request, receipt));
 }
+
+#[test]
+fn a_job_that_ended_by_its_own_exception_is_still_judged_by_its_outputs() {
+    // Only a kill excuses what a job left: a job that raised and also broke
+    // its output contract reports the breach (rule, bound, entries) with its
+    // exit cause beside it.
+    let (claim, request) = job_claim();
+    let data = tempdir().unwrap();
+    let client = AgentHttpClient::for_http_test("http://127.0.0.1:9/", NODE_ID);
+    let executor = RecipeExecutor {
+        client: &client,
+        helper_socket: std::path::Path::new(crate::host_runtime::HELPER_SOCKET),
+        runtime: OciRuntime {
+            runner: &NoProcess,
+            data_root: data.path(),
+        },
+        runtime_root: data.path(),
+    };
+    let outputs = data
+        .path()
+        .join("runs")
+        .join(request.job_id.to_string())
+        .join("outputs");
+    fs::create_dir_all(&outputs).unwrap();
+    let max_files = request.output_limits.max_files;
+    for index in 0..=max_files {
+        fs::write(outputs.join(format!("frame{index}.png")), b"1").unwrap();
+    }
+    executor.runtime.persist_job_intent(&request).unwrap();
+    let outcome = crate::host_runtime::HostRuntimeOutcome {
+        exit_code: Some(1),
+        stop_uncertain: false,
+        diagnostic: Some(
+            "exit_code=1 oom_killed=false exit_cause=python_exception \
+             exception=\"RuntimeError: decoder failed\""
+                .to_owned(),
+        ),
+        process_logs: None,
+    };
+    let super::super::operation_observation::OperationObservation::Confirmed(result) =
+        executor.observe_job_exit(&claim, &request, outcome)
+    else {
+        panic!("a breach is a confirmed ending");
+    };
+    let failure = result.failure().expect("a definite failure");
+    assert_eq!(failure.code, Some(FailureCode::RecipeJobRunFailed));
+    assert_eq!(
+        failure.failure_kind,
+        Some(AgentFailureKind::InvalidContract)
+    );
+    let diagnostic = failure.diagnostic.as_deref().unwrap_or_default();
+    let (limit, observed) = (
+        format!("limit={max_files}"),
+        format!("observed={}", max_files + 1),
+    );
+    for fact in [
+        "exit_code=1",
+        "exit_cause=python_exception",
+        "rule=job_output_max_files",
+        limit.as_str(),
+        observed.as_str(),
+        "frame0.png",
+    ] {
+        assert!(
+            diagnostic.contains(fact),
+            "{fact} missing from {diagnostic}"
+        );
+    }
+}

@@ -177,31 +177,6 @@ pub fn exit_facts(text: &str) -> impl Iterator<Item = (&str, &str)> {
         })
 }
 
-/// The name under which a job receipt keeps its helper's exit account, so the
-/// exit is judged by the same account after a restart re-reads the receipt.
-pub const EXIT_ACCOUNT_PROPERTY: &str = "exit_account";
-
-/// A helper's process-exit summary as one bounded receipt property: its typed
-/// facts only, cause and code first so the bound never cuts them.
-pub fn exit_account_property(summary: &str) -> Option<FailureProperty> {
-    let mut facts: Vec<_> = exit_facts(summary).collect();
-    facts.sort_by_key(|(key, _)| !matches!(*key, EXIT_CAUSE_FIELD | "exit_code"));
-    let mut value = String::new();
-    for (key, fact) in facts {
-        if value.len() + key.len() + fact.len() + 2 > 256 {
-            break;
-        }
-        if !value.is_empty() {
-            value.push(' ');
-        }
-        value.push_str(&format!("{key}={fact}"));
-    }
-    (!value.is_empty()).then(|| FailureProperty {
-        name: EXIT_ACCOUNT_PROPERTY.into(),
-        value,
-    })
-}
-
 /// Sanitize a helper's process-exit summary.  The uncaught exception it ends
 /// with is the workload's own text and is redacted as a line of its own: a
 /// credential in that text then costs the exception, never the exit facts in

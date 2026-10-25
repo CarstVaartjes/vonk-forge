@@ -154,13 +154,10 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         // The exit is observed; the stop record is bookkeeping, and a
         // failure to retire it is journaled with its cause.
         self.record_job_stop(job.job_scope);
-        let account = outcome
+        let cause = outcome
             .diagnostic
             .as_deref()
-            .and_then(crate::failure_evidence::exit_account_property);
-        let cause = account
-            .as_ref()
-            .and_then(|account| ExitCause::of_summary(&account.value));
+            .and_then(ExitCause::of_summary);
         let reason = if code as u32 == JOB_CANCEL_EXIT_CODE {
             Some("job adapter exited after interruption")
         } else if cause == Some(ExitCause::HostMemoryExhausted) {
@@ -183,9 +180,28 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
             diagnostics.stdout = logs.stdout.clone();
             diagnostics.stderr = logs.stderr.clone();
         }
-        // The helper's exit account travels in the receipt: every later
-        // judgement of this exit, after a restart too, reads it from there.
-        diagnostics.preflight.extend(account);
+        // The helper's exit cause travels in the receipt as the same typed
+        // properties the failure evidence reports: every later judgement of
+        // this exit, after a restart too, reads it from there. The cause is
+        // what the agent decides by; the code only takes a free slot.
+        if let Some(cause) = cause {
+            for (name, value) in [
+                (
+                    crate::failure_evidence::EXIT_CAUSE_FIELD,
+                    cause.token().to_owned(),
+                ),
+                ("exit_code", code.to_string()),
+            ] {
+                if diagnostics.preflight.len() < MAX_PREFLIGHT_PROPERTIES {
+                    diagnostics
+                        .preflight
+                        .push(crate::failure_evidence::FailureProperty {
+                            name: name.to_owned(),
+                            value,
+                        });
+                }
+            }
+        }
         receipt.diagnostics = Some(diagnostics);
         // Publish the real exit independently from output observation.
         // Failure here retains intent and output; it never repeats an
@@ -723,15 +739,18 @@ pub fn prepare_job_invocation(
     Ok(plan)
 }
 
-/// The helper's exit account a job receipt keeps, when the helper gave one.
-pub(super) fn receipt_exit_account(receipt: &RecipeJobRunResult) -> Option<&str> {
+/// The preflight slots a diagnostics document holds (its wire bound).
+const MAX_PREFLIGHT_PROPERTIES: usize = 8;
+
+/// The exit cause the helper named for this receipt's process, when it named one.
+pub(super) fn receipt_exit_cause(receipt: &RecipeJobRunResult) -> Option<ExitCause> {
     receipt
         .diagnostics
         .as_ref()?
         .preflight
         .iter()
-        .find(|property| property.name == crate::failure_evidence::EXIT_ACCOUNT_PROPERTY)
-        .map(|property| property.value.as_str())
+        .find(|property| property.name == crate::failure_evidence::EXIT_CAUSE_FIELD)
+        .and_then(|property| ExitCause::from_token(&property.value))
 }
 
 /// A measured nonzero process exit retains its real output and exit account,
@@ -743,14 +762,22 @@ pub(super) fn job_failure(receipt: RecipeJobRunResult) -> ExecutionResult {
         .unwrap_or_else(|| "job adapter exited unsuccessfully".to_owned());
     // A failed job always says what it knows: its output and exit account, or
     // the typed reason there are none.
-    let diagnostic = receipt_exit_account(&receipt).map_or_else(
+    let cause = receipt_exit_cause(&receipt);
+    let diagnostic = cause.map_or_else(
         || {
             "exit_state_unavailable=\"helper reported no detail\" logs_unavailable=\"not captured\""
                 .to_owned()
         },
-        str::to_owned,
+        |cause| {
+            format!(
+                "exit_code={} {}={}",
+                receipt.exit_code,
+                crate::failure_evidence::EXIT_CAUSE_FIELD,
+                cause.token()
+            )
+        },
     );
-    let code = if ExitCause::of_summary(&diagnostic) == Some(ExitCause::HostMemoryExhausted) {
+    let code = if cause == Some(ExitCause::HostMemoryExhausted) {
         FailureCode::WorkloadHostMemoryExhausted
     } else {
         FailureCode::RecipeJobRunFailed

@@ -57,6 +57,22 @@ impl ExitCause {
         }
     }
 
+    /// The cause a stable token names.
+    pub fn from_token(token: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|cause| cause.token() == token)
+    }
+
+    /// The process was killed (by the host memory guard, the kernel's OOM
+    /// killer or another signal) rather than ending by its own hand, so its
+    /// own cleanup never ran: what it left behind is a consequence of the
+    /// kill, not something it chose to produce.
+    pub fn is_kill(self) -> bool {
+        matches!(
+            self,
+            Self::HostMemoryExhausted | Self::OomKilled | Self::CrashedBySignal
+        )
+    }
+
     /// The cause a process-exit summary names, read from its facts only:
     /// the workload's exception after them may itself read `exit_cause=...`.
     pub fn of_summary(summary: &str) -> Option<Self> {
@@ -65,7 +81,7 @@ impl ExitCause {
             .next()?
             .split_whitespace()
             .find_map(|fact| fact.strip_prefix(EXIT_CAUSE_FIELD)?.strip_prefix('='))
-            .and_then(|token| Self::ALL.into_iter().find(|cause| cause.token() == token))
+            .and_then(Self::from_token)
     }
 }
 
