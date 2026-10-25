@@ -248,7 +248,7 @@ async fn every_dispatched_kind_reaches_its_real_probe_and_preserves_unknown() {
     assert!(
         matches!(
             executor.observe(&upgrade).await,
-            Some(OperationObservation::Unknown(_))
+            Some(OperationObservation::Progressing(_))
         ),
         "every wire kind must reach an observer, including unavailable package identity"
     );

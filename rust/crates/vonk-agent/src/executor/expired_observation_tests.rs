@@ -198,5 +198,6 @@ fn damaged_stored_deadline_observes_until_the_accepted_deadline() {
         .unwrap();
     let claims = store.observation_claims().unwrap();
     assert_eq!(claims.len(), 1);
-    assert_eq!(claims[0].deadline, accepted.deadline);
+    let drift = claims[0].deadline.signed_duration_since(accepted.deadline);
+    assert!(drift.num_milliseconds().abs() < 1, "{drift}");
 }

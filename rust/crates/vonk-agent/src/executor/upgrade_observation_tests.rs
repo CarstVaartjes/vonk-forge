@@ -315,7 +315,8 @@ fn package_observation_requires_exact_transaction_and_running_identity() {
             _ => unreachable!(),
         }
         publish(root.path(), &wrong);
-        let OperationObservation::Unknown(wait) = observe(root.path(), &accepted, &running) else {
+        let OperationObservation::Progressing(wait) = observe(root.path(), &accepted, &running)
+        else {
             panic!("mismatched/unconfirmed activation cannot complete");
         };
         assert!(!wait.reason.is_empty());
@@ -333,7 +334,7 @@ fn package_observation_requires_exact_transaction_and_running_identity() {
         }
         assert!(matches!(
             observe(root.path(), &accepted, &wrong),
-            OperationObservation::Unknown(_)
+            OperationObservation::Progressing(_)
         ));
     }
     assert!(matches!(
@@ -356,7 +357,7 @@ async fn rollback_and_expired_unknown_preserve_evidence_and_recover_on_idle_tick
         publish(root.path(), &receipt(&accepted, phase));
         assert!(matches!(
             observe(root.path(), &accepted, &running),
-            OperationObservation::Unknown(_)
+            OperationObservation::Progressing(_)
         ));
     }
     running.binary_digest = "1".repeat(64);
@@ -374,7 +375,7 @@ async fn rollback_and_expired_unknown_preserve_evidence_and_recover_on_idle_tick
     fs::write(root.path().join("activation.json"), b"damaged").unwrap();
     assert!(matches!(
         observe(root.path(), &accepted, &running),
-        OperationObservation::Unknown(_)
+        OperationObservation::Progressing(_)
     ));
     let http = AgentHttpClient::for_http_test("http://127.0.0.1:1/", NODE_ID);
     let executor = UpgradeProbe {
@@ -401,10 +402,11 @@ async fn rollback_and_expired_unknown_preserve_evidence_and_recover_on_idle_tick
     )
     .await
     .unwrap();
-    assert!(matches!(
-        store.pending_results().unwrap()[0].1.result,
-        AgentResultResult::OutcomeUnknown(_)
-    ));
+    // Past the claim's lease, within its activation deadline: the helper's
+    // watcher still owns the transaction, so no unknown is recorded and the
+    // claim stays observed.
+    assert!(store.pending_results().unwrap().is_empty());
+    assert_eq!(store.observation_claims().unwrap().len(), 1);
     drop(store);
     publish(root.path(), &receipt(&accepted, Phase::Acknowledged));
     let mut store = StateStore::open_recovered(&database, NODE_ID).unwrap();
@@ -414,5 +416,20 @@ async fn rollback_and_expired_unknown_preserve_evidence_and_recover_on_idle_tick
     assert!(matches!(
         store.pending_results().unwrap()[0].1.result,
         AgentResultResult::OutcomeDone(_)
+    ));
+}
+
+#[test]
+fn an_unconfirmed_transaction_past_its_activation_deadline_is_unknown() {
+    let root = tempdir().unwrap();
+    let mut accepted = upgrade_claim();
+    let AgentClaimPayload::AgentUpgradePayload(payload) = &mut accepted.payload else {
+        unreachable!()
+    };
+    payload.rollback.activation_deadline = Utc::now().timestamp() - 1;
+    let running = identity(&accepted);
+    assert!(matches!(
+        observe(root.path(), &accepted, &running),
+        OperationObservation::Unknown(_)
     ));
 }
