@@ -911,3 +911,25 @@ def test_source_slower_than_the_watchdog_yields_while_other_work_continues(
         assert session.get(CoordinatorFailure, slow_source) is None
     worker.run_once()
     assert slow_runs == [1, 1]
+
+
+def test_coordinator_redrive_runs_the_step_without_beating_the_watchdog(
+    tmp_path,
+) -> None:
+    """Catches the due-wait step's thread beating the watchdog for a pass that
+    may itself have stopped turning."""
+    beats: list[int] = []
+    ran: list[str] = []
+    worker = Worker(
+        _service(tmp_path),
+        "worker-1",
+        {},
+        housekeeping=lambda: ran.append("telemetry"),
+        coordinator_failures=_failures(tmp_path),
+        step_heartbeat=lambda: beats.append(1),
+    )
+
+    worker.redrive_coordinator("housekeeping:telemetry")
+
+    assert ran == ["telemetry"]
+    assert beats == []

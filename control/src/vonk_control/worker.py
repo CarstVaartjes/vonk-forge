@@ -473,6 +473,9 @@ class Worker:
                 self._cadence_at[key] = now + minimum_interval
 
     def redrive_coordinator(self, source: str) -> None:
+        # Runs inside the due-wait step's thread: it never beats the watchdog,
+        # which only the pass thread may do.
+        task: Callable[[], object] | None
         if source.startswith("housekeeping:"):
             name = source.removeprefix("housekeeping:")
             task = {
@@ -482,25 +485,23 @@ class Worker:
                 LifecycleEventKind.HEARTBEAT: self._loop_heartbeat,
             }.get(name)
             # The due backstop is already executing; its outer caller owns recovery.
-            if task is None:
-                self._failures.succeeded(source)
-            elif name != "due-waits":
-                self._run_housekeeping(name, task)
-            return
-        sources: dict[str, Callable[[], bool]] = {"jobs": self._run_generic}
-        if self._recipes is not None:
-            sources["recipes"] = self._recipes.tick
-        if self._model_cache is not None:
-            sources[WaitOwnerKind.MODEL_CACHE] = self._run_model_cache
-        sources.update(
-            {
-                _background_source_name(service): lambda service=service: bool(
-                    service()
-                )
-                for service in self._background_services
-            }
-        )
-        task = sources.get(source)
+            if task is not None and name == "due-waits":
+                return
+        else:
+            sources: dict[str, Callable[[], bool]] = {"jobs": self._run_generic}
+            if self._recipes is not None:
+                sources["recipes"] = self._recipes.tick
+            if self._model_cache is not None:
+                sources[WaitOwnerKind.MODEL_CACHE] = self._run_model_cache
+            sources.update(
+                {
+                    _background_source_name(service): lambda service=service: bool(
+                        service()
+                    )
+                    for service in self._background_services
+                }
+            )
+            task = sources.get(source)
         if task is None:
             self._failures.succeeded(source)
             return
