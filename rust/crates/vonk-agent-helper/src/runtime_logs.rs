@@ -68,11 +68,14 @@ const FAILURE_HEADERS: [&str; 12] = [
 /// what it sends them to: a place (`above`, `earlier`) or a record that holds
 /// a cause (`root cause`, `stack trace`).  Matched as whole lowercase words.
 const POINTERS: [&str; 3] = ["see", "check", "refer"];
-const TARGETS: [&str; 8] = [
+///
+/// `previous` is not a place: it qualifies another noun far more often than it
+/// points back (vLLM's "check the difference ... between the current run and
+/// the previous run", sglang's "since previous check").
+const TARGETS: [&str; 7] = [
     "above",
     "earlier",
     "preceding",
-    "previous",
     "root cause",
     "trace",
     "traceback",
@@ -166,8 +169,11 @@ fn last_failure_line(stream: &[u8]) -> Option<(usize, usize, usize, Option<usize
 fn line_content(line: &[u8]) -> String {
     let text = String::from_utf8_lossy(line);
     let mut rest: &str = text.trim_end_matches(['\r', '\n']);
+    // Only a `(Name pid=N) ` opener is a process prefix; a message line such as
+    // `(4, 8) vs (8, 4)` is content.
     if rest.starts_with('(')
         && let Some(index) = rest.find(") ")
+        && rest[..index].contains(" pid=")
     {
         rest = &rest[index + 2..];
     }
@@ -578,13 +584,17 @@ pub fn python_exception(logs: &HostHelperProcessLogs) -> Option<String> {
     let (message, line) = found.first()?;
     // A pointer that quotes another stream's exception (vLLM's "Worker failed
     // with error '<message>'") yields to that exception; any other exception
-    // on that stream is unrelated output and the pointer stands.
+    // on that stream is unrelated output and the pointer stands.  The quotes
+    // are part of the match, so a one-token message (`KeyError: 0`) cannot be
+    // found inside the pointer's other text.
     let named = points_elsewhere(line.as_bytes())
         .then(|| {
             found[1..].iter().find(|(_, other)| {
                 other.split_once(": ").is_some_and(|(_, said)| {
                     let said = said.trim();
-                    !said.is_empty() && line.contains(said)
+                    !said.is_empty()
+                        && (line.contains(&format!("'{said}'"))
+                            || line.contains(&format!("\"{said}\"")))
                 })
             })
         })
@@ -1152,10 +1162,39 @@ mod tests {
     }
 
     #[test]
+    fn a_one_token_exception_is_not_read_into_a_pointer() {
+        // Wrong implementation this catches: matching the other stream's
+        // message anywhere in the pointer let `RuntimeError: 1` take over the
+        // summary because vLLM's pointer lists `{'EngineCore_DP0': 1}`.
+        let stdout = "(APIServer pid=55) Traceback (most recent call last):\n(APIServer pid=55)   File \"/app/probe.py\", line 9, in probe\n(APIServer pid=55) RuntimeError: 1\n";
+        let stderr = "(APIServer pid=55) Traceback (most recent call last):\n(APIServer pid=55)   File \"/usr/local/lib/python3.12/dist-packages/vllm/v1/engine/utils.py\", line 1250, in wait_for_engine_startup\n(APIServer pid=55)     raise RuntimeError(\n(APIServer pid=55) RuntimeError: Engine core initialization failed. See root cause above. Failed core proc(s): {'EngineCore_DP0': 1}\n";
+        let logs = retain_container(stdout.as_bytes(), stderr.as_bytes());
+        let summary = exit_summary(Ok(&exit(1, false, "")), Some(&logs), None);
+        assert!(
+            summary.ends_with("Failed core proc(s): {'EngineCore_DP0': 1}\""),
+            "{summary}"
+        );
+    }
+
+    #[test]
+    fn a_parenthesised_message_line_is_not_a_process_prefix() {
+        // Wrong implementation this catches: any `(...) ` opener was stripped
+        // as a process prefix, so a message continuing on `(4, 8) vs (8, 4)`
+        // looked like another process's line and was cut off.
+        let stderr = "Traceback (most recent call last):\n  File \"/app/load.py\", line 3, in load\nValueError: weight shape mismatch for lm_head:\n(4, 8) vs (8, 4)\n";
+        let exception = python_exception(&logs("", stderr)).expect("an exception");
+        assert_eq!(
+            exception,
+            "ValueError: weight shape mismatch for lm_head: (4, 8) vs (8, 4)"
+        );
+    }
+
+    #[test]
     fn a_pointer_is_decided_by_shape_not_by_phrase() {
         // Wrong implementations this catches: a phrase list misses another
-        // wording of the same pointer, and a rule that ignores word order
-        // reads a cause as a pointer.  Every line is a real upstream message
+        // wording of the same pointer, a rule that ignores word order reads a
+        // cause as a pointer, and `previous` as a place reads vLLM's OOM hint
+        // ("check ... the previous run") as one.  Every line is a real upstream message
         // (vLLM v0.27.0, sglang main, torch 2.14.0, CPython).
         for pointer in [
             "Exception: WorkerProc initialization failed due to an exception in a background process. See stack trace for root cause.",
@@ -1175,6 +1214,7 @@ mod tests {
             "RuntimeError: vLLM failed to compile the model. The most likely reason for this is that a previous compilation failed, leading to a corrupted compilation artifact. We recommend trying to remove ~/.cache/vllm/torch_compile_cache and try again to see the real issue.",
             "Use `torch._assert()` to raise a hard AssertionError when the check fails. This error will propagate back the user code that called the compiled function (i.e. Dynamo will not trace any exception handling).",
             "To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html",
+            "Initial free memory 101.2 GiB, reserved 80.0 GiB memory for KV Cache as specified by kv_cache_memory_bytes config and skipped memory profiling. This does not respect the gpu_memory_utilization config. Only use kv_cache_memory_bytes config when you want manual control of KV cache memory size. If OOM'ed, check the difference of initial free memory between the current run and the previous run where kv_cache_memory_bytes is suggested and update it correspondingly.",
             "Previous Traceback:",
             "ValueError: Should be unreachable - `return params` above must be reached: params=None",
             "The above exception was the direct cause of the following exception:",
