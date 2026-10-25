@@ -29,7 +29,7 @@ from ..admission_locking import (
     lock_admission_rows,
 )
 from ..agent_operation_facts import aware
-from ..artifact_lifecycle import ArtifactReferenceUnverified
+from ..artifact_lifecycle import ArtifactLifecycleError, ArtifactReferenceUnverified
 from ..cache_removal_review import (
     CacheAssetDisposition,
     CacheRemovalBlocker,
@@ -82,6 +82,7 @@ from ..unused_storage_collection.references import (
     _installation_pointing,
 )
 from .errors import ModelCacheConflictInvalid
+from .lineage import lineage_contents, model_sets, set_bindings
 from .persistence import _operation_removal, _store_operation_payload
 from .source_helpers import _model_selector, _request_key
 from .views import CacheOperationView
@@ -111,7 +112,19 @@ def _model_objects(
         # damaged evidence matters to deletion, never to acquiring this pin.
         revisions = revisions.where(CatalogDocumentRevision.content_digest == digest)
         cache_sets = cache_sets.where(ModelCacheSet.model_content_sha256 == digest)
-    for revision, current_head in session.execute(revisions):
+    rows = list(session.execute(revisions))
+    # Content of the model's own publisher/slug lineage is the model's, as the
+    # Library shows it: a refreshed revision owns the files of the one before.
+    lineage = {
+        revision.content_digest: (revision.publisher, revision.slug)
+        for revision, _current_head in rows
+    }
+    own = {
+        content
+        for content, name in lineage.items()
+        if content == digest or name == lineage.get(digest)
+    } | {digest}
+    for revision, current_head in rows:
         model = read_or_rebuild(
             kind=CatalogDocumentRevision.__tablename__,
             subject=revision.id,
@@ -128,7 +141,7 @@ def _model_objects(
             continue
         assert isinstance(model, ModelDefinition)
         objects = {file.sha256 for file in model.files}
-        if revision.content_digest == digest:
+        if revision.content_digest in own:
             target_objects.update(objects)
             if not include_shared:
                 # Acquiring a pin needs only this immutable model's files. A
@@ -149,11 +162,15 @@ def _model_objects(
         if isinstance(manifest, Residue):
             issues.append(_observation_issue(manifest))
             continue
+        # A set bound to this model's lineage alone also owns the files its
+        # first requester named under a content the catalog no longer has.
+        bound = set_bindings(row.model_content_sha256, manifest.verified_models)
+        exclusive = bool(bound & own) and all(
+            content in own for content in bound if content in lineage
+        )
         for artifact in manifest.artifacts:
-            if artifact.model_content_sha256 == digest or (
-                artifact.model_content_sha256 is None
-                and row.model_content_sha256 == digest
-            ):
+            owner = artifact.model_content_sha256 or row.model_content_sha256
+            if owner in own or (include_shared and exclusive and owner not in lineage):
                 target_objects.add(artifact.sha256)
             else:
                 shared.add(artifact.sha256)
@@ -201,16 +218,13 @@ class FleetRemovalMixin:
         )
         if shared_objects is not None:
             shared_objects.update(shared)
-        # Provenance is not identity. Include every cached set of this model,
-        # including variants whose executable plan uses a subset of its files.
-        sets = tuple(
-            session.scalars(
-                select(ModelCacheSet).where(
-                    ModelCacheSet.model_content_sha256 == digest
-                )
-            )
-        )
-        names = target_objects | {digest} | {row.artifact_set_sha256 for row in sets}
+        # Provenance is not identity. Include every cached set the Library
+        # shows for this model, including variants whose executable plan uses
+        # a subset of its files and sets first downloaded under an earlier
+        # revision of it.
+        contents = lineage_contents(session, digest)
+        sets = model_sets(session, contents)
+        names = target_objects | contents | set(sets)
         protected = bool(
             names & (evidence.operations | evidence.pointed_models | evidence.pinned)
         )
@@ -381,21 +395,45 @@ class FleetRemovalMixin:
                     else None,
                 )
             )
+        nas_reason = R.UNUSED
+        nas_detail = "Remove unshared NAS objects through model cache removal."
+        if any(issue.kind != NodeInventorySnapshot.__tablename__ for issue in issues):
+            nas_reason, nas_detail = R.OBSERVATION_UNAVAILABLE, keep_detail
+        elif protected:
+            nas_reason, nas_detail = R.REFERENCED, keep_detail
+        elif not sets:
+            nas_detail = "No NAS copy of this model is stored."
+        elif cache._exclusive_nas_objects(session, sets, shared) == set():
+            # "Unused" promises NAS bytes to reclaim: sets whose objects are
+            # all kept for another model say so instead of removing nothing.
+            nas_reason = R.SHARED
+            nas_detail = (
+                "Every NAS object of this model is shared with another model; "
+                "removal drops its cache entries and retains the objects."
+            )
         return FleetModelRemovalEffects(
             nas_remove=not protected,
-            nas_reason=R.OBSERVATION_UNAVAILABLE
-            if any(
-                issue.kind != NodeInventorySnapshot.__tablename__ for issue in issues
-            )
-            else R.REFERENCED
-            if protected
-            else R.UNUSED,
-            nas_detail=keep_detail
-            if protected
-            else "Remove unshared NAS objects through model cache removal.",
+            nas_reason=nas_reason,
+            nas_detail=nas_detail,
             targets=targets,
             observation_issues=issues,
         )
+
+    def _exclusive_nas_objects(
+        self, session: Session, sets: tuple[str, ...], shared: set[str]
+    ) -> set[str] | None:
+        """The objects removing ``sets`` deletes; ``None`` when membership is unknown.
+
+        Unknown membership is the review's own typed blocker and refuses the
+        acceptance; it is never read as "nothing to reclaim".
+        """
+        cache = cast("ModelCacheService", self)
+        try:
+            with session.begin_nested():
+                scope = cache._model_removal_scope_for_sets(session, sets)
+        except ArtifactLifecycleError:
+            return None
+        return set(scope.delete_objects) - shared
 
     def review_fleet_model_removal(self, selector: str) -> CacheRemovalReview:
         cache = cast("ModelCacheService", self)

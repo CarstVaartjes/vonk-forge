@@ -270,7 +270,7 @@ def _assert_old_and_new_agree(engine: Engine, monkeypatch) -> None:
         with monkeypatch.context() as old:
             old.setattr(
                 local_state,
-                "_verifies_requested_model",
+                "verifies_model",
                 _old_verifies_requested_model,
             )
             old.setattr(

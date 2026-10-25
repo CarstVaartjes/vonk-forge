@@ -42,7 +42,6 @@ from ..model_cache_progress import cache_progress, progress_document
 from ..models import (
     ArtifactLifecycleGate,
     ModelCacheOperation,
-    ModelCacheSet,
     ModelCacheSetArtifact,
 )
 from ..operation_contract import AvailabilityRecoveryAction
@@ -54,6 +53,7 @@ from .errors import (
     _ArtifactWriterBusy,
     _reference_error_type,
 )
+from .lineage import lineage_contents, model_sets
 from .persistence import (
     _model_removal_intent_digest,
     _write_operation_payload,
@@ -159,11 +159,11 @@ class RemovalAcceptanceMixin:
         if defer_scope is None:
             defer_scope = not gates_reserved and verify is None
         if selected_sets is None:
-            selected = tuple(
-                session.scalars(
-                    select(ModelCacheSet.artifact_set_sha256)
-                    .where(ModelCacheSet.model_content_sha256 == model_content_sha256)
-                    .order_by(ModelCacheSet.artifact_set_sha256)
+            selected = (
+                ()
+                if model_content_sha256 is None
+                else model_sets(
+                    session, lineage_contents(session, model_content_sha256)
                 )
             )
         else:
