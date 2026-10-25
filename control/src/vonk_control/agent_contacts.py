@@ -1,5 +1,9 @@
 """The one writer of Controller-observed contact facts (``agent_node_contacts``).
 
+Every write of the contact row goes through this module: contact upserts,
+observation delivery, repeated contact evidence, and the row's creation at
+(re-)enrollment and deletion at retirement.
+
 An authenticated agent request records its contact with a plain upsert of the
 node's contact row. It never selects ``agent_nodes`` FOR UPDATE and never
 updates that row, so contact traffic cannot hold the identity/intent row that
@@ -11,12 +15,13 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import ColumnElement, or_
+from sqlalchemy import ColumnElement, delete, or_
 from sqlalchemy.dialects import postgresql, sqlite
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.util import identity_key
 
 from .models import AgentNode, AgentNodeContact
+from .repeated_evidence_contract import RepeatedEvidence
 
 
 def _insert(session: Session) -> postgresql.Insert | sqlite.Insert:
@@ -115,14 +120,36 @@ def lock_contact(session: Session, node_id: str) -> AgentNodeContact | None:
     """
     if session.get(AgentNode, node_id) is None:
         return None
+    ensure_contact(session, node_id)
+    return session.get(
+        AgentNodeContact, node_id, with_for_update=True, populate_existing=True
+    )
+
+
+def ensure_contact(session: Session, node_id: str) -> None:
+    """Create the node's (empty) contact row at enrollment and re-enrollment.
+
+    Steady-state contact is then an UPDATE: it never inserts a child row of
+    the node, so it takes no KEY SHARE on the node row.
+    """
     insert = _insert(session).values(node_id=node_id)
     session.execute(
         insert.on_conflict_do_nothing(index_elements=[AgentNodeContact.node_id])
     )
     _forget_loaded(session, node_id)
-    return session.get(
-        AgentNodeContact, node_id, with_for_update=True, populate_existing=True
-    )
+
+
+def retire_contact(session: Session, node_id: str) -> None:
+    """A retired identity has no contact; re-enrollment starts a new row."""
+    session.execute(delete(AgentNodeContact).where(AgentNodeContact.node_id == node_id))
+    _forget_loaded(session, node_id)
+
+
+def store_contact_evidence(
+    contact: AgentNodeContact, evidence: list[RepeatedEvidence]
+) -> None:
+    """Replace the repeated contact evidence of a row ``lock_contact`` returned."""
+    contact.contact_repeated_evidence = evidence or None
 
 
 def last_seen(node: AgentNode) -> datetime | None:

@@ -15,6 +15,7 @@ from vonk_agent_protocol import (
 )
 
 from .. import job_states
+from ..admission_locking import AdmissionLockBusy, AdmissionRowLock, lock_admission_rows
 from ..models import (
     AgentNode,
     Job,
@@ -137,16 +138,20 @@ def _lock_current_build_parent(
         {plan.build.builder_node_id} if plan.build.builder_node_id else set()
     )
     try:
-        nodes = tuple(
-            session.scalars(
-                select(AgentNode)
-                .where(AgentNode.node_id.in_(locked_nodes))
-                .order_by(AgentNode.node_id)
-                .with_for_update(nowait=True)
-                .execution_options(populate_existing=True)
-            )
-        )
+        # The canonical admission lock (NO KEY mode, see lock_admission_rows).
+        nodes = lock_admission_rows(
+            session,
+            (
+                AdmissionRowLock(
+                    "build-scope-nodes",
+                    AgentNode,
+                    select(AgentNode).where(AgentNode.node_id.in_(locked_nodes)),
+                ),
+            ),
+        )["build-scope-nodes"]
         job = _lock_phase_owner(session, request_key, phase_index, item_index)
+    except AdmissionLockBusy as error:
+        raise RecipeBuildAdmissionBusy() from error
     except DBAPIError as error:
         if getattr(error.orig, "sqlstate", None) != "55P03":
             raise

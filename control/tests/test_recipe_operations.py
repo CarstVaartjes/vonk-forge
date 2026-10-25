@@ -6707,7 +6707,7 @@ def test_postgres_start_refuses_without_waiting_on_a_busy_agent_node(
         if (
             getattr(role, "value", None) == "start"
             and "FROM agent_nodes" in statement
-            and "FOR UPDATE" in statement
+            and "FOR NO KEY UPDATE" in statement
         ):
             start_node_lock_requested.set()
 

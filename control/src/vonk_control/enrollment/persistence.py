@@ -22,6 +22,7 @@ from vonk_agent_protocol.state_machines import (
     NodeIdentityState,
 )
 
+from ..agent_contacts import ensure_contact
 from ..ca_issuance_contract import CertificateIssuanceBinding
 from ..enrollment_validation import (
     _decode_token as _decode_token,  # noqa: PLC0414 -- shared helper export
@@ -53,7 +54,6 @@ from ..models import (
     AgentEnrollment,
     AgentEnrollmentGrant,
     AgentNode,
-    AgentNodeContact,
     AgentNodeProfile,
 )
 from ..pki import IssuedCertificate
@@ -105,9 +105,7 @@ def _persist_issued_enrollment(
                 labels={},
             )
         )
-        # The contact row exists from enrollment on, so steady-state contact is
-        # an UPDATE that never takes a key-share lock on the new node row.
-        session.add(AgentNodeContact(node_id=enrollment.node_id))
+        ensure_contact(session, enrollment.node_id)
         generation = 1
     else:
         if purpose != EnrollmentPurpose.RE_ENROLL:
@@ -115,6 +113,7 @@ def _persist_issued_enrollment(
                 "enrollment purpose projection is unavailable"
             )
         require_node(node)
+        ensure_contact(session, enrollment.node_id)
         certificates = list(
             session.scalars(
                 select(AgentCertificate)

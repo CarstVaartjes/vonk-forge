@@ -496,6 +496,9 @@ def test_admission_rows_security_edges_and_plain_reads_may_touch_agent_nodes(
         "contact.last_seen_at = now",
         "node.contact.management_address = address",
         "session.execute(update(AgentNodeContact).values(last_seen_at=now))",
+        "row.contact_repeated_evidence = evidence",
+        "session.add(AgentNodeContact(node_id=node_id))",
+        "session.execute(delete(AgentNodeContact))",
     ],
 )
 def test_contact_facts_have_one_upsert_writer(statement: str) -> None:
@@ -512,6 +515,12 @@ def test_contact_facts_have_one_upsert_writer(statement: str) -> None:
     assert not check_source(
         "control/src/vonk_control/presence.py",
         "if contact.last_seen_at == now:\n    pass\n",
+        {1},
+        modes=("optimistic",),
+    )
+    assert not check_source(
+        "control/src/vonk_control/models/fleet.py",
+        "class AgentNodeContact(Base):\n    pass\n",
         {1},
         modes=("optimistic",),
     )

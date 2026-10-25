@@ -14,6 +14,7 @@ from vonk_agent_protocol import (
 )
 
 from .. import job_states
+from ..admission_locking import AdmissionLockBusy, AdmissionRowLock, lock_admission_rows
 from ..artifact_lifecycle import (
     ArtifactIdentity,
     ArtifactLifecycleError,
@@ -123,15 +124,24 @@ def _persist_run_switch_runtime_image_reference(
     now = _now(clock)
     with sessions.begin() as session:
         try:
-            nodes = tuple(
-                session.scalars(
-                    select(AgentNode)
-                    .where(AgentNode.node_id.in_(target_nodes))
-                    .order_by(AgentNode.node_id)
-                    .with_for_update(nowait=True)
-                    .execution_options(populate_existing=True)
-                )
-            )
+            # The canonical admission lock: NO KEY mode, so a child row's
+            # foreign-key check (KEY SHARE) from agent contact never refuses it.
+            nodes = lock_admission_rows(
+                session,
+                (
+                    AdmissionRowLock(
+                        "runtime-image-targets",
+                        AgentNode,
+                        select(AgentNode).where(AgentNode.node_id.in_(target_nodes)),
+                    ),
+                ),
+            )["runtime-image-targets"]
+        except AdmissionLockBusy as error:
+            raise RuntimeImagePreparationUnknown(
+                ArtifactLifecycleCode.REFERENCE_BUSY,
+                "RunSwitch target ownership is changing; image publication will retry",
+                retryable=True,
+            ) from error
         except DBAPIError as error:
             state = getattr(error.orig, "sqlstate", None) or getattr(
                 error.orig, "pgcode", None

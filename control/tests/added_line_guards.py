@@ -91,8 +91,10 @@ CONTACT_WRITERS = frozenset(
 CONTACT_WRITE = re.compile(
     r"\.(?:last_seen_at|protocol_version|contact_certificate_serial"
     r"|contact_observation_digest|management_address|management_observed_at"
-    r"|recipe_observation_http_status|recipe_observation_status_at)\s*=(?!=)"
-    r"|\b(?:insert|update)\(\s*AgentNodeContact\b"
+    r"|recipe_observation_http_status|recipe_observation_status_at"
+    r"|contact_repeated_evidence)\s*=(?!=)"
+    r"|\b(?:insert|update|delete)\(\s*AgentNodeContact\b"
+    r"|(?<!class )\bAgentNodeContact\("
 )
 
 

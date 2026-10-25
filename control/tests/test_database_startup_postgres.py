@@ -63,36 +63,81 @@ def test_bookkeeping_adoption_failure_preserves_current_schema(
         assert connection.exec_driver_sql("SELECT 1").scalar_one() == 1
 
 
+_LEGACY_CONTACT_COLUMNS = """ALTER TABLE agent_nodes
+    ADD COLUMN protocol_version integer,
+    ADD COLUMN contact_certificate_serial varchar(128),
+    ADD COLUMN management_address varchar(45),
+    ADD COLUMN management_observed_at timestamptz,
+    ADD COLUMN contact_observation_digest varchar(64),
+    ADD COLUMN recipe_observation_http_status integer,
+    ADD COLUMN recipe_observation_status_at timestamptz,
+    ADD COLUMN last_seen_at timestamptz,
+    ADD COLUMN contact_repeated_evidence json"""
+
+
+def _contact_evidence(at: str) -> str:
+    from datetime import datetime
+
+    from vonk_control.repeated_evidence_contract import (
+        RepeatedEvidence,
+        RepeatedEvidenceSubject,
+    )
+
+    return (
+        "["
+        + RepeatedEvidence(
+            node_id="spk_" + "a" * 32,
+            subject=RepeatedEvidenceSubject.AGENT_RESULT,
+            code="invalid-request",
+            repeats=3,
+            first_at=datetime.fromisoformat(at),
+            last_at=datetime.fromisoformat(at),
+        ).model_dump_json()
+        + "]"
+    )
+
+
 def test_contact_move_rolls_back_on_interruption_and_restarts(
     postgres_engine: Engine, monkeypatch: MonkeyPatch
 ) -> None:
-    """Catches dropping the old owner before a durable copy or skipping replay.
-
-    An upgraded Controller adopts contact facts still on agent_nodes into
-    agent_node_contacts, so a running fleet keeps its last contact and address.
-    """
+    """Catches dropping the old owner before a durable copy, skipping replay,
+    losing any of the nine facts, or losing a rolled-back Controller's newer
+    contacts when the upgrade is applied again."""
     import pytest
-    from sqlalchemy import event, insert, inspect
+    from sqlalchemy import event, insert, inspect, text
+    from sqlalchemy.orm import sessionmaker
     from vonk_control.db import node_facts
-    from vonk_control.models import AgentNode, Base
+    from vonk_control.models import AgentNode, AgentNodeContact, Base
 
+    legacy, empty = "spk_" + "a" * 32, "spk_" + "b" * 32
+    moved = set(AgentNodeContact.__table__.columns.keys()) - {"node_id"}
     Base.metadata.create_all(postgres_engine)
     with postgres_engine.begin() as connection:
         connection.exec_driver_sql("DROP TABLE agent_node_contacts")
-        connection.exec_driver_sql("""ALTER TABLE agent_nodes
-            ADD COLUMN protocol_version integer,
-            ADD COLUMN management_address varchar(45),
-            ADD COLUMN last_seen_at timestamptz""")
+        connection.exec_driver_sql(_LEGACY_CONTACT_COLUMNS)
         connection.execute(
             insert(AgentNode),
             [
-                {"node_id": "legacy", "state": NodeIdentityState.ACTIVE},
-                {"node_id": "empty", "state": NodeIdentityState.ACTIVE},
+                {"node_id": legacy, "state": NodeIdentityState.ACTIVE},
+                {"node_id": empty, "state": NodeIdentityState.ACTIVE},
             ],
         )
-        connection.exec_driver_sql("""UPDATE agent_nodes SET protocol_version = 4,
-            management_address = '10.0.0.42', last_seen_at = '2026-10-25T12:00:00Z'
-            WHERE node_id = 'legacy'""")
+        connection.execute(
+            text("""UPDATE agent_nodes SET protocol_version = 4,
+            contact_certificate_serial = 'serial-old', management_address = '10.0.0.42',
+            management_observed_at = '2026-10-25T12:00:00Z',
+            contact_observation_digest = :digest,
+            recipe_observation_http_status = 422,
+            recipe_observation_status_at = '2026-10-25T12:00:00Z',
+            last_seen_at = '2026-10-25T12:00:00Z',
+            contact_repeated_evidence = CAST(:evidence AS json)
+            WHERE node_id = :node"""),
+            {
+                "digest": "d" * 64,
+                "evidence": _contact_evidence("2026-10-25T12:00:00Z"),
+                "node": legacy,
+            },
+        )
 
     original_move = node_facts.move_contact_facts
 
@@ -116,26 +161,66 @@ def test_contact_move_rolls_back_on_interruption_and_restarts(
             initialize_database(url)
     with postgres_engine.connect() as connection:
         # The old owner survives an interrupted move; the copy is repeatable.
-        assert "last_seen_at" in {
+        assert moved <= {
             column["name"] for column in inspect(connection).get_columns("agent_nodes")
         }
     initialize_database(url)
     initialize_database(url)
+    sessions = sessionmaker(postgres_engine)
+
+    def contact(node_id: str) -> AgentNodeContact:
+        with sessions() as session:
+            row = session.get(AgentNodeContact, node_id)
+            assert row is not None
+            session.expunge(row)
+            return row
+
     with postgres_engine.connect() as connection:
-        assert not {
-            "protocol_version",
-            "management_address",
-            "last_seen_at",
-        }.intersection(
+        assert not moved.intersection(
             column["name"] for column in inspect(connection).get_columns("agent_nodes")
         )
-        assert connection.exec_driver_sql("""SELECT protocol_version,
-            management_address, last_seen_at IS NOT NULL
-            FROM agent_node_contacts WHERE node_id='legacy'
-        """).one() == (4, "10.0.0.42", True)
-        assert connection.exec_driver_sql("""SELECT management_address,
-            last_seen_at FROM agent_node_contacts WHERE node_id='empty'
-        """).one() == (None, None)
+    adopted = contact(legacy)
+    assert (
+        adopted.protocol_version,
+        adopted.contact_certificate_serial,
+        adopted.management_address,
+        adopted.contact_observation_digest,
+        adopted.recipe_observation_http_status,
+    ) == (4, "serial-old", "10.0.0.42", "d" * 64, 422)
+    assert None not in (
+        adopted.management_observed_at,
+        adopted.recipe_observation_status_at,
+        adopted.last_seen_at,
+    )
+    assert isinstance(adopted.contact_repeated_evidence, list)
+    assert [item.repeats for item in adopted.contact_repeated_evidence] == [3]
+    blank = contact(empty)
+    assert all(getattr(blank, name) is None for name in moved)
+
+    # Rollback: the old Controller re-adds its columns as NULL and records newer
+    # contact and presence; an older delivery verdict is replayed. Upgrading
+    # again keeps the newer fact per contact clock, never the stale one.
+    with postgres_engine.begin() as connection:
+        connection.exec_driver_sql(_LEGACY_CONTACT_COLUMNS)
+        connection.exec_driver_sql(f"""UPDATE agent_nodes SET
+            last_seen_at = '2026-10-25T13:00:00Z', protocol_version = 5,
+            contact_certificate_serial = 'serial-new',
+            management_address = '10.0.0.43',
+            management_observed_at = '2026-10-25T13:00:00Z',
+            recipe_observation_http_status = 204,
+            recipe_observation_status_at = '2026-10-25T11:00:00Z'
+            WHERE node_id = '{legacy}'""")
+    initialize_database(url)
+    readopted = contact(legacy)
+    assert (
+        readopted.protocol_version,
+        readopted.contact_certificate_serial,
+        readopted.management_address,
+        readopted.recipe_observation_http_status,
+        readopted.contact_observation_digest,
+    ) == (5, "serial-new", "10.0.0.43", 422, "d" * 64)
+    assert isinstance(readopted.contact_repeated_evidence, list)
+    assert [item.repeats for item in readopted.contact_repeated_evidence] == [3]
 
 
 def test_runtime_items_migration_is_atomic_and_does_not_invent_capacity(

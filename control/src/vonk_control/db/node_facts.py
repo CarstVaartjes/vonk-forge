@@ -3,13 +3,28 @@
 from sqlalchemy import inspect, text
 from sqlalchemy.engine import Connection
 
+# The contact clock that dates each moved fact; a fact without one is kept
+# when the old owner has none (columns re-added by a rolled-back Controller are
+# NULL until that Controller writes them, so a value there is newer).
+_CONTACT_CLOCKS = {
+    "last_seen_at": ("last_seen_at",),
+    "protocol_version": ("last_seen_at",),
+    "contact_observation_digest": ("last_seen_at",),
+    "contact_certificate_serial": ("last_seen_at", "management_observed_at"),
+    "management_address": ("management_observed_at",),
+    "management_observed_at": ("management_observed_at",),
+    "recipe_observation_http_status": ("recipe_observation_status_at",),
+    "recipe_observation_status_at": ("recipe_observation_status_at",),
+}
+
 
 def move_contact_facts(connection: Connection) -> None:
     """Give every node its contact row, adopting facts still on agent_nodes.
 
     Copy before dropping, in startup's one transaction: a crash rolls back
-    both effects and the next start repeats the move. A node without a row
-    reads as never seen until its next contact, which re-creates the facts.
+    both effects and the next start repeats the move. After an upgrade, a
+    rollback and an upgrade again, each fact takes the newer value by its
+    contact clock, so the rolled-back Controller's contacts are not lost.
     """
     from ..models import AgentNodeContact
 
@@ -20,12 +35,34 @@ def move_contact_facts(connection: Connection) -> None:
         old.intersection(AgentNodeContact.__table__.columns.keys()) - {"node_id"}
     )
     names = ", ".join(["node_id", *retired])
+
+    def newer(name: str) -> str:
+        clocks = [clock for clock in _CONTACT_CLOCKS.get(name, ()) if clock in old]
+        if not clocks:
+            return "true"
+        return " OR ".join(
+            f"(excluded.{clock} IS NOT NULL AND (agent_node_contacts.{clock} IS NULL"
+            f" OR excluded.{clock} > agent_node_contacts.{clock}))"
+            for clock in clocks
+        )
+
+    adopt = (
+        "DO UPDATE SET "
+        + ", ".join(
+            f"{name} = CASE WHEN excluded.{name} IS NOT NULL AND ({newer(name)})"
+            f" THEN excluded.{name}"
+            f" ELSE agent_node_contacts.{name} END"
+            for name in retired
+        )
+        if retired
+        else "DO NOTHING"
+    )
     connection.execute(
         text(
             f"INSERT INTO agent_node_contacts ({names}) "
             # WHERE true: SQLite parses ON CONFLICT after INSERT ... SELECT only so.
             f"SELECT {names} FROM agent_nodes WHERE true "
-            "ON CONFLICT (node_id) DO NOTHING"
+            f"ON CONFLICT (node_id) {adopt}"
         )
     )
     for name in retired:

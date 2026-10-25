@@ -14,7 +14,7 @@ from vonk_agent_protocol import OutcomeUnknown, WaitReason
 from vonk_agent_protocol.contracts import AgentFailureResult, AgentUpgradePayload
 
 from . import agent_operation_states
-from .agent_contacts import lock_contact
+from .agent_contacts import lock_contact, store_contact_evidence
 from .models import (
     REPEATED_EVIDENCE_SEQUENCE,
     AgentNodeContact,
@@ -94,7 +94,7 @@ def owner_evidence(row: EvidenceOwner) -> list[RepeatedEvidence] | None:
 
 def _write(row: EvidenceOwner, evidence: list[RepeatedEvidence]) -> None:
     if isinstance(row, AgentNodeContact):
-        row.contact_repeated_evidence = evidence or None
+        store_contact_evidence(row, evidence)
     else:
         row.repeated_evidence = evidence or None
 
@@ -218,6 +218,11 @@ def note_success(
             if isinstance(row, AgentOperation):
                 if evidence and evidence[-1].code is None:
                     return
+                if not _uncleared_failures(session, node_id, subject):
+                    # Nothing to clear: no second write of the settled order,
+                    # which would re-check its foreign key (KEY SHARE on the
+                    # node row) inside the agent's result transaction.
+                    return
                 at = _utc(row.updated_at if now is None else now)
                 evidence = [
                     *evidence,
@@ -263,6 +268,21 @@ def command_events(
     return [
         item for item in result if (item[1].node_id, item[1].subject) not in unreadable
     ], unreadable
+
+
+def _uncleared_failures(session: Session, node_id: str, subject: str) -> bool:
+    """Whether a failure of this command on the node is newer than its last clear."""
+    events, unreadable = command_events(session, (node_id,), subject=subject)
+    if (node_id, subject) in unreadable:
+        return True
+    cleared = max(
+        (event.observation_sequence for _, event in events if event.code is None),
+        default=-1,
+    )
+    return any(
+        event.code is not None and event.observation_sequence > cleared
+        for _, event in events
+    )
 
 
 def command_evidence_needed(session: Session, operation: AgentOperation) -> bool:
