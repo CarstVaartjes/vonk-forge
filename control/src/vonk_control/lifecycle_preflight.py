@@ -30,6 +30,7 @@ from .lifecycle.job import JobAdapter
 from .models import AgentNode, AgentOperation, AgentOperationAttempt, Job
 from .operation_blockers import (
     MAX_BLOCKERS,
+    BlockingOperation,
     OperationBlocker,
     ProgressAlarmCode,
     make_blocker,
@@ -235,11 +236,32 @@ class LifecyclePreflight:
                         )
                         due.append(now + interval)
                         wait = read_wait(operation)
-                        if wait is not None:
-                            checkpoint.child_waits = [
-                                *checkpoint.child_waits,
-                                *wait.blockers,
-                            ][:MAX_BLOCKERS]
+                        # A claimed probe waits for nothing but its own run.
+                        blockers = (
+                            wait.blockers
+                            if wait is not None
+                            else [
+                                make_blocker(
+                                    RuntimePreflightCode.REQUIRED,
+                                    f"runtime probe {operation.id[:8]} is running "
+                                    "on this Spark",
+                                    severity="info",
+                                    node_ids=[node_id],
+                                ).model_copy(
+                                    update={
+                                        "operation": BlockingOperation(
+                                            id=operation.id, kind=operation.kind
+                                        )
+                                    }
+                                )
+                            ]
+                            if operation.state == LifecycleState.RUNNING
+                            else []
+                        )
+                        checkpoint.child_waits = [
+                            *checkpoint.child_waits,
+                            *blockers,
+                        ][:MAX_BLOCKERS]
                         continue
                     else:
                         raw = session.scalar(

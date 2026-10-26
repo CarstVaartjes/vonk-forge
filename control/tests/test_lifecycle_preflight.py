@@ -958,3 +958,35 @@ def test_only_the_checkpoint_reads_its_round_reason():
         and node.attr in {"last_failure_code", "last_failure_detail"}
     )
     assert readers == []
+
+
+def test_a_claimed_probe_shows_itself_running_never_the_round_start_reason(tmp_path):
+    """Catches a claimed probe (whose queue wait clears) falling back to stale."""
+    sessions, _, clock, node_id, service, arguments = _setup(tmp_path)
+    first, error = service.ensure(**arguments, previous=None)
+    assert error is None
+    _finish(sessions, first, clock.now)
+    complete, error = service.ensure(**arguments, previous=first)
+    assert error is None
+    clock.now += timedelta(seconds=301)
+    probing, error = service.ensure(**arguments, previous=complete)
+    assert error is None and probing.last_failure_code == RuntimePreflightCode.STALE
+    with sessions.begin() as session:
+        probe = session.scalar(
+            select(AgentOperation).where(
+                AgentOperation.parent_job_id == _pending(probing)
+            )
+        )
+        assert probe is not None
+        probe.state = LifecycleState.RUNNING.value
+        probe.wait_evidence = None
+        probe.next_action_at = None
+        probe_id = probe.id
+    running, error = service.ensure(**arguments, previous=probing)
+    assert error is None
+    assert running.current_reason == RuntimePreflightCode.REQUIRED
+    [claimed] = running.current_blockers([node_id])
+    assert claimed.operation == BlockingOperation(
+        id=probe_id, kind=OperationKind.RUNTIME_PREFLIGHT.value
+    )
+    assert claimed.node_ids == [node_id]
