@@ -429,7 +429,13 @@ class RunSwitchAdapter:
             else None
         )
         if preflight_reason is not None and preflight is not None:
-            wait_blockers = [
+            # A pending probe's own queue wait is the current dependency; the
+            # reason its round started is history once the child is issued.
+            if preflight.child_waits:
+                preflight_reason = typed_wait_reason(
+                    preflight.child_waits[0].code, preflight_reason
+                )
+            wait_blockers = list(preflight.child_waits) or [
                 make_blocker(
                     preflight_reason,
                     preflight.last_failure_detail or preflight_reason.value,

@@ -28,7 +28,8 @@ from .inventory_items import inventory_items
 from .inventory_items_contract import PreflightInventoryItem
 from .lifecycle.job import JobAdapter
 from .models import AgentNode, AgentOperation, AgentOperationAttempt, Job
-from .persisted_waits import typed_wait_reason
+from .operation_blockers import MAX_BLOCKERS, OperationBlocker
+from .persisted_waits import read_wait, typed_wait_reason
 from .recovery_policy import RECOVERY
 from .runtime_preflight import (
     admission_blockers,
@@ -62,6 +63,12 @@ class LifecyclePreflightCheckpoint(StrictJSONModel):
     last_failure_detail: str | None = None
     attempts: dict[NodeId, Annotated[int, Field(ge=1)]] = Field(default_factory=dict)
     receipts: dict[NodeId, PreflightInventoryItem] = Field(default_factory=dict)
+    #: What the pending probes wait for now: each queued child's own persisted
+    #: queue wait (its typed reason, blocking operation and Spark), replaced on
+    #: every check. The reason that started the round is not the current wait.
+    child_waits: list[OperationBlocker] = Field(
+        default_factory=list, max_length=MAX_BLOCKERS
+    )
 
 
 # Security refusals (failure_classification.is_security_failure) park the
@@ -115,6 +122,7 @@ class LifecyclePreflight:
             )
 
         checkpoint.next_check_at = None
+        checkpoint.child_waits = []
         due: list[datetime] = []
         with self._sessions.begin() as session:
             # Pending child identities bind one probe round to this request and
@@ -200,6 +208,12 @@ class LifecyclePreflight:
                             else PROBE_OBSERVATION_INTERVAL
                         )
                         due.append(now + interval)
+                        wait = read_wait(operation)
+                        if wait is not None:
+                            checkpoint.child_waits = [
+                                *checkpoint.child_waits,
+                                *wait.blockers,
+                            ][:MAX_BLOCKERS]
                         continue
                     else:
                         raw = session.scalar(
