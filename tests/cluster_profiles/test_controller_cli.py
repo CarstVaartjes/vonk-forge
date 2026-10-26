@@ -4296,14 +4296,11 @@ def test_fleet_upgrade_follows_exact_job_and_stops_at_operator_blocker() -> None
     assert len(result["operations"]) == 1
 
 
-def test_fleet_upgrade_follows_parallel_sparks_to_the_end_of_the_follow() -> None:
-    """Catches a follow validator that counts operations: every Spark upgrades
-    at once, so 2 queued and 1 running operation is the normal mid-rollout view
-    and must be followed, not rejected until the follow times out."""
+def _sticky_upgrade_follow(snapshot_overrides: dict[str, object]):
     job_id = "upgrade-job"
     request_key = "44444444-4444-4444-8444-444444444444"
     nodes = ["spk_" + letter * 32 for letter in "abcd"]
-    states = ("running", "queued", "queued", "waiting-for-operator")
+    states = ("running", "queued", "queued", "needs-operator")
     client = FakeClient(
         {
             ("POST", "/api/fleet/upgrade"): {
@@ -4316,20 +4313,20 @@ def test_fleet_upgrade_follows_parallel_sparks_to_the_end_of_the_follow() -> Non
             },
             ("GET", f"/api/jobs/{job_id}"): {
                 "id": job_id,
-                "state": "waiting-for-operator",
+                "state": "queued",
                 "kind": "agent-upgrade",
                 "targets": nodes,
-                "status_reason": f"Spark {nodes[3]} requires operator review",
                 "operations": [
                     {"id": f"operation-{node[4]}", "node_id": node, "state": state}
                     for node, state in zip(nodes, states, strict=True)
                 ],
-                "progress": {"running": 2, "completed": 0, "failed": 1, "total": 4},
+                # The Controller counts queued and running work as running.
+                "progress": {"running": 3, "completed": 0, "failed": 0, "total": 4},
+                **snapshot_overrides,
             },
         }
     )
-
-    status, result = run(
+    return run(
         (
             "fleet",
             "upgrade",
@@ -4346,8 +4343,28 @@ def test_fleet_upgrade_follows_parallel_sparks_to_the_end_of_the_follow() -> Non
         client,
     )
 
-    assert status == 2, result
-    assert isinstance(result["operations"], list) and len(result["operations"]) == 4
+
+def test_fleet_upgrade_follows_parallel_sparks_without_a_validation_error() -> None:
+    """Catches a follow validator that counts operations: every Spark upgrades
+    at once, so 2 queued and 1 running operation is the normal mid-rollout view.
+    It must be adopted; rejecting it left the receipt and an observation error."""
+    _status, result = _sticky_upgrade_follow({})
+
+    observation = result["observation"]
+    assert isinstance(observation, dict)
+    assert observation["status"] == "timed_out"
+    assert "error" not in observation
+    assert len(result["result"]["operations"]) == 4
+
+
+def test_fleet_upgrade_follow_still_refuses_another_jobs_targets() -> None:
+    """The job, kind and target identity checks stay."""
+    _status, result = _sticky_upgrade_follow({"targets": ["spk_" + "f" * 32]})
+
+    observation = result["observation"]
+    assert isinstance(observation, dict)
+    assert observation["error"]
+    assert "operations" not in result["result"]
 
 
 def test_fleet_upgrade_replays_lost_post_with_same_request_key() -> None:

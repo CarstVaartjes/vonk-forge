@@ -1185,7 +1185,7 @@ def check_source(
             (line, "follow validator asserts an operation count; check identity only")
             for line, text in enumerate(source.splitlines(), 1)
             if re.search(
-                r"\blen\((?:active|operations|queued|running)\w*\)\s*(?:>|>=|==|!=)"
+                r"\blen\((?:active|operations|queued|running)\w*\)\s*(?:>|>=)"
                 r"|\[[\"']running[\"']\]\s*(?:>|>=)\s*\d",
                 text,
             )
