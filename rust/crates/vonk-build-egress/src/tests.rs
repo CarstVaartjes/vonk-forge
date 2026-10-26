@@ -404,16 +404,68 @@ fn slow_headers_expire_the_connection_and_release_its_permit_for_fresh_work() {
 }
 
 /// `thread::spawn` panics when the host refuses a thread, and release builds
-/// abort on panic: one load spike would kill the proxy for every build.
+/// abort on panic: one load spike would kill the proxy for every build. Every
+/// production source of the crate must use `thread::Builder` and handle the
+/// error; scoped threads and imported `spawn` panic the same way.
 #[test]
 fn no_infallible_thread_spawn_remains_in_the_proxy() {
-    for (file, source) in [
-        ("main.rs", include_str!("main.rs")),
-        ("runtime_probe.rs", include_str!("runtime_probe.rs")),
-    ] {
-        assert!(
-            !source.contains("thread::spawn("),
-            "{file} must use thread::Builder::new().spawn and handle the error"
-        );
+    let sources = std::fs::read_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/src")).unwrap();
+    let mut scanned = 0;
+    for entry in sources {
+        let path = entry.unwrap().path();
+        if path.extension().is_none_or(|extension| extension != "rs")
+            || path.file_name().is_some_and(|name| name == "tests.rs")
+        {
+            continue;
+        }
+        scanned += 1;
+        let source = std::fs::read_to_string(&path).unwrap();
+        for line in source.lines() {
+            assert!(
+                !(line.contains("use std::thread") && line.contains("spawn")),
+                "{} imports spawn: use thread::Builder::new().spawn",
+                path.display()
+            );
+        }
+        for forbidden in ["thread::spawn", "thread::scope", "Scope"] {
+            assert!(
+                !source.contains(forbidden),
+                "{} uses `{forbidden}`: use thread::Builder::new().spawn and handle the error",
+                path.display()
+            );
+        }
+    }
+    assert!(scanned >= 2, "the crate sources were not found");
+}
+
+#[test]
+fn a_reaper_that_cannot_start_hands_its_child_and_claim_to_supervision() {
+    // Wrong implementation: the unstarted reaper closure takes the child and its
+    // claim down with it, leaking the process and the admission slot.
+    static OWNERS: AtomicUsize = AtomicUsize::new(0);
+    let owner = ResolverOwner::acquire_at(&OWNERS).unwrap();
+    let child = Command::new("/bin/sleep").arg("30").spawn().unwrap();
+    let pid = child.id();
+    retain_resolver_with(
+        child,
+        owner,
+        |_| {},
+        Instant::now() + Duration::from_secs(60),
+        |_| Err(io::Error::from(io::ErrorKind::WouldBlock)),
+    );
+    assert!(
+        RETAINED_RESOLVERS
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|(child, _)| child.id() == pid),
+        "the child was not retained"
+    );
+    assert_eq!(OWNERS.load(Ordering::Acquire), 1, "the claim was dropped");
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while OWNERS.load(Ordering::Acquire) != 0 {
+        assert!(Instant::now() < deadline, "supervision did not reap it");
+        supervise_retained_resolvers();
+        thread::sleep(Duration::from_millis(10));
     }
 }

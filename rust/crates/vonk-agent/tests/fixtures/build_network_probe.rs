@@ -70,6 +70,22 @@ fn hold_tunnels(proxy: SocketAddr, count: usize, authority: &str) {
         assert_eq!(&response, b"HTTP/1.1 200", "tunnel {} refused", tunnels.len());
         tunnels.push(stream);
     }
+    // Every tunnel must still be open: a proxy that dropped one would show EOF,
+    // an idle healthy tunnel only times out.
+    for (index, tunnel) in tunnels.iter_mut().enumerate() {
+        tunnel
+            .set_read_timeout(Some(Duration::from_millis(50)))
+            .unwrap();
+        let mut byte = [0; 1];
+        match tunnel.read(&mut byte) {
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                ) => {}
+            other => panic!("tunnel {index} did not stay open: {other:?}"),
+        }
+    }
     let mut extra = TcpStream::connect_timeout(&proxy, Duration::from_secs(5)).unwrap();
     extra.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
     write!(extra, "CONNECT {authority} HTTP/1.1\r\nHost: {authority}\r\n\r\n").unwrap();

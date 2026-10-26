@@ -539,14 +539,28 @@ fn retain_resolver(
 fn retain_resolver_until(
     child: std::process::Child,
     owner: ResolverOwner,
+    terminate: impl FnMut(&mut std::process::Child) + Send + 'static,
+    deadline: Instant,
+) {
+    retain_resolver_with(child, owner, terminate, deadline, |work| {
+        thread::Builder::new().spawn(work).map(|_| ())
+    });
+}
+
+/// `start` runs the reaper; a host that cannot start it hands the pair to
+/// service supervision at once.
+fn retain_resolver_with(
+    child: std::process::Child,
+    owner: ResolverOwner,
     mut terminate: impl FnMut(&mut std::process::Child) + Send + 'static,
     deadline: Instant,
+    start: impl FnOnce(Box<dyn FnOnce() + Send>) -> io::Result<()>,
 ) {
     // The pair lives in a shared slot so a reaper thread that cannot start
     // never takes the child or its claim down with the unstarted closure.
     let slot = Arc::new(Mutex::new(Some((child, owner))));
     let reaper_slot = Arc::clone(&slot);
-    let spawned = thread::Builder::new().spawn(move || {
+    let spawned = start(Box::new(move || {
         let Some((mut child, owner)) = reaper_slot
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -569,7 +583,7 @@ fn retain_resolver_until(
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .push((child, owner));
-    });
+    }));
     if spawned.is_err()
         && let Some(pair) = slot
             .lock()
@@ -788,8 +802,14 @@ fn tunnel_until(mut left: TcpStream, mut right: TcpStream, deadline: Instant) ->
     let outbound_budget = Arc::clone(&budget);
     // No thread for the second direction: fail this tunnel and close both
     // streams rather than take the whole proxy down.
-    let outbound = thread::Builder::new()
-        .spawn(move || copy_until(&mut left_read, &mut right_write, &outbound_budget, deadline))?;
+    let outbound = thread::Builder::new().spawn(move || {
+        let copied = copy_until(&mut left_read, &mut right_write, &outbound_budget, deadline);
+        // The client is gone (or failed): close the upstream so the other
+        // direction ends now, not after its 120 s read timeout, and the
+        // connection slot is released.
+        let _ = right_write.shutdown(std::net::Shutdown::Both);
+        copied
+    })?;
     let inbound = copy_until(&mut right, &mut left, &budget, deadline);
     let _ = left.shutdown(std::net::Shutdown::Both);
     let _ = right.shutdown(std::net::Shutdown::Both);

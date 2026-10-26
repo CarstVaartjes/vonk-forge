@@ -481,6 +481,22 @@ pub(super) fn write_proxy_rootfs(
 
 #[cfg(test)]
 mod tests {
+    /// The proxy's connection bound, read from its own source: one owner.
+    fn proxy_max_connections() -> usize {
+        include_str!("../../../vonk-build-egress/src/main.rs")
+            .lines()
+            .find_map(|line| line.strip_prefix("const MAX_CONNECTIONS: usize = "))
+            .and_then(|value| value.trim_end_matches(';').parse().ok())
+            .expect("the proxy declares MAX_CONNECTIONS")
+    }
+
+    #[test]
+    fn the_proxy_task_limit_covers_its_connection_bound() {
+        // Wrong implementation: a task limit below what MAX_CONNECTIONS
+        // connections need (1 serve + 4 tasks each), so load kills the proxy.
+        let needed = 1 + 4 * proxy_max_connections();
+        assert!(super::PROXY_PIDS_LIMIT as usize >= needed);
+    }
 
     #[test]
     #[ignore = "requires an isolated Linux systemd host, agent user and installed egress helper"]
@@ -559,7 +575,7 @@ mod tests {
         // The platform proxy's own connection bound, held at once the way a
         // parallel `uv pip install` does: the proxy must neither run out of
         // tasks and die (panic = abort) nor stop admitting afterwards.
-        let hold = |count: &str| {
+        let hold = |count: usize| {
             boundary
                 .run(
                     &[
@@ -568,17 +584,18 @@ mod tests {
                         probe.to_owned(),
                         "--hold-tunnels".to_owned(),
                         outbound.clone(),
-                        count.to_owned(),
+                        count.to_string(),
                         "pypi.org:443".to_owned(),
                     ],
                     Duration::from_secs(45),
                 )
                 .unwrap()
         };
-        let held = hold("64");
+        let held = hold(proxy_max_connections());
         assert!(
             held.success,
-            "64 parallel tunnels: {}\n{}",
+            "{} parallel tunnels: {}\n{}",
+            proxy_max_connections(),
             String::from_utf8_lossy(&held.stdout),
             String::from_utf8_lossy(&held.stderr)
         );
@@ -589,14 +606,26 @@ mod tests {
                 Duration::from_secs(10),
             )
             .unwrap();
-        assert!(survived.success, "64 parallel tunnels killed the proxy");
-        let admitted = hold("1");
         assert!(
-            admitted.success,
-            "a fresh tunnel after the load: {}\n{}",
-            String::from_utf8_lossy(&admitted.stdout),
-            String::from_utf8_lossy(&admitted.stderr)
+            survived.success,
+            "parallel tunnels at the connection bound killed the proxy"
         );
+        // The closed tunnels release their slots as the proxy sees the
+        // disconnects; admission must return within a bound.
+        let admission_deadline = Instant::now() + Duration::from_secs(15);
+        loop {
+            let admitted = hold(1);
+            if admitted.success {
+                break;
+            }
+            assert!(
+                Instant::now() < admission_deadline,
+                "no fresh tunnel after the load: {}\n{}",
+                String::from_utf8_lossy(&admitted.stdout),
+                String::from_utf8_lossy(&admitted.stderr)
+            );
+            std::thread::sleep(Duration::from_millis(500));
+        }
         let context = staging.path().join("context");
         fs::create_dir(&context).unwrap();
         fs::copy(probe, context.join("probe")).unwrap();
