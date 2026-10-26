@@ -932,3 +932,26 @@ def test_round_shows_a_queued_probe_beside_a_peer_backing_off():
     assert queued == busy
     assert backing_off.code == RuntimePreflightCode.EXECUTION_FAILED
     assert backing_off.node_ids == [node_a]
+
+
+def test_only_the_checkpoint_reads_its_round_reason():
+    """Catches a reader projecting the round-start reason as the current wait.
+
+    ``last_failure_code``/``last_failure_detail`` explain why a round started;
+    what it waits for now is ``current_reason``/``current_blockers``.
+    """
+    import ast
+    from pathlib import Path
+
+    import vonk_control
+
+    root = Path(vonk_control.__file__).parent
+    readers = sorted(
+        f"{path.relative_to(root)}:{node.lineno}"
+        for path in root.rglob("*.py")
+        if path.name != "lifecycle_preflight.py"
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8")))
+        if isinstance(node, ast.Attribute)
+        and node.attr in {"last_failure_code", "last_failure_detail"}
+    )
+    assert readers == []

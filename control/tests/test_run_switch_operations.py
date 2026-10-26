@@ -7815,3 +7815,62 @@ def test_a_queued_probe_names_its_spark_holder_as_the_load_reason(tmp_path):
         actor="admin",
     )
     assert fresh.state not in {"cancelled", "failed"}
+
+
+def test_a_failed_run_switch_ends_its_unclaimed_probe_and_transfer(tmp_path):
+    """Catches idempotent children outliving a run-switch that failed.
+
+    The same class as the cancelled probe: a queued transfer child of an ended
+    owner kept retrying for nobody. Copied bytes stay on the Spark for reuse.
+    """
+    from dataclasses import replace
+
+    from vonk_control.lifecycle import State
+    from vonk_control.lifecycle.run_switch import RunSwitchAdapter
+    from vonk_control.run_switch_operations import _read_progress
+
+    from .test_agent_jobs import distribution_payload
+
+    switch = _probing_switch(tmp_path)
+    probe = _probe_ids(switch)
+    assert probe is not None
+    with switch.sessions.begin() as session:
+        transfer = Job(
+            id=str(uuid.uuid4()),
+            request_id=str(uuid.uuid4()),
+            kind="artifact.distribution.v1",
+            state=LifecycleState.QUEUED.value,
+            actor="admin",
+            authority_revision="a" * 64,
+            targets=[switch.node],
+            payload_digest="a" * 64,
+            payload={"workload_intent_ordinal": 1},
+            created_at=NOW,
+            updated_at=NOW,
+        )
+        session.add(transfer)
+        session.flush()
+        transfer_order = str(uuid.uuid4())
+        switch.queue.enqueue_in_session(
+            session,
+            transfer.id,
+            switch.node,
+            "artifact.distribution.v1",
+            "a" * 64,
+            distribution_payload(),
+            operation_id=transfer_order,
+        )
+        job = session.get(Job, switch.operation.operation_id)
+        assert job is not None
+        progress = _read_progress(job.result)
+        progress.child_operation_id = transfer.id
+        adapter = RunSwitchAdapter(session)
+        before = adapter.lifecycle(job, progress, NOW)
+        adapter.apply(job, progress, before, replace(before, state=State.FAILED), NOW)
+    cancelled = LifecycleState.CANCELLED.value
+    assert _probe_states(switch, probe) == (cancelled, cancelled)
+    assert _probe_states(switch, (transfer.id, transfer_order)) == (
+        cancelled,
+        cancelled,
+    )
+    _admits_a_fresh_load(switch)
