@@ -486,7 +486,7 @@ def test_read_uses_postgresql_registration_latest_rows_and_a_bounded_query_set()
                     "nas_route_interface": None,
                 },
                 "telemetry": {
-                    "age_seconds": 2.0,
+                    "age_seconds": 1.75,
                     "freshness": "live",
                     "sample": {
                         "id": "00000000-0000-4000-8000-000000000012",
@@ -1001,6 +1001,7 @@ def test_freshness_boundaries_keep_telemetry_agent_and_inventory_independent() -
                 sequence=index,
                 cpu=float(index),
             )
+            sample.received_at = NOW - ages[node_id]
             session.add(sample)
             session.flush()
             session.add(NodeTelemetryLatest(node_id=node_id, sample_id=sample.id))

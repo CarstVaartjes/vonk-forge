@@ -917,6 +917,7 @@ def test_stale_inventory_intent_waits_and_replans_when_inventory_returns(
         )
         assert snapshot is not None
         snapshot.observed_at = NOW - timedelta(days=1)
+        snapshot.received_at = NOW - timedelta(days=1)
     now = [NOW]
     executor = RecordingArtifactExecutor()
     service = _service(
@@ -984,6 +985,7 @@ def test_stale_inventory_intent_waits_and_replans_when_inventory_returns(
         )
         assert snapshot is not None
         snapshot.observed_at = NOW
+        snapshot.received_at = NOW
     now[0] = second_due + timedelta(seconds=1)
     assert service._advance(operation.operation_id) is True
     refreshed = service.get(operation.operation_id)
