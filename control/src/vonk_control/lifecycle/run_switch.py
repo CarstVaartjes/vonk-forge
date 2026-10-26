@@ -67,7 +67,7 @@ from vonk_agent_protocol import (
 
 from .. import job_states
 from ..agent_operation_facts import aware
-from ..lifecycle_preflight import LifecyclePreflightCheckpoint
+from ..lifecycle_preflight import end_unclaimed_probes
 from ..models import AgentOperation as StoredOperation
 from ..models import Job
 from ..operation_blockers import OperationBlocker, make_blocker
@@ -164,29 +164,6 @@ def set_member_state(
     """The only writer of a member's progress ``state`` (a projection, not a row)."""
 
     entry.state = state
-
-
-def _end_unclaimed_probes(
-    job: Job, preflight: LifecyclePreflightCheckpoint | None, now: datetime
-) -> None:
-    """End the runtime probes an ended run-switch issued that no Spark claimed.
-
-    A probe has no effect to undo; left queued it would outlive its owner and
-    hold the Spark's claim lane for nobody. A claimed probe reports its own end.
-    """
-    # agent_jobs builds on the lifecycle core; import its writer at use.
-    from ..agent_jobs import abandon_idempotent_job_in_session
-
-    session = object_session(job)
-    if session is None or preflight is None:
-        return
-    for child_id in preflight.pending_jobs.values():
-        abandon_idempotent_job_in_session(
-            session,
-            child_id,
-            now,
-            reason=WaitReason.SCOPE_CHANGED.value,
-        )
 
 
 class RunSwitchAdapter:
@@ -443,9 +420,7 @@ class RunSwitchAdapter:
         state = visible if visible and not after.terminal else _STORED[after.state]
         preflight = progress.preflight if progress else None
         preflight_reason = (
-            typed_wait_reason(
-                preflight.last_failure_code, RuntimePreflightCode.REQUIRED
-            )
+            typed_wait_reason(preflight.current_reason, RuntimePreflightCode.REQUIRED)
             if preflight
             and preflight.next_check_at
             and not after.cancel_requested
@@ -455,17 +430,7 @@ class RunSwitchAdapter:
         if preflight_reason is not None and preflight is not None:
             # A pending probe's own queue wait is the current dependency; the
             # reason its round started is history once the child is issued.
-            if preflight.child_waits:
-                preflight_reason = typed_wait_reason(
-                    preflight.child_waits[0].code, preflight_reason
-                )
-            wait_blockers = list(preflight.child_waits) or [
-                make_blocker(
-                    preflight_reason,
-                    preflight.last_failure_detail or preflight_reason.value,
-                    node_ids=list(job.targets),
-                )
-            ]
+            wait_blockers = preflight.current_blockers(list(job.targets))
         lifecycle_wait(
             job,
             identity=job.id,
@@ -487,7 +452,9 @@ class RunSwitchAdapter:
         )
         job.state = state
         if after.state in (State.CANCELLED, State.FAILED):
-            _end_unclaimed_probes(job, preflight, now)
+            session = object_session(job)
+            if session is not None and preflight is not None:
+                end_unclaimed_probes(session, preflight, now)
             # Terminal request result is final; the exact accepted Start may
             # still need its cancellation handoff after a lost worker response.
             schedule_wait(
