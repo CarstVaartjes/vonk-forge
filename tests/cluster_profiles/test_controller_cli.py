@@ -4296,34 +4296,14 @@ def test_fleet_upgrade_follows_exact_job_and_stops_at_operator_blocker() -> None
     assert len(result["operations"]) == 1
 
 
-def test_fleet_upgrade_follows_parallel_sparks_to_the_terminal_state() -> None:
+def test_fleet_upgrade_follows_parallel_sparks_to_the_end_of_the_follow() -> None:
     """Catches a follow validator that counts operations: every Spark upgrades
     at once, so 2 queued and 1 running operation is the normal mid-rollout view
-    and must be followed, not rejected as a malformed response."""
+    and must be followed, not rejected until the follow times out."""
     job_id = "upgrade-job"
     request_key = "44444444-4444-4444-8444-444444444444"
-    nodes = ["spk_" + letter * 32 for letter in "abc"]
-    mid_rollout = {
-        "id": job_id,
-        "state": "running",
-        "kind": "agent-upgrade",
-        "targets": nodes,
-        "operations": [
-            {"id": "operation-a", "node_id": nodes[0], "state": "running"},
-            {"id": "operation-b", "node_id": nodes[1], "state": "queued"},
-            {"id": "operation-c", "node_id": nodes[2], "state": "queued"},
-        ],
-        "progress": {"running": 2, "completed": 0, "failed": 0, "total": 3},
-    }
-    done = {
-        **mid_rollout,
-        "state": "succeeded",
-        "operations": [
-            {"id": f"operation-{name}", "node_id": node, "state": "succeeded"}
-            for name, node in zip("abc", nodes, strict=True)
-        ],
-        "progress": {"running": 0, "completed": 3, "failed": 0, "total": 3},
-    }
+    nodes = ["spk_" + letter * 32 for letter in "abcd"]
+    states = ("running", "queued", "queued", "waiting-for-operator")
     client = FakeClient(
         {
             ("POST", "/api/fleet/upgrade"): {
@@ -4334,7 +4314,18 @@ def test_fleet_upgrade_follows_parallel_sparks_to_the_terminal_state() -> None:
                 "request_key": request_key,
                 "targets": nodes,
             },
-            ("GET", f"/api/jobs/{job_id}"): [mid_rollout, done],
+            ("GET", f"/api/jobs/{job_id}"): {
+                "id": job_id,
+                "state": "waiting-for-operator",
+                "kind": "agent-upgrade",
+                "targets": nodes,
+                "status_reason": f"Spark {nodes[3]} requires operator review",
+                "operations": [
+                    {"id": f"operation-{node[4]}", "node_id": node, "state": state}
+                    for node, state in zip(nodes, states, strict=True)
+                ],
+                "progress": {"running": 2, "completed": 0, "failed": 1, "total": 4},
+            },
         }
     )
 
@@ -4349,12 +4340,15 @@ def test_fleet_upgrade_follows_parallel_sparks_to_the_terminal_state() -> None:
             "--json",
             "--interval-seconds",
             "0.01",
+            "--timeout-seconds",
+            "1",
         ),
         client,
     )
 
-    assert status == 0, result
-    assert result["state"] == "succeeded"
+    assert status == 2, result
+    assert result["state"] == "waiting-for-operator"
+    assert isinstance(result["operations"], list) and len(result["operations"]) == 4
 
 
 def test_fleet_upgrade_replays_lost_post_with_same_request_key() -> None:
