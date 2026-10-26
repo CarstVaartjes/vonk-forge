@@ -364,6 +364,8 @@ const PODMAN_RUN_CLOSE: &[u8] = b"\": while running runtime:";
 /// The bytes of the echoed command kept on that line, so the `build_step`
 /// property read from it holds at most about 164 bytes (with the ellipsis).
 const ECHOED_STEP_BYTES: usize = 160;
+/// The bytes of a Go crash header line kept ahead of the tail.
+const CRASH_HEADER_BYTES: usize = 240;
 
 /// Where the echoed step that starts `rest` ends: at a RUN step's close, or for
 /// a step without one (COPY, ADD) at the first `": `. Every reader of the
@@ -386,6 +388,18 @@ fn echoed_step_end(rest: &[u8]) -> Option<usize> {
 pub fn podman_stderr_tail(stream: &[u8]) -> FailureLogTail {
     let (compacted, cut) = compact_echoed_step(stream);
     let mut tail = log_tail(&compacted);
+    // A Go crash dumps long goroutine traces after its `panic: ` header; the
+    // header is the cause, so it stays ahead of the tail like the step cause.
+    if let Some(header) = go_crash_header(stream)
+        && !tail.text.contains(&header)
+    {
+        let (kept, dropped) = clamp_tail(tail.text, LOG_BYTES - header.len() - 1);
+        tail.text = format!("{header}\n{kept}");
+        tail.truncated = true;
+        tail.dropped_bytes = tail
+            .dropped_bytes
+            .map(|known| known.saturating_add(dropped as u64));
+    }
     if cut > 0 {
         tail.truncated = true;
         tail.dropped_bytes = tail
@@ -393,6 +407,17 @@ pub fn podman_stderr_tail(stream: &[u8]) -> FailureLogTail {
             .map(|known| known.saturating_add(cut as u64));
     }
     tail
+}
+
+/// The first line of a Go runtime crash (`panic: ` or `fatal error: `), redacted
+/// and bounded.
+fn go_crash_header(stream: &[u8]) -> Option<String> {
+    let line = stream
+        .split(|&byte| byte == b'\n')
+        .find(|line| line.starts_with(b"panic: ") || line.starts_with(b"fatal error: "))?;
+    let safe = sanitize_text(&String::from_utf8_lossy(line));
+    let end = safe.floor_char_boundary(CRASH_HEADER_BYTES);
+    Some(safe[..end].trim_end().to_owned())
 }
 
 /// The stream with the echoed step's command bounded, and the bytes it cut.
@@ -812,6 +837,28 @@ fn refusal_property(bound: &RefusalBound) -> Option<FailureProperty> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_podman_crash_header_stays_ahead_of_its_goroutine_dump() {
+        // Wrong implementation: keep only the last lines, which are all stack
+        // frames, so the evidence never names the crash.
+        let mut stderr = String::from(
+            "uv: downloading wheels\npanic: runtime error: index out of range\n\ngoroutine 61 [running]:\n",
+        );
+        for frame in 0..80 {
+            stderr.push_str(&format!(
+                "netavark.frame{frame}(...)\n\t/go/src/f{frame}.go:1\n"
+            ));
+        }
+        let tail = podman_stderr_tail(stderr.as_bytes());
+        assert!(
+            tail.text
+                .starts_with("panic: runtime error: index out of range\n")
+        );
+        assert!(tail.text.contains("frame79"));
+        assert!(tail.text.len() <= LOG_BYTES);
+        assert!(tail.truncated);
+    }
     #[test]
     fn a_failed_image_build_names_its_step_and_exit_status() {
         let failure = Failure::new("build failed").process_logs(Some(FailureProcessLogs {
