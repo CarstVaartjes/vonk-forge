@@ -299,7 +299,7 @@ async fn a_busy_or_long_polling_lane_keeps_observing_other_exact_children() {
             "receipt must arrive before unrelated work completes"
         );
     };
-    observing_during(work, &client, Some(state), &executor, Some(Uuid::new_v4())).await;
+    observing_during(work, &client, Some(state), &executor).await;
     assert!(client.heartbeats.lock().unwrap().is_empty());
     assert!(client.results.lock().unwrap().iter().all(
         |result| result.fence == accepted.fence && result.state == AgentResultState::Succeeded

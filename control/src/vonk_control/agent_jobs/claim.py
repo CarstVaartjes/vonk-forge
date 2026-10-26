@@ -44,7 +44,12 @@ from ..own_cleanup import CLEANUP_KINDS
 from ..persisted_waits import schedule_wait
 from ..recovery_policy import WAIT_STEP
 from .claim_authority import gpu_health_wait, recipe_build_disk_wait
-from .contracts import _MUTATING_OPERATIONS, CLAIM_LEASE_SECONDS
+from .claim_reconcile import _first_claimable_id
+from .contracts import (
+    _MUTATING_OPERATIONS,
+    CLAIM_LEASE_SECONDS,
+    mutations_conflict,
+)
 from .endings import end_unobserved_order
 from .evidence import (
     _exact_service_stop_receipt_covers_start,
@@ -116,11 +121,7 @@ def _claim_once(
                 }
             )
         self._fail_spent_start_budgets(session, node_id, now)
-        candidate_id = session.scalar(
-            self._claimable_operations(node_id, now).with_only_columns(
-                StoredOperation.id
-            )
-        )
+        candidate_id = _first_claimable_id(session, node_id, now)
         recovery_id = None
         if candidate_id is None:
             predicate = _claim_predicate(now)
@@ -369,6 +370,8 @@ def _claim_once(
             active_mutations_list = []
             reconciled_dead_running = False
             for old in candidates:
+                if not mutations_conflict(operation, old):
+                    continue
                 if (
                     operation.workload_intent_ordinal is not None
                     and _exact_service_stop_receipt_covers_start(

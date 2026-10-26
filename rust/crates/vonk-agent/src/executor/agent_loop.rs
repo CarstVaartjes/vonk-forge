@@ -52,7 +52,7 @@ pub async fn run_once<C: LoopClient, E: Executor>(
     preflight_fingerprint: Option<&str>,
     wait_seconds: u64,
     runtime_identity: Option<&AgentRuntimeIdentity>,
-) -> Result<(), LoopError> {
+) -> Result<LaneStep, LoopError> {
     run_once_with_heartbeat_interval(
         client,
         state,
@@ -78,7 +78,7 @@ pub async fn run_once_with_claim_hook<C, E, F>(
     wait_seconds: u64,
     runtime_identity: Option<&AgentRuntimeIdentity>,
     on_claim_accepted: F,
-) -> Result<(), LoopError>
+) -> Result<LaneStep, LoopError>
 where
     C: LoopClient,
     E: Executor,
@@ -101,13 +101,18 @@ where
     .await
 }
 
+/// One pass of the claim lane: deliver, observe, claim one order and settle it.
+///
+/// An order that [runs off the lane](runs_off_lane) is begun in custody and
+/// handed back as [`LaneStep::OffLane`]; its caller executes it beside the
+/// lane and keeps claiming. Every other order executes here to its result.
 pub(super) async fn run_once_with_heartbeat_interval<C, E, F>(
     client: &C,
     state: &mut StateStore,
     executor: &E,
     policy: RunOncePolicy<'_>,
     on_claim_accepted: F,
-) -> Result<(), LoopError>
+) -> Result<LaneStep, LoopError>
 where
     C: LoopClient,
     E: Executor,
@@ -115,7 +120,7 @@ where
 {
     state.restore_custody();
     if let Err(error) =
-        operation_observation::reobserve_operations(state, executor, None, Utc::now()).await
+        operation_observation::reobserve_operations(state, executor, Utc::now()).await
     {
         eprintln!("vonk-agent: preparation observation deferred: {error}");
     }
@@ -130,106 +135,34 @@ where
         client,
         state.reopen().ok(),
         executor,
-        None,
     )
     .await?;
     if let Err(error) = on_claim_accepted() {
         eprintln!("vonk-agent: readiness projection deferred: {error}");
     }
     let Some(claim) = claim else {
-        return Ok(());
+        return Ok(LaneStep::Settled);
     };
     claim.validate().map_err(StateError::from)?;
+    let schedule = HeartbeatSchedule {
+        interval: policy.heartbeat_interval,
+        retry_interval: policy.heartbeat_retry_interval,
+        renewed: policy.lease_renewed,
+    };
     let result = match state.begin(&claim, Utc::now()) {
+        Ok(BeginDecision::Execute) if runs_off_lane(&claim.operation) => {
+            return Ok(LaneStep::OffLane(Box::new(OffLaneClaim::new(
+                state, claim, schedule,
+            ))));
+        }
         Ok(BeginDecision::Execute) => {
-            let heartbeat_state = match state.reopen() {
-                Ok(reopened) => Some(reopened),
-                Err(error) => {
-                    eprintln!("vonk-agent: heartbeat projection unavailable: {error}");
-                    None
-                }
-            };
-            let (stop_heartbeat, heartbeat_stop) = tokio::sync::oneshot::channel();
-            let (lease_deadline_sender, lease_deadline) =
-                tokio::sync::watch::channel(claim.deadline);
-            let (cancellation_sender, cancellation) = tokio::sync::watch::channel(false);
-            let cancel_on_exit = CancelExecutionOnDrop(cancellation_sender.clone());
-            let budget_cancellation = cancellation_sender.clone();
-            let heartbeats = run_heartbeats(
-                client.clone(),
-                heartbeat_state,
-                claim.clone(),
-                lease_deadline_sender,
-                cancellation_sender,
-                heartbeat_stop,
-                HeartbeatSchedule {
-                    interval: policy.heartbeat_interval,
-                    retry_interval: policy.heartbeat_retry_interval,
-                    renewed: policy.lease_renewed,
-                },
-            );
-            let heartbeat_task = tokio::spawn(async move {
-                let _cancel_on_exit = cancel_on_exit;
-                heartbeats.await
-            });
-            let work = operation_observation::observing_during(
-                executor.execute(&claim, lease_deadline, cancellation),
-                client,
-                state.reopen().ok(),
-                executor,
-                Some(claim.fence),
-            );
-            tokio::pin!(work);
-            // The observation budget is a stall window: the order ends only
-            // when its progress stops advancing for a whole window.
-            let mut stall = StallWindow::new(Duration::from_secs(u64::from(
-                claim.observation_budget_seconds,
-            )));
-            let executed = tokio::select! {
-                result = &mut work => result,
-                () = stall.stalled(|| client.progress_observation(claim.fence)) => {
-                    budget_cancellation.send_replace(true);
-                    match tokio::time::timeout(JOB_CANCEL_DRAIN_TIMEOUT, &mut work).await {
-                        Ok(result) => result,
-                        Err(_) => ExecutionResult::unknown(
-                            WaitReason::RuntimeEffectUnconfirmed,
-                            "operation stalled before exact effect settlement",
-                            UnknownEvidence::at(FailureStage::Unknown),
-                        ),
-                    }
-                },
-            };
-            let _ = stop_heartbeat.send(());
-            let heartbeat_result = heartbeat_task
+            let _executing = Executing::hold(state, claim.fence);
+            return execute_claimed(client, state, executor, &claim, schedule, true)
                 .await
-                .map_err(|_| LoopError::HeartbeatTask)
-                .and_then(|result| result);
-            // The executor owns the effect and its quiescence proof. Preserve
-            // its exact cancelled or uncertain outcome; a heartbeat alone
-            // cannot turn an in-flight runtime effect into a terminal result.
-            let result = match state.finish(&claim, executed) {
-                Ok(result) => result,
-                Err(error) => {
-                    eprintln!("vonk-agent: completion custody unavailable: {error}");
-                    state.restore_custody();
-                    let finished = ExecutionResult::unknown(
-                        WaitReason::RuntimeEffectUnconfirmed,
-                        "completion custody awaits exact effect observation",
-                        UnknownEvidence::at(FailureStage::AgentRestart),
-                    )
-                    .finish(&claim);
-                    AgentResult {
-                        fence: claim.fence,
-                        result: finished.result,
-                        state: finished.state,
-                    }
-                }
-            };
-            heartbeat_result?;
-            result
+                .map(|()| LaneStep::Settled);
         }
         Ok(BeginDecision::Replay(result)) => *result,
-        Err(StateError::Busy) => return Ok(()),
+        Err(StateError::Busy) => return Ok(LaneStep::Settled),
         Err(error) => {
             // No effect is dispatched without durable custody. Local failure
             // ends this exact attempt as uncertainty; a fresh fence still
@@ -248,31 +181,140 @@ where
             }
         }
     };
+    deliver_result(client, state, &claim, &result, now).await?;
+    Ok(LaneStep::Settled)
+}
+
+/// Execute one claim begun in custody, keep its lease, and deliver its result.
+///
+/// The caller holds the claim's [`Executing`] fence from its custody onward.
+/// `observe` keeps the other claims' observation and receipt delivery moving
+/// while this one runs; the lane does that for an order beside it.
+pub(super) async fn execute_claimed<C: LoopClient, E: Executor>(
+    client: &C,
+    state: &mut StateStore,
+    executor: &E,
+    claim: &AgentClaim,
+    schedule: HeartbeatSchedule,
+    observe: bool,
+) -> Result<(), LoopError> {
+    let now = Utc::now();
+    let heartbeat_state = match state.reopen() {
+        Ok(reopened) => Some(reopened),
+        Err(error) => {
+            eprintln!("vonk-agent: heartbeat projection unavailable: {error}");
+            None
+        }
+    };
+    let (stop_heartbeat, heartbeat_stop) = tokio::sync::oneshot::channel();
+    let (lease_deadline_sender, lease_deadline) = tokio::sync::watch::channel(claim.deadline);
+    let (cancellation_sender, cancellation) = tokio::sync::watch::channel(false);
+    let cancel_on_exit = CancelExecutionOnDrop(cancellation_sender.clone());
+    let budget_cancellation = cancellation_sender.clone();
+    let heartbeats = run_heartbeats(
+        client.clone(),
+        heartbeat_state,
+        claim.clone(),
+        lease_deadline_sender,
+        cancellation_sender,
+        heartbeat_stop,
+        schedule,
+    );
+    let heartbeat_task = tokio::spawn(async move {
+        let _cancel_on_exit = cancel_on_exit;
+        heartbeats.await
+    });
+    // Without a store the observation stream ends at once: the work runs alone.
+    let observer = if observe { state.reopen().ok() } else { None };
+    let work = operation_observation::observing_during(
+        executor.execute(claim, lease_deadline, cancellation),
+        client,
+        observer,
+        executor,
+    );
+    tokio::pin!(work);
+    // The observation budget is a stall window: the order ends only
+    // when its progress stops advancing for a whole window.
+    let mut stall = StallWindow::new(Duration::from_secs(u64::from(
+        claim.observation_budget_seconds,
+    )));
+    let executed = tokio::select! {
+        result = &mut work => result,
+        () = stall.stalled(|| client.progress_observation(claim.fence)) => {
+            budget_cancellation.send_replace(true);
+            match tokio::time::timeout(JOB_CANCEL_DRAIN_TIMEOUT, &mut work).await {
+                Ok(result) => result,
+                Err(_) => ExecutionResult::unknown(
+                    WaitReason::RuntimeEffectUnconfirmed,
+                    "operation stalled before exact effect settlement",
+                    UnknownEvidence::at(FailureStage::Unknown),
+                ),
+            }
+        },
+    };
+    let _ = stop_heartbeat.send(());
+    let heartbeat_result = heartbeat_task
+        .await
+        .map_err(|_| LoopError::HeartbeatTask)
+        .and_then(|result| result);
+    // The executor owns the effect and its quiescence proof. Preserve
+    // its exact cancelled or uncertain outcome; a heartbeat alone
+    // cannot turn an in-flight runtime effect into a terminal result.
+    let result = match state.finish(claim, executed) {
+        Ok(result) => result,
+        Err(error) => {
+            eprintln!("vonk-agent: completion custody unavailable: {error}");
+            state.restore_custody();
+            let finished = ExecutionResult::unknown(
+                WaitReason::RuntimeEffectUnconfirmed,
+                "completion custody awaits exact effect observation",
+                UnknownEvidence::at(FailureStage::AgentRestart),
+            )
+            .finish(claim);
+            AgentResult {
+                fence: claim.fence,
+                result: finished.result,
+                state: finished.state,
+            }
+        }
+    };
+    heartbeat_result?;
+    deliver_result(client, state, claim, &result, now).await
+}
+
+/// Offer one settled result unless its delivery is already settled or held back.
+async fn deliver_result<C: LoopClient>(
+    client: &C,
+    state: &mut StateStore,
+    claim: &AgentClaim,
+    result: &AgentResult,
+    now: DateTime<Utc>,
+) -> Result<(), LoopError> {
     result
         .validate_for_operation(&claim.operation)
         .map_err(StateError::from)?;
     let settled = state
-        .result_delivery_settled(&result)
+        .result_delivery_settled(result)
         .unwrap_or_else(|error| {
             // Offering exact receipt evidence cannot replay a host effect. Keep an
             // unreadable settlement marker and let the Controller reconcile it.
             eprintln!("vonk-agent: receipt settlement observation deferred: {error}");
             false
         });
-    if !settled && state.result_rejection(&result, now)?.is_none() {
-        match submit_or_core(client, &result).await {
+    if !settled && state.result_rejection(result, now)?.is_none() {
+        match submit_or_core(client, result).await {
             Ok(()) | Err(ClientError::ResultSuperseded) => {
-                if let Err(error) = state.acknowledge(&result) {
+                if let Err(error) = state.acknowledge(result) {
                     eprintln!("vonk-agent: receipt acknowledgement deferred: {error}");
                 }
             }
             Err(ClientError::ResultRejected(error)) => {
-                if let Err(error) = record_result_rejection(state, &result, &error, now) {
+                if let Err(error) = record_result_rejection(state, result, &error, now) {
                     eprintln!("vonk-agent: rejection projection deferred: {error}");
                 }
             }
             Err(ClientError::Controller(error)) if error.disposition() == Disposition::Fail => {
-                if let Err(error) = record_result_rejection(state, &result, &error, now) {
+                if let Err(error) = record_result_rejection(state, result, &error, now) {
                     eprintln!("vonk-agent: rejection projection deferred: {error}");
                 }
             }

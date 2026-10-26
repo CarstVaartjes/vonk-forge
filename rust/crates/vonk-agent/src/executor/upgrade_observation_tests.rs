@@ -394,14 +394,9 @@ async fn rollback_and_expired_unknown_preserve_evidence_and_recover_on_idle_tick
     let database = root.path().join("state.sqlite");
     let mut store = StateStore::open(&database, NODE_ID).unwrap();
     store.begin(&accepted, Utc::now()).unwrap();
-    reobserve_operations(
-        &mut store,
-        &executor,
-        None,
-        accepted.deadline.with_timezone(&Utc),
-    )
-    .await
-    .unwrap();
+    reobserve_operations(&mut store, &executor, accepted.deadline.with_timezone(&Utc))
+        .await
+        .unwrap();
     // Past the claim's lease, within its activation deadline: the helper's
     // watcher still owns the transaction, so no unknown is recorded and the
     // claim stays observed.
@@ -410,7 +405,7 @@ async fn rollback_and_expired_unknown_preserve_evidence_and_recover_on_idle_tick
     drop(store);
     publish(root.path(), &receipt(&accepted, Phase::Acknowledged));
     let mut store = StateStore::open_recovered(&database, NODE_ID).unwrap();
-    reobserve_operations(&mut store, &executor, None, Utc::now())
+    reobserve_operations(&mut store, &executor, Utc::now())
         .await
         .unwrap();
     assert!(matches!(

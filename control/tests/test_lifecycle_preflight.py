@@ -31,11 +31,7 @@ from vonk_control.models import (
     CatalogDocumentRevision,
     Job,
 )
-from vonk_control.operation_blockers import (
-    BlockingOperation,
-    ProgressAlarmCode,
-    make_blocker,
-)
+from vonk_control.operation_blockers import ProgressAlarmCode, make_blocker
 from vonk_control.persisted_waits import read_wait
 from vonk_control.runtime_preflight import mandatory_capabilities
 
@@ -822,12 +818,15 @@ def _heartbeat(sessions, build_id, node_id, now):
         refresh_queue_waits(session, now, node_id=node_id)
 
 
-def test_pending_probe_names_the_build_holding_its_spark_never_stale(tmp_path):
+def test_pending_probe_beside_a_compiling_build_shows_its_own_wait_never_stale(
+    tmp_path,
+):
     """Catches projecting the reason a probe round started as its current wait.
 
     Incident 2026-10-26: both receipts aged out, the round re-probed both
     Sparks, and node B's probe queued behind a long build for hours while the
-    load showed ``runtime_preflight.stale``.
+    load showed ``runtime_preflight.stale``. A build now runs beside the claim
+    lane, so the probe waits only for node B's next poll, and says so.
     """
     from dataclasses import replace
 
@@ -880,12 +879,10 @@ def test_pending_probe_names_the_build_holding_its_spark_never_stale(tmp_path):
         assert probe is not None
         child_wait = read_wait(probe)
     assert child_wait is not None
-    [busy] = child_wait.blockers
-    assert busy.code == WaitReason.SPARK_BUSY
-    assert busy.operation == BlockingOperation(
-        id=build_id, kind=OperationKind.RECIPE_BUILD.value
-    )
-    assert busy.node_ids == [node_b]
+    [awaiting_poll] = child_wait.blockers
+    assert awaiting_poll.code == WaitReason.OBSERVATION_UNAVAILABLE
+    assert awaiting_poll.operation is None
+    assert awaiting_poll.node_ids == [node_b]
 
     # The run-switch shows that same wait, never the round-start reason.
     adapter = RunSwitchAdapter()
@@ -909,7 +906,7 @@ def test_pending_probe_names_the_build_holding_its_spark_never_stale(tmp_path):
     )
     projected = read_wait(job)
     assert projected is not None
-    assert projected.reason == WaitReason.SPARK_BUSY
+    assert projected.reason == WaitReason.OBSERVATION_UNAVAILABLE
     assert projected.blockers == child_wait.blockers
     assert all(
         blocker.code != RuntimePreflightCode.STALE for blocker in projected.blockers
