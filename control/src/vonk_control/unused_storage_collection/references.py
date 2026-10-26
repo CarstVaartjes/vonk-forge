@@ -255,7 +255,7 @@ def _image_kept(
 def _latest_snapshots(
     session: Session, node_id: str | None = None
 ) -> dict[str, tuple[int, int, datetime]]:
-    """Each live Spark's latest reported (free, total, observed at) disk. Free
+    """Each live Spark's latest reported (free, total, received at) disk. Free
     counts the unused model files its agent removes itself before a claim
     writes: only a need beyond them uninstalls anything."""
 
@@ -272,7 +272,7 @@ def _latest_snapshots(
             NodeInventorySnapshot.disk_free_bytes,
             NodeInventorySnapshot.unused_model_bytes,
             NodeInventorySnapshot.disk_total_bytes,
-            NodeInventorySnapshot.observed_at,
+            NodeInventorySnapshot.received_at,
         )
         .join(
             newest,
@@ -285,12 +285,12 @@ def _latest_snapshots(
         .where(AgentNode.revoked_at.is_(None))
     )
     return {
-        found: (spark_free_bytes(free, unused), total, _utc(observed))
-        for found, free, unused, total, observed in rows
+        found: (spark_free_bytes(free, unused), total, _utc(received))
+        for found, free, unused, total, received in rows
     }
 
 
-def _spark_settling(session: Session, node_id: str, observed_at: datetime) -> bool:
+def _spark_settling(session: Session, node_id: str, received_at: datetime) -> bool:
     """A removal (or the stop of a failed run before one) this collector queued
     is still running, or finished after the Spark last reported its free space,
     so that report does not show it yet."""
@@ -304,7 +304,7 @@ def _spark_settling(session: Session, node_id: str, observed_at: datetime) -> bo
                 )
             ),
             Job.actor == ACTOR,
-            or_(Job.state.not_in(_FINISHED_JOBS), Job.updated_at >= observed_at),
+            or_(Job.state.not_in(_FINISHED_JOBS), Job.updated_at >= received_at),
         )
     ):
         if isinstance(targets, list) and node_id in targets:

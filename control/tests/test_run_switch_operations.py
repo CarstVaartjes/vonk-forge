@@ -903,6 +903,37 @@ def test_same_clock_later_intent_fences_older_queued_work(tmp_path: Path) -> Non
     assert service.get(second.operation_id).state == "queued"
 
 
+def test_a_slow_agent_clock_does_not_make_inventory_stale_for_a_load(
+    tmp_path: Path,
+) -> None:
+    """Catches ageing inventory by the agent stamp: a report collected 10 minutes
+    before it was received (a slow Spark clock) refused every load."""
+    sessions, lifecycle, _queue, _mapping_id, _build_id, nodes = setup_services(
+        tmp_path
+    )
+    with sessions.begin() as session:
+        snapshot = session.scalar(
+            select(NodeInventorySnapshot).where(
+                NodeInventorySnapshot.node_id == nodes[0]
+            )
+        )
+        assert snapshot is not None
+        snapshot.observed_at = NOW - timedelta(minutes=10)
+        snapshot.received_at = NOW
+    service = _service(
+        sessions,
+        NOW,
+        lifecycle,
+        RecordingArtifactExecutor(),
+        artifacts=CompleteArtifactInspector(),
+    )
+
+    plan = service.preview(_request(sessions, nodes[0]), actor="admin")
+
+    assert plan.allowed, plan.blockers
+    assert RunSwitchCode.INVENTORY_STALE not in {item.code for item in plan.blockers}
+
+
 def test_stale_inventory_intent_waits_and_replans_when_inventory_returns(
     tmp_path: Path,
 ) -> None:
@@ -917,6 +948,7 @@ def test_stale_inventory_intent_waits_and_replans_when_inventory_returns(
         )
         assert snapshot is not None
         snapshot.observed_at = NOW - timedelta(days=1)
+        snapshot.received_at = NOW - timedelta(days=1)
     now = [NOW]
     executor = RecordingArtifactExecutor()
     service = _service(
@@ -984,6 +1016,7 @@ def test_stale_inventory_intent_waits_and_replans_when_inventory_returns(
         )
         assert snapshot is not None
         snapshot.observed_at = NOW
+        snapshot.received_at = NOW
     now[0] = second_due + timedelta(seconds=1)
     assert service._advance(operation.operation_id) is True
     refreshed = service.get(operation.operation_id)
