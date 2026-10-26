@@ -9,7 +9,7 @@ from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from sqlalchemy import event, func, select
+from sqlalchemy import event, func, select, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import AgentResult, OperationProgress, canonical_message
@@ -1434,3 +1434,55 @@ def test_postgres_distribution_lower_receipt_settles_without_lease_retry(
         row = session.get(AgentOperation, operation.id)
         assert row is not None and row.state == LifecycleState.SUCCEEDED
         assert row.current_attempt == 1
+
+
+def test_postgres_abandon_skips_an_order_a_claim_holds_instead_of_waiting(
+    service,
+) -> None:
+    """Catches the abandon taking job then order locks against the claim's order.
+
+    A claim locks the order, then its job; an abandon that locked the job first
+    and waited for the order deadlocked against it (or held a cancel on it).
+    """
+    from vonk_control.agent_jobs import abandon_idempotent_job_in_session
+
+    sessions, clock = service
+    jobs = AgentJobService(sessions, clock=clock)
+    owner = parent(sessions, clock)
+    probe = jobs.enqueue(
+        owner.id,
+        NODE_A,
+        "runtime.preflight.v1",
+        COMMIT,
+        {
+            "source_build": False,
+            "minimum_free_bytes": 0,
+            "fabric_connectivity": "none",
+            "fabric_minimum_mbps": 0,
+        },
+    )
+    claiming = sessions()
+    try:
+        claiming.begin()
+        assert (
+            claiming.scalar(
+                select(AgentOperation)
+                .where(AgentOperation.id == probe.id)
+                .with_for_update()
+            )
+            is not None
+        )
+        with sessions.begin() as session:
+            session.execute(text("SET LOCAL lock_timeout = '2s'"))
+            assert not abandon_idempotent_job_in_session(
+                session, owner.id, clock.now, reason="scope-changed"
+            )
+    finally:
+        claiming.rollback()
+        claiming.close()
+    # Once the claim is gone, the abandon ends the order and its job.
+    with sessions.begin() as session:
+        assert abandon_idempotent_job_in_session(
+            session, owner.id, clock.now, reason="scope-changed"
+        )
+    assert state(sessions, owner.id) == "cancelled"

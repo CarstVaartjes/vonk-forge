@@ -7602,6 +7602,155 @@ def test_low_level_run_preview_propagates_contract_defects(
         )
 
 
+def _probing_switch(tmp_path, *, probe=True):
+    """A load whose first phase probes its Spark; the probe stays unanswered."""
+    sessions, lifecycle, queue, _mapping_id, _build_id, nodes = setup_services(tmp_path)
+    service = _service(sessions, NOW, lifecycle, RecordingArtifactExecutor())
+    request = _request(sessions, nodes[0])
+    plan = service.preview(request, actor="admin")
+    operation = service.apply(
+        RunSwitchApplyRequest(
+            **request.model_dump(),
+            plan_digest=plan.plan_digest,
+            request_key=str(uuid.uuid4()),
+        ),
+        actor="admin",
+    )
+    # No receipt is reusable, so the first phase issues a probe on the Spark.
+    _clear(sessions)
+    switch = SimpleNamespace(
+        sessions=sessions,
+        queue=queue,
+        node=nodes[0],
+        service=service,
+        request=request,
+        plan=plan,
+        operation=operation,
+    )
+    if probe:
+        for _ in range(4):
+            if _probe_ids(switch):
+                break
+            service.tick()
+    return switch
+
+
+def _probe_ids(switch) -> tuple[str, str] | None:
+    """The run-switch's issued probe: its child job and its Spark order."""
+    from vonk_agent_protocol import AgentOperation as OperationKind
+
+    with switch.sessions() as session:
+        probe = session.scalar(
+            select(AgentOperation).where(
+                AgentOperation.kind == OperationKind.RUNTIME_PREFLIGHT.value
+            )
+        )
+        return None if probe is None else (probe.parent_job_id, probe.id)
+
+
+def _cancel(switch) -> None:
+    switch.service.cancel(
+        switch.operation.operation_id,
+        actor="admin",
+        request_key=str(uuid.uuid4()),
+        reason="The operator chose another model",
+    )
+    for _ in range(3):
+        if switch.service.get(switch.operation.operation_id).state == "cancelled":
+            break
+        switch.service.tick()
+    assert switch.service.get(switch.operation.operation_id).state == "cancelled"
+
+
+def _probe_states(switch, ids) -> tuple[str, str]:
+    with switch.sessions() as session:
+        job = session.get(Job, ids[0])
+        probe = session.get(AgentOperation, ids[1])
+        assert job is not None and probe is not None
+        return job.state, probe.state
+
+
+def _admits_a_fresh_load(switch) -> None:
+    fresh = switch.service.apply(
+        RunSwitchApplyRequest(
+            **switch.request.model_dump(),
+            plan_digest=switch.plan.plan_digest,
+            request_key=str(uuid.uuid4()),
+        ),
+        actor="admin",
+    )
+    assert fresh.state not in {"cancelled", "failed"}
+
+
+def test_cancel_ends_the_queued_runtime_probe_with_its_run_switch(tmp_path):
+    """Catches a cancelled run-switch leaving its unclaimed probe queued.
+
+    Incident 2026-10-26: cancelled loads left their preflight children queued
+    on a Spark whose claim lane a build held; they would have run (and held the
+    lane) for an owner that no longer wanted them.
+    """
+    switch = _probing_switch(tmp_path)
+    ids = _probe_ids(switch)
+    assert ids is not None
+    assert _probe_states(switch, ids)[1] == LifecycleState.QUEUED.value
+    _cancel(switch)
+    cancelled = LifecycleState.CANCELLED.value
+    assert _probe_states(switch, ids) == (cancelled, cancelled)
+    _admits_a_fresh_load(switch)
+
+
+def test_cancel_while_the_probe_is_issued_still_ends_it(tmp_path):
+    """Catches the probe a round commits after the cancel's terminal write.
+
+    The probe is committed before the round saves its checkpoint; a cancel in
+    between ended the run-switch from a checkpoint that did not name it.
+    """
+    switch = _probing_switch(tmp_path, probe=False)
+    executor = switch.service._phase_executor
+    issue = executor.preflight
+
+    def cancel_after_issue(*arguments, **keywords):
+        issued = issue(*arguments, **keywords)
+        _cancel(switch)
+        return issued
+
+    executor.preflight = cancel_after_issue
+    switch.service.tick()
+    ids = _probe_ids(switch)
+    assert ids is not None
+    cancelled = LifecycleState.CANCELLED.value
+    assert _probe_states(switch, ids) == (cancelled, cancelled)
+    executor.preflight = issue
+    _admits_a_fresh_load(switch)
+
+
+def test_cancel_leaves_a_claimed_probe_to_report_its_own_end(tmp_path):
+    """Catches a cancel overwriting the probe a Spark is running."""
+    switch = _probing_switch(tmp_path)
+    ids = _probe_ids(switch)
+    assert ids is not None
+    with switch.sessions.begin() as session:
+        probe = session.get(AgentOperation, ids[1])
+        assert probe is not None
+        probe.state = LifecycleState.RUNNING.value
+        probe.current_attempt = 1
+        session.add(
+            AgentOperationAttempt(
+                operation_id=probe.id,
+                attempt=1,
+                fence=str(uuid.uuid4()),
+                lease_deadline=NOW + timedelta(seconds=30),
+                agent_certificate_serial="serial-0",
+                state=LifecycleState.RUNNING.value,
+            )
+        )
+    _cancel(switch)
+    job_state, probe_state = _probe_states(switch, ids)
+    assert probe_state == LifecycleState.RUNNING.value
+    assert job_state != LifecycleState.CANCELLED.value
+    _admits_a_fresh_load(switch)
+
+
 def test_a_queued_probe_names_its_spark_holder_as_the_load_reason(tmp_path):
     """Catches the load reason staying at the reason its probe round started.
 

@@ -54,7 +54,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from sqlalchemy import select
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import Session, object_session, sessionmaker
 from vonk_agent_protocol import (
     Disposition,
     LifecycleState,
@@ -67,6 +67,7 @@ from vonk_agent_protocol import (
 
 from .. import job_states
 from ..agent_operation_facts import aware
+from ..lifecycle_preflight import end_unclaimed_probes
 from ..models import AgentOperation as StoredOperation
 from ..models import Job
 from ..operation_blockers import OperationBlocker, make_blocker
@@ -451,6 +452,9 @@ class RunSwitchAdapter:
         )
         job.state = state
         if after.state in (State.CANCELLED, State.FAILED):
+            session = object_session(job)
+            if session is not None and preflight is not None:
+                end_unclaimed_probes(session, preflight, now)
             # Terminal request result is final; the exact accepted Start may
             # still need its cancellation handoff after a lost worker response.
             schedule_wait(

@@ -14,11 +14,13 @@ from pydantic import (
     StringConstraints,
 )
 from sqlalchemy import select
+from sqlalchemy.orm import Session
 from vonk_agent_protocol import AgentOperation as OperationKind
 from vonk_agent_protocol import (
     LifecycleState,
     OperationReason,
     RuntimePreflightCode,
+    WaitReason,
     canonical_message,
 )
 from vonk_agent_protocol.runtime_preflight import RuntimePreflightResult
@@ -95,6 +97,23 @@ class LifecyclePreflightCheckpoint(StrictJSONModel):
             [make_blocker(reason, detail, node_ids=backing_off)] if backing_off else []
         )
         return [*self.child_waits, *own][:MAX_BLOCKERS]
+
+
+def end_unclaimed_probes(
+    session: Session, checkpoint: LifecyclePreflightCheckpoint, now: datetime
+) -> None:
+    """End the runtime probes of an ended owner that no Spark has claimed.
+
+    A probe has no effect to undo; left queued it would outlive its owner and
+    hold the Spark's claim lane for nobody. A claimed probe reports its own end.
+    """
+    # agent_jobs builds on the lifecycle core; import its writer at use.
+    from .agent_jobs import abandon_idempotent_job_in_session
+
+    for child_id in checkpoint.pending_jobs.values():
+        abandon_idempotent_job_in_session(
+            session, child_id, now, reason=WaitReason.SCOPE_CHANGED.value
+        )
 
 
 # Security refusals (failure_classification.is_security_failure) park the
