@@ -408,9 +408,14 @@ class DownloadAdmissionMixin:
             transfer = cache._transfer_state_for_manifest(
                 manifest, force=False, cached=cached
             )
-            with cache._session() as session:
-                running = cache._running_transfers(session)
-            fits = cache._storage_fits(manifest, transfer, running, cached=cached)
+            # A preview compares with the free disk alone: the claim gate is
+            # where a transfer also makes room for the running ones.
+            fits = cache._storage_fits(
+                cache._transfer_need(
+                    manifest, transfer, replaces=False, measured=True, cached=cached
+                ),
+                {},
+            )
         new_bytes = transfer.total_bytes
         blockers = []
         if not fits:

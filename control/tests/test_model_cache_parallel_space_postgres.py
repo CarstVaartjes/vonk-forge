@@ -11,13 +11,40 @@ import pytest
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import LifecycleState, ModelCacheCode
 from vonk_control.model_cache import ModelCacheService
-from vonk_control.models import Base
+from vonk_control.model_cache.persistence import _store_operation_payload
+from vonk_control.models import Base, ModelCacheOperation
 from vonk_control.storage_demands import NAS_MODELS, StorageDemands
 
 from .test_model_cache import _artifact
 
 SIZE = 4096
 _Usage = namedtuple("_Usage", "total used free")
+
+
+def _service(postgres_engine, tmp_path: Path, monkeypatch, free: list[int]):
+    Base.metadata.create_all(postgres_engine)
+    sessions = sessionmaker(postgres_engine, expire_on_commit=False)
+    monkeypatch.setattr(
+        "vonk_control.model_cache.shutil.disk_usage",
+        lambda _: _Usage(10**12, 10**12 - free[0], free[0]),
+    )
+    service = ModelCacheService(
+        sessions, tmp_path / "nas", reserve_bytes=0, fixture_sources=True
+    )
+    return service, sessions
+
+
+def _admit(service: ModelCacheService, root: Path, model: str, data: bytes) -> str:
+    root.mkdir()
+    artifact = _artifact(root, data, model_content_sha256=model)
+    preview = service.download_preview(model_content_sha256=model, artifacts=[artifact])
+    return service.start_download(
+        actor="operator",
+        request_key=str(uuid4()),
+        plan_digest=str(preview["plan_digest"]),
+        model_content_sha256=model,
+        artifacts=[artifact],
+    ).id
 
 
 @pytest.mark.parametrize(("downloads", "fitting"), [(2, 1), (8, 3)])
@@ -29,34 +56,18 @@ def test_parallel_downloads_never_overcommit_the_same_free_space(
     Every download alone fits; together they do not. Comparing each with the
     free disk alone starts all of them and fills the volume between them.
     """
-    Base.metadata.create_all(postgres_engine)
-    sessions = sessionmaker(postgres_engine, expire_on_commit=False)
     free = [fitting * SIZE + SIZE // 2]
-    monkeypatch.setattr(
-        "vonk_control.model_cache.shutil.disk_usage",
-        lambda _: _Usage(10**12, 10**12 - free[0], free[0]),
-    )
-    service = ModelCacheService(
-        sessions, tmp_path / "nas", reserve_bytes=0, fixture_sources=True
-    )
+    service, sessions = _service(postgres_engine, tmp_path, monkeypatch, free)
     demands = StorageDemands(service._clock)
     service.bind_storage_demands(demands)
 
     def admit(index: int) -> str:
-        model = f"{index + 1:064x}"
-        source = tmp_path / f"source-{index}"
-        source.mkdir()
-        artifact = _artifact(source, bytes([index]) * SIZE, model_content_sha256=model)
-        preview = service.download_preview(
-            model_content_sha256=model, artifacts=[artifact]
+        return _admit(
+            service,
+            tmp_path / f"source-{index}",
+            f"{index + 1:064x}",
+            bytes([index]) * SIZE,
         )
-        return service.start_download(
-            actor="operator",
-            request_key=str(uuid4()),
-            plan_digest=str(preview["plan_digest"]),
-            model_content_sha256=model,
-            artifacts=[artifact],
-        ).id
 
     try:
         with ThreadPoolExecutor(max_workers=downloads) as pool:
@@ -77,6 +88,12 @@ def test_parallel_downloads_never_overcommit_the_same_free_space(
             assert view.failure["code"] == ModelCacheCode.DOWNLOAD_BLOCKED
             assert view.failure["retryable"] is True
             assert view.next_attempt_at is not None
+        # The running downloads own these waits: their windows restart instead
+        # of running out behind them.
+        with sessions() as session:
+            for operation_id in waiting:
+                row = session.get(ModelCacheOperation, operation_id)
+                assert row is not None and row.progress_advanced_at is not None
         (demand,) = demands.active()
         assert demand.scope == NAS_MODELS
         assert demand.required_free_bytes == (fitting + 1) * SIZE
@@ -93,5 +110,72 @@ def test_parallel_downloads_never_overcommit_the_same_free_space(
             limit=downloads, respect_backoff=False, transfer_slots=downloads
         )
         assert sorted(item for item, _kind in resumed) == sorted(waiting)
+    finally:
+        service.close()
+
+
+@pytest.mark.parametrize("partial_kept", [False, True])
+def test_received_bytes_count_only_while_their_partial_is_on_disk(
+    postgres_engine, tmp_path: Path, monkeypatch, partial_kept: bool
+) -> None:
+    """Catches a ledger read as landed bytes after its partial was discarded.
+
+    A digest mismatch deletes the partial but leaves the ledger's received
+    bytes: the retry still owes the whole object. A partial that is still on
+    disk is a resume that owes only the rest.
+    """
+    free = [SIZE // 2]
+    service, sessions = _service(postgres_engine, tmp_path, monkeypatch, free)
+    try:
+        operation_id = _admit(service, tmp_path / "source", "1" * 64, b"w" * SIZE)
+        kept = SIZE * 3 // 4
+        with sessions.begin() as session:
+            row = session.get(ModelCacheOperation, operation_id)
+            assert row is not None
+            payload = service._transfer_or_none(row)
+            assert payload is not None
+            ((digest, entry),) = payload.transfer.artifacts.items()
+            ledger = payload.transfer.model_copy(
+                update={
+                    "artifacts": {
+                        digest: entry.model_copy(update={"received_bytes": kept})
+                    }
+                }
+            )
+            _store_operation_payload(
+                row, row.kind, payload.model_copy(update={"transfer": ledger})
+            )
+            set_digest = row.artifact_set_sha256
+        assert set_digest is not None
+        if partial_kept:
+            partial = service._partial_path(set_digest, digest)
+            partial.parent.mkdir(parents=True, exist_ok=True)
+            partial.write_bytes(b"w" * kept)
+        claimed = service._claim_operations(
+            limit=1, respect_backoff=False, transfer_slots=1
+        )
+        assert [item for item, _kind in claimed] == (
+            [operation_id] if partial_kept else []
+        )
+    finally:
+        service.close()
+
+
+def test_an_object_two_downloads_share_is_reserved_once(
+    postgres_engine, tmp_path: Path, monkeypatch
+) -> None:
+    """Catches charging one object twice: two models naming the same file."""
+    free = [SIZE + SIZE // 2]
+    service, _sessions = _service(postgres_engine, tmp_path, monkeypatch, free)
+    try:
+        admitted = [
+            _admit(service, tmp_path / f"source-{index}", model, b"s" * SIZE)
+            for index, model in enumerate(("1" * 64, "2" * 64))
+        ]
+        claimed = service._claim_operations(
+            limit=2, respect_backoff=True, transfer_slots=2
+        )
+        assert sorted(item for item, _kind in claimed) == sorted(admitted)
+        assert service.storage_summary().in_flight_bytes == SIZE
     finally:
         service.close()

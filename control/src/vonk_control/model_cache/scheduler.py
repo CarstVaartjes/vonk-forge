@@ -607,9 +607,17 @@ class SchedulerMixin:
                     and transfers >= transfer_slots
                 ):
                     continue  # due again once a transfer slot is free
+                need = cache._transfer_need(
+                    manifest,
+                    payload.transfer,
+                    replaces=operation.kind == CacheOperationKind.REPAIR
+                    or payload.force_refresh,
+                )
                 if transfers_bytes and cache._capacity_holds(
-                    operation, payload, now, running
+                    operation, need, now, running
                 ):
+                    # A lapsed attempt waits now: its bytes are not in flight.
+                    running.pop(operation.id, None)
                     continue
                 if not cache._lifecycle.claim(
                     operation,
@@ -622,7 +630,5 @@ class SchedulerMixin:
                 claimed.append((operation.id, operation.kind))
                 transfers += int(transfers_bytes)
                 if transfers_bytes:
-                    running[operation.id] = cache._remaining_bytes(
-                        manifest, payload.transfer
-                    )
+                    running[operation.id] = need
         return claimed

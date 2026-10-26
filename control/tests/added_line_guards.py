@@ -64,6 +64,7 @@ MODES = (
     "listings",
     "movement",
     "exit-causes",
+    "nas-space",
 )
 # The agent's messages a Controller test may send only as the stand-in pinned
 # to the agent's shared vector; built by hand they are the Controller's idea of
@@ -1135,6 +1136,21 @@ def check_source(
             (line, "pairwise progress movement (compare against forward marks)")
             for line, function in pairwise_movement_checks(source)
             if (path, function) not in MOVEMENT_VERDICTS
+        )
+    if (
+        python
+        and not is_test
+        and "nas-space" in modes
+        and path.startswith("control/src/vonk_control/model_cache/")
+        and path != "control/src/vonk_control/model_cache/storage.py"
+    ):
+        # NAS space is decided once, in storage.py's _storage_fits, next to what
+        # the running transfers still write. A comparison with the free disk
+        # alone let parallel downloads overcommit the volume (#1910).
+        hits.extend(
+            (line, "NAS space read outside storage.py; use _storage_fits")
+            for line, text in enumerate(source.splitlines(), 1)
+            if re.search(r"\bfree_bytes\(\)|\bdisk_usage\(", text)
         )
     if python and is_test and "clocks" in modes:
         hits.extend(

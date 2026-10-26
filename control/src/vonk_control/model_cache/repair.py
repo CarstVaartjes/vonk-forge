@@ -17,12 +17,12 @@ from vonk_agent_protocol import (
 )
 
 from .. import model_cache_states
+from ..agent_operation_facts import aware as _aware
 from ..bounded_json import require_integer, require_mapping, require_sequence
 from ..categorized_errors import InvalidValue
 from ..lifecycle import Reported
 from ..lifecycle.model_cache import ModelCacheAdapter
 from ..model_cache_contract import (
-    CacheOperationKind,
     ModelCacheDownloadPayload,
     ModelCacheOperationPayload,
     ModelCacheRepairCheckpoint,
@@ -43,12 +43,11 @@ from .catalog_helpers import _datetime, _iso
 from .constants import _RETRY_BASE_SECONDS, SCHEMA_VERSION, SOURCE_POLICY
 from .errors import (
     ModelCacheConflictInvalid,
-    ModelCacheError,
     ModelCacheNotFoundInvalid,
 )
-from .persistence import _cache_failure, _manifest_of, _write_operation_payload
+from .persistence import _cache_failure, _write_operation_payload
 from .source_helpers import _is_hf_authority, _request_key
-from .storage import RunningTransfers
+from .storage import RunningTransfers, TransferNeed
 from .views import CacheOperationView
 
 if TYPE_CHECKING:
@@ -175,11 +174,11 @@ class RepairMixin:
                 return cache._operation_view(existing)
         manifest = cache._manifest_for_set(digest)
         transfer = cache._transfer_state_for_manifest(manifest, force=True)
-        with cache._session() as session:
-            running = cache._running_transfers(session)
         waiting_for = (
             ""
-            if cache._storage_fits(manifest, transfer, running, replaces=True)
+            if cache._storage_fits(
+                cache._transfer_need(manifest, transfer, replaces=True), {}
+            )
             else ModelCacheBlockerCode.INSUFFICIENT_RESERVED_STORAGE
         )
         capacity = cache._capacity_wait(waiting_for)
@@ -256,6 +255,14 @@ class RepairMixin:
 
         if not waiting_for:
             return None
+        return cache._capacity_failure(waiting_for)
+
+    def _capacity_failure(
+        self, waiting_for: str
+    ) -> tuple[AvailabilityOperationFailure, datetime]:
+        """The retryable ``download_blocked`` wait and its due time."""
+        cache = cast("ModelCacheService", self)
+
         due = cache._clock() + timedelta(seconds=_RETRY_BASE_SECONDS)
         failure = _cache_failure(
             ModelCacheCode.DOWNLOAD_BLOCKED,
@@ -270,7 +277,7 @@ class RepairMixin:
     def _capacity_holds(
         self,
         operation: ModelCacheOperation,
-        payload: ModelCacheDownloadPayload,
+        need: TransferNeed,
         now: datetime,
         running: RunningTransfers,
     ) -> bool:
@@ -280,28 +287,19 @@ class RepairMixin:
         here next to the running ones, however its admission went. A shortfall
         is a queued wait: the typed ``download_blocked`` reason with the shared
         retry clock (bounded backoff, never an operator wait), and the storage
-        demand is filed so retention frees the space.
+        demand is filed so retention frees the space. While running transfers
+        hold the space, they are the wait's live owner: its window restarts
+        instead of running out behind them.
         """
         cache = cast("ModelCacheService", self)
 
-        try:
-            fits = cache._storage_fits(
-                _manifest_of(payload),
-                payload.transfer,
-                running,
-                operation_id=operation.id,
-                replaces=operation.kind == CacheOperationKind.REPAIR
-                or payload.force_refresh,
-            )
-        except (TypeError, ValueError, ModelCacheError):
+        if cache._storage_fits(need, running, operation_id=operation.id):
             return False
-        if fits:
-            return False
-        capacity = cache._capacity_wait(
+        failure, due = cache._capacity_failure(
             ModelCacheBlockerCode.INSUFFICIENT_RESERVED_STORAGE
         )
-        assert capacity is not None
-        failure, due = capacity
+        if any(owner != operation.id for owner in running):
+            operation.progress_advanced_at = _aware(now)
         cache._lifecycle.complete(
             operation,
             Reported.failed(
