@@ -337,3 +337,73 @@ def test_recipe_coordinator_fault_is_local_rate_limited_and_recovers(tmp_path, o
     assert generic_worker.run_once()
     assert generic_worker.run_once()
     assert jobs.get(fresh.id).result == {"done": True}
+
+
+def test_unusable_image_cache_root_leaves_the_other_lanes_running_and_heals(
+    tmp_path, monkeypatch
+) -> None:
+    """Catches an optional image store, built eagerly at assembly, ending the process."""
+    from vonk_control.capabilities import CapabilityRegistry
+    from vonk_control.capability_contract import (
+        CapabilityAvailability,
+        CapabilityReason,
+        ControllerCapability,
+    )
+    from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
+
+    now = [datetime(2026, 8, 6, tzinfo=UTC)]
+    clock = lambda: now[0]
+    registry = CapabilityRegistry(clock=clock)
+    engine = create_engine(f"sqlite:///{tmp_path / 'optional-image-cache.sqlite'}")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    jobs = JobService(sessions, clock=clock)
+    initialize = FilesystemRuntimeImageStorage.__init__
+    faulty = True
+
+    def unusable(self, *args, **kwargs):
+        if faulty:
+            raise OSError("image cache mount is stale")
+        initialize(self, *args, **kwargs)
+
+    monkeypatch.setattr(FilesystemRuntimeImageStorage, "__init__", unusable)
+    worker = assemble_production_worker(
+        jobs=jobs,
+        sessions=sessions,
+        agent_jobs=AgentJobService(sessions, clock=clock),
+        publisher=AtomicRouteBundlePublisher(tmp_path / "routes"),
+        management_policy=ManagementAddressPolicy.parse("10.0.0.0/24"),
+        clock=clock,
+        worker_id="control-worker-optional-image-cache",
+        capabilities=registry,
+        artifact_job_root=tmp_path / "artifact-jobs" / "blobs",
+        artifact_job_storage_max_bytes=16 * 1024**3,
+        artifact_job_retention_seconds=7 * 24 * 60 * 60,
+        artifact_job_reconcile_interval_seconds=3600,
+        artifact_job_reconcile_batch_limit=1000,
+        agent_artifact_root=tmp_path / "agent-artifacts",
+    )
+    worker._handlers["healthy"] = lambda _request: {"done": True}
+
+    def storage_status():
+        registry.retry_due()
+        return next(
+            status
+            for status in registry.statuses()
+            if status.capability == ControllerCapability.RUNTIME_IMAGE_STORAGE
+        )
+
+    first = jobs.enqueue("healthy", "admin", "abc", [], {})
+    worker.run_once()
+    assert jobs.get(first.id).result == {"done": True}
+    status = storage_status()
+    assert status.availability == CapabilityAvailability.UNAVAILABLE
+    assert status.reason == CapabilityReason.STORAGE_UNAVAILABLE
+
+    faulty = False
+    now[0] += timedelta(seconds=120)
+    assert storage_status().availability == CapabilityAvailability.AVAILABLE
+    fresh = jobs.enqueue("healthy", "admin", "abc", [], {})
+    worker.run_once()
+    assert jobs.get(fresh.id).result == {"done": True}
+    worker.close()

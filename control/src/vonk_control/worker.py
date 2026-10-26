@@ -826,6 +826,7 @@ def assemble_production_worker(
         clock=clock,
         lifecycle=lifecycle,
         image_cache_root=image_cache_root,
+        images=runtime_archive_storage,
         model_cache_root=model_cache_root,
         model_cache=model_cache,
         image_blobs=image_store_collector,
