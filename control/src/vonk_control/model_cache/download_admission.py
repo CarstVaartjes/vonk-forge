@@ -396,21 +396,30 @@ class DownloadAdmissionMixin:
                     for digest, entry in observation.objects.items()
                 },
             )
+            # A split file is assembled part by part, each part deleted once
+            # appended: the disk peaks at the file plus its largest part.
+            needed = transfer.total_bytes + _split_transient_bytes(manifest, cached)
+            fits = needed <= available_bytes
+            if not fits:
+                cache._request_storage(
+                    needed, ModelCacheBlockerCode.INSUFFICIENT_RESERVED_STORAGE
+                )
         else:
-            available_bytes = cache.free_bytes()
             transfer = cache._transfer_state_for_manifest(
                 manifest, force=False, cached=cached
             )
-        new_bytes = transfer.total_bytes
-        # A split file is assembled part by part, each part deleted once
-        # appended: the disk peaks at the file plus its largest part.
-        needed = new_bytes + _split_transient_bytes(manifest, cached)
-        blockers = []
-        if needed > available_bytes:
-            blockers.append(ModelCacheBlockerCode.INSUFFICIENT_RESERVED_STORAGE)
-            cache._request_storage(
-                needed, ModelCacheBlockerCode.INSUFFICIENT_RESERVED_STORAGE
+            # A preview compares with the free disk alone: the claim gate is
+            # where a transfer also makes room for the running ones.
+            fits = cache._storage_fits(
+                cache._transfer_need(
+                    manifest, transfer, replaces=False, measured=True, cached=cached
+                ),
+                {},
             )
+        new_bytes = transfer.total_bytes
+        blockers = []
+        if not fits:
+            blockers.append(ModelCacheBlockerCode.INSUFFICIENT_RESERVED_STORAGE)
         # Bind reusable content, not the first requester's provenance or the
         # verified-model bindings publication adds to the stored manifest.
         # Observation and live admission may see different transfer checkpoints;
