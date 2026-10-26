@@ -66,6 +66,7 @@ MODES = (
     "exit-causes",
     "nas-space",
     "model-sets",
+    "follow-validators",
 )
 # The agent's messages a Controller test may send only as the stand-in pinned
 # to the agent's shared vector; built by hand they are the Controller's idea of
@@ -1170,6 +1171,24 @@ def check_source(
             (line, "model sets chosen by first-requester digest; use lineage.py")
             for line, text in enumerate(source.splitlines(), 1)
             if "ModelCacheSet.model_content_sha256" in text
+        )
+    if (
+        python
+        and not is_test
+        and "follow-validators" in modes
+        and path.startswith("src/cluster_profiles/controller_cli/")
+    ):
+        # A follow validator checks the job's identity, never how many
+        # operations run: every Spark upgrades at once, and a count assertion
+        # made `fleet upgrade --all` end TIMED_OUT while the upgrades ran (N1).
+        hits.extend(
+            (line, "follow validator asserts an operation count; check identity only")
+            for line, text in enumerate(source.splitlines(), 1)
+            if re.search(
+                r"\blen\((?:active|operations|queued|running)\w*\)\s*(?:>|>=|==|!=)"
+                r"|\[[\"']running[\"']\]\s*(?:>|>=)\s*\d",
+                text,
+            )
         )
     if python and is_test and "clocks" in modes:
         hits.extend(

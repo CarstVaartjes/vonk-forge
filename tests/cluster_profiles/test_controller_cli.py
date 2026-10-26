@@ -4296,6 +4296,67 @@ def test_fleet_upgrade_follows_exact_job_and_stops_at_operator_blocker() -> None
     assert len(result["operations"]) == 1
 
 
+def test_fleet_upgrade_follows_parallel_sparks_to_the_terminal_state() -> None:
+    """Catches a follow validator that counts operations: every Spark upgrades
+    at once, so 2 queued and 1 running operation is the normal mid-rollout view
+    and must be followed, not rejected as a malformed response."""
+    job_id = "upgrade-job"
+    request_key = "44444444-4444-4444-8444-444444444444"
+    nodes = ["spk_" + letter * 32 for letter in "abc"]
+    mid_rollout = {
+        "id": job_id,
+        "state": "running",
+        "kind": "agent-upgrade",
+        "targets": nodes,
+        "operations": [
+            {"id": "operation-a", "node_id": nodes[0], "state": "running"},
+            {"id": "operation-b", "node_id": nodes[1], "state": "queued"},
+            {"id": "operation-c", "node_id": nodes[2], "state": "queued"},
+        ],
+        "progress": {"running": 2, "completed": 0, "failed": 0, "total": 3},
+    }
+    done = {
+        **mid_rollout,
+        "state": "succeeded",
+        "operations": [
+            {"id": f"operation-{name}", "node_id": node, "state": "succeeded"}
+            for name, node in zip("abc", nodes, strict=True)
+        ],
+        "progress": {"running": 0, "completed": 3, "failed": 0, "total": 3},
+    }
+    client = FakeClient(
+        {
+            ("POST", "/api/fleet/upgrade"): {
+                "action": "upgrade",
+                "state": "queued",
+                "operation_id": job_id,
+                "plan_digest": "a" * 64,
+                "request_key": request_key,
+                "targets": nodes,
+            },
+            ("GET", f"/api/jobs/{job_id}"): [mid_rollout, done],
+        }
+    )
+
+    status, result = run(
+        (
+            "fleet",
+            "upgrade",
+            "--all",
+            "--yes",
+            "--request-key",
+            request_key,
+            "--json",
+            "--interval-seconds",
+            "0.01",
+        ),
+        client,
+    )
+
+    assert status == 0, result
+    assert result["state"] == "succeeded"
+
+
 def test_fleet_upgrade_replays_lost_post_with_same_request_key() -> None:
     request_key = "22222222-2222-4222-8222-222222222222"
     client = FakeClient(

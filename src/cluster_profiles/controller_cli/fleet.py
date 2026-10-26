@@ -570,29 +570,6 @@ def _fleet(
                 raise ControlMalformedResponse(
                     "fleet upgrade observation identifies another job"
                 )
-            operations = observed.get("operations")
-            if isinstance(operations, list):
-                # A Spark whose install failed retries behind its safety
-                # fence while the rollout moves on; only dispatched work counts.
-                active = [
-                    item
-                    for item in operations
-                    if isinstance(item, Mapping)
-                    and item.get("state") in {"queued", "running"}
-                ]
-                if len(active) > 1:
-                    raise ControlMalformedResponse(
-                        "fleet upgrade job has more than one active Spark"
-                    )
-            progress = observed.get("progress")
-            if (
-                isinstance(progress, Mapping)
-                and type(progress.get("running")) is int
-                and progress["running"] > 1
-            ):
-                raise ControlMalformedResponse(
-                    "fleet upgrade job reports concurrent Spark upgrades"
-                )
 
         if not result.get("targets") and _state(result) == "succeeded":
             # Nothing needed an upgrade: the receipt is the whole outcome and
