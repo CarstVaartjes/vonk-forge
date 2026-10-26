@@ -54,7 +54,6 @@ from ..fleet_model_removal_contract import (
 from ..fleet_model_removal_contract import (
     FleetRemovalReason as R,
 )
-from ..inventory_repository import MAX_INVENTORY_FUTURE_SKEW
 from ..lifecycle.evidence import (
     BookkeepingReason,
     Residue,

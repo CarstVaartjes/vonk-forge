@@ -163,7 +163,7 @@ def test_a_slow_agent_clock_is_admitted_for_install_and_run_switch(tmp_path) -> 
     plan = _service(sessions, inventory_max_age=300, disk_floor_bytes=10).plan_install(
         mapping, build, now=now
     )
-    assert plan.allowed, plan.blockers
+    assert plan.allowed
     with sessions() as session:
         _snapshot, evidence = PlanInventory(
             session, now=now, maximum_age_seconds=300
