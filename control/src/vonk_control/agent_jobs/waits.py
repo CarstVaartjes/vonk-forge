@@ -15,7 +15,7 @@ from vonk_agent_protocol import WaitOwnerKind, WaitReason, WaitResumeCondition
 from vonk_agent_protocol.agent_words import ProfileReasonSeverity
 
 from .. import agent_operation_states
-from ..agent_jobs.contracts import CLAIM_LEASE_SECONDS
+from ..agent_jobs.contracts import CLAIM_LEASE_SECONDS, holds_claim
 from ..agent_jobs.retry import agent_upgrade_in_flight
 from ..agent_jobs.stored import column_field
 from ..agent_operation_facts import attempt_is_live, aware
@@ -54,7 +54,7 @@ def record_queue_waits(
     }
     if not nodes:
         return {}
-    holders: dict[str, tuple[AgentOperation, AgentOperationAttempt | None]] = {}
+    holders: dict[str, list[tuple[AgentOperation, AgentOperationAttempt | None]]] = {}
     for running, attempt in session.execute(
         select(AgentOperation, AgentOperationAttempt)
         .outerjoin(
@@ -80,13 +80,7 @@ def record_queue_waits(
             and not agent_upgrade_in_flight(session, running, now)
         ):
             continue
-        # Prefer the live executor over older uncertain history on this Spark.
-        current = holders.get(running.node_id)
-        if current is None or (
-            not attempt_is_live(*current, now)
-            and attempt_is_live(running, attempt, now)
-        ):
-            holders[running.node_id] = (running, attempt)
+        holders.setdefault(running.node_id, []).append((running, attempt))
     waits: dict[str, QueueWait] = {}
     for operation in operations:
         if operation.state != agent_operation_states.QUEUED:
@@ -97,7 +91,17 @@ def record_queue_waits(
             # deadline. A queue observation must not erase it or postpone it.
             waits[operation.id] = previous
             continue
-        holder = holders.get(operation.node_id)
+        # Only an order that holds this one back is its holder; prefer the
+        # live executor over older uncertain history on this Spark.
+        holding = [
+            candidate
+            for candidate in holders.get(operation.node_id, ())
+            if holds_claim(operation, candidate[0])
+        ]
+        holder = next(
+            (candidate for candidate in holding if attempt_is_live(*candidate, now)),
+            holding[0] if holding else None,
+        )
         progressed_at = aware(operation.created_at)
         reason = WaitReason.OBSERVATION_UNAVAILABLE
         detail = "Awaiting this Spark's next authenticated claim poll"

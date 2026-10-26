@@ -145,7 +145,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         vonk_agent::executor::operation_observation::reobserve_operations(
             &mut state,
             &executor,
-            None,
             claim.deadline.with_timezone(&chrono::Utc) + chrono::Duration::seconds(1),
         )
         .await?;

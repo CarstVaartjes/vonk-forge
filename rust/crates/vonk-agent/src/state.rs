@@ -441,6 +441,11 @@ impl StateStore {
         Self::open(&self.path, &self.node_id)
     }
 
+    /// The journal file every handle of this store opens.
+    pub fn journal(&self) -> &Path {
+        &self.path
+    }
+
     pub fn begin(
         &mut self,
         claim: &AgentClaim,
