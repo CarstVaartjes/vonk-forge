@@ -43,14 +43,26 @@ class DirectConstruction(ast.NodeVisitor):
 FILESYSTEM_EFFECTS = frozenset(
     {
         "chmod",
+        "exists",
+        "glob",
+        "is_dir",
+        "is_file",
+        "iterdir",
+        "listdir",
+        "lstat",
         "makedirs",
         "mkdir",
         "mkfifo",
         "mkstemp",
         "open",
+        "read_bytes",
+        "read_text",
         "rename",
         "replace",
+        "rglob",
         "rmdir",
+        "scandir",
+        "stat",
         "symlink_to",
         "touch",
         "unlink",
@@ -62,7 +74,8 @@ SOURCE = ROOT / "control/src/vonk_control"
 
 
 def constructors(sources: list[str]) -> dict[str, list[ast.FunctionDef]]:
-    """Every ``__init__`` in the sources, by class name."""
+    """Every class ``__init__`` and every function in the sources, by name: what
+    calling that name runs."""
     result: dict[str, list[ast.FunctionDef]] = {}
     for source in sources:
         for node in ast.walk(ast.parse(source)):
@@ -72,6 +85,8 @@ def constructors(sources: list[str]) -> dict[str, list[ast.FunctionDef]]:
                     for init in node.body
                     if isinstance(init, ast.FunctionDef) and init.name == "__init__"
                 )
+            elif isinstance(node, ast.FunctionDef):
+                result.setdefault(node.name, []).append(node)
     return result
 
 
@@ -90,8 +105,8 @@ def nested_filesystem_effects(
                 continue
             leaf = ast.unparse(call.func).rsplit(".", 1)[-1]
             if leaf in FILESYSTEM_EFFECTS:
-                effects.add(f"{name}.__init__ calls {leaf}")
-            elif depth and leaf[:1].isupper():
+                effects.add(f"{name} calls {leaf}")
+            elif depth and (leaf[:1].isupper() or leaf.startswith("build_")):
                 effects |= {
                     f"{name} -> {nested}"
                     for nested in nested_filesystem_effects(inits, leaf, depth - 1)
@@ -117,12 +132,12 @@ def test_nested_scan_rejects_a_constructor_that_builds_a_touching_one():
                 "        root.mkdir(parents=True, exist_ok=True)\n"
             ),
             "class Owner:\n    def __init__(self, root):\n        Store(root)\n",
+            "def build_probe(root):\n    return root.stat()\n",
             "class Pure:\n    def __init__(self, root):\n        self.root = root\n",
         ]
     )
-    assert nested_filesystem_effects(inits, "Owner") == {
-        "Owner -> Store.__init__ calls mkdir"
-    }
+    assert nested_filesystem_effects(inits, "Owner") == {"Owner -> Store calls mkdir"}
+    assert nested_filesystem_effects(inits, "build_probe") == {"build_probe calls stat"}
     assert nested_filesystem_effects(inits, "Pure") == set()
 
 

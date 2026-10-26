@@ -32,7 +32,7 @@ from vonk_agent_protocol import (
 from vonk_forge_contracts import document_sha256
 
 from .admission_locking import ConstraintReplan, ConstraintReplay, admitting
-from .capability_contract import CapabilityUnavailableReply
+from .capabilities import CapabilityUnavailableError
 from .catalog_queries import active_head_revision
 from .catalog_revision_contract import (
     CatalogRevisionContractError,
@@ -999,11 +999,12 @@ def catalog_sync_failure_reason(error: Exception) -> str:
             # SQLAlchemy's code (e.g. 2j85) is a documentation category, not
             # the server condition. Never log raw SQL, parameters or messages.
             status = f"SQLSTATE {sqlstate}; "
+    if isinstance(error, CapabilityUnavailableError):
+        reply = error.reply
+        code = reply.reason
+        detail = f"capability={reply.capability}; retryable={reply.retryable}"
     if isinstance(error, HTTPException):
         status = f"HTTP {error.status_code}; "
-        if isinstance(detail, CapabilityUnavailableReply):
-            code = detail.reason
-            detail = f"capability={detail.capability}; retryable={detail.retryable}"
     text = (
         "".join(ch if ch.isprintable() else " " for ch in detail[:256])
         if isinstance(detail, str)

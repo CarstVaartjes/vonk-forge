@@ -13,7 +13,7 @@ from datetime import UTC, datetime, timedelta
 from threading import Event, Lock, Thread
 from typing import Any, cast
 
-from fastapi import HTTPException
+from vonk_agent_protocol import Disposition, WaitReason
 
 from .capability_contract import (
     CapabilityAvailability,
@@ -22,6 +22,20 @@ from .capability_contract import (
     CapabilityUnavailableReply,
     ControllerCapability,
 )
+
+
+class CapabilityUnavailableError(Exception):
+    """A guarded capability is not constructed right now: a wait, never a defect.
+
+    The API maps it to 503 with its reply; a worker classifies it ``WAIT``, and
+    the capability's own backoff owns the retry."""
+
+    disposition = Disposition.WAIT
+    typed_reason = WaitReason.OBSERVATION_UNAVAILABLE
+
+    def __init__(self, reply: CapabilityUnavailableReply) -> None:
+        super().__init__(f"{reply.capability} unavailable: {reply.reason}")
+        self.reply = reply
 
 
 class CapabilityConfigurationError(ValueError):
@@ -208,12 +222,11 @@ class RecoveringService[T]:
             self._value is None
             or self.status.availability != CapabilityAvailability.AVAILABLE
         ):
-            raise HTTPException(
-                status_code=503,
-                detail=CapabilityUnavailableReply(
+            raise CapabilityUnavailableError(
+                CapabilityUnavailableReply(
                     capability=self.status.capability,
                     reason=self.status.reason or CapabilityReason.INITIALIZING,
-                ),
+                )
             )
         return self._value
 

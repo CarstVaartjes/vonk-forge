@@ -489,6 +489,7 @@ def _availability(sessions, tmp_path: Path, monkeypatch, clock):
     production = build_recipe_image_availability(
         sessions,
         artifact_root=tmp_path,
+        storage=FilesystemRuntimeImageStorage(tmp_path),
         managed_catalog_sync=None,
         recipe_builds=builds,
         recipe_operations=operations,

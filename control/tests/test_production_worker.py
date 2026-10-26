@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
@@ -385,8 +386,15 @@ def test_unusable_image_cache_root_leaves_the_other_lanes_running_and_heals(
     )
     worker._handlers["healthy"] = lambda _request: {"done": True}
 
+    receipt = tmp_path / "agent-artifacts" / "image-cache" / f"{'a' * 64}.receipt.json"
+    receipt.parent.mkdir(parents=True)
+    receipt.write_text("{}")
+    stamp = (now[0] - timedelta(days=3)).timestamp()
+    os.utime(receipt, (stamp, stamp))
+
     def storage_status():
-        registry.retry_due()
+        # Observation only: the storage collector's own tick drives recovery.
+        worker.run_once()
         return next(
             status
             for status in registry.statuses()

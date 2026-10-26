@@ -19,6 +19,7 @@ from ..artifact_lifecycle import (
     ArtifactLifecycleError,
     lock_reference_gates,
 )
+from ..capabilities import CapabilityUnavailableError
 from ..exact_integer_storage import DecimalIntegerOrderKey
 from ..logging import log_event
 from ..models import (
@@ -371,6 +372,7 @@ def _remove(
             SQLAlchemyError,
             ArtifactLifecycleError,
             RuntimeImagePreparationError,
+            CapabilityUnavailableError,
         ) as error:
             kept[f"{label}: refused {_code(error)}"] += 1
             self._refused[group_key] = f"refused {_code(error)}"
@@ -423,7 +425,12 @@ def _reclaim_blobs(self: UnusedStorageCollector) -> None:
         return
     try:
         self._image_blobs.collect()
-    except (OSError, RuntimeError, SQLAlchemyError) as error:
+    except (
+        CapabilityUnavailableError,
+        OSError,
+        RuntimeError,
+        SQLAlchemyError,
+    ) as error:
         log_event(
             _LOGGER,
             "unused_storage.refused",

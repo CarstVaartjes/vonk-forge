@@ -274,7 +274,7 @@ def build_recipe_image_availability(
     clock: Callable[[], datetime],
     max_parallel: int = 4,
     with_scheduler: bool = False,
-    storage: FilesystemRuntimeImageStorage | None = None,
+    storage: FilesystemRuntimeImageStorage,
 ) -> RecipeImageAvailabilityProduction:
     """Compose immutable catalog resolution, OCI storage and image execution."""
 
@@ -284,9 +284,6 @@ def build_recipe_image_availability(
             "recipe image artifact root is required",
             reason=InvalidRequestReason.INCOMPLETE,
         )
-    storage = (
-        storage if storage is not None else FilesystemRuntimeImageStorage(image_root)
-    )
     transport = OciLayoutImageTransport()
 
     def authority(

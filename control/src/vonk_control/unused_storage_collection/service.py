@@ -109,8 +109,7 @@ class UnusedStorageCollector:
         self._lifecycle = lifecycle
         # The caller owns image-store availability (the worker passes its
         # guarded capability); construction touches no filesystem.
-        self._image_store = images
-        self._image_cache_root = image_cache_root
+        self._images = images
         self._image_cache = (
             image_cache_root / IMAGE_CACHE_DIRECTORY
             if image_cache_root is not None
@@ -140,12 +139,6 @@ class UnusedStorageCollector:
 
     def memory_footprint(self) -> dict[WorkerMemoryComponent, int]:
         return {WorkerMemoryComponent.STORAGE_COLLECTION_ROUNDS: len(self._rounds)}
-
-    @property
-    def _images(self) -> FilesystemRuntimeImageStorage | None:
-        if self._image_store is None and self._image_cache_root is not None:
-            self._image_store = FilesystemRuntimeImageStorage(self._image_cache_root)
-        return self._image_store
 
     def tick(self) -> bool:
         """Look at free space at most once per scan; True when anything was removed."""
