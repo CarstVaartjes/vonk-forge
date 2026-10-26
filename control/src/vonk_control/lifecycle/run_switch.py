@@ -166,6 +166,32 @@ def set_member_state(
     entry.state = state
 
 
+def _end_unclaimed_children(
+    job: Job, progress: RunSwitchOperationResult | None, now: datetime
+) -> None:
+    """End the idempotent work an ended run-switch issued that no Spark claimed.
+
+    Its pending runtime probes, and a queued or parked transfer child: neither
+    has an effect to undo (copied bytes stay for reuse), and left queued it
+    would run for nobody. Any other child, or a claimed one, reports its own end.
+    """
+    # agent_jobs builds on the lifecycle core; import its writer at use.
+    from ..agent_jobs import abandon_idempotent_job_in_session
+
+    session = object_session(job)
+    if session is None or progress is None:
+        return
+    if progress.preflight is not None:
+        end_unclaimed_probes(session, progress.preflight, now)
+    if progress.child_operation_id is not None:
+        abandon_idempotent_job_in_session(
+            session,
+            progress.child_operation_id,
+            now,
+            reason=WaitReason.SCOPE_CHANGED.value,
+        )
+
+
 class RunSwitchAdapter:
     """``KindAdapter`` for a stored Run/Switch operation."""
 
@@ -452,9 +478,7 @@ class RunSwitchAdapter:
         )
         job.state = state
         if after.state in (State.CANCELLED, State.FAILED):
-            session = object_session(job)
-            if session is not None and preflight is not None:
-                end_unclaimed_probes(session, preflight, now)
+            _end_unclaimed_children(job, progress, now)
             # Terminal request result is final; the exact accepted Start may
             # still need its cancellation handoff after a lost worker response.
             schedule_wait(
