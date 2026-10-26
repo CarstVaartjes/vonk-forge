@@ -1,12 +1,31 @@
 //! Runtime custody probes never start, stop, upload, or renew an effect.
 //! A measured job exit enters the existing output ledger; the Controller can
-//! authorize delivery-only recovery under a fresh fence.
+//! authorize delivery-only recovery under a fresh fence. The helper's job wait
+//! owns a job's deadline and stops it there; with no execution waiting for
+//! the job, the probe ends its fence once that deadline and the stop grace
+//! passed (`job_past_its_bound`).
 use super::operation_observation::{OperationObservation, PendingObservation};
 use super::*;
 use crate::host_runtime::RuntimeReobservation;
 
 impl<R: ProcessRunner> RecipeExecutor<'_, R> {
     pub(super) async fn observe_runtime(&self, claim: &AgentClaim) -> OperationObservation {
+        let observed = self.observe_runtime_once(claim).await;
+        // A job whose observation could not look stays observed past the
+        // lease, up to the job's own bound.
+        match (&observed, RecipeOperationRequest::parse(claim)) {
+            (OperationObservation::Unknown(wait), Ok(RecipeOperationRequest::JobRun(job)))
+                if wait.cause == WaitReason::ObservationUnavailable =>
+            {
+                let seen = format!("its observation was unavailable: {}", wait.reason);
+                self.job_past_its_bound(claim, &job, None, &seen)
+                    .map_or(observed, OperationObservation::confirmed)
+            }
+            _ => observed,
+        }
+    }
+
+    async fn observe_runtime_once(&self, claim: &AgentClaim) -> OperationObservation {
         let pending = |cause, reason| {
             OperationObservation::Unknown(PendingObservation::new(claim, cause, reason))
         };
@@ -117,6 +136,17 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
             (RecipeOperationRequest::JobRun(job), RuntimeReobservation::Exited(outcome)) => {
                 self.observe_job_exit(claim, &job, outcome)
             }
+            (
+                RecipeOperationRequest::JobRun(job),
+                RuntimeReobservation::Running { progressed_at },
+            ) => match self.job_past_its_bound(claim, &job, progressed_at, "it was running") {
+                Some(ended) => OperationObservation::confirmed(ended),
+                None => OperationObservation::Progressing(PendingObservation::new(
+                    claim,
+                    WaitReason::RuntimeEffectUnconfirmed,
+                    "exact job is still running within its deadline",
+                )),
+            },
             (_, RuntimeReobservation::Running { .. }) => {
                 OperationObservation::Progressing(PendingObservation::new(
                     claim,

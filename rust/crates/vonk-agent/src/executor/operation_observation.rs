@@ -431,22 +431,33 @@ pub async fn reobserve_operations<E: Executor>(
         };
         match observation {
             OperationObservation::Confirmed(result) => {
+                // A confirmed unknown is all the probe can learn (a measured
+                // exit retained while its delivery awaits the Controller):
+                // past the deadline it is final and is not probed again.
+                let unknown = matches!(*result, ExecutionResult::Unknown(_));
                 state.finish(&claim, *result)?;
+                if unknown && now >= claim.deadline.with_timezone(&Utc) {
+                    state.end_observation(claim.fence)?;
+                }
             }
-            OperationObservation::Progressing(pending)
-            | OperationObservation::Blocked(pending)
-            | OperationObservation::Unknown(pending) => {
-                eprintln!(
-                    "vonk-agent: observing fence={} owner={} dependency={} cause={} next_check={} deadline={}: {}",
-                    claim.fence,
-                    pending.owner,
-                    pending.dependency,
-                    pending.cause,
-                    pending.next_check,
-                    pending.deadline,
-                    pending.reason
-                );
+            OperationObservation::Progressing(pending) => {
+                // A live owned unit is still observed past the lease: its exit
+                // replaces any recorded unknown. Its owner's bound ends it.
+                log_pending(&claim, &pending);
+            }
+            OperationObservation::Blocked(pending) | OperationObservation::Unknown(pending) => {
+                log_pending(&claim, &pending);
                 if now >= pending.deadline {
+                    // A probe that could not look is not an observed absence:
+                    // the unknown is recorded but the claim stays observed,
+                    // until the Controller-owned observation budget past the
+                    // deadline is spent (a job run ends at its own bound). An
+                    // observed absence is final, stays in the delivery spool,
+                    // and is not probed again.
+                    let budget = claim.deadline.with_timezone(&Utc)
+                        + chrono::Duration::seconds(i64::from(claim.observation_budget_seconds));
+                    let still_looking = pending.cause == WaitReason::ObservationUnavailable
+                        && (claim.operation == AgentOperation::RecipeJobRunV1 || now < budget);
                     state.finish(
                         &claim,
                         ExecutionResult::unknown(
@@ -455,11 +466,27 @@ pub async fn reobserve_operations<E: Executor>(
                             UnknownEvidence::at(FailureStage::AgentRestart),
                         ),
                     )?;
+                    if !still_looking {
+                        state.end_observation(claim.fence)?;
+                    }
                 }
             }
         }
     }
     Ok(())
+}
+
+fn log_pending(claim: &AgentClaim, pending: &PendingObservation) {
+    eprintln!(
+        "vonk-agent: observing fence={} owner={} dependency={} cause={} next_check={} deadline={}: {}",
+        claim.fence,
+        pending.owner,
+        pending.dependency,
+        pending.cause,
+        pending.next_check,
+        pending.deadline,
+        pending.reason
+    );
 }
 
 /// Keep the same owner probe and spool delivery moving through long polls and

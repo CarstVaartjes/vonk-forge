@@ -16,17 +16,23 @@ use crate::host_runtime::{HostRuntimeError, RuntimeReobservation};
 pub(super) const FIRST_PAUSE: Duration = Duration::from_millis(100);
 pub(super) const MAX_PAUSE: Duration = Duration::from_secs(10);
 
+/// The job's own timeout.
+fn job_timeout(request: &vonk_agent_protocol::RecipeJobRunRequest) -> Duration {
+    Duration::from_secs(
+        request
+            .compiled_execution_plan
+            .job
+            .as_ref()
+            .map_or(0, |job| u64::from(job.timeout_seconds)),
+    )
+}
+
 /// The job's own deadline, counted from `from`.
 pub(super) fn job_deadline(
     from: Instant,
     request: &vonk_agent_protocol::RecipeJobRunRequest,
 ) -> Instant {
-    let timeout = request
-        .compiled_execution_plan
-        .job
-        .as_ref()
-        .map_or(0, |job| u64::from(job.timeout_seconds));
-    from + Duration::from_secs(timeout)
+    from + job_timeout(request)
 }
 
 /// How long a job is given to cease after it is asked to stop.
@@ -204,6 +210,46 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
             FailureStage::JobState,
             format!("job record absent; {seen}"),
         )))
+    }
+
+    /// The end of a job that no execution in this process waits for (the
+    /// agent restarted, or the lease lapsed). The helper's own job wait owns
+    /// the job's deadline and stops it there; the observer only ends the
+    /// fence once that deadline and the stop grace have passed with no exit
+    /// read, failed with what was seen. The dispatch instant did not survive
+    /// the restart, so the deadline counts from the later of the job's last
+    /// progress and the lease deadline, never earlier than the helper's own.
+    /// `None` while the job is within that bound.
+    pub(in crate::executor) fn job_past_its_bound(
+        &self,
+        claim: &AgentClaim,
+        request: &vonk_agent_protocol::RecipeJobRunRequest,
+        progressed_at: Option<DateTime<FixedOffset>>,
+        seen: &str,
+    ) -> Option<ExecutionResult> {
+        let seconds = |duration: Duration| {
+            chrono::Duration::seconds(i64::try_from(duration.as_secs()).unwrap_or(i64::MAX / 1000))
+        };
+        let from = progressed_at.map_or(claim.deadline, |stamp| stamp.max(claim.deadline));
+        let bound =
+            from.with_timezone(&Utc) + seconds(job_timeout(request)) + seconds(stop_grace(request));
+        if Utc::now() < bound {
+            return None;
+        }
+        let stop_plan = job_run_stop_plan(claim, request)?;
+        let job_scope = request.job_id.to_string();
+        let job = DispatchedJob {
+            claim,
+            request,
+            stop_plan: &stop_plan,
+            job_scope: &job_scope,
+            started: Instant::now(),
+        };
+        Some(*job.unobserved_failure(
+            FailureStage::AgentRestart,
+            "no execution waited for the job after an agent restart or lease lapse",
+            &format!("job deadline and stop grace passed while {seen}"),
+        ))
     }
 
     /// The job's exact Stop; its record is retired by the caller.

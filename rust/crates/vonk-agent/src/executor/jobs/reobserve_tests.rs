@@ -136,12 +136,15 @@ pub(super) fn peers(job_id: Uuid, script: Vec<Answer>) -> Peers {
                 Answer::Exited(code) => {
                     response.process_running = Some(false);
                     response.exit_code = Some(code);
-                    response.diagnostic = Some(format!("exit_code={code}"));
-                    response.process_logs = Some(HostHelperProcessLogs {
-                        exit_code: None,
-                        stdout: crate::failure_evidence::log_tail(b"job output\n"),
-                        stderr: crate::failure_evidence::log_tail(b"job error\n"),
-                    });
+                    // A clean exit carries no failure evidence.
+                    if code != 0 {
+                        response.diagnostic = Some(format!("exit_code={code}"));
+                        response.process_logs = Some(HostHelperProcessLogs {
+                            exit_code: None,
+                            stdout: crate::failure_evidence::log_tail(b"job output\n"),
+                            stderr: crate::failure_evidence::log_tail(b"job error\n"),
+                        });
+                    }
                     "exited"
                 }
                 Answer::Absent | Answer::Refused => {
@@ -467,4 +470,239 @@ async fn an_unsupported_probe_never_authorizes_fresh_inference() {
         "unsupported observation is not proof of absence"
     );
     assert_eq!(log, ["refused"]);
+}
+
+/// A restarted agent whose job outlives its lease: the shared observer and a
+/// real journal, the job's container answered by the test helper.
+struct Restarted {
+    /// The helper socket is unreachable, so the probe cannot look.
+    helper_down: bool,
+    peers: Peers,
+    data: tempfile::TempDir,
+    client: AgentHttpClient,
+    store: StateStore,
+    claim: AgentClaim,
+    request: vonk_agent_protocol::RecipeJobRunRequest,
+}
+
+impl Restarted {
+    fn new(script: Vec<Answer>, lease_ago: ChronoDuration) -> Self {
+        let (mut claim, request) = job_claim();
+        claim.deadline = (Utc::now() - lease_ago).fixed_offset();
+        let peers = peers(request.job_id, script);
+        let data = tempdir().unwrap();
+        let client = AgentHttpClient::for_http_test(&peers.controller, NODE_ID);
+        let mut store = StateStore::open(&data.path().join("state.sqlite"), NODE_ID).unwrap();
+        let accepted_at = claim.deadline.with_timezone(&Utc) - ChronoDuration::seconds(1);
+        store.begin(&claim, accepted_at).unwrap();
+        Self {
+            helper_down: false,
+            peers,
+            data,
+            client,
+            store,
+            claim,
+            request,
+        }
+    }
+
+    async fn pass(&mut self, now: DateTime<Utc>) {
+        let executor = RecipeExecutor {
+            client: &self.client,
+            helper_socket: &if self.helper_down {
+                self.data.path().join("no-helper.sock")
+            } else {
+                self.peers.socket.clone()
+            },
+            runtime: OciRuntime {
+                runner: &NoProcess,
+                data_root: self.data.path(),
+            },
+            runtime_root: self.peers.runtime_root.path(),
+        };
+        crate::executor::operation_observation::reobserve_operations(
+            &mut self.store,
+            &executor,
+            None,
+            now,
+        )
+        .await
+        .unwrap();
+    }
+
+    fn runtime(&self) -> OciRuntime<'_, NoProcess> {
+        OciRuntime {
+            runner: &NoProcess,
+            data_root: self.data.path(),
+        }
+    }
+
+    /// The job's durable intent and output directory, as dispatch leaves them.
+    fn prepare_scope(&self) {
+        let scope = self
+            .data
+            .path()
+            .join("runs")
+            .join(self.request.job_id.to_string());
+        fs::create_dir_all(scope.join("outputs")).unwrap();
+        self.runtime().persist_job_intent(&self.request).unwrap();
+    }
+
+    /// The job's measured exit 0, retained as its execution would.
+    fn retain_exit(&self) {
+        self.runtime()
+            .persist_job_completion(&job_receipt(
+                &self.request,
+                0,
+                Instant::now(),
+                empty_job_output_manifest(),
+                None,
+            ))
+            .unwrap();
+    }
+
+    fn result(&self) -> Option<AgentResultResult> {
+        self.store
+            .pending_results()
+            .unwrap()
+            .into_iter()
+            .find(|(_, result)| result.fence == self.claim.fence)
+            .map(|(_, result)| result.result)
+    }
+}
+
+#[tokio::test]
+async fn a_job_running_at_its_lease_deadline_reports_its_later_exit() {
+    let mut agent = Restarted::new(vec![Answer::Running], ChronoDuration::zero());
+    let lease = agent.claim.deadline.with_timezone(&Utc);
+    agent.pass(lease).await;
+    assert_eq!(agent.store.observation_claims().unwrap().len(), 1);
+    assert_eq!(
+        agent.peers.log(),
+        ["running"],
+        "nothing stops a job within its deadline"
+    );
+
+    // The job exits and its measured exit is retained.
+    agent.prepare_scope();
+    agent.retain_exit();
+    agent.pass(lease + ChronoDuration::minutes(10)).await;
+    assert!(
+        matches!(agent.result(), Some(AgentResultResult::OutcomeDone(_))),
+        "the job's exit is reported: {:?}",
+        agent.result()
+    );
+    assert!(agent.store.observation_claims().unwrap().is_empty());
+}
+
+/// The job's deadline plus its stop grace, as a lease age past which it ends.
+fn past_job_bound() -> ChronoDuration {
+    let (_claim, request) = job_claim();
+    let job = request.compiled_execution_plan.job.as_ref().unwrap();
+    let grace = request
+        .compiled_execution_plan
+        .lifecycle
+        .stop_timeout_seconds;
+    ChronoDuration::seconds(i64::from(job.timeout_seconds + grace) + 1)
+}
+
+fn ended_failed(agent: &Restarted) -> String {
+    let Some(AgentResultResult::OutcomeFailed(failure)) = agent.result() else {
+        panic!("a job past its bound ends failed: {:?}", agent.result());
+    };
+    format!("{failure:?}")
+}
+
+#[tokio::test]
+async fn a_job_running_past_its_own_bound_ends_failed_without_a_stop() {
+    let mut agent = Restarted::new(vec![Answer::Running], past_job_bound());
+    agent.pass(Utc::now()).await;
+    let diagnostic = ended_failed(&agent);
+    assert!(
+        diagnostic.contains("deadline and stop grace passed while it was running"),
+        "{diagnostic}"
+    );
+    // The helper's own job wait stops a job at its deadline; the observer
+    // asks for no stop or grant.
+    assert_eq!(agent.peers.log(), ["running"]);
+    assert!(agent.store.observation_claims().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn an_unavailable_helper_at_the_lease_deadline_keeps_the_job_observed() {
+    let mut agent = Restarted::new(
+        vec![Answer::Running, Answer::Exited(0)],
+        ChronoDuration::zero(),
+    );
+    let lease = agent.claim.deadline.with_timezone(&Utc);
+    agent.helper_down = true;
+    agent.pass(lease).await;
+    assert_eq!(
+        agent.store.observation_claims().unwrap().len(),
+        1,
+        "a probe that could not look is not an observed absence"
+    );
+    agent.helper_down = false;
+    agent.pass(lease + ChronoDuration::minutes(1)).await;
+    assert_eq!(agent.store.observation_claims().unwrap().len(), 1);
+    agent.prepare_scope();
+    agent.pass(lease + ChronoDuration::minutes(2)).await;
+    assert!(
+        matches!(agent.result(), Some(AgentResultResult::OutcomeDone(_))),
+        "the job's exit is reported: {:?}",
+        agent.result()
+    );
+    assert_eq!(agent.peers.log()[..2], ["running", "exited"]);
+    assert!(agent.store.observation_claims().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn an_unavailable_helper_past_the_job_bound_ends_the_job_failed() {
+    let mut agent = Restarted::new(vec![Answer::Running], past_job_bound());
+    agent.helper_down = true;
+    agent.pass(Utc::now()).await;
+    let diagnostic = ended_failed(&agent);
+    assert!(
+        diagnostic.contains("its observation was unavailable"),
+        "{diagnostic}"
+    );
+    assert!(agent.store.observation_claims().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn retained_outputs_awaiting_delivery_leave_observation_at_the_lease_deadline() {
+    let mut agent = Restarted::new(vec![Answer::Running], ChronoDuration::zero());
+    let lease = agent.claim.deadline.with_timezone(&Utc);
+    agent.prepare_scope();
+    let scope = agent
+        .data
+        .path()
+        .join("runs")
+        .join(agent.request.job_id.to_string());
+    fs::write(scope.join("outputs").join("result.png"), b"image").unwrap();
+    agent.retain_exit();
+    agent.pass(lease - ChronoDuration::seconds(1)).await;
+    assert!(
+        matches!(agent.result(), Some(AgentResultResult::OutcomeUnknown(_))),
+        "{:?}",
+        agent.result()
+    );
+    assert_eq!(
+        agent.store.observation_claims().unwrap().len(),
+        1,
+        "within the lease the retained exit is read again"
+    );
+    agent.pass(lease).await;
+    assert!(
+        agent.store.observation_claims().unwrap().is_empty(),
+        "past the lease only the Controller's delivery-only order moves it"
+    );
+    assert!(matches!(
+        agent.result(),
+        Some(AgentResultResult::OutcomeUnknown(_))
+    ));
+    assert!(
+        agent.peers.log().is_empty(),
+        "a retained exit needs no helper"
+    );
 }

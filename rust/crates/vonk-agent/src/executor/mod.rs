@@ -305,6 +305,9 @@ mod runtime_observation;
 mod content_observation_tests;
 
 #[cfg(test)]
+mod expired_observation_tests;
+
+#[cfg(test)]
 mod runtime_observation_tests;
 
 mod upgrade_observation;

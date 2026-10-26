@@ -21,13 +21,6 @@ pub(super) fn observe_upgrade(
     claim: &AgentClaim,
     context: Option<UpgradeObservation<'_>>,
 ) -> OperationObservation {
-    let pending = |reason| {
-        OperationObservation::Unknown(PendingObservation::new(
-            claim,
-            WaitReason::AgentUpgradeAwaitingIdentity,
-            reason,
-        ))
-    };
     let request = match AgentUpgradeRequest::parse(claim) {
         Ok(request) => request,
         Err(error) => {
@@ -38,6 +31,23 @@ pub(super) fn observe_upgrade(
             ));
         }
     };
+    // The helper's durable watcher owns the activation transaction until its
+    // activation deadline: until then an unconfirmed transaction is live and
+    // stays observed past the claim's lease. After it nothing settles the
+    // transaction, even an unreadable receipt: the unknown is final.
+    let live = Utc::now().timestamp() < request.rollback.activation_deadline;
+    let waiting = |cause, reason: String| {
+        if live {
+            OperationObservation::Progressing(PendingObservation::new(claim, cause, reason))
+        } else {
+            OperationObservation::confirmed(ExecutionResult::unknown(
+                cause,
+                reason,
+                UnknownEvidence::at(FailureStage::AgentRestart),
+            ))
+        }
+    };
+    let pending = |reason| waiting(WaitReason::AgentUpgradeAwaitingIdentity, reason);
     let Some(context) = context else {
         return pending("running agent identity is unavailable to the package observer".to_owned());
     };
@@ -56,11 +66,10 @@ pub(super) fn observe_upgrade(
                 }
                 _ => error.to_string(),
             };
-            return OperationObservation::Unknown(PendingObservation::new(
-                claim,
+            return waiting(
                 WaitReason::ObservationUnavailable,
                 format!("package activation receipt observation unavailable: {cause}"),
-            ));
+            );
         }
     };
     // Bind the complete captured transaction, including its deadline. A stale
