@@ -13,7 +13,6 @@ from vonk_agent_protocol import ModelCacheCode
 from .catalog_helpers import (
     _github_release_asset_binding,
     _github_release_catalog_source,
-    _http_catalog_source,
     _huggingface_catalog_source,
 )
 from .constants import _GITHUB_API_HOST, ProviderKind
@@ -50,6 +49,8 @@ class Provider:
     production: bool = False
     # A remote kind must pin an immutable revision; a local file has none.
     requires_revision: bool = True
+    # A fixture whose repository is itself the source URL.
+    source_is_repository: bool = False
     # A file of this kind may be published as split parts.
     parts: bool = False
     # Revisions of this kind can be re-checked at the provider.
@@ -57,6 +58,10 @@ class Provider:
     # Detail of the typed error a transport failure becomes, if the provider
     # owns one; otherwise the transport error propagates unchanged.
     transport_failure: str | None = None
+
+
+def _repository_catalog_source(artifact: CatalogArtifact) -> tuple[str, str | None]:
+    return artifact.repository, artifact.revision
 
 
 def _bind_nothing(spec: ArtifactSpec) -> None:
@@ -141,13 +146,15 @@ PROVIDERS: dict[str, Provider] = {
         transport_failure="GitHub release asset transfer failed",
     ),
     ProviderKind.HTTP_FILE: Provider(
-        catalog_source=_http_catalog_source,
+        catalog_source=_repository_catalog_source,
         bind=_bind_nothing,
         validate=_validate_trusted_https,
         open=_open_http,
+        source_is_repository=True,
     ),
     ProviderKind.FILE: Provider(
         requires_revision=False,
+        source_is_repository=True,
         catalog_source=None,
         bind=_bind_nothing,
         validate=_validate_trusted_https,
@@ -165,3 +172,10 @@ def provider_for(kind: str) -> Provider:
             ModelCacheCode.ARTIFACT_INVALID, "cache artifact kind is unsupported"
         )
     return provider
+
+
+def source_is_repository(kind: str) -> bool:
+    """Whether a fixture of this kind names its source by repository."""
+
+    provider = PROVIDERS.get(kind)
+    return provider is not None and provider.source_is_repository

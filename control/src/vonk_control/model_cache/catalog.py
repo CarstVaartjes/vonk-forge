@@ -22,14 +22,13 @@ from .artifacts import (
     _validate_artifact,
 )
 from .catalog_helpers import _source_for_catalog_artifact
-from .constants import FIXTURE_SOURCE_KINDS
 from .errors import (
     ModelCacheResolutionInvalid,
     ModelCacheResolutionRefused,
     ModelCacheStorageUnknown,
 )
 from .input_contracts import CatalogArtifact, FixtureArtifact
-from .providers import PROVIDERS
+from .providers import PROVIDERS, source_is_repository
 
 if TYPE_CHECKING:
     from .service import ModelCacheService
@@ -259,9 +258,7 @@ class CatalogMixin:
         path = artifact.path
         kind = artifact.kind
         repository = artifact.repository
-        source = artifact.source or (
-            repository if kind in FIXTURE_SOURCE_KINDS else None
-        )
+        source = artifact.source or (repository if source_is_repository(kind) else None)
         if source is None:
             raise ModelCacheResolutionInvalid(
                 ModelCacheCode.ARTIFACT_INVALID, "cache artifact source is required"

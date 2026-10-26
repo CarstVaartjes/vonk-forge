@@ -89,10 +89,6 @@ class ProviderKind(StrEnum):
     FILE = "file"
 
 
-# Fixture kinds whose repository is itself the source.
-FIXTURE_SOURCE_KINDS = frozenset({ProviderKind.HTTP_FILE, ProviderKind.FILE})
-
-
 _GITHUB_USER_AGENT = "vonk-forge/0.1.1"
 
 

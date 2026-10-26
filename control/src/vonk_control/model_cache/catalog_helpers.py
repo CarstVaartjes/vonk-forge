@@ -127,11 +127,6 @@ def _huggingface_catalog_source(artifact: CatalogArtifact) -> tuple[str, str | N
     return source, str(revision)
 
 
-def _http_catalog_source(artifact: CatalogArtifact) -> tuple[str, str | None]:
-    assert isinstance(artifact.repository, str)
-    return artifact.repository, artifact.revision
-
-
 def _github_release_catalog_source(
     artifact: CatalogArtifact,
 ) -> tuple[str, str | None]:
