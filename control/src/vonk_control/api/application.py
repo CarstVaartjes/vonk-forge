@@ -70,7 +70,8 @@ from ..auth import (
 )
 from ..bounded_json import BoundedJSONError
 from ..browser_auth import BrowserAuthenticationError, BrowserAuthService
-from ..capability_contract import CapabilityUnavailableReply, ControllerCapability
+from ..capabilities import CapabilityUnavailableError
+from ..capability_contract import ControllerCapability
 from ..catalog_api import CatalogProblem, install_catalog_routes
 from ..catalog_service import CatalogService
 from ..download_contract import download_responses
@@ -235,6 +236,16 @@ def create_app(
         ),
     )
 
+    @app.exception_handler(CapabilityUnavailableError)
+    async def capability_unavailable(
+        _request: Request, error: CapabilityUnavailableError
+    ) -> Response:
+        return Response(
+            error.reply.model_dump_json(),
+            status_code=503,
+            media_type="application/json",
+        )
+
     @app.exception_handler(StarletteHTTPException)
     async def canonical_agent_http_error(
         request: Request, error: StarletteHTTPException
@@ -246,13 +257,6 @@ def create_app(
                 error.answer.model_dump_json(),
                 status_code=error.status_code,
                 headers=error.headers,
-                media_type="application/json",
-            )
-
-        if isinstance(error.detail, CapabilityUnavailableReply):
-            return Response(
-                error.detail.model_dump_json(),
-                status_code=503,
                 media_type="application/json",
             )
 

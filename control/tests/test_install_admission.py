@@ -403,7 +403,9 @@ def setup(
                 not_after=now + timedelta(days=1),
             )
         )
-    InventoryRepository(sessions, clock=lambda: now).record(
+    InventoryRepository(
+        sessions, clock=lambda: now - timedelta(seconds=observed_age)
+    ).record(
         NodeInventoryReport.model_validate_json(
             canonical_message(
                 {

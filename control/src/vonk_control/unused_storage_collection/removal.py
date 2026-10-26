@@ -25,6 +25,7 @@ from ..artifact_reference_scan import (
     model_set_reference_findings,
     runtime_image_reference_findings,
 )
+from ..capabilities import CapabilityUnavailableError
 from ..models import AgentNode, ModelCacheSet, RecipeRun
 from ..oci_image_store import DAMAGED_MANIFEST_CODES, OciImageStoreError
 from ..runtime_image_preparation import RuntimeImagePreparationError
@@ -33,6 +34,7 @@ from .evidence import _Evidence, _Item
 from .references import _image_kept, _installation_kept, _model_kept, _mtime, _utc
 
 if TYPE_CHECKING:
+    from ..runtime_image_preparation import FilesystemRuntimeImageStorage
     from .service import UnusedStorageCollector
 
 
@@ -134,8 +136,26 @@ def _image_items(
 
     if self._images is None or self._image_cache is None:
         return []
+    try:
+        return _scan_image_receipts(
+            self, self._images, self._image_cache, evidence, kept
+        )
+    except CapabilityUnavailableError as error:
+        # The image store is a guarded capability: while it is unavailable
+        # there are no image items this pass, and the outcome names why.
+        kept[f"image receipt: store unavailable ({error.code})"] += 1
+        return []
+
+
+def _scan_image_receipts(
+    self: UnusedStorageCollector,
+    images: FilesystemRuntimeImageStorage,
+    image_cache: Path,
+    evidence: _Evidence,
+    kept: Counter[str],
+) -> list[_Item]:
     items: list[_Item] = []
-    for path in sorted(self._image_cache.glob(f"*{_RECEIPT_SUFFIX}")):
+    for path in sorted(image_cache.glob(f"*{_RECEIPT_SUFFIX}")):
         archive = path.name.removesuffix(_RECEIPT_SUFFIX)
         if len(archive) != 64 or any(c not in "0123456789abcdef" for c in archive):
             continue
@@ -146,7 +166,7 @@ def _image_items(
             continue
         assert modified is not None
         try:
-            size = self._images.published_archive_bytes(archive)
+            size = images.published_archive_bytes(archive)
         except (OSError, RuntimeImagePreparationError, ValueError):
             size = 0
         if size <= 0:
@@ -308,15 +328,14 @@ def _model_items(
         if reason is not None:
             kept[f"model: {reason}"] += 1
             continue
-        size = sum(verified for _set, verified, _a, _u in sets)
+        # Only the bytes the removal frees count: a file a kept set shares stays.
+        counts = [self._model_cache.unused_set_bytes(value[0]) for value in sets]
+        if any(value is None for value in counts):
+            kept["model: bytes unknown"] += 1
+            continue
+        size = sum(value for value in counts if value is not None)
         if size <= 0:
-            counts = [self._model_cache.unused_set_bytes(value[0]) for value in sets]
-            if any(value is None for value in counts):
-                kept["model: bytes unknown"] += 1
-                continue
-            size = sum(value for value in counts if value is not None)
-            if size <= 0:
-                continue
+            continue
         last_used = max(max(accessed, updated) for _set, _v, accessed, updated in sets)
         items.append(
             _Item(

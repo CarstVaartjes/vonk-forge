@@ -89,6 +89,7 @@ class UnusedStorageCollector:
         clock: Callable[[], datetime],
         lifecycle: InstallationRemoval,
         image_cache_root: Path | None = None,
+        images: FilesystemRuntimeImageStorage | None = None,
         model_cache_root: Path | None = None,
         model_cache: UnusedModelRemoval | None = None,
         image_blobs: ImageBlobReclaimer | None = None,
@@ -103,14 +104,14 @@ class UnusedStorageCollector:
         cooldown: timedelta = timedelta(seconds=STORAGE_INEFFECTIVE_COOLDOWN_SECONDS),
     ) -> None:
 
+        if (images is None) != (image_cache_root is None):
+            raise ValueError("image_cache_root and images are given together")
         self._sessions = sessions
         self._clock = clock
         self._lifecycle = lifecycle
-        self._images = (
-            FilesystemRuntimeImageStorage(image_cache_root)
-            if image_cache_root is not None
-            else None
-        )
+        # The caller owns image-store availability (the worker passes its
+        # guarded capability); construction touches no filesystem.
+        self._images = images
         self._image_cache = (
             image_cache_root / IMAGE_CACHE_DIRECTORY
             if image_cache_root is not None

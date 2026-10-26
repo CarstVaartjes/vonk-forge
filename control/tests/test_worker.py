@@ -7,7 +7,7 @@ import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import LifecycleState
+from vonk_agent_protocol import Disposition, LifecycleState
 from vonk_control import job_states, telemetry_maintenance
 from vonk_control.coordinator_failures import CoordinatorFailures
 from vonk_control.jobs import JobService
@@ -550,7 +550,7 @@ def test_failing_housekeeping_task_does_not_stop_sources_or_heartbeat(
 def test_unexpected_owner_fault_does_not_suppress_other_work(
     tmp_path, owner, monkeypatch
 ):
-    """Catches only guarding a fixed list of operational exception types."""
+    """Catches a deterministic fault switching its lane off until a code deploy."""
     calls = []
     broken = True
     now = [10.0]
@@ -574,7 +574,10 @@ def test_unexpected_owner_fault_does_not_suppress_other_work(
         recipes=Recipes() if owner == "recipe" else None,
         housekeeping=task if owner == "housekeeping" else None,
         background_services=(task,) if owner == "background" else (),
-        coordinator_failures=_failures(tmp_path),
+        coordinator_failures=_failures(
+            tmp_path,
+            clock=lambda: datetime(2026, 8, 3, tzinfo=UTC) + timedelta(seconds=now[0]),
+        ),
     )
     assert worker.run_once()
     assert jobs.get(first.id).result == {"done": True}
@@ -583,18 +586,165 @@ def test_unexpected_owner_fault_does_not_suppress_other_work(
     fresh = jobs.enqueue("healthy", "admin", "abc", [], {})
     assert worker.run_once()
     assert jobs.get(fresh.id).result == {"done": True}
-    # A repaired closure in the same revision is no new execution evidence.
-    assert calls == [owner]
-    Worker(
-        jobs,
-        "replacement",
-        {"healthy": lambda _: {}},
-        recipes=Recipes() if owner == "recipe" else None,
-        housekeeping=task if owner == "housekeeping" else None,
-        background_services=(task,) if owner == "background" else (),
-        coordinator_failures=_failures(tmp_path, source_content_sha256="b" * 64),
-    ).run_once()
+    # Same source digest: the cleared fault heals the lane once the backoff passes.
     assert calls == [owner, owner]
+
+
+def test_every_registered_source_recovers_after_its_fault_clears(tmp_path, monkeypatch):
+    """Runtime net: no source or housekeeping key may stay off after a fault."""
+    now = [datetime(2026, 8, 3, tzinfo=UTC)]
+    monkeypatch.setattr(
+        "vonk_control.worker.time.monotonic", lambda: now[0].timestamp()
+    )
+    broken = True
+    calls: list[str] = []
+
+    labels: set[str] = set()
+
+    def probe(name: str) -> Callable[[], bool]:
+        labels.add(name)
+
+        def run() -> bool:
+            calls.append(name)
+            if broken:
+                raise AssertionError(name)
+            return False
+
+        return run
+
+    class Recipes:
+        tick = staticmethod(probe("recipes"))
+
+    class Cache:
+        tick = staticmethod(probe("model-cache"))
+
+    jobs = _service(tmp_path)
+    claim = jobs.claim
+
+    def claim_probe(*args, **kwargs):
+        probe("jobs")()
+        return claim(*args, **kwargs)
+
+    failures = _failures(tmp_path, clock=lambda: now[0])
+    monkeypatch.setattr(jobs, "claim", claim_probe)
+    worker = Worker(
+        jobs,
+        "worker",
+        {"healthy": lambda _: {"done": True}},
+        recipes=Recipes(),
+        model_cache=Cache(),
+        background_services=(probe("background"),),
+        housekeeping=probe("telemetry"),
+        artifact_housekeeping=probe("artifact"),
+        due_waits=probe("due-waits"),
+        loop_heartbeat=probe("heartbeat"),
+        coordinator_failures=failures,
+    )
+    # The worker's own tables, not a hand-typed list: a new lane is covered.
+    table = {name for name, _ in worker._source_table()} | {
+        name for name, task in worker._housekeeping_table() if task is not None
+    }
+    worker.run_once()
+    assert set(calls) == labels
+    assert len(table) == len(labels)  # every dispatched lane has a probe
+    broken = False
+    calls.clear()
+    now[0] += timedelta(seconds=300)
+    fresh = jobs.enqueue("healthy", "admin", "abc", [], {})
+    worker.run_once()
+    assert set(calls) == labels
+    from vonk_control.models import CoordinatorFailure
+
+    with failures._sessions() as session:
+        assert session.scalar(select(CoordinatorFailure)) is None
+    assert jobs.get(fresh.id).result == {"done": True}
+
+
+def _persisting_fault(tmp_path, now, verdict_error):
+    failures = _failures(tmp_path, clock=lambda: now[0])
+    from vonk_control.failure_classification import disposition
+
+    def fail() -> None:
+        failures.failed("source", verdict_error, disposition(verdict_error))
+
+    def due_in() -> float:
+        engine = create_engine(f"sqlite:///{tmp_path / 'worker.sqlite'}")
+        with sessionmaker(engine)() as session:
+            from vonk_control.models import CoordinatorFailure
+
+            row = session.get(CoordinatorFailure, "source")
+            assert row is not None and row.next_action_at is not None
+            return (row.next_action_at.replace(tzinfo=UTC) - now[0]).total_seconds()
+
+    return failures, fail, due_in
+
+
+def test_a_persisting_fault_backs_off_to_the_cap_and_a_deploy_resets_it(tmp_path):
+    now = [datetime(2026, 8, 3, tzinfo=UTC)]
+    failures, fail, due_in = _persisting_fault(
+        tmp_path, now, AssertionError("owner defect")
+    )
+    delays = []
+    for _ in range(9):
+        fail()
+        delays.append(due_in())
+        now[0] += timedelta(seconds=due_in())
+        assert failures.ready("source")
+    assert delays == [5, 5, 10, 20, 40, 80, 160, 300, 300]
+    redeployed = CoordinatorFailures(failures._sessions, lambda: now[0], "b" * 64)
+    assert redeployed.ready("source")
+    redeployed.failed("source", AssertionError("owner defect"), Disposition.FAIL)
+    assert due_in() == 5
+
+
+def test_a_wait_keeps_its_five_second_cadence(tmp_path):
+    now = [datetime(2026, 8, 3, tzinfo=UTC)]
+    _unused, fail, due_in = _persisting_fault(
+        tmp_path, now, ConnectionError("dependency offline")
+    )
+    for _ in range(5):
+        fail()
+        assert due_in() == 5
+        now[0] += timedelta(seconds=5)
+
+
+def test_a_security_refusal_stays_refused_until_its_cause_clears(tmp_path, monkeypatch):
+    from vonk_agent_protocol import SecurityRefusalError
+
+    now = [datetime(2026, 8, 3, tzinfo=UTC)]
+    monkeypatch.setattr(
+        "vonk_control.worker.time.monotonic", lambda: now[0].timestamp()
+    )
+    refused = True
+    calls = []
+
+    def check() -> bool:
+        calls.append(now[0])
+        if refused:
+            raise SecurityRefusalError("untrusted input")
+        return False
+
+    jobs = _service(tmp_path)
+    worker = Worker(
+        jobs,
+        "worker",
+        {"healthy": lambda _: {"done": True}},
+        background_services=(check,),
+        coordinator_failures=_failures(tmp_path, clock=lambda: now[0]),
+    )
+    worker.run_once()
+    now[0] += timedelta(seconds=5)
+    worker.run_once()
+    assert len(calls) == 2  # re-decided by the real check, and still refused
+    refused = False
+    now[0] += timedelta(seconds=10)
+    fresh = jobs.enqueue("healthy", "admin", "abc", [], {})
+    worker.run_once()
+    assert len(calls) == 3
+    assert jobs.get(fresh.id).result == {"done": True}
+    now[0] += timedelta(seconds=1)
+    worker.run_once()
+    assert len(calls) == 4  # admitted again: no backoff is left
 
 
 def test_unavailable_model_cache_surface_is_local_and_fresh_work_observes_repair(
@@ -749,12 +899,7 @@ def test_coordinator_fault_has_durable_api_custody_and_restart_resume(
         )
         wait = read_wait(stored)
         assert wait is not None
-        first_blocked = wait.first_blocked_at
-        assert wait.resume_condition == (
-            WaitResumeCondition.DEPENDENCY_CHANGED
-            if isinstance(fault, AssertionError)
-            else WaitResumeCondition.RETRY_DUE
-        )
+        assert wait.resume_condition == WaitResumeCondition.RETRY_DUE
     # The existing authenticated platform projection consumes the stored contract.
     visible = (
         PlatformObserver(sessions, clock=lambda: now[0]).read().coordinator_failures
@@ -787,30 +932,47 @@ def test_coordinator_fault_has_durable_api_custody_and_restart_resume(
     assert backstop.tick() == 0
     now[0] += timedelta(seconds=301)
     backstop.tick()
-    if isinstance(fault, AssertionError):
-        assert len(calls) == 1
-        with sessions() as session:
-            stored = session.scalar(select(CoordinatorFailure))
-            assert stored is not None
-            current_wait = read_wait(stored)
-            assert (
-                current_wait is not None
-                and current_wait.first_blocked_at == first_blocked
-            )
-        # Changed source is new evidence; it re-arms through the normal worker.
-        replacement = Worker(
-            jobs,
-            "fixed",
-            {},
-            background_services=(source,),
-            coordinator_failures=CoordinatorFailures(
-                sessions, lambda: now[0], "b" * 64
-            ),
-        )
-        replacement.run_once()
     assert len(calls) == 2
     with sessions() as session:
         assert session.scalar(select(CoordinatorFailure)) is None
+
+
+def test_jobs_lane_resumes_in_a_restarted_worker_process_with_the_same_digest(
+    postgres_engine,
+):
+    """Catches a deterministic jobs-lane fault outliving its cause until a deploy."""
+    Base.metadata.create_all(postgres_engine)
+    sessions = sessionmaker(postgres_engine, expire_on_commit=False)
+    now = [datetime(2026, 10, 20, tzinfo=UTC)]
+    jobs = JobService(sessions, clock=lambda: now[0])
+    claim = jobs.claim
+    broken = True
+
+    def faulty_claim(*args, **kwargs):
+        if broken:
+            raise ValueError("malformed persisted row")
+        return claim(*args, **kwargs)
+
+    jobs.claim = faulty_claim  # type: ignore[method-assign]
+
+    def worker(name: str) -> Worker:
+        return Worker(
+            jobs,
+            name,
+            {"healthy": lambda _: {"done": True}},
+            coordinator_failures=CoordinatorFailures(
+                sessions, lambda: now[0], "a" * 64
+            ),
+        )
+
+    assert not worker("old").run_once()
+    broken = False
+    fresh = jobs.enqueue("healthy", "admin", "abc", [], {})
+    restarted = worker("new")
+    assert not restarted.run_once()  # still inside the first backoff
+    now[0] += timedelta(seconds=5)
+    assert restarted.run_once()
+    assert jobs.get(fresh.id).result == {"done": True}
 
 
 def test_durable_fault_stays_with_its_source_when_optional_services_reorder(tmp_path):
@@ -1184,9 +1346,11 @@ def test_every_worker_step_runs_through_the_one_timing_wrapper() -> None:
         "traceback.format_exc",
         "time.monotonic",
         "_background_source_name",
-        "sources.append",
-        "sources.get",
-        "sources.update",
+        "self._source_table",
+        "self._housekeeping_table",
+        "dict(self._housekeeping_table()).get",
+        "dict",
+        "dict(self._source_table()).get",
         "source.startswith",
         "source.removeprefix",
         "type",

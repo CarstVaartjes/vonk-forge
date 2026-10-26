@@ -507,6 +507,36 @@ mod command_evidence_tests {
     }
 
     #[test]
+    fn a_podman_go_crash_after_denial_words_is_not_reported_as_a_blocked_platform() {
+        // Wrong implementation: the 2026-10-26 incident, a crash after a RUN
+        // that printed `permission denied`, became "rootless Podman platform is
+        // blocked".
+        let output = crate::process::ProcessOutput {
+            exit_code: Some(2),
+            success: false,
+            stdout: b"[2/2] STEP 11/28: RUN uv pip install torch\n".to_vec(),
+            stderr: b"error: failed to hardlink: permission denied (os error 13)\npanic: runtime error: invalid memory address\n\ngoroutine 61 [running]:\nnetavark.Teardown(...)\n"
+                .to_vec(),
+        };
+        let error = RecipeBuildError::ImageBuild {
+            diagnostic: crate::recipe_builder::podman_build_diagnostic(&output),
+            logs: Box::new(crate::failure_evidence::FailureProcessLogs {
+                exit_code: Some(2),
+                stdout: crate::failure_evidence::log_tail(&output.stdout),
+                stderr: crate::failure_evidence::podman_stderr_tail(&output.stderr),
+            }),
+        };
+        let ExecutionResult::Failed(failure) = build_error_outcome(&error) else {
+            panic!("a returned crash is a definite failure");
+        };
+        assert_ne!(
+            failure.code,
+            Some(vonk_agent_protocol::generated::FailureCode::RecipeBuildPlatformBlocked)
+        );
+        assert!(!failure.reason.contains("platform is blocked"));
+    }
+
+    #[test]
     fn every_nonzero_build_stage_survives_executor_classification_with_its_evidence() {
         let logs = || {
             Box::new(crate::failure_evidence::FailureProcessLogs {

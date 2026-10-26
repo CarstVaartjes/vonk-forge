@@ -21,7 +21,7 @@ from ..artifact_jobs import ArtifactJobService
 from ..auth import CursorCodec, TokenCodec
 from ..bounded_retry import REQUEST_PAUSES
 from ..browser_auth import BrowserAuthService
-from ..capabilities import CapabilityRegistry
+from ..capabilities import CapabilityRegistry, CapabilityUnavailableError
 from ..capability_contract import ControllerCapability
 from ..catalog_service import CatalogService
 from ..catalog_sync import ManagedRecipeCatalogSyncService, run_automatic_sync
@@ -87,7 +87,13 @@ async def _keep_recipe_routes(
             observed = gateway_keys.reconcile_route_grants()
             if isinstance(observed, UnknownError):
                 _LOGGER.warning("gateway route grants waiting: %s", observed.reason)
-        except (GatewayKeyError, HTTPException, OSError, SQLAlchemyError):
+        except (
+            CapabilityUnavailableError,
+            GatewayKeyError,
+            HTTPException,
+            OSError,
+            SQLAlchemyError,
+        ):
             _LOGGER.exception(
                 "gateway route grants unavailable; next check in %ss", interval_seconds
             )

@@ -13,6 +13,7 @@ from vonk_agent_protocol import LifecycleState
 from vonk_control.availability_production import build_recipe_image_availability
 from vonk_control.bounded_json import require_mapping
 from vonk_control.models import Job, User
+from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
 
 from .test_build_cancellation_recovery import _evidence, _services
 from .test_recipe_builds import _write_controller_build_receipt
@@ -33,6 +34,7 @@ def test_replaced_builder_preserves_current_intent_at_each_commit(
     production = build_recipe_image_availability(
         sessions,
         artifact_root=tmp_path / "images",
+        storage=FilesystemRuntimeImageStorage(tmp_path / "images"),
         managed_catalog_sync=None,
         recipe_builds=builds,
         recipe_operations=operations,
@@ -207,6 +209,7 @@ def test_parent_claim_is_held_until_child_admission_commits(
     production = build_recipe_image_availability(
         sessions,
         artifact_root=tmp_path / "images",
+        storage=FilesystemRuntimeImageStorage(tmp_path / "images"),
         managed_catalog_sync=None,
         recipe_builds=builds,
         recipe_operations=operations,
@@ -285,6 +288,7 @@ def test_builder_contention_names_its_owner_and_replans_after_release(
     service = build_recipe_image_availability(
         sessions,
         artifact_root=tmp_path / "images",
+        storage=FilesystemRuntimeImageStorage(tmp_path / "images"),
         managed_catalog_sync=None,
         recipe_builds=builds,
         recipe_operations=operations,

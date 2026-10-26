@@ -34,7 +34,7 @@ def repository(tmp_path):
                 ),
             )
         )
-    return InventoryRepository(sessions), now
+    return InventoryRepository(sessions, clock=lambda: now), now
 
 
 def test_new_snapshot_supersedes_old_but_preserves_evidence(tmp_path) -> None:

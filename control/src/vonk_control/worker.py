@@ -352,22 +352,12 @@ class Worker:
         # Housekeeping runs before all work, so one failing maintenance task
         # must not deny the heartbeat and every source their turn.  Each task
         # is contained and reported; the outer loop retries it next pass.
-        self._run_housekeeping("due-waits", self._due_waits, minimum_interval=1)
-        self._run_housekeeping("telemetry", self._housekeeping)
-        self._run_housekeeping("artifact", self._artifact_housekeeping)
-        sources: list[tuple[str, Callable[[], bool]]] = []
-        if self._recipes is not None:
-            sources.append(("recipes", self._recipes.tick))
-        if self._model_cache is not None:
-            sources.append(("model-cache", self._run_model_cache))
-        for service in self._background_services:
-            sources.append(
-                (
-                    _background_source_name(service),
-                    lambda service=service: bool(service()),
+        for name, task in self._housekeeping_table():
+            if name != LifecycleEventKind.HEARTBEAT:  # last, after the sources
+                self._run_housekeeping(
+                    name, task, minimum_interval=1 if name == "due-waits" else 0
                 )
-            )
-        sources.append(("jobs", self._run_generic))
+        sources = self._source_table()
         if self._source_cursor >= len(sources):
             self._source_cursor = 0
         advanced = False
@@ -381,7 +371,7 @@ class Worker:
             except Exception as error:  # noqa: BLE001 - isolate one owner, report its fault
                 # A source that keeps failing must not starve the others: the
                 # failure stays visible, the turn moves on, and the failed
-                # source is retried on a later pass.
+                # source is retried once its backoff passes (ready()).
                 self._failures.failed(name, error, disposition(error))
                 log_event(
                     _LOGGER,
@@ -473,35 +463,42 @@ class Worker:
             if minimum_interval:
                 self._cadence_at[key] = now + minimum_interval
 
+    def _source_table(self) -> list[tuple[str, Callable[[], bool]]]:
+        """Every work source by its durable custody name, in dispatch order."""
+        sources: list[tuple[str, Callable[[], bool]]] = []
+        if self._recipes is not None:
+            sources.append(("recipes", self._recipes.tick))
+        if self._model_cache is not None:
+            sources.append(("model-cache", self._run_model_cache))
+        for service in self._background_services:
+            sources.append(
+                (
+                    _background_source_name(service),
+                    lambda service=service: bool(service()),
+                )
+            )
+        sources.append(("jobs", self._run_generic))
+        return sources
+
+    def _housekeeping_table(self) -> list[tuple[str, Callable[[], object] | None]]:
+        return [
+            ("due-waits", self._due_waits),
+            (ReceiptOwner.TELEMETRY, self._housekeeping),
+            ("artifact", self._artifact_housekeeping),
+            (LifecycleEventKind.HEARTBEAT, self._loop_heartbeat),
+        ]
+
     def redrive_coordinator(self, source: str) -> None:
         if source.startswith("housekeeping:"):
             name = source.removeprefix("housekeeping:")
-            task = {
-                "due-waits": self._due_waits,
-                ReceiptOwner.TELEMETRY: self._housekeeping,
-                "artifact": self._artifact_housekeeping,
-                LifecycleEventKind.HEARTBEAT: self._loop_heartbeat,
-            }.get(name)
+            task = dict(self._housekeeping_table()).get(name)
             # The due backstop is already executing; its outer caller owns recovery.
             if task is None:
                 self._failures.succeeded(source)
             elif name != "due-waits":
                 self._run_housekeeping(name, task)
             return
-        sources: dict[str, Callable[[], bool]] = {"jobs": self._run_generic}
-        if self._recipes is not None:
-            sources["recipes"] = self._recipes.tick
-        if self._model_cache is not None:
-            sources[WaitOwnerKind.MODEL_CACHE] = self._run_model_cache
-        sources.update(
-            {
-                _background_source_name(service): lambda service=service: bool(
-                    service()
-                )
-                for service in self._background_services
-            }
-        )
-        task = sources.get(source)
+        task = dict(self._source_table()).get(source)
         if task is None:
             self._failures.succeeded(source)
             return
@@ -788,6 +785,8 @@ def assemble_production_worker(
     if recipe_image_artifact_root is not None:
         from .availability_production import build_recipe_image_availability
 
+        assert runtime_archive_storage is not None  # the root implies the cache
+
         image_production = build_recipe_image_availability(
             sessions,
             artifact_root=recipe_image_artifact_root,
@@ -826,6 +825,7 @@ def assemble_production_worker(
         clock=clock,
         lifecycle=lifecycle,
         image_cache_root=image_cache_root,
+        images=runtime_archive_storage,
         model_cache_root=model_cache_root,
         model_cache=model_cache,
         image_blobs=image_store_collector,
