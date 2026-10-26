@@ -6820,6 +6820,7 @@ def test_memory_freed_by_a_confirmed_stop_after_the_sample_is_not_charged_again(
         snapshot = session.scalar(select(NodeInventorySnapshot))
         assert snapshot is not None
         snapshot.observed_at = lifecycle._clock() - timedelta(seconds=60)
+        snapshot.received_at = lifecycle._clock() - timedelta(seconds=60)
         snapshot.host_memory_total_bytes = total
         snapshot.host_memory_free_bytes = free
         snapshot.gpu_memory_total_bytes = total
@@ -6836,6 +6837,7 @@ def test_memory_freed_by_a_confirmed_stop_after_the_sample_is_not_charged_again(
         snapshot = session.scalar(select(NodeInventorySnapshot))
         assert snapshot is not None
         snapshot.observed_at = lifecycle._clock()
+        snapshot.received_at = lifecycle._clock()
         snapshot.host_memory_free_bytes = total
         snapshot.gpu_memory_free_bytes = total
     assert service.preview(request, actor="admin").allowed

@@ -1434,6 +1434,7 @@ def test_fresh_settled_insufficient_inventory_ends_admission_and_fresh_request_h
         snapshot = session.scalar(select(NodeInventorySnapshot))
         assert snapshot is not None
         snapshot.observed_at = profiles._clock()
+        snapshot.received_at = profiles._clock()
     _later(profiles, 90)
     profiles.tick()
     ended = profiles.application(pending.id)
@@ -1522,6 +1523,7 @@ def test_storage_wait_ends_without_measured_progress_after_restart(
             snapshot = session.scalar(select(NodeInventorySnapshot))
             assert snapshot is not None
             snapshot.observed_at = profiles._clock()
+            snapshot.received_at = profiles._clock()
         # A new service reads the persisted progress, without in-memory history.
         profiles = FleetProfileService(
             sessions,
@@ -1574,6 +1576,7 @@ def test_storage_wait_extends_only_when_measured_available_bytes_increase(
         assert snapshot is not None
         snapshot.unused_model_bytes = 1
         snapshot.observed_at = profiles._clock()
+        snapshot.received_at = profiles._clock()
     profiles.tick()
     progressing = profiles.application(application_id)
     assert progressing.state == LifecycleState.QUEUED

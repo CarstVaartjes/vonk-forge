@@ -292,6 +292,7 @@ def _awaiting_final_verification(
                 with sessions.begin() as session:
                     for inventory in session.scalars(select(NodeInventorySnapshot)):
                         inventory.observed_at = now[0]
+                        inventory.received_at = now[0]
                 _replace_child(artifacts, child_id, state="succeeded")
                 artifacts.child_transfer = False
                 continue
