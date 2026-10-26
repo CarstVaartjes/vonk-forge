@@ -4354,7 +4354,8 @@ def test_fleet_upgrade_follows_parallel_sparks_without_a_validation_error() -> N
     assert isinstance(observation, dict)
     assert observation["status"] == "timed_out"
     assert "error" not in observation
-    assert len(result["result"]["operations"]) == 4
+    inner = result["result"]
+    assert isinstance(inner, dict) and len(inner["operations"]) == 4
 
 
 def test_fleet_upgrade_follow_still_refuses_another_jobs_targets() -> None:
@@ -4364,7 +4365,8 @@ def test_fleet_upgrade_follow_still_refuses_another_jobs_targets() -> None:
     observation = result["observation"]
     assert isinstance(observation, dict)
     assert observation["error"]
-    assert "operations" not in result["result"]
+    inner = result["result"]
+    assert isinstance(inner, dict) and "operations" not in inner
 
 
 def test_fleet_upgrade_replays_lost_post_with_same_request_key() -> None:
