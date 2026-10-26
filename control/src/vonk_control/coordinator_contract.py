@@ -15,8 +15,6 @@ class CoordinatorFailureEvidence(StrictModel):
     disposition: Disposition
     reason: OperationReason
     detail: Annotated[str, Field(min_length=1, max_length=512)]
-    #: Consecutive failures of this source on this content; sets the retry backoff.
-    attempts: Annotated[int, Field(ge=1)] = 1
 
 
 class CoordinatorFailureView(StrictModel):

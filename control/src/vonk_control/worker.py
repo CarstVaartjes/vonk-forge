@@ -355,19 +355,7 @@ class Worker:
         self._run_housekeeping("due-waits", self._due_waits, minimum_interval=1)
         self._run_housekeeping("telemetry", self._housekeeping)
         self._run_housekeeping("artifact", self._artifact_housekeeping)
-        sources: list[tuple[str, Callable[[], bool]]] = []
-        if self._recipes is not None:
-            sources.append(("recipes", self._recipes.tick))
-        if self._model_cache is not None:
-            sources.append(("model-cache", self._run_model_cache))
-        for service in self._background_services:
-            sources.append(
-                (
-                    _background_source_name(service),
-                    lambda service=service: bool(service()),
-                )
-            )
-        sources.append(("jobs", self._run_generic))
+        sources = self._source_table()
         if self._source_cursor >= len(sources):
             self._source_cursor = 0
         advanced = False
@@ -473,35 +461,42 @@ class Worker:
             if minimum_interval:
                 self._cadence_at[key] = now + minimum_interval
 
+    def _source_table(self) -> list[tuple[str, Callable[[], bool]]]:
+        """Every work source by its durable custody name, in dispatch order."""
+        sources: list[tuple[str, Callable[[], bool]]] = []
+        if self._recipes is not None:
+            sources.append(("recipes", self._recipes.tick))
+        if self._model_cache is not None:
+            sources.append(("model-cache", self._run_model_cache))
+        for service in self._background_services:
+            sources.append(
+                (
+                    _background_source_name(service),
+                    lambda service=service: bool(service()),
+                )
+            )
+        sources.append(("jobs", self._run_generic))
+        return sources
+
+    def _housekeeping_table(self) -> list[tuple[str, Callable[[], object] | None]]:
+        return [
+            ("due-waits", self._due_waits),
+            (ReceiptOwner.TELEMETRY, self._housekeeping),
+            ("artifact", self._artifact_housekeeping),
+            (LifecycleEventKind.HEARTBEAT, self._loop_heartbeat),
+        ]
+
     def redrive_coordinator(self, source: str) -> None:
         if source.startswith("housekeeping:"):
             name = source.removeprefix("housekeeping:")
-            task = {
-                "due-waits": self._due_waits,
-                ReceiptOwner.TELEMETRY: self._housekeeping,
-                "artifact": self._artifact_housekeeping,
-                LifecycleEventKind.HEARTBEAT: self._loop_heartbeat,
-            }.get(name)
+            task = dict(self._housekeeping_table()).get(name)
             # The due backstop is already executing; its outer caller owns recovery.
             if task is None:
                 self._failures.succeeded(source)
             elif name != "due-waits":
                 self._run_housekeeping(name, task)
             return
-        sources: dict[str, Callable[[], bool]] = {"jobs": self._run_generic}
-        if self._recipes is not None:
-            sources["recipes"] = self._recipes.tick
-        if self._model_cache is not None:
-            sources[WaitOwnerKind.MODEL_CACHE] = self._run_model_cache
-        sources.update(
-            {
-                _background_source_name(service): lambda service=service: bool(
-                    service()
-                )
-                for service in self._background_services
-            }
-        )
-        task = sources.get(source)
+        task = dict(self._source_table()).get(source)
         if task is None:
             self._failures.succeeded(source)
             return

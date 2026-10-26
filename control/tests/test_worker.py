@@ -7,7 +7,7 @@ import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import LifecycleState
+from vonk_agent_protocol import Disposition, LifecycleState
 from vonk_control import job_states, telemetry_maintenance
 from vonk_control.coordinator_failures import CoordinatorFailures
 from vonk_control.jobs import JobService
@@ -618,14 +618,15 @@ def test_every_registered_source_recovers_after_its_fault_clears(tmp_path, monke
     claim = jobs.claim
 
     def claim_probe(*args, **kwargs):
-        probe("jobs")()
+        if broken:
+            probe("jobs")()
         return claim(*args, **kwargs)
 
     monkeypatch.setattr(jobs, "claim", claim_probe)
     worker = Worker(
         jobs,
         "worker",
-        {},
+        {"healthy": lambda _: {"done": True}},
         recipes=Recipes(),
         model_cache=Cache(),
         background_services=(probe("background"),),
@@ -635,23 +636,116 @@ def test_every_registered_source_recovers_after_its_fault_clears(tmp_path, monke
         loop_heartbeat=probe("heartbeat"),
         coordinator_failures=_failures(tmp_path, clock=lambda: now[0]),
     )
-    registered = {
-        "recipes",
-        "model-cache",
-        "background",
-        "jobs",
+    # The worker's own tables, not a hand-typed list: a new source is covered.
+    sources = {name for name, _ in worker._source_table()}
+    housekeeping = {
+        name for name, task in worker._housekeeping_table() if task is not None
+    }
+    assert {"recipes", "model-cache", "jobs"} <= sources
+    worker.run_once()
+    assert set(calls) == {"jobs", "recipes", "model-cache", "background"} | {
         "telemetry",
         "artifact",
         "due-waits",
         "heartbeat",
     }
-    worker.run_once()
-    assert set(calls) == registered
+    assert len(sources) == 4 and len(housekeeping) == 4
     broken = False
     calls.clear()
     now[0] += timedelta(seconds=300)
+    fresh = jobs.enqueue("healthy", "admin", "abc", [], {})
     worker.run_once()
-    assert set(calls) == registered
+    assert {"recipes", "model-cache", "background", "telemetry", "artifact"} <= set(
+        calls
+    )
+    assert jobs.get(fresh.id).result == {"done": True}
+
+
+def _persisting_fault(tmp_path, now, verdict_error):
+    failures = _failures(tmp_path, clock=lambda: now[0])
+    from vonk_control.failure_classification import disposition
+
+    def fail() -> None:
+        failures.failed("source", verdict_error, disposition(verdict_error))
+
+    def due_in() -> float:
+        engine = create_engine(f"sqlite:///{tmp_path / 'worker.sqlite'}")
+        with sessionmaker(engine)() as session:
+            from vonk_control.models import CoordinatorFailure
+
+            row = session.get(CoordinatorFailure, "source")
+            assert row is not None and row.next_action_at is not None
+            return (row.next_action_at.replace(tzinfo=UTC) - now[0]).total_seconds()
+
+    return failures, fail, due_in
+
+
+def test_a_persisting_fault_backs_off_to_the_cap_and_a_deploy_resets_it(tmp_path):
+    now = [datetime(2026, 8, 3, tzinfo=UTC)]
+    failures, fail, due_in = _persisting_fault(
+        tmp_path, now, AssertionError("owner defect")
+    )
+    delays = []
+    for _ in range(9):
+        fail()
+        delays.append(due_in())
+        now[0] += timedelta(seconds=due_in())
+        assert failures.ready("source")
+    assert delays == [5, 5, 10, 20, 40, 80, 160, 300, 300]
+    redeployed = CoordinatorFailures(failures._sessions, lambda: now[0], "b" * 64)
+    assert redeployed.ready("source")
+    redeployed.failed("source", AssertionError("owner defect"), Disposition.FAIL)
+    assert due_in() == 5
+
+
+def test_a_wait_keeps_its_five_second_cadence(tmp_path):
+    now = [datetime(2026, 8, 3, tzinfo=UTC)]
+    _unused, fail, due_in = _persisting_fault(
+        tmp_path, now, ConnectionError("dependency offline")
+    )
+    for _ in range(5):
+        fail()
+        assert due_in() == 5
+        now[0] += timedelta(seconds=5)
+
+
+def test_a_security_refusal_stays_refused_until_its_cause_clears(tmp_path, monkeypatch):
+    from vonk_agent_protocol import SecurityRefusalError
+
+    now = [datetime(2026, 8, 3, tzinfo=UTC)]
+    monkeypatch.setattr(
+        "vonk_control.worker.time.monotonic", lambda: now[0].timestamp()
+    )
+    refused = True
+    calls = []
+
+    def check() -> bool:
+        calls.append(now[0])
+        if refused:
+            raise SecurityRefusalError("untrusted input")
+        return False
+
+    jobs = _service(tmp_path)
+    worker = Worker(
+        jobs,
+        "worker",
+        {"healthy": lambda _: {"done": True}},
+        background_services=(check,),
+        coordinator_failures=_failures(tmp_path, clock=lambda: now[0]),
+    )
+    worker.run_once()
+    now[0] += timedelta(seconds=5)
+    worker.run_once()
+    assert len(calls) == 2  # re-decided by the real check, and still refused
+    refused = False
+    now[0] += timedelta(seconds=10)
+    fresh = jobs.enqueue("healthy", "admin", "abc", [], {})
+    worker.run_once()
+    assert len(calls) == 3
+    assert jobs.get(fresh.id).result == {"done": True}
+    now[0] += timedelta(seconds=1)
+    worker.run_once()
+    assert len(calls) == 4  # admitted again: no backoff is left
 
 
 def test_unavailable_model_cache_surface_is_local_and_fresh_work_observes_repair(
@@ -806,11 +900,7 @@ def test_coordinator_fault_has_durable_api_custody_and_restart_resume(
         )
         wait = read_wait(stored)
         assert wait is not None
-        assert wait.resume_condition == (
-            WaitResumeCondition.DEPENDENCY_CHANGED
-            if isinstance(fault, AssertionError)
-            else WaitResumeCondition.RETRY_DUE
-        )
+        assert wait.resume_condition == WaitResumeCondition.RETRY_DUE
     # The existing authenticated platform projection consumes the stored contract.
     visible = (
         PlatformObserver(sessions, clock=lambda: now[0]).read().coordinator_failures
@@ -848,7 +938,9 @@ def test_coordinator_fault_has_durable_api_custody_and_restart_resume(
         assert session.scalar(select(CoordinatorFailure)) is None
 
 
-def test_jobs_lane_resumes_after_restart_with_the_same_digest(postgres_engine):
+def test_jobs_lane_resumes_in_a_restarted_worker_process_with_the_same_digest(
+    postgres_engine,
+):
     """Catches a deterministic jobs-lane fault outliving its cause until a deploy."""
     Base.metadata.create_all(postgres_engine)
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)
@@ -1255,9 +1347,11 @@ def test_every_worker_step_runs_through_the_one_timing_wrapper() -> None:
         "traceback.format_exc",
         "time.monotonic",
         "_background_source_name",
-        "sources.append",
-        "sources.get",
-        "sources.update",
+        "self._source_table",
+        "self._housekeeping_table",
+        "dict(self._housekeeping_table()).get",
+        "dict",
+        "dict(self._source_table()).get",
         "source.startswith",
         "source.removeprefix",
         "type",
