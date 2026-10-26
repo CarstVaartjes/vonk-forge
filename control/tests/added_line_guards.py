@@ -64,6 +64,8 @@ MODES = (
     "listings",
     "movement",
     "exit-causes",
+    "nas-space",
+    "model-sets",
 )
 # The agent's messages a Controller test may send only as the stand-in pinned
 # to the agent's shared vector; built by hand they are the Controller's idea of
@@ -1135,6 +1137,39 @@ def check_source(
             (line, "pairwise progress movement (compare against forward marks)")
             for line, function in pairwise_movement_checks(source)
             if (path, function) not in MOVEMENT_VERDICTS
+        )
+    if (
+        python
+        and not is_test
+        and "nas-space" in modes
+        and path.startswith("control/src/vonk_control/model_cache/")
+        and path != "control/src/vonk_control/model_cache/storage.py"
+    ):
+        # NAS space is decided once, in storage.py's _storage_fits, next to what
+        # the running transfers still write. A comparison with the free disk
+        # alone let parallel downloads overcommit the volume (#1910).
+        hits.extend(
+            (line, "NAS space read outside storage.py; use _storage_fits")
+            for line, text in enumerate(source.splitlines(), 1)
+            if re.search(r"\bfree_bytes\(\)|\bdisk_usage\(", text)
+        )
+    if (
+        python
+        and not is_test
+        and "model-sets" in modes
+        and re.fullmatch(
+            r"control/src/vonk_control/model_cache/(?:removal_\w+|fleet_removal)\.py",
+            path,
+        )
+    ):
+        # Removal takes a model's sets from the one resolver the Library shares
+        # (model_cache/lineage.py). Choosing them by the first requester's
+        # digest missed every set downloaded under an earlier revision, and
+        # removals "succeeded" having removed nothing (#1911).
+        hits.extend(
+            (line, "model sets chosen by first-requester digest; use lineage.py")
+            for line, text in enumerate(source.splitlines(), 1)
+            if "ModelCacheSet.model_content_sha256" in text
         )
     if python and is_test and "clocks" in modes:
         hits.extend(

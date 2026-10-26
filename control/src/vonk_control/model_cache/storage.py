@@ -8,25 +8,68 @@ import shutil
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, NamedTuple, cast
 
 from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+from vonk_agent_protocol import LifecycleState, ModelCacheBlockerCode
 
 from .. import model_cache_states
-from ..model_cache_contract import ModelCacheObjectReceipt
+from ..model_cache_contract import (
+    CacheOperationKind,
+    ModelCacheObjectReceipt,
+    ModelCacheTransfer,
+)
 from ..models import ModelCacheOperation, ModelCacheSet, ModelCacheSetArtifact
 from ..storage_demands import NAS_MODELS, StorageDemands
 from ..strict_json import read_stored_model
-from .artifacts import ArtifactSpec, _is_hex
+from .artifacts import (
+    ArtifactSetManifest,
+    ArtifactSpec,
+    _is_hex,
+    _unique_artifacts,
+)
 from .constants import _DIGEST_LENGTH, SCHEMA_VERSION
+from .errors import ModelCacheError
 from .persistence import _manifest_of
 from .source_helpers import _fsync_directory
 from .views import StorageSummary
 
 if TYPE_CHECKING:
     from .service import ModelCacheService
+
+
+class TransferNeed(NamedTuple):
+    """What a transfer still adds to the NAS disk."""
+
+    #: Bytes each object has still to land.
+    objects: dict[str, int]
+    #: Extra disk held while it runs: a split file's largest part during
+    #: assembly, or the copy a refresh or repair writes beside a verified one.
+    peak: int
+
+
+#: What each running download or repair still adds to the NAS, by operation id.
+RunningTransfers = dict[str, TransferNeed]
+
+
+def _in_flight(
+    running: RunningTransfers, *, excluding: str | None = None
+) -> tuple[dict[str, int], int]:
+    """What the running transfers, ``excluding`` aside, still write per object,
+    and the sum of their peaks. An object two transfers share lands once, so
+    it counts once.
+    """
+    merged: dict[str, int] = {}
+    peaks = 0
+    for operation_id, need in running.items():
+        if operation_id == excluding:
+            continue
+        peaks += need.peak
+        for digest, remaining in need.objects.items():
+            merged[digest] = max(merged.get(digest, 0), remaining)
+    return merged, peaks
 
 
 class StorageMixin:
@@ -54,13 +97,142 @@ class StorageMixin:
     def free_bytes(self) -> int:
         """Free NAS bytes beyond the reserve: one ``statvfs``, no object scan.
 
-        Admission and previews need only this number. ``storage_summary`` walks
+        Admission and previews need only this number and what the running
+        transfers still write (:meth:`_running_transfers`). ``storage_summary`` walks
         every stored object, set and in-flight operation and is for the storage
         view, never for a read that repeats once per recipe.
         """
         cache = cast("ModelCacheService", self)
 
         return max(0, shutil.disk_usage(cache._root).free - cache._reserve_bytes)
+
+    def _transfer_need(
+        self,
+        manifest: ArtifactSetManifest,
+        transfer: ModelCacheTransfer,
+        *,
+        replaces: bool,
+        measured: bool = False,
+        cached: frozenset[str] | None = None,
+    ) -> TransferNeed:
+        """What a transfer still adds to the NAS disk.
+
+        An object has landed as far as its stored copy (a refresh replaces it
+        in place, needing no new space) or, failing that, the transfer's ledger
+        (baseline plus bytes received) as far as checkpoint files on disk back
+        it: a ledger whose partial was discarded owes the whole object again.
+        A ``measured`` plan was just read from disk and is taken as it is.
+        No hash: one ``lstat`` per object and one listing of the set's partials.
+        """
+        cache = cast("ModelCacheService", self)
+
+        on_disk: dict[str, int] = {}
+        if not measured:
+            try:
+                with os.scandir(cache._root / "partials" / manifest.digest) as items:
+                    for item in items:
+                        if item.is_file(follow_symlinks=False):
+                            name = item.name[:_DIGEST_LENGTH]
+                            on_disk[name] = on_disk.get(name, 0) + item.stat().st_size
+            except OSError:
+                pass  # no checkpoint files: the ledger is not backed
+        objects: dict[str, int] = {}
+        split_peak = replace_peak = 0
+        for digest, spec in _unique_artifacts(manifest.artifacts).items():
+            entry = transfer.artifacts.get(digest)
+            ledger = 0 if entry is None else entry.baseline_bytes + entry.received_bytes
+            if measured:
+                landed = ledger
+            else:
+                kept = on_disk.get(digest, 0) + sum(
+                    on_disk.get(part.sha256, 0) for part in spec.parts or ()
+                )
+                landed = max(cache._stored_object_bytes(digest), min(ledger, kept))
+            objects[digest] = max(0, spec.expected_bytes - landed)
+            if (
+                spec.parts is not None
+                and objects[digest]
+                and (cached is None or digest not in cached)
+            ):
+                # A split file is assembled part by part, each part deleted
+                # once appended: the disk peaks at its largest part.
+                split_peak = max(
+                    split_peak, max(part.expected_bytes for part in spec.parts)
+                )
+            if replaces and ledger < spec.expected_bytes:
+                # A refresh or repair writes a stored object again beside its
+                # verified copy, released once the new one is published.
+                replace_peak = max(replace_peak, spec.expected_bytes)
+        return TransferNeed(objects, max(split_peak, replace_peak))
+
+    def _running_transfers(self, session: Session) -> RunningTransfers:
+        """What every running download and repair still adds to the NAS disk.
+
+        One query over the running operations, so it is bounded by the transfer
+        pool, never by history. The claim gate and the storage view read this
+        one figure: a transfer is claimed only into the space the running ones
+        leave, so parallel downloads never fill the volume between them.
+        """
+        cache = cast("ModelCacheService", self)
+
+        running: RunningTransfers = {}
+        for operation in session.scalars(
+            select(ModelCacheOperation).where(
+                ModelCacheOperation.kind.in_(
+                    (CacheOperationKind.DOWNLOAD, CacheOperationKind.REPAIR)
+                ),
+                ModelCacheOperation.state.in_(
+                    model_cache_states.words(LifecycleState.RUNNING)
+                ),
+            )
+        ):
+            payload = cache._transfer_or_none(operation)
+            if payload is None:
+                continue  # unreadable: the claim loop rebuilds or retires it
+            try:
+                manifest = _manifest_of(payload)
+            except (TypeError, ValueError, ModelCacheError):
+                continue
+            running[operation.id] = cache._transfer_need(
+                manifest,
+                payload.transfer,
+                replaces=operation.kind == CacheOperationKind.REPAIR
+                or payload.force_refresh,
+            )
+        return running
+
+    def _storage_fits(
+        self,
+        need: TransferNeed,
+        running: RunningTransfers,
+        *,
+        operation_id: str | None = None,
+    ) -> bool:
+        """Whether a transfer fits in the NAS space the running ones leave.
+
+        Its own remaining bytes (objects a running transfer already writes
+        aside) plus its peak must fit in the free disk beyond the reserve once
+        every other running transfer has landed and held its peak. A transfer
+        that adds nothing always fits. When one does not fit, the storage
+        demand asks retention for the whole shortfall.
+        """
+        cache = cast("ModelCacheService", self)
+
+        others, peaks = _in_flight(running, excluding=operation_id)
+        own = need.peak + sum(
+            remaining
+            for digest, remaining in need.objects.items()
+            if digest not in others
+        )
+        if own == 0:
+            return True
+        committed = own + sum(others.values()) + peaks
+        if committed <= cache.free_bytes():
+            return True
+        cache._request_storage(
+            committed, ModelCacheBlockerCode.INSUFFICIENT_RESERVED_STORAGE
+        )
+        return False
 
     def storage_summary(self) -> StorageSummary:
         cache = cast("ModelCacheService", self)
@@ -80,34 +252,10 @@ class StorageMixin:
                     object_bytes[path.name] = path.stat().st_size
                 except OSError:
                     continue
-        # Partial checkpoints are storage facts. They are measured before the
-        # read transaction opens so no SQL session spans the directory scan.
-        partial_bytes: dict[str, int] = {}
-        partial_root = cache._root / "partials"
-        for partial in partial_root.glob("*/*.part"):
-            if (
-                partial.is_file()
-                and not partial.is_symlink()
-                and len(partial.stem) == _DIGEST_LENGTH
-                and _is_hex(partial.stem)
-            ):
-                try:
-                    partial_bytes[partial.stem] = max(
-                        partial_bytes.get(partial.stem, 0), partial.stat().st_size
-                    )
-                except OSError:
-                    continue
         unique_used = sum(object_bytes.values())
         with cache._session(write=True) as session:
             sets = list(session.scalars(select(ModelCacheSet)))
             memberships = list(session.scalars(select(ModelCacheSetArtifact)))
-            operations = list(
-                session.scalars(
-                    select(ModelCacheOperation).where(
-                        ModelCacheOperation.state.in_(model_cache_states.LIVE)
-                    )
-                )
-            )
             for row in sets:
                 cache._refresh_protection(session, row)
             protected_sets = {row.artifact_set_sha256 for row in sets if row.protected}
@@ -116,16 +264,6 @@ class StorageMixin:
                 for item in memberships
                 if item.artifact_set_sha256 in protected_sets
             }
-            in_flight_artifacts: dict[str, int] = {}
-            for operation in operations:
-                if operation.kind not in {"download", "repair"}:
-                    continue
-                payload = cache._transfer_or_none(operation)
-                if payload is None:
-                    continue  # unreadable: its objects are not counted in flight
-                manifest = _manifest_of(payload)
-                for item in manifest.artifacts:
-                    in_flight_artifacts.setdefault(item.sha256, item.expected_bytes)
             protected_bytes = sum(
                 object_bytes.get(digest, 0) for digest in protected_artifacts
             )
@@ -138,16 +276,7 @@ class StorageMixin:
                 if digest not in protected_artifacts
             )
             in_flight_bytes = sum(
-                max(
-                    0,
-                    expected
-                    - max(
-                        object_bytes.get(digest, 0),
-                        partial_bytes.get(digest, 0),
-                        cache._stored_object_bytes(digest),
-                    ),
-                )
-                for digest, expected in in_flight_artifacts.items()
+                _in_flight(cache._running_transfers(session))[0].values()
             )
         available = max(0, usage.free - cache._reserve_bytes)
         return StorageSummary(
