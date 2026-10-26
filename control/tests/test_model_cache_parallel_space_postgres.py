@@ -15,7 +15,7 @@ from vonk_control.model_cache.persistence import _store_operation_payload
 from vonk_control.models import Base, ModelCacheOperation
 from vonk_control.storage_demands import NAS_MODELS, StorageDemands
 
-from .test_model_cache import _artifact
+from .test_model_cache import _artifact, _download
 
 SIZE = 4096
 _Usage = namedtuple("_Usage", "total used free")
@@ -177,5 +177,54 @@ def test_an_object_two_downloads_share_is_reserved_once(
         )
         assert sorted(item for item, _kind in claimed) == sorted(admitted)
         assert service.storage_summary().in_flight_bytes == SIZE
+    finally:
+        service.close()
+
+
+def test_a_running_repair_holds_its_copy_beside_the_verified_one(
+    postgres_engine, tmp_path: Path, monkeypatch
+) -> None:
+    """Catches counting a running repair as needing nothing.
+
+    A repair rewrites a stored object next to its verified copy. A sibling
+    download fits beside the repair's remaining bytes (none) but not beside
+    that copy, so it waits until the repair ends.
+    """
+    free = [10**9]
+    service, sessions = _service(postgres_engine, tmp_path, monkeypatch, free)
+    try:
+        source = tmp_path / "repaired"
+        source.mkdir()
+        stored = _download(
+            service,
+            [_artifact(source, b"r" * SIZE, model_content_sha256="1" * 64)],
+            model_content_sha256="1" * 64,
+            request_key=str(uuid4()),
+        )
+        assert stored.state == LifecycleState.SUCCEEDED, stored.last_error
+        set_digest = stored.artifact_set_sha256
+        assert set_digest is not None
+        free[0] = SIZE + SIZE // 2
+        repair = service.start_repair(
+            actor="operator",
+            request_key=str(uuid4()),
+            artifact_set_sha256=set_digest,
+            plan_digest=str(service.repair_preview(set_digest)["plan_digest"]),
+        )
+        assert service._claim_operations(
+            limit=1, respect_backoff=False, transfer_slots=1
+        ) == [(repair.id, "repair")]
+        sibling = _admit(service, tmp_path / "sibling", "2" * 64, b"s" * SIZE)
+        assert (
+            service._claim_operations(limit=1, respect_backoff=False, transfer_slots=1)
+            == []
+        )
+        with sessions.begin() as session:
+            row = session.get(ModelCacheOperation, repair.id)
+            assert row is not None
+            row.state = LifecycleState.SUCCEEDED
+        assert service._claim_operations(
+            limit=1, respect_backoff=False, transfer_slots=1
+        ) == [(sibling, "download")]
     finally:
         service.close()
