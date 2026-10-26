@@ -12,6 +12,7 @@ from vonk_agent_protocol import (
     ModelAccessReason,
     ModelCacheCode,
 )
+from vonk_agent_protocol.http_failure import TransientReason
 
 from .. import model_cache_states
 from ..lifecycle import Effect, Outcome, Reported
@@ -313,7 +314,9 @@ class RetryMixin:
                 if payload.failure is not None and payload.failure.code in {
                     ModelAccessReason.ACCESS_DENIED,
                     ModelAccessReason.ACCESS_REQUIRED,
+                    TransientReason.RATE_LIMITED,
                 }:
+                    # An upstream owner's wait ended: the stall window restarts.
                     operation.progress_advanced_at = now
                 _store_operation_payload(
                     operation,

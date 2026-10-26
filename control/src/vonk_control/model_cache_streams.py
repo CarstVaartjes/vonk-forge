@@ -108,7 +108,8 @@ class StreamGovernor:
             self._last_rate = None
             self._hold_windows = PLATEAU_HOLD_WINDOWS
             # Retry-After itself is honoured by the service's provider
-            # cooldown, which refuses every Hugging Face request until it ends;
+            # cooldown, which refuses every request to that provider until it
+            # ends;
             # here the halved limit and the hold keep the ramp from resuming
             # at full width the moment the cooldown lifts.
             self._reason = reason

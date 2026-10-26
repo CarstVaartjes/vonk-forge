@@ -6,7 +6,7 @@ import hashlib
 import os
 import re
 import shutil
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from datetime import datetime
 from io import BufferedReader
 from pathlib import Path
@@ -322,6 +322,27 @@ class DownloadMixin:
         cache = cast("ModelCacheService", self)
         provider_for(spec.kind).validate(cache, spec)
 
+    def _open_provider(
+        self, client: httpx2.Client, spec: ArtifactSpec, headers: Mapping[str, str]
+    ) -> httpx2.Response:
+        """Open one response from the spec's provider, every provider alike.
+
+        A provider under its cooldown is not contacted; a rate limit or a
+        server error narrows the parallel streams before it is reported.
+        """
+        cache = cast("ModelCacheService", self)
+        cache._refuse_during_cooldown(spec.kind)
+        try:
+            return provider_for(spec.kind).open(cache, client, spec, headers)
+        except ModelCacheStorageUnknown as error:
+            if error.code == ModelCacheCode.RATE_LIMITED or (
+                error.source_status is not None and error.source_status >= 500
+            ):
+                cache._streams.throttled(
+                    error.retry_after_seconds, f"{spec.kind}: {error.detail}"
+                )
+            raise
+
     def _download_parallel_ranges(
         self,
         spec: ArtifactSpec,
@@ -334,7 +355,6 @@ class DownloadMixin:
     ) -> bool:
         cache = cast("ModelCacheService", self)
         cache._validate_http_download(spec)
-        provider = provider_for(spec.kind)
         # Range segments and atomic assembly coexist temporarily. Reserve the
         # worst-case additional footprint across this process's active files.
         # The retained prefix is already excluded from current free space:
@@ -382,7 +402,7 @@ class DownloadMixin:
                     "Range": f"bytes={start}-{end}",
                     "Accept-Encoding": "identity",
                 }
-                return provider.open(cache, client, spec, headers)
+                return cache._open_provider(client, spec, headers)
 
             digest = None if fetch_only else hashlib.sha256()
             with cache._sample_transfer(
@@ -480,7 +500,6 @@ class DownloadMixin:
             handle.seek(offset)
             return handle, offset, handle.close
         cache._validate_http_download(spec)
-        provider = provider_for(spec.kind)
         client = cache._http
         owns_client = client is None
         if client is None:
@@ -495,13 +514,13 @@ class DownloadMixin:
                 "production cache HTTP clients must not follow redirects",
             )
         headers = {"Range": f"bytes={offset}-"} if offset else {}
-        response = provider.open(cache, client, spec, headers)
+        response = cache._open_provider(client, spec, headers)
         effective_offset = offset
         if offset and response.status_code == 200:
             # The server ignored the range request; restart safely rather than
             # appending a complete payload to a checkpoint.
             response.close()
-            response = provider.open(cache, client, spec, {})
+            response = cache._open_provider(client, spec, {})
             effective_offset = 0
         if response.status_code == 206:
             content_range = response.headers.get("content-range", "")

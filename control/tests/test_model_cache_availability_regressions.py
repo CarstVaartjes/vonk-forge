@@ -24,6 +24,7 @@ from vonk_control.bounded_json import (
     text,
 )
 from vonk_control.model_cache import ModelCacheService, ModelCacheStorageError
+from vonk_control.model_cache.constants import ProviderKind
 from vonk_control.model_cache_contract import (
     ModelCacheOperationProgress,
     ModelCacheUpstreamRevision,
@@ -347,9 +348,8 @@ def test_postgres_concurrent_claims_are_distinct(
         [_artifact("pg-b", b"b")],
         "00000000-0000-4000-8000-000000000312",
     )
-    # The cooldown scan has already loaded both rows into the second
-    # session's identity map when the first worker commits its claim.
-    # A later locking SELECT must refresh that cached claim state.
+    # The second worker pauses at its locking SELECT until the first worker
+    # has committed its claim; the locked read must see that claim state.
     second_loaded = threading.Event()
     first_committed = threading.Event()
     original_session = second._session
@@ -788,7 +788,9 @@ def test_hf_access_recheck_resumes_the_exact_retained_transfer(
     limited = service.get_operation(current_id)
     assert limited.failure is not None
     assert limited.failure["retry_after_seconds"] == 30
-    assert service._hf_cooldown_until == NOW.replace(second=30)
+    assert service._provider_cooldown({ProviderKind.HTTP_FILE}) == NOW.replace(
+        second=30
+    )
     assert len(requests) == 4
     now[0] = NOW + timedelta(seconds=31)
     _drain(service, current_id)

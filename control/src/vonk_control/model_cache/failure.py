@@ -27,7 +27,6 @@ from .catalog_helpers import _iso
 from .constants import (
     _ACCESS_WAIT_CODES,
     _CREDENTIAL_FAILURE_CODES,
-    _RETRY_BASE_SECONDS,
     _SOURCE_GONE_ATTEMPTS,
     _SOURCE_GONE_STATUSES,
 )
@@ -39,6 +38,7 @@ from .persistence import (
     _store_operation_payload,
     _updated,
 )
+from .provider_waits import provider_kinds
 
 if TYPE_CHECKING:
     from .service import ModelCacheService
@@ -204,6 +204,20 @@ class FailureMixin:
                     provider_hint = cache._access_retry_delay(
                         operation.id, access_checks
                     )
+                if failure_code == ModelCacheCode.RATE_LIMITED:
+                    # The provider owns this wait (it spends no retry): re-check
+                    # on its own hint, else on the provider-wait cadence. Its
+                    # cooldown holds every request to the same provider, and is
+                    # recorded before the core schedules, so the stall window
+                    # never clips the provider's "later".
+                    if type(provider_hint) is not int or provider_hint < 1:
+                        access_checks += 1
+                        provider_hint = cache._access_retry_delay(
+                            operation.id, access_checks
+                        )
+                    until = now + timedelta(seconds=provider_hint)
+                    for kind in provider_kinds(manifest.artifacts, artifact_key):
+                        cache._record_provider_cooldown(kind, until)
                 operation.last_error = detail[:512]
                 # The core owns the schedule (bounded backoff, never earlier than
                 # the provider's own hint) and the end of a terminal failure.
@@ -259,15 +273,6 @@ class FailureMixin:
                                 or cache._huggingface_credential_fingerprint()
                             )
                         }
-                    )
-                provider_rate_limited = (
-                    getattr(error, "code", None) == ModelCacheCode.RATE_LIMITED
-                )
-                if provider_rate_limited and cache._manifest_has_huggingface_source(
-                    manifest
-                ):
-                    cache._record_huggingface_cooldown(
-                        next_retry or now + timedelta(seconds=_RETRY_BASE_SECONDS)
                     )
                 failure_payload = _cache_failure(
                     failure_code,

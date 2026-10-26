@@ -2,10 +2,14 @@ import threading
 import time
 import types
 from threading import Event
+from types import SimpleNamespace
+from typing import cast
 
 import httpx2
 import pytest
 from vonk_agent_protocol import LifecycleState, ModelCacheFailureCode
+from vonk_control.model_cache.artifacts import ArtifactSpec
+from vonk_control.model_cache.constants import ProviderKind
 from vonk_control.model_cache_ranges import download_ranges
 from vonk_control.model_cache_streams import (
     PLATEAU_HOLD_WINDOWS,
@@ -176,7 +180,7 @@ def test_range_streams_respect_the_gate(tmp_path) -> None:
     assert peak <= 2
 
 
-def test_huggingface_429_and_5xx_back_off_the_streams(cache, tmp_path) -> None:  # noqa: F811
+def test_provider_429_and_5xx_back_off_the_streams(cache, tmp_path) -> None:  # noqa: F811
     _existing, sessions = cache
     statuses = iter([429, 503])
 
@@ -188,16 +192,18 @@ def test_huggingface_429_and_5xx_back_off_the_streams(cache, tmp_path) -> None: 
     service, client = _http_cache_service(tmp_path, sessions, handler)
     try:
         url = "https://huggingface.co/org/repo/resolve/" + "a" * 40 + "/w.bin"
+        spec = cast(
+            "ArtifactSpec",
+            SimpleNamespace(kind=ProviderKind.HUGGINGFACE_FILE, source=url),
+        )
         before = service._streams.status().limit
         with observe_unknown():
-            observed = service._open_http_response(client, url, {})
+            observed = service._open_provider(client, spec, {})
             assert not observed
         halved = service._streams.status().limit
         assert halved == before // 2
-        assert service._hf_cooldown_until is not None  # Retry-After honoured
-        service._hf_cooldown_until = None
         with observe_unknown():
-            observed = service._open_http_response(client, url, {})
+            observed = service._open_provider(client, spec, {})
             assert not observed
         assert service._streams.status().limit == halved // 2
     finally:

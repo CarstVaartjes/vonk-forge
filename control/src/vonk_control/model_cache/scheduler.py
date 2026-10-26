@@ -13,6 +13,7 @@ from vonk_agent_protocol import (
     InvalidRequestReason,
     UnknownOutcomeError,
 )
+from vonk_agent_protocol.http_failure import TransientReason
 
 from .. import model_cache_states
 from ..agent_operation_facts import aware as _aware
@@ -62,6 +63,21 @@ class SchedulerMixin:
         if not 1 <= limit <= 100:
             raise InvalidValue("cache operation limit is invalid")
         with cache._session() as session:
+            # Provider waits outlive a restart: rebuild their cooldowns once.
+            cache._adopt_provider_cooldowns(
+                list(
+                    session.scalars(
+                        select(ModelCacheOperation)
+                        .where(ModelCacheOperation.kind.in_(["download", "repair"]))
+                        .where(ModelCacheOperation.state.in_(model_cache_states.LIVE))
+                        .where(
+                            ModelCacheOperation.payload["failure"]["code"].as_string()
+                            == TransientReason.RATE_LIMITED.value
+                        )
+                    )
+                ),
+                cache._clock(),
+            )
             count = require_integer(
                 session.scalar(
                     select(func.count())
@@ -430,21 +446,6 @@ class SchedulerMixin:
         claimed: list[tuple[str, str]] = []
         transfers = 0
         with cache._session(write=True) as session:
-            if respect_backoff:
-                cooldown_rows = list(
-                    session.scalars(
-                        select(ModelCacheOperation)
-                        .where(ModelCacheOperation.kind.in_(["download", "repair"]))
-                        .where(
-                            ModelCacheOperation.state.in_(
-                                (*model_cache_states.LIVE, "failed")
-                            )
-                        )
-                        .order_by(ModelCacheOperation.updated_at.desc())
-                        .limit(256)
-                    )
-                )
-                cache._refresh_huggingface_cooldown(cooldown_rows, now)
             # Each claim reserves its remaining bytes in this pass, so the pass
             # never admits more downloads than the disk holds between them.
             running = cache._running_transfers(session)
@@ -472,8 +473,9 @@ class SchedulerMixin:
                         ModelCacheOperation.state.in_(model_cache_states.LIVE),
                     )
                     .with_for_update(skip_locked=True)
-                    # The cooldown scan may have cached this row before another
-                    # worker committed a claim; inspect the locked database value.
+                    # An earlier read of this session may have cached this row
+                    # before another worker committed a claim; inspect the
+                    # locked database value.
                     .execution_options(populate_existing=True)
                 )
                 if operation is None:
@@ -533,20 +535,12 @@ class SchedulerMixin:
                     # nothing here is irreversible, so it is retried with backoff)
                     # instead of the next claimant stealing the claim.
                     row = cache._lifecycle.lapse(operation, now)
-                if respect_backoff:
-                    if row.next_action_at is not None and row.next_action_at > _aware(
-                        now
-                    ):
-                        continue
-                    if (
-                        cache._hf_cooldown_until is not None
-                        and cache._hf_cooldown_until > now
-                        and cache._payload_has_huggingface_source(payload)
-                    ):
-                        # The provider's cooldown is a live owner of this wait:
-                        # the stall window restarts instead of running out.
-                        operation.progress_advanced_at = _aware(now)
-                        continue
+                if (
+                    respect_backoff
+                    and row.next_action_at is not None
+                    and row.next_action_at > _aware(now)
+                ):
+                    continue
                 manifest = _manifest_of(payload)
                 if has_pending_removal(
                     session,

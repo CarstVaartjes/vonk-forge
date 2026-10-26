@@ -3,10 +3,8 @@
 from __future__ import annotations
 
 import uuid
-from collections.abc import Sequence
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, cast
-from urllib.parse import urlsplit
 
 from sqlalchemy import func, select
 from vonk_agent_protocol import (
@@ -23,8 +21,6 @@ from ..categorized_errors import InvalidValue
 from ..lifecycle import Reported
 from ..lifecycle.model_cache import ModelCacheAdapter
 from ..model_cache_contract import (
-    ModelCacheDownloadPayload,
-    ModelCacheOperationPayload,
     ModelCacheRepairCheckpoint,
     ModelCacheRepairPayload,
     ModelCacheRetry,
@@ -37,7 +33,6 @@ from .artifacts import (
     ArtifactSetManifest,
     _optional_digest,
     _sha256_json,
-    _unique_artifacts,
 )
 from .catalog_helpers import _datetime, _iso
 from .constants import _RETRY_BASE_SECONDS, SCHEMA_VERSION, SOURCE_POLICY
@@ -46,7 +41,7 @@ from .errors import (
     ModelCacheNotFoundInvalid,
 )
 from .persistence import _cache_failure, _write_operation_payload
-from .source_helpers import _is_hf_authority, _request_key
+from .source_helpers import _request_key
 from .storage import RunningTransfers, TransferNeed
 from .views import CacheOperationView
 
@@ -56,61 +51,6 @@ if TYPE_CHECKING:
 
 class RepairMixin:
     """Repair behavior of the cache service."""
-
-    @staticmethod
-    def _payload_has_huggingface_source(payload: ModelCacheOperationPayload) -> bool:
-        if not isinstance(payload, ModelCacheDownloadPayload):
-            return False
-        for artifact in payload.manifest.artifacts:
-            source = artifact.source
-            try:
-                host = urlsplit(source).hostname
-            except ValueError:
-                host = None
-            if _is_hf_authority(host):
-                return True
-        return False
-
-    @classmethod
-    def _manifest_has_huggingface_source(cls, manifest: ArtifactSetManifest) -> bool:
-        for spec in _unique_artifacts(manifest.artifacts).values():
-            try:
-                host = urlsplit(spec.source).hostname
-            except ValueError:
-                continue
-            if _is_hf_authority(host):
-                return True
-        return False
-
-    def _record_huggingface_cooldown(self, until: datetime) -> None:
-        cache = cast("ModelCacheService", self)
-        with cache._lock:
-            if cache._hf_cooldown_until is None or until > cache._hf_cooldown_until:
-                cache._hf_cooldown_until = until
-
-    def _refresh_huggingface_cooldown(
-        self, rows: Sequence[ModelCacheOperation], now: datetime
-    ) -> None:
-        """Reconstruct HF throttling after restart from durable failure rows."""
-        cache = cast("ModelCacheService", self)
-
-        latest = cache._hf_cooldown_until
-        for operation in rows:
-            payload = cache._payload_or_none(operation)
-            if payload is None or not cache._payload_has_huggingface_source(payload):
-                continue  # unreadable: it carries no usable throttle evidence
-            failure = cache._canonical_failure(operation)
-            if failure is None or failure.code != "rate_limited":
-                continue
-            retry_at = failure.retry_time
-            if retry_at is None:
-                continue
-            candidate = _datetime(datetime.fromisoformat(retry_at))
-            if candidate > now and (latest is None or candidate > latest):
-                latest = candidate
-        cache._hf_cooldown_until = (
-            latest if latest is not None and latest > now else None
-        )
 
     def repair_preview(self, artifact_set_sha256: str) -> dict[str, object]:
         cache = cast("ModelCacheService", self)

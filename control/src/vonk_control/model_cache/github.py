@@ -138,8 +138,12 @@ class GithubMixin:
                 return cache._open_github_release_asset_once(client, spec, headers)
             except ModelCacheStorageUnknown as error:
                 refused = error
-                if error.source_status in {404, 410} or error.retry_after_seconds:
-                    break  # the durable source-gone counter owns these observations
+                if (
+                    error.source_status in {404, 410}
+                    or error.retry_after_seconds
+                    or error.code == ModelCacheCode.RATE_LIMITED
+                ):
+                    break  # the durable failure path owns these observations
         if refused is not None:
             raise refused
         raise ModelCacheStorageUnknown(

@@ -289,6 +289,8 @@ class ModelCacheRetry(StrippedStrictModel):
     automatic_attempts: int = Field(ge=1)
     operator_retries: int = Field(ge=0)
     missing_source: ModelCacheMissingSourceObservation | None = None
+    # Checks of a provider-owned wait (access approval, or a rate limit without
+    # a hint): its re-check cadence, five minutes doubling to one hour.
     access_checks: int = Field(default=0, ge=0)
     # Content identity of the credential file observed at an authorization
     # failure; a different value lets the worker resume automatically.

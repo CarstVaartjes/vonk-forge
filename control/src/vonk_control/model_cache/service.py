@@ -39,6 +39,7 @@ from .inventory import InventoryMixin
 from .observation import StorageObserver
 from .operations import OperationsMixin
 from .persistence import _read_operation_payload, _store_operation_payload
+from .provider_waits import ProviderWaitsMixin
 from .removal_acceptance import RemovalAcceptanceMixin
 from .removal_execution import RemovalExecutionMixin
 from .removal_reconcile import RemovalReconcileMixin
@@ -79,6 +80,7 @@ class ModelCacheService(
     OperationsMixin,
     SchedulerMixin,
     RepairMixin,
+    ProviderWaitsMixin,
     AvailabilityMixin,
     InventoryMixin,
     UpdatesMixin,
@@ -190,7 +192,9 @@ class ModelCacheService(
         self._background_operations: dict[str, _BackgroundTransfer] = {}
         # Object digest -> the operation whose transfer in this process writes it.
         self._active_digests: dict[str, str] = {}
-        self._hf_cooldown_until: datetime | None = None
+        # Provider kind -> when its rate limit or quota wait ends.
+        self._provider_cooldowns: dict[str, datetime] = {}
+        self._cooldown_lock = threading.Lock()
         self._progress_checkpoint_at: dict[str, datetime] = {}
         self._cancel_events: dict[str, threading.Event] = {}
         self._range_reserved_bytes = 0

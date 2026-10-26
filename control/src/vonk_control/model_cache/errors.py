@@ -59,12 +59,16 @@ class ModelCacheError(RuntimeError):
     @property
     def disposition(self) -> Disposition:
         """The cache's typed code table: authorization and source policy end the
-        transfer; every other code is retried within the bounded retry count."""
+        transfer; a provider's rate limit or quota is the provider's own wait and
+        spends no retry; every other code is retried within the bounded retry
+        count."""
 
         if is_security_failure(self.code):
             return Disposition.SECURITY
         if self.code in _TERMINAL_FAILURE_CODES:
             return Disposition.FAIL
+        if self.code == ModelCacheCode.RATE_LIMITED:
+            return Disposition.WAIT
         return Disposition.OBSERVE
 
 
