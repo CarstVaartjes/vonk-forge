@@ -599,7 +599,11 @@ def test_every_registered_source_recovers_after_its_fault_clears(tmp_path, monke
     broken = True
     calls: list[str] = []
 
+    labels: set[str] = set()
+
     def probe(name: str) -> Callable[[], bool]:
+        labels.add(name)
+
         def run() -> bool:
             calls.append(name)
             if broken:
@@ -618,10 +622,10 @@ def test_every_registered_source_recovers_after_its_fault_clears(tmp_path, monke
     claim = jobs.claim
 
     def claim_probe(*args, **kwargs):
-        if broken:
-            probe("jobs")()
+        probe("jobs")()
         return claim(*args, **kwargs)
 
+    failures = _failures(tmp_path, clock=lambda: now[0])
     monkeypatch.setattr(jobs, "claim", claim_probe)
     worker = Worker(
         jobs,
@@ -634,30 +638,25 @@ def test_every_registered_source_recovers_after_its_fault_clears(tmp_path, monke
         artifact_housekeeping=probe("artifact"),
         due_waits=probe("due-waits"),
         loop_heartbeat=probe("heartbeat"),
-        coordinator_failures=_failures(tmp_path, clock=lambda: now[0]),
+        coordinator_failures=failures,
     )
-    # The worker's own tables, not a hand-typed list: a new source is covered.
-    sources = {name for name, _ in worker._source_table()}
-    housekeeping = {
+    # The worker's own tables, not a hand-typed list: a new lane is covered.
+    table = {name for name, _ in worker._source_table()} | {
         name for name, task in worker._housekeeping_table() if task is not None
     }
-    assert {"recipes", "model-cache", "jobs"} <= sources
     worker.run_once()
-    assert set(calls) == {"jobs", "recipes", "model-cache", "background"} | {
-        "telemetry",
-        "artifact",
-        "due-waits",
-        "heartbeat",
-    }
-    assert len(sources) == 4 and len(housekeeping) == 4
+    assert set(calls) == labels
+    assert len(table) == len(labels)  # every dispatched lane has a probe
     broken = False
     calls.clear()
     now[0] += timedelta(seconds=300)
     fresh = jobs.enqueue("healthy", "admin", "abc", [], {})
     worker.run_once()
-    assert {"recipes", "model-cache", "background", "telemetry", "artifact"} <= set(
-        calls
-    )
+    assert set(calls) == labels
+    from vonk_control.models import CoordinatorFailure
+
+    with failures._sessions() as session:
+        assert session.scalar(select(CoordinatorFailure)) is None
     assert jobs.get(fresh.id).result == {"done": True}
 
 

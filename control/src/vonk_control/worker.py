@@ -352,9 +352,11 @@ class Worker:
         # Housekeeping runs before all work, so one failing maintenance task
         # must not deny the heartbeat and every source their turn.  Each task
         # is contained and reported; the outer loop retries it next pass.
-        self._run_housekeeping("due-waits", self._due_waits, minimum_interval=1)
-        self._run_housekeeping("telemetry", self._housekeeping)
-        self._run_housekeeping("artifact", self._artifact_housekeeping)
+        for name, task in self._housekeeping_table():
+            if name != LifecycleEventKind.HEARTBEAT:  # last, after the sources
+                self._run_housekeeping(
+                    name, task, minimum_interval=1 if name == "due-waits" else 0
+                )
         sources = self._source_table()
         if self._source_cursor >= len(sources):
             self._source_cursor = 0
