@@ -91,6 +91,17 @@ def _matches_kind(node: ast.AST) -> bool:
     )
 
 
+def _collects_kind(node: ast.AST) -> bool:
+    """A set, list, tuple, dict or set() call that holds ProviderKind members."""
+
+    collection = isinstance(node, ast.Set | ast.List | ast.Tuple | ast.Dict) or (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id in {"set", "frozenset"}
+    )
+    return collection and any(_is_provider_member(n) for n in ast.walk(node))
+
+
 def scan_source(
     source: str, *, dispatcher: bool = False, owner: bool = False
 ) -> list[int]:
@@ -99,7 +110,8 @@ def scan_source(
     lines: set[int] = set()
     for node in ast.walk(ast.parse(source)):
         if (not owner and _spells_kind(node)) or (
-            not dispatcher and (_compares_kind(node) or _matches_kind(node))
+            not dispatcher
+            and (_compares_kind(node) or _matches_kind(node) or _collects_kind(node))
         ):
             lines.add(getattr(node, "lineno", 0))
     return sorted(lines)
@@ -131,6 +143,12 @@ def test_guard_catches_kind_comparisons_and_literals():
         'if spec.kind != "huggingface.file":\n    pass\n',
         'if spec.kind != "file":\n    pass\n',
         "if kind in frozenset({ProviderKind.HTTP_FILE}):\n    pass\n",
+        "GITHUB_KINDS = frozenset({ProviderKind.GITHUB_RELEASE_ASSET})\n",
+        "KINDS = {ProviderKind.FILE, ProviderKind.HTTP_FILE}\n",
+        "KINDS = (ProviderKind.FILE,)\n",
+        "KINDS = set([ProviderKind.FILE])\n",
+        "HANDLERS = {ProviderKind.FILE: handler}\n",
+        "from elsewhere import GITHUB_KINDS\nKINDS = list((ProviderKind.FILE, 1))\n",
         "match spec.kind:\n    case ProviderKind.FILE:\n        pass\n",
         "match spec.kind:\n    case 'file':\n        pass\n",
         "match spec.kind:\n    case 'http.file' | 'x':\n        pass\n",
