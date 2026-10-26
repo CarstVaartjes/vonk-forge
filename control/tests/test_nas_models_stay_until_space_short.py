@@ -19,6 +19,7 @@ from .test_unused_storage_collection import (
 )
 
 TICKS = 5
+ALL = {"a": True, "n": True, "b": True, "l": True}
 
 
 def _tick(service) -> None:
@@ -29,14 +30,14 @@ def _tick(service) -> None:
 
 
 def _shelf(postgres_engine, tmp_path):
-    """Set A (a superseded revision, unreferenced), B (its successor, used by an
-    installation) and
-    L (another model, loaded by a running installation)."""
+    """A (a superseded revision) and N (its successor), both unreferenced; B
+    (installed) and L (loaded by a running installation) are other models."""
     service, sessions = _removal_service(postgres_engine, tmp_path)
     world = Catalog(postgres_engine)
-    _, a, _ = _revision(service, sessions, tmp_path / "a", slug="idle", data=b"old")
+    _, a, _ = _revision(service, sessions, tmp_path / "a", data=b"old")
+    _, n, _ = _revision(service, sessions, tmp_path / "n", data=b"new", note="new")
     b_model, b, _ = _revision(
-        service, sessions, tmp_path / "b", data=b"new", note="new"
+        service, sessions, tmp_path / "b", slug="kept", data=b"bbb"
     )
     _, loaded, _ = _revision(
         service, sessions, tmp_path / "l", slug="loaded", data=b"lll"
@@ -49,7 +50,8 @@ def _shelf(postgres_engine, tmp_path):
         )
         assert run is not None
         run.state = "running"
-    return service, sessions, world, {"a": a, "b": b, "l": loaded}, {"b": b_model}
+    sets = {"a": a, "n": n, "b": b, "l": loaded}
+    return service, sessions, world, sets, {"b": b_model}
 
 
 def _alive(sessions, sets) -> dict[str, bool]:
@@ -65,10 +67,10 @@ def test_cached_sets_survive_every_tick_while_space_is_ample(
     try:
         for _ in range(TICKS):
             _tick(service)
-        assert _alive(sessions, sets) == {"a": True, "b": True, "l": True}
+        assert _alive(sessions, sets) == ALL
         ample = _models(world, service, free=TOTAL // 2).collect()
         assert ample.models == 0
-        assert _alive(sessions, sets) == {"a": True, "b": True, "l": True}
+        assert _alive(sessions, sets) == ALL
     finally:
         service.close()
 
@@ -82,19 +84,19 @@ def test_pressure_evicts_only_the_unreferenced_set_and_b_is_served_without_trans
     try:
         for _ in range(TICKS):
             _tick(service)
-        assert _alive(sessions, sets) == {"a": True, "b": True, "l": True}
+        assert _alive(sessions, sets) == ALL
 
         short = _models(world, service).collect()
-        assert short.models == 1, short.kept
+        assert short.models == 2, short.kept
         _settle(service)
-        assert _alive(sessions, sets) == {"a": False, "b": True, "l": True}
+        assert _alive(sessions, sets) == {"a": False, "n": False, "b": True, "l": True}
 
         # Every source is gone: a request for B is served from the cache or
         # not at all, never by another transfer.
         gone = tmp_path / "gone"
         gone.mkdir()
         artifacts = [
-            _artifact(gone, b"new", model_content_sha256=models["b"]),
+            _artifact(gone, b"bbb", model_content_sha256=models["b"]),
             _artifact(
                 gone,
                 b"shared",
