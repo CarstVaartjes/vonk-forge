@@ -107,25 +107,36 @@ impl<'a> Beside<'a> {
             if let Poll::Ready(output) = lane.as_mut().poll(context) {
                 return Poll::Ready(output);
             }
-            let mut running = self.0.borrow_mut();
-            while let Poll::Ready(Some(())) = Pin::new(&mut *running).poll_next(context) {}
+            self.progress(context);
             Poll::Pending
         })
         .await
     }
 
     /// Wait until every off-lane execution has delivered.
-    pub async fn drain(&self) {
+    #[cfg(test)]
+    async fn drain(&self) {
         std::future::poll_fn(|context| {
-            let mut running = self.0.borrow_mut();
-            while let Poll::Ready(Some(())) = Pin::new(&mut *running).poll_next(context) {}
-            if running.is_empty() {
+            if self.progress(context) {
                 Poll::Ready(())
             } else {
                 Poll::Pending
             }
         })
         .await;
+    }
+
+    /// Poll the executions once and say whether none is left. One that ended
+    /// asks for another pass at once, so the others keep their wakers.
+    fn progress(&self, context: &mut std::task::Context<'_>) -> bool {
+        match Pin::new(&mut *self.0.borrow_mut()).poll_next(context) {
+            Poll::Ready(Some(())) => {
+                context.waker().wake_by_ref();
+                false
+            }
+            Poll::Ready(None) => true,
+            Poll::Pending => false,
+        }
     }
 }
 

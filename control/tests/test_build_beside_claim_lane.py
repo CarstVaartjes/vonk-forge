@@ -104,6 +104,15 @@ def _poll(jobs, clock, build_claim, node_id: str, wanted: str) -> AgentClaim:
     raise AssertionError(f"{wanted} on {node_id} was not claimed beside the build")
 
 
+def _admit_a_fresh_probe(jobs, sessions, clock, build_claim) -> None:
+    """A fresh request on node B is still claimed beside the build."""
+    fresh = parent(sessions, clock)
+    jobs.enqueue(
+        fresh.id, NODE_B, AgentOperation.RUNTIME_PREFLIGHT.value, COMMIT, _PREFLIGHT
+    )
+    _poll(jobs, clock, build_claim, NODE_B, AgentOperation.RUNTIME_PREFLIGHT)
+
+
 def test_dual_load_progresses_on_the_spark_whose_build_compiles(service) -> None:
     """Catches a build still holding its Spark's mutations as if it ran on the lane.
 
@@ -154,6 +163,16 @@ def test_dual_load_progresses_on_the_spark_whose_build_compiles(service) -> None
     with sessions() as session:
         compiling = session.get(StoredOperation, build.id)
         assert compiling is not None and compiling.state == "running"
+    _admit_a_fresh_probe(jobs, sessions, clock, build_claim)
+
+
+#: The agent build the upgrade fixture rolls back to: the build that may install it.
+_ROLLBACK_SOURCE = {
+    "architecture": "linux-arm64",
+    "binary_digest": "f" * 64,
+    "build_digest": "sha256:" + "f" * 64,
+    "semantic_version": "0.1.0",
+}
 
 
 def _upgrade_payload() -> dict[str, object]:
@@ -222,6 +241,64 @@ def test_work_that_would_end_a_build_waits_for_it_with_a_named_reason(
         ),
     )
     assert waits_for().reason == WaitReason.OBSERVATION_UNAVAILABLE
+    released = claim_agent(
+        jobs,
+        NODE_B,
+        _SERIAL[NODE_B],
+        **(
+            {"runtime_identity": _ROLLBACK_SOURCE}
+            if kind is AgentOperation.AGENT_UPGRADE
+            else {}
+        ),
+    )
+    assert released is not None and released.operation == kind
+
+
+def test_work_held_by_the_build_never_holds_back_the_load_behind_it(service) -> None:
+    """Catches a conflicting order at the queue head starving every later order.
+
+    The claim picks the oldest claimable order; refusing it as conflicting with
+    the build must not hand out nothing while a probe and a stop wait behind.
+    """
+    jobs, sessions, clock = service
+    build, build_claim = _compiling_build(jobs, sessions, clock)
+    rollout = parent(sessions, clock)
+    upgrade = jobs.enqueue(
+        rollout.id,
+        NODE_B,
+        AgentOperation.AGENT_UPGRADE.value,
+        COMMIT,
+        _upgrade_payload(),
+    )
+    clock.advance(seconds=1)
+    load = parent(sessions, clock)
+    jobs.enqueue(
+        load.id, NODE_B, AgentOperation.RUNTIME_PREFLIGHT.value, COMMIT, _PREFLIGHT
+    )
+    clock.advance(seconds=1)
+    jobs.enqueue(
+        load.id,
+        NODE_B,
+        AgentOperation.RECIPE_STOP.value,
+        COMMIT,
+        recipe_stop_payload(NODE_B, plan_digest=COMMIT),
+    )
+    probe = _poll(jobs, clock, build_claim, NODE_B, AgentOperation.RUNTIME_PREFLIGHT)
+    jobs.succeed(
+        probe, RuntimePreflightResult(fingerprint="a" * 64, observed_at=1, findings=[])
+    )
+    stop = _poll(jobs, clock, build_claim, NODE_B, AgentOperation.RECIPE_STOP)
+    jobs.succeed(stop, RecipeStopResult())
+    with sessions.begin() as session:
+        refresh_queue_waits(session, clock.now, node_id=NODE_B)
+        queued = session.get(StoredOperation, upgrade.id)
+        assert queued is not None and queued.state == "queued"
+        wait = read_wait(queued)
+    assert wait is not None and wait.reason == WaitReason.SPARK_BUSY
+    assert wait.blockers[0].operation == BlockingOperation(
+        id=build.id, kind=AgentOperation.RECIPE_BUILD.value
+    )
+    _admit_a_fresh_probe(jobs, sessions, clock, build_claim)
 
 
 def test_off_lane_operations_are_the_agents_shared_vector() -> None:

@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import select
+from sqlalchemy import and_, select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
     AgentOperation,
@@ -16,6 +16,7 @@ from vonk_agent_protocol import (
 )
 
 from .. import agent_operation_states
+from ..agent_operation_facts import attempt_is_live
 from ..agent_operation_facts import aware as _aware
 from ..agent_operation_facts import (
     operation_start_deadline as _operation_start_deadline,
@@ -28,7 +29,11 @@ from ..lifecycle.agent_operation import AgentOperationAdapter
 from ..models import AgentNode, AgentOperationAttempt, Job
 from ..models import AgentOperation as StoredOperation
 from ..own_cleanup import CLEANUP_KINDS
-from .contracts import _WORKLOAD_INTENT_OPERATIONS
+from .contracts import (
+    _WORKLOAD_INTENT_OPERATIONS,
+    OFF_LANE_OPERATIONS,
+    mutations_conflict,
+)
 from .evidence import (
     _failure_result,
     _is_refusal_reason,
@@ -226,6 +231,46 @@ def _claimable_operations(node_id: str, now: datetime):
         )
         .execution_options(populate_existing=True)
         .limit(1)
+    )
+
+
+def _first_claimable_id(session: Session, node_id: str, now: datetime) -> str | None:
+    """The oldest claimable order on this Spark that no order beside its lane holds.
+
+    A build runs beside the claim lane, so an order it conflicts with (its own
+    cleanup, an agent upgrade) must not stand at the head of the queue and keep
+    every later probe, transfer or start from its claim. Only this Spark's
+    claimable rows are read, and only while such an order is live.
+    """
+
+    statement = _claimable_operations(node_id, now)
+    beside = [
+        holder
+        for holder, attempt in session.execute(
+            select(StoredOperation, AgentOperationAttempt).join(
+                AgentOperationAttempt,
+                and_(
+                    AgentOperationAttempt.operation_id == StoredOperation.id,
+                    AgentOperationAttempt.attempt == StoredOperation.current_attempt,
+                ),
+            )
+            .where(
+                StoredOperation.node_id == node_id,
+                StoredOperation.kind.in_(OFF_LANE_OPERATIONS),
+                StoredOperation.state == agent_operation_states.RUNNING,
+            )
+        )
+        if attempt_is_live(holder, attempt, now)
+    ]
+    if not beside:
+        return session.scalar(statement.with_only_columns(StoredOperation.id))
+    return next(
+        (
+            candidate.id
+            for candidate in session.scalars(statement.limit(None))
+            if not any(mutations_conflict(candidate, holder) for holder in beside)
+        ),
+        None,
     )
 
 

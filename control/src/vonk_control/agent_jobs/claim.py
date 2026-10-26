@@ -44,6 +44,7 @@ from ..own_cleanup import CLEANUP_KINDS
 from ..persisted_waits import schedule_wait
 from ..recovery_policy import WAIT_STEP
 from .claim_authority import gpu_health_wait, recipe_build_disk_wait
+from .claim_reconcile import _first_claimable_id
 from .contracts import (
     _MUTATING_OPERATIONS,
     CLAIM_LEASE_SECONDS,
@@ -120,11 +121,7 @@ def _claim_once(
                 }
             )
         self._fail_spent_start_budgets(session, node_id, now)
-        candidate_id = session.scalar(
-            self._claimable_operations(node_id, now).with_only_columns(
-                StoredOperation.id
-            )
-        )
+        candidate_id = _first_claimable_id(session, node_id, now)
         recovery_id = None
         if candidate_id is None:
             predicate = _claim_predicate(now)
