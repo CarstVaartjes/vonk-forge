@@ -26,7 +26,6 @@ from ..models import (
     Job,
     ModelCacheOperation,
     ModelCacheSet,
-    ModelCacheSetArtifact,
     NodeInventorySnapshot,
     RecipeInstallation,
     RecipeRun,
@@ -224,14 +223,10 @@ def _model_kept(session: Session, digest: str, evidence: _Evidence) -> str | Non
         recipe in evidence.pointed_digests for _s, recipe in sets
     ):
         return "profile"
+    # Model and set digests only, as for an installation: a file shared with a
+    # used successor does not keep a superseded revision. The removal scope's
+    # delete_objects keeps the shared bytes and only unique bytes count as free.
     names = {digest} | {set_digest for set_digest, _r in sets}
-    names.update(
-        session.scalars(
-            select(ModelCacheSetArtifact.artifact_sha256).where(
-                ModelCacheSetArtifact.artifact_set_sha256.in_(names)
-            )
-        )
-    )
     if not evidence.live.isdisjoint(names):
         return "live operation"
     if not evidence.application_references_readable:

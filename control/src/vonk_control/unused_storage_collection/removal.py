@@ -308,15 +308,14 @@ def _model_items(
         if reason is not None:
             kept[f"model: {reason}"] += 1
             continue
-        size = sum(verified for _set, verified, _a, _u in sets)
+        # Only the bytes the removal frees count: a file a kept set shares stays.
+        counts = [self._model_cache.unused_set_bytes(value[0]) for value in sets]
+        if any(value is None for value in counts):
+            kept["model: bytes unknown"] += 1
+            continue
+        size = sum(value for value in counts if value is not None)
         if size <= 0:
-            counts = [self._model_cache.unused_set_bytes(value[0]) for value in sets]
-            if any(value is None for value in counts):
-                kept["model: bytes unknown"] += 1
-                continue
-            size = sum(value for value in counts if value is not None)
-            if size <= 0:
-                continue
+            continue
         last_used = max(max(accessed, updated) for _set, _v, accessed, updated in sets)
         items.append(
             _Item(

@@ -1,4 +1,4 @@
-"""Release superseded model sets through the existing fenced collector."""
+"""Observe cached model sets and adopt their catalog bindings."""
 
 from __future__ import annotations
 

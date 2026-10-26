@@ -229,6 +229,18 @@ class CatalogRevisionCollector:
         cutoff = now - GRACE
         with self._sessions() as session:
             candidates = self._candidates(session, cutoff)
+            if any(item.kind == RunSwitchReasonScopeName.MODEL for item in candidates):
+                cached = self._cached_model_digests(session)
+                if cached is not None:
+                    # A revision a cached set still holds stays (NAS models are
+                    # kept until space is short). Decided once per pass, before
+                    # any lock fence, instead of fencing and scanning per revision.
+                    candidates = [
+                        item
+                        for item in candidates
+                        if item.kind != RunSwitchReasonScopeName.MODEL
+                        or item.content_digest not in cached
+                    ]
         # The budget starts after the inventory so every pass reaches a candidate.
         deadline = time.monotonic() + self._budget_seconds
         removed = 0
@@ -537,6 +549,22 @@ class CatalogRevisionCollector:
                 CatalogRecipeModelReference.recipe_revision_id == revision.id
             )
         )
+
+    @staticmethod
+    def _cached_model_digests(session: Session) -> frozenset[str] | None:
+        """Model digests any cached set verifies; ``None`` when a manifest is
+        unreadable, so each revision is decided by its own recheck instead."""
+
+        found: set[str] = set()
+        for value in session.scalars(
+            select(ModelCacheSet.manifest).execution_options(yield_per=_SCAN_BATCH)
+        ):
+            try:
+                manifest = CacheManifest.model_validate_json(canonical_message(value))
+            except (TypeError, ValueError):
+                return None
+            found.update(item.content_sha256 for item in manifest.verified_models)
+        return frozenset(found)
 
     @staticmethod
     def _require_no_remaining_reference(session: Session, revision: _Candidate) -> None:
