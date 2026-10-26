@@ -41,6 +41,7 @@ from vonk_control.lifecycle.agent_operation import AgentOperationAdapter
 from vonk_control.models import AgentNode, AgentOperation, AgentOperationAttempt, Job
 
 from . import test_agent_jobs_postgres as fixtures
+from .node_contacts import contact_row
 from .runtime_identity_support import claim_agent
 from .test_agent_jobs_postgres import COMMIT, NODE_A, parent
 
@@ -173,7 +174,7 @@ def test_lost_content_report_adopts_after_lease_without_reexecution_or_renewal(
         deadline = before.lease_deadline
         node = session.get(AgentNode, NODE_A)
         assert node is not None
-        contact = node.last_seen_at
+        contact = contact_row(node).last_seen_at
     assert queue.record_late_result(receipt)
     with sessions() as session:
         row = session.get(AgentOperation, operation.id)
@@ -186,7 +187,7 @@ def test_lost_content_report_adopts_after_lease_without_reexecution_or_renewal(
         assert attempt is not None
         assert attempt.lease_deadline == deadline
         node = session.get(AgentNode, NODE_A)
-        assert node is not None and node.last_seen_at == contact
+        assert node is not None and contact_row(node).last_seen_at == contact
     assert claim_agent(queue, NODE_A, "serial-a") is None
 
 

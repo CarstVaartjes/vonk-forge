@@ -23,6 +23,7 @@ from ..job_documents import RecipeStartParent, RecipeStopParent
 from ..lifecycle.evidence import Residue
 from ..models import (
     AgentNode,
+    AgentNodeContact,
     AgentOperation,
     ClusterMapping,
     Job,
@@ -182,12 +183,7 @@ def _singleton_recovery_authority(
             _MISSING if agent_node is None else _MISMATCH,
             "singleton recovery requires exact Stop and observation support",
         )
-    presence = session.scalar(
-        select(AgentNode)
-        .where(AgentNode.node_id == run_node.node_id)
-        .order_by(AgentNode.management_observed_at.desc())
-        .limit(1)
-    )
+    presence = session.get(AgentNodeContact, run_node.node_id)
     if (
         presence is None
         or not isinstance(presence.management_address, str)

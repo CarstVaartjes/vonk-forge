@@ -204,7 +204,7 @@ def _claim_once(
                 )
             return None
         node, certificate = identity
-        self._consume_contact(session, source, node, certificate)
+        self._verify_contact_source(source, node, certificate)
         self._record_contact(
             session,
             node,
@@ -213,6 +213,7 @@ def _claim_once(
             runtime_identity,
             preflight_fingerprint,
             hostname,
+            source,
         )
         self._reconcile_agent_upgrade(
             session,

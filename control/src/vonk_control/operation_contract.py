@@ -92,6 +92,9 @@ class AvailabilityOperationFailure(BaseModel):
     free_bytes: int | None = Field(default=None, ge=0)
     shortfall_bytes: int | None = Field(default=None, ge=0)
     artifact_key: str | None = Field(default=None, min_length=1, max_length=256)
+    #: The build Job whose ending ended this attempt: its Spark receipt holds the
+    #: build's own output, which the failure evidence download reports.
+    build_operation_id: str | None = Field(default=None, min_length=1, max_length=128)
 
     @field_validator("recovery_actions", mode="before")
     @classmethod

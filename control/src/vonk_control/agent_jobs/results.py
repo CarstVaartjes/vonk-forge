@@ -23,6 +23,7 @@ from vonk_agent_protocol.recipe_jobs import RecipeJobRunResult
 
 from .. import agent_operation_states
 from ..admission_locking import admission_attempts
+from ..agent_contacts import record_contact
 from ..agent_operation_facts import aware as _aware
 from ..agent_outcome import stored_report
 from ..auth import AgentSource
@@ -171,7 +172,16 @@ def record_late_result(
                 reason=SecurityRefusalReason.STALE_FENCE,
             )
         node, certificate = identity
-        self._consume_contact(session, source, node, certificate)
+        self._verify_contact_source(source, node, certificate)
+        if source is not None:
+            # A late result proves the address, never a renewed contact.
+            record_contact(
+                session,
+                node.node_id,
+                contact_certificate_serial=certificate.serial,
+                management_address=source.management_address,
+                management_observed_at=_aware(now),
+            )
         parent = session.get(Job, parent_job_id)
         operation = session.get(StoredOperation, operation_id, with_for_update=True)
         attempt = session.scalar(

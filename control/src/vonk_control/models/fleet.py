@@ -68,6 +68,37 @@ class AgentNode(Base):
         Integer, nullable=False, default=0, server_default="0"
     )
     state: Mapped[str] = mapped_column(String(24), nullable=False)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    inventory_snapshot: Mapped[NodeInventoryItemsSnapshot | None] = relationship(
+        "NodeInventoryItemsSnapshot",
+        uselist=False,
+        lazy="selectin",
+        cascade="all, delete-orphan",
+        single_parent=True,
+    )
+    # Requests record contact only through ``agent_contacts`` (an upsert).
+    contact: Mapped[AgentNodeContact | None] = relationship(
+        "AgentNodeContact",
+        uselist=False,
+        lazy="selectin",
+        cascade="all, delete-orphan",
+        single_parent=True,
+    )
+
+
+class AgentNodeContact(Base):
+    """What the Controller observed about its latest contact with one Spark.
+
+    Every authenticated agent request writes here, never on ``agent_nodes``:
+    a plain upsert of this row takes no lock on the identity/intent row that
+    admission and publication lock (owner-approved lock-reduction step 1).
+    """
+
+    __tablename__ = "agent_node_contacts"
+    node_id: Mapped[str] = mapped_column(
+        ForeignKey("agent_nodes.node_id", ondelete="CASCADE"), primary_key=True
+    )
     protocol_version: Mapped[int | None] = mapped_column(Integer)
     contact_certificate_serial: Mapped[str | None] = mapped_column(String(128))
     management_address: Mapped[str | None] = mapped_column(String(45))
@@ -80,20 +111,10 @@ class AgentNode(Base):
         DateTime(timezone=True)
     )
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-
-    inventory_snapshot: Mapped[NodeInventoryItemsSnapshot | None] = relationship(
-        "NodeInventoryItemsSnapshot",
-        uselist=False,
-        lazy="selectin",
-        cascade="all, delete-orphan",
-        single_parent=True,
-    )
-
     contact_repeated_evidence: Mapped[list[RepeatedEvidence] | Residue | None] = (
         mapped_column(
             ContractJSON[list[RepeatedEvidence]](
-                "agent_nodes", "contact_repeated_evidence", none_as_null=True
+                "agent_node_contacts", "contact_repeated_evidence", none_as_null=True
             ),
             nullable=True,
         )

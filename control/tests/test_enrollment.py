@@ -58,7 +58,6 @@ from vonk_control.models import (
     Job,
 )
 from vonk_control.pki import IssuedCertificate
-from vonk_control.presence import AgentPresenceService, ManagementAddressPolicy
 
 from .agent_fences import fenced_operation
 from .ca_test_authority import FixtureCertificateAuthority
@@ -772,14 +771,16 @@ def test_staged_rotation_releases_an_idle_claim_before_certificate_expiry(
     issued = enroll(enrollment)
     contacted = threading.Event()
 
-    def observe_contact(_session, _source) -> None:
-        contacted.set()
+    def observe_contact(_conn, _cursor, statement, *_arguments) -> None:
+        if statement.startswith("INSERT INTO agent_node_contacts"):
+            contacted.set()
 
+    engine = sessions.kw["bind"]
+    event.listen(engine, "after_cursor_execute", observe_contact)
     stop_waiting = threading.Event()
     jobs = AgentJobService(
         sessions,
         clock=clock,
-        contact_consumer=observe_contact,
         monotonic=lambda: time.monotonic() + (120 if stop_waiting.is_set() else 0),
     )
     source = AgentSource(
@@ -807,6 +808,7 @@ def test_staged_rotation_releases_an_idle_claim_before_certificate_expiry(
             # Advance only the long-poll clock to bound failure cleanup too.
             stop_waiting.set()
             jobs.notify_available()
+            event.remove(engine, "after_cursor_execute", observe_contact)
 
 
 def test_rotation_preserves_live_operation_authority_on_postgres(
@@ -830,14 +832,7 @@ def test_rotation_preserves_live_operation_authority_on_postgres(
 def _assert_rotation_operation_authority(service, attempt_state) -> None:
     enrollment, sessions, clock, _authority = service
     issued = enroll(enrollment)
-    presence = AgentPresenceService(
-        sessions, ManagementAddressPolicy.parse("192.168.1.0/24"), clock=clock
-    )
-
-    def observe_contact(session, source) -> None:
-        presence.observe_in_session(session, source)
-
-    jobs = AgentJobService(sessions, clock=clock, contact_consumer=observe_contact)
+    jobs = AgentJobService(sessions, clock=clock)
     payload = {"workload_intent_ordinal": 1}
     parent = Job(
         request_id=str(uuid.uuid4()),

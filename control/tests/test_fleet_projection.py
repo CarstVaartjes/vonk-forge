@@ -16,6 +16,7 @@ from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.inventory import InventoryRequest
 from vonk_agent_protocol.state_machines import NodeIdentityState
 from vonk_agent_protocol.telemetry import HostResourceSample
+from vonk_control.agent_contacts import record_contact
 from vonk_control.fleet_events import FleetEventRepository
 from vonk_control.fleet_projection import (
     _AUTHORITY_REVISION,
@@ -34,6 +35,7 @@ from vonk_control.inventory_repository import (
 from vonk_control.models import (
     AgentCertificate,
     AgentNode,
+    AgentNodeContact,
     AgentNodeProfile,
     AgentOperation,
     AgentOperationAttempt,
@@ -283,7 +285,7 @@ def test_fleet_contains_registered_node_absent_from_repository() -> None:
             AgentNode(
                 node_id=NODE_A,
                 state="active",
-                last_seen_at=NOW,
+                contact=AgentNodeContact(last_seen_at=NOW),
             )
         )
 
@@ -303,8 +305,8 @@ def test_fleet_excludes_revoked_agent_nodes() -> None:
             AgentNode(
                 node_id=NODE_A,
                 state="revoked",
-                last_seen_at=NOW,
                 revoked_at=NOW,
+                contact=AgentNodeContact(last_seen_at=NOW),
             )
         )
 
@@ -333,7 +335,6 @@ def test_read_uses_postgresql_registration_latest_rows_and_a_bounded_query_set()
                 AgentNode(
                     node_id=NODE_A,
                     state="active",
-                    last_seen_at=NOW - timedelta(seconds=5),
                     inventory_snapshot=inventory_items_fixture(
                         NODE_A,
                         observed_at=NOW - timedelta(seconds=5),
@@ -341,11 +342,11 @@ def test_read_uses_postgresql_registration_latest_rows_and_a_bounded_query_set()
                             {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
                         ),
                     ),
+                    contact=AgentNodeContact(last_seen_at=NOW - timedelta(seconds=5)),
                 ),
                 AgentNode(
                     node_id=NODE_B,
                     state="active",
-                    last_seen_at=NOW - timedelta(seconds=7),
                     inventory_snapshot=inventory_items_fixture(
                         NODE_B,
                         observed_at=NOW - timedelta(seconds=7),
@@ -353,11 +354,11 @@ def test_read_uses_postgresql_registration_latest_rows_and_a_bounded_query_set()
                             {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
                         ),
                     ),
+                    contact=AgentNodeContact(last_seen_at=NOW - timedelta(seconds=7)),
                 ),
                 AgentNode(
                     node_id=EXTRA_NODE,
                     state="revoked",
-                    last_seen_at=NOW,
                     revoked_at=NOW,
                     inventory_snapshot=inventory_items_fixture(
                         EXTRA_NODE,
@@ -366,6 +367,7 @@ def test_read_uses_postgresql_registration_latest_rows_and_a_bounded_query_set()
                             {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
                         ),
                     ),
+                    contact=AgentNodeContact(last_seen_at=NOW),
                 ),
             ]
         )
@@ -385,14 +387,12 @@ def test_read_uses_postgresql_registration_latest_rows_and_a_bounded_query_set()
                 _certificate(EXTRA_NODE, "bounded-external"),
             ]
         )
-        session.execute(
-            update(AgentNode)
-            .where(AgentNode.node_id == NODE_A)
-            .values(
-                contact_certificate_serial="bounded-a",
-                management_address="192.168.1.211",
-                management_observed_at=NOW,
-            )
+        record_contact(
+            session,
+            NODE_A,
+            contact_certificate_serial="bounded-a",
+            management_address="192.168.1.211",
+            management_observed_at=NOW,
         )
         session.add_all(
             [
@@ -607,14 +607,12 @@ def test_display_name_update_preserves_identity_and_emits_projection_refresh() -
         session.add(_profile(NODE_A, display_name=NODE_A))
         set_inventory_hostname(session, NODE_A, "spark-3542.internal")
         session.add(_certificate(NODE_A, "profile-a"))
-        session.execute(
-            update(AgentNode)
-            .where(AgentNode.node_id == NODE_A)
-            .values(
-                contact_certificate_serial="profile-a",
-                management_address="192.168.1.211",
-                management_observed_at=NOW,
-            )
+        record_contact(
+            session,
+            NODE_A,
+            contact_certificate_serial="profile-a",
+            management_address="192.168.1.211",
+            management_observed_at=NOW,
         )
 
     projection = FleetProjection(sessions, clock=lambda: NOW)
@@ -833,54 +831,56 @@ def test_connection_uses_certificate_authority_and_finite_offline_precedence() -
                 AgentNode(
                     node_id=node_ids[1],
                     state="revoked",
-                    last_seen_at=NOW,
                     revoked_at=NOW,
+                    contact=AgentNodeContact(last_seen_at=NOW),
                 ),
                 AgentNode(
                     node_id=node_ids[2],
                     state="pending",
-                    last_seen_at=NOW,
+                    contact=AgentNodeContact(last_seen_at=NOW),
                 ),
                 AgentNode(
                     node_id=node_ids[3],
                     state="active",
-                    last_seen_at=NOW,
+                    contact=AgentNodeContact(last_seen_at=NOW),
                 ),
                 AgentNode(
                     node_id=node_ids[4],
                     state="active",
-                    last_seen_at=NOW,
+                    contact=AgentNodeContact(last_seen_at=NOW),
                 ),
                 AgentNode(
                     node_id=node_ids[5],
                     state="active",
-                    last_seen_at=NOW,
+                    contact=AgentNodeContact(last_seen_at=NOW),
                 ),
                 AgentNode(
                     node_id=node_ids[6],
                     state="active",
-                    last_seen_at=NOW,
+                    contact=AgentNodeContact(last_seen_at=NOW),
                 ),
                 AgentNode(
                     node_id=node_ids[7],
                     state="active",
-                    last_seen_at=NOW,
+                    contact=AgentNodeContact(last_seen_at=NOW),
                 ),
                 AgentNode(node_id=node_ids[8], state="active"),
                 AgentNode(
                     node_id=node_ids[9],
                     state="active",
-                    last_seen_at=NOW + timedelta(microseconds=1),
+                    contact=AgentNodeContact(
+                        last_seen_at=NOW + timedelta(microseconds=1)
+                    ),
                 ),
                 AgentNode(
                     node_id=node_ids[10],
                     state="active",
-                    last_seen_at=NOW - timedelta(seconds=151),
+                    contact=AgentNodeContact(last_seen_at=NOW - timedelta(seconds=151)),
                 ),
                 AgentNode(
                     node_id=node_ids[11],
                     state="active",
-                    last_seen_at=NOW,
+                    contact=AgentNodeContact(last_seen_at=NOW),
                 ),
             ]
         )
@@ -972,8 +972,6 @@ def test_freshness_boundaries_keep_telemetry_agent_and_inventory_independent() -
                 AgentNode(
                     node_id=node_id,
                     state="active",
-                    last_seen_at=NOW
-                    - timedelta(seconds=150 if node_id != NODE_D else 151),
                     inventory_snapshot=inventory_items_fixture(
                         node_id,
                         observed_at=NOW
@@ -981,6 +979,10 @@ def test_freshness_boundaries_keep_telemetry_agent_and_inventory_independent() -
                         identity=AgentRuntimeIdentity.model_validate(
                             {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
                         ),
+                    ),
+                    contact=AgentNodeContact(
+                        last_seen_at=NOW
+                        - timedelta(seconds=150 if node_id != NODE_D else 151)
                     ),
                 )
             )
@@ -1054,7 +1056,6 @@ def test_installed_and_loaded_groups_require_every_exact_current_rank(capsys) ->
                 AgentNode(
                     node_id=NODE_A,
                     state="active",
-                    last_seen_at=NOW,
                     inventory_snapshot=inventory_items_fixture(
                         NODE_A,
                         observed_at=NOW,
@@ -1062,11 +1063,11 @@ def test_installed_and_loaded_groups_require_every_exact_current_rank(capsys) ->
                             {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
                         ),
                     ),
+                    contact=AgentNodeContact(last_seen_at=NOW),
                 ),
                 AgentNode(
                     node_id=NODE_B,
                     state="active",
-                    last_seen_at=NOW,
                     inventory_snapshot=inventory_items_fixture(
                         NODE_B,
                         observed_at=NOW,
@@ -1074,6 +1075,7 @@ def test_installed_and_loaded_groups_require_every_exact_current_rank(capsys) ->
                             {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
                         ),
                     ),
+                    contact=AgentNodeContact(last_seen_at=NOW),
                 ),
             ]
         )
@@ -1534,7 +1536,6 @@ def test_a_damaged_active_revision_preserves_known_presence_and_recovers(
             AgentNode(
                 node_id=NODE_A,
                 state="active",
-                last_seen_at=NOW,
                 inventory_snapshot=inventory_items_fixture(
                     NODE_A,
                     observed_at=NOW,
@@ -1542,6 +1543,7 @@ def test_a_damaged_active_revision_preserves_known_presence_and_recovers(
                         {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
                     ),
                 ),
+                contact=AgentNodeContact(last_seen_at=NOW),
             )
         )
         session.flush()
@@ -1935,7 +1937,6 @@ def test_projection_preserves_all_current_installation_groups_beyond_512() -> No
             AgentNode(
                 node_id=NODE_A,
                 state="active",
-                last_seen_at=NOW,
                 inventory_snapshot=inventory_items_fixture(
                     NODE_A,
                     observed_at=NOW,
@@ -1943,6 +1944,7 @@ def test_projection_preserves_all_current_installation_groups_beyond_512() -> No
                         {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
                     ),
                 ),
+                contact=AgentNodeContact(last_seen_at=NOW),
             )
         )
         documents, revisions = _canonical_catalog_documents(
@@ -2151,7 +2153,6 @@ def _installed_byte_group(
             AgentNode(
                 node_id=NODE_A,
                 state="active",
-                last_seen_at=NOW,
                 inventory_snapshot=inventory_items_fixture(
                     NODE_A,
                     observed_at=NOW,
@@ -2159,6 +2160,7 @@ def _installed_byte_group(
                         {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
                     ),
                 ),
+                contact=AgentNodeContact(last_seen_at=NOW),
             )
         )
         session.add(_certificate(NODE_A, "byte-recipe"))
@@ -2434,7 +2436,6 @@ def _cpu_clock_codes(
             AgentNode(
                 node_id=NODE_A,
                 state="active",
-                last_seen_at=NOW - timedelta(seconds=1),
                 inventory_snapshot=inventory_items_fixture(
                     NODE_A,
                     observed_at=NOW - timedelta(seconds=1),
@@ -2442,6 +2443,7 @@ def _cpu_clock_codes(
                         {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
                     ),
                 ),
+                contact=AgentNodeContact(last_seen_at=NOW - timedelta(seconds=1)),
             )
         )
         session.flush()
@@ -2500,7 +2502,6 @@ def _route_warnings(interfaces, route):
             AgentNode(
                 node_id=NODE_A,
                 state="active",
-                last_seen_at=NOW - timedelta(seconds=1),
                 inventory_snapshot=inventory_items_fixture(
                     NODE_A,
                     observed_at=NOW - timedelta(seconds=1),
@@ -2508,6 +2509,7 @@ def _route_warnings(interfaces, route):
                         {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
                     ),
                 ),
+                contact=AgentNodeContact(last_seen_at=NOW - timedelta(seconds=1)),
             )
         )
         session.flush()
@@ -2598,7 +2600,6 @@ def test_fleet_names_the_spark_that_copies_from_the_nas_far_slower(
                 AgentNode(
                     node_id=node_id,
                     state="active",
-                    last_seen_at=NOW - timedelta(seconds=1),
                     inventory_snapshot=inventory_items_fixture(
                         node_id,
                         observed_at=NOW - timedelta(seconds=1),
@@ -2606,6 +2607,7 @@ def test_fleet_names_the_spark_that_copies_from_the_nas_far_slower(
                             {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
                         ),
                     ),
+                    contact=AgentNodeContact(last_seen_at=NOW - timedelta(seconds=1)),
                 )
             )
             session.flush()
@@ -2707,8 +2709,16 @@ def test_fleet_api_isolates_damaged_observation_and_recovers(tmp_path, damaged) 
     with sessions.begin() as session:
         session.add_all(
             [
-                AgentNode(node_id=NODE_A, state="active", last_seen_at=NOW),
-                AgentNode(node_id=NODE_B, state="active", last_seen_at=NOW),
+                AgentNode(
+                    node_id=NODE_A,
+                    state="active",
+                    contact=AgentNodeContact(last_seen_at=NOW),
+                ),
+                AgentNode(
+                    node_id=NODE_B,
+                    state="active",
+                    contact=AgentNodeContact(last_seen_at=NOW),
+                ),
                 inventory,
                 sample,
                 NodeTelemetryLatest(node_id=NODE_A, sample_id=sample_id),
@@ -2792,7 +2802,6 @@ def test_expired_certificate_attention_preserves_security_and_names_enrollment_a
             AgentNode(
                 node_id=NODE_A,
                 state="active",
-                last_seen_at=NOW - timedelta(seconds=1),
                 inventory_snapshot=inventory_items_fixture(
                     NODE_A,
                     observed_at=NOW - timedelta(seconds=1),
@@ -2800,6 +2809,7 @@ def test_expired_certificate_attention_preserves_security_and_names_enrollment_a
                         {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
                     ),
                 ),
+                contact=AgentNodeContact(last_seen_at=NOW - timedelta(seconds=1)),
             )
         )
         session.flush()
@@ -2829,7 +2839,6 @@ def _host_codes(host_settings: dict[str, object] | None) -> list[str]:
             AgentNode(
                 node_id=NODE_A,
                 state="active",
-                last_seen_at=NOW - timedelta(seconds=1),
                 inventory_snapshot=inventory_items_fixture(
                     NODE_A,
                     observed_at=NOW - timedelta(seconds=1),
@@ -2837,6 +2846,7 @@ def _host_codes(host_settings: dict[str, object] | None) -> list[str]:
                         {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
                     ),
                 ),
+                contact=AgentNodeContact(last_seen_at=NOW - timedelta(seconds=1)),
             )
         )
         session.flush()
@@ -2951,7 +2961,7 @@ def test_controller_contact_ahead_of_projection_clock_is_fresh() -> None:
             AgentNode(
                 node_id=NODE_A,
                 state=NodeIdentityState.ACTIVE,
-                last_seen_at=NOW + timedelta(seconds=2),
+                contact=AgentNodeContact(last_seen_at=NOW + timedelta(seconds=2)),
             )
         )
         session.flush()
@@ -2975,7 +2985,7 @@ def test_contact_committed_between_clock_read_and_postgres_snapshot_stays_online
             AgentNode(
                 node_id=NODE_A,
                 state=NodeIdentityState.ACTIVE,
-                last_seen_at=NOW - timedelta(seconds=151),
+                contact=AgentNodeContact(last_seen_at=NOW - timedelta(seconds=151)),
             )
         )
         session.flush()
@@ -2993,11 +3003,7 @@ def test_contact_committed_between_clock_read_and_postgres_snapshot_stays_online
         # Advance the contact producer while capture is delayed, without a
         # timing-sensitive sleep. Its independent transaction commits first.
         with sessions.begin() as writer:
-            writer.execute(
-                update(AgentNode)
-                .where(AgentNode.node_id == NODE_A)
-                .values(last_seen_at=NOW + timedelta(seconds=2))
-            )
+            record_contact(writer, NODE_A, last_seen_at=NOW + timedelta(seconds=2))
         begin_capture(session)
         assert session.scalar(text("SHOW transaction_isolation")) == "repeatable read"
 

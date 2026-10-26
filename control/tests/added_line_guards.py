@@ -54,6 +54,7 @@ MODES = (
     "locks",
     "optimistic",
     "clocks",
+    "excerpts",
     "collections",
     "progress",
     "contact-clocks",
@@ -62,6 +63,7 @@ MODES = (
     "start-budgets",
     "listings",
     "movement",
+    "exit-causes",
 )
 # The agent's messages a Controller test may send only as the stand-in pinned
 # to the agent's shared vector; built by hand they are the Controller's idea of
@@ -79,6 +81,86 @@ SECURITY_EDGES = frozenset(
         "control/src/vonk_control/agent_api/authority.py",
     }
 )
+
+
+# The one owner of how a container's exit cause is spelled and read.
+EXIT_CAUSE_OWNER = "rust/crates/vonk-agent-protocol/src/failure_evidence.rs"
+
+
+@cache
+def exit_cause_tokens() -> frozenset[str]:
+    """The ``ExitCause`` tokens, read from the enum's own ``token`` mapping."""
+    source = (ROOT / EXIT_CAUSE_OWNER).read_text()
+    body = source[source.index("pub fn token(self)") :]
+    body = body[: body.index("\n    }\n")]
+    return frozenset(re.findall(r'Self::\w+ => "([a-z_]+)"', body))
+
+
+# Controller-observed contact facts have one writer: an upsert in agent_contacts.
+CONTACT_WRITERS = frozenset(
+    {
+        "control/src/vonk_control/agent_contacts.py",
+        "control/src/vonk_control/db/node_facts.py",
+    }
+)
+# Facts only the contact row has; ``last_seen_at``, ``protocol_version`` and
+# ``management_address`` also name unrelated fields, so for those only a
+# receiver named for the contact row counts.
+_CONTACT_ONLY = frozenset(
+    {
+        "contact_certificate_serial",
+        "contact_observation_digest",
+        "contact_repeated_evidence",
+        "management_observed_at",
+        "recipe_observation_http_status",
+        "recipe_observation_status_at",
+    }
+)
+_CONTACT_SHARED = frozenset({"last_seen_at", "protocol_version", "management_address"})
+
+
+def contact_writes(source: str) -> list[int]:
+    """Lines writing a contact fact outside the one writer module."""
+    if "contact" not in source and "AgentNodeContact" not in source:
+        return []
+    found: set[int] = set()
+    tree = ast.parse(source)
+    # Names bound to a contact row: ``row = session.get(AgentNodeContact, ...)``.
+    rows = {
+        target.id
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Assign | ast.AnnAssign)
+        and node.value is not None
+        and "AgentNodeContact" in ast.unparse(node.value)
+        for target in (node.targets if isinstance(node, ast.Assign) else [node.target])
+        if isinstance(target, ast.Name)
+    }
+    for node in ast.walk(tree):
+        targets: list[ast.expr] = []
+        if isinstance(node, ast.Assign):
+            targets = list(node.targets)
+        elif isinstance(node, ast.AugAssign | ast.AnnAssign):
+            targets = [node.target]
+        for target in targets:
+            if isinstance(target, ast.Attribute) and (
+                target.attr in _CONTACT_ONLY
+                or target.attr in _CONTACT_SHARED
+                and (
+                    "contact" in ast.unparse(target.value).lower()
+                    or isinstance(target.value, ast.Name)
+                    and target.value.id in rows
+                )
+            ):
+                found.add(target.lineno)
+        if isinstance(node, ast.Call):
+            name = ast.unparse(node.func).split(".")[-1]
+            if name == "AgentNodeContact" or (
+                name in {"insert", "update", "delete"}
+                and node.args
+                and ast.unparse(node.args[0]).split(".")[-1] == "AgentNodeContact"
+            ):
+                found.add(node.lineno)
+    return sorted(found)
 
 
 @cache
@@ -649,6 +731,26 @@ def check_source(
                 )
             ):
                 noexit_hits.append(f"{path}:{line}: exit code invented, not measured")
+    if (
+        "exit-causes" in modes
+        and not is_test
+        and path.endswith((".rs", ".py"))
+        and path != EXIT_CAUSE_OWNER
+    ):
+        # P10: a container's exit cause is decided through ``ExitCause``
+        # (``of_summary``/``from_token``/``token``), never by matching its
+        # ``exit_cause=`` text or spelling a cause token: five such literal
+        # parses let a job's host-memory kill report an output breach (#1906).
+        test_lines = rust_test_lines(source) if path.endswith(".rs") else set()
+        spelled = re.compile(
+            r"exit_cause="
+            r"|[\"'](?:" + "|".join(sorted(exit_cause_tokens())) + r")[\"']"
+        )
+        noexit_hits.extend(
+            f"{path}:{line}: exit cause spelled outside ExitCause"
+            for line, text in enumerate(source.splitlines(), 1)
+            if line in added and line not in test_lines and spelled.search(text)
+        )
     if "listings" in modes and not is_test:
         # GitHub lists a run's artifacts 30 to a page; a reader of one page
         # silently misses the rest (shard timings, #1900). Read every page or
@@ -681,6 +783,25 @@ def check_source(
                 )
             ):
                 noexit_hits.append(f"{path}:{line}: artifact listing reads one page")
+    if "excerpts" in modes and not is_test and path.endswith(".py"):
+        # A process's output is bounded from its end, where a failure is
+        # printed, and a retained diagnostic tail is read from both streams: a
+        # log, excerpt or stream value cut from the front, or a tail's
+        # ``stderr.text or stdout.text`` choosing one stream by presence, kept a
+        # build's echoed command instead of its error (#1905). A raw tool's
+        # ``stderr or stdout`` (skopeo prints its errors on stderr) is not a
+        # retained tail and is not matched.
+        name = r"\b(?:\w+_)?(?:log|excerpt|stderr|stdout)(?:_\w+)?\b"
+        spelled = re.compile(
+            name + r"(?:\.text)?\)?\[\s*:\s*[\w.]+\s*\]"
+            r"|\bstderr\.text\s+or\s+[\w.()]*stdout\.text"
+            r"|\bstdout\.text\s+or\s+[\w.()]*stderr\.text"
+        )
+        noexit_hits.extend(
+            f"{path}:{line}: output bounded from its front or one stream preferred"
+            for line, text in enumerate(source.splitlines(), 1)
+            if line in added and spelled.search(text)
+        )
     if (
         "locks" in modes
         and not is_test
@@ -707,6 +828,18 @@ def check_source(
     hits: list[tuple[int, str]] = []
     if "optimistic" in modes and python and path.startswith("control/src/"):
         hits.extend((line, optimistic.KIND) for line in optimistic.scan_source(source))
+        if not is_security_edge(path) and not path.startswith(
+            "control/src/vonk_control/enrollment/"
+        ):
+            hits.extend(
+                (line, optimistic.NODE_KIND)
+                for line in optimistic.scan_agent_node_locks(source)
+            )
+        if path not in CONTACT_WRITERS:
+            hits.extend(
+                (line, "contact fact written outside agent_contacts (one upsert path)")
+                for line in contact_writes(source)
+            )
         classified = classified_write_lines(path, source)
         hits.extend(
             (line, optimistic.WRITE_KIND)

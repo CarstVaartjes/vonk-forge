@@ -35,7 +35,7 @@ def _lock_operation_scopes(
     *,
     nowait: bool = False,
 ) -> dict[str, tuple[str, tuple[str, ...]]] | None:
-    """Lock hinted target nodes, then parents; callers pin and refresh operations.
+    """Check hinted target nodes, then lock parents; callers pin operations.
 
     ``nowait`` is for background writers: they must never queue for a node an
     admission is trying to take (a queued writer refuses every NOWAIT
@@ -64,7 +64,11 @@ def _lock_operation_scopes(
         if scope is None or node_id not in scope or operation_node != node_id:
             return None
         scopes[operation_id] = (parent_id, scope)
-    if not cls._lock_target_scopes(session, scopes, node_id, nowait=nowait):
+    # The blocking callers are agent contacts: they read the target nodes and
+    # never hold the rows admission and publication lock.
+    if not cls._lock_target_scopes(
+        session, scopes, node_id, nowait=nowait, lock_nodes=False
+    ):
         return None
     return scopes
 
@@ -76,6 +80,7 @@ def _lock_target_scopes(
     node_id: str,
     *,
     nowait: bool = False,
+    lock_nodes: bool = True,
 ) -> bool:
     nodes = sorted(
         {node_id} | {target for _, scope in scopes.values() for target in scope}
@@ -102,6 +107,16 @@ def _lock_target_scopes(
             ),
         )
         locked = list(locked_rows.get("target-agent-nodes", ()))
+    elif not lock_nodes:
+        # The locked parent Job below fences the scope.
+        locked = list(
+            session.scalars(
+                select(AgentNode)
+                .where(AgentNode.node_id.in_(nodes))
+                .order_by(AgentNode.node_id)
+                .execution_options(populate_existing=True)
+            )
+        )
     else:
         locked = list(
             session.scalars(

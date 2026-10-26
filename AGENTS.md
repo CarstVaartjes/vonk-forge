@@ -140,8 +140,15 @@ total complexity; do not build a second job scheduler out of JSON files.
 
 Per-Spark facts have one owner: agent-reported data uses one canonical typed
 Pydantic contract per item in a typed column of `node_inventory_snapshots` or
-`node_telemetry_samples`; Controller observations of contact use columns on
-`agent_nodes`. Do not add per-feature fact tables, ad hoc JSON, duplicate fact
+`node_telemetry_samples`; Controller observations of contact use columns of
+`agent_node_contacts`, written only through `agent_contacts.py`. Contact,
+claim and result recording take no explicit lock on `agent_nodes` and never
+update it; admission locks that identity/intent row FOR NO KEY UPDATE, which a
+child row's foreign-key KEY SHARE never blocks. Until lock-plan step 4, three
+result paths still lock target nodes: the recipe intent check on failed or
+cancelled start/stop results (`recipe_operations/intent.py`), the cleanup Stop
+a failed start enqueues, and an enqueue inside a phase-advance result; do not
+add others. Do not add per-feature fact tables, ad hoc JSON, duplicate fact
 owners, or authoritative in-memory copies. Operation intent/history, grants,
 and desired configuration are distinct from observed Spark facts. Existing
 misplaced fields require an owner-approved move; do not extend them. The

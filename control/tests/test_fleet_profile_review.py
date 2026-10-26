@@ -20,6 +20,7 @@ from vonk_control.fleet_profiles import (
 )
 from vonk_control.models import (
     AgentNode,
+    AgentNodeContact,
     CatalogDocumentRevision,
     FleetProfileApplication,
     InstallationNode,
@@ -380,8 +381,6 @@ def test_review_binds_idle_roster_and_definition_but_not_observation_time():
             AgentNode(
                 node_id=_node_id(2),
                 state="active",
-                protocol_version=2,
-                last_seen_at=now,
                 inventory_snapshot=inventory_items_fixture(
                     _node_id(2),
                     observed_at=now,
@@ -389,6 +388,7 @@ def test_review_binds_idle_roster_and_definition_but_not_observation_time():
                         {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
                     ),
                 ),
+                contact=AgentNodeContact(protocol_version=2, last_seen_at=now),
             )
         )
     expanded = service.preview(profile.id)

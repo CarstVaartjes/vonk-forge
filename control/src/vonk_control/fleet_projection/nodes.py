@@ -19,6 +19,7 @@ from vonk_agent_protocol.gpu_clock import (
 )
 from vonk_agent_protocol.inventory import HostSettings
 
+from ..agent_contacts import last_seen as last_seen_at
 from ..gpu_health import gpu_health_reason
 from ..inventory_items import inventory_items
 from ..models import (
@@ -78,16 +79,18 @@ def _node(
     gpu_clock_desired: GpuClockRange | None = None,
 ) -> FleetNode:
     warnings: list[ProjectionReason] = list(layout_notices)
+    contact = agent.contact
     if (
-        agent.recipe_observation_http_status is not None
-        and agent.recipe_observation_http_status >= 400
+        contact is not None
+        and contact.recipe_observation_http_status is not None
+        and contact.recipe_observation_http_status >= 400
     ):
         warnings.append(
             ProjectionReason(
                 code=ProjectionCode.OBSERVATION_TRANSFER_UNAVAILABLE,
                 detail=(
-                    f"Recipe observations rejected with HTTP {agent.recipe_observation_http_status} "
-                    f"since {agent.recipe_observation_status_at}; exact evidence remains pending on the agent."
+                    f"Recipe observations rejected with HTTP {contact.recipe_observation_http_status} "
+                    f"since {contact.recipe_observation_status_at}; exact evidence remains pending on the agent."
                 ),
                 severity=ProfileReasonSeverity.WARNING.value,
                 recommendation="The agent retries pending content on the next observation pass; inspect Controller rejection evidence if this persists.",
@@ -326,7 +329,7 @@ def _node(
         id=node_id,
         display_name=node_id if profile is None else profile.display_name,
         hostname="" if items is None else items.hostname or "",
-        ip_address=agent.management_address,
+        ip_address=None if contact is None else contact.management_address,
         lifecycle="managed" if profile is None else profile.lifecycle,
         labels=labels,
         projection_issues=projection_issues or None,
@@ -362,7 +365,8 @@ def _connection(
             last_seen_at=None,
             last_seen_age_seconds=None,
         )
-    last_seen = None if value.last_seen_at is None else _utc(value.last_seen_at)
+    seen = last_seen_at(value)
+    last_seen = None if seen is None else _utc(seen)
     # Contact is Controller-stamped: capture latency or clock rollback can
     # make it newer than current without indicating a lost connection.
     age = None if last_seen is None else max(0.0, (current - last_seen).total_seconds())

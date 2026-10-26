@@ -5,9 +5,10 @@ from __future__ import annotations
 from datetime import timedelta
 from uuid import uuid4
 
-from sqlalchemy import select, update
+from sqlalchemy import select
 from vonk_agent_protocol import DesiredAssignmentState, canonical_message
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
+from vonk_control.agent_contacts import record_contact
 from vonk_control.fleet_profile_contract import (
     FleetProfileAssignmentInput,
     FleetProfileInput,
@@ -21,6 +22,7 @@ from vonk_control.memory_reservations import memory_reservations
 from vonk_control.models import (
     AgentCertificate,
     AgentNode,
+    AgentNodeContact,
     AgentOperation,
     CatalogDocumentRevision,
     ClusterMapping,
@@ -131,8 +133,6 @@ def test_profile_apply_stops_only_reachable_rank_and_retains_missing_claim(
                 AgentNode(
                     node_id=unrelated_node,
                     state="active",
-                    protocol_version=1,
-                    last_seen_at=observed_at,
                     inventory_snapshot=inventory_items_fixture(
                         unrelated_node,
                         observed_at=observed_at,
@@ -144,6 +144,9 @@ def test_profile_apply_stops_only_reachable_rank_and_retains_missing_claim(
                                 ),
                             }
                         ),
+                    ),
+                    contact=AgentNodeContact(
+                        protocol_version=1, last_seen_at=observed_at
                     ),
                 )
             )
@@ -159,14 +162,12 @@ def test_profile_apply_stops_only_reachable_rank_and_retains_missing_claim(
                     not_after=observed_at + timedelta(days=365),
                 )
             )
-            session.execute(
-                update(AgentNode)
-                .where(AgentNode.node_id == unrelated_node)
-                .values(
-                    contact_certificate_serial=serial,
-                    management_address=f"192.168.1.{213 + index}",
-                    management_observed_at=observed_at,
-                )
+            record_contact(
+                session,
+                unrelated_node,
+                contact_certificate_serial=serial,
+                management_address=f"192.168.1.{213 + index}",
+                management_observed_at=observed_at,
             )
         InventoryRepository(sessions, clock=lifecycle._clock).record(
             NodeInventoryReport.model_validate_json(
