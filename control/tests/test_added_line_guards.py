@@ -1006,18 +1006,28 @@ def test_added_line_guard_rejects_negative_controller_contact_age(source, line):
     assert not check_source(PATH, source, {line + 1}, modes=("contact-clocks",))
 
 
-def test_contact_clock_guard_preserves_staleness_and_security_and_agent_freshness():
+def test_contact_clock_guard_preserves_staleness_and_security():
     source = (
         "def online(node, current):\n"
         "    seen = node.last_seen_at\n"
         "    return current - seen > window\n"
         "def certificate(cert, now):\n"
         "    return cert.not_before > now\n"
-        "def observation(sample, now):\n"
-        "    age = now - sample.observed_at\n"
-        "    return timedelta(0) <= age < window\n"
     )
-    assert not check_source(PATH, source, set(range(1, 9)), modes=("contact-clocks",))
+    assert not check_source(PATH, source, set(range(1, 6)), modes=("contact-clocks",))
+
+
+def test_contact_clock_guard_rejects_agent_stamp_freshness():
+    """Catches ageing inventory by the agent's own clock."""
+    source = (
+        "def stale(row, now):\n"
+        "    age = now - row.observed_at\n"
+        "    return age.total_seconds() > window\n"
+        "def future(row, now):\n"
+        "    return row.observed_at > now\n"
+    )
+    assert check_source(PATH, source, {2}, modes=("contact-clocks",))
+    assert check_source(PATH, source, {5}, modes=("contact-clocks",))
 
 
 @pytest.mark.parametrize("negative", (False, True))

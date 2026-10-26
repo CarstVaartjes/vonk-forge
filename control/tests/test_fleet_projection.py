@@ -467,7 +467,7 @@ def test_read_uses_postgresql_registration_latest_rows_and_a_bounded_query_set()
                     "memory_pool": "separate",
                     "observed_at": "2026-08-15T11:59:50Z",
                     "received_at": "2026-08-15T11:59:51Z",
-                    "age_seconds": 10.0,
+                    "age_seconds": 9.0,
                     "freshness": "fresh",
                     "disk_total_bytes": 1000,
                     "disk_free_bytes": 800,
@@ -540,7 +540,7 @@ def test_read_uses_postgresql_registration_latest_rows_and_a_bounded_query_set()
                     "memory_pool": "separate",
                     "observed_at": "2026-08-15T11:59:48Z",
                     "received_at": "2026-08-15T11:59:49Z",
-                    "age_seconds": 12.0,
+                    "age_seconds": 11.0,
                     "freshness": "fresh",
                     "disk_total_bytes": 1000,
                     "disk_free_bytes": 750,
@@ -991,13 +991,9 @@ def test_freshness_boundaries_keep_telemetry_agent_and_inventory_independent() -
             inventory_age = timedelta(
                 seconds=300, milliseconds=1 if node_id == NODE_B else 0
             )
-            session.add(
-                _inventory(
-                    node_id,
-                    NOW - inventory_age,
-                    free_bytes=700 + index,
-                )
-            )
+            inventory = _inventory(node_id, NOW - inventory_age, free_bytes=700 + index)
+            inventory.received_at = NOW - inventory_age
+            session.add(inventory)
             sample = _telemetry(
                 node_id,
                 f"00000000-0000-4000-8000-{index:012d}",

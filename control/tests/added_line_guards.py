@@ -424,13 +424,14 @@ def _rehashes_stored_row(node: ast.Compare) -> bool:
 
 
 def controller_contact_clock_checks(source: str) -> list[int]:
-    """Detect future-contact rejection, not agent observations or certificate dates.
+    """Detect future-contact rejection, not certificate dates.
 
     This syntax guard tracks local aliases of Controller contact/heartbeat
-    timestamps and their ages. Behaviour tests own the actual clock race.
+    timestamps, agent observation stamps and their ages: freshness is the
+    Controller's receive time, an agent stamp only orders reports. Behaviour tests own the actual clock race.
     """
     tree = ast.parse(source)
-    attributes = {"last_seen_at", "received_at"}
+    attributes = {"last_seen_at", "received_at", "observed_at"}
     if "ControlProcessHeartbeat" in source:
         attributes.add("completed_at")
     found: set[int] = set()
@@ -510,6 +511,15 @@ def controller_contact_clock_checks(source: str) -> list[int]:
         node.lineno
         for node in ast.walk(tree)
         if isinstance(node, ast.Attribute) and node.attr == "LAST_SEEN_IN_FUTURE"
+    )
+    found.update(
+        node.lineno
+        for node in ast.walk(tree)
+        if isinstance(node, ast.BinOp)
+        and isinstance(node.op, ast.Sub)
+        and ast.unparse(node.left) in {"now", "current", "timestamp"}
+        and isinstance(node.right, ast.Attribute)
+        and node.right.attr == "observed_at"
     )
     return sorted(found)
 

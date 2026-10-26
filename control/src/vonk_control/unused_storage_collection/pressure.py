@@ -80,8 +80,8 @@ def _pressures(self: UnusedStorageCollector, now: datetime) -> list[_Pressure]:
             or 0
         )
         snapshots = _latest_snapshots(session)
-    for node_id, (free, total, observed) in sorted(snapshots.items()):
-        if now - observed > INVENTORY_MAX_AGE:
+    for node_id, (free, total, received) in sorted(snapshots.items()):
+        if now - received > INVENTORY_MAX_AGE:
             continue
         scope = spark_scope(node_id)
         pressure = self._pressure(
@@ -89,7 +89,7 @@ def _pressures(self: UnusedStorageCollector, now: datetime) -> list[_Pressure]:
             node_id,
             free,
             total,
-            observed,
+            received,
             largest_install,
             [demand for demand in demands if demand.scope == scope],
         )

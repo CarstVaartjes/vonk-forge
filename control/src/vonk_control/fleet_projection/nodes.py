@@ -398,7 +398,8 @@ def _inventory(
     if value is None:
         return None
     observed = _utc(value.observed_at)
-    age = max(0.0, (current - observed).total_seconds())
+    received = _utc(value.received_at)
+    age = max(0.0, (current - received).total_seconds())
     from ..inventory_repository import _validated_inventory
 
     report = _validated_inventory(value, observed_at=observed)
@@ -414,7 +415,7 @@ def _inventory(
             },
         ),
         observed_at=observed,
-        received_at=_utc(value.received_at),
+        received_at=received,
         age_seconds=age,
         freshness="stale" if age > self._inventory_fresh_seconds else "fresh",
     )
