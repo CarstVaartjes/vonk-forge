@@ -804,10 +804,10 @@ fn tunnel_until(mut left: TcpStream, mut right: TcpStream, deadline: Instant) ->
     // streams rather than take the whole proxy down.
     let outbound = thread::Builder::new().spawn(move || {
         let copied = copy_until(&mut left_read, &mut right_write, &outbound_budget, deadline);
-        // The client is gone (or failed): close the upstream so the other
-        // direction ends now, not after its 120 s read timeout, and the
-        // connection slot is released.
-        let _ = right_write.shutdown(std::net::Shutdown::Both);
+        // The client is gone (or failed): send the upstream our FIN so it
+        // closes and the other direction ends now, not after its 120 s read
+        // timeout, and the connection slot is released.
+        let _ = right_write.shutdown(std::net::Shutdown::Write);
         copied
     })?;
     let inbound = copy_until(&mut right, &mut left, &budget, deadline);

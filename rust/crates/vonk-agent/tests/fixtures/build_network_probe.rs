@@ -65,9 +65,13 @@ fn hold_tunnels(proxy: SocketAddr, count: usize, authority: &str) {
             .set_read_timeout(Some(Duration::from_secs(15)))
             .unwrap();
         write!(stream, "CONNECT {authority} HTTP/1.1\r\nHost: {authority}\r\n\r\n").unwrap();
-        let mut response = [0; 12];
-        stream.read_exact(&mut response).unwrap();
-        assert_eq!(&response, b"HTTP/1.1 200", "tunnel {} refused", tunnels.len());
+        let response = read_reply(&mut stream);
+        assert!(
+            response.starts_with(b"HTTP/1.1 200"),
+            "tunnel {} refused: {}",
+            tunnels.len(),
+            String::from_utf8_lossy(&response)
+        );
         tunnels.push(stream);
     }
     // Every tunnel must still be open: a proxy that dropped one would show EOF,
@@ -89,10 +93,25 @@ fn hold_tunnels(proxy: SocketAddr, count: usize, authority: &str) {
     let mut extra = TcpStream::connect_timeout(&proxy, Duration::from_secs(5)).unwrap();
     extra.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
     write!(extra, "CONNECT {authority} HTTP/1.1\r\nHost: {authority}\r\n\r\n").unwrap();
-    let mut response = [0; 12];
-    extra
-        .read_exact(&mut response)
-        .expect("the proxy stopped answering while holding tunnels");
+    let response = read_reply(&mut extra);
     assert!(response.starts_with(b"HTTP/1.1 "));
-    println!("held {} tunnels; proxy answered {}", tunnels.len(), String::from_utf8_lossy(&response));
+    println!(
+        "held {} tunnels; proxy answered {}",
+        tunnels.len(),
+        String::from_utf8_lossy(&response[..12])
+    );
+}
+
+/// The proxy's reply head, through its blank line, so a later read sees only
+/// tunnel bytes.
+fn read_reply(stream: &mut TcpStream) -> Vec<u8> {
+    let mut reply = Vec::new();
+    let mut byte = [0; 1];
+    while !reply.ends_with(b"\r\n\r\n") {
+        stream
+            .read_exact(&mut byte)
+            .expect("the proxy stopped answering while holding tunnels");
+        reply.push(byte[0]);
+    }
+    reply
 }
