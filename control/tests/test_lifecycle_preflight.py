@@ -31,7 +31,11 @@ from vonk_control.models import (
     CatalogDocumentRevision,
     Job,
 )
-from vonk_control.operation_blockers import BlockingOperation, ProgressAlarmCode
+from vonk_control.operation_blockers import (
+    BlockingOperation,
+    ProgressAlarmCode,
+    make_blocker,
+)
 from vonk_control.persisted_waits import read_wait
 from vonk_control.runtime_preflight import mandatory_capabilities
 
@@ -758,13 +762,14 @@ def test_probe_round_freshness_bounds_rank_span_not_worker_delay(
         assert error is None and reused.pending_jobs
 
 
-def _heartbeating_build(sessions, node_id, now):
-    """A live ``recipe.build.v1`` attempt on ``node_id``, renewed as it heartbeats."""
+def _heartbeating_build(sessions, node_id, now, kind=OperationKind.RECIPE_BUILD):
+    """A live order (a ``recipe.build.v1`` unless ``kind`` says otherwise) on
+    ``node_id``, renewed as it heartbeats."""
     with sessions.begin() as session:
         parent = Job(
             id=str(uuid.uuid4()),
             request_id=str(uuid.uuid4()),
-            kind=OperationKind.RECIPE_BUILD.value,
+            kind=kind.value,
             state=LifecycleState.RUNNING.value,
             actor="test",
             authority_revision="a" * 64,
@@ -779,7 +784,7 @@ def _heartbeating_build(sessions, node_id, now):
         build = AgentOperation(
             parent_job_id=parent.id,
             node_id=node_id,
-            kind=OperationKind.RECIPE_BUILD.value,
+            kind=kind.value,
             payload_digest="a" * 64,
             payload={},
             authority_revision="a" * 64,
@@ -910,3 +915,23 @@ def test_pending_probe_names_the_build_holding_its_spark_never_stale(tmp_path):
         blocker.code != RuntimePreflightCode.STALE for blocker in projected.blockers
     )
     assert waiting.child_waits == child_wait.blockers
+
+
+def test_round_shows_a_queued_probe_beside_a_peer_backing_off():
+    """Catches one Spark's queue wait hiding another Spark's failed-probe backoff."""
+    node_a, node_b = "spk_" + "a" * 32, "spk_" + "b" * 32
+    busy = make_blocker(
+        WaitReason.SPARK_BUSY, "waits for recipe.stop", node_ids=[node_b]
+    )
+    checkpoint = LifecyclePreflightCheckpoint(
+        phase_index=0,
+        retry_at={node_a: NOW + timedelta(seconds=30)},
+        last_failure_code=RuntimePreflightCode.EXECUTION_FAILED,
+        last_failure_detail="probe failed on node A",
+        child_waits=[busy],
+    )
+    assert checkpoint.current_reason == WaitReason.SPARK_BUSY
+    [queued, backing_off] = checkpoint.current_blockers([node_a, node_b])
+    assert queued == busy
+    assert backing_off.code == RuntimePreflightCode.EXECUTION_FAILED
+    assert backing_off.node_ids == [node_a]

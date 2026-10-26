@@ -156,7 +156,7 @@ from .runtime_identity_support import (
 from .runtime_image_fixtures import place_test_image
 
 _FIXTURE_ADAPTER = resolve_runtime_adapter("vllm", {"node_count": 1})
-from .test_lifecycle_preflight import _finish
+from .test_lifecycle_preflight import _clear, _finish
 from .test_recipe_operations import (
     NOW,
     _CanonicalModelCache,
@@ -7600,3 +7600,69 @@ def test_low_level_run_preview_propagates_contract_defects(
             item.code == RunSwitchCode.RUN_ADMISSION_UNAVAILABLE
             for item in plan.blockers
         )
+
+
+def test_a_queued_probe_names_its_spark_holder_as_the_load_reason(tmp_path):
+    """Catches the load reason staying at the reason its probe round started.
+
+    Incident 2026-10-26: the load said ``runtime_preflight.stale`` for hours
+    while its probe sat queued behind another order holding the Spark.
+    """
+    from vonk_agent_protocol import AgentOperation as OperationKind
+    from vonk_agent_protocol import WaitReason
+    from vonk_control.agent_jobs.waits import refresh_queue_waits
+
+    from .test_lifecycle_preflight import _heartbeat, _heartbeating_build
+
+    sessions, lifecycle, _, _mapping_id, _build_id, nodes = setup_services(tmp_path)
+    now = [NOW]
+    service = _service(sessions, NOW, lifecycle, RecordingArtifactExecutor())
+    service._clock = lambda: now[0]
+    request = _request(sessions, nodes[0])
+    plan = service.preview(request, actor="admin")
+    operation = service.apply(
+        RunSwitchApplyRequest(
+            **request.model_dump(),
+            plan_digest=plan.plan_digest,
+            request_key=str(uuid.uuid4()),
+        ),
+        actor="admin",
+    )
+    _clear(sessions)
+    for _ in range(4):
+        view = service.get(operation.operation_id)
+        if (
+            view.result is not None
+            and view.result.preflight is not None
+            and (view.result.preflight.pending_jobs)
+        ):
+            break
+        service.tick()
+    holder = _heartbeating_build(
+        sessions, nodes[0], now[0], kind=OperationKind.RECIPE_STOP
+    )
+    for _ in range(3):
+        now[0] += timedelta(seconds=61)
+        _heartbeat(sessions, holder, nodes[0], now[0])
+        service.tick()
+    with sessions.begin() as session:
+        refresh_queue_waits(session, now[0], node_id=nodes[0])
+    now[0] += timedelta(seconds=61)
+    service.tick()
+
+    view = service.get(operation.operation_id)
+    assert view.status_reason == WaitReason.SPARK_BUSY
+    assert view.wait is not None and view.wait.reason == WaitReason.SPARK_BUSY
+    assert view.blockers[0].operation is not None
+    assert view.blockers[0].operation.id == holder
+    assert view.blockers[0].node_ids == [nodes[0]]
+    # A fresh request for the same load is still admitted behind the wait.
+    fresh = service.apply(
+        RunSwitchApplyRequest(
+            **request.model_dump(),
+            plan_digest=plan.plan_digest,
+            request_key=str(uuid.uuid4()),
+        ),
+        actor="admin",
+    )
+    assert fresh.state not in {"cancelled", "failed"}

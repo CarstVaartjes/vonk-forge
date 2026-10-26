@@ -225,7 +225,7 @@ class PhaseDispatchMixin:
                             ),
                             now,
                         )
-                    job.status_reason = checkpoint.last_failure_code
+                    job.status_reason = checkpoint.current_reason
                     _ADAPTER.project(
                         job,
                         current,
