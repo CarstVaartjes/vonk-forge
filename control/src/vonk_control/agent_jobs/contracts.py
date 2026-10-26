@@ -22,6 +22,7 @@ from vonk_agent_protocol import (
 )
 
 from .. import agent_operation_states, job_states
+from ..content_identity import same_build_units
 from ..lifecycle.agent_operation import AGGREGATE_FINAL_STATES
 from ..lifecycle.evidence import Residue
 from ..models import AgentOperation as StoredOperation
@@ -130,7 +131,7 @@ def mutations_conflict(
     return other.kind in {
         build,
         AgentOperation.RECIPE_BUILD_CLEANUP.value,
-    } and _build_id(claimed) == _build_id(holder)
+    } and same_build_units(_build_id(claimed), _build_id(holder))
 
 
 def holds_claim(queued: StoredOperation, holder: StoredOperation) -> bool:

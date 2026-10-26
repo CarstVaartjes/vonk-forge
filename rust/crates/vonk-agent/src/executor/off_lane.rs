@@ -40,7 +40,8 @@ pub enum LaneStep {
 
 impl LaneStep {
     /// Assert this pass settled on the lane (no claim was handed off).
-    pub fn settled(self) {
+    #[cfg(test)]
+    pub(crate) fn settled(self) {
         if let Self::OffLane(claim) = self {
             panic!(
                 "claim {} runs beside the lane and was not executed",

@@ -242,3 +242,14 @@ def catalog_reference_membership(column, identities: Collection[str]):
     reuse. The caller still checks the exact mapping, options and image bytes.
     """
     return column.in_(identities)
+
+
+def same_build_units(first: str | None, second: str | None) -> bool:
+    """Whether two orders start or stop the same build process.
+
+    Not content sameness: a build's systemd units and private staging are
+    named by its build id, so two orders naming one act on the same process.
+    An unreadable id (``None``) is treated as the same, never as free.
+    """
+
+    return first == second
