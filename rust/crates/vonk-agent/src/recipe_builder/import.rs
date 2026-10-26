@@ -39,6 +39,19 @@ pub(super) fn podman_import_diagnostic(
     }
 }
 
+/// A Go runtime crash in Podman's stderr: its `panic: ` or `fatal error: `
+/// header line, or a goroutine dump line (`goroutine 61 [running]:`).
+fn podman_crashed(stderr: &str) -> bool {
+    stderr.lines().any(|line| {
+        line.starts_with("panic: ")
+            || line.starts_with("fatal error: ")
+            || line.strip_prefix("goroutine ").is_some_and(|rest| {
+                let digits = rest.chars().take_while(char::is_ascii_digit).count();
+                digits > 0 && rest[digits..].starts_with(" [")
+            })
+    })
+}
+
 pub(crate) fn podman_build_diagnostic(
     output: &crate::process::ProcessOutput,
 ) -> PodmanBuildDiagnostic {
@@ -71,6 +84,17 @@ pub(crate) fn podman_build_diagnostic(
         || evidence.contains("disk quota exceeded")
     {
         PodmanBuildDiagnostic::TemporaryStorageExhausted
+    } else if evidence.contains("out of memory")
+        || evidence.contains("memory limit")
+        || evidence.contains("oom-kill")
+        || evidence.contains("signal: killed")
+    {
+        PodmanBuildDiagnostic::MemoryLimitExceeded
+    } else if !step_exited && podman_crashed(&causes) {
+        // Podman itself died (a Go runtime crash while it tore down the build's
+        // network namespace). The RUN output above the crash is not the cause,
+        // so none of its words may classify a host denial.
+        PodmanBuildDiagnostic::Unknown
     } else if causes.contains("insufficient uids or gids")
         || causes.contains("subuid")
         || causes.contains("subgid")
@@ -101,12 +125,6 @@ pub(crate) fn podman_build_diagnostic(
         // A RUN process can report its own permission error. An explicit OCI
         // runtime refusal stays a platform denial even with a step exit status.
         PodmanBuildDiagnostic::PermissionDenied
-    } else if evidence.contains("out of memory")
-        || evidence.contains("memory limit")
-        || evidence.contains("oom-kill")
-        || evidence.contains("signal: killed")
-    {
-        PodmanBuildDiagnostic::MemoryLimitExceeded
     } else if causes.contains("fuse-overlayfs")
         || causes.contains("overlay mount")
         || causes.contains("error committing")
