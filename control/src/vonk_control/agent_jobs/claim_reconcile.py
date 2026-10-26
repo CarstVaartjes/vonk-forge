@@ -247,7 +247,8 @@ def _first_claimable_id(session: Session, node_id: str, now: datetime) -> str | 
     beside = [
         holder
         for holder, attempt in session.execute(
-            select(StoredOperation, AgentOperationAttempt).join(
+            select(StoredOperation, AgentOperationAttempt)
+            .join(
                 AgentOperationAttempt,
                 and_(
                     AgentOperationAttempt.operation_id == StoredOperation.id,

@@ -301,6 +301,28 @@ def test_work_held_by_the_build_never_holds_back_the_load_behind_it(service) -> 
     _admit_a_fresh_probe(jobs, sessions, clock, build_claim)
 
 
+def test_a_compiling_build_is_never_labelled_a_refused_claim(service) -> None:
+    """Catches the idle poll explaining an executing build as refused work.
+
+    The agent polls throughout a build now; the refusal note named the build
+    "running-lease-live" and rewrote it with every renewed lease.
+    """
+    jobs, sessions, clock = service
+    build, build_claim = _compiling_build(jobs, sessions, clock)
+    for _ in range(_BOUNDED_POLLS):
+        clock.advance(seconds=10)
+        jobs.heartbeat(build_claim, None, 30)
+        assert claim_agent(jobs, NODE_B, _SERIAL[NODE_B]) is None
+    with sessions() as session:
+        compiling = session.get(StoredOperation, build.id)
+        assert compiling is not None
+        owner = session.get(Job, compiling.parent_job_id)
+        assert owner is not None
+        assert compiling.status_reason is None
+        assert owner.status_reason is None
+    _admit_a_fresh_probe(jobs, sessions, clock, build_claim)
+
+
 def test_off_lane_operations_are_the_agents_shared_vector() -> None:
     """Catches the Controller and the agent disagreeing on what holds the lane."""
     vector = json.loads(
