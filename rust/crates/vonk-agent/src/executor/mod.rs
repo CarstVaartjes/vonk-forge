@@ -289,8 +289,10 @@ mod start;
 mod stop;
 pub use agent_loop::*;
 mod off_lane;
+#[cfg(test)]
+pub(crate) use off_lane::BuildBeside;
 use off_lane::Executing;
-pub use off_lane::{Beside, LaneStep, OffLaneClaim, runs_off_lane};
+pub use off_lane::{Beside, LaneStep, OffLaneClaim, builds_beside, runs_off_lane};
 mod heartbeat;
 use crate::stall_window::{Inactivity, StallWindow};
 use heartbeat::*;

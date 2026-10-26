@@ -75,7 +75,8 @@ async fn deliver(client: &EvidenceRefusingClient, state: &mut StateStore) {
         || Ok(()),
     )
     .await
-    .unwrap();
+    .unwrap()
+    .settled();
 }
 
 #[test]
@@ -170,7 +171,8 @@ async fn a_refused_core_discards_delivery_with_evidence_across_restart() {
     };
     run_once(&replay, &mut restarted, &RejectingExecutor, None, 0, None)
         .await
-        .unwrap();
+        .unwrap()
+        .settled();
     assert!(replay.results.lock().unwrap().is_empty());
     let (acknowledged, retained): (bool, Vec<u8>) = rusqlite::Connection::open(path)
         .unwrap()

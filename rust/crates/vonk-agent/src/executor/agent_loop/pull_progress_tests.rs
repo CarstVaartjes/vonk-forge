@@ -147,7 +147,8 @@ async fn image_pull_bytes_reach_the_order_heartbeat() {
     )
     .await
     .unwrap()
-    .unwrap();
+    .unwrap()
+    .settled();
     let heartbeats = client.inner.heartbeats.lock().unwrap();
     let pulled = heartbeats
         .iter()

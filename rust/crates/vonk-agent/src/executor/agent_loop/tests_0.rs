@@ -25,7 +25,8 @@ async fn successful_claim_publishes_readiness_before_job_execution() {
         Ok(())
     })
     .await
-    .unwrap();
+    .unwrap()
+    .settled();
 
     assert_eq!(*events.lock().unwrap(), ["readiness", "execute"]);
 }
@@ -65,7 +66,8 @@ async fn long_execution_renews_and_persists_its_lease_before_result() {
         || Ok(()),
     )
     .await
-    .unwrap();
+    .unwrap()
+    .settled();
 
     let heartbeats = client.heartbeats.lock().unwrap();
     assert!(heartbeats.len() >= 2);
@@ -118,7 +120,8 @@ async fn a_long_execution_keeps_feeding_the_service_watchdog_through_its_renewal
         || Ok(()),
     )
     .await
-    .unwrap();
+    .unwrap()
+    .settled();
 
     assert!(WATCHDOG_FEEDS.load(std::sync::atomic::Ordering::SeqCst) - before >= 3);
 }
@@ -249,7 +252,8 @@ async fn a_refused_result_is_kept_instead_of_discarded() {
         || Ok(()),
     )
     .await
-    .unwrap();
+    .unwrap()
+    .settled();
 
     assert_eq!(client.submitted.lock().unwrap().len(), 1);
     // The execution is not retried. Its recorded outcome remains readable
@@ -271,7 +275,8 @@ async fn a_refused_result_is_kept_instead_of_discarded() {
         || Ok(()),
     )
     .await
-    .unwrap();
+    .unwrap()
+    .settled();
     assert_eq!(client.submitted.lock().unwrap().len(), 2);
     assert!(state.unreconciled_results().unwrap().is_empty());
     let connection = rusqlite::Connection::open(&path).unwrap();
@@ -318,7 +323,8 @@ async fn an_ingress_rejected_result_is_recorded_and_the_loop_stays_alive() {
             || Ok(()),
         )
         .await
-        .unwrap();
+        .unwrap()
+        .settled();
     }
 
     // The same bytes were offered once and then not hot-looped, the receipt
@@ -383,7 +389,8 @@ async fn a_corrected_ingress_reconciles_the_retained_result() {
         || Ok(()),
     )
     .await
-    .unwrap();
+    .unwrap()
+    .settled();
 
     assert_eq!(client.submitted.lock().unwrap().len(), 1);
     assert!(state.pending_results().unwrap().is_empty());
@@ -428,7 +435,8 @@ async fn transient_heartbeat_failure_does_not_terminate_healthy_execution() {
         || Ok(()),
     )
     .await
-    .unwrap();
+    .unwrap()
+    .settled();
 
     assert!(client.heartbeats.lock().unwrap().len() >= 2);
     assert_eq!(client.results.lock().unwrap().len(), 1);
@@ -468,7 +476,8 @@ async fn cancelled_heartbeat_preserves_the_executors_confirmed_stop_result() {
         || Ok(()),
     )
     .await
-    .unwrap();
+    .unwrap()
+    .settled();
 
     let results = client.results.lock().unwrap();
     assert_eq!(results.len(), 1);
@@ -513,7 +522,8 @@ async fn exact_superseded_cancellation_heartbeat_is_an_expected_loop_outcome() {
         || Ok(()),
     )
     .await
-    .unwrap();
+    .unwrap()
+    .settled();
 
     let results = client.0.results.lock().unwrap();
     assert_eq!(results.len(), 1);
@@ -569,7 +579,7 @@ async fn transient_heartbeat_failure_retries_inside_the_accepted_lease() {
         assert_eq!(heartbeats.lock().unwrap().len(), 2);
     };
     let (result, ()) = tokio::join!(run, drive_clock);
-    result.unwrap();
+    result.unwrap().settled();
     assert_eq!(client.results.lock().unwrap().len(), 1);
 }
 
@@ -632,7 +642,8 @@ async fn terminal_heartbeat_failure_cancels_a_blocking_executor() {
             None,
         )
         .await
-        .unwrap();
+        .unwrap()
+        .settled();
         assert!(state.pending_results().unwrap().is_empty());
     }
 }
@@ -705,7 +716,8 @@ async fn a_retryable_renewal_failure_after_the_lease_lapses_still_renews() {
             || Ok(()),
         )
         .await
-        .expect("a lapsed lease that the Controller still accepts must be re-acquired");
+        .expect("a lapsed lease that the Controller still accepts must be re-acquired")
+        .settled();
 
         assert!(
             !cancelled.load(Ordering::SeqCst),
@@ -736,7 +748,8 @@ async fn a_retryable_renewal_failure_after_the_lease_lapses_still_renews() {
             None,
         )
         .await
-        .unwrap();
+        .unwrap()
+        .settled();
         assert_eq!(
             client
                 .inner
@@ -827,7 +840,7 @@ async fn assert_renewal_unknown_ends_then_admits_fresh(unreadable: bool) {
         result.is_ok(),
         "renewal retried past the start's own immutable budget"
     );
-    result.unwrap().unwrap();
+    result.unwrap().unwrap().settled();
     assert!(executor.cancelled.load(Ordering::SeqCst));
     let mut fresh = claim();
     fresh.fence = Uuid::new_v4();
@@ -850,7 +863,8 @@ async fn assert_renewal_unknown_ends_then_admits_fresh(unreadable: bool) {
         None,
     )
     .await
-    .unwrap();
+    .unwrap()
+    .settled();
     assert!(
         fresh_client
             .results
@@ -925,14 +939,16 @@ async fn stale_renewal_reobserves_then_completes_and_admits_fresh_execution() {
         || Ok(()),
     )
     .await
-    .unwrap();
+    .unwrap()
+    .settled();
     assert!(executor.observed_deadline.lock().unwrap().unwrap() > Utc::now());
     let mut fresh = claim();
     fresh.fence = Uuid::new_v4();
     client.inner.claim.lock().unwrap().replace(fresh);
     run_once(&client, &mut state, &executor, None, 0, None)
         .await
-        .unwrap();
+        .unwrap()
+        .settled();
     let fences: std::collections::HashSet<_> = client
         .inner
         .results
@@ -1005,10 +1021,12 @@ async fn failed_old_delivery_admits_fresh_work_then_reconciles_after_fault_clear
     client.inner.claim.lock().unwrap().replace(newer);
     run_once(&client, &mut state, &RejectingExecutor, None, 0, None)
         .await
-        .unwrap();
+        .unwrap()
+        .settled();
     run_once(&client, &mut state, &RejectingExecutor, None, 0, None)
         .await
-        .unwrap();
+        .unwrap()
+        .settled();
     assert!(state.pending_results().unwrap().is_empty());
     let fences: std::collections::HashSet<_> = client
         .inner
@@ -1085,7 +1103,8 @@ async fn damaged_local_deadline_does_not_cancel_verified_renewal_or_fresh_claims
         || Ok(()),
     )
     .await
-    .unwrap();
+    .unwrap()
+    .settled();
     assert!(state.pending_results().unwrap().is_empty());
     drop(state);
     let mut state = StateStore::open_recovered(&path, NODE_ID).unwrap();
@@ -1102,7 +1121,8 @@ async fn damaged_local_deadline_does_not_cancel_verified_renewal_or_fresh_claims
     client.claim.lock().unwrap().replace(fresh);
     run_once(&client, &mut state, &RejectingExecutor, None, 0, None)
         .await
-        .unwrap();
+        .unwrap()
+        .settled();
     assert!(state.pending_results().unwrap().is_empty());
 }
 
@@ -1148,7 +1168,8 @@ async fn damaged_receipt_and_failed_projection_writes_do_not_gate_fresh_success(
         };
         run_once(&client, &mut state, &executor, None, 0, None)
             .await
-            .unwrap();
+            .unwrap()
+            .settled();
         let preserved: rusqlite::types::Value = db
             .query_row(
                 "SELECT result_json FROM operations WHERE fence=?1",
@@ -1168,12 +1189,14 @@ async fn damaged_receipt_and_failed_projection_writes_do_not_gate_fresh_success(
         client.claim.lock().unwrap().replace(newer);
         run_once(&client, &mut state, &executor, None, 0, None)
             .await
-            .unwrap();
+            .unwrap()
+            .settled();
         // Wrapping the cursor takes one completed pass, then reoffers the damaged
         // row as uncertainty. It never replaces or executes the old effect.
         run_once(&client, &mut state, &executor, None, 0, None)
             .await
-            .unwrap();
+            .unwrap()
+            .settled();
         let acknowledged: bool = db
             .query_row(
                 "SELECT result_acknowledged FROM operations WHERE fence=?1",
@@ -1208,7 +1231,8 @@ async fn unavailable_custody_observes_without_effects_and_restores_fresh_executi
     };
     run_once(&client, &mut state, &executor, None, 0, None)
         .await
-        .unwrap();
+        .unwrap()
+        .settled();
     assert!(executor.observed_deadline.lock().unwrap().is_none());
     assert!(path.is_dir());
     std::fs::remove_dir(&path).unwrap();
@@ -1218,7 +1242,8 @@ async fn unavailable_custody_observes_without_effects_and_restores_fresh_executi
     client.claim.lock().unwrap().replace(fresh);
     run_once(&client, &mut state, &executor, None, 0, None)
         .await
-        .unwrap();
+        .unwrap()
+        .settled();
     assert!(executor.observed_deadline.lock().unwrap().is_some());
     assert!(state.pending_results().unwrap().is_empty());
 }
@@ -1289,7 +1314,8 @@ async fn silent_non_start_renewal_ends_at_immutable_budget_and_fresh_work_succee
     )
     .await
     .unwrap()
-    .unwrap();
+    .unwrap()
+    .settled();
     assert!(executor.cancelled.load(Ordering::SeqCst));
     client.unavailable.store(false, Ordering::SeqCst);
     let mut fresh = claim();
@@ -1302,7 +1328,8 @@ async fn silent_non_start_renewal_ends_at_immutable_budget_and_fresh_work_succee
     };
     run_once(&client, &mut state, &fresh_executor, None, 0, None)
         .await
-        .unwrap();
+        .unwrap()
+        .settled();
     assert!(fresh_executor.observed_deadline.lock().unwrap().is_some());
     assert!(state.pending_results().unwrap().is_empty());
 }
@@ -1333,7 +1360,8 @@ async fn projections_removed_after_startup_are_rebuilt_before_fresh_success() {
     };
     run_once(&client, &mut state, &executor, None, 0, None)
         .await
-        .unwrap();
+        .unwrap()
+        .settled();
     {
         let submitted = client.results.lock().unwrap();
         assert!(submitted.iter().any(|result| result == &old));
@@ -1352,7 +1380,8 @@ async fn projections_removed_after_startup_are_rebuilt_before_fresh_success() {
     client.claim.lock().unwrap().replace(newer);
     run_once(&client, &mut state, &executor, None, 0, None)
         .await
-        .unwrap();
+        .unwrap()
+        .settled();
     assert!(state.pending_results().unwrap().is_empty());
 }
 
@@ -1414,7 +1443,8 @@ async fn a_definitely_refused_result_is_recorded_never_silently_dropped() {
                 || Ok(()),
             )
             .await
-            .unwrap();
+            .unwrap()
+            .settled();
         }
         // Offered once, kept in custody, and the refusal is durable evidence.
         assert_eq!(client.submitted.lock().unwrap().len(), 1, "HTTP {status}");

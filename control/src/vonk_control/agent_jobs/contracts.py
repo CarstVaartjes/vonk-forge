@@ -6,6 +6,7 @@ import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from typing import NamedTuple
 
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
@@ -22,6 +23,7 @@ from vonk_agent_protocol import (
 
 from .. import agent_operation_states, job_states
 from ..lifecycle.agent_operation import AGGREGATE_FINAL_STATES
+from ..lifecycle.evidence import Residue
 from ..models import AgentOperation as StoredOperation
 from ..models import AgentOperationAttempt
 from ..recovery_policy import FailureKind
@@ -87,7 +89,24 @@ _MUTATING_OPERATIONS = frozenset(
 OFF_LANE_OPERATIONS = frozenset({AgentOperation.RECIPE_BUILD.value})
 
 
-def mutations_conflict(claimed: StoredOperation, holder: StoredOperation) -> bool:
+class ClaimOrder(NamedTuple):
+    """The facts of a claimable order the conflict rule reads, without its row."""
+
+    id: str
+    kind: str
+    build_id: str | None
+
+
+def _build_id(order: StoredOperation | ClaimOrder) -> str | None:
+    if isinstance(order, ClaimOrder):
+        return order.build_id
+    value = column_field(order, "payload", "build_id")
+    return None if value is None or isinstance(value, Residue) else str(value)
+
+
+def mutations_conflict(
+    claimed: StoredOperation | ClaimOrder, holder: StoredOperation | ClaimOrder
+) -> bool:
     """Whether a live ``holder`` forbids ``claimed`` from overlapping it on its Spark.
 
     Mutations on one Spark stay serial, except a build: it compiles in its own
@@ -111,9 +130,7 @@ def mutations_conflict(claimed: StoredOperation, holder: StoredOperation) -> boo
     return other.kind in {
         build,
         AgentOperation.RECIPE_BUILD_CLEANUP.value,
-    } and column_field(claimed, "payload", "build_id") == column_field(
-        holder, "payload", "build_id"
-    )
+    } and _build_id(claimed) == _build_id(holder)
 
 
 def holds_claim(queued: StoredOperation, holder: StoredOperation) -> bool:
