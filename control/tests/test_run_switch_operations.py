@@ -156,7 +156,7 @@ from .runtime_identity_support import (
 from .runtime_image_fixtures import place_test_image
 
 _FIXTURE_ADAPTER = resolve_runtime_adapter("vllm", {"node_count": 1})
-from .test_lifecycle_preflight import _finish
+from .test_lifecycle_preflight import _clear, _finish
 from .test_recipe_operations import (
     NOW,
     _CanonicalModelCache,
@@ -7600,3 +7600,77 @@ def test_low_level_run_preview_propagates_contract_defects(
             item.code == RunSwitchCode.RUN_ADMISSION_UNAVAILABLE
             for item in plan.blockers
         )
+
+
+def test_cancel_ends_the_queued_runtime_probe_with_its_run_switch(tmp_path):
+    """Catches a cancelled run-switch leaving its unclaimed probe queued.
+
+    Incident 2026-10-26: cancelled loads left their preflight children queued
+    on a Spark whose claim lane a build held; they would have run (and held the
+    lane) for an owner that no longer wanted them.
+    """
+    from vonk_agent_protocol import AgentOperation as OperationKind
+
+    sessions, lifecycle, _, _mapping_id, _build_id, nodes = setup_services(tmp_path)
+    service = _service(sessions, NOW, lifecycle, RecordingArtifactExecutor())
+    request = _request(sessions, nodes[0])
+    plan = service.preview(request, actor="admin")
+    operation = service.apply(
+        RunSwitchApplyRequest(
+            **request.model_dump(),
+            plan_digest=plan.plan_digest,
+            request_key=str(uuid.uuid4()),
+        ),
+        actor="admin",
+    )
+    # No receipt is reusable, so the first phase issues a probe on the Spark.
+    _clear(sessions)
+    for _ in range(4):
+        view = service.get(operation.operation_id)
+        if (
+            view.result is not None
+            and view.result.preflight is not None
+            and (view.result.preflight.pending_jobs)
+        ):
+            break
+        service.tick()
+    view = service.get(operation.operation_id)
+    assert view.result is not None and view.result.preflight is not None
+    [probe_job_id] = view.result.preflight.pending_jobs.values()
+    with sessions() as session:
+        [probe] = session.scalars(
+            select(AgentOperation).where(
+                AgentOperation.parent_job_id == probe_job_id,
+                AgentOperation.kind == OperationKind.RUNTIME_PREFLIGHT.value,
+            )
+        )
+        assert probe.state == LifecycleState.QUEUED.value
+
+    service.cancel(
+        operation.operation_id,
+        actor="admin",
+        request_key=str(uuid.uuid4()),
+        reason="The operator chose another model",
+    )
+    for _ in range(3):
+        if service.get(operation.operation_id).state == "cancelled":
+            break
+        service.tick()
+
+    assert service.get(operation.operation_id).state == "cancelled"
+    with sessions() as session:
+        probe_job = session.get(Job, probe_job_id)
+        queued_probe = session.get(AgentOperation, probe.id)
+        assert probe_job is not None and queued_probe is not None
+        assert probe_job.state == LifecycleState.CANCELLED.value
+        assert queued_probe.state == LifecycleState.CANCELLED.value
+    # The ended probe never blocks a fresh request for the same load.
+    fresh = service.apply(
+        RunSwitchApplyRequest(
+            **request.model_dump(),
+            plan_digest=plan.plan_digest,
+            request_key=str(uuid.uuid4()),
+        ),
+        actor="admin",
+    )
+    assert fresh.state not in {"cancelled", "failed"}

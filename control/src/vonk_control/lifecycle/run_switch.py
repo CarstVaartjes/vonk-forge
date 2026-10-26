@@ -54,7 +54,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from sqlalchemy import select
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import Session, object_session, sessionmaker
 from vonk_agent_protocol import (
     Disposition,
     LifecycleState,
@@ -67,6 +67,7 @@ from vonk_agent_protocol import (
 
 from .. import job_states
 from ..agent_operation_facts import aware
+from ..lifecycle_preflight import LifecyclePreflightCheckpoint
 from ..models import AgentOperation as StoredOperation
 from ..models import Job
 from ..operation_blockers import OperationBlocker, make_blocker
@@ -163,6 +164,29 @@ def set_member_state(
     """The only writer of a member's progress ``state`` (a projection, not a row)."""
 
     entry.state = state
+
+
+def _end_unclaimed_probes(
+    job: Job, preflight: LifecyclePreflightCheckpoint | None, now: datetime
+) -> None:
+    """End the runtime probes an ended run-switch issued that no Spark claimed.
+
+    A probe has no effect to undo; left queued it would outlive its owner and
+    hold the Spark's claim lane for nobody. A claimed probe reports its own end.
+    """
+    # agent_jobs builds on the lifecycle core; import its writer at use.
+    from ..agent_jobs import abandon_idempotent_job_in_session
+
+    session = object_session(job)
+    if session is None or preflight is None:
+        return
+    for child_id in preflight.pending_jobs.values():
+        abandon_idempotent_job_in_session(
+            session,
+            child_id,
+            now,
+            reason=WaitReason.SCOPE_CHANGED.value,
+        )
 
 
 class RunSwitchAdapter:
@@ -463,6 +487,7 @@ class RunSwitchAdapter:
         )
         job.state = state
         if after.state in (State.CANCELLED, State.FAILED):
+            _end_unclaimed_probes(job, preflight, now)
             # Terminal request result is final; the exact accepted Start may
             # still need its cancellation handoff after a lost worker response.
             schedule_wait(
