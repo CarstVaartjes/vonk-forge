@@ -402,3 +402,18 @@ fn slow_headers_expire_the_connection_and_release_its_permit_for_fresh_work() {
         .unwrap();
     assert!(read_header_until(&mut peer, Instant::now() + Duration::from_secs(1)).is_ok());
 }
+
+/// `thread::spawn` panics when the host refuses a thread, and release builds
+/// abort on panic: one load spike would kill the proxy for every build.
+#[test]
+fn no_infallible_thread_spawn_remains_in_the_proxy() {
+    for (file, source) in [
+        ("main.rs", include_str!("main.rs")),
+        ("runtime_probe.rs", include_str!("runtime_probe.rs")),
+    ] {
+        assert!(
+            !source.contains("thread::spawn("),
+            "{file} must use thread::Builder::new().spawn and handle the error"
+        );
+    }
+}

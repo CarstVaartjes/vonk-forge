@@ -8,6 +8,14 @@ pub(super) enum BuildNetwork {
     Public,
 }
 
+/// Task limit of the egress proxy container. Bound: 1 serve thread + at most
+/// `MAX_CONNECTIONS` (vonk-build-egress/src/main.rs) concurrent connections, each
+/// using a handler thread, a tunnel thread, a resolver child and a reaper
+/// thread = 1 + 64 x 4 = 257 tasks. Round up to 320 for the container's own
+/// conmon/init tasks. A lower limit makes thread creation fail under a load
+/// of parallel CONNECT tunnels (uv opens about 50).
+const PROXY_PIDS_LIMIT: u32 = 320;
+
 /// An empty host list builds offline; otherwise the build reaches only the
 /// listed public hosts.
 pub(super) fn build_network(network: &vonk_agent_protocol::RecipeBuildNetwork) -> BuildNetwork {
@@ -131,7 +139,7 @@ impl<'a, R: ProcessRunner + ?Sized> BuildEgress<'a, R> {
             "--read-only".to_owned(),
             "--cap-drop=all".to_owned(),
             "--security-opt=no-new-privileges".to_owned(),
-            "--pids-limit=96".to_owned(),
+            format!("--pids-limit={PROXY_PIDS_LIMIT}"),
             "--memory=134217728b".to_owned(),
             "--cpus=1".to_owned(),
             "--user=65532:65532".to_owned(),
@@ -547,6 +555,47 @@ mod tests {
         assert!(
             reachable.success,
             "the outbound canary must be reachable outside the build: {reachable:?}"
+        );
+        // The platform proxy's own connection bound, held at once the way a
+        // parallel `uv pip install` does: the proxy must neither run out of
+        // tasks and die (panic = abort) nor stop admitting afterwards.
+        let hold = |count: &str| {
+            boundary
+                .run(
+                    &[
+                        "unshare".to_owned(),
+                        "--rootless-netns".to_owned(),
+                        probe.to_owned(),
+                        "--hold-tunnels".to_owned(),
+                        outbound.clone(),
+                        count.to_owned(),
+                        "pypi.org:443".to_owned(),
+                    ],
+                    Duration::from_secs(45),
+                )
+                .unwrap()
+        };
+        let held = hold("64");
+        assert!(
+            held.success,
+            "64 parallel tunnels: {}\n{}",
+            String::from_utf8_lossy(&held.stdout),
+            String::from_utf8_lossy(&held.stderr)
+        );
+        let survived = runner
+            .run(
+                Program::Systemctl,
+                &["--user".to_owned(), "is-active".to_owned(), unit.clone()],
+                Duration::from_secs(10),
+            )
+            .unwrap();
+        assert!(survived.success, "64 parallel tunnels killed the proxy");
+        let admitted = hold("1");
+        assert!(
+            admitted.success,
+            "a fresh tunnel after the load: {}\n{}",
+            String::from_utf8_lossy(&admitted.stdout),
+            String::from_utf8_lossy(&admitted.stderr)
         );
         let context = staging.path().join("context");
         fs::create_dir(&context).unwrap();

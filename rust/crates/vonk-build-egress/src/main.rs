@@ -104,12 +104,23 @@ fn serve(hosts: Arc<BTreeSet<String>>) -> io::Result<()> {
             reject(stream, 503);
             continue;
         }
-        let active = Arc::clone(&active);
+        // The guard owns the slot from here on: dropping it, in the worker or
+        // with a closure that never started, releases the slot exactly once.
+        let guard = ConnectionGuard(Arc::clone(&active));
         let hosts = Arc::clone(&hosts);
-        thread::spawn(move || {
-            let _guard = ConnectionGuard(active);
-            let _ = handle(stream, &hosts);
-        });
+        let refusal = stream.try_clone().ok();
+        if thread::Builder::new()
+            .spawn(move || {
+                let _guard = guard;
+                let _ = handle(stream, &hosts);
+            })
+            .is_err()
+            && let Some(refusal) = refusal
+        {
+            // The host cannot give this connection a thread right now: say so
+            // and keep serving; the client retries.
+            reject(refusal, 503);
+        }
     }
     Ok(())
 }
@@ -526,12 +537,23 @@ fn retain_resolver(
 }
 
 fn retain_resolver_until(
-    mut child: std::process::Child,
+    child: std::process::Child,
     owner: ResolverOwner,
     mut terminate: impl FnMut(&mut std::process::Child) + Send + 'static,
     deadline: Instant,
 ) {
-    thread::spawn(move || {
+    // The pair lives in a shared slot so a reaper thread that cannot start
+    // never takes the child or its claim down with the unstarted closure.
+    let slot = Arc::new(Mutex::new(Some((child, owner))));
+    let reaper_slot = Arc::clone(&slot);
+    let spawned = thread::Builder::new().spawn(move || {
+        let Some((mut child, owner)) = reaper_slot
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .take()
+        else {
+            return;
+        };
         while Instant::now() < deadline {
             if matches!(child.try_wait(), Ok(Some(_))) {
                 return;
@@ -548,6 +570,18 @@ fn retain_resolver_until(
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .push((child, owner));
     });
+    if spawned.is_err()
+        && let Some(pair) = slot
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .take()
+    {
+        // Service supervision takes over at once; no claim is dropped.
+        RETAINED_RESOLVERS
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .push(pair);
+    }
 }
 
 fn supervise_retained_resolvers() {
@@ -752,9 +786,10 @@ fn tunnel_until(mut left: TcpStream, mut right: TcpStream, deadline: Instant) ->
     let mut right_write = right.try_clone()?;
     let budget = Arc::new(AtomicU64::new(0));
     let outbound_budget = Arc::clone(&budget);
-    let outbound = thread::spawn(move || {
-        copy_until(&mut left_read, &mut right_write, &outbound_budget, deadline)
-    });
+    // No thread for the second direction: fail this tunnel and close both
+    // streams rather than take the whole proxy down.
+    let outbound = thread::Builder::new()
+        .spawn(move || copy_until(&mut left_read, &mut right_write, &outbound_budget, deadline))?;
     let inbound = copy_until(&mut right, &mut left, &budget, deadline);
     let _ = left.shutdown(std::net::Shutdown::Both);
     let _ = right.shutdown(std::net::Shutdown::Both);
