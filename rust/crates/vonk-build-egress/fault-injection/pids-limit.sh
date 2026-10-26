@@ -10,7 +10,7 @@
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 work=$(mktemp -d)
-trap 'docker rm -f egress-fi >/dev/null 2>&1 || true; rm -rf "$work"' EXIT
+trap 'docker rm -f egress-fi >/dev/null 2>&1 || true; rm -rf "${work:?}"' EXIT
 source=${1:-$here/../src/main.rs}
 rustc --edition=2024 -C panic=abort -C opt-level=3 "$source" -o "$work/proxy"
 cat > "$work/client.py" <<'PY'
