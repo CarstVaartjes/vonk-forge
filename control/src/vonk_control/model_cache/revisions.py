@@ -32,6 +32,7 @@ from .artifacts import ArtifactSetManifest
 from .catalog_helpers import _revision_identity
 from .constants import _LOGGER
 from .errors import ModelCacheConflictUnknown, ModelCacheError
+from .lineage import set_bindings
 from .persistence import _manifest_of
 
 if TYPE_CHECKING:
@@ -130,10 +131,8 @@ class RevisionsMixin:
             if manifest is None:
                 continue
             bindings[row.artifact_set_sha256].update(
-                reference.content_sha256 for reference in manifest.verified_models
+                set_bindings(row.model_content_sha256, manifest.verified_models)
             )
-            if row.model_content_sha256 is not None:
-                bindings[row.artifact_set_sha256].add(row.model_content_sha256)
             aliases: dict[tuple[str, str], list[CatalogDocumentRevision]] = defaultdict(
                 list
             )

@@ -34,12 +34,13 @@ from ..model_cache_contract import (
     ModelCacheRetry,
 )
 from ..model_cache_progress import cache_phase, progress_document
-from ..models import ArtifactLifecycleGate, Job, ModelCacheOperation
+from ..models import ArtifactLifecycleGate, Job, ModelCacheOperation, ModelCacheSet
 from ..operation_contract import AvailabilityOperationFailure
 from .artifacts import _is_digest
 from .catalog_helpers import _iso
 from .constants import _LOGGER, _TRANSFER_CLAIM_SECONDS
 from .errors import ModelCacheStorageError, _ArtifactWriterBusy
+from .lineage import lineage_contents, model_sets
 from .persistence import (
     _cache_failure,
     _manifest_of,
@@ -126,6 +127,11 @@ class RemovalReconcileMixin:
                 and checkpoint.model_content_sha256 is not None
             ):
                 recovered_sets: set[str] = set(checkpoint.selected)
+                # History finds sets whose index rows were lost; a set whose
+                # row reads as another catalog model's too stays with it.
+                owned = model_sets(
+                    session, lineage_contents(session, checkpoint.model_content_sha256)
+                ).owned
                 for digest in session.scalars(
                     select(ModelCacheOperation.artifact_set_sha256)
                     .where(
@@ -147,7 +153,8 @@ class RemovalReconcileMixin:
                     if not isinstance(digest, str) or not _is_digest(digest):
                         session.rollback()
                         return False
-                    recovered_sets.add(digest)
+                    if digest in owned or session.get(ModelCacheSet, digest) is None:
+                        recovered_sets.add(digest)
                 checkpoint = checkpoint.model_copy(
                     update={"selected": sorted(recovered_sets)}
                 )

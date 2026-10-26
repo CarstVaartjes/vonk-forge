@@ -65,6 +65,7 @@ MODES = (
     "movement",
     "exit-causes",
     "nas-space",
+    "model-sets",
 )
 # The agent's messages a Controller test may send only as the stand-in pinned
 # to the agent's shared vector; built by hand they are the Controller's idea of
@@ -1151,6 +1152,24 @@ def check_source(
             (line, "NAS space read outside storage.py; use _storage_fits")
             for line, text in enumerate(source.splitlines(), 1)
             if re.search(r"\bfree_bytes\(\)|\bdisk_usage\(", text)
+        )
+    if (
+        python
+        and not is_test
+        and "model-sets" in modes
+        and re.fullmatch(
+            r"control/src/vonk_control/model_cache/(?:removal_\w+|fleet_removal)\.py",
+            path,
+        )
+    ):
+        # Removal takes a model's sets from the one resolver the Library shares
+        # (model_cache/lineage.py). Choosing them by the first requester's
+        # digest missed every set downloaded under an earlier revision, and
+        # removals "succeeded" having removed nothing (#1911).
+        hits.extend(
+            (line, "model sets chosen by first-requester digest; use lineage.py")
+            for line, text in enumerate(source.splitlines(), 1)
+            if "ModelCacheSet.model_content_sha256" in text
         )
     if python and is_test and "clocks" in modes:
         hits.extend(

@@ -36,6 +36,7 @@ from .errors import (
     ModelCacheRemovalOwnerInvalid,
     ModelCacheStorageInvalid,
 )
+from .lineage import first_requested_sets, lineage_contents, model_sets
 from .persistence import _operation_removal
 from .source_helpers import _model_selector, _request_key
 from .views import CacheOperationView, ModelCacheRemovalScope
@@ -185,7 +186,7 @@ class RemovalReviewMixin:
                 request_key=request_key,
                 selector=model_content_sha256,
                 model_content_sha256=model_content_sha256,
-                selected_sets=None,
+                selected_sets=first_requested_sets(session, model_content_sha256),
                 verify=verify,
             )
             operation_id = operation.id
@@ -272,13 +273,9 @@ class RemovalReviewMixin:
             digest = cache._resolve_model_selector_in_session(
                 session, normalized_selector
             )
-            selected_sets = tuple(
-                session.scalars(
-                    select(ModelCacheSet.artifact_set_sha256)
-                    .where(ModelCacheSet.model_content_sha256 == digest)
-                    .order_by(ModelCacheSet.artifact_set_sha256)
-                )
-            )
+            # The sets the Library shows for this model, not only those first
+            # downloaded under its current content digest.
+            selected_sets = model_sets(session, lineage_contents(session, digest)).owned
             findings: list[CacheRemovalFinding] = []
             blockers: list[CacheRemovalBlocker] = []
             try:
@@ -618,13 +615,14 @@ class RemovalReviewMixin:
         dependency_digests.update(rows)
         if not dependency_digests:
             return None
-        selected_sets = tuple(
-            session.scalars(
-                select(ModelCacheSet.artifact_set_sha256)
-                .where(ModelCacheSet.model_content_sha256.in_(dependency_digests))
-                .order_by(ModelCacheSet.artifact_set_sha256)
-            )
-        )
+        selected_sets = model_sets(
+            session,
+            {
+                content
+                for digest in dependency_digests
+                for content in lineage_contents(session, digest)
+            },
+        ).owned
         if not selected_sets:
             return None
         return cache._model_removal_scope_for_sets(session, selected_sets)

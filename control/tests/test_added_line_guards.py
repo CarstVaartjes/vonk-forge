@@ -1366,3 +1366,34 @@ def test_the_storage_owner_and_other_packages_may_read_nas_space() -> None:
         "control/tests/test_model_cache.py",
     ):
         assert not check_source(path, _SPACE_CHECK, {2}, modes=("nas-space",))
+
+
+_SET_SELECTION = (
+    "def sets(session, digest):\n"
+    "    return session.scalars(\n"
+    "        select(ModelCacheSet.artifact_set_sha256).where(\n"
+    "            ModelCacheSet.model_content_sha256 == digest\n"
+    "        )\n"
+    "    )\n"
+)
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "control/src/vonk_control/model_cache/removal_review.py",
+        "control/src/vonk_control/model_cache/fleet_removal.py",
+    ],
+)
+def test_removal_choosing_sets_by_first_requester_is_flagged(path: str) -> None:
+    assert check_source(path, _SET_SELECTION, {4}, modes=("model-sets",))
+    assert not check_source(path, _SET_SELECTION, {1}, modes=("model-sets",))
+
+
+def test_the_shared_resolver_and_other_modules_may_select_by_digest() -> None:
+    for path in (
+        "control/src/vonk_control/model_cache/lineage.py",
+        "control/src/vonk_control/model_cache/resolution.py",
+        "control/tests/test_model_removal_lineage_postgres.py",
+    ):
+        assert not check_source(path, _SET_SELECTION, {4}, modes=("model-sets",))

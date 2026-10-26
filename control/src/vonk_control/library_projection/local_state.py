@@ -8,20 +8,16 @@ from typing import TYPE_CHECKING, cast
 
 from pydantic import ValidationError
 from sqlalchemy import (
-    Exists,
     Select,
     String,
     and_,
-    case,
     column,
     func,
-    literal,
-    literal_column,
     or_,
     select,
     values,
 )
-from sqlalchemy.orm import Session, load_only
+from sqlalchemy.orm import load_only
 from vonk_agent_protocol import (
     AssetAvailability,
     InstallationState,
@@ -44,6 +40,7 @@ from ..library_contract import (
     LibraryRecipeProjection,
 )
 from ..library_image_presence import ImageKey
+from ..model_cache.lineage import verifies_model
 from ..model_cache_contract import (
     CacheManifest,
     CacheOperationKind,
@@ -160,38 +157,6 @@ def _local(
         )
 
 
-def _verifies_requested_model(session: Session, digests: set[str]) -> Exists:
-    """Whether a set's manifest lists a requested digest among its verified models.
-
-    Each set's reference list is expanded once and matched by equality, never
-    joined against every requested digest, so the cost grows with the sets plus
-    the requested digests. A prefilter only: the shared manifest reader still
-    decides exact membership, and a damaged list never fails the read.
-    """
-
-    verified = ModelCacheSet.manifest["verified_models"]
-    if session.get_bind().dialect.name == "postgresql":
-        array = case(
-            (func.json_typeof(verified) == "array", verified),
-            else_=literal_column("'[]'::json"),
-        )
-        reference = func.json_array_elements(array).table_valued("value")
-        content = reference.c.value.op("->>")("content_sha256")
-    else:
-        reference = func.json_each(
-            ModelCacheSet.manifest, "$.verified_models"
-        ).table_valued("value", "type")
-        content = case(
-            (
-                reference.c.type == "object",
-                func.json_extract(reference.c.value, "$.content_sha256"),
-            )
-        )
-    return (
-        select(literal(1)).select_from(reference).where(content.in_(digests)).exists()
-    )
-
-
 def _latest_cache_operations(
     set_members: Sequence[tuple[str, str]],
 ) -> Select[str]:
@@ -285,7 +250,7 @@ def _database_local_state(
                     or_(
                         ModelCacheSet.model_content_sha256.in_(digests),
                         ModelCacheSet.recipe_revision_sha256.in_(digests),
-                        _verifies_requested_model(session, requested_digests),
+                        verifies_model(session, requested_digests),
                     )
                 )
             )
