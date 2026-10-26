@@ -1017,6 +1017,9 @@ def test_contact_clock_guard_preserves_staleness_and_security():
     assert not check_source(PATH, source, set(range(1, 6)), modes=("contact-clocks",))
 
 
+_FACTS = "# reads NodeInventorySnapshot\n"
+
+
 @pytest.mark.parametrize(
     "source",
     [
@@ -1025,24 +1028,27 @@ def test_contact_clock_guard_preserves_staleness_and_security():
         "def f(row, now):\n    seen = row.observed_at\n    return (now - seen).total_seconds()\n",
         "def f(row, current):\n    seen = _utc(row.observed_at)\n    return max(0.0, (current - seen).total_seconds())\n",
         "def f(snapshots, now):\n    for node, (free, observed) in snapshots:\n        if now - observed > MAX_AGE:\n            continue\n",
+        # A timedelta comparison is freshness too; only the ingress handlers may.
+        "def f(snapshot, now):\n    return now - snapshot.observed_at > timedelta(seconds=MAX)\n",
+        "def f(row):\n    return datetime.now(UTC) - row.observed_at > window\n",
         # Cutoff forms, in both orientations and with a clock call.
         "def f(row, now):\n    return aware(row.observed_at) < now - MAX_AGE\n",
         "def f(row, cache):\n    return cache._clock() - MAX_AGE <= aware(row.observed_at)\n",
         "def f(row, now):\n    return now - MAX_AGE > row.observed_at\n",
     ],
 )
-def test_contact_clock_guard_rejects_agent_stamp_freshness(source):
+def test_agent_stamp_freshness_is_rejected(source):
     """Catches ageing inventory or telemetry by the agent's own clock, in the
     forms that slipped past a literal ``now - x.observed_at`` match."""
+    source = _FACTS + source
     lines = set(range(1, len(source.splitlines()) + 1))
-    assert check_source(PATH, source, lines, modes=("contact-clocks",))
+    hits = check_source(PATH, source, lines, modes=("contact-clocks",))
+    assert hits and all("use received_at" in text for text in hits)
 
 
 @pytest.mark.parametrize(
     "source",
     [
-        # The ingress acceptance window may compare the stamp to the clock.
-        "def f(v, now):\n    return now - v.observed_at > timedelta(minutes=5)\n",
         # Freshness from the Controller's receive time.
         "def f(row, now):\n    return (now - row.received_at).total_seconds() > window\n",
         "def f(row, now):\n    return aware(row.received_at) < now - MAX_AGE\n",
@@ -1054,9 +1060,38 @@ def test_contact_clock_guard_rejects_agent_stamp_freshness(source):
         "def f(session, now):\n    row = session.scalar(select(X).order_by(X.observed_at.desc()))\n    return now - row.received_at\n",
     ],
 )
-def test_contact_clock_guard_allows_ingress_receipt_and_ordering(source):
+def test_agent_stamp_guard_allows_receipt_and_ordering(source):
+    source = _FACTS + source
     lines = set(range(1, len(source.splitlines()) + 1))
     assert not check_source(PATH, source, lines, modes=("contact-clocks",))
+
+
+def test_agent_stamp_guard_ignores_controller_written_progress_timestamps():
+    """Progress ``observed_at`` is the Controller's own clock, not an agent's."""
+    source = (
+        "def due(previous, now):\n"
+        "    observed = _timestamp(previous.observed_at)\n"
+        "    return observed is None or (now - observed).total_seconds() >= 1\n"
+    )
+    assert not check_source(PATH, source, {1, 2, 3}, modes=("contact-clocks",))
+
+
+@pytest.mark.parametrize(
+    ("path", "name"),
+    [
+        ("control/src/vonk_control/agent_api/observations.py", "inventory"),
+        ("control/src/vonk_control/telemetry.py", "_canonical_sample"),
+    ],
+)
+def test_ingress_handlers_may_judge_an_agent_stamp_by_location(path, name):
+    body = (
+        f"{_FACTS}def make(now):\n    def {name}(v):\n"
+        "        return now - v.observed_at > timedelta(minutes=5)\n"
+    )
+    assert not check_source(path, body, {3, 4}, modes=("contact-clocks",))
+    assert check_source(
+        "control/src/vonk_control/other.py", body, {3, 4}, modes=("contact-clocks",)
+    )
 
 
 @pytest.mark.parametrize("negative", (False, True))

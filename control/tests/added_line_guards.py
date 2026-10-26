@@ -434,18 +434,51 @@ def _is_clock(value: ast.AST) -> bool:
     if not isinstance(value, ast.Call):
         return False
     function = value.func
-    return (isinstance(function, ast.Attribute) and function.attr == "_clock") or (
-        isinstance(function, ast.Name) and function.id in {"clock", "_clock"}
-    )
+    return (
+        isinstance(function, ast.Attribute)
+        and (
+            function.attr == "_clock"
+            or (
+                function.attr == "now"
+                and ast.unparse(function).endswith("datetime.now")
+            )
+        )
+    ) or (isinstance(function, ast.Name) and function.id in {"clock", "_clock"})
 
 
-def _agent_stamp_ages(tree: ast.Module) -> list[int]:
+#: Sources that read an agent's own reports. Controller-written progress
+#: timestamps (also named ``observed_at``) are not agent facts.
+_AGENT_FACTS = (
+    "NodeInventorySnapshot",
+    "NodeTelemetrySample",
+    "TelemetrySampleView",
+    "InventorySnapshotView",
+    "_latest_snapshots",
+)
+#: The two ingress handlers that judge an agent stamp against the receive
+#: clock to accept or refuse a report: (path, function).
+_INGRESS = frozenset(
+    {
+        ("control/src/vonk_control/agent_api/observations.py", "inventory"),
+        ("control/src/vonk_control/telemetry.py", "_canonical_sample"),
+    }
+)
+
+
+def agent_stamp_freshness(source: str, path: str = "") -> list[int]:
+    """Lines that age an agent stamp against a Controller clock, in a source that
+    reads agent facts, outside the two ingress handlers."""
+    if not any(name in source for name in _AGENT_FACTS):
+        return []
+    return _agent_stamp_ages(ast.parse(source), path)
+
+
+def _agent_stamp_ages(tree: ast.Module, path: str = "") -> list[int]:
     """Lines that age an agent's own ``observed_at`` against a Controller clock.
 
     An agent stamp only orders reports: a Spark whose clock runs slow, or a
     report collected minutes before it was sent, is stale on arrival if it is
-    aged from the stamp. Age from ``received_at``. The ingress acceptance
-    window (``now - x.observed_at > timedelta(...)``) is allowed. Aliases and
+    aged from the stamp. Age from ``received_at``. Aliases and
     wrappers (``_utc(x.observed_at)``) are followed within a function.
     """
     found: set[int] = set()
@@ -490,24 +523,8 @@ def _agent_stamp_ages(tree: ast.Module) -> list[int]:
                 stamps.update(
                     target.id for target in node.targets if isinstance(target, ast.Name)
                 )
-        ingress = {
-            id(operand)
-            for node in ast.walk(scope)
-            if isinstance(node, ast.Compare)
-            and any(
-                isinstance(part, ast.Call)
-                and ast.unparse(part.func).endswith("timedelta")
-                for part in (node.left, *node.comparators)
-            )
-            for operand in (node.left, *node.comparators)
-        }
         for node in ast.walk(scope):
-            if (
-                isinstance(node, ast.BinOp)
-                and age(node)
-                and stamp(node.right)
-                and id(node) not in ingress
-            ):
+            if isinstance(node, ast.BinOp) and age(node) and stamp(node.right):
                 found.add(node.lineno)
             if isinstance(node, ast.Compare):
                 sides = (node.left, *node.comparators)
@@ -515,7 +532,15 @@ def _agent_stamp_ages(tree: ast.Module) -> list[int]:
                     age(side) for side in sides
                 ):
                     found.add(node.lineno)
-    return sorted(found)
+    # A handler that accepts or refuses a report by its stamp is exempt by
+    # location, including when it is nested in a router factory.
+    exempt = [
+        range(scope.lineno, (scope.end_lineno or scope.lineno) + 1)
+        for scope in ast.walk(tree)
+        if isinstance(scope, ast.FunctionDef | ast.AsyncFunctionDef)
+        and (path, scope.name) in _INGRESS
+    ]
+    return sorted(line for line in found if not any(line in span for span in exempt))
 
 
 def controller_contact_clock_checks(source: str) -> list[int]:
@@ -524,7 +549,7 @@ def controller_contact_clock_checks(source: str) -> list[int]:
     This syntax guard tracks local aliases of Controller contact/heartbeat
     timestamps, agent observation stamps and their ages: freshness is the
     Controller's receive time, an agent stamp only orders reports (see
-    ``_agent_stamp_ages``). Behaviour tests own the actual clock race.
+    ``agent_stamp_freshness``). Behaviour tests own the actual clock race.
     """
     tree = ast.parse(source)
     attributes = {"last_seen_at", "received_at", "observed_at"}
@@ -608,7 +633,6 @@ def controller_contact_clock_checks(source: str) -> list[int]:
         for node in ast.walk(tree)
         if isinstance(node, ast.Attribute) and node.attr == "LAST_SEEN_IN_FUTURE"
     )
-    found.update(_agent_stamp_ages(tree))
     return sorted(found)
 
 
@@ -1197,6 +1221,16 @@ def check_source(
         hits.extend(
             (line, "Controller contact rejected for negative clock age")
             for line in controller_contact_clock_checks(source)
+        )
+    if (
+        python
+        and not is_test
+        and "contact-clocks" in modes
+        and path.startswith("control/src/")
+    ):
+        hits.extend(
+            (line, "agent stamp aged against the Controller clock; use received_at")
+            for line in agent_stamp_freshness(source, path)
         )
     if python and not is_test and "planner-defects" in modes:
         hits.extend(
