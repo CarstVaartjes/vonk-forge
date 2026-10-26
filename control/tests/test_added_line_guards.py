@@ -1397,3 +1397,27 @@ def test_the_shared_resolver_and_other_modules_may_select_by_digest() -> None:
         "control/tests/test_model_removal_lineage_postgres.py",
     ):
         assert not check_source(path, _SET_SELECTION, {4}, modes=("model-sets",))
+
+
+_FOLLOW_COUNT = (
+    "def same_job(observed):\n"
+    "    active = [item for item in observed['operations']]\n"
+    "    if len(active) > 1:\n"
+    "        raise ControlMalformedResponse('more than one active Spark')\n"
+    "    if observed['progress']['running'] > 1:\n"
+    "        raise ControlMalformedResponse('concurrent upgrades')\n"
+)
+
+
+def test_follow_validator_asserting_an_operation_count_is_flagged() -> None:
+    """Catches a follow validator that rejects parallel Spark upgrades."""
+    path = "src/cluster_profiles/controller_cli/fleet.py"
+    assert check_source(path, _FOLLOW_COUNT, {3}, modes=("follow-validators",))
+    assert check_source(path, _FOLLOW_COUNT, {5}, modes=("follow-validators",))
+    assert not check_source(path, _FOLLOW_COUNT, {1, 2}, modes=("follow-validators",))
+    assert not check_source(
+        "src/cluster_profiles/other.py",
+        _FOLLOW_COUNT,
+        {3},
+        modes=("follow-validators",),
+    )
