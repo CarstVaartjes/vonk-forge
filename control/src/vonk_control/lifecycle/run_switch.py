@@ -419,9 +419,7 @@ class RunSwitchAdapter:
         state = visible if visible and not after.terminal else _STORED[after.state]
         preflight = progress.preflight if progress else None
         preflight_reason = (
-            typed_wait_reason(
-                preflight.last_failure_code, RuntimePreflightCode.REQUIRED
-            )
+            typed_wait_reason(preflight.current_reason, RuntimePreflightCode.REQUIRED)
             if preflight
             and preflight.next_check_at
             and not after.cancel_requested
@@ -429,13 +427,9 @@ class RunSwitchAdapter:
             else None
         )
         if preflight_reason is not None and preflight is not None:
-            wait_blockers = [
-                make_blocker(
-                    preflight_reason,
-                    preflight.last_failure_detail or preflight_reason.value,
-                    node_ids=list(job.targets),
-                )
-            ]
+            # A pending probe's own queue wait is the current dependency; the
+            # reason its round started is history once the child is issued.
+            wait_blockers = preflight.current_blockers(list(job.targets))
         lifecycle_wait(
             job,
             identity=job.id,
