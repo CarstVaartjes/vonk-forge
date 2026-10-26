@@ -788,6 +788,8 @@ def assemble_production_worker(
     if recipe_image_artifact_root is not None:
         from .availability_production import build_recipe_image_availability
 
+        assert runtime_archive_storage is not None  # the root implies the cache
+
         image_production = build_recipe_image_availability(
             sessions,
             artifact_root=recipe_image_artifact_root,
