@@ -1017,17 +1017,46 @@ def test_contact_clock_guard_preserves_staleness_and_security():
     assert not check_source(PATH, source, set(range(1, 6)), modes=("contact-clocks",))
 
 
-def test_contact_clock_guard_rejects_agent_stamp_freshness():
-    """Catches ageing inventory by the agent's own clock."""
-    source = (
-        "def stale(row, now):\n"
-        "    age = now - row.observed_at\n"
-        "    return age.total_seconds() > window\n"
-        "def future(row, now):\n"
-        "    return row.observed_at > now\n"
-    )
-    assert check_source(PATH, source, {2}, modes=("contact-clocks",))
-    assert check_source(PATH, source, {5}, modes=("contact-clocks",))
+@pytest.mark.parametrize(
+    "source",
+    [
+        # Direct, aliased and wrapped agent stamps aged against the clock.
+        "def f(row, now):\n    return now - row.observed_at > window\n",
+        "def f(row, now):\n    seen = row.observed_at\n    return (now - seen).total_seconds()\n",
+        "def f(row, current):\n    seen = _utc(row.observed_at)\n    return max(0.0, (current - seen).total_seconds())\n",
+        "def f(snapshots, now):\n    for node, (free, observed) in snapshots:\n        if now - observed > MAX_AGE:\n            continue\n",
+        # Cutoff forms, in both orientations and with a clock call.
+        "def f(row, now):\n    return aware(row.observed_at) < now - MAX_AGE\n",
+        "def f(row, cache):\n    return cache._clock() - MAX_AGE <= aware(row.observed_at)\n",
+        "def f(row, now):\n    return now - MAX_AGE > row.observed_at\n",
+    ],
+)
+def test_contact_clock_guard_rejects_agent_stamp_freshness(source):
+    """Catches ageing inventory or telemetry by the agent's own clock, in the
+    forms that slipped past a literal ``now - x.observed_at`` match."""
+    lines = set(range(1, len(source.splitlines()) + 1))
+    assert check_source(PATH, source, lines, modes=("contact-clocks",))
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        # The ingress acceptance window may compare the stamp to the clock.
+        "def f(v, now):\n    return now - v.observed_at > timedelta(minutes=5)\n",
+        # Freshness from the Controller's receive time.
+        "def f(row, now):\n    return (now - row.received_at).total_seconds() > window\n",
+        "def f(row, now):\n    return aware(row.received_at) < now - MAX_AGE\n",
+        # Ordering reports never reads the clock.
+        "def f(a, b):\n    return a.observed_at >= b.observed_at\n",
+        "def f(sample, since):\n    return sample.observed_at - since < GRACE\n",
+        "def f(a, last):\n    return a.observed_at <= last\n",
+        # A row read by an observed_at ordering is not a stamp.
+        "def f(session, now):\n    row = session.scalar(select(X).order_by(X.observed_at.desc()))\n    return now - row.received_at\n",
+    ],
+)
+def test_contact_clock_guard_allows_ingress_receipt_and_ordering(source):
+    lines = set(range(1, len(source.splitlines()) + 1))
+    assert not check_source(PATH, source, lines, modes=("contact-clocks",))
 
 
 @pytest.mark.parametrize("negative", (False, True))

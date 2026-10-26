@@ -474,7 +474,7 @@ def _telemetry_state(
 ) -> TelemetryState | None:
     if value is None:
         return None
-    age = max(0.0, (current - _utc(value.observed_at)).total_seconds())
+    age = max(0.0, (current - _utc(value.received_at)).total_seconds())
     if age <= self._telemetry_live_seconds:
         freshness = "live"
     elif age <= self._telemetry_delayed_seconds:

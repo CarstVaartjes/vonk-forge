@@ -423,12 +423,108 @@ def _rehashes_stored_row(node: ast.Compare) -> bool:
     )
 
 
+_CLOCK_NAMES = frozenset({"now", "current", "timestamp"})
+_QUERY_CALLS = frozenset({"scalar", "scalars", "execute", "get", "all", "first", "one"})
+_STAMP_NAME = re.compile(r"observed(?:_at)?")
+
+
+def _is_clock(value: ast.AST) -> bool:
+    if ast.unparse(value) in _CLOCK_NAMES:
+        return True
+    if not isinstance(value, ast.Call):
+        return False
+    function = value.func
+    return (isinstance(function, ast.Attribute) and function.attr == "_clock") or (
+        isinstance(function, ast.Name) and function.id in {"clock", "_clock"}
+    )
+
+
+def _agent_stamp_ages(tree: ast.Module) -> list[int]:
+    """Lines that age an agent's own ``observed_at`` against a Controller clock.
+
+    An agent stamp only orders reports: a Spark whose clock runs slow, or a
+    report collected minutes before it was sent, is stale on arrival if it is
+    aged from the stamp. Age from ``received_at``. The ingress acceptance
+    window (``now - x.observed_at > timedelta(...)``) is allowed. Aliases and
+    wrappers (``_utc(x.observed_at)``) are followed within a function.
+    """
+    found: set[int] = set()
+    for scope in ast.walk(tree):
+        if not isinstance(scope, ast.FunctionDef | ast.AsyncFunctionDef):
+            continue
+        stamps: set[str] = set()
+
+        def stamp(value: ast.AST, stamps: set[str] = stamps) -> bool:
+            return any(
+                isinstance(part, ast.Attribute)
+                and part.attr == "observed_at"
+                or isinstance(part, ast.Name)
+                and (part.id in stamps or _STAMP_NAME.fullmatch(part.id) is not None)
+                for part in ast.walk(value)
+            )
+
+        def age(value: ast.AST) -> bool:
+            return (
+                isinstance(value, ast.BinOp)
+                and isinstance(value.op, ast.Sub)
+                and _is_clock(value.left)
+            )
+
+        assigns = sorted(
+            (n for n in ast.walk(scope) if isinstance(n, ast.Assign)),
+            key=lambda n: n.lineno,
+        )
+        for node in assigns:
+            reads = any(
+                isinstance(p, ast.Call)
+                and isinstance(p.func, ast.Attribute)
+                and p.func.attr in _QUERY_CALLS
+                for p in ast.walk(node.value)
+            )
+            # A row read by ``order_by(X.observed_at)`` is not itself a stamp.
+            if (
+                stamp(node.value)
+                and not reads
+                and not any(age(p) for p in ast.walk(node.value))
+            ):
+                stamps.update(
+                    target.id for target in node.targets if isinstance(target, ast.Name)
+                )
+        ingress = {
+            id(operand)
+            for node in ast.walk(scope)
+            if isinstance(node, ast.Compare)
+            and any(
+                isinstance(part, ast.Call)
+                and ast.unparse(part.func).endswith("timedelta")
+                for part in (node.left, *node.comparators)
+            )
+            for operand in (node.left, *node.comparators)
+        }
+        for node in ast.walk(scope):
+            if (
+                isinstance(node, ast.BinOp)
+                and age(node)
+                and stamp(node.right)
+                and id(node) not in ingress
+            ):
+                found.add(node.lineno)
+            if isinstance(node, ast.Compare):
+                sides = (node.left, *node.comparators)
+                if any(stamp(side) and not age(side) for side in sides) and any(
+                    age(side) for side in sides
+                ):
+                    found.add(node.lineno)
+    return sorted(found)
+
+
 def controller_contact_clock_checks(source: str) -> list[int]:
     """Detect future-contact rejection, not certificate dates.
 
     This syntax guard tracks local aliases of Controller contact/heartbeat
     timestamps, agent observation stamps and their ages: freshness is the
-    Controller's receive time, an agent stamp only orders reports. Behaviour tests own the actual clock race.
+    Controller's receive time, an agent stamp only orders reports (see
+    ``_agent_stamp_ages``). Behaviour tests own the actual clock race.
     """
     tree = ast.parse(source)
     attributes = {"last_seen_at", "received_at", "observed_at"}
@@ -512,15 +608,7 @@ def controller_contact_clock_checks(source: str) -> list[int]:
         for node in ast.walk(tree)
         if isinstance(node, ast.Attribute) and node.attr == "LAST_SEEN_IN_FUTURE"
     )
-    found.update(
-        node.lineno
-        for node in ast.walk(tree)
-        if isinstance(node, ast.BinOp)
-        and isinstance(node.op, ast.Sub)
-        and ast.unparse(node.left) in {"now", "current", "timestamp"}
-        and isinstance(node.right, ast.Attribute)
-        and node.right.attr == "observed_at"
-    )
+    found.update(_agent_stamp_ages(tree))
     return sorted(found)
 
 
