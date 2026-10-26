@@ -327,7 +327,8 @@ def _optional_digest(value: object) -> str | None:
 
 
 def _validate_artifact(value: ArtifactSpec) -> None:
-    from .catalog_helpers import _github_release_asset_binding, _validate_source
+    from .catalog_helpers import _validate_source
+    from .providers import PROVIDERS
 
     if (
         not value.key
@@ -346,13 +347,7 @@ def _validate_artifact(value: ArtifactSpec) -> None:
         or "\\" in value.path
         or "\x00" in value.path
         or any(part in {"", ".", ".."} for part in value.path.split("/"))
-        or value.kind
-        not in {
-            "huggingface.file",
-            "github-release.asset",
-            "http.file",
-            "file",
-        }
+        or value.kind not in PROVIDERS
         or len(value.sha256) != _DIGEST_LENGTH
         or value.sha256 != value.sha256.lower()
         or not _is_hex(value.sha256)
@@ -376,25 +371,27 @@ def _validate_artifact(value: ArtifactSpec) -> None:
             ModelCacheCode.ARTIFACT_INVALID,
             "only verified empty support artifacts may have zero bytes",
         )
-    if value.kind != "file" and value.revision is None:
+    if PROVIDERS[value.kind].requires_revision and value.revision is None:
         raise ModelCacheResolutionInvalid(
             ModelCacheCode.REVISION_MISSING,
             "remote cache artifacts require an immutable revision",
         )
     _validate_source(value.source)
-    if value.kind == "github-release.asset":
-        _github_release_asset_binding(value)
+    PROVIDERS[value.kind].bind(value)
     if value.parts is not None:
         _validate_parts(value)
 
 
 def _validate_parts(value: ArtifactSpec) -> None:
     from .catalog_helpers import _validate_source
+    from .providers import PROVIDERS
 
     parts = value.parts
     assert parts is not None
+    provider = PROVIDERS.get(value.kind)
     if (
-        value.kind != "huggingface.file"
+        provider is None
+        or not provider.parts
         or not 2 <= len(parts) <= _MAX_ARTIFACT_PARTS
         or len({part.path for part in parts}) != len(parts)
         or value.path in {part.path for part in parts}

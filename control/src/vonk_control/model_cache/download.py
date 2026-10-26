@@ -35,12 +35,10 @@ from ..model_cache_ranges import cleanup_ranges, download_ranges, range_partial_
 from ..models import ModelCacheOperation, ModelCacheSet
 from ..operation_contract import AvailabilityRecoveryAction
 from .artifacts import ArtifactSpec
-from .catalog_helpers import _github_release_asset_binding
-from .constants import _CHUNK_BYTES, _GITHUB_API_HOST, _PARALLEL_RANGE_WORKERS
+from .constants import _CHUNK_BYTES, _PARALLEL_RANGE_WORKERS
 from .errors import (
     ModelCacheConflictUnknown,
     ModelCacheError,
-    ModelCacheResolutionError,
     ModelCacheStorageError,
     ModelCacheStorageInvalid,
     ModelCacheStorageRefused,
@@ -48,7 +46,7 @@ from .errors import (
     _ArtifactWriterBusy,
     _reference_error_type,
 )
-from .source_helpers import _is_private_host
+from .providers import provider_for
 
 if TYPE_CHECKING:
     from .service import ModelCacheService
@@ -166,12 +164,11 @@ class DownloadMixin:
                 state=ModelFileState.PARTIAL,
                 completed_artifacts=completed_artifacts,
             )
-            if spec.kind == "github-release.asset" and isinstance(
-                error, httpx2.HTTPError
-            ):
+            transport_failure = provider_for(spec.kind).transport_failure
+            if transport_failure is not None and isinstance(error, httpx2.HTTPError):
                 raise ModelCacheStorageUnknown(
                     ModelCacheCode.SOURCE_UNAVAILABLE,
-                    "GitHub release asset transfer failed",
+                    transport_failure,
                     recovery="resume",
                 ) from error
             raise
@@ -323,39 +320,7 @@ class DownloadMixin:
 
     def _validate_http_download(self, spec: ArtifactSpec) -> None:
         cache = cast("ModelCacheService", self)
-        if spec.kind == "github-release.asset":
-            try:
-                _github_release_asset_binding(spec)
-                parsed = urlsplit(spec.source)
-            except (ModelCacheResolutionError, TypeError, ValueError) as error:
-                raise ModelCacheStorageInvalid(
-                    ModelCacheCode.SOURCE_INVALID, "GitHub release asset URL is invalid"
-                ) from error
-            if parsed.scheme != "https" or parsed.hostname != _GITHUB_API_HOST:
-                raise ModelCacheStorageRefused(
-                    ModelCacheCode.SOURCE_UNTRUSTED,
-                    "GitHub release downloads must use the canonical GitHub API host",
-                )
-            return
-        try:
-            parsed = urlsplit(spec.source)
-            hostname = parsed.hostname
-            port = parsed.port
-        except (TypeError, ValueError) as error:
-            raise ModelCacheStorageInvalid(
-                ModelCacheCode.SOURCE_INVALID, "cache source URL is invalid"
-            ) from error
-        if not cache._fixture_sources and (
-            parsed.scheme != "https"
-            or hostname is None
-            or port is not None
-            or hostname.lower().rstrip(".") not in cache._trusted_source_hosts
-            or _is_private_host(hostname)
-        ):
-            raise ModelCacheStorageRefused(
-                ModelCacheCode.SOURCE_UNTRUSTED,
-                "production cache downloads require a trusted HTTPS artifact host",
-            )
+        provider_for(spec.kind).validate(cache, spec)
 
     def _download_parallel_ranges(
         self,
@@ -369,6 +334,7 @@ class DownloadMixin:
     ) -> bool:
         cache = cast("ModelCacheService", self)
         cache._validate_http_download(spec)
+        provider = provider_for(spec.kind)
         # Range segments and atomic assembly coexist temporarily. Reserve the
         # worst-case additional footprint across this process's active files.
         # The retained prefix is already excluded from current free space:
@@ -416,9 +382,7 @@ class DownloadMixin:
                     "Range": f"bytes={start}-{end}",
                     "Accept-Encoding": "identity",
                 }
-                if spec.kind == "github-release.asset":
-                    return cache._open_github_release_asset(client, spec, headers)
-                return cache._open_http_response(client, spec.source, headers)
+                return provider.open(cache, client, spec, headers)
 
             digest = None if fetch_only else hashlib.sha256()
             with cache._sample_transfer(
@@ -469,12 +433,11 @@ class DownloadMixin:
                 state=ModelFileState.PARTIAL,
                 completed_artifacts=completed_artifacts,
             )
-            if spec.kind == "github-release.asset" and isinstance(
-                error, httpx2.HTTPError
-            ):
+            transport_failure = provider_for(spec.kind).transport_failure
+            if transport_failure is not None and isinstance(error, httpx2.HTTPError):
                 raise ModelCacheStorageUnknown(
                     ModelCacheCode.SOURCE_UNAVAILABLE,
-                    "GitHub release asset transfer failed",
+                    transport_failure,
                     recovery="resume",
                 ) from error
             raise
@@ -517,6 +480,7 @@ class DownloadMixin:
             handle.seek(offset)
             return handle, offset, handle.close
         cache._validate_http_download(spec)
+        provider = provider_for(spec.kind)
         client = cache._http
         owns_client = client is None
         if client is None:
@@ -531,21 +495,13 @@ class DownloadMixin:
                 "production cache HTTP clients must not follow redirects",
             )
         headers = {"Range": f"bytes={offset}-"} if offset else {}
-        response = (
-            cache._open_github_release_asset(client, spec, headers)
-            if spec.kind == "github-release.asset"
-            else cache._open_http_response(client, spec.source, headers)
-        )
+        response = provider.open(cache, client, spec, headers)
         effective_offset = offset
         if offset and response.status_code == 200:
             # The server ignored the range request; restart safely rather than
             # appending a complete payload to a checkpoint.
             response.close()
-            response = (
-                cache._open_github_release_asset(client, spec, {})
-                if spec.kind == "github-release.asset"
-                else cache._open_http_response(client, spec.source, {})
-            )
+            response = provider.open(cache, client, spec, {})
             effective_offset = 0
         if response.status_code == 206:
             content_range = response.headers.get("content-range", "")

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+from enum import StrEnum
 
 from vonk_agent_protocol import ModelAccessReason, ModelCacheCode, SecurityRefusalReason
 
@@ -77,6 +78,19 @@ _HF_CANONICAL_HOST = "huggingface.co"
 
 
 _GITHUB_API_HOST = "api.github.com"
+
+
+class ProviderKind(StrEnum):
+    """Artifact kinds; the provider table owns what each one means."""
+
+    HUGGINGFACE_FILE = "huggingface.file"
+    GITHUB_RELEASE_ASSET = "github-release.asset"
+    HTTP_FILE = "http.file"
+    FILE = "file"
+
+
+# Fixture kinds whose repository is itself the source.
+FIXTURE_SOURCE_KINDS = frozenset({ProviderKind.HTTP_FILE, ProviderKind.FILE})
 
 
 _GITHUB_USER_AGENT = "vonk-forge/0.1.1"

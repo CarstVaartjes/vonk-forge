@@ -41,6 +41,7 @@ from .constants import (
     SOURCE_POLICY,
 )
 from .errors import ModelCacheConflictInvalid, ModelCacheError
+from .providers import PROVIDERS
 
 if TYPE_CHECKING:
     from .service import ModelCacheService
@@ -350,7 +351,12 @@ class UpdatesMixin:
                 sources: list[tuple[str, str]] = []
                 if check_upstream:
                     for spec in manifest.artifacts:
-                        if spec.kind != "huggingface.file" or spec.revision is None:
+                        provider = PROVIDERS.get(spec.kind)
+                        if (
+                            provider is None
+                            or not provider.upstream_checks
+                            or spec.revision is None
+                        ):
                             continue
                         repository = "/".join(
                             urlsplit(spec.source).path.strip("/").split("/")[:2]

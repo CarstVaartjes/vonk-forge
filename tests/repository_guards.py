@@ -8,6 +8,7 @@ Do not add a whole-tree scan to SCOPED: select its file or node in GUARDS.
 
 GUARDS: tuple[str, ...] = (
     "tests/test_get_or_create_guard.py",
+    "tests/test_provider_dispatch_guard.py",
     "tests/test_optimistic_lock_guard.py",
     "tests/test_single_source_values.py",
     "tests/test_request_path_scan_guard.py",

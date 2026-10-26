@@ -22,12 +22,14 @@ from .artifacts import (
     _validate_artifact,
 )
 from .catalog_helpers import _source_for_catalog_artifact
+from .constants import FIXTURE_SOURCE_KINDS
 from .errors import (
     ModelCacheResolutionInvalid,
     ModelCacheResolutionRefused,
     ModelCacheStorageUnknown,
 )
 from .input_contracts import CatalogArtifact, FixtureArtifact
+from .providers import PROVIDERS
 
 if TYPE_CHECKING:
     from .service import ModelCacheService
@@ -190,10 +192,8 @@ class CatalogMixin:
                 ModelCacheCode.ARTIFACT_INVALID,
                 "catalog artifact integrity metadata is incomplete",
             )
-        if (
-            raw_kind not in {"huggingface.file", "github-release.asset"}
-            and not cache._fixture_sources
-        ):
+        provider = PROVIDERS.get(raw_kind)
+        if (provider is None or not provider.production) and not cache._fixture_sources:
             raise ModelCacheResolutionRefused(
                 ModelCacheCode.SOURCE_UNTRUSTED,
                 "production cache downloads require a trusted catalog artifact reference",
@@ -260,7 +260,7 @@ class CatalogMixin:
         kind = artifact.kind
         repository = artifact.repository
         source = artifact.source or (
-            repository if kind in {"http.file", "file"} else None
+            repository if kind in FIXTURE_SOURCE_KINDS else None
         )
         if source is None:
             raise ModelCacheResolutionInvalid(

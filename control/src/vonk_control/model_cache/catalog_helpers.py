@@ -5,7 +5,8 @@ from __future__ import annotations
 import json
 import re
 from datetime import UTC, datetime
-from urllib.parse import urlsplit
+from typing import assert_never
+from urllib.parse import quote, urlsplit
 
 from pydantic import ValidationError
 from vonk_agent_protocol import ModelCacheCode
@@ -15,14 +16,18 @@ from vonk_forge_contracts import (
     read_model,
     read_recipe,
 )
-from vonk_forge_contracts.model import GitHubReleaseSource, ModelReference
+from vonk_forge_contracts.model import (
+    GitHubReleaseSource,
+    ModelReference,
+    ModelSource,
+)
 
 from ..bounded_json import require_mapping
 from ..catalog_revision_contract import read_catalog_document
 from ..categorized_errors import InvalidType
 from ..models import CatalogDocumentRevision
 from .artifacts import ArtifactSetManifest, ArtifactSpec, _is_hex
-from .constants import _DIGEST_LENGTH, _GITHUB_API_HOST, _MAX_ARTIFACTS
+from .constants import _DIGEST_LENGTH, _GITHUB_API_HOST, _MAX_ARTIFACTS, ProviderKind
 from .errors import (
     ModelCacheConflictInvalid,
     ModelCacheResolutionError,
@@ -64,6 +69,95 @@ def _validate_source(source: str) -> None:
     )
 
 
+def _huggingface_catalog_source(artifact: CatalogArtifact) -> tuple[str, str | None]:
+    repository = artifact.repository
+    path = artifact.path
+    revision = artifact.revision
+    assert isinstance(repository, str) and isinstance(path, str)
+    # Catalog repositories are immutable HTTPS URLs.  Parse and bind the
+    # repository path to the one trusted Hugging Face authority before
+    # constructing the file URL; accepting the raw URL here would permit
+    # catalog metadata to redirect the Controller to another host.
+    try:
+        parsed = urlsplit(repository)
+        hostname = parsed.hostname
+        port = parsed.port
+    except (TypeError, ValueError) as error:
+        raise ModelCacheResolutionInvalid(
+            ModelCacheCode.SOURCE_INVALID,
+            "catalog Hugging Face repository is invalid",
+        ) from error
+    if parsed.scheme:
+        if (
+            parsed.scheme != "https"
+            or hostname is None
+            or hostname.lower().rstrip(".") != "huggingface.co"
+            or port is not None
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.query
+            or parsed.fragment
+            or not parsed.path.startswith("/")
+        ):
+            raise ModelCacheResolutionInvalid(
+                ModelCacheCode.SOURCE_INVALID,
+                "catalog Hugging Face repository must use canonical HTTPS",
+            )
+        repository_path = parsed.path.strip("/")
+    else:
+        # Older catalog fixtures store the repository as the immutable
+        # Hugging Face ``namespace/name`` identifier.  It is safe to
+        # normalize that bounded identifier to the canonical authority;
+        # arbitrary URI repositories still take the guarded path above.
+        repository_path = repository
+    if not _valid_repository(repository_path):
+        raise ModelCacheResolutionInvalid(
+            ModelCacheCode.SOURCE_INVALID,
+            "catalog Hugging Face repository is invalid",
+        )
+    if not isinstance(revision, str) or not re.fullmatch(r"[0-9a-f]{40,64}", revision):
+        raise ModelCacheResolutionInvalid(
+            ModelCacheCode.REVISION_INVALID,
+            "catalog artifact revision is not immutable",
+        )
+    source = (
+        f"https://huggingface.co/{repository_path}/resolve/{revision}/"
+        f"{quote(path, safe='/')}"
+    )
+    return source, str(revision)
+
+
+def _http_catalog_source(artifact: CatalogArtifact) -> tuple[str, str | None]:
+    assert isinstance(artifact.repository, str)
+    return artifact.repository, artifact.revision
+
+
+def _github_release_catalog_source(
+    artifact: CatalogArtifact,
+) -> tuple[str, str | None]:
+    repository = artifact.repository
+    assert isinstance(repository, str)
+    release_id = artifact.release_id
+    asset_id = artifact.asset_id
+    owner_and_name = _github_repository_parts(repository)
+    if (
+        type(release_id) is not int
+        or release_id < 1
+        or type(asset_id) is not int
+        or asset_id < 1
+    ):
+        raise ModelCacheResolutionInvalid(
+            ModelCacheCode.SOURCE_INVALID,
+            "catalog GitHub release asset identity is invalid",
+        )
+    owner, name = owner_and_name
+    revision = f"github-release:{release_id}"
+    source = (
+        f"https://{_GITHUB_API_HOST}/repos/{owner}/{name}/releases/assets/{asset_id}"
+    )
+    return source, revision
+
+
 def _source_for_catalog_artifact(
     artifact: CatalogArtifact,
 ) -> tuple[str, str | None]:
@@ -79,85 +173,15 @@ def _source_for_catalog_artifact(
         raise ModelCacheResolutionInvalid(
             ModelCacheCode.ARTIFACT_INVALID, "catalog artifact path is invalid"
         )
-    if kind == "huggingface.file":
-        from urllib.parse import quote
+    from .providers import PROVIDERS
 
-        # Catalog repositories are immutable HTTPS URLs.  Parse and bind the
-        # repository path to the one trusted Hugging Face authority before
-        # constructing the file URL; accepting the raw URL here would permit
-        # catalog metadata to redirect the Controller to another host.
-        try:
-            parsed = urlsplit(repository)
-            hostname = parsed.hostname
-            port = parsed.port
-        except (TypeError, ValueError) as error:
-            raise ModelCacheResolutionInvalid(
-                ModelCacheCode.SOURCE_INVALID,
-                "catalog Hugging Face repository is invalid",
-            ) from error
-        if parsed.scheme:
-            if (
-                parsed.scheme != "https"
-                or hostname is None
-                or hostname.lower().rstrip(".") != "huggingface.co"
-                or port is not None
-                or parsed.username is not None
-                or parsed.password is not None
-                or parsed.query
-                or parsed.fragment
-                or not parsed.path.startswith("/")
-            ):
-                raise ModelCacheResolutionInvalid(
-                    ModelCacheCode.SOURCE_INVALID,
-                    "catalog Hugging Face repository must use canonical HTTPS",
-                )
-            repository_path = parsed.path.strip("/")
-        else:
-            # Older catalog fixtures store the repository as the immutable
-            # Hugging Face ``namespace/name`` identifier.  It is safe to
-            # normalize that bounded identifier to the canonical authority;
-            # arbitrary URI repositories still take the guarded path above.
-            repository_path = repository
-        if not _valid_repository(repository_path):
-            raise ModelCacheResolutionInvalid(
-                ModelCacheCode.SOURCE_INVALID,
-                "catalog Hugging Face repository is invalid",
-            )
-        if not isinstance(revision, str) or not re.fullmatch(
-            r"[0-9a-f]{40,64}", revision
-        ):
-            raise ModelCacheResolutionInvalid(
-                ModelCacheCode.REVISION_INVALID,
-                "catalog artifact revision is not immutable",
-            )
-        source = (
-            f"https://huggingface.co/{repository_path}/resolve/{revision}/"
-            f"{quote(path, safe='/')}"
-        )
-    elif kind == "http.file":
-        source = repository
-    elif kind == "github-release.asset":
-        release_id = artifact.release_id
-        asset_id = artifact.asset_id
-        owner_and_name = _github_repository_parts(repository)
-        if (
-            type(release_id) is not int
-            or release_id < 1
-            or type(asset_id) is not int
-            or asset_id < 1
-        ):
-            raise ModelCacheResolutionInvalid(
-                ModelCacheCode.SOURCE_INVALID,
-                "catalog GitHub release asset identity is invalid",
-            )
-        owner, name = owner_and_name
-        revision = f"github-release:{release_id}"
-        source = f"https://{_GITHUB_API_HOST}/repos/{owner}/{name}/releases/assets/{asset_id}"
-    else:
+    provider = PROVIDERS.get(kind)
+    if provider is None or provider.catalog_source is None:
         raise ModelCacheResolutionInvalid(
             ModelCacheCode.SOURCE_UNSUPPORTED,
             "catalog artifact source cannot be downloaded by the NAS cache",
         )
+    source, revision = provider.catalog_source(artifact)
     return source, str(revision) if revision is not None else None
 
 
@@ -194,7 +218,7 @@ def _github_repository_parts(repository: str) -> tuple[str, str]:
 def _github_release_asset_binding(spec: ArtifactSpec) -> tuple[int, int, str, str]:
     """Validate that a persisted GitHub source binds one exact release asset."""
 
-    if spec.kind != "github-release.asset" or not isinstance(spec.repository, str):
+    if not isinstance(spec.repository, str):
         raise ModelCacheResolutionInvalid(
             ModelCacheCode.SOURCE_INVALID, "GitHub release asset identity is invalid"
         )
@@ -326,25 +350,28 @@ def _canonical_model_artifacts(row: CatalogDocumentRevision) -> list[CatalogArti
             ModelCacheCode.MODEL_DEFINITION_INVALID,
             "canonical model definition is invalid",
         ) from error
-    if isinstance(definition.source, GitHubReleaseSource):
-        repository = definition.source.repository
-        revision = f"github-release:{definition.source.release_id}"
-        release_id = definition.source.release_id
-        assets = {asset.file_id: asset.asset_id for asset in definition.source.assets}
-        provider_kind = "github-release.asset"
-    else:
-        repository = definition.source.repository
-        revision = definition.source.revision
+    source = definition.source
+    if isinstance(source, GitHubReleaseSource):
+        repository = source.repository
+        revision = f"github-release:{source.release_id}"
+        release_id = source.release_id
+        assets = {asset.file_id: asset.asset_id for asset in source.assets}
+        provider_kind = ProviderKind.GITHUB_RELEASE_ASSET
+    elif isinstance(source, ModelSource):
+        repository = source.repository
+        revision = source.revision
         release_id = None
         assets = {}
-        provider_kind = "huggingface.file"
+        provider_kind = ProviderKind.HUGGINGFACE_FILE
+    else:
+        assert_never(source)
     result: list[CatalogArtifact] = []
     for value in definition.files:
         result.append(
             CatalogArtifact(
                 id=value.id,
                 path=value.path,
-                kind=provider_kind,
+                kind=provider_kind.value,
                 repository=repository,
                 revision=revision,
                 sha256=value.sha256,

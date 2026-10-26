@@ -6,6 +6,7 @@ from pydantic import Field, model_validator
 
 from ..model_cache_contract import CacheManifestArtifactPart
 from ..strict_json import StrictModel
+from .constants import FIXTURE_SOURCE_KINDS
 
 
 class CatalogArtifactPart(StrictModel):
@@ -46,7 +47,7 @@ class FixtureArtifact(StrictModel):
     @model_validator(mode="after")
     def source_is_present(self) -> FixtureArtifact:
         if self.source is None and not (
-            self.kind in {"http.file", "file"} and self.repository is not None
+            self.kind in FIXTURE_SOURCE_KINDS and self.repository is not None
         ):
             raise ValueError("cache artifact source is missing")
         return self
