@@ -38,6 +38,7 @@ from vonk_control.models import (
     RecipeBuild,
     User,
 )
+from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
 
 from .agent_fences import fenced_attempt, fenced_operation
 from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, claim_agent
@@ -235,6 +236,7 @@ def test_native_source_fetch_failure_reaches_availability_owner(
     production = build_recipe_image_availability(
         sessions,
         artifact_root=tmp_path / "runtime-images",
+        storage=FilesystemRuntimeImageStorage(tmp_path / "runtime-images"),
         managed_catalog_sync=None,
         recipe_builds=builds,
         recipe_operations=operations,

@@ -122,6 +122,7 @@ def test_damaged_receipted_manifest_recovers_through_new_availability_request(
         return build_recipe_image_availability(
             sessions,
             artifact_root=artifact_root,
+            storage=FilesystemRuntimeImageStorage(artifact_root),
             managed_catalog_sync=None,
             recipe_builds=builds,
             recipe_operations=operations,

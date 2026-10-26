@@ -42,6 +42,7 @@ from vonk_agent_protocol import (
 )
 
 from .auth import MUTATION_ROLES, Actor
+from .capabilities import CapabilityUnavailableError
 from .gateway_route_grants import GatewayInferenceRoute
 from .operation_api import bounded_error_responses
 from .operator_acceptance import (
@@ -111,7 +112,7 @@ def _observe_gateway[T](
                 raise
             if error.status_code in {409, 422}:
                 raise
-        except (GatewayKeyError, OSError, ValueError):
+        except (CapabilityUnavailableError, GatewayKeyError, OSError, ValueError):
             pass
         if attempt + 1 < attempts:
             time.sleep(0.05 * (2**attempt))
@@ -1191,7 +1192,7 @@ async def keep_default_key(
                 )
                 return
             _LOGGER.warning("gateway key dependency is unavailable")
-        except (GatewayKeyError, OSError) as error:
+        except (CapabilityUnavailableError, GatewayKeyError, OSError) as error:
             _LOGGER.warning(
                 "default gateway client key not ready: %s; retrying in %s seconds",
                 error,
