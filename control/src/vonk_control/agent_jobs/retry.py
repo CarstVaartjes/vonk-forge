@@ -262,12 +262,19 @@ def abandon_idempotent_job_in_session(
     Parked and not-yet-issued operations are cancelled, then the job. Whatever
     the transfers already left on the Spark (finished objects, partial files)
     stays for the next request to reuse. Returns ``False``, changing nothing,
-    when the job holds another kind of operation or one that is still running:
-    that one reports its own outcome.
+    when the job holds another kind of operation or one that is still running
+    (that one reports its own outcome), or when another writer holds the job
+    or one of its operations right now (offer it again later).
     """
 
-    # The claim's order: operations, then their job. An operation a claim
-    # holds is skipped, and the job is left to report through it.
+    # Every writer locks the job, then its operations; this never waits for
+    # either. A job or operation another writer holds (a claim, a late
+    # result) is left to it: the caller offers the job again later.
+    job = session.scalar(
+        select(Job).where(Job.id == job_id).with_for_update(of=Job, skip_locked=True)
+    )
+    if job is None:
+        return False
     members = session.scalar(
         select(func.count())
         .select_from(StoredOperation)
@@ -289,9 +296,6 @@ def abandon_idempotent_job_in_session(
             for operation in operations
         )
     ):
-        return False
-    job = session.scalar(select(Job).where(Job.id == job_id).with_for_update(of=Job))
-    if job is None:
         return False
     adapter = AgentOperationAdapter(session)
     for operation in operations:
