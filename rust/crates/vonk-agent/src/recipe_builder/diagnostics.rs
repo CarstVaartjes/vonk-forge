@@ -649,6 +649,67 @@ mod tests {
     }
 
     #[test]
+    fn every_platform_block_vector_yields_to_a_crash_and_to_a_steps_own_exit() {
+        // Wrong implementation: a denial gate that reads words a RUN printed, or
+        // lines left by a crashed Podman, as a host denial in either classifier.
+        let crash = "\npanic: runtime error: nil pointer dereference\n\ngoroutine 61 [running]:\n";
+        let step_exit = "\nError: building at STEP \"RUN uv pip install\": while running runtime: exit status 1";
+        for (vector, build, import) in [
+            (
+                "lchown /root/.cache/uv: operation not permitted",
+                PodmanBuildDiagnostic::SubordinateIdMappingUnavailable,
+                PodmanImportDiagnostic::SubordinateIdMappingUnavailable,
+            ),
+            (
+                "newuidmap: write to uid_map failed",
+                PodmanBuildDiagnostic::SubordinateIdMappingUnavailable,
+                PodmanImportDiagnostic::SubordinateIdMappingUnavailable,
+            ),
+            (
+                "cannot clone: Operation not permitted",
+                PodmanBuildDiagnostic::UserNamespaceDenied,
+                PodmanImportDiagnostic::PermissionDenied,
+            ),
+            (
+                "mount `proc` to `proc`: Operation not permitted",
+                PodmanBuildDiagnostic::ProcMountDenied,
+                PodmanImportDiagnostic::PermissionDenied,
+            ),
+            (
+                "open /private/data: permission denied",
+                PodmanBuildDiagnostic::PermissionDenied,
+                PodmanImportDiagnostic::PermissionDenied,
+            ),
+        ] {
+            let run = |stderr: String| ProcessOutput {
+                exit_code: Some(1),
+                success: false,
+                stdout: Vec::new(),
+                stderr: stderr.into_bytes(),
+            };
+            assert_eq!(podman_build_diagnostic(&run(vector.to_owned())), build);
+            assert_eq!(podman_import_diagnostic(&run(vector.to_owned())), import);
+            let crashed = run(format!("{vector}{crash}"));
+            assert_eq!(
+                podman_build_diagnostic(&crashed),
+                PodmanBuildDiagnostic::Unknown,
+                "{vector}"
+            );
+            assert_eq!(
+                podman_import_diagnostic(&crashed),
+                PodmanImportDiagnostic::Unknown,
+                "{vector}"
+            );
+            // The step's own exit: the words are the RUN's, not the host's.
+            assert_eq!(
+                podman_build_diagnostic(&run(format!("{vector}{step_exit}"))),
+                PodmanBuildDiagnostic::BuildStepFailed,
+                "{vector}"
+            );
+        }
+    }
+
+    #[test]
     fn an_out_of_memory_build_is_not_hidden_behind_denial_words_or_a_crash() {
         let output = podman_crash_output(
             "lchown /root: permission denied\nKilled\nout of memory",

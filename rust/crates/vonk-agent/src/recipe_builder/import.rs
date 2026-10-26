@@ -16,6 +16,9 @@ pub(super) fn podman_import_diagnostic(
     let evidence = String::from_utf8_lossy(&evidence).to_ascii_lowercase();
     if evidence.contains("no space left on device") || evidence.contains("disk quota exceeded") {
         PodmanImportDiagnostic::TemporaryStorageExhausted
+    } else if podman_crashed(&String::from_utf8_lossy(&output.stderr).to_ascii_lowercase()) {
+        // A crashed Podman has no cause in the words it printed before dying.
+        PodmanImportDiagnostic::Unknown
     } else if evidence.contains("insufficient uids or gids")
         || evidence.contains("subuid")
         || evidence.contains("subgid")
@@ -39,17 +42,20 @@ pub(super) fn podman_import_diagnostic(
     }
 }
 
-/// A Go runtime crash in Podman's stderr: its `panic: ` or `fatal error: `
-/// header line, or a goroutine dump line (`goroutine 61 [running]:`).
+/// Podman itself died in its Go runtime: a `panic: ` or `fatal error: ` header
+/// line, or a goroutine dump line (`goroutine 61 [running]:`), with no closing
+/// `Error: building at STEP` line. That line means the crash lines belong to the
+/// RUN's own program, which is an ordinary failed step. `stderr` is lowercase.
 fn podman_crashed(stderr: &str) -> bool {
-    stderr.lines().any(|line| {
-        line.starts_with("panic: ")
-            || line.starts_with("fatal error: ")
-            || line.strip_prefix("goroutine ").is_some_and(|rest| {
-                let digits = rest.chars().take_while(char::is_ascii_digit).count();
-                digits > 0 && rest[digits..].starts_with(" [")
-            })
-    })
+    !stderr.contains("error: building at step ")
+        && stderr.lines().any(|line| {
+            line.starts_with("panic: ")
+                || line.starts_with("fatal error: ")
+                || line.strip_prefix("goroutine ").is_some_and(|rest| {
+                    let digits = rest.chars().take_while(char::is_ascii_digit).count();
+                    digits > 0 && rest[digits..].starts_with(" [")
+                })
+        })
 }
 
 pub(crate) fn podman_build_diagnostic(
@@ -64,6 +70,7 @@ pub(crate) fn podman_build_diagnostic(
     // entire RUN command on stderr; its words are not an observed host fault.
     // Only actual stderr cause lines may classify a platform denial.
     let stderr = String::from_utf8_lossy(&output.stderr).to_ascii_lowercase();
+    let crashed = podman_crashed(&stderr);
     let causes = if let Some((before, step)) = stderr.split_once("error: building at step ") {
         // A Dockerfile heredoc may put newlines inside the echoed command.
         // Keep preceding runtime errors and the cause after the closing quote.
@@ -77,6 +84,9 @@ pub(crate) fn podman_build_diagnostic(
     let step_exited = causes
         .lines()
         .any(|line| line.starts_with("while running runtime: exit status "));
+    // A RUN's own failure exits its step; real host denials arrive before any
+    // step exit or name the OCI runtime. Words a RUN printed are not denials.
+    let denial_visible = !step_exited || causes.contains("crun:") || causes.contains("runc:");
     let logs = super::diagnostics::sanitized_process_logs(output);
     if logs.stdout.text.trim().is_empty() && logs.stderr.text.trim().is_empty() {
         PodmanBuildDiagnostic::NonzeroWithoutOutput
@@ -90,36 +100,39 @@ pub(crate) fn podman_build_diagnostic(
         || evidence.contains("signal: killed")
     {
         PodmanBuildDiagnostic::MemoryLimitExceeded
-    } else if !step_exited && podman_crashed(&causes) {
+    } else if crashed {
         // Podman itself died (a Go runtime crash while it tore down the build's
         // network namespace). The RUN output above the crash is not the cause,
         // so none of its words may classify a host denial.
         PodmanBuildDiagnostic::Unknown
-    } else if causes.contains("insufficient uids or gids")
-        || causes.contains("subuid")
-        || causes.contains("subgid")
-        || causes.contains("newuidmap")
-        || causes.contains("newgidmap")
-        || causes.contains("lchown")
+    } else if denial_visible
+        && (causes.contains("insufficient uids or gids")
+            || causes.contains("subuid")
+            || causes.contains("subgid")
+            || causes.contains("newuidmap")
+            || causes.contains("newgidmap")
+            || causes.contains("lchown"))
     {
         PodmanBuildDiagnostic::SubordinateIdMappingUnavailable
-    } else if causes.lines().any(|line| {
-        line.contains("apparmor")
-            && line.contains("denied")
-            && (line.contains("userns") || line.contains("user namespace"))
-    }) || causes.contains("user namespace is not enabled")
-        || causes.contains("user namespaces are not enabled")
-        || causes.contains("cannot clone: operation not permitted")
+    } else if denial_visible
+        && (causes.lines().any(|line| {
+            line.contains("apparmor")
+                && line.contains("denied")
+                && (line.contains("userns") || line.contains("user namespace"))
+        }) || causes.contains("user namespace is not enabled")
+            || causes.contains("user namespaces are not enabled")
+            || causes.contains("cannot clone: operation not permitted"))
     {
         PodmanBuildDiagnostic::UserNamespaceDenied
-    } else if (causes.contains("mount `proc`")
-        || causes.contains("mount 'proc'")
-        || causes.contains("mount \"proc\"")
-        || causes.contains("mount proc to proc"))
+    } else if denial_visible
+        && (causes.contains("mount `proc`")
+            || causes.contains("mount 'proc'")
+            || causes.contains("mount \"proc\"")
+            || causes.contains("mount proc to proc"))
         && (causes.contains("permission denied") || causes.contains("operation not permitted"))
     {
         PodmanBuildDiagnostic::ProcMountDenied
-    } else if (!step_exited || causes.contains("crun:") || causes.contains("runc:"))
+    } else if denial_visible
         && (causes.contains("permission denied") || causes.contains("operation not permitted"))
     {
         // A RUN process can report its own permission error. An explicit OCI
