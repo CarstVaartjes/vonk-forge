@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Callable
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import (
     TYPE_CHECKING,
 )
@@ -13,12 +13,13 @@ from typing import cast as typing_cast
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import AgentOperation as WireAgentOperation
-from vonk_agent_protocol import LifecycleState, RunSwitchCode
+from vonk_agent_protocol import LifecycleState, RunSwitchCode, WaitReason
 from vonk_agent_protocol.agent_words import ProfileSwitchChildKind
 
 from .. import job_states
 from ..bounded_json import require_integer
 from ..failure_classification import error_code, is_security_failure
+from ..lifecycle.run_switch import end_unclaimed_children
 from ..models import (
     Job,
     RecipeRun,
@@ -48,6 +49,9 @@ from .ownership import _checkpoint_matches, _complete_cancellation
 from .planning_helpers import _aware, _now, _stored_job_plan
 from .provider import _ADAPTER
 from .result_helpers import _persisted_result, _read_progress
+
+#: How soon an ended owner offers again the work another writer held.
+_REOFFER_INTERVAL = timedelta(seconds=5)
 
 if TYPE_CHECKING:
     from ..distribution_executor.receipts import _ChildView
@@ -237,12 +241,24 @@ class EndingsMixin:
                 )
             )
         if start_id is None:
+            now = _now(service._clock)
             with service._sessions.begin() as session:
                 retained = session.get(
                     Job, operation_id, with_for_update={"skip_locked": True}
                 )
                 if retained is not None and retained.state == state:
-                    schedule_wait(retained, None)
+                    # Work a writer held at the end is offered again until
+                    # nothing the ended owner issued is left queued.
+                    stored = read_row_column(retained, "result")
+                    remaining = end_unclaimed_children(
+                        session, _read_progress(stored), now
+                    )
+                    schedule_wait(
+                        retained,
+                        now + _REOFFER_INTERVAL if remaining else None,
+                        now=now,
+                        reason=WaitReason.CLEANUP_UNCONFIRMED,
+                    )
             return
         try:
             service._lifecycle.cancel(

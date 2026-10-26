@@ -7602,9 +7602,11 @@ def test_low_level_run_preview_propagates_contract_defects(
         )
 
 
-def _probing_switch(tmp_path, *, probe=True):
+def _probing_switch(tmp_path, *, probe=True, engine=None):
     """A load whose first phase probes its Spark; the probe stays unanswered."""
-    sessions, lifecycle, queue, _mapping_id, _build_id, nodes = setup_services(tmp_path)
+    sessions, lifecycle, queue, _mapping_id, _build_id, nodes = setup_services(
+        tmp_path, engine=engine
+    )
     service = _service(sessions, NOW, lifecycle, RecordingArtifactExecutor())
     request = _request(sessions, nodes[0])
     plan = service.preview(request, actor="admin")
@@ -7873,4 +7875,41 @@ def test_a_failed_run_switch_ends_its_unclaimed_probe_and_transfer(tmp_path):
         cancelled,
         cancelled,
     )
+    _admits_a_fresh_load(switch)
+
+
+def test_postgres_a_probe_a_writer_held_at_the_end_is_ended_on_the_next_check(
+    tmp_path, postgres_engine
+):
+    """Catches an ended owner leaving the probe another writer held queued.
+
+    The abandon never waits for a lock: a probe a claim or result holds at the
+    terminal write is skipped. The owner's terminal re-check offers it again
+    until nothing it issued is left queued.
+    """
+    switch = _probing_switch(tmp_path, engine=postgres_engine)
+    now = [NOW]
+    switch.service._clock = lambda: now[0]
+    ids = _probe_ids(switch)
+    assert ids is not None
+    holder = switch.sessions()
+    try:
+        holder.begin()
+        holder.scalar(select(Job).where(Job.id == ids[0]).with_for_update())
+        _cancel(switch)
+        assert _probe_states(switch, ids)[1] == LifecycleState.QUEUED.value
+    finally:
+        holder.rollback()
+        holder.close()
+    # The worker re-drives the ended owner when its terminal wait is due.
+    with switch.sessions() as session:
+        ended = session.get(Job, switch.operation.operation_id)
+        assert ended is not None and ended.next_action_at is not None
+        now[0] = ended.next_action_at.replace(tzinfo=UTC)
+    switch.service.redrive(switch.operation.operation_id)
+    cancelled = LifecycleState.CANCELLED.value
+    assert _probe_states(switch, ids) == (cancelled, cancelled)
+    with switch.sessions() as session:
+        ended = session.get(Job, switch.operation.operation_id)
+        assert ended is not None and ended.next_action_at is None
     _admits_a_fresh_load(switch)
