@@ -141,7 +141,8 @@ async fn process_death_at_four_boundaries_recovers_on_an_idle_tick_without_execu
         let mut state = StateStore::open_recovered(&root.join("state.sqlite"), NODE_ID).unwrap();
         run_once(&client, &mut state, &executor, None, 0, None)
             .await
-            .unwrap();
+            .unwrap()
+            .settled();
         assert!(
             client.heartbeats.lock().unwrap().is_empty(),
             "a probe cannot renew a lease"
@@ -299,7 +300,7 @@ async fn a_busy_or_long_polling_lane_keeps_observing_other_exact_children() {
             "receipt must arrive before unrelated work completes"
         );
     };
-    observing_during(work, &client, Some(state), &executor, Some(Uuid::new_v4())).await;
+    observing_during(work, &client, Some(state), &executor).await;
     assert!(client.heartbeats.lock().unwrap().is_empty());
     assert!(client.results.lock().unwrap().iter().all(
         |result| result.fence == accepted.fence && result.state == AgentResultState::Succeeded

@@ -780,7 +780,8 @@ async fn observation_misses_end_without_effects_and_a_fresh_fence_executes() {
         )
         .await
         .unwrap()
-        .unwrap();
+        .unwrap()
+        .settled();
         assert_eq!(executor.1.load(Ordering::SeqCst), 0);
         assert!(matches!(
             client.results.lock().unwrap()[0].result,
@@ -795,7 +796,8 @@ async fn observation_misses_end_without_effects_and_a_fresh_fence_executes() {
         )
         .await
         .unwrap()
-        .unwrap();
+        .unwrap()
+        .settled();
         assert_eq!(executor.1.load(Ordering::SeqCst), 1);
         assert!(
             client

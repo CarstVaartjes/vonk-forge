@@ -9,11 +9,12 @@ from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from sqlalchemy import event, func, select
+from sqlalchemy import event, func, select, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import AgentResult, OperationProgress, canonical_message
 from vonk_agent_protocol.recipe_operations import RecipeStopResult
+from vonk_agent_protocol.runtime_preflight import RuntimePreflightResult
 from vonk_control import agent_operation_states as aos
 from vonk_control.admission_locking import AdmissionLockBusy
 from vonk_control.agent_jobs import AgentJobService, StaleAgentAttempt
@@ -1434,3 +1435,107 @@ def test_postgres_distribution_lower_receipt_settles_without_lease_retry(
         row = session.get(AgentOperation, operation.id)
         assert row is not None and row.state == LifecycleState.SUCCEEDED
         assert row.current_attempt == 1
+
+
+_PROBE = {
+    "source_build": False,
+    "minimum_free_bytes": 0,
+    "fabric_connectivity": "none",
+    "fabric_minimum_mbps": 0,
+}
+
+
+def _abandon(sessions, job_id, now) -> bool:
+    from vonk_control.agent_jobs import abandon_idempotent_job_in_session
+
+    with sessions.begin() as session:
+        session.execute(text("SET LOCAL lock_timeout = '5s'"))
+        return abandon_idempotent_job_in_session(
+            session, job_id, now, reason="scope-changed"
+        )
+
+
+def test_postgres_abandon_and_a_concurrent_claim_never_wait_and_both_settle(
+    service,
+) -> None:
+    """Catches the abandon waiting on (or deadlocking with) the real claim.
+
+    Every round races a real claim of a queued probe against its abandon; one
+    of them wins, the other leaves it, and the probe ends claimed or cancelled.
+    """
+    sessions, clock = service
+    jobs = AgentJobService(sessions, clock=clock)
+    for _ in range(12):
+        owner = parent(sessions, clock)
+        probe = jobs.enqueue(owner.id, NODE_A, "runtime.preflight.v1", COMMIT, _PROBE)
+        start = threading.Barrier(2)
+
+        def claim(start=start):
+            start.wait()
+            return claim_agent(jobs, NODE_A, "serial-a")
+
+        def abandon(start=start, owner=owner):
+            start.wait()
+            return _abandon(sessions, owner.id, clock.now)
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            claiming, abandoning = pool.submit(claim), pool.submit(abandon)
+            claimed = claiming.result(timeout=30)
+            abandoned = abandoning.result(timeout=30)
+        with sessions() as session:
+            order = session.get(AgentOperation, probe.id)
+            assert order is not None
+        assert not (claimed is not None and abandoned)
+        assert order.state == ("running" if claimed is not None else "cancelled")
+        if claimed is not None:
+            jobs.succeed(
+                claimed,
+                RuntimePreflightResult(
+                    fingerprint="a" * 64, observed_at=1, findings=[]
+                ),
+            )
+    # Nothing is left behind: a fresh request is still admitted and claimed.
+    fresh = parent(sessions, clock)
+    jobs.enqueue(fresh.id, NODE_A, "runtime.preflight.v1", COMMIT, _PROBE)
+    assert claim_agent(jobs, NODE_A, "serial-a") is not None
+
+
+def test_postgres_abandon_and_a_concurrent_late_result_never_wait_and_settle(
+    service,
+) -> None:
+    """Catches the abandon and a probe's own result locking against each other."""
+    sessions, clock = service
+    jobs = AgentJobService(sessions, clock=clock)
+    for _ in range(12):
+        owner = parent(sessions, clock)
+        probe = jobs.enqueue(owner.id, NODE_A, "runtime.preflight.v1", COMMIT, _PROBE)
+        claimed = claim_agent(jobs, NODE_A, "serial-a")
+        assert claimed is not None
+        start = threading.Barrier(2)
+
+        def report(claimed=claimed, start=start):
+            start.wait()
+            jobs.succeed(
+                claimed,
+                RuntimePreflightResult(
+                    fingerprint="a" * 64, observed_at=1, findings=[]
+                ),
+            )
+
+        def abandon(owner=owner, start=start):
+            start.wait()
+            return _abandon(sessions, owner.id, clock.now)
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            reported = pool.submit(report)
+            abandoned = pool.submit(abandon)
+            reported.result(timeout=30)
+            abandoned.result(timeout=30)
+        # A probe a Spark runs reports its own end; the abandon never ends it.
+        with sessions() as session:
+            order = session.get(AgentOperation, probe.id)
+            assert order is not None and order.state == "succeeded"
+        assert state(sessions, owner.id) == "succeeded"
+    fresh = parent(sessions, clock)
+    jobs.enqueue(fresh.id, NODE_A, "runtime.preflight.v1", COMMIT, _PROBE)
+    assert claim_agent(jobs, NODE_A, "serial-a") is not None

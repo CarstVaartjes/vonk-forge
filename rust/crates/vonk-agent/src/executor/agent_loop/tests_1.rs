@@ -30,7 +30,8 @@ async fn failed_execution_emits_the_controller_failure_contract() {
         || Ok(()),
     )
     .await
-    .unwrap();
+    .unwrap()
+    .settled();
 
     {
         let results = client.results.lock().unwrap();
@@ -52,7 +53,8 @@ async fn failed_execution_emits_the_controller_failure_contract() {
     *client.claim.lock().unwrap() = Some(fresh.clone());
     run_once(&client, &mut state, &FailedExecutor, None, 0, None)
         .await
-        .unwrap();
+        .unwrap()
+        .settled();
     assert!(
         client
             .results
@@ -101,7 +103,8 @@ async fn artifact_job_heartbeat_cancellation_is_preserved_as_terminal_cancelled(
         || Ok(()),
     )
     .await
-    .unwrap();
+    .unwrap()
+    .settled();
 
     {
         let results = client.results.lock().unwrap();
@@ -121,7 +124,8 @@ async fn artifact_job_heartbeat_cancellation_is_preserved_as_terminal_cancelled(
     *client.claim.lock().unwrap() = Some(fresh.clone());
     run_once(&client, &mut state, &FailedExecutor, None, 0, None)
         .await
-        .unwrap();
+        .unwrap()
+        .settled();
     assert!(
         client
             .results
@@ -211,7 +215,8 @@ async fn journal_finish_failure_ends_unknown_then_a_fresh_fence_executes_once() 
     )
     .await
     .unwrap()
-    .unwrap();
+    .unwrap()
+    .settled();
     assert!(matches!(
         client.inner.results.lock().unwrap()[0].result,
         AgentResultResult::OutcomeUnknown(_)
@@ -226,7 +231,8 @@ async fn journal_finish_failure_ends_unknown_then_a_fresh_fence_executes_once() 
     )
     .await
     .unwrap()
-    .unwrap();
+    .unwrap()
+    .settled();
     assert_eq!(executor.effects.load(Ordering::SeqCst), 2);
     assert!(
         client

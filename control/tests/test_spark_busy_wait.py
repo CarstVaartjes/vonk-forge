@@ -1,7 +1,8 @@
 """A queued order behind a busy Spark says what it waits for, then proceeds.
 
-The agent executes one claimed order at a time and does not poll meanwhile, so
-no claim evaluates the orders queued behind it.  Their wait must still be
+The agent executes one claimed lane order at a time (a build runs beside the
+lane) and does not poll meanwhile, so no claim evaluates the orders queued
+behind it.  Their wait must still be
 visible in every read (Activity, the operation, the job) and in vonkctl, and it
 must clear by itself once the running order ends.
 """

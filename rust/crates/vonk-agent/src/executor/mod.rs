@@ -74,7 +74,7 @@ const HEARTBEAT_RETRY_FLOOR: Duration = Duration::from_millis(50);
 ///
 /// ``interval`` is the steady-state cadence once a renewal is accepted and
 /// ``retry_interval`` is the prompt delay after a transient failure.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 struct HeartbeatSchedule {
     interval: Duration,
     retry_interval: Duration,
@@ -288,6 +288,11 @@ mod runtime;
 mod start;
 mod stop;
 pub use agent_loop::*;
+mod off_lane;
+#[cfg(test)]
+pub(crate) use off_lane::BuildBeside;
+use off_lane::Executing;
+pub use off_lane::{Beside, LaneStep, OffLaneClaim, builds_beside, runs_off_lane};
 mod heartbeat;
 use crate::stall_window::{Inactivity, StallWindow};
 use heartbeat::*;

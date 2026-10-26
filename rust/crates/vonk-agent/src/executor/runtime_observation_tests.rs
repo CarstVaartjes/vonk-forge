@@ -291,7 +291,8 @@ async fn runtime_process_death_at_every_custody_seam_recovers_without_new_claims
                 StateStore::open_recovered(&root.join("state.sqlite"), NODE_ID).unwrap();
             run_once(&client, &mut state, &executor, None, 0, None)
                 .await
-                .unwrap();
+                .unwrap()
+                .settled();
             stop.store(true, Ordering::SeqCst);
             tokio::time::timeout(
                 Duration::from_secs(20),

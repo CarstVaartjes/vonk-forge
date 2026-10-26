@@ -87,7 +87,7 @@ fn pending(store: &StateStore, fence: Uuid) -> Option<AgentResultResult> {
 }
 
 async fn pass(store: &mut StateStore, probe: &ScriptedProbe, now: DateTime<Utc>) {
-    reobserve_operations(store, probe, None, now).await.unwrap();
+    reobserve_operations(store, probe, now).await.unwrap();
 }
 
 #[tokio::test]

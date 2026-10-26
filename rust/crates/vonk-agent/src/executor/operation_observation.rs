@@ -416,14 +416,15 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
 
 /// Runs before receipt delivery and claims, including an entirely idle fleet.
 /// Startup reaches this same pass through run_once; it never dispatches effects.
+/// A claim this process is executing (on the lane or beside it) is its
+/// executor's to settle and is never probed.
 pub async fn reobserve_operations<E: Executor>(
     state: &mut StateStore,
     executor: &E,
-    executing: Option<uuid::Uuid>,
     now: DateTime<Utc>,
 ) -> Result<(), StateError> {
     for claim in state.observation_claims()? {
-        if executing == Some(claim.fence) {
+        if super::off_lane::Executing::contains(state, claim.fence) {
             continue;
         }
         let Some(observation) = executor.observe(&claim).await else {
@@ -490,19 +491,17 @@ fn log_pending(claim: &AgentClaim, pending: &PendingObservation) {
 }
 
 /// Keep the same owner probe and spool delivery moving through long polls and
-/// unrelated long-running effects. The current executor owns its own fence.
+/// unrelated long-running effects. Executing claims settle through their executor.
 pub(super) async fn observing_during<F: Future, C: LoopClient, E: Executor>(
     work: F,
     client: &C,
     state: Option<StateStore>,
     executor: &E,
-    executing: Option<uuid::Uuid>,
 ) -> F::Output {
     let observations = stream::unfold(state, |state| async move {
         let mut state = state?;
         tokio::time::sleep(HEARTBEAT_INTERVAL).await;
-        if let Err(error) = reobserve_operations(&mut state, executor, executing, Utc::now()).await
-        {
+        if let Err(error) = reobserve_operations(&mut state, executor, Utc::now()).await {
             eprintln!("vonk-agent: periodic operation observation deferred: {error}");
         }
         if let Err(error) = super::agent_loop::deliver_retained(client, &mut state).await {

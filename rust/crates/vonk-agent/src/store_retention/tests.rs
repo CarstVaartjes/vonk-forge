@@ -312,6 +312,31 @@ fn a_base_image_no_build_opened_for_the_grace_leaves_unless_a_build_holds_it() {
 }
 
 #[test]
+fn a_build_beside_the_lane_keeps_its_staging_and_base_images_before_it_locks_them() {
+    // Catches retention removing an aged staging tree or base image between a
+    // build's claim and its unit start or image lock (the lane no longer waits
+    // for the build, so retention runs while it is starting).
+    let root = tempfile::tempdir().unwrap();
+    authorize_retention(root.path());
+    let images = root.path().join("base-images/sha256");
+    let image = file(&images.join(OBJECT).join("image.oci.tar"), b"base");
+    let staging = file(
+        &root
+            .path()
+            .join("build-staging")
+            .join(format!("{OBJECT}-{ORPHAN}"))
+            .join("context/input"),
+        b"source",
+    );
+    let build = crate::executor::BuildBeside::hold(root.path(), ORPHAN.parse().unwrap());
+    assert_eq!(run(root.path(), after_grace(), &|| ROOMY).entries, 0);
+    assert!(image.exists() && staging.exists());
+    drop(build);
+    run(root.path(), after_grace(), &|| ROOMY);
+    assert!(!image.exists());
+}
+
+#[test]
 fn retired_stores_are_emptied() {
     let root = tempfile::tempdir().unwrap();
     authorize_retention(root.path());

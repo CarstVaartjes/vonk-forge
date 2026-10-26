@@ -7,7 +7,7 @@ from collections.abc import Mapping
 from datetime import datetime, timedelta
 
 from pydantic import BaseModel
-from sqlalchemy import or_, select, update
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.orm import Session, object_session
 from sqlalchemy.sql.elements import ColumnElement
 from vonk_agent_protocol import (
@@ -262,23 +262,39 @@ def abandon_idempotent_job_in_session(
     Parked and not-yet-issued operations are cancelled, then the job. Whatever
     the transfers already left on the Spark (finished objects, partial files)
     stays for the next request to reuse. Returns ``False``, changing nothing,
-    when the job holds another kind of operation or one that is still running:
-    that one reports its own outcome.
+    when the job holds another kind of operation or one that is still running
+    (that one reports its own outcome), or when another writer holds the job
+    or one of its operations right now (offer it again later).
     """
 
-    job = session.scalar(select(Job).where(Job.id == job_id).with_for_update(of=Job))
+    # Every writer locks the job, then its operations; this never waits for
+    # either. A job or operation another writer holds (a claim, a late
+    # result) is left to it: the caller offers the job again later.
+    job = session.scalar(
+        select(Job).where(Job.id == job_id).with_for_update(of=Job, skip_locked=True)
+    )
     if job is None:
         return False
+    members = session.scalar(
+        select(func.count())
+        .select_from(StoredOperation)
+        .where(StoredOperation.parent_job_id == job_id)
+    )
     operations = tuple(
         session.scalars(
             select(StoredOperation)
             .where(StoredOperation.parent_job_id == job_id)
-            .with_for_update(of=StoredOperation)
+            .with_for_update(of=StoredOperation, skip_locked=True)
         )
     )
-    if not operations or any(
-        operation.kind not in _ABANDONABLE_OPERATIONS or operation.state == "running"
-        for operation in operations
+    if (
+        not operations
+        or len(operations) != members
+        or any(
+            operation.kind not in _ABANDONABLE_OPERATIONS
+            or operation.state == agent_operation_states.RUNNING
+            for operation in operations
+        )
     ):
         return False
     adapter = AgentOperationAdapter(session)

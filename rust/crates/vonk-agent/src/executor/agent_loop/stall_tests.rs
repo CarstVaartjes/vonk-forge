@@ -150,7 +150,8 @@ async fn a_progressing_order_outlives_its_window_and_a_stalled_one_ends() {
         )
         .await
         .unwrap()
-        .unwrap();
+        .unwrap()
+        .settled();
         assert_eq!(executor.cancelled.load(Ordering::SeqCst), !advancing);
         if !advancing {
             assert!(started.elapsed() < Duration::from_millis(2500));
@@ -260,7 +261,8 @@ async fn a_failed_progress_post_is_carried_by_the_next_heartbeat() {
         || Ok(()),
     )
     .await
-    .unwrap();
+    .unwrap()
+    .settled();
     let heartbeats = client.inner.heartbeats.lock().unwrap().clone();
     assert!(heartbeats.len() >= 2);
     let items = |index: usize| {

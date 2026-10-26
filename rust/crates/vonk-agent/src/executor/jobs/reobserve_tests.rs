@@ -523,7 +523,6 @@ impl Restarted {
         crate::executor::operation_observation::reobserve_operations(
             &mut self.store,
             &executor,
-            None,
             now,
         )
         .await
