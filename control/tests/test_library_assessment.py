@@ -201,6 +201,7 @@ def test_stale_capacity_is_unavailable_and_filter_cannot_report_empty_success(
     with sessions.begin() as session:
         for row in session.scalars(select(NodeInventorySnapshot)):
             row.observed_at = NOW - timedelta(hours=1)
+            row.received_at = NOW - timedelta(hours=1)
     with TestClient(app) as client:
         response = client.get("/api/recipe/library", params={"assess": True})
         assert response.status_code == 200, response.text

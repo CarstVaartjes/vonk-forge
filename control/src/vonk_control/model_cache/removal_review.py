@@ -225,11 +225,25 @@ class RemovalReviewMixin:
         available = [
             asset.available_bytes for asset in assets if asset.kind == "model-set"
         ]
-        return (
-            None
-            if any(value is None for value in available)
-            else sum(value for value in available if value is not None)
-        )
+        if any(value is None for value in available):
+            return None
+        # A file another cached set keeps stays on disk: it frees nothing.
+        deleted = set(scope.delete_objects)
+        kept = {
+            digest
+            for objects in dict(scope.memberships).values()
+            for digest in objects
+            if digest not in deleted
+        }
+        shared = 0
+        for digest in kept:
+            try:
+                shared += cache._object_path(digest).lstat().st_size
+            except FileNotFoundError:
+                continue
+            except OSError:
+                return None
+        return max(0, sum(value for value in available if value is not None) - shared)
 
     def _cancel_superseded_downloads(
         self,

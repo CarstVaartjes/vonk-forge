@@ -1068,8 +1068,7 @@ def test_gateway_dependency_recovers_after_prolonged_outage(tmp_path, http_statu
     """Catches a healthy relay staying unavailable despite recurring observations."""
     from datetime import UTC, datetime, timedelta
 
-    from fastapi import HTTPException
-    from vonk_control.capabilities import CapabilityRegistry
+    from vonk_control.capabilities import CapabilityRegistry, CapabilityUnavailableError
     from vonk_control.capability_contract import (
         CapabilityAvailability,
         ControllerCapability,
@@ -1105,9 +1104,8 @@ def test_gateway_dependency_recovers_after_prolonged_outage(tmp_path, http_statu
         capabilities.retry_due()
         unavailable = capabilities.statuses()[0]
         assert unavailable.availability == CapabilityAvailability.UNAVAILABLE
-        with pytest.raises(HTTPException) as error:
+        with pytest.raises(CapabilityUnavailableError):
             service.ensure_default(tmp_path / "client-key")
-        assert error.value.status_code == 503
         next_attempt = unavailable.next_attempt_at
         assert next_attempt is not None
         delay = (next_attempt - now).total_seconds()

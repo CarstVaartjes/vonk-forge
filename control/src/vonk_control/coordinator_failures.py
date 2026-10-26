@@ -22,7 +22,10 @@ from .failure_classification import disposition, error_code, error_detail
 from .logging import redact_text
 from .models import CoordinatorFailure
 from .operation_blockers import BlockingOperation, make_blocker
-from .persisted_waits import write_wait
+from .persisted_waits import read_wait, write_wait
+
+_RETRY_FIRST_SECONDS = 5
+_RETRY_CAP_SECONDS = 300
 
 
 class CoordinatorFailures:
@@ -54,14 +57,13 @@ class CoordinatorFailures:
                 self._write(row, failure, now)
                 return False
             if failure.source_content_sha256 != self._source_content_sha256:
+                # New executable content is new evidence: its backoff restarts.
+                session.delete(row)
                 return True
-            if row.next_action_at is not None and aware(row.next_action_at) > now:
-                return False
-            if failure.disposition in {Disposition.FAIL, Disposition.SECURITY}:
-                # Observe the resume condition, never execute the unchanged decision.
-                self._write(row, failure, now)
-                return False
-            return True
+            # Once due, run the source again. A cleared fault heals the lane; a
+            # persisting one fails again with a longer backoff, and a security
+            # refusal is re-decided by the real check, never assumed.
+            return row.next_action_at is None or aware(row.next_action_at) <= now
 
     def failed(self, source: str, error: Exception, verdict: Disposition) -> None:
         # The catch site supplies the one classifier's verdict; no prose classifier.
@@ -88,17 +90,23 @@ class CoordinatorFailures:
     ) -> None:
         definite = failure.disposition in {Disposition.FAIL, Disposition.SECURITY}
         reason = failure.reason
+        retry_in = float(_RETRY_FIRST_SECONDS)
+        previous = read_wait(row)
+        if definite and previous is not None and previous.reason == reason:
+            # Deterministic faults back off by how long the same fault has
+            # persisted (first_blocked_at survives while the cause is unchanged):
+            # 5 s doubling to the cap. No second counter.
+            persisted = (now - previous.first_blocked_at).total_seconds()
+            retry_in = min(_RETRY_CAP_SECONDS, max(retry_in, persisted))
         write_wait(
             row,
             identity=BlockingOperation(id=row.id, kind=WaitOwnerKind.COORDINATOR.value),
             kind=WaitOwnerKind.COORDINATOR,
             reason=reason,
             now=now,
-            next_check=now + timedelta(seconds=300 if definite else 5),
+            next_check=now + timedelta(seconds=retry_in),
             blockers=[make_blocker(reason, failure.detail)],
-            resume_condition=WaitResumeCondition.DEPENDENCY_CHANGED
-            if definite
-            else WaitResumeCondition.RETRY_DUE,
+            resume_condition=WaitResumeCondition.RETRY_DUE,
         )
 
     def succeeded(self, source: str) -> None:

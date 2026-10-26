@@ -97,7 +97,6 @@ from .references import FleetProfilePreview as FleetProfilePreview
 from .references import Job as Job
 from .references import Mapping as Mapping
 from .references import ModelCacheOperation as ModelCacheOperation
-from .references import ModelCacheSetArtifact as ModelCacheSetArtifact
 from .references import NodeInventorySnapshot as NodeInventorySnapshot
 from .references import RecipeRun as RecipeRun
 from .references import and_ as and_

@@ -220,6 +220,10 @@ def _collector(
     world.now = now or NOW
     _report_disk(world.sessions, free, at=world.now, unused_models=unused_models)
     options.setdefault("disk_usage", lambda _path: (TOTAL, free))
+    if options.get("image_cache_root") is not None:
+        options.setdefault(
+            "images", FilesystemRuntimeImageStorage(options["image_cache_root"])
+        )
     return UnusedStorageCollector(
         world.sessions,
         clock=lambda: world.now,
@@ -1908,6 +1912,47 @@ def test_receipt_no_recipe_needs_is_removed_when_disk_is_short_and_recent_ones_l
     result = _collector(world, image_cache_root=tmp_path, free=GIB, **exact).collect()
     assert not recent.exists()
     assert result.images == 1
+
+
+def test_an_unavailable_image_store_is_no_image_items_this_pass_then_heals(
+    world: Catalog, tmp_path: Path
+) -> None:
+    """Catches the guarded image store's unavailability escaping the sweep as a
+    failure that ends the storage lane on the first flap of the cache mount."""
+
+    from vonk_control.capabilities import CapabilityRegistry
+    from vonk_control.capability_contract import ControllerCapability
+
+    path = _receipt(tmp_path, AN_IMAGE)
+    now = [NOW]
+    registry = CapabilityRegistry(clock=lambda: now[0])
+    mounted = False
+
+    def build() -> FilesystemRuntimeImageStorage:
+        if not mounted:
+            raise OSError("image cache mount is stale")
+        return FilesystemRuntimeImageStorage(tmp_path)
+
+    images = registry.guard(
+        ControllerCapability.RUNTIME_IMAGE_STORAGE, FilesystemRuntimeImageStorage, build
+    )
+    exact = {"reserve_floor_bytes": 0, "reserve_fraction": 0.0}
+
+    def sweep():
+        return _collector(
+            world,
+            image_cache_root=tmp_path,
+            images=images,
+            free=100 * GIB - 1,
+            **exact,
+        ).collect()
+
+    assert sweep().images == 0  # returns, no raise; nothing is removed
+    assert path.exists()
+    mounted = True
+    now[0] += timedelta(seconds=120)  # the capability's own backoff has passed
+    assert sweep().images == 1  # the next pass drives the retry and sees images
+    assert not path.exists()
 
 
 def test_an_image_with_a_damaged_manifest_is_evictable_with_its_on_disk_size(

@@ -130,6 +130,7 @@ def _prepared_successor(tmp_path, *, change="runtime"):
     production = build_recipe_image_availability(
         sessions,
         artifact_root=tmp_path / "artifacts",
+        storage=FilesystemRuntimeImageStorage(tmp_path / "artifacts"),
         managed_catalog_sync=None,
         recipe_builds=builds,
         recipe_operations=NoBuild(),
@@ -455,6 +456,7 @@ def test_a_load_finds_the_build_whose_bytes_the_download_verified(tmp_path, loss
     production = build_recipe_image_availability(
         sessions,
         artifact_root=tmp_path / "artifacts",
+        storage=FilesystemRuntimeImageStorage(tmp_path / "artifacts"),
         managed_catalog_sync=None,
         recipe_builds=builds,
         recipe_operations=NoBuild(),
@@ -542,6 +544,7 @@ def test_a_load_binds_the_build_its_image_preparation_reuses(tmp_path):
     production = build_recipe_image_availability(
         sessions,
         artifact_root=tmp_path / "artifacts",
+        storage=FilesystemRuntimeImageStorage(tmp_path / "artifacts"),
         managed_catalog_sync=None,
         recipe_builds=builds,
         recipe_operations=NoBuild(),

@@ -56,14 +56,19 @@ def submit_model_download(cache: ModelCacheService, tmp_path: Path) -> None:
 
 
 def inventory(
-    sessions, node_id: str, now: datetime, objects: list[ModelStoreObject] | None
+    sessions,
+    node_id: str,
+    now: datetime,
+    objects: list[ModelStoreObject] | None,
+    *,
+    collected_before: timedelta = timedelta(0),
 ) -> None:
     InventoryRepository(sessions, clock=lambda: now).record(
         NodeInventoryReport.model_validate_json(
             canonical_message(
                 {
                     "node_id": node_id,
-                    "observed_at": now,
+                    "observed_at": now - collected_before,
                     "disk_total_bytes": 1000,
                     "disk_free_bytes": 900,
                     "host_memory_total_bytes": 1000,
@@ -164,6 +169,50 @@ def test_finished_recipe_model_eviction_is_exact_durable_and_waits_for_evidence(
             second,
         ]
         assert result.result is not None
+        submit_model_download(cache, tmp_path)
+    finally:
+        cache.close()
+
+
+def test_fleet_removal_confirms_from_a_report_a_slow_agent_clock_stamped_early(
+    postgres_engine, tmp_path: Path
+) -> None:
+    """Catches judging store evidence by the agent stamp: a Spark whose clock is
+    10 minutes slow (or whose report was collected that long before sending)
+    never looked "collected after acceptance", so removal waited for fresh
+    model-store evidence forever."""
+    Base.metadata.create_all(postgres_engine)
+    world = Catalog(postgres_engine)
+    slow = timedelta(minutes=10)
+    now = [datetime.now(UTC)]
+    cache = ModelCacheService(
+        world.sessions,
+        tmp_path / "nas",
+        reserve_bytes=0,
+        fixture_sources=True,
+        clock=lambda: now[0],
+    )
+    try:
+        selector, _model_digest, path = _prepare_removal_target(
+            cache, world.sessions, tmp_path, slug="slow-clock", data=b"slow weights"
+        )
+        obj = ModelStoreObject(sha256=path.name, bytes=path.stat().st_size)
+        inventory(world.sessions, NODE, now[0], [obj], collected_before=slow)
+        review = cache.review_fleet_model_removal(selector)
+        assert review.fleet is not None and review.fleet.nas_remove
+        accepted = cache.remove_fleet_model_selector(
+            selector,
+            actor="operator",
+            request_key=str(uuid4()),
+            review_digest=review.review_digest,
+        )
+        now[0] += timedelta(seconds=60)
+        inventory(world.sessions, NODE, now[0], [], collected_before=slow)
+        for _ in range(6):
+            cache.advance_removals()
+        result = cache.get_operation(accepted.id)
+        assert result.state == LifecycleState.SUCCEEDED, result.last_error
+        assert not path.exists()
         submit_model_download(cache, tmp_path)
     finally:
         cache.close()

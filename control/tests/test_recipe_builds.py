@@ -594,6 +594,7 @@ def test_nonforced_availability_dispatch_reuses_build_resolved_after_queue(
     production = build_recipe_image_availability(
         sessions,
         artifact_root=artifact_root,
+        storage=FilesystemRuntimeImageStorage(artifact_root),
         managed_catalog_sync=None,
         recipe_builds=delayed,
         recipe_operations=Operations(),
@@ -708,6 +709,7 @@ def test_present_archive_with_damaged_receipt_is_reprepared_not_rebuilt(
     production = build_recipe_image_availability(
         sessions,
         artifact_root=artifact_root,
+        storage=FilesystemRuntimeImageStorage(artifact_root),
         managed_catalog_sync=None,
         recipe_builds=builds,
         recipe_operations=Operations(),
@@ -845,6 +847,7 @@ def test_legacy_unreadable_build_receipt_is_replaced_from_verified_bytes(
     production = build_recipe_image_availability(
         sessions,
         artifact_root=artifact_root,
+        storage=FilesystemRuntimeImageStorage(artifact_root),
         managed_catalog_sync=None,
         recipe_builds=builds,
         recipe_operations=Operations(),
@@ -1957,6 +1960,7 @@ def test_forced_image_build_resumes_after_worker_restart(
         return build_recipe_image_availability(
             sessions,
             artifact_root=tmp_path / "artifacts",
+            storage=FilesystemRuntimeImageStorage(tmp_path / "artifacts"),
             managed_catalog_sync=None,
             recipe_builds=builds,
             recipe_operations=operations,
@@ -2496,6 +2500,7 @@ def test_source_read_fault_keeps_exact_parent_and_resumes_one_build(
         return build_recipe_image_availability(
             sessions,
             artifact_root=tmp_path / "artifacts",
+            storage=FilesystemRuntimeImageStorage(tmp_path / "artifacts"),
             managed_catalog_sync=None,
             recipe_builds=builds,
             recipe_operations=operations,

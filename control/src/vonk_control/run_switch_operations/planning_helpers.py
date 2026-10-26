@@ -329,7 +329,11 @@ def _latest_inventory(
     observed = snapshot.observed_at
     if observed.tzinfo is None or observed.utcoffset() is None:
         observed = observed.replace(tzinfo=UTC)
-    age = max(0.0, (now - observed.astimezone(UTC)).total_seconds())
+    received = snapshot.received_at
+    if received.tzinfo is None or received.utcoffset() is None:
+        received = received.replace(tzinfo=UTC)
+    # Freshness is the Controller's receive time; the agent stamp only orders.
+    age = max(0.0, (now - received.astimezone(UTC)).total_seconds())
     fresh = age <= maximum_age_seconds
     return snapshot, FreshnessEvidence(
         source=f"spark:{node_id}:inventory",

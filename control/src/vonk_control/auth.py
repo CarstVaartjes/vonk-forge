@@ -244,17 +244,13 @@ class TrustedProxyAgentIdentityMiddleware:
         if callable(proxy_auth):
             # Ordinary admin reads do not depend on the agent ingress secret.
             if supplied_proxy_auth:
-                from fastapi import HTTPException
-
-                from .capability_contract import CapabilityUnavailableReply
+                from .capabilities import CapabilityUnavailableError
 
                 try:
                     proxy_auth = await asyncio.to_thread(proxy_auth)
-                except HTTPException as error:
-                    if not isinstance(error.detail, CapabilityUnavailableReply):
-                        raise
+                except CapabilityUnavailableError as error:
                     response = Response(
-                        error.detail.model_dump_json(),
+                        error.reply.model_dump_json(),
                         status_code=503,
                         media_type="application/json",
                     )

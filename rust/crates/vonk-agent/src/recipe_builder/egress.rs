@@ -8,6 +8,14 @@ pub(super) enum BuildNetwork {
     Public,
 }
 
+/// Task limit of the egress proxy container. Bound: 1 serve thread + at most
+/// `MAX_CONNECTIONS` (vonk-build-egress/src/main.rs) concurrent connections, each
+/// using a handler thread, a tunnel thread, a resolver child and a reaper
+/// thread = 1 + 64 x 4 = 257 tasks. Round up to 320 for the container's own
+/// conmon/init tasks. A lower limit makes thread creation fail under a load
+/// of parallel CONNECT tunnels (uv opens about 50).
+const PROXY_PIDS_LIMIT: u32 = 320;
+
 /// An empty host list builds offline; otherwise the build reaches only the
 /// listed public hosts.
 pub(super) fn build_network(network: &vonk_agent_protocol::RecipeBuildNetwork) -> BuildNetwork {
@@ -131,7 +139,7 @@ impl<'a, R: ProcessRunner + ?Sized> BuildEgress<'a, R> {
             "--read-only".to_owned(),
             "--cap-drop=all".to_owned(),
             "--security-opt=no-new-privileges".to_owned(),
-            "--pids-limit=96".to_owned(),
+            format!("--pids-limit={PROXY_PIDS_LIMIT}"),
             "--memory=134217728b".to_owned(),
             "--cpus=1".to_owned(),
             "--user=65532:65532".to_owned(),
@@ -473,6 +481,22 @@ pub(super) fn write_proxy_rootfs(
 
 #[cfg(test)]
 mod tests {
+    /// The proxy's connection bound, read from its own source: one owner.
+    fn proxy_max_connections() -> usize {
+        include_str!("../../../vonk-build-egress/src/main.rs")
+            .lines()
+            .find_map(|line| line.strip_prefix("const MAX_CONNECTIONS: usize = "))
+            .and_then(|value| value.trim_end_matches(';').parse().ok())
+            .expect("the proxy declares MAX_CONNECTIONS")
+    }
+
+    #[test]
+    fn the_proxy_task_limit_covers_its_connection_bound() {
+        // Wrong implementation: a task limit below what MAX_CONNECTIONS
+        // connections need (1 serve + 4 tasks each), so load kills the proxy.
+        let needed = 1 + 4 * proxy_max_connections();
+        assert!(super::PROXY_PIDS_LIMIT as usize >= needed);
+    }
 
     #[test]
     #[ignore = "requires an isolated Linux systemd host, agent user and installed egress helper"]
@@ -548,6 +572,60 @@ mod tests {
             reachable.success,
             "the outbound canary must be reachable outside the build: {reachable:?}"
         );
+        // The platform proxy's own connection bound, held at once the way a
+        // parallel `uv pip install` does: the proxy must neither run out of
+        // tasks and die (panic = abort) nor stop admitting afterwards.
+        let hold = |count: usize| {
+            boundary
+                .run(
+                    &[
+                        "unshare".to_owned(),
+                        "--rootless-netns".to_owned(),
+                        probe.to_owned(),
+                        "--hold-tunnels".to_owned(),
+                        outbound.clone(),
+                        count.to_string(),
+                        "pypi.org:443".to_owned(),
+                    ],
+                    Duration::from_secs(45),
+                )
+                .unwrap()
+        };
+        let held = hold(proxy_max_connections());
+        assert!(
+            held.success,
+            "{} parallel tunnels: {}\n{}",
+            proxy_max_connections(),
+            String::from_utf8_lossy(&held.stdout),
+            String::from_utf8_lossy(&held.stderr)
+        );
+        let survived = runner
+            .run(
+                Program::Systemctl,
+                &["--user".to_owned(), "is-active".to_owned(), unit.clone()],
+                Duration::from_secs(10),
+            )
+            .unwrap();
+        assert!(
+            survived.success,
+            "parallel tunnels at the connection bound killed the proxy"
+        );
+        // The closed tunnels release their slots as the proxy sees the
+        // disconnects; admission must return within a bound.
+        let admission_deadline = Instant::now() + Duration::from_secs(15);
+        loop {
+            let admitted = hold(1);
+            if admitted.success {
+                break;
+            }
+            assert!(
+                Instant::now() < admission_deadline,
+                "no fresh tunnel after the load: {}\n{}",
+                String::from_utf8_lossy(&admitted.stdout),
+                String::from_utf8_lossy(&admitted.stderr)
+            );
+            std::thread::sleep(Duration::from_millis(500));
+        }
         let context = staging.path().join("context");
         fs::create_dir(&context).unwrap();
         fs::copy(probe, context.join("probe")).unwrap();

@@ -54,7 +54,6 @@ from ..fleet_model_removal_contract import (
 from ..fleet_model_removal_contract import (
     FleetRemovalReason as R,
 )
-from ..inventory_repository import MAX_INVENTORY_FUTURE_SKEW
 from ..lifecycle.evidence import (
     BookkeepingReason,
     Residue,
@@ -323,9 +322,7 @@ class FleetRemovalMixin:
             available = (
                 snapshot is not None
                 and snapshot.model_objects is not None
-                and cache._clock() - INVENTORY_MAX_AGE
-                <= aware(snapshot.observed_at)
-                <= cache._clock() + MAX_INVENTORY_FUTURE_SKEW
+                and aware(snapshot.received_at) >= cache._clock() - INVENTORY_MAX_AGE
             )
             snapshot_objects = None if snapshot is None else snapshot.model_objects
             objects = (
@@ -799,9 +796,8 @@ class FleetRemovalMixin:
                     if (
                         snapshot is None
                         or snapshot.model_objects is None
-                        or aware(snapshot.observed_at)
-                        <= accepted_at + MAX_INVENTORY_FUTURE_SKEW
-                        or aware(snapshot.observed_at) < now - INVENTORY_MAX_AGE
+                        or aware(snapshot.received_at) <= accepted_at
+                        or aware(snapshot.received_at) < now - INVENTORY_MAX_AGE
                     ):
                         pending = f"Waiting for fresh model-store evidence from Spark {target.node_id}; next inventory resumes removal."
                         continue

@@ -1,10 +1,9 @@
-"""Release superseded model sets through the existing fenced collector."""
+"""Observe cached model sets and adopt their catalog bindings."""
 
 from __future__ import annotations
 
 import random
 import stat
-import uuid
 from collections import defaultdict
 from dataclasses import replace
 from datetime import datetime, timedelta
@@ -16,7 +15,6 @@ from vonk_agent_protocol import Disposition, LifecycleState
 from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
 
 from ..admission_locking import AdmissionLockBusy, AdmissionRowLock, lock_admission_rows
-from ..artifact_lifecycle import ArtifactReferenceUnsettled, ArtifactReferenceUnverified
 from ..artifact_reference_scan import model_set_reference_reasons
 from ..catalog_queries import active_head_revision
 from ..failure_classification import disposition, wait_reason
@@ -39,10 +37,6 @@ if TYPE_CHECKING:
     from .service import ModelCacheService
 
 _REVISION_SCAN_INTERVAL = timedelta(seconds=30)
-
-
-class _RevisionChanged(Exception):
-    """Re-plan on the next worker pass; no removal was accepted."""
 
 
 #: Each set's row and stored manifest (None: damaged and not re-derived), by digest.
@@ -375,132 +369,17 @@ class RevisionsMixin:
         return adopted
 
     def reconcile_model_revisions(self) -> None:
-        """Reconsider retained owners every 30 seconds, including after restart.
-
-        No in-use set gets fenced. Acceptance rechecks the exact successor and
-        owners under the normal set/object gates; conflicts get a fresh plan.
-        The existing removal worker owns bounded, crash-safe byte collection.
-        """
+        """Re-observe and adopt cached model sets every 30 seconds, including
+        after restart. Model files are never released here: they stay until
+        space is short and the unused-storage collector evicts them (LRU)."""
         cache = cast("ModelCacheService", self)
         now = cache._clock()
         if cache._revision_scan_at is not None and now < cache._revision_scan_at:
             return
         cache._revision_scan_at = now + _REVISION_SCAN_INTERVAL
         stored = cache._stored_sets()
-        published = cache._reconcile_verified_models(stored)
-        if cache._adopt_current_model_bindings(stored) or published:
-            stored = cache._stored_sets()  # Read the bindings just published.
-        with cache._session() as session:
-            sets, _bindings = cache._model_revision_sets(session, stored)
-        newest: dict[
-            tuple[str, str], tuple[CatalogDocumentRevision, ModelCacheSet]
-        ] = {}
-        by_set: dict[str, list[CatalogDocumentRevision]] = defaultdict(list)
-        ready_sets: dict[str, bool] = {}
-        for revision, row, manifest in sets:
-            by_set[row.artifact_set_sha256].append(revision)
-            lineage = (revision.publisher, revision.slug)
-            if lineage not in newest and row.state == ModelCacheSetState.CACHED:
-                ready = ready_sets.get(row.artifact_set_sha256)
-                if ready is None:
-                    ready = cache._manifest_coverage_complete(manifest)
-                    ready_sets[row.artifact_set_sha256] = ready
-                if ready:
-                    newest[lineage] = (revision, row)
-        candidates: dict[str, set[str]] = {}
-        for old_set, revisions in by_set.items():
-            replacements: set[str] = set()
-            for revision in revisions:
-                successor = newest.get((revision.publisher, revision.slug))
-                if (
-                    successor is None
-                    or successor[0].content_digest == revision.content_digest
-                    or successor[0].revision_number <= revision.revision_number
-                ):
-                    break  # This physical set still owns a current model revision.
-                replacements.add(successor[1].artifact_set_sha256)
-            else:
-                candidates[old_set] = replacements
-        if not candidates:
-            return
-        try:
-            with cache._session() as session:
-                owners = model_set_reference_reasons(session, tuple(candidates))
-                candidates = {
-                    digest: replacements
-                    for digest, replacements in candidates.items()
-                    if not owners[digest]
-                }
-                scope = cache._model_removal_scope_for_sets(session, tuple(candidates))
-        except (
-            ArtifactReferenceUnsettled,
-            ArtifactReferenceUnverified,
-            ModelCacheConflictUnknown,
-        ):
-            return  # Snapshot changed: the next pass derives a fresh exact scope.
-        # Connect only sets sharing objects that will have no remaining owner.
-        # Shared objects still held by a current/in-use set do not join unrelated
-        # cleanup work. One accepted scope then owns every obsolete shared byte.
-        components = {digest: {digest} for digest in candidates}
-        reclaimable = set(scope.delete_objects)
-        object_owners: dict[str, set[str]] = defaultdict(set)
-        for digest, objects in scope.memberships:
-            for object_digest in objects:
-                if object_digest in reclaimable:
-                    object_owners[object_digest].add(digest)
-        for sharing in object_owners.values():
-            joined = set().union(*(components[digest] for digest in sharing))
-            for digest in joined:
-                components[digest] = joined
-        for selected in {frozenset(group) for group in components.values()}:
-            replacements = set().union(*(candidates[digest] for digest in selected))
-            cache._release_model_revision(selected, replacements)
-
-    def _release_model_revision(
-        self, selected_sets: frozenset[str], replacements: set[str]
-    ) -> None:
-        cache = cast("ModelCacheService", self)
-
-        def verify(session: Session, selected: tuple[str, ...]) -> None:
-            for new_set in replacements:
-                latest = session.get(ModelCacheSet, new_set)
-                if latest is None or latest.state != ModelCacheSetState.CACHED:
-                    raise _RevisionChanged
-            if any(model_set_reference_reasons(session, selected).values()):
-                raise _RevisionChanged
-
-        try:
-            with cache._lock, cache._session(write=True) as session:
-                cache._accept_model_removal(
-                    session,
-                    actor="model-revision-retention",
-                    request_key=str(uuid.uuid4()),
-                    selector=min(selected_sets),
-                    model_content_sha256=None,
-                    selected_sets=tuple(sorted(selected_sets)),
-                    verify=verify,
-                )
-        except _RevisionChanged:
-            return  # retained owners are explained by model_storage
-        except (
-            ModelCacheConflictUnknown,
-            ArtifactReferenceUnsettled,
-            ArtifactReferenceUnverified,
-        ) as error:
-            # Another owner or removal won. Release all gates and re-plan
-            # from current sets on the next bounded scan, never spin.
-            log_event(
-                _LOGGER,
-                "model_cache.revision_recheck",
-                service="control-worker",
-                set_digests=sorted(selected_sets),
-                code=error.code,
-                detail=error.detail,
-                next_attempt_at=cache._revision_scan_at.isoformat()
-                if cache._revision_scan_at is not None
-                else None,
-            )
-            return
+        cache._reconcile_verified_models(stored)
+        cache._adopt_current_model_bindings(stored)
 
     def model_storage(self) -> dict[str, ModelCacheUsage]:
         """Observe storage outside request handling for the disposable Library index."""
