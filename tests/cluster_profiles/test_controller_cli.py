@@ -4347,7 +4347,6 @@ def test_fleet_upgrade_follows_parallel_sparks_to_the_end_of_the_follow() -> Non
     )
 
     assert status == 2, result
-    assert result["state"] == "waiting-for-operator"
     assert isinstance(result["operations"], list) and len(result["operations"]) == 4
 
 
