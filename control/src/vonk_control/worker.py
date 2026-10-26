@@ -381,7 +381,7 @@ class Worker:
             except Exception as error:  # noqa: BLE001 - isolate one owner, report its fault
                 # A source that keeps failing must not starve the others: the
                 # failure stays visible, the turn moves on, and the failed
-                # source is retried on a later pass.
+                # source is retried once its backoff passes (ready()).
                 self._failures.failed(name, error, disposition(error))
                 log_event(
                     _LOGGER,

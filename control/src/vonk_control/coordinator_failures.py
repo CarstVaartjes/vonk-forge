@@ -24,6 +24,9 @@ from .models import CoordinatorFailure
 from .operation_blockers import BlockingOperation, make_blocker
 from .persisted_waits import write_wait
 
+_RETRY_FIRST_SECONDS = 5
+_RETRY_CAP_SECONDS = 300
+
 
 class CoordinatorFailures:
     def __init__(
@@ -55,25 +58,30 @@ class CoordinatorFailures:
                 return False
             if failure.source_content_sha256 != self._source_content_sha256:
                 return True
-            if row.next_action_at is not None and aware(row.next_action_at) > now:
-                return False
-            if failure.disposition in {Disposition.FAIL, Disposition.SECURITY}:
-                # Observe the resume condition, never execute the unchanged decision.
-                self._write(row, failure, now)
-                return False
-            return True
+            # Once due, run the source again. A cleared fault heals the lane; a
+            # persisting one fails again with a longer backoff, and a security
+            # refusal is re-decided by the real check, never assumed.
+            return row.next_action_at is None or aware(row.next_action_at) <= now
 
     def failed(self, source: str, error: Exception, verdict: Disposition) -> None:
         # The catch site supplies the one classifier's verdict; no prose classifier.
         assert verdict == disposition(error)
-        failure = CoordinatorFailureEvidence(
-            source_content_sha256=self._source_content_sha256,
-            disposition=verdict,
-            reason=_reason(error, verdict),
-            detail=redact_text(error_detail(error)),
-        )
         with self._sessions.begin() as session:
             row = session.get(CoordinatorFailure, source)
+            previous = row.failure if row is not None else None
+            attempts = (
+                previous.attempts + 1
+                if isinstance(previous, CoordinatorFailureEvidence)
+                and previous.source_content_sha256 == self._source_content_sha256
+                else 1
+            )
+            failure = CoordinatorFailureEvidence(
+                source_content_sha256=self._source_content_sha256,
+                disposition=verdict,
+                reason=_reason(error, verdict),
+                detail=redact_text(error_detail(error)),
+                attempts=attempts,
+            )
             if row is None:
                 row = CoordinatorFailure(id=source, failure=failure)
                 session.add(row)
@@ -94,7 +102,7 @@ class CoordinatorFailures:
             kind=WaitOwnerKind.COORDINATOR,
             reason=reason,
             now=now,
-            next_check=now + timedelta(seconds=300 if definite else 5),
+            next_check=now + timedelta(seconds=_backoff_seconds(failure, definite)),
             blockers=[make_blocker(reason, failure.detail)],
             resume_condition=WaitResumeCondition.DEPENDENCY_CHANGED
             if definite
@@ -106,6 +114,14 @@ class CoordinatorFailures:
             row = session.get(CoordinatorFailure, source)
             if row is not None:
                 session.delete(row)
+
+
+def _backoff_seconds(failure: CoordinatorFailureEvidence, definite: bool) -> int:
+    if not definite:
+        return _RETRY_FIRST_SECONDS
+    return min(
+        _RETRY_CAP_SECONDS, _RETRY_FIRST_SECONDS * 2 ** min(failure.attempts - 1, 6)
+    )
 
 
 def _reason(error: Exception, verdict: Disposition) -> OperationReason:
