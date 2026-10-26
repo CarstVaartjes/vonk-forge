@@ -90,28 +90,24 @@ class CoordinatorFailures:
     ) -> None:
         definite = failure.disposition in {Disposition.FAIL, Disposition.SECURITY}
         reason = failure.reason
+        retry_in = float(_RETRY_FIRST_SECONDS)
+        previous = read_wait(row)
+        if definite and previous is not None and previous.reason == reason:
+            # Deterministic faults back off by how long the same fault has
+            # persisted (first_blocked_at survives while the cause is unchanged):
+            # 5 s doubling to the cap. No second counter.
+            persisted = (now - previous.first_blocked_at).total_seconds()
+            retry_in = min(_RETRY_CAP_SECONDS, max(retry_in, persisted))
         write_wait(
             row,
             identity=BlockingOperation(id=row.id, kind=WaitOwnerKind.COORDINATOR.value),
             kind=WaitOwnerKind.COORDINATOR,
             reason=reason,
             now=now,
-            next_check=now + timedelta(seconds=_RETRY_FIRST_SECONDS),
+            next_check=now + timedelta(seconds=retry_in),
             blockers=[make_blocker(reason, failure.detail)],
             resume_condition=WaitResumeCondition.RETRY_DUE,
         )
-        if definite:
-            # Deterministic faults back off by how long the fault has persisted
-            # (first_blocked_at survives while the cause is unchanged): 5 s,
-            # doubling to the cap. No second counter.
-            wait = read_wait(row)
-            if wait is not None:
-                persisted = (now - wait.first_blocked_at).total_seconds()
-                row.next_action_at = now + timedelta(
-                    seconds=min(
-                        _RETRY_CAP_SECONDS, max(_RETRY_FIRST_SECONDS, persisted)
-                    )
-                )
 
     def succeeded(self, source: str) -> None:
         with self._sessions.begin() as session:
