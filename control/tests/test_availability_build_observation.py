@@ -468,6 +468,7 @@ def test_deterministic_build_failure_ends_preparation_without_hammering(
             assert snapshot is not None
             snapshot.observed_at = clock[0]
             snapshot.received_at = clock[0]
+            snapshot.received_at = clock[0]
         # A new explicit request after repair is not poisoned by the old failure.
         fresh = service.start(
             revision.id, actor="operator", request_id=str(uuid.uuid4())
