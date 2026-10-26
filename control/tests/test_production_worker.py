@@ -392,25 +392,36 @@ def test_unusable_image_cache_root_leaves_the_other_lanes_running_and_heals(
     stamp = (now[0] - timedelta(days=3)).timestamp()
     os.utime(receipt, (stamp, stamp))
 
-    def storage_status():
-        # Observation only: the storage collector's own tick drives recovery.
+    def statuses():
+        # Observation only: the worker's own ticks drive recovery.
         worker.run_once()
-        return next(
-            status
+        return {
+            status.capability: status
             for status in registry.statuses()
-            if status.capability == ControllerCapability.RUNTIME_IMAGE_STORAGE
-        )
+            if status.capability
+            in {
+                ControllerCapability.RUNTIME_IMAGE_STORAGE,
+                ControllerCapability.IMAGE_COLLECTION,
+            }
+        }
 
     first = jobs.enqueue("healthy", "admin", "abc", [], {})
     worker.run_once()
     assert jobs.get(first.id).result == {"done": True}
-    status = storage_status()
-    assert status.availability == CapabilityAvailability.UNAVAILABLE
-    assert status.reason == CapabilityReason.STORAGE_UNAVAILABLE
+    unavailable = statuses()
+    assert set(unavailable) == {
+        ControllerCapability.RUNTIME_IMAGE_STORAGE,
+        ControllerCapability.IMAGE_COLLECTION,
+    }
+    for status in unavailable.values():
+        assert status.availability == CapabilityAvailability.UNAVAILABLE
+        assert status.reason == CapabilityReason.STORAGE_UNAVAILABLE
 
     faulty = False
     now[0] += timedelta(seconds=120)
-    assert storage_status().availability == CapabilityAvailability.AVAILABLE
+    assert {status.availability for status in statuses().values()} == {
+        CapabilityAvailability.AVAILABLE
+    }
     fresh = jobs.enqueue("healthy", "admin", "abc", [], {})
     worker.run_once()
     assert jobs.get(fresh.id).result == {"done": True}

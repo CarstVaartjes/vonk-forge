@@ -1001,7 +1001,6 @@ def catalog_sync_failure_reason(error: Exception) -> str:
             status = f"SQLSTATE {sqlstate}; "
     if isinstance(error, CapabilityUnavailableError):
         reply = error.reply
-        code = reply.reason
         detail = f"capability={reply.capability}; retryable={reply.retryable}"
     if isinstance(error, HTTPException):
         status = f"HTTP {error.status_code}; "

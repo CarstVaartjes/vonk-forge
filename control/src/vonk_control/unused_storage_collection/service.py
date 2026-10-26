@@ -104,6 +104,8 @@ class UnusedStorageCollector:
         cooldown: timedelta = timedelta(seconds=STORAGE_INEFFECTIVE_COOLDOWN_SECONDS),
     ) -> None:
 
+        if (images is None) != (image_cache_root is None):
+            raise ValueError("image_cache_root and images are given together")
         self._sessions = sessions
         self._clock = clock
         self._lifecycle = lifecycle

@@ -36,6 +36,8 @@ class CapabilityUnavailableError(Exception):
     def __init__(self, reply: CapabilityUnavailableReply) -> None:
         super().__init__(f"{reply.capability} unavailable: {reply.reason}")
         self.reply = reply
+        #: The typed reason, so waits and refusal counts carry it.
+        self.code = reply.reason
 
 
 class CapabilityConfigurationError(ValueError):

@@ -26,11 +26,10 @@ from ..artifact_reference_scan import (
     runtime_image_reference_findings,
 )
 from ..capabilities import CapabilityUnavailableError
-from ..logging import log_event
 from ..models import AgentNode, ModelCacheSet, RecipeRun
 from ..oci_image_store import DAMAGED_MANIFEST_CODES, OciImageStoreError
 from ..runtime_image_preparation import RuntimeImagePreparationError
-from .common import _LOGGER, _RECEIPT_SUFFIX, ACTOR, _Kept, _Stopping
+from .common import _RECEIPT_SUFFIX, ACTOR, _Kept, _Stopping
 from .evidence import _Evidence, _Item
 from .references import _image_kept, _installation_kept, _model_kept, _mtime, _utc
 
@@ -143,14 +142,8 @@ def _image_items(
         )
     except CapabilityUnavailableError as error:
         # The image store is a guarded capability: while it is unavailable
-        # there are no image items this pass; its own backoff retries it.
-        log_event(
-            _LOGGER,
-            "unused_storage.image_store_unavailable",
-            service="control-worker",
-            capability=error.reply.capability,
-            reason=error.reply.reason,
-        )
+        # there are no image items this pass, and the outcome names why.
+        kept[f"image receipt: store unavailable ({error.code})"] += 1
         return []
 
 
