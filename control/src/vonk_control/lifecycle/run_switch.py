@@ -166,30 +166,47 @@ def set_member_state(
     entry.state = state
 
 
-def _end_unclaimed_children(
-    job: Job, progress: RunSwitchOperationResult | None, now: datetime
-) -> None:
+def end_unclaimed_children(
+    session: Session, progress: RunSwitchOperationResult, now: datetime
+) -> bool:
     """End the idempotent work an ended run-switch issued that no Spark claimed.
 
     Its pending runtime probes, and a queued or parked transfer child: neither
     has an effect to undo (copied bytes stay for reuse), and left queued it
-    would run for nobody. Any other child, or a claimed one, reports its own end.
+    would run for nobody. Any other child, or a claimed one, reports its own
+    end. Returns whether such work is still queued (another writer held it):
+    the caller offers it again on its next check.
     """
-    # agent_jobs builds on the lifecycle core; import its writer at use.
+    # agent_jobs builds on the lifecycle core; import its writers at use.
+    from .. import agent_operation_states
     from ..agent_jobs import abandon_idempotent_job_in_session
+    from ..agent_jobs.contracts import _ABANDONABLE_OPERATIONS
 
-    session = object_session(job)
-    if session is None or progress is None:
-        return
+    children = (
+        list(progress.preflight.pending_jobs.values()) if progress.preflight else []
+    )
     if progress.preflight is not None:
         end_unclaimed_probes(session, progress.preflight, now)
     if progress.child_operation_id is not None:
+        children.append(progress.child_operation_id)
         abandon_idempotent_job_in_session(
             session,
             progress.child_operation_id,
             now,
             reason=WaitReason.SCOPE_CHANGED.value,
         )
+    return bool(children) and (
+        session.scalar(
+            select(StoredOperation.id)
+            .where(
+                StoredOperation.parent_job_id.in_(children),
+                StoredOperation.kind.in_(_ABANDONABLE_OPERATIONS),
+                StoredOperation.state.in_(agent_operation_states.QUEUED_OR_PARKED),
+            )
+            .limit(1)
+        )
+        is not None
+    )
 
 
 class RunSwitchAdapter:
@@ -478,7 +495,9 @@ class RunSwitchAdapter:
         )
         job.state = state
         if after.state in (State.CANCELLED, State.FAILED):
-            _end_unclaimed_children(job, progress, now)
+            session = object_session(job)
+            if session is not None and progress is not None:
+                end_unclaimed_children(session, progress, now)
             # Terminal request result is final; the exact accepted Start may
             # still need its cancellation handoff after a lost worker response.
             schedule_wait(
