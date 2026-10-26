@@ -108,18 +108,18 @@ fn serve(hosts: Arc<BTreeSet<String>>) -> io::Result<()> {
         // with a closure that never started, releases the slot exactly once.
         let guard = ConnectionGuard(Arc::clone(&active));
         let hosts = Arc::clone(&hosts);
-        let refusal = stream.try_clone().ok();
-        if thread::Builder::new()
-            .spawn(move || {
-                let _guard = guard;
-                let _ = handle(stream, &hosts);
-            })
-            .is_err()
-            && let Some(refusal) = refusal
-        {
+        let refusal = stream.try_clone();
+        let spawned = thread::Builder::new().spawn(move || {
+            let _guard = guard;
+            let _ = handle(stream, &hosts);
+        });
+        if let Err(error) = spawned {
             // The host cannot give this connection a thread right now: say so
             // and keep serving; the client retries.
-            reject(refusal, 503);
+            eprintln!("vonk-build-egress: no thread for a connection ({error})");
+            if let Ok(refusal) = refusal {
+                reject(refusal, 503);
+            }
         }
     }
     Ok(())
