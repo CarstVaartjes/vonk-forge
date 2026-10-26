@@ -30,11 +30,25 @@ pub fn runs_off_lane(operation: &AgentOperation) -> bool {
 /// An [`OffLane`](LaneStep::OffLane) claim is already in custody: dropping it
 /// leaves the order to the observation pass and the Controller's lease.
 #[derive(Debug)]
+#[must_use = "an off-lane claim is begun in custody; execute it beside the lane"]
 pub enum LaneStep {
     /// Nothing claimed, or the claim ran to its delivered result on the lane.
     Settled,
     /// A claim begun in custody that runs beside the lane.
     OffLane(Box<OffLaneClaim>),
+}
+
+impl LaneStep {
+    /// Assert this pass settled on the lane (no claim was handed off).
+    #[cfg(test)]
+    pub(crate) fn settled(self) {
+        if let Self::OffLane(claim) = self {
+            panic!(
+                "claim {} runs beside the lane and was not executed",
+                claim.fence()
+            );
+        }
+    }
 }
 
 /// A claim the lane began in custody and handed off. It is executing from
@@ -44,15 +58,26 @@ pub struct OffLaneClaim {
     claim: AgentClaim,
     schedule: HeartbeatSchedule,
     _executing: Executing,
+    _build: Option<BuildBeside>,
 }
 
 impl OffLaneClaim {
     pub(super) fn new(state: &StateStore, claim: AgentClaim, schedule: HeartbeatSchedule) -> Self {
         let executing = Executing::hold(state, claim.fence);
+        let build = match &claim.payload {
+            vonk_agent_protocol::generated::AgentClaimPayload::RecipeBuildRequest(request) => {
+                Some(BuildBeside::hold(
+                    state.journal().parent().unwrap_or(state.journal()),
+                    request.build_id,
+                ))
+            }
+            _ => None,
+        };
         Self {
             claim,
             schedule,
             _executing: executing,
+            _build: build,
         }
     }
 
@@ -167,6 +192,44 @@ impl Drop for Executing {
 
 fn executing() -> std::sync::MutexGuard<'static, BTreeSet<(PathBuf, uuid::Uuid)>> {
     EXECUTING
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// Builds this process runs beside the lane, by agent data root and build
+/// identity. Store retention keeps their staging and the base images they may
+/// open: from the claim on, before their units start or their locks are taken.
+static BUILDS_BESIDE: Mutex<BTreeSet<(PathBuf, uuid::Uuid)>> = Mutex::new(BTreeSet::new());
+
+/// The build identities running beside the lane over `data_root`.
+pub fn builds_beside(data_root: &std::path::Path) -> BTreeSet<uuid::Uuid> {
+    builds()
+        .iter()
+        .filter(|(root, _)| root == data_root)
+        .map(|(_, build_id)| *build_id)
+        .collect()
+}
+
+/// Holds one build in [`BUILDS_BESIDE`] while its claim executes.
+#[derive(Debug)]
+pub(crate) struct BuildBeside((PathBuf, uuid::Uuid));
+
+impl BuildBeside {
+    pub(crate) fn hold(data_root: &std::path::Path, build_id: uuid::Uuid) -> Self {
+        let key = (data_root.to_path_buf(), build_id);
+        builds().insert(key.clone());
+        Self(key)
+    }
+}
+
+impl Drop for BuildBeside {
+    fn drop(&mut self) {
+        builds().remove(&self.0);
+    }
+}
+
+fn builds() -> std::sync::MutexGuard<'static, BTreeSet<(PathBuf, uuid::Uuid)>> {
+    BUILDS_BESIDE
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
 }

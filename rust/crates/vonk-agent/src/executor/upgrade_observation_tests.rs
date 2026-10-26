@@ -251,7 +251,8 @@ async fn upgrade_process_death_at_every_custody_seam_reobserves_without_installi
         let mut store = StateStore::open_recovered(&root.join("state.sqlite"), NODE_ID).unwrap();
         run_once(&client, &mut store, &executor, None, 0, None)
             .await
-            .unwrap();
+            .unwrap()
+            .settled();
         if point == 0 {
             assert!(
                 client.results.lock().unwrap().is_empty(),
@@ -265,7 +266,8 @@ async fn upgrade_process_death_at_every_custody_seam_reobserves_without_installi
             publish(root, &receipt(&accepted, Phase::Acknowledged));
             run_once(&client, &mut store, &executor, None, 0, None)
                 .await
-                .unwrap();
+                .unwrap()
+                .settled();
         }
         assert!(
             client.heartbeats.lock().unwrap().is_empty(),

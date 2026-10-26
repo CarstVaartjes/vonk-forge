@@ -188,7 +188,8 @@ async fn a_probe_is_claimed_and_delivered_while_a_build_compiles_beside_the_lane
         // A pass of the lane never probes or settles the executing build.
         run_once_with_heartbeat_interval(&client, &mut state, &executor, policy(), || Ok(()))
             .await
-            .unwrap();
+            .unwrap()
+            .settled();
         assert!(delivered(&client, build.fence).is_none());
         executor.release.notify_one();
     });

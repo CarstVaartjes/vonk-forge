@@ -32,6 +32,7 @@ from ..own_cleanup import CLEANUP_KINDS
 from .contracts import (
     _WORKLOAD_INTENT_OPERATIONS,
     OFF_LANE_OPERATIONS,
+    ClaimOrder,
     mutations_conflict,
 )
 from .evidence import (
@@ -265,11 +266,20 @@ def _first_claimable_id(session: Session, node_id: str, now: datetime) -> str | 
     ]
     if not beside:
         return session.scalar(statement.with_only_columns(StoredOperation.id))
+    # Per poll while a build is live: one row of (id, kind, build_id) per
+    # claimable order on this Spark, never their payload documents.
+    candidates = session.execute(
+        statement.with_only_columns(
+            StoredOperation.id,
+            StoredOperation.kind,
+            StoredOperation.payload["build_id"].as_string(),
+        ).limit(None)
+    )
     return next(
         (
-            candidate.id
-            for candidate in session.scalars(statement.limit(None))
-            if not any(mutations_conflict(candidate, holder) for holder in beside)
+            order.id
+            for order in map(ClaimOrder._make, candidates)
+            if not any(mutations_conflict(order, holder) for holder in beside)
         ),
         None,
     )

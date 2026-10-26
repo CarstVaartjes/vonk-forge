@@ -15,7 +15,7 @@ use async_trait::async_trait;
 use vonk_agent::{
     client::{AgentHttpClient, ClientError},
     config::AgentConfig,
-    executor::{LoopClient, RecipeExecutor, distribution_success, run_once},
+    executor::{LaneStep, LoopClient, RecipeExecutor, distribution_success, run_once},
     identity::IdentityPaths,
     oci::OciRuntime,
     process::{ProcessError, ProcessOutput, ProcessRunner, Program},
@@ -180,7 +180,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             },
             runtime_root: &data_root,
         };
-        run_once(&loop_client, &mut state, &executor, None, 0, None).await?;
+        // A build runs beside the claim lane: the lane hands it back to run.
+        if let LaneStep::OffLane(build) =
+            run_once(&loop_client, &mut state, &executor, None, 0, None).await?
+        {
+            build
+                .execute(loop_client.clone(), state.reopen()?, &executor)
+                .await?;
+        }
         let results = loop_client.results.lock().expect("result lock");
         // Reconciliation can redeliver older attempts alongside this claim.
         // Observe the exact requested fence, allowing identical redelivery only.

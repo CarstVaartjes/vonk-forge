@@ -799,6 +799,7 @@ impl Pass<'_> {
     /// A build beside the lane keeps its tree through its live units; unknown
     /// systemd evidence keeps the tree too.
     fn build_staging(&mut self, root: &Path, runner: &impl crate::process::ProcessRunner) {
+        let beside = crate::executor::builds_beside(self.data_root);
         for (name, metadata) in self.list(root).into_iter().flatten() {
             if !self
                 .now
@@ -811,6 +812,11 @@ impl Pass<'_> {
                 .get(name.len().saturating_sub(36)..)
                 .and_then(|id| uuid::Uuid::parse_str(id).ok())
             {
+                // A build beside the lane owns it from its claim on, before
+                // its units start.
+                if beside.contains(&build_id) {
+                    continue;
+                }
                 let request = vonk_agent_protocol::RecipeBuildCleanupRequest {
                     build_id,
                     operation_id: build_id,
@@ -924,6 +930,11 @@ impl Pass<'_> {
     /// opens the image takes the lock and marks it. A held lock is a build
     /// using it now.
     fn base_images(&mut self, images: &Path) {
+        // A build beside the lane may open any base image before it takes the
+        // image's lock; its images wait for the next pass.
+        if !crate::executor::builds_beside(self.data_root).is_empty() {
+            return;
+        }
         for (name, metadata) in self.list(images).into_iter().flatten() {
             if !metadata.is_dir() || name.starts_with('.') {
                 continue;

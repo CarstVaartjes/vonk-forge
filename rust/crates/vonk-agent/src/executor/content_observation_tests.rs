@@ -141,7 +141,8 @@ async fn process_death_at_four_boundaries_recovers_on_an_idle_tick_without_execu
         let mut state = StateStore::open_recovered(&root.join("state.sqlite"), NODE_ID).unwrap();
         run_once(&client, &mut state, &executor, None, 0, None)
             .await
-            .unwrap();
+            .unwrap()
+            .settled();
         assert!(
             client.heartbeats.lock().unwrap().is_empty(),
             "a probe cannot renew a lease"

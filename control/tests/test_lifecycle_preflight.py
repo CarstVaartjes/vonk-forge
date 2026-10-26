@@ -31,7 +31,11 @@ from vonk_control.models import (
     CatalogDocumentRevision,
     Job,
 )
-from vonk_control.operation_blockers import ProgressAlarmCode, make_blocker
+from vonk_control.operation_blockers import (
+    BlockingOperation,
+    ProgressAlarmCode,
+    make_blocker,
+)
 from vonk_control.persisted_waits import read_wait
 from vonk_control.runtime_preflight import mandatory_capabilities
 
