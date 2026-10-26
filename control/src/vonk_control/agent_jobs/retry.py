@@ -7,7 +7,7 @@ from collections.abc import Mapping
 from datetime import datetime, timedelta
 
 from pydantic import BaseModel
-from sqlalchemy import or_, select, update
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.orm import Session, object_session
 from sqlalchemy.sql.elements import ColumnElement
 from vonk_agent_protocol import (
@@ -266,20 +266,32 @@ def abandon_idempotent_job_in_session(
     that one reports its own outcome.
     """
 
-    job = session.scalar(select(Job).where(Job.id == job_id).with_for_update(of=Job))
-    if job is None:
-        return False
+    # The claim's order: operations, then their job. An operation a claim
+    # holds is skipped, and the job is left to report through it.
+    members = session.scalar(
+        select(func.count())
+        .select_from(StoredOperation)
+        .where(StoredOperation.parent_job_id == job_id)
+    )
     operations = tuple(
         session.scalars(
             select(StoredOperation)
             .where(StoredOperation.parent_job_id == job_id)
-            .with_for_update(of=StoredOperation)
+            .with_for_update(of=StoredOperation, skip_locked=True)
         )
     )
-    if not operations or any(
-        operation.kind not in _ABANDONABLE_OPERATIONS or operation.state == "running"
-        for operation in operations
+    if (
+        not operations
+        or len(operations) != members
+        or any(
+            operation.kind not in _ABANDONABLE_OPERATIONS
+            or operation.state == agent_operation_states.RUNNING
+            for operation in operations
+        )
     ):
+        return False
+    job = session.scalar(select(Job).where(Job.id == job_id).with_for_update(of=Job))
+    if job is None:
         return False
     adapter = AgentOperationAdapter(session)
     for operation in operations:
