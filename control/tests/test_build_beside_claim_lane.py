@@ -13,9 +13,11 @@ import uuid
 from datetime import timedelta
 from pathlib import Path
 
+import pytest
 from vonk_agent_protocol import (
     AgentClaim,
     AgentOperation,
+    RecipeBuildEvidence,
     WaitReason,
     canonical_message,
 )
@@ -28,8 +30,10 @@ from vonk_control.models import AgentOperation as StoredOperation
 from vonk_control.models import Job
 from vonk_control.operation_blockers import BlockingOperation
 from vonk_control.persisted_waits import read_wait
+from vonk_control.wait_contract import QueueWait
 
 from .agent_fences import fenced_operation
+from .package_upgrade_fixtures import source_transport
 from .recipe_stop_fixtures import recipe_stop_payload
 from .runtime_identity_support import claim_agent
 from .test_agent_jobs import COMMIT, NODE_A, NODE_B, parent
@@ -152,36 +156,72 @@ def test_dual_load_progresses_on_the_spark_whose_build_compiles(service) -> None
         assert compiling is not None and compiling.state == "running"
 
 
+def _upgrade_payload() -> dict[str, object]:
+    return {
+        "architecture": "linux-arm64",
+        "package_bytes": 1234,
+        "package_sha256": "d" * 64,
+        "package_signature": "e" * 128,
+        "package_url": (
+            "https://install.vonkforge.ai/dev/releases/example/"
+            "spark/current/linux-arm64/vonk-forge-agent.deb"
+        ),
+        "package_version": "0.1.0~dev.330+g0123456789ab",
+        "schema_version": 1,
+        "target_binary_digest": "a" * 64,
+        "target_build_digest": "sha256:" + "b" * 64,
+        **source_transport(),
+    }
+
+
+@pytest.mark.parametrize(
+    "kind",
+    [AgentOperation.RECIPE_BUILD_CLEANUP, AgentOperation.AGENT_UPGRADE],
+)
 def test_work_that_would_end_a_build_waits_for_it_with_a_named_reason(
-    service,
+    service, kind
 ) -> None:
     """Catches the build's own cleanup or an agent restart overlapping the build."""
     jobs, sessions, clock = service
     build, build_claim = _compiling_build(jobs, sessions, clock)
     owner = parent(sessions, clock)
-    cleanup = jobs.enqueue(
-        owner.id,
-        NODE_B,
-        AgentOperation.RECIPE_BUILD_CLEANUP.value,
-        COMMIT,
-        {
+    payload = (
+        _upgrade_payload()
+        if kind is AgentOperation.AGENT_UPGRADE
+        else {
             "build_id": _build_payload()["build_id"],
             "operation_id": str(uuid.uuid4()),
-        },
+        }
     )
+    queued_order = jobs.enqueue(owner.id, NODE_B, kind.value, COMMIT, payload)
     for _ in range(_BOUNDED_POLLS):
         clock.advance(seconds=10)
         jobs.heartbeat(build_claim, None, 30)
         assert claim_agent(jobs, NODE_B, _SERIAL[NODE_B]) is None
-    with sessions() as session:
-        queued = session.get(StoredOperation, cleanup.id)
-        assert queued is not None
-        wait = read_wait(queued)
-    assert wait is not None and wait.reason == WaitReason.SPARK_BUSY
+
+    def waits_for() -> QueueWait:
+        with sessions.begin() as session:
+            refresh_queue_waits(session, clock.now, node_id=NODE_B)
+            queued = session.get(StoredOperation, queued_order.id)
+            assert queued is not None
+            wait = read_wait(queued)
+        assert wait is not None
+        return wait
+
+    wait = waits_for()
+    assert wait.reason == WaitReason.SPARK_BUSY
     assert wait.blockers[0].operation == BlockingOperation(
         id=build.id, kind=AgentOperation.RECIPE_BUILD.value
     )
     assert wait.blockers[0].node_ids == [NODE_B]
+    # The build's end, not time, releases it: it then awaits the next poll.
+    jobs.succeed(
+        build_claim,
+        RecipeBuildEvidence(
+            image_bytes=1, image_digest="sha256:" + "a" * 64, oci_layout_sha256="b" * 64
+        ),
+    )
+    assert waits_for().reason == WaitReason.OBSERVATION_UNAVAILABLE
 
 
 def test_off_lane_operations_are_the_agents_shared_vector() -> None:
