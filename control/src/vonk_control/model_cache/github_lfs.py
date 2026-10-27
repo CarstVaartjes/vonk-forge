@@ -55,6 +55,7 @@ from .errors import (
     ModelCacheStorageInvalid,
     ModelCacheStorageRefused,
     ModelCacheStorageUnknown,
+    ProviderNotAsked,
     _retry_after_seconds,
 )
 from .provider_contracts import (
@@ -146,6 +147,10 @@ class _LfsLinks:
         # The flight is one bounded batch call; a peer waits that long, no more.
         if not flight.done.wait(timeout=_LFS_RESOLVE_WAIT_SECONDS):
             raise _unavailable("the GitHub LFS link resolve of a peer did not finish")
+        if isinstance(flight.error, ModelCacheStorageUnknown):
+            # The flight's answer, shared: only the flight's own request
+            # throttles the streams and records a cooldown for it.
+            raise ProviderNotAsked.shared(flight.error) from flight.error
         if flight.error is not None:
             raise flight.error  # the flight's refusal, shared
         with self._lock:

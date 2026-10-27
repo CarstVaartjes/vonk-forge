@@ -185,6 +185,8 @@ def download_ranges(
                         raise
                     proven.set()
                     return response
+        if interrupted():  # stopped or failed while the probe was in flight
+            raise InterruptedError("range transfer interrupted")
         return _open_checked(offset, end)
 
     def _open_checked(offset: int, end: int) -> httpx2.Response:

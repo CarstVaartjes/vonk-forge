@@ -95,6 +95,30 @@ def test_opens_after_the_first_accepted_range_run_concurrently(tmp_path):
     assert len(opened) == 4
 
 
+def test_a_stop_during_the_probe_opens_no_peer(tmp_path):
+    """A cancel, supersede or shutdown that lands while the probe is in
+    flight: its peers, queued behind it, never open the provider."""
+
+    target = tmp_path / "model.part"
+    data = bytes(range(100))
+    stop = Event()
+    opened = []
+
+    def open_range(start, end):
+        opened.append(start)
+        if len(opened) == 1:
+            time.sleep(0.2)  # the probe: every peer queues behind it
+            stop.set()
+        return response(start, end, len(data), data[start : end + 1])
+
+    with observe_unknown():
+        observed = download_ranges(
+            target, len(data), open_range, stop, lambda value: None
+        )
+        assert not observed
+    assert len(opened) == 1
+
+
 class _Refused(Exception):
     """A provider's typed refusal (a rate limit, a quota, a gone source)."""
 

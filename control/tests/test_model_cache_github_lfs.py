@@ -396,7 +396,72 @@ def test_concurrent_resolves_of_one_object_make_one_batch_call(
     for thread in threads:
         thread.join(timeout=30)
     assert len(resolves) == 1
-    assert outcomes == [refusal if refused else link] * 2
+    if not refused:
+        assert outcomes == [link, link]
+        return
+    assert refusal in outcomes  # the flight's own request got the answer
+    (shared,) = [outcome for outcome in outcomes if outcome is not refusal]
+    assert isinstance(shared, ModelCacheStorageUnknown)
+    assert shared.code == ModelCacheCode.RATE_LIMITED  # the same typed wait
+    assert shared.__cause__ is refusal
+
+
+def test_one_shared_batch_429_halves_the_streams_once(
+    nas: _Nas, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Three requests wait on one refused resolve: the provider answered once,
+    so the stream limit halves once and one cooldown is recorded."""
+
+    operation = nas.start().id  # admitted, not run: no link, no cooldown
+    with nas.sessions() as session:
+        row = session.get(ModelCacheOperation, operation)
+        assert row is not None
+        payload = nas.service._payload_or_none(row)
+    assert isinstance(payload, ModelCacheDownloadPayload)
+    spec = ArtifactSpec._from_wire(payload.manifest.artifacts[0])
+    waiting = threading.Semaphore(0)
+
+    class _WatchedEvent(threading.Event):
+        def wait(self, timeout: float | None = None) -> bool:
+            waiting.release()
+            return super().wait(timeout)
+
+    class _WatchedFlight(github_lfs._Flight):
+        def __init__(self) -> None:
+            super().__init__()
+            self.done = _WatchedEvent()
+
+    monkeypatch.setattr(github_lfs, "_Flight", _WatchedFlight)
+    real_resolve = nas.service._resolve_github_lfs_link
+
+    def resolve_once_peers_wait(*args):
+        for _peer in range(2):
+            assert waiting.acquire(timeout=30)  # both peers wait on this flight
+        return real_resolve(*args)
+
+    monkeypatch.setattr(
+        nas.service, "_resolve_github_lfs_link", resolve_once_peers_wait
+    )
+    nas.github.batch_answer = rate_limited_until(NOW + timedelta(seconds=1800))
+    width = nas.service._streams.status().limit
+    codes: list[str] = []
+
+    def request() -> None:
+        try:
+            nas.service._open_provider(nas.client, spec, {})
+        except ModelCacheStorageUnknown as error:
+            codes.append(error.code)
+
+    threads = [threading.Thread(target=request) for _ in range(3)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=30)
+    assert codes == [ModelCacheCode.RATE_LIMITED] * 3
+    assert nas.github.batch_calls == 1
+    assert nas.service._streams.status().limit == width // 2
+    cooldown = nas.service._provider_cooldown([ProviderKind.GITHUB_LFS_OBJECT])
+    assert cooldown == NOW + timedelta(seconds=1800)
 
 
 def test_a_rate_limit_is_the_providers_wait_and_holds_fresh_requests(

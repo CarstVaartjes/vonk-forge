@@ -228,10 +228,8 @@ class FailureMixin:
                         verdict,
                         fence=cache._claim_owner,
                         retry_after=(
-                            now + timedelta(seconds=provider_hint)
+                            hinted_until(provider_hint, now, at_least=0)
                             if retryable
-                            and type(provider_hint) is int
-                            and provider_hint >= 0
                             else None
                         ),
                         reason=detail[:512],

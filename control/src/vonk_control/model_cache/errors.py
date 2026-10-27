@@ -229,9 +229,22 @@ class ModelCacheStorageUnknown(_CacheUnknown, ModelCacheStorageError):
     default_reason = WaitReason.OBSERVATION_UNAVAILABLE
 
 
-class ProviderCooldownRefused(ModelCacheStorageUnknown):
-    """The cache's own refusal while a provider's cooldown runs: no provider
-    answered, so nothing is throttled or recorded again."""
+class ProviderNotAsked(ModelCacheStorageUnknown):
+    """A refusal this request got without asking the provider: a running
+    cooldown, or a peer's answer shared with it.  The request that got the
+    answer already throttled and recorded it; nothing is done again."""
+
+    @classmethod
+    def shared(cls, error: ModelCacheStorageUnknown) -> ProviderNotAsked:
+        """A peer's answer, handed to a request that waited on it."""
+        return cls(
+            error.code,
+            error.detail,
+            reason=error.typed_reason,
+            retry_after_seconds=error.retry_after_seconds,
+            recovery=error.recovery,
+            source_status=error.source_status,
+        )
 
 
 def _reference_error_type(error: ArtifactLifecycleError) -> type[ModelCacheError]:

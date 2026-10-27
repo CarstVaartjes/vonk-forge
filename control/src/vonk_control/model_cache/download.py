@@ -43,7 +43,7 @@ from .errors import (
     ModelCacheStorageInvalid,
     ModelCacheStorageRefused,
     ModelCacheStorageUnknown,
-    ProviderCooldownRefused,
+    ProviderNotAsked,
     _ArtifactWriterBusy,
     _reference_error_type,
 )
@@ -338,8 +338,8 @@ class DownloadMixin:
         cache._refuse_during_cooldown(spec.kind)
         try:
             return provider_for(spec.kind).open(cache, client, spec, headers)
-        except ProviderCooldownRefused:
-            raise  # refused inside the open by the cooldown: no provider answered
+        except ProviderNotAsked:
+            raise  # no provider answered this request: nothing to throttle or record
         except ModelCacheStorageUnknown as error:
             until = hinted_until(error.retry_after_seconds, cache._clock())
             if error.code == ModelCacheCode.RATE_LIMITED and until is not None:

@@ -24,7 +24,7 @@ from ..model_cache_contract import (
 )
 from ..models import ModelCacheOperation
 from .catalog_helpers import _datetime
-from .errors import ProviderCooldownRefused
+from .errors import ProviderNotAsked
 
 if TYPE_CHECKING:
     from .service import ModelCacheService
@@ -59,10 +59,14 @@ def payload_kinds(
     return provider_kinds(payload.manifest.artifacts, artifact_key)
 
 
-def hinted_until(hint: object, now: datetime) -> datetime | None:
-    """When a provider's own wait hint ends, or ``None`` without a usable hint."""
+def hinted_until(hint: object, now: datetime, *, at_least: int = 1) -> datetime | None:
+    """When a provider's own wait hint ends, or ``None`` without a usable hint.
 
-    if type(hint) is not int or hint < 1:
+    A provider wait needs a hint of at least a second (``0`` says nothing
+    about how long to wait); a retry schedule also takes ``0`` as "now"
+    (``at_least=0``)."""
+
+    if type(hint) is not int or hint < at_least:
         return None
     return now + timedelta(seconds=hint)
 
@@ -112,7 +116,7 @@ class ProviderWaitsMixin:
         until = cache._provider_cooldown((kind,))
         if until is None:
             return
-        raise ProviderCooldownRefused(
+        raise ProviderNotAsked(
             ModelCacheCode.RATE_LIMITED,
             "the artifact provider asked to wait; this download resumes automatically",
             retry_after_seconds=max(
