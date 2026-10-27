@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 import os
 from collections.abc import Mapping
-from datetime import timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 from urllib.parse import urljoin, urlsplit
@@ -32,7 +31,6 @@ from .artifacts import ArtifactSetManifest, ArtifactSpec, _unique_artifacts
 from .constants import (
     _CREDENTIAL_FAILURE_PUBLIC_CODES,
     _MAX_HTTP_REDIRECTS,
-    _RETRY_BASE_SECONDS,
 )
 from .errors import (
     ModelCacheCredentialPathUnsafe,
@@ -74,8 +72,12 @@ class HttpMixin:
                 return cache._open_http_response_once(client, source, headers)
             except ModelCacheStorageUnknown as error:
                 refused = error
-                if error.source_status in {404, 410} or error.retry_after_seconds:
-                    break  # the durable source-gone counter owns these observations
+                if (
+                    error.source_status in {404, 410}
+                    or error.retry_after_seconds
+                    or error.code == ModelCacheCode.RATE_LIMITED
+                ):
+                    break  # the durable failure path owns these observations
         assert refused is not None
         raise refused
 
@@ -100,18 +102,6 @@ class HttpMixin:
         except ValueError:
             source_host = None
         source_is_huggingface = _is_hf_authority(source_host)
-        if source_is_huggingface:
-            with cache._lock:
-                cooldown = cache._hf_cooldown_until
-            if cooldown is not None and cooldown > cache._clock():
-                raise ModelCacheStorageUnknown(
-                    ModelCacheCode.RATE_LIMITED,
-                    "Hugging Face download cooldown is active",
-                    retry_after_seconds=max(
-                        1, int((cooldown - cache._clock()).total_seconds())
-                    ),
-                    recovery="resume",
-                )
         authenticated = False
         token: str | None = None
         token_loaded = False
@@ -137,21 +127,7 @@ class HttpMixin:
             status_code = response.status_code
             if status_code == 429:
                 retry_after = _retry_after_seconds(response.headers, now=cache._clock())
-                if source_is_huggingface:
-                    until = cache._clock() + timedelta(
-                        seconds=retry_after or _RETRY_BASE_SECONDS
-                    )
-                    with cache._lock:
-                        if (
-                            cache._hf_cooldown_until is None
-                            or until > cache._hf_cooldown_until
-                        ):
-                            cache._hf_cooldown_until = until
                 response.close()
-                if source_is_huggingface:
-                    cache._streams.throttled(
-                        retry_after, "Hugging Face answered 429 (rate limited)"
-                    )
                 raise ModelCacheStorageUnknown(
                     ModelCacheCode.RATE_LIMITED,
                     "artifact provider rate limited this download; it will resume automatically",
@@ -213,10 +189,6 @@ class HttpMixin:
                     else None
                 )
                 response.close()
-                if status_code >= 500 and source_is_huggingface:
-                    cache._streams.throttled(
-                        retry_after, f"Hugging Face answered {status_code}"
-                    )
                 raise ModelCacheStorageUnknown(
                     ModelCacheCode.SOURCE_UNAVAILABLE,
                     f"cache source request failed with status {status_code}",

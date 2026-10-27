@@ -45,8 +45,10 @@ class FixtureArtifact(StrictModel):
 
     @model_validator(mode="after")
     def source_is_present(self) -> FixtureArtifact:
+        from .providers import source_is_repository
+
         if self.source is None and not (
-            self.kind in {"http.file", "file"} and self.repository is not None
+            source_is_repository(self.kind) and self.repository is not None
         ):
             raise ValueError("cache artifact source is missing")
         return self

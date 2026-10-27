@@ -1473,6 +1473,85 @@ def test_the_shared_resolver_and_other_modules_may_select_by_digest() -> None:
         assert not check_source(path, _SET_SELECTION, {4}, modes=("model-sets",))
 
 
+_DIRECT_OPENER = (
+    "def check(cache, client):\n    return cache._open_http_response(client, URL, {})\n"
+)
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        "cache._open_http_response(client, URL, {})",
+        "cache._open_github_release_asset(client, spec, {})",
+        "cache._open_github_lfs_object(client, spec, {})",
+        "provider_for(spec.kind).open(cache, client, spec, {})",
+        "PROVIDERS[spec.kind].open(cache, client, spec, {})",
+    ],
+)
+def test_a_provider_opened_past_the_one_opener_is_flagged(call: str) -> None:
+    source = f"def check(cache, client, spec):\n    return {call}\n"
+    for path in (
+        "control/src/vonk_control/model_cache/updates.py",
+        "control/src/vonk_control/model_cache/download.py",
+    ):
+        assert check_source(path, source, {2}, modes=("openers",)), (path, call)
+    assert not check_source(
+        "control/src/vonk_control/model_cache/updates.py",
+        source,
+        {1},
+        modes=("openers",),
+    )
+
+
+def test_the_provider_table_and_the_one_opener_may_open_providers() -> None:
+    opener = (
+        "def _open_provider(self, client, spec, headers):\n"
+        "    return provider_for(spec.kind).open(self, client, spec, headers)\n"
+    )
+    assert not check_source(
+        "control/src/vonk_control/model_cache/download.py",
+        opener,
+        {2},
+        modes=("openers",),
+    )
+    assert not check_source(
+        "control/src/vonk_control/model_cache/providers.py",
+        _DIRECT_OPENER,
+        {2},
+        modes=("openers",),
+    )
+    assert not check_source(
+        "control/tests/test_model_cache_huggingface_auth.py",
+        _DIRECT_OPENER,
+        {2},
+        modes=("openers",),
+    )
+    definition = "def _open_http_response(self, client, source, headers):\n    pass\n"
+    assert not check_source(
+        "control/src/vonk_control/model_cache/http.py",
+        definition,
+        {1},
+        modes=("openers",),
+    )
+
+
+def test_the_anonymous_github_primitive_is_for_the_github_modules_only() -> None:
+    source = "def check(cache, client):\n    return cache._send_anonymous_github_request(client, URL)\n"
+    assert check_source(
+        "control/src/vonk_control/model_cache/updates.py",
+        source,
+        {2},
+        modes=("openers",),
+    )
+    for module in ("github.py", "github_lfs.py"):
+        assert not check_source(
+            f"control/src/vonk_control/model_cache/{module}",
+            source,
+            {2},
+            modes=("openers",),
+        )
+
+
 _FOLLOW_COUNT = (
     "def same_job(observed):\n"
     "    active = [item for item in observed['operations']]\n"

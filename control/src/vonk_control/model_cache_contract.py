@@ -37,7 +37,6 @@ from .wait_contract import QueueWait
 
 DIGEST_PATTERN = r"^[0-9a-f]{64}$"
 ARTIFACT_KEY_PATTERN = r"^[a-z][a-z0-9_.:-]{0,255}$"
-REVISION_PATTERN = r"^[0-9a-f]{40,64}$"
 UUID_PATTERN = (
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-"
     r"[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
@@ -289,6 +288,8 @@ class ModelCacheRetry(StrippedStrictModel):
     automatic_attempts: int = Field(ge=1)
     operator_retries: int = Field(ge=0)
     missing_source: ModelCacheMissingSourceObservation | None = None
+    # Checks of a provider-owned wait (access approval, or a rate limit without
+    # a hint): its re-check cadence, five minutes doubling to one hour.
     access_checks: int = Field(default=0, ge=0)
     # Content identity of the credential file observed at an authorization
     # failure; a different value lets the worker resume automatically.
@@ -867,15 +868,6 @@ class ModelCacheDownloadPreviewResponse(StrippedStrictModel):
     warnings: list[str] = Field(max_length=32)
 
 
-class ModelCacheUpstreamRevision(StrippedStrictModel):
-    repository: str
-    pinned_revision: str = Field(pattern=REVISION_PATTERN)
-    latest_revision: str | None = Field(default=None, pattern=REVISION_PATTERN)
-    status: Literal["current", "update-available", "check-failed"]
-    checked_at: str
-    error_code: str | None = None
-
-
 class ModelCacheUpdateResponse(StrippedStrictModel):
     schema_version: Literal[2] = 2
     artifact_set_sha256: Digest
@@ -883,7 +875,6 @@ class ModelCacheUpdateResponse(StrippedStrictModel):
     latest_model_content_sha256: Digest | None
     model_update_from: ModelReference | None = None
     model_update_to: ModelReference | None = None
-    upstream_revisions: list[ModelCacheUpstreamRevision] = Field(default_factory=list)
     model_update_ambiguous: bool = False
     model_update_candidates: list[ModelReference] = Field(
         default_factory=list, max_length=16

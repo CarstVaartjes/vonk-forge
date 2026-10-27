@@ -24,9 +24,9 @@ from vonk_control.bounded_json import (
     text,
 )
 from vonk_control.model_cache import ModelCacheService, ModelCacheStorageError
+from vonk_control.model_cache.constants import ProviderKind
 from vonk_control.model_cache_contract import (
     ModelCacheOperationProgress,
-    ModelCacheUpstreamRevision,
 )
 from vonk_control.models import (
     Base,
@@ -347,9 +347,8 @@ def test_postgres_concurrent_claims_are_distinct(
         [_artifact("pg-b", b"b")],
         "00000000-0000-4000-8000-000000000312",
     )
-    # The cooldown scan has already loaded both rows into the second
-    # session's identity map when the first worker commits its claim.
-    # A later locking SELECT must refresh that cached claim state.
+    # The second worker pauses at its locking SELECT until the first worker
+    # has committed its claim; the locked read must see that claim state.
     second_loaded = threading.Event()
     first_committed = threading.Event()
     original_session = second._session
@@ -788,7 +787,9 @@ def test_hf_access_recheck_resumes_the_exact_retained_transfer(
     limited = service.get_operation(current_id)
     assert limited.failure is not None
     assert limited.failure["retry_after_seconds"] == 30
-    assert service._hf_cooldown_until == NOW.replace(second=30)
+    assert service._provider_cooldown({ProviderKind.HTTP_FILE}) == NOW.replace(
+        second=30
+    )
     assert len(requests) == 4
     now[0] = NOW + timedelta(seconds=31)
     _drain(service, current_id)
@@ -877,129 +878,6 @@ def test_two_controller_services_share_one_upstream_object_transfer(
     )
     first.close()
     second.close()
-
-
-@pytest.mark.usefixtures("damaged_json_rows")
-def test_upstream_check_is_explicit_metadata_only_and_keeps_pin(tmp_path: Path) -> None:
-    sessions = _database(tmp_path)
-    calls = []
-    latest = "2" * 40
-
-    def handler(request):
-        assert sessions.kw["bind"].pool.checkedout() == 0
-        calls.append(str(request.url))
-        assert request.url.path == "/api/models/acme/model/revision/main"
-        return httpx2.Response(200, json={"sha": latest})
-
-    service, _ = _service(tmp_path, sessions, handler=handler)
-    current_doc = _model_document("source-revision-1", "1")
-    # Two immutable files from one repository need one metadata request.
-    files = current_doc["files"]
-    assert isinstance(files, list) and files
-    first_file = files[0]
-    assert isinstance(first_file, dict)
-    files.append({**first_file, "id": "extra", "path": "extra.json"})
-    current_digest = _insert_model_revision(sessions, current_doc, created_at=NOW)
-    manifest = service.resolve_artifact_set(model_content_sha256=current_digest)
-    with sessions.begin() as session:
-        service._ensure_set(session, manifest)
-    assert _first_update(service.discover_updates())["upstream_revisions"] == []
-    assert calls == []
-    update = _first_update(service.discover_updates(check_upstream=True))
-    assert len(calls) == 1
-    revisions = require_sequence(
-        update["upstream_revisions"], "cache update upstream revisions"
-    )
-    revision = require_mapping(revisions[0], "cache update upstream revision")
-    assert revision["latest_revision"] == latest
-    assert revision["pinned_revision"] == "1" * 40
-    assert revision["status"] == "update-available"
-    assert update["model_update_available"] is False
-    assert service.manifest_for_artifact_set(manifest.digest) == manifest
-    newer = _model_document("source-revision-2", "2", supersedes=current_digest)
-    new_digest = _insert_model_revision(
-        sessions, newer, created_at=NOW + timedelta(hours=1)
-    )
-    assert (
-        service.resolve_artifact_set(model_content_sha256=new_digest).digest
-        != manifest.digest
-    )
-    assert _first_update(service.discover_updates())["model_update_available"] is True
-    service.close()
-
-
-@pytest.mark.usefixtures("damaged_json_rows")
-def test_failed_upstream_metadata_check_does_not_hide_catalog_update(
-    tmp_path: Path,
-) -> None:
-    sessions = _database(tmp_path)
-    service, _ = _service(tmp_path, sessions, handler=lambda _: httpx2.Response(503))
-    current_digest = _insert_model_revision(
-        sessions, _model_document("old", "1"), created_at=NOW
-    )
-    manifest = service.resolve_artifact_set(model_content_sha256=current_digest)
-    with sessions.begin() as session:
-        service._ensure_set(session, manifest)
-    _insert_model_revision(
-        sessions,
-        _model_document("new", "2", supersedes=current_digest),
-        created_at=NOW + timedelta(hours=1),
-    )
-    update = _first_update(service.discover_updates(check_upstream=True))
-    assert update["model_update_available"] is True
-    revisions = require_sequence(
-        update["upstream_revisions"], "cache update upstream revisions"
-    )
-    revision = require_mapping(revisions[0], "cache update upstream revision")
-    assert revision["status"] == "check-failed"
-    assert ModelCacheUpstreamRevision.model_validate(revision).latest_revision is None
-    service.close()
-
-
-def test_upstream_page_budget_bounds_concurrency_and_latency(
-    tmp_path, monkeypatch, frozen_pass_budgets
-):
-    sessions = _database(tmp_path)
-    service, _ = _service(tmp_path, sessions)
-    release = threading.Event()
-    calls = []
-    answered = []
-    from vonk_control.model_cache.constants import _UPSTREAM_CHECK_WORKERS
-
-    started = threading.Barrier(_UPSTREAM_CHECK_WORKERS + 1)
-
-    def expired(futures, *, timeout, return_when):
-        started.wait(timeout=30)
-        frozen_pass_budgets.advance(timeout)
-        return set(), set(futures)
-
-    monkeypatch.setattr("vonk_control.model_cache.updates.wait", expired)
-
-    def check(repository, revision):
-        calls.append(repository)
-        started.wait(timeout=30)
-        release.wait(30)
-        answered.append(repository)
-        return ModelCacheUpstreamRevision(
-            repository=repository,
-            pinned_revision=revision,
-            status="current",
-            checked_at=NOW.isoformat(),
-        )
-
-    monkeypatch.setattr(service, "_check_upstream_revision", check)
-    keys = [(f"acme/model-{index}", "a" * 40) for index in range(12)]
-    try:
-        result = service._check_upstream_revisions(keys)
-        # Latency is bounded by the page budget, not the checks: the page
-        # answered while every started check was still blocked.
-        assert answered == []
-        assert len(calls) == 4
-        assert list(result) == keys
-        assert all(row.status != "current" for row in result.values())
-    finally:
-        release.set()
-        service.close()
 
 
 def _drain_until(service, operation_id: str, now: list[datetime], states: set[str]):

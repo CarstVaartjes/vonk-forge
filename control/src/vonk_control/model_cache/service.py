@@ -26,7 +26,6 @@ from .constants import (
     _DEFAULT_MAX_DOWNLOAD_STREAMS,
     _DEFAULT_MAX_PARALLEL_DOWNLOADS,
     _MAX_PARALLEL_DOWNLOADS,
-    _UPSTREAM_CHECK_WORKERS,
 )
 from .core import CoreMixin
 from .download import DownloadMixin
@@ -34,11 +33,13 @@ from .download_admission import DownloadAdmissionMixin
 from .failure import FailureMixin
 from .fleet_removal import FleetRemovalMixin
 from .github import GithubMixin
+from .github_lfs import GithubLfsMixin, _LfsLinks
 from .http import HttpMixin
 from .inventory import InventoryMixin
 from .observation import StorageObserver
 from .operations import OperationsMixin
 from .persistence import _read_operation_payload, _store_operation_payload
+from .provider_waits import ProviderWaitsMixin
 from .removal_acceptance import RemovalAcceptanceMixin
 from .removal_execution import RemovalExecutionMixin
 from .removal_reconcile import RemovalReconcileMixin
@@ -71,6 +72,7 @@ class ModelCacheService(
     SplitTransferMixin,
     DownloadMixin,
     GithubMixin,
+    GithubLfsMixin,
     HttpMixin,
     CheckpointsMixin,
     FailureMixin,
@@ -79,6 +81,7 @@ class ModelCacheService(
     OperationsMixin,
     SchedulerMixin,
     RepairMixin,
+    ProviderWaitsMixin,
     AvailabilityMixin,
     InventoryMixin,
     UpdatesMixin,
@@ -183,14 +186,14 @@ class ModelCacheService(
             max_workers=max_parallel_downloads,
             thread_name_prefix="vonk-model-cache",
         )
-        self._upstream_executor = ThreadPoolExecutor(
-            max_workers=_UPSTREAM_CHECK_WORKERS, thread_name_prefix="vonk-model-updates"
-        )
-        self._upstream_slots = threading.BoundedSemaphore(_UPSTREAM_CHECK_WORKERS)
         self._background_operations: dict[str, _BackgroundTransfer] = {}
         # Object digest -> the operation whose transfer in this process writes it.
         self._active_digests: dict[str, str] = {}
-        self._hf_cooldown_until: datetime | None = None
+        # Provider kind -> when its rate limit or quota wait ends.
+        self._provider_cooldowns: dict[str, datetime] = {}
+        self._cooldown_lock = threading.Lock()
+        # Signed GitHub LFS links, in process memory only.
+        self._lfs_links = _LfsLinks()
         self._progress_checkpoint_at: dict[str, datetime] = {}
         self._cancel_events: dict[str, threading.Event] = {}
         self._range_reserved_bytes = 0

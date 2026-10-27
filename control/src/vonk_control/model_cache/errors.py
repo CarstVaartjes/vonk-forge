@@ -59,12 +59,16 @@ class ModelCacheError(RuntimeError):
     @property
     def disposition(self) -> Disposition:
         """The cache's typed code table: authorization and source policy end the
-        transfer; every other code is retried within the bounded retry count."""
+        transfer; a provider's rate limit or quota is the provider's own wait and
+        spends no retry; every other code is retried within the bounded retry
+        count."""
 
         if is_security_failure(self.code):
             return Disposition.SECURITY
         if self.code in _TERMINAL_FAILURE_CODES:
             return Disposition.FAIL
+        if self.code == ModelCacheCode.RATE_LIMITED:
+            return Disposition.WAIT
         return Disposition.OBSERVE
 
 
@@ -223,6 +227,24 @@ class ModelCacheStorageInvalid(_CacheInvalid, ModelCacheStorageError):
 
 class ModelCacheStorageUnknown(_CacheUnknown, ModelCacheStorageError):
     default_reason = WaitReason.OBSERVATION_UNAVAILABLE
+
+
+class ProviderNotAsked(ModelCacheStorageUnknown):
+    """A refusal this request got without asking the provider: a running
+    cooldown, or a peer's answer shared with it.  The request that got the
+    answer already throttled and recorded it; nothing is done again."""
+
+    @classmethod
+    def shared(cls, error: ModelCacheStorageUnknown) -> ProviderNotAsked:
+        """A peer's answer, handed to a request that waited on it."""
+        return cls(
+            error.code,
+            error.detail,
+            reason=error.typed_reason,
+            retry_after_seconds=error.retry_after_seconds,
+            recovery=error.recovery,
+            source_status=error.source_status,
+        )
 
 
 def _reference_error_type(error: ArtifactLifecycleError) -> type[ModelCacheError]:

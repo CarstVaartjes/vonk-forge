@@ -4070,17 +4070,25 @@ def test_model_cache_parallel_ranges_publish_or_fall_back(
     barrier = threading.Barrier(4)
     requests = []
 
+    class AfterPeers(httpx2.SyncByteStream):
+        """A range body that flows only once every peer is streaming too."""
+
+        def __init__(self, content: bytes) -> None:
+            self.content = content
+
+        def __iter__(self):
+            barrier.wait(timeout=30)  # fails if the range transfers serialize
+            yield self.content
+
     def handler(request):
         requested = request.headers.get("range")
         requests.append(requested)
-        if requested:
-            barrier.wait(timeout=30)
         if requested and range_supported:
             start, end = map(int, requested.removeprefix("bytes=").split("-"))
             return httpx2.Response(
                 206,
                 request=request,
-                content=payload[start : end + 1],
+                stream=AfterPeers(payload[start : end + 1]),
                 headers={"content-range": f"bytes {start}-{end}/{len(payload)}"},
             )
         return httpx2.Response(200, request=request, content=payload)
@@ -4102,7 +4110,10 @@ def test_model_cache_parallel_ranges_publish_or_fall_back(
             ).read_bytes()
             == payload
         )
-        assert len([request for request in requests if request]) == 4
+        # An ignored range is learned from the first answer: no peer asks.
+        assert len([request for request in requests if request]) == (
+            4 if range_supported else 1
+        )
         assert (None in requests) == (not range_supported)
         assert not list((service.root / "partials").rglob("*.range-*"))
     finally:

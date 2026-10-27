@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+from enum import StrEnum
 
 from vonk_agent_protocol import ModelAccessReason, ModelCacheCode, SecurityRefusalReason
 
@@ -17,6 +18,9 @@ _DIGEST_LENGTH = 64
 
 
 _DIGEST_PATTERN = r"[0-9a-f]{64}"
+
+
+_REVISION_PATTERN = r"[0-9a-f]{40,64}"
 
 
 _MAX_ARTIFACTS = 1024
@@ -67,22 +71,51 @@ _MAX_RETRY_HINT_SECONDS = 365 * 24 * 60 * 60
 _TRANSFER_CLAIM_SECONDS = 120
 
 
-_UPSTREAM_CHECK_SECONDS = 8.0
-
-
-_UPSTREAM_CHECK_WORKERS = 4
-
-
 _HF_CANONICAL_HOST = "huggingface.co"
 
 
 _GITHUB_API_HOST = "api.github.com"
 
 
+class ProviderKind(StrEnum):
+    """Artifact kinds; the provider table owns what each one means."""
+
+    HUGGINGFACE_FILE = "huggingface.file"
+    GITHUB_RELEASE_ASSET = "github-release.asset"
+    GITHUB_LFS_OBJECT = "github-lfs.object"
+    HTTP_FILE = "http.file"
+    FILE = "file"
+
+
 _GITHUB_USER_AGENT = "vonk-forge/0.1.1"
 
 
 _GITHUB_RELEASE_ASSET_HOST = "release-assets.githubusercontent.com"
+
+
+_GITHUB_HOST = "github.com"
+
+
+# The stable, secret-free locator a GitHub LFS object is persisted under.
+_GITHUB_LFS_MEDIA_HOST = "media.githubusercontent.com"
+
+
+# The only hosts a signed LFS download link may name (observed 2026-10-26).
+_GITHUB_LFS_OBJECT_HOSTS = frozenset({"github-cloud.githubusercontent.com"})
+
+
+_MAX_GITHUB_LFS_BATCH_BYTES = 64 * 1024
+
+
+_MAX_GITHUB_LFS_LINK_HEADERS = 16
+
+
+# A signed link is reused while at least this much of its lifetime remains.
+_LFS_HREF_MARGIN_SECONDS = 60
+
+# A peer waits at most this long for the one batch call that resolves its link
+# (the call's own timeouts and pauses end well inside it).
+_LFS_RESOLVE_WAIT_SECONDS = 120
 
 
 _MAX_GITHUB_RELEASE_METADATA_BYTES = 4 * 1024 * 1024

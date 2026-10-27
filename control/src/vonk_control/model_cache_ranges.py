@@ -89,6 +89,9 @@ def download_ranges(
     Assembly temporarily needs space for another full object alongside segments.
     The caller must serialize attempts for this target and use stable workers.
     on_assembled_bytes lets ingress hash the ordered bytes in this same read.
+    Until one range answer is accepted, opens go one at a time, so a refusal
+    (rate limit, quota, gone, ignored range) costs one request; the first real
+    failure is the one raised, never a peer's resulting interruption.
     """
     segments = list(_segments(target, expected_bytes, workers))
     _reset_symlink(target)
@@ -125,9 +128,24 @@ def download_ranges(
     lock = Lock()
     abort = Event()
     fallback = Event()
+    # Until one range answer proves the provider serves this request, opens go
+    # one at a time: a refusal (rate limit, quota, gone) costs one request and
+    # stops the peers before the next one can open.
+    probe = Lock()
+    proven = Event()
+    failure: Exception | None = None
 
     def interrupted() -> bool:
         return stop_event.is_set() or abort.is_set()
+
+    def fail(error: Exception) -> None:
+        # The first real failure is the one raised: a peer's InterruptedError
+        # (it stopped because of this abort) never replaces it.
+        nonlocal failure
+        with lock:
+            if failure is None:
+                failure = error
+        abort.set()
 
     def transfer(start: int, end: int, path: Path) -> None:
         if interrupted():
@@ -151,9 +169,28 @@ def download_ranges(
         # Retained range prefixes remain reusable on a later range observation.
         fallback.set()
 
-    def _transfer_body(start: int, end: int, path: Path, offset: int) -> None:
+    def _open(offset: int, end: int) -> httpx2.Response:
+        if not proven.is_set():
+            with probe:
+                if not proven.is_set():  # else a peer's answer was accepted
+                    if interrupted():
+                        raise InterruptedError("range transfer interrupted")
+                    try:
+                        response = _open_checked(offset, end)
+                    except _RangeIgnored:
+                        abort.set()  # before the probe frees: no peer opens
+                        raise
+                    except Exception as exc:
+                        fail(exc)  # before the probe frees: no peer opens
+                        raise
+                    proven.set()
+                    return response
+        if interrupted():  # stopped or failed while the probe was in flight
+            raise InterruptedError("range transfer interrupted")
+        return _open_checked(offset, end)
+
+    def _open_checked(offset: int, end: int) -> httpx2.Response:
         response = open_range(offset, end)
-        invalid_body = False
         try:
             if response.status_code == 200:
                 raise _RangeIgnored()
@@ -176,6 +213,15 @@ def download_ranges(
                 raise RangeResponseError(
                     "range response must use identity content encoding"
                 )
+        except BaseException:
+            response.close()
+            raise
+        return response
+
+    def _transfer_body(start: int, end: int, path: Path, offset: int) -> None:
+        response = _open(offset, end)
+        invalid_body = False
+        try:
             remaining = end - offset + 1
             with path.open("ab") as output:
                 try:
@@ -208,7 +254,6 @@ def download_ranges(
                 path.unlink(missing_ok=True)
 
     on_progress(sum(counts.values()))
-    failure: Exception | None = None
     ignored = False
     with ThreadPoolExecutor(
         max_workers=workers, thread_name_prefix="model-range"
@@ -221,9 +266,7 @@ def download_ranges(
                 ignored = True
                 abort.set()
             except Exception as exc:  # noqa: BLE001 - cancel peers, then re-raise the original failure
-                if failure is None:
-                    failure = exc
-                abort.set()
+                fail(exc)
     if ignored:
         cleanup_ranges(target, expected_bytes, workers=workers)
         return False

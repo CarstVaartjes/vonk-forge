@@ -6,7 +6,7 @@ import hashlib
 import os
 import re
 import shutil
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from datetime import datetime
 from io import BufferedReader
 from pathlib import Path
@@ -35,20 +35,20 @@ from ..model_cache_ranges import cleanup_ranges, download_ranges, range_partial_
 from ..models import ModelCacheOperation, ModelCacheSet
 from ..operation_contract import AvailabilityRecoveryAction
 from .artifacts import ArtifactSpec
-from .catalog_helpers import _github_release_asset_binding
-from .constants import _CHUNK_BYTES, _GITHUB_API_HOST, _PARALLEL_RANGE_WORKERS
+from .constants import _CHUNK_BYTES, _PARALLEL_RANGE_WORKERS
 from .errors import (
     ModelCacheConflictUnknown,
     ModelCacheError,
-    ModelCacheResolutionError,
     ModelCacheStorageError,
     ModelCacheStorageInvalid,
     ModelCacheStorageRefused,
     ModelCacheStorageUnknown,
+    ProviderNotAsked,
     _ArtifactWriterBusy,
     _reference_error_type,
 )
-from .source_helpers import _is_private_host
+from .provider_waits import hinted_until
+from .providers import provider_for
 
 if TYPE_CHECKING:
     from .service import ModelCacheService
@@ -166,12 +166,11 @@ class DownloadMixin:
                 state=ModelFileState.PARTIAL,
                 completed_artifacts=completed_artifacts,
             )
-            if spec.kind == "github-release.asset" and isinstance(
-                error, httpx2.HTTPError
-            ):
+            transport_failure = provider_for(spec.kind).transport_failure
+            if transport_failure is not None and isinstance(error, httpx2.HTTPError):
                 raise ModelCacheStorageUnknown(
                     ModelCacheCode.SOURCE_UNAVAILABLE,
-                    "GitHub release asset transfer failed",
+                    transport_failure,
                     recovery="resume",
                 ) from error
             raise
@@ -323,39 +322,35 @@ class DownloadMixin:
 
     def _validate_http_download(self, spec: ArtifactSpec) -> None:
         cache = cast("ModelCacheService", self)
-        if spec.kind == "github-release.asset":
-            try:
-                _github_release_asset_binding(spec)
-                parsed = urlsplit(spec.source)
-            except (ModelCacheResolutionError, TypeError, ValueError) as error:
-                raise ModelCacheStorageInvalid(
-                    ModelCacheCode.SOURCE_INVALID, "GitHub release asset URL is invalid"
-                ) from error
-            if parsed.scheme != "https" or parsed.hostname != _GITHUB_API_HOST:
-                raise ModelCacheStorageRefused(
-                    ModelCacheCode.SOURCE_UNTRUSTED,
-                    "GitHub release downloads must use the canonical GitHub API host",
-                )
-            return
+        provider_for(spec.kind).validate(cache, spec)
+
+    def _open_provider(
+        self, client: httpx2.Client, spec: ArtifactSpec, headers: Mapping[str, str]
+    ) -> httpx2.Response:
+        """Open one response from the spec's provider, every provider alike.
+
+        A provider under its cooldown is not contacted; a rate limit or a
+        server error narrows the parallel streams before it is reported.  A
+        rate limit with a hint holds the provider from the moment it answers,
+        so a later request of any transfer refuses without asking.
+        """
+        cache = cast("ModelCacheService", self)
+        cache._refuse_during_cooldown(spec.kind)
         try:
-            parsed = urlsplit(spec.source)
-            hostname = parsed.hostname
-            port = parsed.port
-        except (TypeError, ValueError) as error:
-            raise ModelCacheStorageInvalid(
-                ModelCacheCode.SOURCE_INVALID, "cache source URL is invalid"
-            ) from error
-        if not cache._fixture_sources and (
-            parsed.scheme != "https"
-            or hostname is None
-            or port is not None
-            or hostname.lower().rstrip(".") not in cache._trusted_source_hosts
-            or _is_private_host(hostname)
-        ):
-            raise ModelCacheStorageRefused(
-                ModelCacheCode.SOURCE_UNTRUSTED,
-                "production cache downloads require a trusted HTTPS artifact host",
-            )
+            return provider_for(spec.kind).open(cache, client, spec, headers)
+        except ProviderNotAsked:
+            raise  # no provider answered this request: nothing to throttle or record
+        except ModelCacheStorageUnknown as error:
+            until = hinted_until(error.retry_after_seconds, cache._clock())
+            if error.code == ModelCacheCode.RATE_LIMITED and until is not None:
+                cache._record_provider_cooldown(spec.kind, until)
+            if error.code == ModelCacheCode.RATE_LIMITED or (
+                error.source_status is not None and error.source_status >= 500
+            ):
+                cache._streams.throttled(
+                    error.retry_after_seconds, f"{spec.kind}: {error.detail}"
+                )
+            raise
 
     def _download_parallel_ranges(
         self,
@@ -416,9 +411,7 @@ class DownloadMixin:
                     "Range": f"bytes={start}-{end}",
                     "Accept-Encoding": "identity",
                 }
-                if spec.kind == "github-release.asset":
-                    return cache._open_github_release_asset(client, spec, headers)
-                return cache._open_http_response(client, spec.source, headers)
+                return cache._open_provider(client, spec, headers)
 
             digest = None if fetch_only else hashlib.sha256()
             with cache._sample_transfer(
@@ -469,12 +462,11 @@ class DownloadMixin:
                 state=ModelFileState.PARTIAL,
                 completed_artifacts=completed_artifacts,
             )
-            if spec.kind == "github-release.asset" and isinstance(
-                error, httpx2.HTTPError
-            ):
+            transport_failure = provider_for(spec.kind).transport_failure
+            if transport_failure is not None and isinstance(error, httpx2.HTTPError):
                 raise ModelCacheStorageUnknown(
                     ModelCacheCode.SOURCE_UNAVAILABLE,
-                    "GitHub release asset transfer failed",
+                    transport_failure,
                     recovery="resume",
                 ) from error
             raise
@@ -531,21 +523,13 @@ class DownloadMixin:
                 "production cache HTTP clients must not follow redirects",
             )
         headers = {"Range": f"bytes={offset}-"} if offset else {}
-        response = (
-            cache._open_github_release_asset(client, spec, headers)
-            if spec.kind == "github-release.asset"
-            else cache._open_http_response(client, spec.source, headers)
-        )
+        response = cache._open_provider(client, spec, headers)
         effective_offset = offset
         if offset and response.status_code == 200:
             # The server ignored the range request; restart safely rather than
             # appending a complete payload to a checkpoint.
             response.close()
-            response = (
-                cache._open_github_release_asset(client, spec, {})
-                if spec.kind == "github-release.asset"
-                else cache._open_http_response(client, spec.source, {})
-            )
+            response = cache._open_provider(client, spec, {})
             effective_offset = 0
         if response.status_code == 206:
             content_range = response.headers.get("content-range", "")

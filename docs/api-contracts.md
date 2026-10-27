@@ -794,8 +794,8 @@ completed per-node removal receipts and queues only the unfinished nodes. Active
 runs, active cleanup operations and changed immutable membership still block it.
 
 Structure validation does not replace transaction semantics. Cache workers
-refresh the database row when acquiring its lock, so a prior cooldown scan
-cannot hide another worker's newly committed claim. The PostgreSQL regression
+refresh the database row when acquiring its lock, so an earlier read in the
+same session cannot hide another worker's newly committed claim. The PostgreSQL regression
 forces that interleaving and verifies that workers claim different operations.
 
 ## Discovered HTTP completeness gate

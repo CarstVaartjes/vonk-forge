@@ -113,8 +113,9 @@ def _stall_deadline(
 ) -> datetime:
     """A download that keeps receiving bytes is healthy, however slow the link.
 
-    A provider cooldown is a wait on a live owner (the provider's Retry-After):
-    the window never runs out inside it and restarts when it ends.
+    A provider wait is a wait on a live owner (the provider's rate limit or
+    quota): the window never runs out inside it and restarts when it ends,
+    however long the provider asks to wait.
     """
 
     anchors = [
@@ -156,7 +157,8 @@ class CacheEffects(Protocol):
         ...
 
     def cooldown_until(self, payload: ModelCacheOperationPayload) -> datetime | None:
-        """A provider-wide cooldown the operation's sources are under."""
+        """When the provider wait the operation is under ends (or its own last
+        one ended): its providers' cooldown or its own recorded wait."""
         ...
 
 

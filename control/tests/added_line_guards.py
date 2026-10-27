@@ -66,6 +66,7 @@ MODES = (
     "exit-causes",
     "nas-space",
     "model-sets",
+    "openers",
     "follow-validators",
 )
 # The agent's messages a Controller test may send only as the stand-in pinned
@@ -79,6 +80,8 @@ SECURITY_EDGES = frozenset(
         "control/src/vonk_control/auth.py",
         # Canonical provider HTTP authentication and model-byte ingress verification.
         "control/src/vonk_control/model_cache/http.py",
+        # The GitHub LFS link host allowlist and redirect refusal (SSRF edge).
+        "control/src/vonk_control/model_cache/github_lfs.py",
         "control/src/vonk_control/browser_auth.py",
         "control/src/vonk_control/auth_api.py",
         "control/src/vonk_control/agent_api/authority.py",
@@ -711,6 +714,67 @@ def start_budget_derivations(source: str) -> list[tuple[int, str]]:
     return sorted(found.items())
 
 
+# A provider is contacted only through ``download.py:_open_provider``, which
+# holds back a provider under its cooldown and narrows the parallel streams on
+# its rate limit. A direct opener call bypassed both (the Hugging Face
+# upstream-revision check, deleted with #1925's review).
+_PROVIDER_OPENERS = frozenset(
+    {"_open_http_response", "_open_github_release_asset", "_open_github_lfs_object"}
+)
+_OPENER_OWNERS = {
+    "control/src/vonk_control/model_cache/providers.py": None,
+    "control/src/vonk_control/model_cache/download.py": "_open_provider",
+}
+
+# The anonymous GitHub request primitive skips the cooldown and the stream
+# throttle too: only the two GitHub provider modules, whose openers run under
+# ``_open_provider``, may call it.
+_ANONYMOUS_SEND = "_send_anonymous_github_request"
+_ANONYMOUS_SEND_MODULES = frozenset(
+    {
+        "control/src/vonk_control/model_cache/github.py",
+        "control/src/vonk_control/model_cache/github_lfs.py",
+    }
+)
+
+
+def provider_opener_calls(source: str) -> list[tuple[int, str | None]]:
+    """Calls of a provider opener or ``provider_for(...).open(``, with the
+    enclosing function's name (None at module level)."""
+
+    found: dict[int, str | None] = {}
+
+    def visit(node: ast.AST, function: str | None) -> None:
+        for child in ast.iter_child_nodes(node):
+            scope = (
+                child.name
+                if isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef)
+                else function
+            )
+            if isinstance(child, ast.Call) and isinstance(child.func, ast.Attribute):
+                owner = child.func.value
+                if child.func.attr in _PROVIDER_OPENERS or (
+                    child.func.attr == "open"
+                    and (
+                        (
+                            isinstance(owner, ast.Call)
+                            and isinstance(owner.func, ast.Name)
+                            and owner.func.id == "provider_for"
+                        )
+                        or (
+                            isinstance(owner, ast.Subscript)
+                            and isinstance(owner.value, ast.Name)
+                            and owner.value.id == "PROVIDERS"
+                        )
+                    )
+                ):
+                    found[child.lineno] = scope
+            visit(child, scope)
+
+    visit(ast.parse(source), None)
+    return sorted(found.items())
+
+
 # Movement is forward-only: a stall's marks keep, per child phase, the highest
 # counters and the phases seen, so a copy retried from zero or a phase
 # flapping back is not progress (#1899).  A comparison of one progress field
@@ -1303,6 +1367,35 @@ def check_source(
             (line, "model sets chosen by first-requester digest; use lineage.py")
             for line, text in enumerate(source.splitlines(), 1)
             if "ModelCacheSet.model_content_sha256" in text
+        )
+    if (
+        python
+        and not is_test
+        and "openers" in modes
+        and path.startswith("control/src/")
+    ):
+        owner = _OPENER_OWNERS.get(path, "")
+        hits.extend(
+            (line, "provider opened outside download.py:_open_provider")
+            for line, function in provider_opener_calls(source)
+            if path not in _OPENER_OWNERS or (owner is not None and function != owner)
+        )
+    if (
+        python
+        and not is_test
+        and "openers" in modes
+        and path.startswith("control/src/")
+        and path not in _ANONYMOUS_SEND_MODULES
+    ):
+        hits.extend(
+            (
+                node.lineno,
+                "anonymous GitHub request outside the GitHub provider modules",
+            )
+            for node in ast.walk(ast.parse(source))
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == _ANONYMOUS_SEND
         )
     if (
         python

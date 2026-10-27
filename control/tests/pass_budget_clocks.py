@@ -33,7 +33,6 @@ PASS_BUDGET_MODULES = (
     "vonk_control.library_projection.local_state",
     "vonk_control.library_assessment",
     "vonk_control.library_image_presence",
-    "vonk_control.model_cache.updates",
     "vonk_control.profile_read_observation",
 )
 
@@ -98,7 +97,6 @@ def frozen_pass_budgets(monkeypatch: pytest.MonkeyPatch) -> PassClock:
     )
     for owner in (
         "vonk_control.library_image_presence",
-        "vonk_control.model_cache.updates",
         "vonk_control.profile_read_observation",
     ):
         monkeypatch.setattr(f"{owner}.wait", completing_wait)

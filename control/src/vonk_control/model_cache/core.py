@@ -36,6 +36,7 @@ from .persistence import (
     _operation_progress,
     _store_operation_payload,
 )
+from .provider_waits import payload_kinds, provider_wait_end
 
 if TYPE_CHECKING:
     from .service import ModelCacheService
@@ -59,7 +60,6 @@ class CoreMixin:
         # releasing the service. HTTP clients have bounded read timeouts, so
         # this wait is finite while preventing post-shutdown DB/file writes.
         cache._executor.shutdown(wait=True, cancel_futures=True)
-        cache._upstream_executor.shutdown(wait=False, cancel_futures=True)
         with cache._lock:
             cache._advance_background_operations()
             cache._progress_checkpoint_at.clear()
@@ -144,16 +144,16 @@ class CoreMixin:
         return cache._artifact_effects_settled(operation_id, manifest)
 
     def cooldown_until(self, payload: ModelCacheOperationPayload) -> datetime | None:
-        """The provider cooldown (rate limit) the operation's sources are under."""
+        """When the provider wait the operation is under ends: its providers'
+        running cooldown, or the end of the wait it recorded itself (kept once
+        passed, so the stall window restarts when the wait ends)."""
         cache = cast("ModelCacheService", self)
 
-        until = cache._hf_cooldown_until
-        if until is None or until <= cache._clock():
-            return None
-        try:
-            return until if cache._payload_has_huggingface_source(payload) else None
-        except (KeyError, TypeError, ValueError):
-            return None
+        ends = (
+            cache._provider_cooldown(payload_kinds(payload)),
+            provider_wait_end(payload),
+        )
+        return max((end for end in ends if end is not None), default=None)
 
     def _payload_or_none(
         self, operation: ModelCacheOperation

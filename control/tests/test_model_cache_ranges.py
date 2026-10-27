@@ -1,4 +1,6 @@
-from threading import Barrier, Event
+import time
+from contextlib import contextmanager
+from threading import Barrier, Event, Semaphore
 
 import httpx2
 import pytest
@@ -19,6 +21,18 @@ def response(start, end, total, content, status=206, content_range=None):
     )
 
 
+class _AfterPeers(httpx2.SyncByteStream):
+    """A range body that flows only once every peer is streaming too."""
+
+    def __init__(self, barrier, content):
+        self.barrier = barrier
+        self.content = content
+
+    def __iter__(self):
+        self.barrier.wait(timeout=30)  # Fails if the actual transfers serialize.
+        yield self.content
+
+
 def test_parallel_ranges_assemble_and_reuse_contiguous_prefix(tmp_path):
     target = tmp_path / "model.part"
     data = bytes(range(100))
@@ -29,8 +43,12 @@ def test_parallel_ranges_assemble_and_reuse_contiguous_prefix(tmp_path):
 
     def open_range(start, end):
         requests.append((start, end))
-        barrier.wait(timeout=30)  # Fails if the actual transfers serialize.
-        return response(start, end, len(data), data[start : end + 1])
+        return httpx2.Response(
+            206,
+            stream=_AfterPeers(barrier, data[start : end + 1]),
+            headers={"content-range": f"bytes {start}-{end}/{len(data)}"},
+            request=httpx2.Request("GET", "https://example.com/model"),
+        )
 
     assert download_ranges(target, len(data), open_range, Event(), progress.append)
     assert target.read_bytes() == data
@@ -43,15 +61,111 @@ def test_parallel_ranges_assemble_and_reuse_contiguous_prefix(tmp_path):
 def test_ignored_ranges_preserve_sequential_partial(tmp_path):
     target = tmp_path / "model.part"
     target.write_bytes(b"abc")
-    assert not download_ranges(
-        target,
-        100,
-        lambda start, end: response(start, end, 100, b"x" * 100, 200),
-        Event(),
-        lambda value: None,
-    )
+    requests = []
+
+    def ignored(start, end):
+        requests.append((start, end))
+        return response(start, end, 100, b"x" * 100, 200)
+
+    assert not download_ranges(target, 100, ignored, Event(), lambda value: None)
     assert target.read_bytes() == b"abc"
     assert list(tmp_path.iterdir()) == [target]
+    assert len(requests) == 1  # the first answer ignored the range: no peer asks
+
+
+def test_opens_after_the_first_accepted_range_run_concurrently(tmp_path):
+    """The probe serializes only the first open: once a range answer is
+    accepted, every peer opens at once (not one after another)."""
+
+    target = tmp_path / "model.part"
+    data = bytes(range(100))
+    peers = Barrier(3)
+    opened = []
+
+    def open_range(start, end):
+        opened.append(start)
+        if len(opened) == 1:
+            time.sleep(0.2)  # the probe: every peer queues behind it
+        else:
+            peers.wait(timeout=30)  # fails if the peers' opens serialize
+        return response(start, end, len(data), data[start : end + 1])
+
+    assert download_ranges(target, len(data), open_range, Event(), lambda value: None)
+    assert target.read_bytes() == data
+    assert len(opened) == 4
+
+
+def test_a_stop_during_the_probe_opens_no_peer(tmp_path):
+    """A cancel, supersede or shutdown that lands while the probe is in
+    flight: its peers, queued behind it, never open the provider."""
+
+    target = tmp_path / "model.part"
+    data = bytes(range(100))
+    stop = Event()
+    opened = []
+
+    def open_range(start, end):
+        opened.append(start)
+        if len(opened) == 1:
+            time.sleep(0.2)  # the probe: every peer queues behind it
+            stop.set()
+        return response(start, end, len(data), data[start : end + 1])
+
+    with observe_unknown():
+        observed = download_ranges(
+            target, len(data), open_range, stop, lambda value: None
+        )
+        assert not observed
+    assert len(opened) == 1
+
+
+class _Refused(Exception):
+    """A provider's typed refusal (a rate limit, a quota, a gone source)."""
+
+
+@contextmanager
+def _one_stream_at_a_time(gate):
+    with gate:
+        yield
+
+
+@pytest.mark.parametrize("gated", [False, True], ids=["ungated", "one-stream"])
+def test_a_refused_range_always_raises_the_refusal_not_a_peer_interruption(
+    tmp_path, gated
+):
+    """Stress: one worker's provider refusal is the error raised, every time.
+
+    Its peers stop with InterruptedError because of that refusal; whichever
+    finishes first, the caller must see the refusal, since only the refusal
+    routes to the provider's typed wait. A refusal before any range answered
+    costs one request: the peers never open the provider.
+    """
+
+    data = bytes(range(64))
+    gate = Semaphore(1)
+    for iteration in range(300):
+        target = tmp_path / f"model-{iteration}.part"
+        refused_start = (iteration % 4) * 16
+        opened = []
+
+        def open_range(start, end, refused_start=refused_start, opened=opened):
+            opened.append(start)
+            if start == refused_start:
+                raise _Refused("the provider asked to wait")
+            time.sleep(0.001)  # a peer is still in flight when the refusal lands
+            return response(start, end, len(data), data[start : end + 1])
+
+        with pytest.raises(_Refused):
+            download_ranges(
+                target,
+                len(data),
+                open_range,
+                Event(),
+                lambda value: None,
+                stream_gate=(lambda: _one_stream_at_a_time(gate)) if gated else None,
+            )
+        if opened[0] == refused_start:
+            assert opened == [refused_start]  # the peers never asked
 
 
 @pytest.mark.parametrize(
