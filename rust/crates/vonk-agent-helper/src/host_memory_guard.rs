@@ -35,14 +35,18 @@ pub struct Sample {
     pub full_avg10: Option<f64>,
 }
 
+/// One `/proc/meminfo` field (`key` with its colon) in bytes.
+pub fn meminfo_bytes(text: &str, key: &str) -> Option<u64> {
+    text.lines().find_map(|line| {
+        let mut fields = line.split_whitespace();
+        (fields.next()? == key).then(|| fields.next()?.parse::<u64>().ok()?.checked_mul(1024))?
+    })
+}
+
 pub fn read_sample(mut read: impl FnMut(&str) -> std::io::Result<String>) -> Sample {
-    let available_bytes = read("/proc/meminfo").ok().and_then(|text| {
-        text.lines().find_map(|line| {
-            let mut fields = line.split_whitespace();
-            (fields.next()? == "MemAvailable:")
-                .then(|| fields.next()?.parse::<u64>().ok()?.checked_mul(1024))?
-        })
-    });
+    let available_bytes = read("/proc/meminfo")
+        .ok()
+        .and_then(|text| meminfo_bytes(&text, "MemAvailable:"));
     let full_avg10 = read("/proc/pressure/memory").ok().and_then(|text| {
         text.lines().find_map(|line| {
             let mut fields = line.split_whitespace();
@@ -152,6 +156,7 @@ fn evidence(sample: Sample, trigger: &str, duration: Duration) -> FailureDiagnos
     };
     FailureDiagnostics {
         model_store_layout: None,
+        page_cache: None,
         process_exit_code: None,
         schema_version: 1,
         collected_at: observed_at.to_rfc3339(),

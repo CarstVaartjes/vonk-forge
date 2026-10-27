@@ -22,6 +22,7 @@ pub mod network;
 pub mod oci;
 pub mod outcome;
 pub mod package_activation;
+pub mod page_cache;
 pub mod pair;
 pub mod process;
 pub mod readiness;

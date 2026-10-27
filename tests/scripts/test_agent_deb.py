@@ -2834,6 +2834,9 @@ def test_builder_produces_reproducible_verified_arm64_deb(tmp_path: Path) -> Non
         "ReadWritePaths=-/sys/fs/cgroup/system.slice -/sys/fs/cgroup/docker"
         in helper_unit.splitlines()
     )
+    # Only the page-cache drop is writable under ProtectKernelTunables.
+    assert "ReadWritePaths=-/proc/sys/vm/drop_caches" in helper_unit.splitlines()
+    assert "ProtectKernelTunables=yes" in helper_unit.splitlines()
     # Reject broader capability sets, including a second additive directive
     # that leaves the expected line intact (the former substring check missed it).
     helper_path = payload / "lib/systemd/system/vonk-forge-package-helper.service"

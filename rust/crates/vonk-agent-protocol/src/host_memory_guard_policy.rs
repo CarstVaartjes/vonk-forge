@@ -23,3 +23,15 @@ pub const COMMAND_TIMEOUT: Duration = Duration::from_secs(1);
 pub const JOURNAL_RETRY: Duration = Duration::from_secs(2);
 // Bound retained diagnostics after their exact container has been removed.
 pub const RECEIPT_COLLECTION_INTERVAL: Duration = Duration::from_secs(60);
+// Page-cache drops during a workload's load (owner 2026-10-27). GB10 counts
+// reclaimable page cache as used: vLLM's free-memory check and NVRM
+// allocations fail at ~6-7 GB MemAvailable with 7-14 GB cached (NVIDIA's DGX
+// Spark vLLM troubleshooting; vLLM #35313). The agent asks once before the
+// container starts and every interval until the workload is ready or its
+// start ends; the helper syncs within the bound, then drops.
+pub const PAGE_CACHE_DROP_INTERVAL: Duration = Duration::from_secs(5);
+// A slow disk never stalls a start: the drop proceeds after this bound and
+// reclaims only clean pages.
+pub const PAGE_CACHE_SYNC_TIMEOUT: Duration = Duration::from_secs(2);
+// One drop answers within the sync bound plus the drop itself.
+pub const PAGE_CACHE_DROP_REPLY_TIMEOUT: Duration = Duration::from_secs(15);

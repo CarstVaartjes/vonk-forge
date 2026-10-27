@@ -78,6 +78,17 @@ REVIEWED_CORE_DEFAULTS = {
     # struct only adds path and errno detail, absent from older agents.
     "FailureDiagnostics.model_store_layout",
     "ModelStoreLayoutFault.errno",
+    # Page-cache drops a start made: optional detail beside the failure (or a
+    # job receipt's diagnostics), absent from older agents and helpers.
+    "FailureDiagnostics.page_cache",
+    "PageCacheDropEvidence.first",
+    "PageCacheDropEvidence.last",
+    "PageCacheDropEvidence.last_problem",
+    "PageCacheDropReport.cached_before_bytes",
+    "PageCacheDropReport.cached_after_bytes",
+    "PageCacheDropReport.mem_available_after_bytes",
+    "PageCacheDropReport.sync",
+    "PageCacheDropReport.problem",
     "AgentFailureResult.error_code",
     "AgentFailureResult.failure_kind",
     "AgentFailureResult.operation",

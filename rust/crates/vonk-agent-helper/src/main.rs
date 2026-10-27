@@ -466,6 +466,21 @@ fn handle(
             HelperRejection::new(HelperErrorCode::OperationFailed, error.safe_detail())
         });
     }
+    if let Some(report) =
+        vonk_agent_helper::page_cache::handle(&raw, verifier, &peer).map_err(|error| {
+            HelperRejection::new(HelperErrorCode::PeerIdentityInvalid, error.safe_detail())
+        })?
+    {
+        let body = vonk_agent_protocol::canonical_generated_json(&report).map_err(|_| {
+            HelperRejection::new(
+                HelperErrorCode::OperationFailed,
+                "page cache report encoding failed",
+            )
+        })?;
+        return write_frame(stream, &body).map_err(|error| {
+            HelperRejection::new(HelperErrorCode::OperationFailed, error.safe_detail())
+        });
+    }
     if let Ok(removal) = vonk_agent_protocol::parse_strict::<
         vonk_agent_protocol::generated::AgentStoreRemovalRequest,
     >(&raw)
