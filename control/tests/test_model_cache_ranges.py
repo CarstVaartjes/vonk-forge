@@ -73,6 +73,28 @@ def test_ignored_ranges_preserve_sequential_partial(tmp_path):
     assert len(requests) == 1  # the first answer ignored the range: no peer asks
 
 
+def test_opens_after_the_first_accepted_range_run_concurrently(tmp_path):
+    """The probe serializes only the first open: once a range answer is
+    accepted, every peer opens at once (not one after another)."""
+
+    target = tmp_path / "model.part"
+    data = bytes(range(100))
+    peers = Barrier(3)
+    opened = []
+
+    def open_range(start, end):
+        opened.append(start)
+        if len(opened) == 1:
+            time.sleep(0.2)  # the probe: every peer queues behind it
+        else:
+            peers.wait(timeout=30)  # fails if the peers' opens serialize
+        return response(start, end, len(data), data[start : end + 1])
+
+    assert download_ranges(target, len(data), open_range, Event(), lambda value: None)
+    assert target.read_bytes() == data
+    assert len(opened) == 4
+
+
 class _Refused(Exception):
     """A provider's typed refusal (a rate limit, a quota, a gone source)."""
 

@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Iterable, Sequence
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Protocol, cast
 
 from vonk_agent_protocol import ModelCacheCode, OperatorActionName
@@ -24,7 +24,7 @@ from ..model_cache_contract import (
 )
 from ..models import ModelCacheOperation
 from .catalog_helpers import _datetime
-from .errors import ModelCacheStorageUnknown
+from .errors import ProviderCooldownRefused
 
 if TYPE_CHECKING:
     from .service import ModelCacheService
@@ -57,6 +57,14 @@ def payload_kinds(
     if not isinstance(payload, ModelCacheDownloadPayload):
         return frozenset()
     return provider_kinds(payload.manifest.artifacts, artifact_key)
+
+
+def hinted_until(hint: object, now: datetime) -> datetime | None:
+    """When a provider's own wait hint ends, or ``None`` without a usable hint."""
+
+    if type(hint) is not int or hint < 1:
+        return None
+    return now + timedelta(seconds=hint)
 
 
 def provider_wait_end(payload: ModelCacheOperationPayload) -> datetime | None:
@@ -104,7 +112,7 @@ class ProviderWaitsMixin:
         until = cache._provider_cooldown((kind,))
         if until is None:
             return
-        raise ModelCacheStorageUnknown(
+        raise ProviderCooldownRefused(
             ModelCacheCode.RATE_LIMITED,
             "the artifact provider asked to wait; this download resumes automatically",
             retry_after_seconds=max(

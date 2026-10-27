@@ -7,7 +7,7 @@ import os
 import re
 import shutil
 from collections.abc import Callable, Iterator, Mapping, Sequence
-from datetime import datetime, timedelta
+from datetime import datetime
 from io import BufferedReader
 from pathlib import Path
 from typing import TYPE_CHECKING, NoReturn, cast
@@ -43,9 +43,11 @@ from .errors import (
     ModelCacheStorageInvalid,
     ModelCacheStorageRefused,
     ModelCacheStorageUnknown,
+    ProviderCooldownRefused,
     _ArtifactWriterBusy,
     _reference_error_type,
 )
+from .provider_waits import hinted_until
 from .providers import provider_for
 
 if TYPE_CHECKING:
@@ -336,16 +338,12 @@ class DownloadMixin:
         cache._refuse_during_cooldown(spec.kind)
         try:
             return provider_for(spec.kind).open(cache, client, spec, headers)
+        except ProviderCooldownRefused:
+            raise  # refused inside the open by the cooldown: no provider answered
         except ModelCacheStorageUnknown as error:
-            hint = error.retry_after_seconds
-            if (
-                error.code == ModelCacheCode.RATE_LIMITED
-                and type(hint) is int
-                and hint >= 1
-            ):
-                cache._record_provider_cooldown(
-                    spec.kind, cache._clock() + timedelta(seconds=hint)
-                )
+            until = hinted_until(error.retry_after_seconds, cache._clock())
+            if error.code == ModelCacheCode.RATE_LIMITED and until is not None:
+                cache._record_provider_cooldown(spec.kind, until)
             if error.code == ModelCacheCode.RATE_LIMITED or (
                 error.source_status is not None and error.source_status >= 500
             ):

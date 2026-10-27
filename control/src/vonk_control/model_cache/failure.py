@@ -38,7 +38,7 @@ from .persistence import (
     _store_operation_payload,
     _updated,
 )
-from .provider_waits import provider_kinds
+from .provider_waits import hinted_until, provider_kinds
 
 if TYPE_CHECKING:
     from .service import ModelCacheService
@@ -210,12 +210,13 @@ class FailureMixin:
                     # cooldown holds every request to the same provider, and is
                     # recorded before the core schedules, so the stall window
                     # never clips the provider's "later".
-                    if type(provider_hint) is not int or provider_hint < 1:
+                    until = hinted_until(provider_hint, now)
+                    if until is None:
                         access_checks += 1
                         provider_hint = cache._access_retry_delay(
                             operation.id, access_checks
                         )
-                    until = now + timedelta(seconds=provider_hint)
+                        until = now + timedelta(seconds=provider_hint)
                     for kind in provider_kinds(manifest.artifacts, artifact_key):
                         cache._record_provider_cooldown(kind, until)
                 operation.last_error = detail[:512]

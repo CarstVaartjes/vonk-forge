@@ -443,3 +443,41 @@ def test_a_hinted_rate_limit_holds_its_provider_from_the_answer(
         client.close()
         service.close()
         engine.dispose()
+
+
+@pytest.mark.parametrize("kind", sorted(PROVIDERS))
+def test_a_cooldown_refusal_inside_the_open_neither_throttles_nor_records(
+    tmp_path: Path, kind: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A peer's refusal lands between the opener's check and the provider's
+    own check: no provider answered, so the streams keep their width and the
+    peer's cooldown is not moved."""
+
+    now = [NOW]
+    until = NOW + timedelta(minutes=30)
+
+    def open_after_a_peer_refused(cache, client, spec, headers):
+        cache._record_provider_cooldown(kind, until)  # the peer's refusal
+        now[0] += timedelta(milliseconds=500)
+        cache._refuse_during_cooldown(kind)
+
+    monkeypatch.setitem(
+        PROVIDERS, kind, replace(PROVIDERS[kind], open=open_after_a_peer_refused)
+    )
+    engine, sessions = _sqlite_sessions()
+    service = ModelCacheService(
+        sessions, tmp_path / "cache", reserve_bytes=0, clock=lambda: now[0]
+    )
+    client = httpx2.Client()
+    try:
+        width = service._streams.status().limit
+        spec = cast("ArtifactSpec", SimpleNamespace(kind=kind))
+        with pytest.raises(ModelCacheStorageUnknown) as refused:
+            service._open_provider(client, spec, {})
+        assert refused.value.code == ModelCacheCode.RATE_LIMITED
+        assert service._streams.status().limit == width
+        assert service._provider_cooldown([kind]) == until
+    finally:
+        client.close()
+        service.close()
+        engine.dispose()

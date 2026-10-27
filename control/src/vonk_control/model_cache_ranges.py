@@ -170,19 +170,22 @@ def download_ranges(
         fallback.set()
 
     def _open(offset: int, end: int) -> httpx2.Response:
-        with nullcontext() if proven.is_set() else probe:
-            if interrupted():
-                raise InterruptedError("range transfer interrupted")
-            try:
-                response = _open_checked(offset, end)
-            except _RangeIgnored:
-                abort.set()  # before the probe frees: no peer opens
-                raise
-            except Exception as exc:
-                fail(exc)  # before the probe frees: no peer opens
-                raise
-            proven.set()
-            return response
+        if not proven.is_set():
+            with probe:
+                if not proven.is_set():  # else a peer's answer was accepted
+                    if interrupted():
+                        raise InterruptedError("range transfer interrupted")
+                    try:
+                        response = _open_checked(offset, end)
+                    except _RangeIgnored:
+                        abort.set()  # before the probe frees: no peer opens
+                        raise
+                    except Exception as exc:
+                        fail(exc)  # before the probe frees: no peer opens
+                        raise
+                    proven.set()
+                    return response
+        return _open_checked(offset, end)
 
     def _open_checked(offset: int, end: int) -> httpx2.Response:
         response = open_range(offset, end)

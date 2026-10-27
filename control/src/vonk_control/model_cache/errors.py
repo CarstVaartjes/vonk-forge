@@ -229,6 +229,11 @@ class ModelCacheStorageUnknown(_CacheUnknown, ModelCacheStorageError):
     default_reason = WaitReason.OBSERVATION_UNAVAILABLE
 
 
+class ProviderCooldownRefused(ModelCacheStorageUnknown):
+    """The cache's own refusal while a provider's cooldown runs: no provider
+    answered, so nothing is throttled or recorded again."""
+
+
 def _reference_error_type(error: ArtifactLifecycleError) -> type[ModelCacheError]:
     """Preserve typed refusals and unknown effects across the cache adapter."""
     if isinstance(error, SecurityRefusalError):
