@@ -27,8 +27,9 @@
 //!   while starting (vLLM's "No available memory for the cache blocks") said
 //!   how much it found and took a few lines before its traceback: "Model
 //!   loading took 64.98 GiB memory", "Available KV cache memory: 0.46 GiB".
-//!   The traceback fills the window, so those lines are retained ahead of it
-//!   in the same way, and the fix can be sized from the evidence.
+//!   The traceback fills the window, so the window is chosen within a smaller
+//!   budget and those lines are retained ahead of it in the same way, and the
+//!   fix can be sized from the evidence.
 
 use std::ops::Range;
 pub use vonk_agent_protocol::failure_evidence::ExitCause;
@@ -44,8 +45,8 @@ const RETAINED_BYTES: usize = 2048;
 /// Bytes reserved for the line that marks the output omitted between the
 /// retained failure lines and the tail.
 const OMISSION_MARKER_BYTES: usize = 48;
-/// Bytes of memory-figure lines retained ahead of the window, taken from the
-/// tail's share so the stream's bound stays [`RETAINED_BYTES`].
+/// Bytes of memory-figure lines retained ahead of the window, reserved from
+/// the window's budget so the stream's bound stays [`RETAINED_BYTES`].
 const MEMORY_FIGURE_BYTES: usize = RETAINED_BYTES / 4;
 /// Lines read back from the container.  Kept well above what is retained so a
 /// failure header above the retained window is still visible to the anchor.
@@ -280,8 +281,8 @@ fn closing_exception(stream: &[u8]) -> Option<(usize, usize)> {
 }
 
 /// The start of the last frame above `before`, when it lies within half the
-/// budget: the frame that raised the exception closing at `before`.
-fn raising_frame(stream: &[u8], before: usize) -> Option<usize> {
+/// `budget`: the frame that raised the exception closing at `before`.
+fn raising_frame(stream: &[u8], before: usize, budget: usize) -> Option<usize> {
     let mut offset = 0;
     let mut frame = None;
     for line in stream[..before].split_inclusive(|byte| *byte == b'\n') {
@@ -290,16 +291,21 @@ fn raising_frame(stream: &[u8], before: usize) -> Option<usize> {
         }
         offset += line.len();
     }
-    frame.filter(|start| before - start <= RETAINED_BYTES / 2)
+    frame.filter(|start| before - start <= budget / 2)
 }
 
 /// Where a window that ends on an exception line ends instead: on the stream's
 /// last line when the budget reaches it, otherwise on the last whole line the
 /// budget holds, counted from the frame that raised the exception.  An
 /// exception line longer than the budget ends the window as it did before.
-fn through_the_message(stream: &[u8], exception_start: usize, exception_end: usize) -> usize {
-    let from = raising_frame(stream, exception_start).unwrap_or(exception_start);
-    let limit = (from + RETAINED_BYTES).clamp(exception_end, stream.len());
+fn through_the_message(
+    stream: &[u8],
+    exception_start: usize,
+    exception_end: usize,
+    budget: usize,
+) -> usize {
+    let from = raising_frame(stream, exception_start, budget).unwrap_or(exception_start);
+    let limit = (from + budget).clamp(exception_end, stream.len());
     if limit == stream.len() {
         return limit;
     }
@@ -311,24 +317,31 @@ fn through_the_message(stream: &[u8], exception_start: usize, exception_end: usi
 
 /// The retained byte range of one stream and the lines retained ahead of it:
 /// the [`failure_window`], with the memory figures printed above it.
+///
+/// A stream with no figure above its window keeps that window.  Otherwise the
+/// window is chosen again within a budget that leaves room for the figures
+/// and the omission marker, so every anchor of the window -- the raising
+/// frame, the exception, the causes -- is placed within the smaller budget
+/// rather than cut from its top afterwards, and the figures are taken from
+/// above that smaller window.
 fn window(stream: &[u8]) -> (Vec<Range<usize>>, Range<usize>) {
-    let (causes, range) = failure_window(stream);
-    let figures = memory_figures(&stream[..range.start], &causes, MEMORY_FIGURE_BYTES);
+    let (causes, range) = failure_window(stream, RETAINED_BYTES);
+    if memory_figures(&stream[..range.start], &causes, MEMORY_FIGURE_BYTES).is_empty() {
+        return (causes, range);
+    }
+    let budget = RETAINED_BYTES - MEMORY_FIGURE_BYTES - OMISSION_MARKER_BYTES;
+    let (reduced_causes, reduced) = failure_window(stream, budget);
+    let figures = memory_figures(
+        &stream[..reduced.start],
+        &reduced_causes,
+        MEMORY_FIGURE_BYTES,
+    );
     if figures.is_empty() {
         return (causes, range);
     }
-    // The figures take their bytes from the top of the tail, and the omission
-    // marker its reserve when the causes did not already make room for it.
-    let marker = if causes.is_empty() {
-        OMISSION_MARKER_BYTES
-    } else {
-        0
-    };
-    let start =
-        (range.start + figures.iter().map(Range::len).sum::<usize>() + marker).min(range.end);
-    let mut retained: Vec<_> = causes.into_iter().chain(figures).collect();
+    let mut retained: Vec<_> = reduced_causes.into_iter().chain(figures).collect();
     retained.sort_by_key(|line| line.start);
-    (retained, start..range.end)
+    (retained, reduced)
 }
 
 /// The byte range that ends on the stream's own account of its failure.
@@ -356,12 +369,14 @@ fn window(stream: &[u8]) -> (Vec<Range<usize>>, Range<usize>) {
 /// A block that points above itself with no traceback above it still has a
 /// cause: the lines its processes reported as errors before it.  Those come
 /// back as separate line ranges, retained ahead of the window.
-fn failure_window(stream: &[u8]) -> (Vec<Range<usize>>, Range<usize>) {
+///
+/// Everything retained fits in `budget` bytes.
+fn failure_window(stream: &[u8], budget: usize) -> (Vec<Range<usize>>, Range<usize>) {
     let Some((header_start, header_end, block_start, cause_above)) = last_failure_line(stream)
     else {
         return (
             Vec::new(),
-            stream.len().saturating_sub(RETAINED_BYTES)..stream.len(),
+            stream.len().saturating_sub(budget)..stream.len(),
         );
     };
     // Give way only when the cause above is itself a failure block.  A summary
@@ -380,30 +395,27 @@ fn failure_window(stream: &[u8]) -> (Vec<Range<usize>>, Range<usize>) {
         .split_inclusive(|byte| *byte == b'\n')
         .any(points_elsewhere);
     if header_start > block_start && cause_above.is_some() && points_above {
-        return (
-            Vec::new(),
-            block_start.saturating_sub(RETAINED_BYTES)..block_start,
-        );
+        return (Vec::new(), block_start.saturating_sub(budget)..block_start);
     }
     let end = match closing_exception(stream) {
         Some((exception_start, exception_end)) if exception_end == header_end => {
-            through_the_message(stream, exception_start, exception_end)
+            through_the_message(stream, exception_start, exception_end, budget)
         }
         _ => header_end,
     };
     let causes = if points_above && cause_above.is_none() {
-        first_failure_lines(stream, block_start, RETAINED_BYTES / 2)
+        first_failure_lines(stream, block_start, budget / 2)
     } else {
         Vec::new()
     };
     let kept: usize = causes.iter().map(Range::len).sum();
-    let start = end.saturating_sub(RETAINED_BYTES - kept - OMISSION_MARKER_BYTES);
+    let start = end.saturating_sub(budget - kept - OMISSION_MARKER_BYTES);
     let causes: Vec<_> = causes
         .into_iter()
         .filter(|line| line.end <= start)
         .collect();
     if causes.is_empty() {
-        return (Vec::new(), end.saturating_sub(RETAINED_BYTES)..end);
+        return (Vec::new(), end.saturating_sub(budget)..end);
     }
     (causes, start..end)
 }
@@ -860,7 +872,7 @@ mod tests {
     /// logs what it loaded and what was left for the KV cache, then a
     /// traceback longer than the bound that ends on vLLM's ValueError, and the
     /// API server's traceback pointing above itself.
-    fn kv_cache_exhausted_start() -> Vec<u8> {
+    fn kv_cache_exhausted_start(frames: usize) -> Vec<u8> {
         let prefix = "(EngineCore pid=255) INFO 10-27 06:53:40 [gpu_worker.py:462]";
         let mut stream = b"Downloading apache-tvm-ffi (16.7 MB)\n".to_vec();
         for index in 0..100 {
@@ -881,7 +893,7 @@ mod tests {
             )
             .into_bytes(),
         );
-        for index in 0..30 {
+        for index in 0..frames {
             stream.extend(
                 format!("{error}   File \"/opt/vllm/v1/core/kv_cache_utils.py\", line {index}, in get_kv_cache_configs\n{error}     _check_enough_kv_cache_memory(\n").into_bytes(),
             );
@@ -902,7 +914,7 @@ mod tests {
         // Wrong implementation this catches: the window kept only the last
         // frames and the exception, so every "No available memory for the
         // cache blocks" failure lost the figures needed to size its fix.
-        let stream = kv_cache_exhausted_start();
+        let stream = kv_cache_exhausted_start(30);
         let plain = String::from_utf8_lossy(&stream[stream.len() - RETAINED_BYTES..]);
         assert!(!plain.contains("Available KV cache memory"));
         let tail = retain(&stream);
@@ -926,6 +938,54 @@ mod tests {
         let shown = tail.text.len() - lines[marker].len() - 1;
         assert_eq!(tail.dropped_bytes, Some((stream.len() - shown) as u64));
         assert!(tail.truncated);
+    }
+
+    #[test]
+    fn a_memory_figure_at_the_top_of_the_window_is_not_lost_to_the_figures_above_it() {
+        // Wrong implementation this catches: the figures were taken from above
+        // the full window and their bytes cut from its top, so "Available KV
+        // cache memory", which a shorter traceback leaves inside the window,
+        // was cut out to make room for "Model loading took" above it.
+        let stream = kv_cache_exhausted_start(7);
+        let tail = retain(&stream);
+        assert!(tail.text.len() <= RETAINED_BYTES, "{}", tail.text);
+        for kept in [
+            "Model loading took 64.98 GiB memory",
+            "Available KV cache memory: -1.25 GiB",
+            "ValueError: No available memory for the cache blocks",
+        ] {
+            assert!(tail.text.contains(kept), "{kept}: {}", tail.text);
+        }
+    }
+
+    #[test]
+    fn memory_figures_above_a_traceback_never_cost_its_exception() {
+        // Wrong implementation this catches: moving the window's start down
+        // after it was placed cut the frame that raised the exception, and then
+        // the exception itself, so the exit summary lost it and the exit was
+        // unclassified.
+        let mut stream = sglang_backend_refusal();
+        stream.extend(b"[2026-10-15 08:12:01] Received sigquit from a child process. It usually means the child failed.\n".repeat(28));
+        let state = exit(1, false, "");
+        for figures in 0..3 {
+            let mut stderr =
+                b"[2026-10-15 08:11:58] Load weight end. avail mem=50.00 GB, mem usage=64.98 GB.\n"
+                    .repeat(figures);
+            stderr.extend(&stream);
+            let output = logs("", std::str::from_utf8(&stderr).unwrap());
+            assert!(output.stderr.text.len() <= RETAINED_BYTES);
+            assert!(
+                python_exception(&output).is_some_and(|text| text.contains("AssertionError")),
+                "{figures}: {}",
+                output.stderr.text
+            );
+            assert_eq!(
+                classify(Some(&state), Some(&output)),
+                ExitCause::PythonException,
+                "{figures}: {}",
+                output.stderr.text
+            );
+        }
     }
 
     #[test]
