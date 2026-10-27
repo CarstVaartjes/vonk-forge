@@ -53,8 +53,6 @@ class Provider:
     source_is_repository: bool = False
     # A file of this kind may be published as split parts.
     parts: bool = False
-    # Revisions of this kind can be re-checked at the provider.
-    upstream_checks: bool = False
     # Detail of the typed error a transport failure becomes, if the provider
     # owns one; otherwise the transport error propagates unchanged.
     transport_failure: str | None = None
@@ -135,7 +133,6 @@ PROVIDERS: dict[str, Provider] = {
         open=_open_http,
         production=True,
         parts=True,
-        upstream_checks=True,
     ),
     ProviderKind.GITHUB_RELEASE_ASSET: Provider(
         catalog_source=_github_release_catalog_source,

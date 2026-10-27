@@ -26,7 +26,6 @@ from .constants import (
     _DEFAULT_MAX_DOWNLOAD_STREAMS,
     _DEFAULT_MAX_PARALLEL_DOWNLOADS,
     _MAX_PARALLEL_DOWNLOADS,
-    _UPSTREAM_CHECK_WORKERS,
 )
 from .core import CoreMixin
 from .download import DownloadMixin
@@ -185,10 +184,6 @@ class ModelCacheService(
             max_workers=max_parallel_downloads,
             thread_name_prefix="vonk-model-cache",
         )
-        self._upstream_executor = ThreadPoolExecutor(
-            max_workers=_UPSTREAM_CHECK_WORKERS, thread_name_prefix="vonk-model-updates"
-        )
-        self._upstream_slots = threading.BoundedSemaphore(_UPSTREAM_CHECK_WORKERS)
         self._background_operations: dict[str, _BackgroundTransfer] = {}
         # Object digest -> the operation whose transfer in this process writes it.
         self._active_digests: dict[str, str] = {}

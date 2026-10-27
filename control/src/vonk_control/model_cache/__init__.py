@@ -84,8 +84,6 @@ from .constants import _SOURCE_GONE_ATTEMPTS as _SOURCE_GONE_ATTEMPTS
 from .constants import _SOURCE_GONE_STATUSES as _SOURCE_GONE_STATUSES
 from .constants import _TERMINAL_FAILURE_CODES as _TERMINAL_FAILURE_CODES
 from .constants import _TRANSFER_CLAIM_SECONDS as _TRANSFER_CLAIM_SECONDS
-from .constants import _UPSTREAM_CHECK_SECONDS as _UPSTREAM_CHECK_SECONDS
-from .constants import _UPSTREAM_CHECK_WORKERS as _UPSTREAM_CHECK_WORKERS
 from .constants import _USE_MANIFEST_BYTES as _USE_MANIFEST_BYTES
 from .constants import _WEIGHT_ROLES as _WEIGHT_ROLES
 from .constants import SCHEMA_VERSION as SCHEMA_VERSION

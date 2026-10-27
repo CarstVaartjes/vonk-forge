@@ -60,7 +60,6 @@ class CoreMixin:
         # releasing the service. HTTP clients have bounded read timeouts, so
         # this wait is finite while preventing post-shutdown DB/file writes.
         cache._executor.shutdown(wait=True, cancel_futures=True)
-        cache._upstream_executor.shutdown(wait=False, cancel_futures=True)
         with cache._lock:
             cache._advance_background_operations()
             cache._progress_checkpoint_at.clear()

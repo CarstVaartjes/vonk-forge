@@ -2,14 +2,8 @@
 
 from __future__ import annotations
 
-import re
-import time
-from collections.abc import Sequence
-from concurrent.futures import FIRST_COMPLETED, Future, wait
 from typing import TYPE_CHECKING, cast
-from urllib.parse import urlsplit
 
-import httpx2
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import ModelCacheCode
@@ -22,7 +16,6 @@ from ..catalog_revision_contract import (
     read_catalog_document,
 )
 from ..categorized_errors import InvalidValue
-from ..model_cache_contract import ModelCacheUpstreamRevision
 from ..models import CatalogDocumentRevision, ModelCacheSet
 from ..strict_json import serialize_json_value
 from .artifacts import ArtifactSetManifest, _optional_digest
@@ -35,13 +28,10 @@ from .catalog_helpers import (
     _same_model_artifact_identity,
 )
 from .constants import (
-    _UPSTREAM_CHECK_SECONDS,
-    _UPSTREAM_CHECK_WORKERS,
     SCHEMA_VERSION,
     SOURCE_POLICY,
 )
-from .errors import ModelCacheConflictInvalid, ModelCacheError
-from .providers import PROVIDERS
+from .errors import ModelCacheConflictInvalid
 
 if TYPE_CHECKING:
     from .service import ModelCacheService
@@ -152,129 +142,11 @@ class UpdatesMixin:
         )
         return None if latest is None else latest.content_digest
 
-    def _check_upstream_revision(
-        self, repository: str, revision: str
-    ) -> ModelCacheUpstreamRevision:
-        """Inspect provider metadata only; catalog import owns accepting new pins."""
-        cache = cast("ModelCacheService", self)
-        result = ModelCacheUpstreamRevision(
-            repository=repository,
-            pinned_revision=revision,
-            status="check-failed",
-            checked_at=_iso(cache._clock()) or "",
-        )
-        own_client = cache._http is None
-        client = cache._http or httpx2.Client(timeout=20, follow_redirects=False)
-        try:
-            response = cache._open_http_response(
-                client,
-                f"https://huggingface.co/api/models/{repository}/revision/main",
-                {},
-            )
-            try:
-                response.read()
-                document = response.json()
-            finally:
-                response.close()
-            latest = document.get("sha") if isinstance(document, dict) else None
-            if isinstance(latest, str) and re.fullmatch(r"[0-9a-f]{40,64}", latest):
-                result = result.model_copy(
-                    update={
-                        "latest_revision": latest,
-                        "status": "current"
-                        if latest == revision
-                        else "update-available",
-                    }
-                )
-            else:
-                # Not an immutable revision: reported as an unknown check, never
-                # raised (the status stays ``check-failed``).
-                result.error_code = ModelCacheCode.UPSTREAM_REVISION_INVALID
-        except (ModelCacheError, httpx2.HTTPError, ValueError, OSError) as error:
-            # Provider failures must not hide accepted catalog updates or
-            # expose signed URLs/credentials in the public response.
-            result.error_code = getattr(
-                error, "code", ModelCacheCode.UPSTREAM_CHECK_FAILED
-            )
-        finally:
-            if own_client:
-                client.close()
-        return result
-
-    def _check_upstream_revisions(
-        self, identities: Sequence[tuple[str, str]]
-    ) -> dict[tuple[str, str], ModelCacheUpstreamRevision]:
-        """Bound metadata concurrency and total response latency across the page."""
-        cache = cast("ModelCacheService", self)
-        ordered = list(dict.fromkeys(identities))
-        results: dict[tuple[str, str], ModelCacheUpstreamRevision] = {}
-        pending: dict[Future[ModelCacheUpstreamRevision], tuple[str, str]] = {}
-        deadline = time.monotonic() + _UPSTREAM_CHECK_SECONDS
-        remaining = iter(ordered)
-        exhausted = False
-        while time.monotonic() < deadline:
-            for _slot in range(_UPSTREAM_CHECK_WORKERS - len(pending)):
-                if exhausted or time.monotonic() >= deadline:
-                    break
-                if not cache._upstream_slots.acquire(blocking=False):
-                    break
-                key = next(remaining, None)
-                if key is None:
-                    cache._upstream_slots.release()
-                    exhausted = True
-                    break
-                try:
-                    future = cache._upstream_executor.submit(
-                        cache._check_upstream_revision, *key
-                    )
-                except RuntimeError:
-                    cache._upstream_slots.release()
-                    break
-                future.add_done_callback(lambda _: cache._upstream_slots.release())
-                pending[future] = key
-            if not pending:
-                break
-            done, _ = wait(
-                pending,
-                timeout=max(0, deadline - time.monotonic()),
-                return_when=FIRST_COMPLETED,
-            )
-            if not done:
-                break
-            for future in done:
-                key = pending.pop(future)
-                try:
-                    results[key] = future.result()
-                except Exception:  # noqa: BLE001 - diagnostics must not hide local catalog results
-                    # A diagnostic/provider bug cannot hide the catalog page.
-                    results[key] = ModelCacheUpstreamRevision(
-                        repository=key[0],
-                        pinned_revision=key[1],
-                        status="check-failed",
-                        checked_at=_iso(cache._clock()) or "",
-                        error_code=ModelCacheCode.UPSTREAM_CHECK_FAILED,
-                    )
-        for future in pending:
-            future.cancel()
-        for repository, revision in ordered:
-            results.setdefault(
-                (repository, revision),
-                ModelCacheUpstreamRevision(
-                    repository=repository,
-                    pinned_revision=revision,
-                    status="check-failed",
-                    checked_at=_iso(cache._clock()) or "",
-                    error_code=ModelCacheCode.UPSTREAM_CHECK_BUDGET_EXHAUSTED,
-                ),
-            )
-        return results
-
     def discover_updates(
         self,
         *,
         artifact_set_sha256: str | None = None,
         limit: int = 100,
-        check_upstream: bool = False,
         boundary: tuple[str, str] | None = None,
     ) -> dict[str, object]:
         """Return a bounded, deterministic update page.
@@ -315,7 +187,6 @@ class UpdatesMixin:
                     )
             page = rows[start : start + limit]
             result = []
-            upstream_sources: dict[str, list[tuple[str, str]]] = {}
             for row in page:
                 manifest = cache._stored_manifest(row)
                 if manifest is None:
@@ -348,23 +219,6 @@ class UpdatesMixin:
                     latest_recipe = cache._latest_recipe_digest(
                         session, row.recipe_revision_sha256
                     )
-                sources: list[tuple[str, str]] = []
-                if check_upstream:
-                    for spec in manifest.artifacts:
-                        provider = PROVIDERS.get(spec.kind)
-                        if (
-                            provider is None
-                            or not provider.upstream_checks
-                            or spec.revision is None
-                        ):
-                            continue
-                        repository = "/".join(
-                            urlsplit(spec.source).path.strip("/").split("/")[:2]
-                        )
-                        key = (repository, spec.revision)
-                        if key not in sources:
-                            sources.append(key)
-                upstream_sources[row.artifact_set_sha256] = sources
                 result.append(
                     {
                         "schema_version": SCHEMA_VERSION,
@@ -384,7 +238,6 @@ class UpdatesMixin:
                         ],
                         "recipe_revision_sha256": row.recipe_revision_sha256,
                         "latest_recipe_revision_sha256": latest_recipe,
-                        "upstream_revisions": [],
                         "model_update_available": model_update,
                         "recipe_update_available": recipe_update,
                         "updated_at": _iso(row.updated_at),
@@ -394,17 +247,6 @@ class UpdatesMixin:
             if start + limit < total and page:
                 last = page[-1]
                 next_boundary = (_iso(last.updated_at) or "", last.artifact_set_sha256)
-        # All catalog values above are detached JSON snapshots. Provider I/O
-        # must not retain a DB connection or transaction while waiting.
-        if check_upstream:
-            upstream_checks = cache._check_upstream_revisions(
-                [key for sources in upstream_sources.values() for key in sources]
-            )
-            for entry in result:
-                entry["upstream_revisions"] = [
-                    serialize_json_value(upstream_checks[key])
-                    for key in upstream_sources[entry["artifact_set_sha256"]]
-                ]
         return {
             "schema_version": SCHEMA_VERSION,
             "source_policy": SOURCE_POLICY,
