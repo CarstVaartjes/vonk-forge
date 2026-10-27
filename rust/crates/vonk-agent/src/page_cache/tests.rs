@@ -158,3 +158,29 @@ fn an_ask_is_answered_only_by_the_helpers_report_for_it() {
     );
     helper.join().unwrap();
 }
+
+#[tokio::test(start_paused = true)]
+async fn a_stop_ends_a_launched_ranks_drops_before_its_deadline() {
+    let (phases, drops) = counting(None);
+    let run = Uuid::new_v4();
+    phases
+        .begin(run)
+        .release_until(Instant::now() + INTERVAL * 100);
+    tokio::time::sleep(INTERVAL + INTERVAL / 2).await;
+    phases.end(run);
+    tokio::time::sleep(INTERVAL * 10).await;
+    assert_eq!(drops.load(Ordering::SeqCst), 1);
+    assert!(!ticking(&phases));
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_load_after_the_cadence_ended_starts_it_again() {
+    let (phases, drops) = counting(None);
+    phases.begin(Uuid::new_v4()).finish();
+    tokio::time::sleep(INTERVAL * 3).await;
+    assert!(!ticking(&phases));
+    let load = phases.begin(Uuid::new_v4());
+    tokio::time::sleep(INTERVAL * 2 + INTERVAL / 2).await;
+    assert_eq!(load.finish().unwrap().drops, 2);
+    assert_eq!(drops.load(Ordering::SeqCst), 2);
+}

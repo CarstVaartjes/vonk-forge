@@ -269,13 +269,8 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         let mut runtime_result = run_until_cancelled(
             async {
                 if runtime_action == HostRuntimeAction::Start {
-                    load.drop_now().await;
-                    self.execute_host_runtime_plan(
-                        claim,
-                        runtime_arguments,
-                        HostRuntimePlan::Start(request.clone()),
-                    )
-                    .await
+                    self.launch_after_drop(load, claim, runtime_arguments, &request)
+                        .await
                 } else {
                     self.inspect_start_run(claim, runtime_arguments, request.run_generation)
                         .await
@@ -309,15 +304,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                 }
             };
             runtime_result = run_until_cancelled(
-                async {
-                    load.drop_now().await;
-                    self.execute_host_runtime_plan(
-                        claim,
-                        runtime_guard_arguments.clone(),
-                        HostRuntimePlan::Start(request.clone()),
-                    )
-                    .await
-                },
+                self.launch_after_drop(load, claim, runtime_guard_arguments.clone(), &request),
                 &mut cancellation_observer,
             )
             .await;
@@ -527,6 +514,22 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
             return self.cancel_start_run(claim, &run_id).await;
         }
         success
+    }
+}
+
+impl<R> RecipeExecutor<'_, R> {
+    /// The one way a workload container starts: one page-cache drop first, so
+    /// its load begins without what preparation left cached.
+    async fn launch_after_drop(
+        &self,
+        load: &crate::page_cache::LoadPhase,
+        claim: &AgentClaim,
+        arguments: Vec<String>,
+        request: &vonk_agent_protocol::RecipeStartRequest,
+    ) -> Result<(), crate::host_runtime::HostRuntimeError> {
+        load.drop_now().await;
+        self.execute_host_runtime_plan(claim, arguments, HostRuntimePlan::Start(request.clone()))
+            .await
     }
 }
 

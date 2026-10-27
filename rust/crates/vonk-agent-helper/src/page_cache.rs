@@ -29,11 +29,14 @@ use crate::protocol::{GrantVerifier, HelperError, PeerIdentity};
 const DROP_PAGE_CACHE: &[u8] = b"1";
 const DROP_CACHES: &str = "proc/sys/vm/drop_caches";
 
-/// One `sync` at a time. A sync still writing back when its bound passes is
-/// left to finish and the next drop waits on that same one, so a slow disk
-/// never piles up blocked threads.
+/// One drop and one `sync` at a time. A sync still writing back when its
+/// bound passes is left to finish and the next drop waits on that same one,
+/// so a slow disk never piles up blocked threads. The kernel's drop walk takes
+/// each superblock's lock, so a stuck mount can hold one drop forever: a later
+/// ask answers at once instead of holding a helper request slot behind it.
 pub struct SyncLane {
     pending: Mutex<Option<mpsc::Receiver<()>>>,
+    drops: Mutex<()>,
     sync: fn(),
 }
 
@@ -41,11 +44,13 @@ impl SyncLane {
     pub const fn new(sync: fn()) -> Self {
         Self {
             pending: Mutex::new(None),
+            drops: Mutex::new(()),
             sync,
         }
     }
 
-    pub fn run(&self, bound: Duration) -> PageCacheSync {
+    /// `None` when no sync could be started.
+    pub fn run(&self, bound: Duration) -> Option<PageCacheSync> {
         let mut pending = self
             .pending
             .lock()
@@ -66,24 +71,22 @@ impl SyncLane {
                     eprintln!(
                         "vonk-agent-helper: page cache sync not started: {error}; the drop proceeds"
                     );
-                    return PageCacheSync::TimedOut;
+                    return None;
                 }
                 receiver
             }
         };
-        match receiver.recv_timeout(bound) {
+        Some(match receiver.recv_timeout(bound) {
             Ok(()) | Err(mpsc::RecvTimeoutError::Disconnected) => PageCacheSync::Completed,
             Err(mpsc::RecvTimeoutError::Timeout) => {
                 *pending = Some(receiver);
                 PageCacheSync::TimedOut
             }
-        }
+        })
     }
 }
 
 static SYNC: SyncLane = SyncLane::new(rustix::fs::sync);
-/// Drops never overlap: a second asker waits at most one bounded drop.
-static DROPS: Mutex<()> = Mutex::new(());
 
 /// Sync within `bound`, drop, and read `Cached` around it. Never fails: a drop
 /// that could not happen is the report's problem.
@@ -93,8 +96,26 @@ pub fn drop_page_cache(
     bound: Duration,
     request_id: uuid::Uuid,
 ) -> PageCacheDropReport {
-    let _serial = DROPS.lock().unwrap_or_else(|error| error.into_inner());
     let meminfo = || std::fs::read_to_string(root.join("proc/meminfo")).unwrap_or_default();
+    let _serial = match sync.drops.try_lock() {
+        Ok(guard) => guard,
+        Err(std::sync::TryLockError::Poisoned(guard)) => guard.into_inner(),
+        Err(std::sync::TryLockError::WouldBlock) => {
+            let now = meminfo();
+            eprintln!(
+                "vonk-agent-helper: page cache drop request={request_id} answered at once: an earlier drop has not returned"
+            );
+            return PageCacheDropReport {
+                request_id,
+                dropped_at: chrono::Utc::now().fixed_offset(),
+                cached_before_bytes: meminfo_bytes(&now, "Cached:"),
+                cached_after_bytes: None,
+                mem_available_after_bytes: meminfo_bytes(&now, "MemAvailable:"),
+                sync: None,
+                problem: Some(PageCacheDropProblem::DropInProgress),
+            };
+        }
+    };
     let before = meminfo();
     let synced = sync.run(bound);
     let problem = OpenOptions::new()
@@ -115,7 +136,7 @@ pub fn drop_page_cache(
         cached_before_bytes: meminfo_bytes(&before, "Cached:"),
         cached_after_bytes: meminfo_bytes(&after, "Cached:"),
         mem_available_after_bytes: meminfo_bytes(&after, "MemAvailable:"),
-        sync: Some(synced),
+        sync: synced,
         problem,
     };
     let known = |value: Option<u64>| {
@@ -124,12 +145,15 @@ pub fn drop_page_cache(
             |bytes| bytes.to_string(),
         )
     };
+    let synced = synced
+        .map(|sync| format!(" sync={sync}"))
+        .unwrap_or_default();
     let refused = report
         .problem
         .map(|problem| format!(" problem={problem}"))
         .unwrap_or_default();
     eprintln!(
-        "vonk-agent-helper: page cache drop request={request_id} cached_before_bytes={} cached_after_bytes={} mem_available_after_bytes={} sync={synced}{refused}",
+        "vonk-agent-helper: page cache drop request={request_id} cached_before_bytes={} cached_after_bytes={} mem_available_after_bytes={}{synced}{refused}",
         known(report.cached_before_bytes),
         known(report.cached_after_bytes),
         known(report.mem_available_after_bytes),
@@ -236,6 +260,46 @@ mod tests {
         );
         assert_eq!(third.sync, Some(PageCacheSync::Completed));
         assert_eq!(STARTED.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn an_ask_behind_a_drop_that_never_returns_is_answered_at_once() {
+        // Fault: a stuck mount holds the kernel's drop walk. The next ask must
+        // not take a helper request slot until that drop returns.
+        static LANE: SyncLane = SyncLane::new(|| {});
+        let lane = &LANE;
+        let root = host();
+        let (held, release, returned) = (mpsc::channel(), mpsc::channel::<()>(), mpsc::channel());
+        let (holding, waiting, returning) = (held.0, release.1, returned.0);
+        thread::spawn(move || {
+            {
+                let _drop = LANE.drops.lock().unwrap();
+                holding.send(()).unwrap();
+                waiting.recv_timeout(Duration::from_secs(30)).unwrap();
+            }
+            returning.send(()).unwrap();
+        });
+        held.1.recv_timeout(Duration::from_secs(5)).unwrap();
+        let begun = Instant::now();
+        let report = drop_page_cache(
+            root.path(),
+            lane,
+            Duration::from_secs(5),
+            uuid::Uuid::new_v4(),
+        );
+        assert!(begun.elapsed() < Duration::from_secs(1));
+        assert_eq!(report.problem, Some(PageCacheDropProblem::DropInProgress));
+        assert_eq!(report.sync, None);
+        assert_eq!(fs::read(root.path().join(DROP_CACHES)).unwrap(), b"");
+        release.0.send(()).unwrap();
+        returned.1.recv_timeout(Duration::from_secs(5)).unwrap();
+        let next = drop_page_cache(
+            root.path(),
+            lane,
+            Duration::from_secs(5),
+            uuid::Uuid::new_v4(),
+        );
+        assert_eq!(next.problem, None);
     }
 
     #[test]

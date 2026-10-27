@@ -214,6 +214,11 @@ impl LoadPhases {
         }
     }
 
+    /// `run` is stopped: its drops end, whoever held them.
+    pub fn end(&self, run: Uuid) {
+        self.settle(run, None);
+    }
+
     fn settle(&self, run: Uuid, until: Option<Instant>) -> Option<PageCacheDropEvidence> {
         let mut state = self.lock();
         let evidence = match until {

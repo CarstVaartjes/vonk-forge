@@ -147,6 +147,9 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         request: vonk_agent_protocol::RecipeStopRequest,
     ) -> ExecutionResult {
         self.report_phase(claim, ProgressPhase::Stopping).await;
+        // A stopped run loads no longer: a launched rank's drops end here,
+        // not at its start deadline.
+        crate::page_cache::LoadPhases::for_helper(self.helper_socket).end(request.run_id);
         let run_id = request.run_id.to_string();
         // The signed request already binds the exact runtime target. Local
         // history is a projection, never an additional stop admission gate.

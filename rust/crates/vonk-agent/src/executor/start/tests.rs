@@ -442,3 +442,49 @@ async fn a_host_that_refuses_the_drop_still_starts_its_workload_with_a_note() {
         Some(vonk_agent_protocol::generated::PageCacheDropProblem::NotPermitted)
     );
 }
+
+#[test]
+fn every_workload_container_start_drops_the_page_cache_first() {
+    // Guard: a Start plan is built only inside `launch_after_drop`, so no new
+    // start path can skip the drop. Matches (`Start(_)`, `Start(plan)) =>`)
+    // only read plans.
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut pending = vec![root];
+    let mut builders = Vec::new();
+    while let Some(path) = pending.pop() {
+        if path.is_dir() {
+            pending.extend(
+                fs::read_dir(&path)
+                    .unwrap()
+                    .map(|entry| entry.unwrap().path()),
+            );
+            continue;
+        }
+        let source = fs::read_to_string(&path).unwrap();
+        for (index, line) in source.lines().enumerate() {
+            if line.contains("HostRuntimePlan::Start(") && !line.contains("=>") {
+                builders.push((path.clone(), index, source.clone()));
+            }
+        }
+    }
+    let sites: Vec<_> = builders
+        .iter()
+        .map(|(path, index, _)| format!("{}:{}", path.display(), index + 1))
+        .collect();
+    assert_eq!(sites.len(), 1, "Start plans built at {sites:?}");
+    let (path, index, source) = &builders[0];
+    assert!(path.ends_with("executor/start.rs"));
+    let before: Vec<&str> = source.lines().take(*index).collect();
+    let function = before
+        .iter()
+        .rev()
+        .find(|line| line.trim_start().starts_with("async fn "))
+        .unwrap();
+    assert!(function.contains("fn launch_after_drop("), "{function}");
+    let body = before
+        .iter()
+        .rev()
+        .take_while(|line| !line.trim_start().starts_with("async fn "))
+        .any(|line| line.contains("load.drop_now().await"));
+    assert!(body, "launch_after_drop drops before it starts");
+}

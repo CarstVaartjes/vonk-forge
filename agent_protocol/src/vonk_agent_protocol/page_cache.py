@@ -31,7 +31,10 @@ class PageCacheDropRequest(WireModel):
 
 
 class PageCacheSync(WireEnum):
-    """Whether the bounded ``sync`` before the drop finished in time."""
+    """Whether the bounded ``sync`` before the drop finished in time.
+
+    Absent from a report whose sync never started.
+    """
 
     COMPLETED = "completed"
     # Still writing back at its bound (or an earlier sync still is): the drop
@@ -44,6 +47,9 @@ class PageCacheDropProblem(WireEnum):
 
     NOT_PERMITTED = "not-permitted"
     DROP_FAILED = "drop-failed"
+    # An earlier drop has not returned (a stuck mount holds the kernel's walk):
+    # this ask answers at once instead of queueing behind it.
+    DROP_IN_PROGRESS = "drop-in-progress"
     HELPER_UNAVAILABLE = "helper-unavailable"
 
 
