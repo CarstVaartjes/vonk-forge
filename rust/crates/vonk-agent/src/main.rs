@@ -14,8 +14,8 @@ use vonk_agent::{
     client::{AgentHttpClient, ClientError, Disposition},
     config::{AgentConfig, DEFAULT_CONFIG_PATH, POLL_MAX_SECONDS, POLL_MIN_SECONDS},
     executor::{
-        ControlExecutor, LoopError, RecipeExecutor, RecipeObservationError, RecipeObservationSweep,
-        run_once_with_claim_hook,
+        Beside, ControlExecutor, LaneStep, LoopError, RecipeExecutor, RecipeObservationError,
+        RecipeObservationSweep, run_once_with_claim_hook,
     },
     inventory::{
         InventoryCollector, InventoryError, STATE_DATABASE_DISK_RESERVE_BYTES,
@@ -388,10 +388,43 @@ impl AuthorityRetry {
 
 async fn run_control_lane(
     config: &AgentConfig,
+    runtime_identity: AgentRuntimeIdentity,
+    client: AgentHttpClient,
+    state: StateStore,
+    verdict: LatestVerdict,
+) -> Result<(), Box<dyn std::error::Error>> {
+    // A build compiles beside the lane: the Spark keeps claiming other work.
+    let runner = SystemProcessRunner;
+    let builds = RecipeExecutor {
+        client: &client,
+        helper_socket: Path::new(vonk_agent::host_runtime::HELPER_SOCKET),
+        runtime_root: Path::new("/run/vonk-forge-agent"),
+        runtime: OciRuntime {
+            runner: &runner,
+            data_root: &config.data_dir,
+        },
+    };
+    let beside = Beside::default();
+    let lane = claim_lane(
+        config,
+        runtime_identity,
+        client.clone(),
+        state,
+        verdict,
+        &builds,
+        &beside,
+    );
+    beside.alongside(lane).await
+}
+
+async fn claim_lane<'a>(
+    config: &AgentConfig,
     mut runtime_identity: AgentRuntimeIdentity,
     client: AgentHttpClient,
     mut state: StateStore,
     verdict: LatestVerdict,
+    builds: &'a RecipeExecutor<'a, SystemProcessRunner>,
+    beside: &Beside<'a>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let runner = SystemProcessRunner;
     let mut failures = 0_u32;
@@ -477,7 +510,8 @@ async fn run_control_lane(
                 continue;
             }
         }
-        // Between claims no claim is live, so stores lose only ownerless bytes.
+        // Between lane claims only a build beside the lane can be live; its
+        // stores stay protected by its units, base-image locks and age.
         if Instant::now() >= retention_due {
             retention_due = collect_stores(config.data_dir.clone(), verdict.fresh()).await;
         }
@@ -533,11 +567,32 @@ async fn run_control_lane(
             }
         });
         match operation.await {
-            Ok(()) => {
+            Ok(step) => {
                 failures = 0;
                 authority = AuthorityRetry::default();
                 readiness_published = true;
                 systemd_notify::progress("Agent control loop progressing");
+                if let LaneStep::OffLane(claim) = step {
+                    let fence = claim.fence();
+                    match state.reopen() {
+                        Ok(store) => {
+                            let client = client.clone();
+                            let available = guarded.available;
+                            beside.start(fence, async move {
+                                let executor = CustodyExecutor {
+                                    executor: builds,
+                                    available,
+                                };
+                                claim.execute(client, store, &executor).await
+                            });
+                        }
+                        // The claim is journaled: the observation pass and the
+                        // Controller's lease reconcile it like a lost response.
+                        Err(error) => {
+                            eprintln!("vonk-agent: off-lane order {fence} not started: {error}")
+                        }
+                    }
+                }
             }
             Err(error) if loop_error_is_fatal(&error) => {
                 eprintln!("vonk-agent: control authority refused: {error}");

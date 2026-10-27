@@ -5,8 +5,10 @@
 //! tracks with a readable plan or a job's scope leaves only on its order.
 //! Unreadable installation caches also expire once runtime evidence confirms
 //! they are unused. The other stores hold entries whose
-//! owner the agent observes locally, and the control lane runs one claim at a
-//! time and runs this pass between claims, so no claim is live while it runs.
+//! owner the agent observes locally, and the control lane runs this pass
+//! between its claims. Only a build beside the lane can be live then; its
+//! stores stay protected by its exact units, its held base-image locks and
+//! their age.
 //! Two kinds of entry leave here:
 //!
 //! - Unused Spark model copies leave after [`GRACE`], or sooner when a load
@@ -454,7 +456,8 @@ fn sweep_with(
     }
     // A stale projection may still protect content, but never authorizes an
     // explicit removal. Local ownership remains authoritative for cache relief;
-    // this pass runs between claims, with no live claim using an unlinked object.
+    // this pass runs between lane claims, and a build beside the lane uses no
+    // model object, so no live claim uses an unlinked object.
     let projection = retention_projection(data_root);
     let keep = projection
         .as_ref()
@@ -793,8 +796,10 @@ impl Pass<'_> {
 
     /// A crashed build can leave private Podman databases that no longer open.
     /// Their contents are not liveness: only the exact owning cgroups are.
-    /// This pass runs between claims; unknown systemd evidence keeps the tree.
+    /// A build beside the lane keeps its tree through its live units; unknown
+    /// systemd evidence keeps the tree too.
     fn build_staging(&mut self, root: &Path, runner: &impl crate::process::ProcessRunner) {
+        let beside = crate::executor::builds_beside(self.data_root);
         for (name, metadata) in self.list(root).into_iter().flatten() {
             if !self
                 .now
@@ -807,6 +812,11 @@ impl Pass<'_> {
                 .get(name.len().saturating_sub(36)..)
                 .and_then(|id| uuid::Uuid::parse_str(id).ok())
             {
+                // A build beside the lane owns it from its claim on, before
+                // its units start.
+                if beside.contains(&build_id) {
+                    continue;
+                }
                 let request = vonk_agent_protocol::RecipeBuildCleanupRequest {
                     build_id,
                     operation_id: build_id,
@@ -920,6 +930,11 @@ impl Pass<'_> {
     /// opens the image takes the lock and marks it. A held lock is a build
     /// using it now.
     fn base_images(&mut self, images: &Path) {
+        // A build beside the lane may open any base image before it takes the
+        // image's lock; its images wait for the next pass.
+        if !crate::executor::builds_beside(self.data_root).is_empty() {
+            return;
+        }
         for (name, metadata) in self.list(images).into_iter().flatten() {
             if !metadata.is_dir() || name.starts_with('.') {
                 continue;

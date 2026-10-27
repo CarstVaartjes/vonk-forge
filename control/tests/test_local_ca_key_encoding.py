@@ -80,9 +80,9 @@ def test_key_encoding_signs_or_reports_typed_configuration_failure(
     """Catches accepting mismatches, decoding v2 in the Controller, or startup failure."""
     from datetime import timedelta
 
-    from fastapi import HTTPException
     from vonk_control.capabilities import (
         CapabilityConfigurationError,
+        CapabilityUnavailableError,
         RecoveringService,
     )
     from vonk_control.capability_contract import (
@@ -129,9 +129,12 @@ def test_key_encoding_signs_or_reports_typed_configuration_failure(
                 lambda: LocalCertificateAuthority(**options),
                 lambda: clock,
             )
-            with pytest.raises(HTTPException) as failure:
+            with pytest.raises(CapabilityUnavailableError) as failure:
                 service.require_service()
-            assert failure.value.status_code == 503
+            assert (
+                failure.value.reply.reason
+                == CapabilityReason.CA_KEY_ENCODING_UNSUPPORTED
+            )
             assert service.status.availability == CapabilityAvailability.UNAVAILABLE
             assert service.status.reason == CapabilityReason.CA_KEY_ENCODING_UNSUPPORTED
             assert key_path.read_bytes() == pem

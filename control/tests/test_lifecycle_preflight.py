@@ -4,12 +4,21 @@ from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import delete, select
-from vonk_agent_protocol import RuntimePreflightCode, canonical_message
+from vonk_agent_protocol import (
+    AgentOperation as OperationKind,
+)
+from vonk_agent_protocol import (
+    LifecycleState,
+    RuntimePreflightCode,
+    WaitReason,
+    canonical_message,
+)
 from vonk_agent_protocol.agent_words import ProfileChildPhase
 from vonk_agent_protocol.runtime_preflight import (
     RuntimePreflightRequest,
     RuntimePreflightResult,
 )
+from vonk_control.agent_jobs.waits import refresh_queue_waits
 from vonk_control.inventory_items import inventory_items, record_preflight
 from vonk_control.lifecycle_preflight import (
     LifecyclePreflight,
@@ -22,6 +31,12 @@ from vonk_control.models import (
     CatalogDocumentRevision,
     Job,
 )
+from vonk_control.operation_blockers import (
+    BlockingOperation,
+    ProgressAlarmCode,
+    make_blocker,
+)
+from vonk_control.persisted_waits import read_wait
 from vonk_control.runtime_preflight import mandatory_capabilities
 
 from .agent_fences import fenced_operation
@@ -514,10 +529,21 @@ def test_disconnected_probe_keeps_exact_child_until_recovery_after_restart(
     assert waiting.next_check_at is not None
     assert clock.now < waiting.next_check_at <= clock.now + timedelta(seconds=60)
     clock.now += timedelta(days=1)
+    with sessions.begin() as session:
+        refresh_queue_waits(session, clock.now, node_id=node_id)
     waiting, error = restarted.ensure(**arguments, previous=waiting)
     assert error is None and _pending(waiting) == next(
         iter(checkpoint.pending_jobs.values()), None
     )
+    # A day without a poll is a named, alarmed wait on the exact child, never
+    # a silent one: its typed reason and the stall past its fixed window.
+    assert waiting.next_check_at is not None
+    assert waiting.next_check_at <= clock.now + timedelta(seconds=60)
+    assert [blocker.code for blocker in waiting.child_waits] == [
+        WaitReason.OBSERVATION_UNAVAILABLE,
+        ProgressAlarmCode.STALLED,
+    ]
+    assert all(blocker.node_ids == [node_id] for blocker in waiting.child_waits)
     _finish(sessions, waiting, clock.now)
     completed, error = restarted.ensure(**arguments, previous=waiting)
     assert error is None and _pending(completed) is None
@@ -734,3 +760,234 @@ def test_probe_round_freshness_bounds_rank_span_not_worker_delay(
         # Consumption does not turn this round into indefinitely reusable evidence.
         reused, error = service.ensure(previous=completed, **arguments)
         assert error is None and reused.pending_jobs
+
+
+def _heartbeating_build(sessions, node_id, now, kind=OperationKind.RECIPE_BUILD):
+    """A live order (a ``recipe.build.v1`` unless ``kind`` says otherwise) on
+    ``node_id``, renewed as it heartbeats."""
+    with sessions.begin() as session:
+        parent = Job(
+            id=str(uuid.uuid4()),
+            request_id=str(uuid.uuid4()),
+            kind=kind.value,
+            state=LifecycleState.RUNNING.value,
+            actor="test",
+            authority_revision="a" * 64,
+            targets=[node_id],
+            payload_digest="a" * 64,
+            payload={},
+            created_at=now,
+            updated_at=now,
+        )
+        session.add(parent)
+        session.flush()
+        build = AgentOperation(
+            parent_job_id=parent.id,
+            node_id=node_id,
+            kind=kind.value,
+            payload_digest="a" * 64,
+            payload={},
+            authority_revision="a" * 64,
+            state=LifecycleState.RUNNING.value,
+            current_attempt=1,
+            created_at=now,
+            updated_at=now,
+        )
+        session.add(build)
+        session.flush()
+        session.add(
+            AgentOperationAttempt(
+                operation_id=build.id,
+                attempt=1,
+                fence=str(uuid.uuid4()),
+                lease_deadline=now + timedelta(seconds=30),
+                agent_certificate_serial="serial-1",
+                state=LifecycleState.RUNNING.value,
+            )
+        )
+        refresh_queue_waits(session, now, node_id=node_id)
+        return build.id
+
+
+def _heartbeat(sessions, build_id, node_id, now):
+    """What the Controller does on each build heartbeat: renew, refresh waits."""
+    with sessions.begin() as session:
+        attempt = session.scalar(
+            select(AgentOperationAttempt).where(
+                AgentOperationAttempt.operation_id == build_id
+            )
+        )
+        assert attempt is not None
+        attempt.lease_deadline = now + timedelta(seconds=30)
+        refresh_queue_waits(session, now, node_id=node_id)
+
+
+def test_pending_probe_beside_a_compiling_build_shows_its_own_wait_never_stale(
+    tmp_path,
+):
+    """Catches projecting the reason a probe round started as its current wait.
+
+    Incident 2026-10-26: both receipts aged out, the round re-probed both
+    Sparks, and node B's probe queued behind a long build for hours while the
+    load showed ``runtime_preflight.stale``. A build now runs beside the claim
+    lane, so the probe waits only for node B's next poll, and says so.
+    """
+    from dataclasses import replace
+
+    from vonk_control.lifecycle import State
+    from vonk_control.lifecycle.run_switch import RunSwitchAdapter
+    from vonk_control.run_switch_contract import RunSwitchOperationResult
+
+    sessions, _queue, clock, _, service, arguments = _setup(tmp_path, node_count=2)
+    with sessions() as session:
+        node_a, node_b = sorted(session.scalars(select(AgentNode.node_id)))
+    arguments["nodes"] = {node_a: False, node_b: False}
+    first, error = service.ensure(**arguments, previous=None)
+    assert error is None
+    for node_id in (node_a, node_b):
+        _finish(
+            sessions,
+            first.model_copy(
+                update={"pending_jobs": {node_id: first.pending_jobs[node_id]}}
+            ),
+            clock.now,
+        )
+    complete, error = service.ensure(**arguments, previous=first)
+    assert error is None and set(complete.receipts) == {node_a, node_b}
+
+    # Both receipts age out: the new round starts because they are stale.
+    clock.now += timedelta(seconds=301)
+    build_id = _heartbeating_build(sessions, node_b, clock.now)
+    probing, error = service.ensure(**arguments, previous=complete)
+    assert error is None and set(probing.pending_jobs) == {node_a, node_b}
+    assert probing.last_failure_code == RuntimePreflightCode.STALE
+    _finish(
+        sessions,
+        probing.model_copy(
+            update={"pending_jobs": {node_a: probing.pending_jobs[node_a]}}
+        ),
+        clock.now,
+    )
+    _heartbeat(sessions, build_id, node_b, clock.now)
+
+    clock.now += timedelta(minutes=10)
+    _heartbeat(sessions, build_id, node_b, clock.now)
+    waiting, error = service.ensure(**arguments, previous=probing)
+    assert error is None and set(waiting.pending_jobs) == {node_b}
+    with sessions() as session:
+        probe = session.scalar(
+            select(AgentOperation).where(
+                AgentOperation.parent_job_id == waiting.pending_jobs[node_b]
+            )
+        )
+        assert probe is not None
+        child_wait = read_wait(probe)
+    assert child_wait is not None
+    [awaiting_poll] = child_wait.blockers
+    assert awaiting_poll.code == WaitReason.OBSERVATION_UNAVAILABLE
+    assert awaiting_poll.operation is None
+    assert awaiting_poll.node_ids == [node_b]
+
+    # The run-switch shows that same wait, never the round-start reason.
+    adapter = RunSwitchAdapter()
+    job = Job(
+        id=str(uuid.uuid4()),
+        kind="recipe.run-switch.v2",
+        state=LifecycleState.RUNNING.value,
+        actor="test",
+        targets=[node_a, node_b],
+        payload={"workload_intent_ordinal": 1},
+        result={},
+    )
+    progress = RunSwitchOperationResult(preflight=waiting)
+    before = adapter.lifecycle(job, progress, clock.now)
+    adapter.apply(
+        job,
+        progress,
+        before,
+        replace(before, state=State.OBSERVING, next_action_at=waiting.next_check_at),
+        clock.now,
+    )
+    projected = read_wait(job)
+    assert projected is not None
+    assert projected.reason == WaitReason.OBSERVATION_UNAVAILABLE
+    assert projected.blockers == child_wait.blockers
+    assert all(
+        blocker.code != RuntimePreflightCode.STALE for blocker in projected.blockers
+    )
+    assert waiting.child_waits == child_wait.blockers
+
+
+def test_round_shows_a_queued_probe_beside_a_peer_backing_off():
+    """Catches one Spark's queue wait hiding another Spark's failed-probe backoff."""
+    node_a, node_b = "spk_" + "a" * 32, "spk_" + "b" * 32
+    busy = make_blocker(
+        WaitReason.SPARK_BUSY, "waits for recipe.stop", node_ids=[node_b]
+    )
+    checkpoint = LifecyclePreflightCheckpoint(
+        phase_index=0,
+        retry_at={node_a: NOW + timedelta(seconds=30)},
+        last_failure_code=RuntimePreflightCode.EXECUTION_FAILED,
+        last_failure_detail="probe failed on node A",
+        child_waits=[busy],
+    )
+    assert checkpoint.current_reason == WaitReason.SPARK_BUSY
+    [queued, backing_off] = checkpoint.current_blockers([node_a, node_b])
+    assert queued == busy
+    assert backing_off.code == RuntimePreflightCode.EXECUTION_FAILED
+    assert backing_off.node_ids == [node_a]
+
+
+def test_only_the_checkpoint_reads_its_round_reason():
+    """Catches a reader projecting the round-start reason as the current wait.
+
+    ``last_failure_code``/``last_failure_detail`` explain why a round started;
+    what it waits for now is ``current_reason``/``current_blockers``.
+    """
+    import ast
+    from pathlib import Path
+
+    import vonk_control
+
+    root = Path(vonk_control.__file__).parent
+    readers = sorted(
+        f"{path.relative_to(root)}:{node.lineno}"
+        for path in root.rglob("*.py")
+        if path.name != "lifecycle_preflight.py"
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8")))
+        if isinstance(node, ast.Attribute)
+        and node.attr in {"last_failure_code", "last_failure_detail"}
+    )
+    assert readers == []
+
+
+def test_a_claimed_probe_shows_itself_running_never_the_round_start_reason(tmp_path):
+    """Catches a claimed probe (whose queue wait clears) falling back to stale."""
+    sessions, _, clock, node_id, service, arguments = _setup(tmp_path)
+    first, error = service.ensure(**arguments, previous=None)
+    assert error is None
+    _finish(sessions, first, clock.now)
+    complete, error = service.ensure(**arguments, previous=first)
+    assert error is None
+    clock.now += timedelta(seconds=301)
+    probing, error = service.ensure(**arguments, previous=complete)
+    assert error is None and probing.last_failure_code == RuntimePreflightCode.STALE
+    with sessions.begin() as session:
+        probe = session.scalar(
+            select(AgentOperation).where(
+                AgentOperation.parent_job_id == _pending(probing)
+            )
+        )
+        assert probe is not None
+        probe.state = LifecycleState.RUNNING.value
+        probe.wait_evidence = None
+        probe.next_action_at = None
+        probe_id = probe.id
+    running, error = service.ensure(**arguments, previous=probing)
+    assert error is None
+    assert running.current_reason == RuntimePreflightCode.REQUIRED
+    [claimed] = running.current_blockers([node_id])
+    assert claimed.operation == BlockingOperation(
+        id=probe_id, kind=OperationKind.RUNTIME_PREFLIGHT.value
+    )
+    assert claimed.node_ids == [node_id]

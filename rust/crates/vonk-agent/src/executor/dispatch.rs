@@ -191,7 +191,8 @@ mod tests {
         )
         .await
         .unwrap()
-        .unwrap();
+        .unwrap()
+        .settled();
         let results = client.results.lock().unwrap().clone();
         assert!(results.iter().any(|result| result == &retained));
         assert!(results.iter().any(|result| result.fence == fresh.fence));

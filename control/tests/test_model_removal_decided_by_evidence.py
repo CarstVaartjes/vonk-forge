@@ -81,9 +81,17 @@ def _request_download(
 
 
 def _installation(
-    world: Catalog, set_digest: str, *, plan: dict[str, object] | None = None
+    world: Catalog,
+    set_digest: str,
+    *,
+    plan: dict[str, object] | None = None,
+    file_digests: tuple[str, ...] = (),
 ) -> str:
-    """An installed recipe whose own plan runs the model set on the Spark."""
+    """An installed recipe whose own plan runs the model set on the Spark.
+
+    ``file_digests`` are the set's real file digests, which a real compiled plan
+    names in ``artifacts[].sha256``.
+    """
 
     revision = world.revision(f"recipe-{uuid4().hex[:8]}", 1)
     installation_id, _run_id = world.workload(
@@ -91,6 +99,9 @@ def _installation(
     )
     compiled = json.loads(_COMPILED.read_text())
     compiled["identity"]["model_artifact_set_sha256"] = set_digest
+    for artifact, digest in zip(compiled["artifacts"], file_digests, strict=False):
+        artifact["sha256"] = digest
+        artifact["file_id"] = f"{artifact['file_id'].rsplit('-', 1)[0]}-{digest[:12]}"
     with world.sessions.begin() as session:
         row = session.get(RecipeInstallation, installation_id)
         assert row is not None

@@ -127,6 +127,7 @@ def test_collection_racing_download_converges_after_restart(
         clock=lambda: now[0],
         lifecycle=cast(InstallationRemoval, FakeLifecycle(sessions)),
         image_cache_root=tmp_path,
+        images=FilesystemRuntimeImageStorage(tmp_path),
     )
     held, release = Event(), Event()
     receipt_path = storage.root / f"{ARCHIVE_SHA}.receipt.json"

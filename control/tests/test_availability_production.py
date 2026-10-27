@@ -160,7 +160,10 @@ def test_production_factory_separates_api_service_and_worker_scheduler(
         "recipe_operations": object(),
         "clock": lambda: datetime.now(UTC),
     }
-    api = build_recipe_image_availability(**kwargs)
+    api = build_recipe_image_availability(
+        **kwargs,
+        storage=FilesystemRuntimeImageStorage(tmp_path / "api-artifacts"),
+    )
     assert api.scheduler is None
     assert api.storage.root == tmp_path / "api-artifacts" / "image-cache"
     api.close()
@@ -168,6 +171,7 @@ def test_production_factory_separates_api_service_and_worker_scheduler(
     worker = build_recipe_image_availability(
         **kwargs,
         artifact_root=tmp_path / "worker-artifacts",
+        storage=FilesystemRuntimeImageStorage(tmp_path / "worker-artifacts"),
         with_scheduler=True,
     )
     assert worker.scheduler is not None
@@ -367,6 +371,7 @@ def test_recipe_download_api_reuses_verified_cached_source_build(
     production = build_recipe_image_availability(
         sessions,
         artifact_root=artifact_root,
+        storage=FilesystemRuntimeImageStorage(artifact_root),
         managed_catalog_sync=reobserver,
         recipe_builds=builds,
         recipe_operations=operations,
@@ -486,6 +491,7 @@ def test_source_build_without_builder_queues_provisional_parent(
     production = build_recipe_image_availability(
         sessions,
         settings=Settings(),
+        storage=FilesystemRuntimeImageStorage(Settings.agent_artifact_root),
         managed_catalog_sync=None,
         recipe_builds=Builds(),
         recipe_operations=object(),
@@ -600,6 +606,7 @@ def test_stored_policy_projection_observes_then_fresh_authority_is_admitted(
     production = build_recipe_image_availability(
         sessions,
         settings=Settings(),
+        storage=FilesystemRuntimeImageStorage(Settings.agent_artifact_root),
         managed_catalog_sync=None,
         recipe_builds=builds,
         recipe_operations=object(),
@@ -708,6 +715,7 @@ def test_authority_resolves_builds_without_an_open_transaction(
     production = build_recipe_image_availability(
         sessions,
         settings=Settings(),
+        storage=FilesystemRuntimeImageStorage(Settings.agent_artifact_root),
         managed_catalog_sync=None,
         recipe_builds=Builds(),
         recipe_operations=object(),
@@ -841,6 +849,7 @@ def test_builder_reuses_selected_plan_without_a_second_capacity_admission(
     production = build_recipe_image_availability(
         sessions,
         settings=Settings(),
+        storage=FilesystemRuntimeImageStorage(Settings.agent_artifact_root),
         managed_catalog_sync=None,
         recipe_builds=builds,
         recipe_operations=Operations(),
@@ -1006,6 +1015,7 @@ def test_busy_spark_makes_build_wait_until_it_is_idle(tmp_path) -> None:
     production = build_recipe_image_availability(
         sessions,
         settings=Settings(),
+        storage=FilesystemRuntimeImageStorage(Settings.agent_artifact_root),
         managed_catalog_sync=None,
         recipe_builds=Builds(),
         recipe_operations=Operations(),
@@ -1207,6 +1217,7 @@ def test_a_prebuilt_pull_does_not_wait_for_a_free_builder_and_holds_none(
     production = build_recipe_image_availability(
         sessions,
         settings=Settings(),
+        storage=FilesystemRuntimeImageStorage(Settings.agent_artifact_root),
         managed_catalog_sync=None,
         recipe_builds=Builds(),
         recipe_operations=Operations(),
@@ -1397,6 +1408,7 @@ def test_a_prebuilt_pull_does_not_occupy_the_builder_a_spark_build_needs(
     production = build_recipe_image_availability(
         sessions,
         settings=Settings(),
+        storage=FilesystemRuntimeImageStorage(Settings.agent_artifact_root),
         managed_catalog_sync=None,
         recipe_builds=Builds(),
         recipe_operations=Operations(),
@@ -1678,6 +1690,7 @@ def test_builder_parent_preserves_typed_failure_and_retry_policy(
     production = build_recipe_image_availability(
         sessions,
         settings=Settings(),
+        storage=FilesystemRuntimeImageStorage(Settings.agent_artifact_root),
         managed_catalog_sync=None,
         recipe_builds=Builds(),
         recipe_operations=operations,
@@ -2036,6 +2049,7 @@ def test_a_failed_build_step_keeps_its_own_error_lines_and_names_its_spark(
     production = build_recipe_image_availability(
         sessions,
         settings=Settings(),
+        storage=FilesystemRuntimeImageStorage(Settings.agent_artifact_root),
         managed_catalog_sync=None,
         recipe_builds=Builds(),
         recipe_operations=Operations(),
@@ -2126,6 +2140,7 @@ def test_builder_source_error_is_not_mislabeled_as_capacity_wait(tmp_path) -> No
     production = build_recipe_image_availability(
         sessions,
         settings=Settings(),
+        storage=FilesystemRuntimeImageStorage(Settings.agent_artifact_root),
         managed_catalog_sync=None,
         recipe_builds=Builds(),
         recipe_operations=object(),
@@ -2325,6 +2340,7 @@ def test_postgres_builder_transaction_does_not_cross_session_block(
     production = build_recipe_image_availability(
         sessions,
         settings=Settings(),
+        storage=FilesystemRuntimeImageStorage(Settings.agent_artifact_root),
         managed_catalog_sync=None,
         recipe_builds=builds,
         recipe_operations=Operations(),
@@ -2527,6 +2543,7 @@ def test_postgres_connected_source_build_queues_model_child_until_builder_eligib
     production = build_recipe_image_availability(
         sessions,
         settings=Settings(),
+        storage=FilesystemRuntimeImageStorage(Settings.agent_artifact_root),
         managed_catalog_sync=None,
         recipe_builds=Builds(),
         recipe_operations=Operations(),

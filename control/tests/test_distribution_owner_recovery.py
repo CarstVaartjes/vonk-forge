@@ -90,6 +90,7 @@ def test_distribution_observation_deadline_survives_restart_and_fresh_admission(
     with switch.sessions.begin() as session:
         for snapshot in session.scalars(select(NodeInventorySnapshot)):
             snapshot.observed_at = switch.clock.now
+            snapshot.received_at = switch.clock.now
     request = _request(switch.sessions, switch.nodes[0])
     plan = restarted.preview(request, actor="admin")
     assert plan.allowed

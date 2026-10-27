@@ -31,6 +31,7 @@ from vonk_control.recipe_image_availability import (
     RecipeImageAvailabilityError,
 )
 from vonk_control.recipe_image_availability_contract import AvailabilityBuildReceipt
+from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
 from vonk_control.stored_json import read_row_column
 from vonk_control.strict_json import read_stored_model, serialize_json_value
 
@@ -56,6 +57,7 @@ def test_build_observer_yields_and_recovers_a_committed_child_before_replanning(
         return build_recipe_image_availability(
             sessions,
             artifact_root=tmp_path / "images",
+            storage=FilesystemRuntimeImageStorage(tmp_path / "images"),
             managed_catalog_sync=None,
             recipe_builds=builds,
             recipe_operations=operations,
@@ -153,6 +155,7 @@ def test_one_availability_slot_serves_two_parents_sharing_one_real_build(
     production = build_recipe_image_availability(
         sessions,
         artifact_root=tmp_path / "images",
+        storage=FilesystemRuntimeImageStorage(tmp_path / "images"),
         managed_catalog_sync=None,
         recipe_builds=builds,
         recipe_operations=operations,
@@ -269,6 +272,7 @@ def test_unbound_adoption_repairs_projection_and_reuses_accepted_content(
     production = build_recipe_image_availability(
         sessions,
         artifact_root=tmp_path / "images",
+        storage=FilesystemRuntimeImageStorage(tmp_path / "images"),
         managed_catalog_sync=None,
         recipe_builds=builds,
         recipe_operations=operations,
@@ -416,6 +420,7 @@ def test_deterministic_build_failure_ends_preparation_without_hammering(
     production = build_recipe_image_availability(
         sessions,
         artifact_root=tmp_path / "images",
+        storage=FilesystemRuntimeImageStorage(tmp_path / "images"),
         managed_catalog_sync=None,
         recipe_builds=builds,
         recipe_operations=operations,
@@ -468,6 +473,7 @@ def test_deterministic_build_failure_ends_preparation_without_hammering(
             assert snapshot is not None
             snapshot.observed_at = clock[0]
             snapshot.received_at = clock[0]
+            snapshot.received_at = clock[0]
         # A new explicit request after repair is not poisoned by the old failure.
         fresh = service.start(
             revision.id, actor="operator", request_id=str(uuid.uuid4())
@@ -502,6 +508,7 @@ def test_settled_child_failure_gets_new_execution_identity_on_recovery(
     production = build_recipe_image_availability(
         sessions,
         artifact_root=tmp_path / "images",
+        storage=FilesystemRuntimeImageStorage(tmp_path / "images"),
         managed_catalog_sync=None,
         recipe_builds=builds,
         recipe_operations=operations,
@@ -586,6 +593,7 @@ def test_new_availability_intent_after_removal_joins_the_accepted_build(
     production = build_recipe_image_availability(
         sessions,
         artifact_root=tmp_path / "images",
+        storage=FilesystemRuntimeImageStorage(tmp_path / "images"),
         managed_catalog_sync=None,
         recipe_builds=builds,
         recipe_operations=operations,
@@ -682,6 +690,7 @@ def test_unbound_consumer_reuses_verified_image_while_replacement_build_runs(
     production = build_recipe_image_availability(
         sessions,
         artifact_root=tmp_path / "images",
+        storage=FilesystemRuntimeImageStorage(tmp_path / "images"),
         managed_catalog_sync=None,
         recipe_builds=builds,
         recipe_operations=operations,
@@ -707,6 +716,7 @@ def test_expired_observers_failure_cannot_erase_the_new_claims_build_dependency(
     production = build_recipe_image_availability(
         sessions,
         artifact_root=tmp_path / "images",
+        storage=FilesystemRuntimeImageStorage(tmp_path / "images"),
         managed_catalog_sync=None,
         recipe_builds=builds,
         recipe_operations=operations,
@@ -784,6 +794,7 @@ def test_a_succeeded_build_is_adopted_after_its_preparation_retried(
     production = build_recipe_image_availability(
         sessions,
         artifact_root=tmp_path / "images",
+        storage=FilesystemRuntimeImageStorage(tmp_path / "images"),
         managed_catalog_sync=None,
         recipe_builds=builds,
         recipe_operations=operations,

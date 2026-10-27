@@ -6,6 +6,7 @@ import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from typing import NamedTuple
 
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
@@ -21,10 +22,13 @@ from vonk_agent_protocol import (
 )
 
 from .. import agent_operation_states, job_states
+from ..content_identity import same_build_units
 from ..lifecycle.agent_operation import AGGREGATE_FINAL_STATES
+from ..lifecycle.evidence import Residue
 from ..models import AgentOperation as StoredOperation
 from ..models import AgentOperationAttempt
 from ..recovery_policy import FailureKind
+from .stored import column_field
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -77,6 +81,67 @@ _MUTATING_OPERATIONS = frozenset(
         AgentOperation.RECIPE_RECONCILE.value,
     }
 )
+
+
+#: Orders the agent runs beside its claim lane (``executor::runs_off_lane``):
+#: a Spark keeps claiming other work while one of them runs (owner decision
+#: 2026-10-26, "builds run off the claim lane"). Shared vector:
+#: ``agent_protocol/fixtures/off-lane-operations.json``.
+OFF_LANE_OPERATIONS = frozenset({AgentOperation.RECIPE_BUILD.value})
+
+
+class ClaimOrder(NamedTuple):
+    """The facts of a claimable order the conflict rule reads, without its row."""
+
+    id: str
+    kind: str
+    build_id: str | None
+
+
+def _build_id(order: StoredOperation | ClaimOrder) -> str | None:
+    if isinstance(order, ClaimOrder):
+        return order.build_id
+    value = column_field(order, "payload", "build_id")
+    return None if value is None or isinstance(value, Residue) else str(value)
+
+
+def mutations_conflict(
+    claimed: StoredOperation | ClaimOrder, holder: StoredOperation | ClaimOrder
+) -> bool:
+    """Whether a live ``holder`` forbids ``claimed`` from overlapping it on its Spark.
+
+    Mutations on one Spark stay serial, except a build: it compiles in its own
+    storage under its own units, and its memory and disk reservations already
+    decide what fits beside it. It conflicts only with work that would end it
+    under its feet: its own build identity (a cleanup or a second attempt
+    stops the same units) and an agent upgrade (which restarts its supervisor).
+    """
+
+    if (
+        claimed.kind not in _MUTATING_OPERATIONS
+        or holder.kind not in _MUTATING_OPERATIONS
+    ):
+        return False
+    build = AgentOperation.RECIPE_BUILD.value
+    if build not in (claimed.kind, holder.kind):
+        return True
+    other = holder if claimed.kind == build else claimed
+    if other.kind == AgentOperation.AGENT_UPGRADE.value:
+        return True
+    return other.kind in {
+        build,
+        AgentOperation.RECIPE_BUILD_CLEANUP.value,
+    } and same_build_units(_build_id(claimed), _build_id(holder))
+
+
+def holds_claim(queued: StoredOperation, holder: StoredOperation) -> bool:
+    """Whether a live ``holder`` on the same Spark keeps ``queued`` from its claim.
+
+    The agent claims the next order once its lane is free, so any lane order
+    holds every queued one; an off-lane order holds only what it conflicts with.
+    """
+
+    return holder.kind not in OFF_LANE_OPERATIONS or mutations_conflict(queued, holder)
 
 
 _WORKLOAD_INTENT_OPERATIONS = frozenset(

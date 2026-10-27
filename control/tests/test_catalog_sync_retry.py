@@ -371,7 +371,10 @@ def test_gateway_capability_recovers_without_blocking_fresh_catalog_requests(
             if typed_unknown:
                 assert "CatalogSyncUnsettled (observation-unavailable)" in caplog.text
             else:
-                assert "HTTP 503; capability.dependency_unavailable" in caplog.text
+                assert (
+                    "CapabilityUnavailableError (capability.dependency_unavailable)"
+                    in caplog.text
+                )
                 assert "capability=gateway-keys" in caplog.text
             assert f"retrying in {timeout} seconds" in caplog.text
             assert "unclassified" not in caplog.text

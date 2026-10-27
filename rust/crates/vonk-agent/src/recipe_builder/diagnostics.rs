@@ -595,6 +595,149 @@ mod tests {
         }
     }
 
+    /// The stderr of a Podman that crashed in its own Go runtime during a RUN:
+    /// the step's output (`run_output`) first, then the crash and its frames.
+    fn podman_crash_output(run_output: &str, crash_header: &str) -> ProcessOutput {
+        ProcessOutput {
+            exit_code: Some(2),
+            success: false,
+            stdout: b"[2/2] STEP 11/28: RUN uv pip install torch\n".to_vec(),
+            stderr: format!(
+                "{run_output}\n{crash_header}\n\ngoroutine 61 [running]:\n\
+                 github.com/containers/common/libnetwork/netavark.(*netavarkNetwork).Teardown(...)\n\
+                 \t/go/src/netavark/run.go:93 +0x1d4\n"
+            )
+            .into_bytes(),
+        }
+    }
+
+    #[test]
+    fn a_podman_crash_is_not_a_platform_denial_whatever_the_run_output_says() {
+        // Wrong implementation: classify by denial words anywhere in stderr, so
+        // a crash after a RUN that printed them reports a blocked platform.
+        for run_output in [
+            "error: failed to hardlink: permission denied (os error 13)",
+            "lchown /root/.cache/uv: operation not permitted",
+            "newuidmap: subuid range unavailable for user",
+            "cannot clone: Operation not permitted",
+            "mount `proc` to `proc`: permission denied",
+        ] {
+            for header in [
+                "panic: runtime error: invalid memory address or nil pointer dereference",
+                "fatal error: all goroutines are asleep - deadlock!",
+            ] {
+                let output = podman_crash_output(run_output, header);
+                assert_eq!(
+                    podman_build_diagnostic(&output),
+                    PodmanBuildDiagnostic::Unknown,
+                    "{run_output} / {header}"
+                );
+            }
+        }
+        // A goroutine dump alone is a crash too, whatever its header looked like.
+        let output = ProcessOutput {
+            exit_code: Some(2),
+            success: false,
+            stdout: Vec::new(),
+            stderr: b"lchown denied: permission denied\ngoroutine 1 [running]:\nmain.main()\n"
+                .to_vec(),
+        };
+        assert_eq!(
+            podman_build_diagnostic(&output),
+            PodmanBuildDiagnostic::Unknown
+        );
+    }
+
+    #[test]
+    fn every_platform_block_vector_yields_to_a_crash_and_to_a_steps_own_exit() {
+        // Wrong implementation: a denial gate that reads words a RUN printed, or
+        // lines left by a crashed Podman, as a host denial in either classifier.
+        let crash = "\npanic: runtime error: nil pointer dereference\n\ngoroutine 61 [running]:\n";
+        let step_exit = "\nError: building at STEP \"RUN uv pip install\": while running runtime: exit status 1";
+        for (vector, build, import) in [
+            (
+                "lchown /root/.cache/uv: operation not permitted",
+                PodmanBuildDiagnostic::SubordinateIdMappingUnavailable,
+                PodmanImportDiagnostic::SubordinateIdMappingUnavailable,
+            ),
+            (
+                "newuidmap: write to uid_map failed",
+                PodmanBuildDiagnostic::SubordinateIdMappingUnavailable,
+                PodmanImportDiagnostic::SubordinateIdMappingUnavailable,
+            ),
+            (
+                "cannot clone: Operation not permitted",
+                PodmanBuildDiagnostic::UserNamespaceDenied,
+                PodmanImportDiagnostic::PermissionDenied,
+            ),
+            (
+                "mount `proc` to `proc`: Operation not permitted",
+                PodmanBuildDiagnostic::ProcMountDenied,
+                PodmanImportDiagnostic::PermissionDenied,
+            ),
+            (
+                "open /private/data: permission denied",
+                PodmanBuildDiagnostic::PermissionDenied,
+                PodmanImportDiagnostic::PermissionDenied,
+            ),
+        ] {
+            let run = |stderr: String| ProcessOutput {
+                exit_code: Some(1),
+                success: false,
+                stdout: Vec::new(),
+                stderr: stderr.into_bytes(),
+            };
+            assert_eq!(podman_build_diagnostic(&run(vector.to_owned())), build);
+            assert_eq!(podman_import_diagnostic(&run(vector.to_owned())), import);
+            let crashed = run(format!("{vector}{crash}"));
+            assert_eq!(
+                podman_build_diagnostic(&crashed),
+                PodmanBuildDiagnostic::Unknown,
+                "{vector}"
+            );
+            assert_eq!(
+                podman_import_diagnostic(&crashed),
+                PodmanImportDiagnostic::Unknown,
+                "{vector}"
+            );
+            // The step's own exit: the words are the RUN's, not the host's.
+            assert_eq!(
+                podman_build_diagnostic(&run(format!("{vector}{step_exit}"))),
+                PodmanBuildDiagnostic::BuildStepFailed,
+                "{vector}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_out_of_memory_build_is_not_hidden_behind_denial_words_or_a_crash() {
+        let output = podman_crash_output(
+            "lchown /root: permission denied\nKilled\nout of memory",
+            "panic: runtime error: invalid memory address or nil pointer dereference",
+        );
+        assert_eq!(
+            podman_build_diagnostic(&output),
+            PodmanBuildDiagnostic::MemoryLimitExceeded
+        );
+    }
+
+    #[test]
+    fn a_run_steps_own_go_panic_stays_a_failed_step() {
+        // The crash lines belong to the recipe's program when Podman reports the
+        // step's exit status: that is a failed step, not a Podman fault.
+        let output = ProcessOutput {
+            exit_code: Some(1),
+            success: false,
+            stdout: Vec::new(),
+            stderr: b"panic: bad input\n\ngoroutine 1 [running]:\nError: building at STEP \"RUN ./tool\": while running runtime: exit status 2"
+                .to_vec(),
+        };
+        assert_eq!(
+            podman_build_diagnostic(&output),
+            PodmanBuildDiagnostic::BuildStepFailed
+        );
+    }
+
     #[test]
     fn podman_build_failures_have_stable_secret_free_diagnostics() {
         for (stdout, stderr, expected) in [

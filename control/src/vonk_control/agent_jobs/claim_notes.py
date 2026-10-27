@@ -24,6 +24,7 @@ from .contracts import (
     _CONCLUDED_OUTCOMES,
     _DATABASE_REPOLL_SECONDS,
     _LOGGER,
+    OFF_LANE_OPERATIONS,
 )
 from .evidence import _is_refusal_reason
 from .predicates import (
@@ -335,6 +336,12 @@ def _excluded_work_refusal(
         .where(
             StoredOperation.node_id == node.node_id,
             StoredOperation.state.in_(agent_operation_states.LIVE),
+            # An order running beside the lane is executing (or, its lease
+            # spent, claimable): never work this node was refused.
+            ~(
+                StoredOperation.kind.in_(OFF_LANE_OPERATIONS)
+                & (StoredOperation.state == agent_operation_states.RUNNING)
+            ),
         )
         .order_by(StoredOperation.created_at, StoredOperation.id)
         .limit(1)

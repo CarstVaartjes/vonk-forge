@@ -1,6 +1,9 @@
 """Api: public imports."""
 
 from ..agent_services import build_agent_services as build_agent_services
+from ..capability_contract import (
+    CapabilityUnavailableReply as CapabilityUnavailableReply,
+)
 from .application import FLEET_SSE_EVENTS as FLEET_SSE_EVENTS
 from .application import MAX_CONTROL_DOCUMENT_BYTES as MAX_CONTROL_DOCUMENT_BYTES
 from .application import MAX_RECIPE_IMAGE_BYTES as MAX_RECIPE_IMAGE_BYTES
@@ -18,7 +21,6 @@ from .application import BoundedJSONError as BoundedJSONError
 from .application import BrowserAuthenticationError as BrowserAuthenticationError
 from .application import BrowserAuthService as BrowserAuthService
 from .application import Callable as Callable
-from .application import CapabilityUnavailableReply as CapabilityUnavailableReply
 from .application import CatalogCode as CatalogCode
 from .application import CatalogProblem as CatalogProblem
 from .application import CatalogService as CatalogService

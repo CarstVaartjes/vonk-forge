@@ -54,7 +54,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from sqlalchemy import select
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import Session, object_session, sessionmaker
 from vonk_agent_protocol import (
     Disposition,
     LifecycleState,
@@ -67,6 +67,7 @@ from vonk_agent_protocol import (
 
 from .. import job_states
 from ..agent_operation_facts import aware
+from ..lifecycle_preflight import end_unclaimed_probes
 from ..models import AgentOperation as StoredOperation
 from ..models import Job
 from ..operation_blockers import OperationBlocker, make_blocker
@@ -163,6 +164,49 @@ def set_member_state(
     """The only writer of a member's progress ``state`` (a projection, not a row)."""
 
     entry.state = state
+
+
+def end_unclaimed_children(
+    session: Session, progress: RunSwitchOperationResult, now: datetime
+) -> bool:
+    """End the idempotent work an ended run-switch issued that no Spark claimed.
+
+    Its pending runtime probes, and a queued or parked transfer child: neither
+    has an effect to undo (copied bytes stay for reuse), and left queued it
+    would run for nobody. Any other child, or a claimed one, reports its own
+    end. Returns whether such work is still queued (another writer held it):
+    the caller offers it again on its next check.
+    """
+    # agent_jobs builds on the lifecycle core; import its writers at use.
+    from .. import agent_operation_states
+    from ..agent_jobs import abandon_idempotent_job_in_session
+    from ..agent_jobs.contracts import _ABANDONABLE_OPERATIONS
+
+    children = (
+        list(progress.preflight.pending_jobs.values()) if progress.preflight else []
+    )
+    if progress.preflight is not None:
+        end_unclaimed_probes(session, progress.preflight, now)
+    if progress.child_operation_id is not None:
+        children.append(progress.child_operation_id)
+        abandon_idempotent_job_in_session(
+            session,
+            progress.child_operation_id,
+            now,
+            reason=WaitReason.SCOPE_CHANGED.value,
+        )
+    return bool(children) and (
+        session.scalar(
+            select(StoredOperation.id)
+            .where(
+                StoredOperation.parent_job_id.in_(children),
+                StoredOperation.kind.in_(_ABANDONABLE_OPERATIONS),
+                StoredOperation.state.in_(agent_operation_states.QUEUED_OR_PARKED),
+            )
+            .limit(1)
+        )
+        is not None
+    )
 
 
 class RunSwitchAdapter:
@@ -419,9 +463,7 @@ class RunSwitchAdapter:
         state = visible if visible and not after.terminal else _STORED[after.state]
         preflight = progress.preflight if progress else None
         preflight_reason = (
-            typed_wait_reason(
-                preflight.last_failure_code, RuntimePreflightCode.REQUIRED
-            )
+            typed_wait_reason(preflight.current_reason, RuntimePreflightCode.REQUIRED)
             if preflight
             and preflight.next_check_at
             and not after.cancel_requested
@@ -429,13 +471,9 @@ class RunSwitchAdapter:
             else None
         )
         if preflight_reason is not None and preflight is not None:
-            wait_blockers = [
-                make_blocker(
-                    preflight_reason,
-                    preflight.last_failure_detail or preflight_reason.value,
-                    node_ids=list(job.targets),
-                )
-            ]
+            # A pending probe's own queue wait is the current dependency; the
+            # reason its round started is history once the child is issued.
+            wait_blockers = preflight.current_blockers(list(job.targets))
         lifecycle_wait(
             job,
             identity=job.id,
@@ -457,6 +495,9 @@ class RunSwitchAdapter:
         )
         job.state = state
         if after.state in (State.CANCELLED, State.FAILED):
+            session = object_session(job)
+            if session is not None and progress is not None:
+                end_unclaimed_children(session, progress, now)
             # Terminal request result is final; the exact accepted Start may
             # still need its cancellation handoff after a lost worker response.
             schedule_wait(

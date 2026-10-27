@@ -165,8 +165,11 @@ Worker coordinator faults before an operation is claimed have one current row
 per source in `coordinator_failures`. The row stores the canonical disposition,
 redacted cause and executable content identity, plus the shared typed wait evidence and due
 column. `/api/platform` exposes this evidence. Transient faults resume at their
-persisted retry time, including after restart. Deterministic faults are checked
-for a changed executable content identity without executing the unchanged decision again.
+persisted retry time, including after restart. Deterministic faults retry too, so a
+lane recovers once its cause clears: the backoff is how long the fault has
+persisted (5 s doubling to 300 s) and restarts when the executable content identity
+changes. A persisting fault fails again with its evidence; a security refusal is
+re-decided by the real check.
 Successful observation removes the current fault; this table is not history.
 The normal due-row backstop redrives these sources through the same worker path.
 

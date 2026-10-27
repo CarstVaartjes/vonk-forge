@@ -44,6 +44,7 @@ from ..install_admission import (
 from ..lifecycle.types import (
     State as _LifecycleState,
 )
+from ..lifecycle_preflight import end_unclaimed_probes
 from ..logging import log_event
 from ..models import (
     Job,
@@ -80,6 +81,7 @@ from .constants import (
     _LOGGER,
     _OBSERVING,
     _RUNTIME_IMAGE_OWNER_CHANGED,
+    _TERMINAL_STATES,
 )
 from .contracts import FinalVerificationExpiry
 from .endings_helpers import _reject_invalid_operation
@@ -193,6 +195,10 @@ class PhaseDispatchMixin:
                     if not _checkpoint_matches(
                         job, current, phase_index, item_index, None
                     ):
+                        if job.state in _TERMINAL_STATES:
+                            # The owner ended while this round issued its
+                            # probes; its terminal write never saw them.
+                            end_unclaimed_probes(session, checkpoint, now)
                         return False
                     current.preflight = checkpoint
                     schedule_wait(
@@ -225,7 +231,7 @@ class PhaseDispatchMixin:
                             ),
                             now,
                         )
-                    job.status_reason = checkpoint.last_failure_code
+                    job.status_reason = checkpoint.current_reason
                     _ADAPTER.project(
                         job,
                         current,

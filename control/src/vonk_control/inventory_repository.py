@@ -168,6 +168,11 @@ class InventoryRepository:
                 if row.observed_at.tzinfo
                 else row.observed_at.replace(tzinfo=UTC)
             )
+            received = (
+                row.received_at
+                if row.received_at.tzinfo
+                else row.received_at.replace(tzinfo=UTC)
+            )
             # Validate the persisted JSON semantics using the producer's current
             # contract. A typed annotation or SQL string alone is not evidence.
             validated = _validated_inventory(row, observed_at=observed)
@@ -179,7 +184,7 @@ class InventoryRepository:
                         "node_id": row.node_id,
                         "received_at": row.received_at,
                         "evidence_digest": row.evidence_digest,
-                        "stale": (now - observed).total_seconds() > maximum_age,
+                        "stale": (now - received).total_seconds() > maximum_age,
                     }
                 )
             )

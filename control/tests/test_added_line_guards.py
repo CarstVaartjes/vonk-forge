@@ -1006,18 +1006,92 @@ def test_added_line_guard_rejects_negative_controller_contact_age(source, line):
     assert not check_source(PATH, source, {line + 1}, modes=("contact-clocks",))
 
 
-def test_contact_clock_guard_preserves_staleness_and_security_and_agent_freshness():
+def test_contact_clock_guard_preserves_staleness_and_security():
     source = (
         "def online(node, current):\n"
         "    seen = node.last_seen_at\n"
         "    return current - seen > window\n"
         "def certificate(cert, now):\n"
         "    return cert.not_before > now\n"
-        "def observation(sample, now):\n"
-        "    age = now - sample.observed_at\n"
-        "    return timedelta(0) <= age < window\n"
     )
-    assert not check_source(PATH, source, set(range(1, 9)), modes=("contact-clocks",))
+    assert not check_source(PATH, source, set(range(1, 6)), modes=("contact-clocks",))
+
+
+_FACTS = "# reads NodeInventorySnapshot\n"
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        # Direct, aliased and wrapped agent stamps aged against the clock.
+        "def f(row, now):\n    return now - row.observed_at > window\n",
+        "def f(row, now):\n    seen = row.observed_at\n    return (now - seen).total_seconds()\n",
+        "def f(row, current):\n    seen = _utc(row.observed_at)\n    return max(0.0, (current - seen).total_seconds())\n",
+        "def f(snapshots, now):\n    for node, (free, observed) in snapshots:\n        if now - observed > MAX_AGE:\n            continue\n",
+        # A timedelta comparison is freshness too; only the ingress handlers may.
+        "def f(snapshot, now):\n    return now - snapshot.observed_at > timedelta(seconds=MAX)\n",
+        "def f(row):\n    return datetime.now(UTC) - row.observed_at > window\n",
+        # Cutoff forms, in both orientations and with a clock call.
+        "def f(row, now):\n    return aware(row.observed_at) < now - MAX_AGE\n",
+        "def f(row, cache):\n    return cache._clock() - MAX_AGE <= aware(row.observed_at)\n",
+        "def f(row, now):\n    return now - MAX_AGE > row.observed_at\n",
+    ],
+)
+def test_agent_stamp_freshness_is_rejected(source):
+    """Catches ageing inventory or telemetry by the agent's own clock, in the
+    forms that slipped past a literal ``now - x.observed_at`` match."""
+    source = _FACTS + source
+    lines = set(range(1, len(source.splitlines()) + 1))
+    hits = check_source(PATH, source, lines, modes=("contact-clocks",))
+    assert hits and all("use received_at" in text for text in hits)
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        # Freshness from the Controller's receive time.
+        "def f(row, now):\n    return (now - row.received_at).total_seconds() > window\n",
+        "def f(row, now):\n    return aware(row.received_at) < now - MAX_AGE\n",
+        # Ordering reports never reads the clock.
+        "def f(a, b):\n    return a.observed_at >= b.observed_at\n",
+        "def f(sample, since):\n    return sample.observed_at - since < GRACE\n",
+        "def f(a, last):\n    return a.observed_at <= last\n",
+        # A row read by an observed_at ordering is not a stamp.
+        "def f(session, now):\n    row = session.scalar(select(X).order_by(X.observed_at.desc()))\n    return now - row.received_at\n",
+    ],
+)
+def test_agent_stamp_guard_allows_receipt_and_ordering(source):
+    source = _FACTS + source
+    lines = set(range(1, len(source.splitlines()) + 1))
+    assert not check_source(PATH, source, lines, modes=("contact-clocks",))
+
+
+def test_agent_stamp_guard_ignores_controller_written_progress_timestamps():
+    """Progress ``observed_at`` is the Controller's own clock, not an agent's."""
+    source = (
+        "def due(previous, now):\n"
+        "    observed = _timestamp(previous.observed_at)\n"
+        "    return observed is None or (now - observed).total_seconds() >= 1\n"
+    )
+    assert not check_source(PATH, source, {1, 2, 3}, modes=("contact-clocks",))
+
+
+@pytest.mark.parametrize(
+    ("path", "name"),
+    [
+        ("control/src/vonk_control/agent_api/observations.py", "inventory"),
+        ("control/src/vonk_control/telemetry.py", "_canonical_sample"),
+    ],
+)
+def test_ingress_handlers_may_judge_an_agent_stamp_by_location(path, name):
+    body = (
+        f"{_FACTS}def make(now):\n    def {name}(v):\n"
+        "        return now - v.observed_at > timedelta(minutes=5)\n"
+    )
+    assert not check_source(path, body, {3, 4}, modes=("contact-clocks",))
+    assert check_source(
+        "control/src/vonk_control/other.py", body, {3, 4}, modes=("contact-clocks",)
+    )
 
 
 @pytest.mark.parametrize("negative", (False, True))
@@ -1458,4 +1532,28 @@ def test_the_provider_table_and_the_one_opener_may_open_providers() -> None:
         definition,
         {1},
         modes=("openers",),
+    )
+
+
+_FOLLOW_COUNT = (
+    "def same_job(observed):\n"
+    "    active = [item for item in observed['operations']]\n"
+    "    if len(active) > 1:\n"
+    "        raise ControlMalformedResponse('more than one active Spark')\n"
+    "    if observed['progress']['running'] > 1:\n"
+    "        raise ControlMalformedResponse('concurrent upgrades')\n"
+)
+
+
+def test_follow_validator_asserting_an_operation_count_is_flagged() -> None:
+    """Catches a follow validator that rejects parallel Spark upgrades."""
+    path = "src/cluster_profiles/controller_cli/fleet.py"
+    assert check_source(path, _FOLLOW_COUNT, {3}, modes=("follow-validators",))
+    assert check_source(path, _FOLLOW_COUNT, {5}, modes=("follow-validators",))
+    assert not check_source(path, _FOLLOW_COUNT, {1, 2}, modes=("follow-validators",))
+    assert not check_source(
+        "src/cluster_profiles/other.py",
+        _FOLLOW_COUNT,
+        {3},
+        modes=("follow-validators",),
     )

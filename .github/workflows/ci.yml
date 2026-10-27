@@ -393,7 +393,9 @@ jobs:
           set -euo pipefail
           # The helper has no dependencies: compile its real source statically
           # without rebuilding the agent dependency graph for a second target.
-          rustc --edition=2024 -C target-feature=+crt-static \
+          # Match the release profile: abort on panic, optimised.
+          rustc --edition=2024 -C panic=abort -C opt-level=3 \
+            -C target-feature=+crt-static \
             rust/crates/vonk-build-egress/src/main.rs \
             -o "$RUNNER_TEMP/vonk-build-egress"
           rustc --edition=2024 -C target-feature=+crt-static \

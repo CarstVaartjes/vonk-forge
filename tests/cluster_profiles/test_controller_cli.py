@@ -4296,6 +4296,79 @@ def test_fleet_upgrade_follows_exact_job_and_stops_at_operator_blocker() -> None
     assert len(result["operations"]) == 1
 
 
+def _sticky_upgrade_follow(snapshot_overrides: dict[str, object]):
+    job_id = "upgrade-job"
+    request_key = "44444444-4444-4444-8444-444444444444"
+    nodes = ["spk_" + letter * 32 for letter in "abcd"]
+    states = ("running", "queued", "queued", "needs-operator")
+    client = FakeClient(
+        {
+            ("POST", "/api/fleet/upgrade"): {
+                "action": "upgrade",
+                "state": "queued",
+                "operation_id": job_id,
+                "plan_digest": "a" * 64,
+                "request_key": request_key,
+                "targets": nodes,
+            },
+            ("GET", f"/api/jobs/{job_id}"): {
+                "id": job_id,
+                "state": "queued",
+                "kind": "agent-upgrade",
+                "targets": nodes,
+                "operations": [
+                    {"id": f"operation-{node[4]}", "node_id": node, "state": state}
+                    for node, state in zip(nodes, states, strict=True)
+                ],
+                # The Controller counts queued and running work as running.
+                "progress": {"running": 3, "completed": 0, "failed": 0, "total": 4},
+                **snapshot_overrides,
+            },
+        }
+    )
+    return run(
+        (
+            "fleet",
+            "upgrade",
+            "--all",
+            "--yes",
+            "--request-key",
+            request_key,
+            "--json",
+            "--interval-seconds",
+            "0.01",
+            "--timeout-seconds",
+            "1",
+        ),
+        client,
+    )
+
+
+def test_fleet_upgrade_follows_parallel_sparks_without_a_validation_error() -> None:
+    """Catches a follow validator that counts operations: every Spark upgrades
+    at once, so 2 queued and 1 running operation is the normal mid-rollout view.
+    It must be adopted; rejecting it left the receipt and an observation error."""
+    _status, result = _sticky_upgrade_follow({})
+
+    observation = result["observation"]
+    assert isinstance(observation, dict)
+    assert observation["status"] == "timed_out"
+    assert "error" not in observation
+    inner = result["result"]
+    assert isinstance(inner, dict) and len(inner["operations"]) == 4
+
+
+def test_fleet_upgrade_follow_still_refuses_another_jobs_targets() -> None:
+    """The job, kind and target identity checks stay."""
+    _status, result = _sticky_upgrade_follow({"targets": ["spk_" + "f" * 32]})
+
+    observation = result["observation"]
+    assert isinstance(observation, dict)
+    assert observation["error"]
+    inner = result["result"]
+    assert isinstance(inner, dict) and "operations" not in inner
+
+
 def test_fleet_upgrade_replays_lost_post_with_same_request_key() -> None:
     request_key = "22222222-2222-4222-8222-222222222222"
     client = FakeClient(

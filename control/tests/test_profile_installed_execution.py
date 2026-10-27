@@ -655,6 +655,7 @@ def test_a_disk_wait_without_new_inventory_ends_then_fresh_intent_recovers(
         assert snapshot is not None
         snapshot.disk_free_bytes = snapshot.disk_total_bytes
         snapshot.observed_at = lifecycle._clock()
+        snapshot.received_at = lifecycle._clock()
     replacement = service.apply(
         waiting.profile_id, request_key=str(uuid4()), actor="admin"
     )
@@ -663,6 +664,7 @@ def test_a_disk_wait_without_new_inventory_ends_then_fresh_intent_recovers(
             snapshot = session.scalar(select(NodeInventorySnapshot))
             assert snapshot is not None
             snapshot.observed_at = lifecycle._clock()
+            snapshot.received_at = lifecycle._clock()
         _after(lifecycle, service, planner, STORAGE_ADMISSION_RETRY_SECONDS + 1)
         if service.application(replacement.id).current_operation_id is not None:
             break
@@ -684,6 +686,7 @@ def test_a_load_ends_with_typed_evidence_when_reclamation_cannot_make_room(
         snapshot.observed_at = lifecycle._clock() + timedelta(
             seconds=PROFILE_STALL_WINDOW_SECONDS + 120
         )
+        snapshot.received_at = snapshot.observed_at
     _after(lifecycle, service, planner, PROFILE_STALL_WINDOW_SECONDS + 120)
     ended = service.application(waiting.id)
     assert ended.state == LifecycleState.FAILED, ended.status_reason
@@ -716,6 +719,7 @@ def test_a_load_waiting_for_eviction_is_admitted_when_space_arrives(
         assert snapshot is not None
         snapshot.disk_free_bytes = snapshot.disk_total_bytes
         snapshot.observed_at = lifecycle._clock()
+        snapshot.received_at = lifecycle._clock()
     _after(lifecycle, service, planner, STORAGE_ADMISSION_RETRY_SECONDS + 1)
     admitted = service.application(waiting.id)
     assert admitted.current_operation_id is not None, admitted.status_reason

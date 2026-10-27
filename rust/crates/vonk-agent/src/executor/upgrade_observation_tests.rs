@@ -251,7 +251,8 @@ async fn upgrade_process_death_at_every_custody_seam_reobserves_without_installi
         let mut store = StateStore::open_recovered(&root.join("state.sqlite"), NODE_ID).unwrap();
         run_once(&client, &mut store, &executor, None, 0, None)
             .await
-            .unwrap();
+            .unwrap()
+            .settled();
         if point == 0 {
             assert!(
                 client.results.lock().unwrap().is_empty(),
@@ -265,7 +266,8 @@ async fn upgrade_process_death_at_every_custody_seam_reobserves_without_installi
             publish(root, &receipt(&accepted, Phase::Acknowledged));
             run_once(&client, &mut store, &executor, None, 0, None)
                 .await
-                .unwrap();
+                .unwrap()
+                .settled();
         }
         assert!(
             client.heartbeats.lock().unwrap().is_empty(),
@@ -394,14 +396,9 @@ async fn rollback_and_expired_unknown_preserve_evidence_and_recover_on_idle_tick
     let database = root.path().join("state.sqlite");
     let mut store = StateStore::open(&database, NODE_ID).unwrap();
     store.begin(&accepted, Utc::now()).unwrap();
-    reobserve_operations(
-        &mut store,
-        &executor,
-        None,
-        accepted.deadline.with_timezone(&Utc),
-    )
-    .await
-    .unwrap();
+    reobserve_operations(&mut store, &executor, accepted.deadline.with_timezone(&Utc))
+        .await
+        .unwrap();
     // Past the claim's lease, within its activation deadline: the helper's
     // watcher still owns the transaction, so no unknown is recorded and the
     // claim stays observed.
@@ -410,7 +407,7 @@ async fn rollback_and_expired_unknown_preserve_evidence_and_recover_on_idle_tick
     drop(store);
     publish(root.path(), &receipt(&accepted, Phase::Acknowledged));
     let mut store = StateStore::open_recovered(&database, NODE_ID).unwrap();
-    reobserve_operations(&mut store, &executor, None, Utc::now())
+    reobserve_operations(&mut store, &executor, Utc::now())
         .await
         .unwrap();
     assert!(matches!(

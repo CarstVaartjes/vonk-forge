@@ -14,11 +14,13 @@ from pydantic import (
     StringConstraints,
 )
 from sqlalchemy import select
+from sqlalchemy.orm import Session
 from vonk_agent_protocol import AgentOperation as OperationKind
 from vonk_agent_protocol import (
     LifecycleState,
     OperationReason,
     RuntimePreflightCode,
+    WaitReason,
     canonical_message,
 )
 from vonk_agent_protocol.runtime_preflight import RuntimePreflightResult
@@ -28,7 +30,14 @@ from .inventory_items import inventory_items
 from .inventory_items_contract import PreflightInventoryItem
 from .lifecycle.job import JobAdapter
 from .models import AgentNode, AgentOperation, AgentOperationAttempt, Job
-from .persisted_waits import typed_wait_reason
+from .operation_blockers import (
+    MAX_BLOCKERS,
+    BlockingOperation,
+    OperationBlocker,
+    ProgressAlarmCode,
+    make_blocker,
+)
+from .persisted_waits import read_wait, typed_wait_reason
 from .recovery_policy import RECOVERY
 from .runtime_preflight import (
     admission_blockers,
@@ -62,6 +71,50 @@ class LifecyclePreflightCheckpoint(StrictJSONModel):
     last_failure_detail: str | None = None
     attempts: dict[NodeId, Annotated[int, Field(ge=1)]] = Field(default_factory=dict)
     receipts: dict[NodeId, PreflightInventoryItem] = Field(default_factory=dict)
+    #: What the pending probes wait for now: each queued child's own persisted
+    #: queue wait (its typed reason, blocking operation and Spark), replaced on
+    #: every check. The reason that started the round is not the current wait.
+    child_waits: list[OperationBlocker] = Field(
+        default_factory=list, max_length=MAX_BLOCKERS
+    )
+
+    @property
+    def current_reason(self) -> OperationReason | ProgressAlarmCode | None:
+        """The reason this round waits now: a queued probe's own wait first."""
+        return self.child_waits[0].code if self.child_waits else self.last_failure_code
+
+    def current_blockers(self, node_ids: list[str]) -> list[OperationBlocker]:
+        """Every dependency of this round: each queued probe's own wait, then the
+        checkpoint's reason for the Sparks backing off that no probe wait names."""
+        reason = typed_wait_reason(
+            self.last_failure_code, RuntimePreflightCode.REQUIRED
+        )
+        detail = self.last_failure_detail or reason.value
+        if not self.child_waits:
+            return [make_blocker(reason, detail, node_ids=node_ids)]
+        named = {node for blocker in self.child_waits for node in blocker.node_ids}
+        backing_off = sorted(set(self.retry_at) - named)
+        own = (
+            [make_blocker(reason, detail, node_ids=backing_off)] if backing_off else []
+        )
+        return [*self.child_waits, *own][:MAX_BLOCKERS]
+
+
+def end_unclaimed_probes(
+    session: Session, checkpoint: LifecyclePreflightCheckpoint, now: datetime
+) -> None:
+    """End the runtime probes of an ended owner that no Spark has claimed.
+
+    A probe has no effect to undo; left queued it would outlive its owner and
+    hold the Spark's claim lane for nobody. A claimed probe reports its own end.
+    """
+    # agent_jobs builds on the lifecycle core; import its writer at use.
+    from .agent_jobs import abandon_idempotent_job_in_session
+
+    for child_id in checkpoint.pending_jobs.values():
+        abandon_idempotent_job_in_session(
+            session, child_id, now, reason=WaitReason.SCOPE_CHANGED.value
+        )
 
 
 # Security refusals (failure_classification.is_security_failure) park the
@@ -115,6 +168,7 @@ class LifecyclePreflight:
             )
 
         checkpoint.next_check_at = None
+        checkpoint.child_waits = []
         due: list[datetime] = []
         with self._sessions.begin() as session:
             # Pending child identities bind one probe round to this request and
@@ -200,6 +254,33 @@ class LifecyclePreflight:
                             else PROBE_OBSERVATION_INTERVAL
                         )
                         due.append(now + interval)
+                        wait = read_wait(operation)
+                        # A claimed probe waits for nothing but its own run.
+                        blockers = (
+                            wait.blockers
+                            if wait is not None
+                            else [
+                                make_blocker(
+                                    RuntimePreflightCode.REQUIRED,
+                                    f"runtime probe {operation.id[:8]} is running "
+                                    "on this Spark",
+                                    severity="info",
+                                    node_ids=[node_id],
+                                ).model_copy(
+                                    update={
+                                        "operation": BlockingOperation(
+                                            id=operation.id, kind=operation.kind
+                                        )
+                                    }
+                                )
+                            ]
+                            if operation.state == LifecycleState.RUNNING
+                            else []
+                        )
+                        checkpoint.child_waits = [
+                            *checkpoint.child_waits,
+                            *blockers,
+                        ][:MAX_BLOCKERS]
                         continue
                     else:
                         raw = session.scalar(
