@@ -20,6 +20,7 @@ from ..models import AgentCertificate, AgentNode, AgentOperationAttempt, Job
 from ..models import AgentOperation as StoredOperation
 from ..persisted_waits import read_wait
 from .contracts import (
+    _BOUNDARY_REFUSAL_PREFIXES,
     _CLAIM_REFUSAL_PREFIX,
     _CONCLUDED_OUTCOMES,
     _DATABASE_REPOLL_SECONDS,
@@ -280,11 +281,9 @@ def record_boundary_refusal(
     receives the same note on the same surface the jobs API returns.
     """
 
-    prefixes = {
-        "heartbeat": "heartbeat refused: ",
-        "result": "result refused: ",
-    }
-    prefix = prefixes.get(boundary)
+    prefix = next(
+        (p for p in _BOUNDARY_REFUSAL_PREFIXES if p.startswith(f"{boundary} ")), None
+    )
     if prefix is None:
         raise InvalidValue(
             "agent boundary is invalid", reason=InvalidRequestReason.MALFORMED
