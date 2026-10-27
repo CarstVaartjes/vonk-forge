@@ -220,34 +220,49 @@ def _conditional_post_stop_memory_check(
             < node.memory_required_bytes + node.memory_floor_bytes
         ):
             return None
-    for node_id in blocked_nodes:
-        node = nodes[node_id]
-        components = insufficient_components.get(node_id, frozenset())
-        if not components or node.memory_pool is None:
-            return None
-        for component in components:
-            reservation_kind = {
-                "host": "host-memory",
-                "accelerator": "gpu-memory",
-                "shared": "unified-memory",
-            }.get(component)
-            if reservation_kind is None:
-                return None
-            claim_kinds = memory_reservation_kinds(reservation_kind, node.memory_pool)
-            if not any(
-                node_id in stop.node_ids
-                and any(
-                    claim.kind in claim_kinds
-                    for claim in reviewed_run_memory_reservations(
-                        session, node_id, stop
-                    )
-                )
-                for stop in stops
-            ):
-                return None
+    if not blocked_nodes <= _stop_covered_nodes(
+        session, stops, fit, insufficient_components
+    ):
+        return None
     return ConditionalPostStopMemoryCheck(
         stop_run_ids=sorted(stop.run_id for stop in stops)
     )
+
+
+def _stop_covered_nodes(
+    session: Session,
+    stops: Sequence[StopImpact],
+    fit: SparkFit,
+    insufficient_components: Mapping[str, frozenset[str]],
+) -> frozenset[str]:
+    """The Sparks whose every memory shortfall an exact reviewed stop's claim holds."""
+
+    covered: set[str] = set()
+    for node in fit.nodes:
+        components = insufficient_components.get(node.node_id, frozenset())
+        if not components or node.memory_pool is None:
+            continue
+        if all(
+            (
+                reservation_kind := {
+                    "host": "host-memory",
+                    "accelerator": "gpu-memory",
+                    "shared": "unified-memory",
+                }.get(component)
+            )
+            is not None
+            and any(
+                claim.kind
+                in memory_reservation_kinds(reservation_kind, node.memory_pool)
+                for stop in stops
+                for claim in reviewed_run_memory_reservations(
+                    session, node.node_id, stop
+                )
+            )
+            for component in components
+        ):
+            covered.add(node.node_id)
+    return frozenset(covered)
 
 
 def _settings_view(settings: object) -> EffectiveSettingsSelection:

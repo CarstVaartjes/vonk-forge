@@ -3825,6 +3825,127 @@ def test_exact_stop_reservation_budget_needs_a_fresh_post_stop_check(
     assert not changed.allowed
 
 
+def test_a_switch_waiting_on_another_claim_names_it_not_the_planned_stop(
+    tmp_path: Path,
+) -> None:
+    """A single-Spark run is replaced by a dual; the other Spark holds a claim.
+
+    The shortfall on the stopped run's Spark is one its planned stop clears. The
+    switch still waits, but on the claim no stop releases, and that is what its
+    blockers (and so the wait's headline) name.
+    """
+    sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(
+        tmp_path, nodes=2
+    )
+    installation_id = installed_recipe(
+        lifecycle, mapping_id, build_id, nodes, request_id=str(uuid.uuid4())
+    ).owner_id
+    run_id = lifecycle._run_admission.accept_run(
+        lifecycle._run_admission.plan_run(
+            installation_id, "old", now=lifecycle._clock()
+        ),
+        actor="admin",
+        now=lifecycle._clock(),
+    )
+    with sessions.begin() as session:
+        installation = session.get(RecipeInstallation, installation_id)
+        run = session.get(RecipeRun, run_id)
+        assert installation is not None and run is not None
+        installation.state = "partial"
+        run.state = "running"
+        run.route_state = "published"
+        group = SparkGroup(
+            nodes=[
+                SparkGroupNode(
+                    node_id=item.node_id,
+                    rank=item.rank,
+                    role=item.role,
+                    endpoint_owner=item.rank == 0,
+                )
+                for item in session.scalars(
+                    select(RunNode)
+                    .where(RunNode.run_id == run_id)
+                    .order_by(RunNode.rank)
+                )
+            ]
+        )
+        assert [item.node_id for item in group.nodes] == list(nodes)
+        # The outgoing run serves on the first Spark only.
+        for item in session.scalars(select(RunNode).where(RunNode.run_id == run_id)):
+            if item.node_id == nodes[1]:
+                session.delete(item)
+            else:
+                item.state = "running"
+                item.reserved_memory_bytes = 7_800
+        for reservation in session.scalars(
+            select(ResourceReservation).where(
+                ResourceReservation.owner_kind == "run",
+                ResourceReservation.owner_id == run_id,
+            )
+        ):
+            if reservation.node_id == nodes[1]:
+                session.delete(reservation)
+            elif reservation.kind == "unified-memory":
+                reservation.amount_bytes = 7_800
+
+    request = _request(sessions, nodes[0], action="switch").model_copy(
+        update={"spark_group": group}
+    )
+    service = _service(
+        sessions,
+        lifecycle._clock(),
+        lifecycle,
+        RecordingArtifactExecutor(),
+        phase_executor=SynchronousPhaseExecutor(),
+    )
+    baseline = service.preview(request, actor="admin")
+    required = baseline.fit_current.nodes[0].memory_required_bytes
+    floor = baseline.fit_current.nodes[0].memory_floor_bytes
+    assert required is not None and floor is not None
+    # Each Spark's pool fits the demand, but not the demand and the run's peak.
+    total = 7_800 + required + floor - 1
+    with sessions.begin() as session:
+        for snapshot in session.scalars(select(NodeInventorySnapshot)):
+            snapshot.host_memory_total_bytes = total
+            snapshot.gpu_memory_total_bytes = total
+            snapshot.host_memory_free_bytes = required + floor + 10
+            snapshot.gpu_memory_free_bytes = required + floor + 10
+
+    # Only the stop stands between the dual and its start: it is admitted
+    # behind a fresh post-stop check.
+    clear = service.preview(request, actor="admin")
+    assert clear.post_stop_memory_check is not None
+    assert clear.post_stop_memory_check.stop_run_ids == [run_id]
+    assert clear.allowed, clear.blockers
+
+    # A claim no stop releases (an independent build) fills the other Spark.
+    holder = str(uuid.uuid4())
+    with sessions.begin() as session:
+        session.add(
+            ResourceReservation(
+                node_id=nodes[1],
+                kind="unified-memory",
+                resource_key="memory",
+                amount_bytes=7_800,
+                owner_kind="recipe-build",
+                owner_id=holder,
+                state=ReservationState.ACTIVE,
+                plan_digest="d" * 64,
+                created_at=NOW,
+            )
+        )
+    waiting = service.preview(request, actor="admin")
+
+    assert not waiting.allowed
+    assert waiting.post_stop_memory_check is None
+    assert waiting.blockers
+    # The wait names the Spark the claim holds, and the claim, first.
+    assert all(reason.node_ids == [nodes[1]] for reason in waiting.blockers), [
+        (reason.code, reason.node_ids) for reason in waiting.blockers
+    ]
+    assert holder in waiting.blockers[0].detail
+
+
 def test_recheck_binds_the_inventory_sample_it_reads_not_the_reviewed_one(
     tmp_path: Path,
 ) -> None:
