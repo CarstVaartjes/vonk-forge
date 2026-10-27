@@ -91,6 +91,10 @@
       "kind": "agent-protocol"
     },
     {
+      "module": "agent_protocol/src/vonk_agent_protocol/page_cache.py",
+      "kind": "agent-protocol"
+    },
+    {
       "module": "agent_protocol/src/vonk_agent_protocol/reason_codes/vocabulary.py",
       "kind": "agent-protocol"
     },

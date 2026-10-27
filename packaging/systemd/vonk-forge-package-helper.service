@@ -66,6 +66,10 @@ ReadWritePaths=-/var/lib/vonk-forge-agent/installations -/var/lib/vonk-forge-age
 # else SIGKILL of its non-root members), never through the daemon a thrashing
 # host starves. Docker places container cgroups under one of these parents.
 ReadWritePaths=-/sys/fs/cgroup/system.slice -/sys/fs/cgroup/docker
+# The page-cache drop a loading workload's agent asks for (ProtectKernelTunables
+# keeps the rest of /proc/sys read-only). A host that cannot bind it still starts
+# the helper, and each drop then reports not-permitted.
+ReadWritePaths=-/proc/sys/vm/drop_caches
 TimeoutStartSec=30s
 TimeoutStopSec=15s
 KillMode=mixed

@@ -5,12 +5,41 @@ use super::*;
 mod reobserve;
 
 impl<R: ProcessRunner> RecipeExecutor<'_, R> {
+    /// A start, with the page-cache drops of its load attached to its result.
     pub(super) async fn execute_start(
         &self,
         claim: &AgentClaim,
         lease_deadline: tokio::sync::watch::Receiver<DateTime<FixedOffset>>,
         cancellation: tokio::sync::watch::Receiver<bool>,
         request: vonk_agent_protocol::RecipeStartRequest,
+    ) -> ExecutionResult {
+        let rank_launch = matches!(request.phase, Some(RecipeStartPhase::RankLaunch));
+        let start_deadline = request
+            .start_deadline
+            .as_deref()
+            .and_then(|deadline| DateTime::parse_from_rfc3339(deadline).ok());
+        let mut load = None;
+        let result = self
+            .start_workload(claim, lease_deadline, cancellation, request, &mut load)
+            .await;
+        // A launched rank's readiness is another phase's (the master's) or no
+        // agent's: its drops continue until its accepted start deadline.
+        let evidence = load.and_then(|load| match start_deadline {
+            Some(deadline) if rank_launch && matches!(result, ExecutionResult::Done(_)) => {
+                load.release_until(tokio::time::Instant::now() + remaining_lease(deadline))
+            }
+            _ => load.finish(),
+        });
+        with_page_cache(result, evidence)
+    }
+
+    async fn start_workload(
+        &self,
+        claim: &AgentClaim,
+        lease_deadline: tokio::sync::watch::Receiver<DateTime<FixedOffset>>,
+        cancellation: tokio::sync::watch::Receiver<bool>,
+        request: vonk_agent_protocol::RecipeStartRequest,
+        load: &mut Option<crate::page_cache::LoadPhase>,
     ) -> ExecutionResult {
         let preload_diagnostics = self.runtime.report_preload_memory(
             request.placement().reserved_memory_bytes,
@@ -233,9 +262,14 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         } else {
             arguments
         };
+        // The load begins: what preparation read stays cached until dropped.
+        let load = &*load.insert(
+            crate::page_cache::LoadPhases::for_helper(self.helper_socket).begin(request.run_id),
+        );
         let mut runtime_result = run_until_cancelled(
             async {
                 if runtime_action == HostRuntimeAction::Start {
+                    load.drop_now().await;
                     self.execute_host_runtime_plan(
                         claim,
                         runtime_arguments,
@@ -275,11 +309,15 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                 }
             };
             runtime_result = run_until_cancelled(
-                self.execute_host_runtime_plan(
-                    claim,
-                    runtime_guard_arguments.clone(),
-                    HostRuntimePlan::Start(request.clone()),
-                ),
+                async {
+                    load.drop_now().await;
+                    self.execute_host_runtime_plan(
+                        claim,
+                        runtime_guard_arguments.clone(),
+                        HostRuntimePlan::Start(request.clone()),
+                    )
+                    .await
+                },
                 &mut cancellation_observer,
             )
             .await;
@@ -489,6 +527,35 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
             return self.cancel_start_run(claim, &run_id).await;
         }
         success
+    }
+}
+
+/// `result` with the page-cache drops of its load: a failure's diagnostics or
+/// a started workload's preload diagnostics. An unconfirmed start reports
+/// none; its drops stay in the journal.
+fn with_page_cache(
+    result: ExecutionResult,
+    evidence: Option<vonk_agent_protocol::generated::PageCacheDropEvidence>,
+) -> ExecutionResult {
+    let Some(evidence) = evidence else {
+        return result;
+    };
+    match result {
+        ExecutionResult::Failed(mut failure) => {
+            failure.page_cache = Some(evidence);
+            ExecutionResult::Failed(failure)
+        }
+        ExecutionResult::Done(
+            vonk_agent_protocol::generated::OutcomeDoneResult::RecipeStartResult(mut started),
+        ) => {
+            if let Some(diagnostics) = started.preload_diagnostics.as_mut() {
+                diagnostics.page_cache = Some(evidence);
+            }
+            ExecutionResult::Done(
+                vonk_agent_protocol::generated::OutcomeDoneResult::RecipeStartResult(started),
+            )
+        }
+        other => other,
     }
 }
 

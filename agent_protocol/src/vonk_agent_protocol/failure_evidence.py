@@ -5,6 +5,7 @@ from typing import Annotated, Literal
 
 from pydantic import Field, field_validator, model_validator
 
+from .page_cache import PageCacheDropEvidence
 from .wire_model import WireModel
 
 MAX_DROPPED_COUNT = 2**64 - 1
@@ -45,6 +46,8 @@ class FailureDiagnostics(WireModel):
     # Numeric subprocess status; absent when the process never started or was signalled.
     process_exit_code: int | None = Field(default=None, strict=True, ge=0, le=255)
     model_store_layout: ModelStoreLayoutFault | None = None
+    # The page-cache drops the helper made while this workload started.
+    page_cache: PageCacheDropEvidence | None = None
     schema_version: Literal[1] = 1
     collected_at: str = Field(min_length=1, max_length=64)
     phase: str = Field(min_length=1, max_length=80)

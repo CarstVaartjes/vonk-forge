@@ -46,6 +46,8 @@ pub struct Failure {
     pub stage: Option<FailureStage>,
     pub diagnostic: Option<String>,
     pub model_store_layout: Option<vonk_agent_protocol::generated::ModelStoreLayoutFault>,
+    /// The page-cache drops made while the failed workload started.
+    pub page_cache: Option<vonk_agent_protocol::generated::PageCacheDropEvidence>,
     pub helper_error_code: Option<HelperErrorCode>,
     pub helper_exit_code: Option<u32>,
     /// The rejected container's own output, when the helper read it.
@@ -66,6 +68,7 @@ impl Failure {
             stage: None,
             diagnostic: None,
             model_store_layout: None,
+            page_cache: None,
             helper_error_code: None,
             helper_exit_code: None,
             process_logs: None,
