@@ -210,6 +210,21 @@ def _reset_at(at: datetime) -> Callable[[], httpx2.Response]:
 PRODUCTION_KINDS = sorted(kind for kind, row in PROVIDERS.items() if row.production)
 
 
+@pytest.fixture(params=["sequential", "ranges"])
+def transfer_path(
+    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
+) -> str:
+    """Every provider-wait proof runs on the sequential stream and on the
+    parallel range path (every real weight file), where 4 workers open the
+    provider at once."""
+
+    if request.param == "ranges":
+        monkeypatch.setattr(
+            "vonk_control.model_cache.constants._PARALLEL_RANGE_MIN_BYTES", 1
+        )
+    return request.param
+
+
 def test_every_production_provider_is_proven_here() -> None:
     """Guard: a new production kind must join the provider-wait proofs below."""
 
@@ -224,6 +239,7 @@ def test_every_production_provider_is_proven_here() -> None:
 
 @pytest.mark.parametrize("kind", PRODUCTION_KINDS)
 @pytest.mark.parametrize("hint", ["retry-after", "reset"])
+@pytest.mark.usefixtures("transfer_path")
 def test_thirty_hour_rate_limit_waits_past_the_recovery_budget_then_heals(
     tmp_path: Path, kind: str, hint: str
 ) -> None:
@@ -275,6 +291,7 @@ def test_thirty_hour_rate_limit_waits_past_the_recovery_budget_then_heals(
 
 
 @pytest.mark.parametrize("kind", PRODUCTION_KINDS)
+@pytest.mark.usefixtures("transfer_path")
 def test_hintless_rate_limit_rechecks_on_the_provider_wait_cadence(
     tmp_path: Path, kind: str
 ) -> None:
@@ -387,6 +404,41 @@ def test_every_provider_kind_owns_its_own_cooldown(
             else:
                 assert service._open_provider(client, spec, {}).status_code == 200
         assert sorted(opened) == sorted(set(PROVIDERS) - {kind})
+    finally:
+        client.close()
+        service.close()
+        engine.dispose()
+
+
+@pytest.mark.parametrize("kind", sorted(PROVIDERS))
+def test_a_hinted_rate_limit_holds_its_provider_from_the_answer(
+    tmp_path: Path, kind: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The provider's "later" holds the next request of any transfer at once,
+    not only once the refused transfer has ended and written its failure."""
+
+    opened: list[str] = []
+
+    def refuse(cache, client, spec, headers):
+        opened.append(spec.kind)
+        raise ModelCacheStorageUnknown(
+            ModelCacheCode.RATE_LIMITED, "later", retry_after_seconds=1800
+        )
+
+    monkeypatch.setitem(PROVIDERS, kind, replace(PROVIDERS[kind], open=refuse))
+    engine, sessions = _sqlite_sessions()
+    service = ModelCacheService(
+        sessions, tmp_path / "cache", reserve_bytes=0, clock=lambda: NOW
+    )
+    client = httpx2.Client()
+    try:
+        spec = cast("ArtifactSpec", SimpleNamespace(kind=kind))
+        for _request in range(2):
+            with pytest.raises(ModelCacheStorageUnknown) as refused:
+                service._open_provider(client, spec, {})
+            assert refused.value.code == ModelCacheCode.RATE_LIMITED
+            assert refused.value.retry_after_seconds == 1800
+        assert opened == [kind]  # the second request never asked
     finally:
         client.close()
         service.close()

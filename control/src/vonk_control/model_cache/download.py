@@ -7,7 +7,7 @@ import os
 import re
 import shutil
 from collections.abc import Callable, Iterator, Mapping, Sequence
-from datetime import datetime
+from datetime import datetime, timedelta
 from io import BufferedReader
 from pathlib import Path
 from typing import TYPE_CHECKING, NoReturn, cast
@@ -328,13 +328,24 @@ class DownloadMixin:
         """Open one response from the spec's provider, every provider alike.
 
         A provider under its cooldown is not contacted; a rate limit or a
-        server error narrows the parallel streams before it is reported.
+        server error narrows the parallel streams before it is reported.  A
+        rate limit with a hint holds the provider from the moment it answers,
+        so a later request of any transfer refuses without asking.
         """
         cache = cast("ModelCacheService", self)
         cache._refuse_during_cooldown(spec.kind)
         try:
             return provider_for(spec.kind).open(cache, client, spec, headers)
         except ModelCacheStorageUnknown as error:
+            hint = error.retry_after_seconds
+            if (
+                error.code == ModelCacheCode.RATE_LIMITED
+                and type(hint) is int
+                and hint >= 1
+            ):
+                cache._record_provider_cooldown(
+                    spec.kind, cache._clock() + timedelta(seconds=hint)
+                )
             if error.code == ModelCacheCode.RATE_LIMITED or (
                 error.source_status is not None and error.source_status >= 500
             ):

@@ -1,10 +1,11 @@
 """Provider waits: a rate limit or quota is its provider's own wait.
 
 Each provider kind of the provider table has its own cooldown: an anonymous
-GitHub surface and Hugging Face are limited independently.  The failure path is
-the one writer (``FailureMixin._finish_failed``); the provider opener refuses to
-contact a provider while its cooldown runs; start-up rebuilds the cooldowns from
-the durable ``rate_limited`` rows once.
+GitHub surface and Hugging Face are limited independently.  The provider opener
+(``DownloadMixin._open_provider``) records a hinted rate limit the moment it is
+answered, the failure path (``FailureMixin._finish_failed``) records every wait
+it schedules; the opener refuses to contact a provider while its cooldown runs;
+start-up rebuilds the cooldowns from the durable ``rate_limited`` rows once.
 """
 
 from __future__ import annotations

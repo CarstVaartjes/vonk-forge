@@ -182,7 +182,8 @@ def test_range_streams_respect_the_gate(tmp_path) -> None:
 
 def test_provider_429_and_5xx_back_off_the_streams(cache, tmp_path) -> None:  # noqa: F811
     _existing, sessions = cache
-    statuses = iter([429, 503])
+    # The 5xx first: a hinted 429 holds the provider, so nothing is asked after it.
+    statuses = iter([503, 429])
 
     def handler(request):
         return httpx2.Response(
