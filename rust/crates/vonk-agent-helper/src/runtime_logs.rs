@@ -858,7 +858,8 @@ mod tests {
 
     /// The live vLLM shape of a start that runs out of memory: the engine
     /// logs what it loaded and what was left for the KV cache, then a
-    /// traceback longer than the bound that ends on vLLM's ValueError.
+    /// traceback longer than the bound that ends on vLLM's ValueError, and the
+    /// API server's traceback pointing above itself.
     fn kv_cache_exhausted_start() -> Vec<u8> {
         let prefix = "(EngineCore pid=255) INFO 10-27 06:53:40 [gpu_worker.py:462]";
         let mut stream = b"Downloading apache-tvm-ffi (16.7 MB)\n".to_vec();
@@ -886,6 +887,13 @@ mod tests {
             );
         }
         stream.extend(format!("{error} ValueError: No available memory for the cache blocks. Try increasing `gpu_memory_utilization` when initializing the engine.\n").into_bytes());
+        stream.extend(b"(APIServer pid=55) Traceback (most recent call last):\n");
+        for index in 0..10 {
+            stream.extend(
+                format!("(APIServer pid=55)   File \"/opt/vllm/v1/engine/utils.py\", line {index}, in wait_for_engine_startup\n").into_bytes(),
+            );
+        }
+        stream.extend(b"(APIServer pid=55) RuntimeError: Engine core initialization failed. See root cause above. Failed core proc(s): {}\n");
         stream
     }
 
