@@ -3827,6 +3827,8 @@ def test_exact_stop_reservation_budget_needs_a_fresh_post_stop_check(
 
 def _single_run_replaced_by_a_dual(
     tmp_path: Path,
+    *,
+    resident_on_stopped_spark: bool = False,
 ) -> tuple[
     sessionmaker[Session],
     RunSwitchOperationService,
@@ -3837,7 +3839,9 @@ def _single_run_replaced_by_a_dual(
     """One run serving on the first of two Sparks, and a switch to a dual.
 
     Each Spark's pool fits the dual's demand, but not that demand and the run's
-    peak: on the first Spark only the run's planned stop makes room.
+    peak: on the first Spark only the run's planned stop makes room. With
+    ``resident_on_stopped_spark`` the first Spark's observed free memory still
+    holds the running workload, as a live Spark reports it before the stop.
     """
     sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(
         tmp_path, nodes=2
@@ -3911,8 +3915,13 @@ def _single_run_replaced_by_a_dual(
         for snapshot in session.scalars(select(NodeInventorySnapshot)):
             snapshot.host_memory_total_bytes = 7_800 + required + floor - 1
             snapshot.gpu_memory_total_bytes = 7_800 + required + floor - 1
-            snapshot.host_memory_free_bytes = required + floor + 10
-            snapshot.gpu_memory_free_bytes = required + floor + 10
+            free = (
+                floor
+                if resident_on_stopped_spark and snapshot.node_id == nodes[0]
+                else required + floor + 10
+            )
+            snapshot.host_memory_free_bytes = free
+            snapshot.gpu_memory_free_bytes = free
     return sessions, service, request, run_id, nodes
 
 
@@ -3938,15 +3947,18 @@ def _independent_build(sessions: sessionmaker[Session], node_id: str) -> str:
     return build_id
 
 
+@pytest.mark.parametrize("resident_on_stopped_spark", [False, True])
 def test_a_switch_waiting_on_another_claim_names_it_not_the_planned_stop(
-    tmp_path: Path,
+    tmp_path: Path, resident_on_stopped_spark: bool
 ) -> None:
     """The stop-bound shortfall on the stopped run's Spark is cleared by its stop.
 
     The switch still waits, but on the claim no stop releases, and that is what
     its blockers (and so the wait's headline) name.
     """
-    sessions, service, request, run_id, nodes = _single_run_replaced_by_a_dual(tmp_path)
+    sessions, service, request, run_id, nodes = _single_run_replaced_by_a_dual(
+        tmp_path, resident_on_stopped_spark=resident_on_stopped_spark
+    )
     # Only the stop stands between the dual and its start: it is admitted
     # behind a fresh post-stop check.
     clear = service.preview(request, actor="admin")
@@ -3959,12 +3971,12 @@ def test_a_switch_waiting_on_another_claim_names_it_not_the_planned_stop(
 
     assert not waiting.allowed
     assert waiting.post_stop_memory_check is None
-    # The wait names the Spark the claim holds, and the claim, first.
+    # The wait's headline is the claim no stop releases, on its Spark.
     assert waiting.blockers
-    assert all(reason.node_ids == [nodes[1]] for reason in waiting.blockers), [
-        (reason.code, reason.node_ids) for reason in waiting.blockers
+    assert waiting.blockers[0].node_ids == [nodes[1]]
+    assert holder in waiting.blockers[0].detail, [
+        (reason.code, reason.node_ids, reason.detail) for reason in waiting.blockers
     ]
-    assert holder in waiting.blockers[0].detail
 
 
 def test_a_claim_beside_the_stopped_run_stays_part_of_the_wait(

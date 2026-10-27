@@ -270,8 +270,10 @@ class ResourceAdmissionMixin:
                     # The switch waits on what no planned stop releases. A
                     # pre-stop shortfall on a Spark whose exact stop claims
                     # hold it is cleared by that stop, so it never names (or
-                    # heads) the wait. Every after-stop reason remains: the
-                    # stop does not clear it.
+                    # heads) the wait. After-stop reasons remain; an
+                    # observed-capacity shortfall on a stop-covered Spark still
+                    # uses pre-stop inventory and is decided by the fresh
+                    # post-stop check once the other holders are gone.
                     covered = _stop_covered_nodes(
                         session, stops, current, memory_shortfalls
                     )
