@@ -38,7 +38,12 @@ class GithubMixin:
 
     @staticmethod
     def _send_anonymous_github_request(
-        client: httpx2.Client, url: str, headers: Mapping[str, str]
+        client: httpx2.Client,
+        url: str,
+        headers: Mapping[str, str],
+        *,
+        method: str = "GET",
+        content: bytes | None = None,
     ) -> httpx2.Response:
         """Send only these headers, ignoring injected client auth and cookies.
 
@@ -49,7 +54,7 @@ class GithubMixin:
 
         request_headers = dict(headers)
         request_headers["User-Agent"] = _GITHUB_USER_AGENT
-        request = httpx2.Request("GET", url, headers=request_headers)
+        request = httpx2.Request(method, url, headers=request_headers, content=content)
         return client.send(
             request,
             stream=True,

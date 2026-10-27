@@ -11,6 +11,8 @@ import httpx2
 from vonk_agent_protocol import ModelCacheCode
 
 from .catalog_helpers import (
+    _github_lfs_binding,
+    _github_lfs_catalog_source,
     _github_release_asset_binding,
     _github_release_catalog_source,
     _huggingface_catalog_source,
@@ -85,6 +87,20 @@ def _validate_release_download(cache: ModelCacheService, spec: ArtifactSpec) -> 
         )
 
 
+def _bind_github_lfs(spec: ArtifactSpec) -> None:
+    _github_lfs_binding(spec)
+
+
+def _validate_lfs_download(cache: ModelCacheService, spec: ArtifactSpec) -> None:
+    """The locator must be the media URL of the spec's own commit and path."""
+    try:
+        _github_lfs_binding(spec)
+    except ModelCacheResolutionError as error:
+        raise ModelCacheStorageInvalid(
+            ModelCacheCode.SOURCE_INVALID, "GitHub LFS object locator is invalid"
+        ) from error
+
+
 def _validate_trusted_https(cache: ModelCacheService, spec: ArtifactSpec) -> None:
     try:
         parsed = urlsplit(spec.source)
@@ -125,6 +141,15 @@ def _open_github_release(
     return cache._open_github_release_asset(client, spec, headers)
 
 
+def _open_github_lfs(
+    cache: ModelCacheService,
+    client: httpx2.Client,
+    spec: ArtifactSpec,
+    headers: Mapping[str, str],
+) -> httpx2.Response:
+    return cache._open_github_lfs_object(client, spec, headers)
+
+
 PROVIDERS: dict[str, Provider] = {
     ProviderKind.HUGGINGFACE_FILE: Provider(
         catalog_source=_huggingface_catalog_source,
@@ -141,6 +166,14 @@ PROVIDERS: dict[str, Provider] = {
         open=_open_github_release,
         production=True,
         transport_failure="GitHub release asset transfer failed",
+    ),
+    ProviderKind.GITHUB_LFS_OBJECT: Provider(
+        catalog_source=_github_lfs_catalog_source,
+        bind=_bind_github_lfs,
+        validate=_validate_lfs_download,
+        open=_open_github_lfs,
+        production=True,
+        transport_failure="GitHub LFS object transfer failed",
     ),
     ProviderKind.HTTP_FILE: Provider(
         catalog_source=_repository_catalog_source,

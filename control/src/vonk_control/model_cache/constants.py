@@ -79,6 +79,7 @@ class ProviderKind(StrEnum):
 
     HUGGINGFACE_FILE = "huggingface.file"
     GITHUB_RELEASE_ASSET = "github-release.asset"
+    GITHUB_LFS_OBJECT = "github-lfs.object"
     HTTP_FILE = "http.file"
     FILE = "file"
 
@@ -87,6 +88,27 @@ _GITHUB_USER_AGENT = "vonk-forge/0.1.1"
 
 
 _GITHUB_RELEASE_ASSET_HOST = "release-assets.githubusercontent.com"
+
+
+_GITHUB_HOST = "github.com"
+
+
+# The stable, secret-free locator a GitHub LFS object is persisted under.
+_GITHUB_LFS_MEDIA_HOST = "media.githubusercontent.com"
+
+
+# The only hosts a signed LFS download link may name (observed 2026-10-26).
+_GITHUB_LFS_OBJECT_HOSTS = frozenset({"github-cloud.githubusercontent.com"})
+
+
+_MAX_GITHUB_LFS_BATCH_BYTES = 64 * 1024
+
+
+_MAX_GITHUB_LFS_LINK_HEADERS = 16
+
+
+# A signed link is reused while at least this much of its lifetime remains.
+_LFS_HREF_MARGIN_SECONDS = 60
 
 
 _MAX_GITHUB_RELEASE_METADATA_BYTES = 4 * 1024 * 1024

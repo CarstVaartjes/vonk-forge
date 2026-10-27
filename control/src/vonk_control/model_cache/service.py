@@ -33,6 +33,7 @@ from .download_admission import DownloadAdmissionMixin
 from .failure import FailureMixin
 from .fleet_removal import FleetRemovalMixin
 from .github import GithubMixin
+from .github_lfs import GithubLfsMixin, _LfsLinks
 from .http import HttpMixin
 from .inventory import InventoryMixin
 from .observation import StorageObserver
@@ -71,6 +72,7 @@ class ModelCacheService(
     SplitTransferMixin,
     DownloadMixin,
     GithubMixin,
+    GithubLfsMixin,
     HttpMixin,
     CheckpointsMixin,
     FailureMixin,
@@ -190,6 +192,8 @@ class ModelCacheService(
         # Provider kind -> when its rate limit or quota wait ends.
         self._provider_cooldowns: dict[str, datetime] = {}
         self._cooldown_lock = threading.Lock()
+        # Signed GitHub LFS links, in process memory only.
+        self._lfs_links = _LfsLinks()
         self._progress_checkpoint_at: dict[str, datetime] = {}
         self._cancel_events: dict[str, threading.Event] = {}
         self._range_reserved_bytes = 0

@@ -1,0 +1,35 @@
+{
+  "recorded": "2026-10-27 anonymous POST https://github.com/NVlabs/GR00T-WholeBodyControl.git/info/lfs/objects/batch; every href query value replaced by REDACTED",
+  "status": 200,
+  "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "x-ratelimit-limit": "100",
+    "x-ratelimit-remaining": "99",
+    "x-ratelimit-reset": "1793060246",
+    "x-ratelimit-resource": "lfs",
+    "x-ratelimit-used": "1"
+  },
+  "body": {
+    "objects": [
+      {
+        "oid": "84afc7c229473351a24b0a7d79fc47be9dbb81bd12774285f2f60a3c0e9028df",
+        "size": 7761041,
+        "actions": {
+          "download": {
+            "href": "https://github-cloud.githubusercontent.com/alambic/media/974824110/84/af/84afc7c229473351a24b0a7d79fc47be9dbb81bd12774285f2f60a3c0e9028df?X-Amz-Algorithm=REDACTED&X-Amz-Credential=REDACTED&X-Amz-Date=REDACTED&X-Amz-Expires=REDACTED&X-Amz-Signature=REDACTED&X-Amz-SignedHeaders=REDACTED&actor_id=REDACTED&key_id=REDACTED&repo_id=REDACTED&token=REDACTED",
+            "expires_at": "2026-10-27T01:16:26Z",
+            "expires_in": 3600
+          }
+        }
+      },
+      {
+        "oid": "0000000000000000000000000000000000000000000000000000000000000000",
+        "size": 5,
+        "error": {
+          "code": 404,
+          "message": "Object does not exist on the server"
+        }
+      }
+    ]
+  }
+}

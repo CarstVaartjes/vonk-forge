@@ -17,6 +17,7 @@ from vonk_forge_contracts import (
     read_recipe,
 )
 from vonk_forge_contracts.model import (
+    GitHubLfsSource,
     GitHubReleaseSource,
     ModelReference,
     ModelSource,
@@ -27,7 +28,13 @@ from ..catalog_revision_contract import read_catalog_document
 from ..categorized_errors import InvalidType
 from ..models import CatalogDocumentRevision
 from .artifacts import ArtifactSetManifest, ArtifactSpec, _is_hex
-from .constants import _DIGEST_LENGTH, _GITHUB_API_HOST, _MAX_ARTIFACTS, ProviderKind
+from .constants import (
+    _DIGEST_LENGTH,
+    _GITHUB_API_HOST,
+    _GITHUB_LFS_MEDIA_HOST,
+    _MAX_ARTIFACTS,
+    ProviderKind,
+)
 from .errors import (
     ModelCacheConflictInvalid,
     ModelCacheResolutionError,
@@ -153,6 +160,26 @@ def _github_release_catalog_source(
     return source, revision
 
 
+def _github_lfs_media_url(owner: str, name: str, revision: str, path: str) -> str:
+    """The stable, secret-free locator of one LFS object at one commit."""
+
+    return (
+        f"https://{_GITHUB_LFS_MEDIA_HOST}/media/{owner}/{name}/{revision}/"
+        f"{quote(path, safe='/')}"
+    )
+
+
+def _github_lfs_catalog_source(artifact: CatalogArtifact) -> tuple[str, str | None]:
+    owner, name = _github_repository_parts(artifact.repository)
+    revision = artifact.revision
+    if re.fullmatch(r"[0-9a-f]{40,64}", revision) is None:
+        raise ModelCacheResolutionInvalid(
+            ModelCacheCode.REVISION_INVALID,
+            "catalog GitHub LFS revision is not a full commit SHA",
+        )
+    return _github_lfs_media_url(owner, name, revision, artifact.path), revision
+
+
 def _source_for_catalog_artifact(
     artifact: CatalogArtifact,
 ) -> tuple[str, str | None]:
@@ -250,6 +277,30 @@ def _github_release_asset_binding(spec: ArtifactSpec) -> tuple[int, int, str, st
             ModelCacheCode.SOURCE_INVALID, "GitHub release asset URL is invalid"
         )
     return int(revision_match.group(1)), int(asset_id_text), owner, name
+
+
+def _github_lfs_binding(spec: ArtifactSpec) -> tuple[str, str, str, str]:
+    """Validate that a persisted LFS source is the locator of its own identity.
+
+    The locator is recomputed from the repository, commit and path and must
+    match exactly, so a stored row cannot point the opener anywhere else.
+    """
+
+    revision = spec.revision
+    if (
+        not isinstance(spec.repository, str)
+        or not isinstance(revision, str)
+        or re.fullmatch(r"[0-9a-f]{40,64}", revision) is None
+    ):
+        raise ModelCacheResolutionInvalid(
+            ModelCacheCode.SOURCE_INVALID, "GitHub LFS object identity is invalid"
+        )
+    owner, name = _github_repository_parts(spec.repository)
+    if spec.source != _github_lfs_media_url(owner, name, revision, spec.path):
+        raise ModelCacheResolutionInvalid(
+            ModelCacheCode.SOURCE_INVALID, "GitHub LFS object locator is invalid"
+        )
+    return owner, name, revision, spec.path
 
 
 def _datetime(value: datetime) -> datetime:
@@ -352,6 +403,12 @@ def _canonical_model_artifacts(row: CatalogDocumentRevision) -> list[CatalogArti
         release_id = source.release_id
         assets = {asset.file_id: asset.asset_id for asset in source.assets}
         provider_kind = ProviderKind.GITHUB_RELEASE_ASSET
+    elif isinstance(source, GitHubLfsSource):
+        repository = source.repository
+        revision = source.revision
+        release_id = None
+        assets = {}
+        provider_kind = ProviderKind.GITHUB_LFS_OBJECT
     elif isinstance(source, ModelSource):
         repository = source.repository
         revision = source.revision

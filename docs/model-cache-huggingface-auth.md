@@ -61,6 +61,29 @@ See GitHub's [release lookup](https://docs.github.com/en/rest/releases/releases)
 and [release asset download](https://docs.github.com/en/rest/releases/assets)
 API documentation for the public endpoints used by this provider.
 
+## Public GitHub LFS objects
+
+A `github-lfs` model pins one commit of a public GitHub repository; every
+model file is one Git LFS object whose SHA-256 is the LFS oid. The Controller
+persists the stable, secret-free locator
+`https://media.githubusercontent.com/media/<owner>/<repo>/<commit>/<path>` and
+fetches the bytes by oid through GitHub's LFS batch API, anonymously. The
+signed download link the batch call returns lives in Controller memory only, is
+shared by every range worker and resume of that object, and is refused unless
+it names `github-cloud.githubusercontent.com`. An expired or refused link is
+resolved again once. The bytes are verified against the oid at ingress.
+
+LFS bandwidth is billed to the repository owner, also for anonymous public
+downloads, and GitHub allows 100 anonymous LFS batch calls an hour. A rate
+limit or an exhausted bandwidth quota is a visible wait of that provider: the
+download stays queued with reason `rate_limited`, spends no retry, holds every
+other GitHub LFS download until the provider's reset, and rechecks on the
+provider's hint or every 5 minutes doubling to hourly. A quota may only reset
+when the owner's billing month ends or the owner raises the budget; cancel the
+request if you do not want to wait. A missing object or repository (GitHub
+answers 401 for a missing or private repository) ends as source gone after
+repeated identical answers; a fresh request starts over.
+
 ## Files Hugging Face hosts only as parts
 
 Hugging Face caps a file at 50 GB, so a larger file may exist there only as

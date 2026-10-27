@@ -33,6 +33,7 @@ from vonk_control.model_cache.errors import ModelCacheStorageUnknown
 from vonk_control.model_cache.providers import PROVIDERS
 from vonk_control.models import Base, ModelCacheOperation
 
+from .github_lfs_fake import GithubLfsFake, lfs_model
 from .test_model_cache_github_release import (
     NOW,
     _client,
@@ -64,9 +65,14 @@ class _Provider:
         self.limit = limit
         self.limited = True
         self.calls = 0
+        self.clock: Callable[[], datetime] = lambda: NOW
 
     def handler(self) -> Callable[[httpx2.Request], httpx2.Response]:
-        healthy = _serve_release_and_asset(self.data, [])
+        healthy = (
+            GithubLfsFake(self.data, self.clock).handler
+            if self.kind == ProviderKind.GITHUB_LFS_OBJECT
+            else _serve_release_and_asset(self.data, [])
+        )
 
         def handle(request: httpx2.Request) -> httpx2.Response:
             self.calls += 1
@@ -105,12 +111,17 @@ class _Harness:
         self.sessions = sessions
         self.provider = provider
         self.now = now
+        provider.clock = lambda: self.now[0]
         self.client = _client(provider.handler())
         self.root = root
         self.service = self._build()
-        self.release_digest: str | None = None
+        # The GitHub kinds are production catalog sources; Hugging Face here
+        # is a fixture artifact.
+        self.catalog_digest: str | None = None
         if provider.kind == ProviderKind.GITHUB_RELEASE_ASSET:
-            self.release_digest, _ = _insert_model(sessions, _model(provider.data))
+            self.catalog_digest, _ = _insert_model(sessions, _model(provider.data))
+        elif provider.kind == ProviderKind.GITHUB_LFS_OBJECT:
+            self.catalog_digest, _ = _insert_model(sessions, lfs_model(provider.data))
 
     def _build(self) -> ModelCacheService:
         service = ModelCacheService(
@@ -118,7 +129,7 @@ class _Harness:
             self.root,
             reserve_bytes=0,
             http_client=self.client,
-            fixture_sources=self.provider.kind != ProviderKind.GITHUB_RELEASE_ASSET,
+            fixture_sources=self.provider.kind == ProviderKind.HUGGINGFACE_FILE,
             clock=lambda: self.now[0],
         )
         service.resume_operations()  # the production start-up hook
@@ -130,13 +141,13 @@ class _Harness:
 
     def start(self) -> str:
         service = self.service
-        if self.release_digest is not None:
-            preview = service.download_preview(model_content_sha256=self.release_digest)
+        if self.catalog_digest is not None:
+            preview = service.download_preview(model_content_sha256=self.catalog_digest)
             return service.start_download(
                 actor="operator",
                 request_key=str(uuid4()),
                 plan_digest=str(preview["plan_digest"]),
-                model_content_sha256=self.release_digest,
+                model_content_sha256=self.catalog_digest,
             ).id
         artifacts = [_hf_artifact(self.provider.data)]
         model = str(artifacts[0]["model_content_sha256"])
@@ -203,7 +214,11 @@ def test_every_production_provider_is_proven_here() -> None:
     """Guard: a new production kind must join the provider-wait proofs below."""
 
     assert PRODUCTION_KINDS == sorted(
-        [ProviderKind.GITHUB_RELEASE_ASSET, ProviderKind.HUGGINGFACE_FILE]
+        [
+            ProviderKind.GITHUB_LFS_OBJECT,
+            ProviderKind.GITHUB_RELEASE_ASSET,
+            ProviderKind.HUGGINGFACE_FILE,
+        ]
     )
 
 
