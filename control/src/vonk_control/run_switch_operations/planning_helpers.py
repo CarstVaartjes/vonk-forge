@@ -242,6 +242,11 @@ def _stop_covered_nodes(
         components = insufficient_components.get(node.node_id, frozenset())
         if not components or node.memory_pool is None:
             continue
+        held = {
+            claim.kind
+            for stop in stops
+            for claim in reviewed_run_memory_reservations(session, node.node_id, stop)
+        }
         if all(
             (
                 reservation_kind := {
@@ -251,13 +256,8 @@ def _stop_covered_nodes(
                 }.get(component)
             )
             is not None
-            and any(
-                claim.kind
-                in memory_reservation_kinds(reservation_kind, node.memory_pool)
-                for stop in stops
-                for claim in reviewed_run_memory_reservations(
-                    session, node.node_id, stop
-                )
+            and not held.isdisjoint(
+                memory_reservation_kinds(reservation_kind, node.memory_pool)
             )
             for component in components
         ):

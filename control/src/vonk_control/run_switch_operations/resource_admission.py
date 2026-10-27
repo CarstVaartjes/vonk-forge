@@ -268,18 +268,21 @@ class ResourceAdmissionMixin:
                         blockers.append(reason)
                 if conditional is None:
                     # The switch waits on what no planned stop releases. A
-                    # shortfall its exact stop claims hold is cleared by the
-                    # stop, so it never names (or heads) that wait.
+                    # pre-stop shortfall on a Spark whose exact stop claims
+                    # hold it is cleared by that stop, so it never names (or
+                    # heads) the wait. Every after-stop reason remains: the
+                    # stop does not clear it.
                     covered = _stop_covered_nodes(
                         session, stops, current, memory_shortfalls
                     )
                     waits = [
                         reason
-                        for reason in blockers
-                        if reason.code not in _MEMORY_STOP_CONDITIONAL_REFUSALS
-                        or not reason.node_ids
-                        or not set(reason.node_ids) <= covered
+                        for reason in current_memory_blockers
+                        if not reason.node_ids or not set(reason.node_ids) <= covered
                     ]
+                    for reason in after_stop.blockers:
+                        if reason not in waits:
+                            waits.append(reason)
                     if waits:
                         blockers = waits
                 after_stop = None
