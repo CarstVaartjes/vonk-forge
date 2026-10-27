@@ -27,6 +27,7 @@ from vonk_control.model_cache.constants import _SOURCE_GONE_ATTEMPTS, ProviderKi
 from vonk_control.model_cache.errors import ModelCacheStorageInvalid
 from vonk_control.model_cache.provider_contracts import _GitHubLfsBatch
 from vonk_control.models import Base, ModelCacheOperation
+from vonk_control.operation_contract import AvailabilityRecoveryAction
 
 from .github_lfs_fake import (
     OBJECT_HOST,
@@ -84,7 +85,9 @@ class _Nas:
         self.service.close()
         self.service = self._build()
 
-    def start(self) -> str:
+    def start(self):
+        """Admit a fresh download request; returns its accepted operation."""
+
         preview = self.service.download_preview(model_content_sha256=self.digest)
         assert preview["blockers"] == []
         return self.service.start_download(
@@ -92,7 +95,7 @@ class _Nas:
             request_key=str(uuid4()),
             plan_digest=str(preview["plan_digest"]),
             model_content_sha256=self.digest,
-        ).id
+        )
 
     def run(self) -> None:
         """One worker pass that honours every backoff and cooldown."""
@@ -193,7 +196,7 @@ def test_lfs_model_downloads_anonymously_by_oid_and_is_reused_offline(
     assert spec.source == MEDIA_URL
     assert spec.revision == REVISION
 
-    operation = nas.start()
+    operation = nas.start().id
     nas.run()
     assert nas.view(operation).state == LifecycleState.SUCCEEDED
     assert nas.placed() == DATA
@@ -202,7 +205,7 @@ def test_lfs_model_downloads_anonymously_by_oid_and_is_reused_offline(
     assert MEDIA_URL in nas.stored_text()
     _assert_no_link_secret(nas, caplog)
 
-    offline = nas.start()
+    offline = nas.start().id
     calls = len(nas.github.requests)
     nas.run()
     assert nas.view(offline).state == LifecycleState.SUCCEEDED
@@ -230,7 +233,7 @@ def test_a_link_past_its_lifetime_is_resolved_again_and_the_transfer_resumes(
 
     caplog.set_level(logging.DEBUG, logger="vonk_control")
     nas.github.truncate_next_to = 100
-    operation = nas.start()
+    operation = nas.start().id
     nas.run()
     assert nas.view(operation).state in WAITING
     assert nas.github.batch_calls == 1
@@ -253,7 +256,7 @@ def test_a_link_refused_before_its_expiry_is_resolved_again_exactly_once(
 
     caplog.set_level(logging.DEBUG, logger="vonk_control")
     nas.github.truncate_next_to = 100
-    operation = nas.start()
+    operation = nas.start().id
     nas.run()
     assert nas.github.batch_calls == 1
 
@@ -270,7 +273,7 @@ def test_a_link_refused_before_its_expiry_is_resolved_again_exactly_once(
 
 def test_a_link_that_stays_refused_is_observed_not_looped(nas: _Nas) -> None:
     nas.github.link_status = 403
-    operation = nas.start()
+    operation = nas.start().id
     nas.run()
     view = nas.view(operation)
     assert view.state in WAITING
@@ -288,7 +291,7 @@ def test_parallel_range_workers_share_one_batch_call(
     monkeypatch.setattr(
         "vonk_control.model_cache.constants._PARALLEL_RANGE_MIN_BYTES", 1
     )
-    operation = nas.start()
+    operation = nas.start().id
     nas.run()
     assert nas.view(operation).state == LifecycleState.SUCCEEDED
     assert nas.placed() == DATA
@@ -304,7 +307,7 @@ def test_a_rate_limit_is_the_providers_wait_and_holds_fresh_requests(
 
     reset = NOW + timedelta(seconds=1800)
     nas.github.batch_answer = rate_limited_until(reset)
-    first = nas.start()
+    first = nas.start().id
     nas.run()
     view = nas.view(first)
     assert view.state in WAITING
@@ -312,10 +315,11 @@ def test_a_rate_limit_is_the_providers_wait_and_holds_fresh_requests(
     assert view.failure["code"] == TransientReason.RATE_LIMITED
     assert nas.retries(first) == 0  # a provider wait spends no retry
     assert nas.next_check(first) >= reset
-    assert nas.service._provider_cooldown([ProviderKind.GITHUB_LFS_OBJECT]) >= reset
+    cooldown = nas.service._provider_cooldown([ProviderKind.GITHUB_LFS_OBJECT])
+    assert cooldown is not None and cooldown >= reset
     calls = nas.github.batch_calls
 
-    fresh = nas.start()
+    fresh = nas.start().id
     nas.run()
     assert nas.next_check(fresh) >= reset
     assert nas.github.batch_calls == calls  # the fresh request waits too
@@ -337,7 +341,7 @@ def test_an_exhausted_bandwidth_quota_waits_for_days_then_heals(
     is not the quota's, so re-checks follow the provider-wait cadence."""
 
     nas.github.batch_answer = quota_answer(status)
-    operation = nas.start()
+    operation = nas.start().id
     nas.run()
     checks = [nas.now[0]]
     while nas.now[0] < NOW + RECOVERY_BUDGET + timedelta(hours=1):
@@ -370,7 +374,7 @@ def test_a_restart_resumes_the_object_with_a_range_and_a_new_link(
     resumes the retained bytes."""
 
     nas.github.truncate_next_to = 300
-    operation = nas.start()
+    operation = nas.start().id
     nas.run()
     assert nas.github.batch_calls == 1
     nas.restart()
@@ -388,20 +392,25 @@ def test_a_missing_object_or_repository_ends_as_source_gone_then_heals(
         nas.github.object_error = 404
     else:
         nas.github.batch_answer = repository_gone
-    operation = nas.start()
+    operation = nas.start().id
     nas.run()
-    view = nas.run_until_settled(operation)
-    assert view.state == LifecycleState.FAILED
-    assert view.failure is not None
-    assert view.failure["code"] == ModelCacheCode.SOURCE_GONE
-    assert "download_again" in view.failure["recovery_actions"]
+    ended = nas.run_until_settled(operation)
+    assert ended.state == LifecycleState.FAILED
+    assert ended.failure is not None
+    assert ended.failure["code"] == ModelCacheCode.SOURCE_GONE
+    assert ended.failure["recovery_actions"] == [
+        AvailabilityRecoveryAction.DOWNLOAD_AGAIN
+    ]
     assert nas.github.batch_calls == _SOURCE_GONE_ATTEMPTS  # one per observation
     assert nas.github.link_requests == []
 
+    # The source heals: a fresh request is admitted and completes.
     nas.github.object_error = None
     nas.github.batch_answer = None
     fresh = nas.start()
-    assert nas.run_until_settled(fresh).state == LifecycleState.SUCCEEDED
+    assert fresh.id != ended.id
+    nas.service.run_pending()
+    assert nas.view(fresh.id).state == LifecycleState.SUCCEEDED
     assert nas.placed() == DATA
 
 
@@ -411,7 +420,7 @@ def test_a_link_off_the_object_storage_host_is_refused_before_any_request(
     """Security edge: the batch reply cannot send the NAS anywhere else."""
 
     nas.github.link_host = "evil.example"
-    operation = nas.start()
+    operation = nas.start().id
     nas.run()
     view = nas.run_until_settled(operation)
     assert view.state == LifecycleState.FAILED
@@ -424,7 +433,7 @@ def test_a_link_off_the_object_storage_host_is_refused_before_any_request(
 
 def test_a_link_that_redirects_is_refused(nas: _Nas) -> None:
     nas.github.link_status = 302
-    operation = nas.start()
+    operation = nas.start().id
     nas.run()
     view = nas.run_until_settled(operation)
     assert view.state == LifecycleState.FAILED
@@ -436,7 +445,7 @@ def test_a_link_that_redirects_is_refused(nas: _Nas) -> None:
 
 def test_bytes_that_do_not_match_the_oid_are_refused_at_ingress(nas: _Nas) -> None:
     nas.github.served = bytes(reversed(DATA))
-    operation = nas.start()
+    operation = nas.start().id
     nas.run()
     assert nas.view(operation).state in WAITING
     assert nas.placed() is None

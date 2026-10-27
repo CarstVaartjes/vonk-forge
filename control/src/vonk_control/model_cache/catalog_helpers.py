@@ -296,7 +296,8 @@ def _github_lfs_binding(spec: ArtifactSpec) -> tuple[str, str, str, str]:
             ModelCacheCode.SOURCE_INVALID, "GitHub LFS object identity is invalid"
         )
     owner, name = _github_repository_parts(spec.repository)
-    if spec.source != _github_lfs_media_url(owner, name, revision, spec.path):
+    locator = _github_lfs_media_url(owner, name, revision, spec.path)
+    if spec.source != locator:
         raise ModelCacheResolutionInvalid(
             ModelCacheCode.SOURCE_INVALID, "GitHub LFS object locator is invalid"
         )

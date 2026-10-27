@@ -79,6 +79,8 @@ SECURITY_EDGES = frozenset(
         "control/src/vonk_control/auth.py",
         # Canonical provider HTTP authentication and model-byte ingress verification.
         "control/src/vonk_control/model_cache/http.py",
+        # The GitHub LFS link host allowlist and redirect refusal (SSRF edge).
+        "control/src/vonk_control/model_cache/github_lfs.py",
         "control/src/vonk_control/browser_auth.py",
         "control/src/vonk_control/auth_api.py",
         "control/src/vonk_control/agent_api/authority.py",

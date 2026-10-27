@@ -28,7 +28,6 @@ What each answer means (tests assert the behaviour, not these codes):
 
 from __future__ import annotations
 
-import json
 import threading
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
@@ -41,6 +40,7 @@ from pydantic import ValidationError
 from vonk_agent_protocol import ModelCacheCode, OperatorActionName
 
 from ..bounded_retry import bounded_attempts
+from ..operation_contract import AvailabilityRecoveryAction
 from .catalog_helpers import _datetime, _github_lfs_binding
 from .constants import (
     _GITHUB_HOST,
@@ -56,7 +56,13 @@ from .errors import (
     ModelCacheStorageUnknown,
     _retry_after_seconds,
 )
-from .provider_contracts import _GitHubLfsBatch, _GitHubLfsObject
+from .provider_contracts import (
+    _GitHubLfsBatch,
+    _GitHubLfsBatchRequest,
+    _GitHubLfsObject,
+    _GitHubLfsObjectRef,
+    _GitHubLfsOperation,
+)
 
 if TYPE_CHECKING:
     from .artifacts import ArtifactSpec
@@ -258,7 +264,7 @@ def _object_link(entry: _GitHubLfsObject, now: datetime) -> _LfsLink:
         raise ModelCacheStorageRefused(
             ModelCacheCode.SOURCE_UNTRUSTED,
             "GitHub LFS offered a download outside the trusted object storage host",
-            recovery="inspect",
+            recovery=AvailabilityRecoveryAction.INSPECT,
         )
     header = download.header or {}
     if len(header) > _MAX_GITHUB_LFS_LINK_HEADERS:
@@ -338,15 +344,18 @@ class GithubLfsMixin:
         self, client: httpx2.Client, spec: ArtifactSpec, owner: str, name: str
     ) -> _LfsLink:
         cache = cast("ModelCacheService", self)
-        body = json.dumps(
-            {
-                "operation": "download",
-                "transfers": ["basic"],
-                "objects": [{"oid": spec.sha256, "size": spec.expected_bytes}],
-                "hash_algo": "sha256",
-            },
-            separators=(",", ":"),
-        ).encode()
+        body = (
+            _GitHubLfsBatchRequest(
+                operation=_GitHubLfsOperation.DOWNLOAD,
+                transfers=["basic"],
+                objects=[
+                    _GitHubLfsObjectRef(oid=spec.sha256, size=spec.expected_bytes)
+                ],
+                hash_algo="sha256",
+            )
+            .model_dump_json()
+            .encode()
+        )
         try:
             response = cache._send_anonymous_github_request(
                 client,
@@ -415,7 +424,7 @@ class GithubLfsMixin:
             raise ModelCacheStorageRefused(
                 ModelCacheCode.REDIRECT_FORBIDDEN,
                 "GitHub LFS object storage redirected; redirects are not followed",
-                recovery="inspect",
+                recovery=AvailabilityRecoveryAction.INSPECT,
             )
         if status in {429, 503}:
             raise ModelCacheStorageUnknown(

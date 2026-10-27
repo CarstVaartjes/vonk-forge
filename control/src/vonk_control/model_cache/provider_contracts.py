@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from enum import StrEnum
+
 from pydantic import BaseModel, ConfigDict, StrictInt, StrictStr
 
 
@@ -32,6 +34,30 @@ class _GitHubErrorMetadata(BaseModel):
     model_config = ConfigDict(extra="allow", strict=True)
 
     message: StrictStr
+
+
+class _GitHubLfsOperation(StrEnum):
+    """The Git LFS batch API's own operation word."""
+
+    DOWNLOAD = "download"
+
+
+class _GitHubLfsObjectRef(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    oid: StrictStr
+    size: StrictInt
+
+
+class _GitHubLfsBatchRequest(BaseModel):
+    """The one batch request the cache sends: download one object by oid."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    operation: _GitHubLfsOperation
+    transfers: list[StrictStr]
+    objects: list[_GitHubLfsObjectRef]
+    hash_algo: StrictStr
 
 
 class _GitHubLfsDownload(BaseModel):
