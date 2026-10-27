@@ -48,6 +48,7 @@ from .planning_helpers import (
     _now,
     _resource_reason,
     _settings_view,
+    _stop_covered_nodes,
 )
 
 if TYPE_CHECKING:
@@ -265,6 +266,27 @@ class ResourceAdmissionMixin:
                 for reason in after_stop.blockers:
                     if reason not in blockers:
                         blockers.append(reason)
+                if conditional is None:
+                    # The switch waits on what no planned stop releases. A
+                    # pre-stop shortfall on a Spark whose exact stop claims
+                    # hold it is cleared by that stop, so it never names (or
+                    # heads) the wait. After-stop reasons remain; an
+                    # observed-capacity shortfall on a stop-covered Spark still
+                    # uses pre-stop inventory and is decided by the fresh
+                    # post-stop check once the other holders are gone.
+                    covered = _stop_covered_nodes(
+                        session, stops, current, memory_shortfalls
+                    )
+                    waits = [
+                        reason
+                        for reason in current_memory_blockers
+                        if not reason.node_ids or not set(reason.node_ids) <= covered
+                    ]
+                    for reason in after_stop.blockers:
+                        if reason not in waits:
+                            waits.append(reason)
+                    if waits:
+                        blockers = waits
                 after_stop = None
             else:
                 conditional = _conditional_post_stop_memory_check(
