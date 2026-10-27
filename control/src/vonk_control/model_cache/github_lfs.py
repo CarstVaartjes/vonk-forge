@@ -46,6 +46,7 @@ from .constants import (
     _GITHUB_HOST,
     _GITHUB_LFS_OBJECT_HOSTS,
     _LFS_HREF_MARGIN_SECONDS,
+    _LFS_RESOLVE_WAIT_SECONDS,
     _MAX_GITHUB_LFS_BATCH_BYTES,
     _MAX_GITHUB_LFS_LINK_HEADERS,
 )
@@ -91,20 +92,31 @@ class _LfsLink:
         return f"_LfsLink(expires_at={self.expires_at!r})"
 
 
+class _Flight:
+    """One in-progress resolve of one object, and how it ended."""
+
+    def __init__(self) -> None:
+        self.done = threading.Event()
+        self.error: Exception | None = None
+
+
 class _LfsLinks:
     """The signed links of the objects this process transfers, by object.
 
-    A link is reused until it nears expiry.  Resolving is single-flight: while
-    one transfer asks GitHub, the others wait for its answer, so parallel range
-    workers of one file make one batch call.  The resolve gate is held across
-    that one bounded batch call only; it is never the service lock.  Expired
-    links are dropped on every store, so the map holds only links that are
-    still live (objects resolved within the last link lifetime).
+    A link is reused until it nears expiry.  Resolving is single-flight per
+    object: while one transfer asks GitHub, the others on the same object wait
+    for its outcome, so parallel range workers of one file make one batch call.
+    The outcome is shared whether it answers or refuses: a rate limit, quota
+    answer or transport error is re-raised to the peers that waited on that
+    flight, not asked again; a transfer that arrives after the flight ended
+    resolves anew.  A flight is one bounded batch call and always ends; other
+    objects resolve independently.  Expired links are dropped on every store,
+    so the map holds only links that are still live.
     """
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
-        self._resolve = threading.Lock()
+        self._flights: dict[_LinkKey, _Flight] = {}
         self._links: dict[_LinkKey, _LfsLink] = {}
 
     @staticmethod
@@ -121,18 +133,38 @@ class _LfsLinks:
     ) -> _LfsLink:
         with self._lock:
             link = self._links.get(key)
-        if self._live(link, clock()):
-            assert link is not None
-            return link
-        with self._resolve:
-            with self._lock:
-                link = self._links.get(key)
             if self._live(link, clock()):
                 assert link is not None
-                return link  # a peer resolved it while this one waited
+                return link
+            flight = self._flights.get(key)
+            leader = flight is None
+            if flight is None:
+                flight = self._flights[key] = _Flight()
+        if leader:
+            return self._lead(key, flight, clock, resolve)
+        # The flight is one bounded batch call; a peer waits that long, no more.
+        if not flight.done.wait(timeout=_LFS_RESOLVE_WAIT_SECONDS):
+            raise _unavailable("the GitHub LFS link resolve of a peer did not finish")
+        if flight.error is not None:
+            raise flight.error  # the flight's refusal, shared
+        with self._lock:
+            link = self._links.get(key)
+        if not self._live(link, clock()):
+            raise _unavailable("the GitHub LFS link of a peer's resolve expired")
+        assert link is not None
+        return link
+
+    def _lead(
+        self,
+        key: _LinkKey,
+        flight: _Flight,
+        clock: Callable[[], datetime],
+        resolve: Callable[[], _LfsLink],
+    ) -> _LfsLink:
+        try:
             link = resolve()
-            now = clock()
             with self._lock:
+                now = clock()
                 self._links = {
                     other: value
                     for other, value in self._links.items()
@@ -140,6 +172,13 @@ class _LfsLinks:
                 }
                 self._links[key] = link
             return link
+        except Exception as error:
+            flight.error = error
+            raise
+        finally:
+            with self._lock:
+                del self._flights[key]
+            flight.done.set()
 
     def drop(self, key: _LinkKey, link: _LfsLink) -> None:
         """Forget a refused link, unless a peer already replaced it."""

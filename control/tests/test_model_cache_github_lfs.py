@@ -300,6 +300,40 @@ def test_parallel_range_workers_share_one_batch_call(
     assert nas.github.batch_calls == 1
 
 
+@pytest.mark.parametrize(
+    "answer",
+    [
+        pytest.param(
+            lambda: rate_limited_until(NOW + timedelta(seconds=1800)), id="429"
+        ),
+        pytest.param(lambda: quota_answer(403), id="403-quota"),
+    ],
+)
+def test_parallel_range_workers_share_a_refused_batch_call(
+    nas: _Nas, monkeypatch: pytest.MonkeyPatch, answer
+) -> None:
+    """P3/P17: the range workers that waited on a refused resolve share its
+    refusal; each check makes one batch call, not one per worker."""
+
+    monkeypatch.setattr(
+        "vonk_control.model_cache.constants._PARALLEL_RANGE_MIN_BYTES", 1
+    )
+    nas.github.batch_answer = answer()
+    operation = nas.start().id
+    nas.run()
+    for _check in range(4):
+        view = nas.view(operation)
+        assert view.state in WAITING, view.last_error
+        assert nas.github.batch_calls == _check + 1  # one per check
+        nas.now[0] = nas.next_check(operation)
+        nas.run()
+    nas.github.batch_answer = None
+    nas.now[0] = nas.next_check(operation)
+    nas.run()
+    assert nas.view(operation).state == LifecycleState.SUCCEEDED
+    assert nas.placed() == DATA
+
+
 def test_a_rate_limit_is_the_providers_wait_and_holds_fresh_requests(
     nas: _Nas,
 ) -> None:

@@ -33,6 +33,7 @@ from .constants import (
     _GITHUB_API_HOST,
     _GITHUB_LFS_MEDIA_HOST,
     _MAX_ARTIFACTS,
+    _REVISION_PATTERN,
     ProviderKind,
 )
 from .errors import (
@@ -122,7 +123,7 @@ def _huggingface_catalog_source(artifact: CatalogArtifact) -> tuple[str, str | N
             ModelCacheCode.SOURCE_INVALID,
             "catalog Hugging Face repository is invalid",
         )
-    if not isinstance(revision, str) or not re.fullmatch(r"[0-9a-f]{40,64}", revision):
+    if not isinstance(revision, str) or not re.fullmatch(_REVISION_PATTERN, revision):
         raise ModelCacheResolutionInvalid(
             ModelCacheCode.REVISION_INVALID,
             "catalog artifact revision is not immutable",
@@ -172,7 +173,7 @@ def _github_lfs_media_url(owner: str, name: str, revision: str, path: str) -> st
 def _github_lfs_catalog_source(artifact: CatalogArtifact) -> tuple[str, str | None]:
     owner, name = _github_repository_parts(artifact.repository)
     revision = artifact.revision
-    if re.fullmatch(r"[0-9a-f]{40,64}", revision) is None:
+    if re.fullmatch(_REVISION_PATTERN, revision) is None:
         raise ModelCacheResolutionInvalid(
             ModelCacheCode.REVISION_INVALID,
             "catalog GitHub LFS revision is not a full commit SHA",
@@ -290,7 +291,7 @@ def _github_lfs_binding(spec: ArtifactSpec) -> tuple[str, str, str, str]:
     if (
         not isinstance(spec.repository, str)
         or not isinstance(revision, str)
-        or re.fullmatch(r"[0-9a-f]{40,64}", revision) is None
+        or re.fullmatch(_REVISION_PATTERN, revision) is None
     ):
         raise ModelCacheResolutionInvalid(
             ModelCacheCode.SOURCE_INVALID, "GitHub LFS object identity is invalid"

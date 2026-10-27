@@ -726,6 +726,17 @@ _OPENER_OWNERS = {
     "control/src/vonk_control/model_cache/download.py": "_open_provider",
 }
 
+# The anonymous GitHub request primitive skips the cooldown and the stream
+# throttle too: only the two GitHub provider modules, whose openers run under
+# ``_open_provider``, may call it.
+_ANONYMOUS_SEND = "_send_anonymous_github_request"
+_ANONYMOUS_SEND_MODULES = frozenset(
+    {
+        "control/src/vonk_control/model_cache/github.py",
+        "control/src/vonk_control/model_cache/github_lfs.py",
+    }
+)
+
 
 def provider_opener_calls(source: str) -> list[tuple[int, str | None]]:
     """Calls of a provider opener or ``provider_for(...).open(``, with the
@@ -1368,6 +1379,23 @@ def check_source(
             (line, "provider opened outside download.py:_open_provider")
             for line, function in provider_opener_calls(source)
             if path not in _OPENER_OWNERS or (owner is not None and function != owner)
+        )
+    if (
+        python
+        and not is_test
+        and "openers" in modes
+        and path.startswith("control/src/")
+        and path not in _ANONYMOUS_SEND_MODULES
+    ):
+        hits.extend(
+            (
+                node.lineno,
+                "anonymous GitHub request outside the GitHub provider modules",
+            )
+            for node in ast.walk(ast.parse(source))
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == _ANONYMOUS_SEND
         )
     if (
         python

@@ -20,6 +20,9 @@ _DIGEST_LENGTH = 64
 _DIGEST_PATTERN = r"[0-9a-f]{64}"
 
 
+_REVISION_PATTERN = r"[0-9a-f]{40,64}"
+
+
 _MAX_ARTIFACTS = 1024
 
 
@@ -109,6 +112,10 @@ _MAX_GITHUB_LFS_LINK_HEADERS = 16
 
 # A signed link is reused while at least this much of its lifetime remains.
 _LFS_HREF_MARGIN_SECONDS = 60
+
+# A peer waits at most this long for the one batch call that resolves its link
+# (the call's own timeouts and pauses end well inside it).
+_LFS_RESOLVE_WAIT_SECONDS = 120
 
 
 _MAX_GITHUB_RELEASE_METADATA_BYTES = 4 * 1024 * 1024

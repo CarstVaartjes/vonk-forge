@@ -1535,6 +1535,23 @@ def test_the_provider_table_and_the_one_opener_may_open_providers() -> None:
     )
 
 
+def test_the_anonymous_github_primitive_is_for_the_github_modules_only() -> None:
+    source = "def check(cache, client):\n    return cache._send_anonymous_github_request(client, URL)\n"
+    assert check_source(
+        "control/src/vonk_control/model_cache/updates.py",
+        source,
+        {2},
+        modes=("openers",),
+    )
+    for module in ("github.py", "github_lfs.py"):
+        assert not check_source(
+            f"control/src/vonk_control/model_cache/{module}",
+            source,
+            {2},
+            modes=("openers",),
+        )
+
+
 _FOLLOW_COUNT = (
     "def same_job(observed):\n"
     "    active = [item for item in observed['operations']]\n"

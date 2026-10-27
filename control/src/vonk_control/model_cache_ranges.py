@@ -143,7 +143,15 @@ def download_ranges(
                 return
             try:
                 with stream_gate() if stream_gate is not None else nullcontext():
-                    _transfer_body(start, end, path, offset)
+                    if interrupted():  # a peer failed while this one queued
+                        raise InterruptedError("range transfer interrupted")
+                    try:
+                        _transfer_body(start, end, path, offset)
+                    except (_RangeIgnored, RangeTruncatedError):
+                        raise
+                    except Exception:
+                        abort.set()  # before the gate frees: peers stop at once
+                        raise
                 return
             except RangeTruncatedError:
                 continue
