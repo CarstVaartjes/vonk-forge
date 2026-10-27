@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 from dataclasses import replace
 from datetime import datetime, timedelta
 from itertools import pairwise
@@ -22,10 +23,15 @@ from sqlalchemy.pool import StaticPool
 from vonk_agent_protocol import LifecycleState, ModelCacheCode
 from vonk_agent_protocol.http_failure import TransientReason
 from vonk_control.lifecycle.model_cache import RECOVERY_BUDGET
-from vonk_control.model_cache import ModelCacheService
+from vonk_control.model_cache import ModelCacheService, github_lfs
+from vonk_control.model_cache.artifacts import ArtifactSpec
 from vonk_control.model_cache.constants import _SOURCE_GONE_ATTEMPTS, ProviderKind
-from vonk_control.model_cache.errors import ModelCacheStorageInvalid
+from vonk_control.model_cache.errors import (
+    ModelCacheStorageInvalid,
+    ModelCacheStorageUnknown,
+)
 from vonk_control.model_cache.provider_contracts import _GitHubLfsBatch
+from vonk_control.model_cache_contract import ModelCacheDownloadPayload
 from vonk_control.models import Base, ModelCacheOperation
 from vonk_control.operation_contract import AvailabilityRecoveryAction
 
@@ -344,6 +350,55 @@ def test_parallel_range_workers_share_a_refused_batch_call(
     assert nas.placed() == DATA
 
 
+@pytest.mark.parametrize("refused", [False, True], ids=["answered", "refused"])
+def test_concurrent_resolves_of_one_object_make_one_batch_call(
+    refused: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Two transfers resolving one object at once: one batch call, and the
+    peer gets its outcome, whether a link or the typed refusal."""
+
+    peer_waiting = threading.Event()
+
+    class _WatchedEvent(threading.Event):
+        def wait(self, timeout: float | None = None) -> bool:
+            peer_waiting.set()
+            return super().wait(timeout)
+
+    class _WatchedFlight(github_lfs._Flight):
+        def __init__(self) -> None:
+            super().__init__()
+            self.done = _WatchedEvent()
+
+    monkeypatch.setattr(github_lfs, "_Flight", _WatchedFlight)
+    links = github_lfs._LfsLinks()
+    resolves: list[int] = []
+    refusal = ModelCacheStorageUnknown(ModelCacheCode.RATE_LIMITED, "later")
+    link = github_lfs._LfsLink("https://object.example/x", (), NOW + timedelta(hours=1))
+
+    def resolve() -> github_lfs._LfsLink:
+        resolves.append(1)
+        assert peer_waiting.wait(timeout=30)  # the peer waits on this flight
+        if refused:
+            raise refusal
+        return link
+
+    outcomes: list[object] = []
+
+    def transfer() -> None:
+        try:
+            outcomes.append(links.get(("o/r", "a" * 64), lambda: NOW, resolve))
+        except ModelCacheStorageUnknown as error:
+            outcomes.append(error)
+
+    threads = [threading.Thread(target=transfer) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=30)
+    assert len(resolves) == 1
+    assert outcomes == [refusal if refused else link] * 2
+
+
 def test_a_rate_limit_is_the_providers_wait_and_holds_fresh_requests(
     nas: _Nas,
 ) -> None:
@@ -374,6 +429,27 @@ def test_a_rate_limit_is_the_providers_wait_and_holds_fresh_requests(
     for operation in (first, fresh):
         assert nas.run_until_settled(operation).state == LifecycleState.SUCCEEDED
     assert nas.placed() == DATA
+
+
+def test_a_resolve_after_a_recorded_refusal_makes_no_batch_call(nas: _Nas) -> None:
+    """A transfer that passed the opener before a peer's refusal was recorded
+    reaches the resolve after it: it refuses with the typed wait, no batch call."""
+
+    nas.github.batch_answer = rate_limited_until(NOW + timedelta(seconds=1800))
+    operation = nas.start().id
+    nas.run()
+    assert nas.github.batch_calls == 1
+    with nas.sessions() as session:
+        row = session.get(ModelCacheOperation, operation)
+        assert row is not None
+        payload = nas.service._payload_or_none(row)
+    assert isinstance(payload, ModelCacheDownloadPayload)
+    spec = ArtifactSpec._from_wire(payload.manifest.artifacts[0])
+    with pytest.raises(ModelCacheStorageUnknown) as refused:
+        nas.service._open_github_lfs_object(nas.client, spec, {})
+    assert refused.value.code == ModelCacheCode.RATE_LIMITED
+    assert refused.value.retry_after_seconds == 1800
+    assert nas.github.batch_calls == 1
 
 
 @pytest.mark.parametrize("status", [403, 509])

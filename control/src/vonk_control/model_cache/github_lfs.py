@@ -109,7 +109,8 @@ class _LfsLinks:
     The outcome is shared whether it answers or refuses: a rate limit, quota
     answer or transport error is re-raised to the peers that waited on that
     flight, not asked again; a transfer that arrives after the flight ended
-    resolves anew.  A flight is one bounded batch call and always ends; other
+    resolves anew, unless the provider's cooldown runs (then it refuses
+    without a call).  A flight is one bounded batch call and always ends; other
     objects resolve independently.  Expired links are dropped on every store,
     so the map holds only links that are still live.
     """
@@ -341,12 +342,15 @@ class GithubLfsMixin:
         owner, name, _revision, _path = _github_lfs_binding(spec)
         key = (f"{owner}/{name}", spec.sha256)
         status = 0
+
+        def resolve() -> _LfsLink:
+            # A transfer that reaches the resolve after a peer's refusal was
+            # recorded refuses without a batch call; its waiters share that.
+            cache._refuse_during_cooldown(spec.kind)
+            return cache._resolve_github_lfs_link(client, spec, owner, name)
+
         for _refresh in range(2):
-            link = cache._lfs_links.get(
-                key,
-                cache._clock,
-                lambda: cache._resolve_github_lfs_link(client, spec, owner, name),
-            )
+            link = cache._lfs_links.get(key, cache._clock, resolve)
             response = cache._get_github_lfs_link(client, link, headers)
             if response.status_code not in _LINK_REFUSED:
                 return response
