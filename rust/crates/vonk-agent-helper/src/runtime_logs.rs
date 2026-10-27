@@ -326,13 +326,19 @@ fn through_the_message(
 /// above that smaller window.
 fn window(stream: &[u8]) -> (Vec<Range<usize>>, Range<usize>) {
     let (causes, range) = failure_window(stream, RETAINED_BYTES);
-    if memory_figures(&stream[..range.start], &causes, MEMORY_FIGURE_BYTES).is_empty() {
+    if memory_figures(
+        &stream[..above(stream, &range)],
+        &causes,
+        MEMORY_FIGURE_BYTES,
+    )
+    .is_empty()
+    {
         return (causes, range);
     }
     let budget = RETAINED_BYTES - MEMORY_FIGURE_BYTES - OMISSION_MARKER_BYTES;
     let (reduced_causes, reduced) = failure_window(stream, budget);
     let figures = memory_figures(
-        &stream[..reduced.start],
+        &stream[..above(stream, &reduced)],
         &reduced_causes,
         MEMORY_FIGURE_BYTES,
     );
@@ -342,6 +348,18 @@ fn window(stream: &[u8]) -> (Vec<Range<usize>>, Range<usize>) {
     let mut retained: Vec<_> = reduced_causes.into_iter().chain(figures).collect();
     retained.sort_by_key(|line| line.start);
     (retained, reduced)
+}
+
+/// Where the bytes above `window` end: at its start, or past the line it opens
+/// inside, which [`retain`] drops from the tail as partial.
+fn above(stream: &[u8], window: &Range<usize>) -> usize {
+    if window.start == 0 || stream[window.start - 1] == b'\n' {
+        return window.start;
+    }
+    stream[window.clone()]
+        .iter()
+        .position(|byte| *byte == b'\n')
+        .map_or(window.start, |index| window.start + index + 1)
 }
 
 /// The byte range that ends on the stream's own account of its failure.
@@ -955,6 +973,36 @@ mod tests {
             "ValueError: No available memory for the cache blocks",
         ] {
             assert!(tail.text.contains(kept), "{kept}: {}", tail.text);
+        }
+    }
+
+    #[test]
+    fn a_memory_figure_is_kept_wherever_the_window_opens() {
+        // Wrong implementation this catches: a figure line the smaller window
+        // opened inside was neither a figure (it did not end above the window)
+        // nor in the tail (a partial first line is dropped), so at some offsets
+        // "Available KV cache memory" was lost although the full window held it.
+        let stream = kv_cache_exhausted_start(4);
+        let at = stream
+            .windows(b"EngineCore failed to start".len())
+            .position(|window| window == b"EngineCore failed to start")
+            .unwrap();
+        // Every figure line is longer than the step, so each one is opened
+        // inside by both windows at some step.
+        for pad in (0..RETAINED_BYTES).step_by(16) {
+            let mut padded = stream[..at].to_vec();
+            padded.extend(vec![b'x'; pad]);
+            padded.extend(&stream[at..]);
+            let tail = retain(&padded);
+            assert!(tail.text.len() <= RETAINED_BYTES);
+            for kept in [
+                "Model loading took 64.98 GiB memory",
+                "Estimated CUDA graph memory: 0.19 GiB",
+                "Available KV cache memory: -1.25 GiB",
+                "ValueError: No available memory for the cache blocks",
+            ] {
+                assert!(tail.text.contains(kept), "{pad} {kept}: {}", tail.text);
+            }
         }
     }
 
