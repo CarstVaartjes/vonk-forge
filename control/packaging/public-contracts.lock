@@ -1,7 +1,7 @@
 source = "https://github.com/CarstVaartjes/vonk-forge-recipes.git"
-# Resolved from the reviewed recipe contract at 54f3be0f21f927dae55ae12883855721be36617e.
-revision = "54f3be0f21f927dae55ae12883855721be36617e"
+# Resolved from the reviewed recipe contract at 5a3b1b1c78c9b5c6c543d857620987f1e7aaadc8.
+revision = "5a3b1b1c78c9b5c6c543d857620987f1e7aaadc8"
 subdirectory = "contracts"
-package = "vonk-forge-public-contracts==2.5.0"
-wheel = "inventory/wheels/vonk_forge_public_contracts-2.5.0-py3-none-any.whl"
-sha256 = "b2296471043b6345c88ad674bd2c1afdabbdffcc2d265b3d855224351edff04f"
+package = "vonk-forge-public-contracts==2.6.0"
+wheel = "inventory/wheels/vonk_forge_public_contracts-2.6.0-py3-none-any.whl"
+sha256 = "bad40e07f4a0101c0ea08b79e5d07519e06dc248c54e3aafc76f98bf1f95c4dc"
