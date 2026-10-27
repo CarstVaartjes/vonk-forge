@@ -20,11 +20,11 @@ from ..models import AgentCertificate, AgentNode, AgentOperationAttempt, Job
 from ..models import AgentOperation as StoredOperation
 from ..persisted_waits import read_wait
 from .contracts import (
+    _BOUNDARY_REFUSAL_PREFIXES,
     _CLAIM_REFUSAL_PREFIX,
     _CONCLUDED_OUTCOMES,
     _DATABASE_REPOLL_SECONDS,
     _LOGGER,
-    OFF_LANE_OPERATIONS,
 )
 from .evidence import _is_refusal_reason
 from .predicates import (
@@ -281,11 +281,9 @@ def record_boundary_refusal(
     receives the same note on the same surface the jobs API returns.
     """
 
-    prefixes = {
-        "heartbeat": "heartbeat refused: ",
-        "result": "result refused: ",
-    }
-    prefix = prefixes.get(boundary)
+    prefix = next(
+        (p for p in _BOUNDARY_REFUSAL_PREFIXES if p.startswith(f"{boundary} ")), None
+    )
     if prefix is None:
         raise InvalidValue(
             "agent boundary is invalid", reason=InvalidRequestReason.MALFORMED
@@ -336,11 +334,19 @@ def _excluded_work_refusal(
         .where(
             StoredOperation.node_id == node.node_id,
             StoredOperation.state.in_(agent_operation_states.LIVE),
-            # An order running beside the lane is executing (or, its lease
-            # spent, claimable): never work this node was refused.
+            # A running order whose lease is live is executing, or finished
+            # with its result not yet delivered: a wait, never work this node
+            # was refused. Its lease spent, it is claimable recovery instead.
             ~(
-                StoredOperation.kind.in_(OFF_LANE_OPERATIONS)
-                & (StoredOperation.state == agent_operation_states.RUNNING)
+                (StoredOperation.state == agent_operation_states.RUNNING)
+                & select(AgentOperationAttempt.id)
+                .where(
+                    AgentOperationAttempt.operation_id == StoredOperation.id,
+                    AgentOperationAttempt.attempt == StoredOperation.current_attempt,
+                    AgentOperationAttempt.state == agent_operation_states.RUNNING,
+                    AgentOperationAttempt.lease_deadline > now,
+                )
+                .exists()
             ),
         )
         .order_by(StoredOperation.created_at, StoredOperation.id)

@@ -25,6 +25,7 @@ from ..models import AgentNode, AgentOperationAttempt, Job
 from ..models import AgentOperation as StoredOperation
 from ..offline_stops import is_deferred_stop
 from .contracts import _ABANDONABLE_OPERATIONS
+from .evidence import _is_refusal_reason
 from .retry import _abandon_operation, _retry_authorized_for_current_attempt
 from .stored import column_field, column_is_document, column_value
 
@@ -120,8 +121,9 @@ def _aggregate_parent_state(
     if verdict is None:
         return
     # A parent that already ended keeps its recorded state and reason; one
-    # ended without a reason still receives its failed order's evidence.
-    ended = job.status_reason is not None and job_states.means(
+    # ended without an outcome reason, or carrying only a claim note (a wait
+    # diagnostic, never an outcome), still receives its failed order's evidence.
+    ended = not _is_refusal_reason(job.status_reason) and job_states.means(
         job.state,
         LifecycleState.SUCCEEDED,
         LifecycleState.FAILED,

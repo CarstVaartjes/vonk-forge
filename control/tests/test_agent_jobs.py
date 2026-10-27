@@ -4113,6 +4113,11 @@ def test_claim_refusal_scenarios_cover_the_predicate() -> None:
     assert set(_REFUSAL_SCENARIOS) == set(_claim_refusal_check_names())
 
 
+#: Conditions that are never a refusal: the order is the node's own, executing
+#: or awaiting its result, so an idle poll names nothing (a wait, not a refusal).
+_NEVER_REFUSED = frozenset({"running-lease-live"})
+
+
 @pytest.mark.parametrize("check", _claim_refusal_check_names())
 def test_excluded_work_refusal_names_every_predicate_condition(service, check) -> None:
     """An operation failing only one predicate condition is never opaque.
@@ -4133,6 +4138,9 @@ def test_excluded_work_refusal_names_every_predicate_condition(service, check) -
         assert node is not None
         excluded = jobs._excluded_work_refusal(session, node, clock.now)
 
+    if check in _NEVER_REFUSED:
+        assert excluded is None
+        return
     assert excluded is not None
     _, refusal, _ = excluded
     assert refusal == check
