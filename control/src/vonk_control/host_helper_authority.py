@@ -51,6 +51,7 @@ from . import agent_operation_states
 from .agent_jobs import _WORKLOAD_INTENT_OPERATIONS
 from .host_runtime_plan_authority import (
     RuntimePlanAuthorityError,
+    RuntimePlanAuthorityStale,
     RuntimePlanBinding,
     RuntimePlanEvidenceUnavailable,
     RuntimePlanUnsatisfiable,
@@ -693,9 +694,13 @@ class HostRuntimeAuthorityService:
             except RuntimePlanUnsatisfiable as error:
                 reason = error.typed_reason or InvalidRequestReason.INCOMPLETE
                 raise HostRuntimeGrantUnsatisfiable(reason) from error
-            except RuntimePlanEvidenceUnavailable as error:
+            except (RuntimePlanEvidenceUnavailable, RuntimePlanAuthorityStale) as error:
+                # Unreadable evidence, or the Controller's own records moved on
+                # (a run not yet or no longer starting, a superseded identity):
+                # never a security refusal. The agent waits and asks again; the
+                # attempt's bounded observation ends an order that stays stale.
                 raise HostRuntimeEvidenceUnavailable(
-                    "container runtime lifecycle evidence is unavailable"
+                    "container runtime lifecycle authority is not current"
                 ) from error
             except (RuntimePlanAuthorityError, TypeError, ValueError) as error:
                 raise HostHelperAuthorityError(
