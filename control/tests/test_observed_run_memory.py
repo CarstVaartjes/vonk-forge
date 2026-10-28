@@ -1,6 +1,6 @@
 from vonk_agent_protocol import canonical_message
 
-"""Admission uses what a recipe really used once that exceeds its declaration."""
+"""Admission bounds a recipe's load by what its runs really used."""
 
 from datetime import timedelta
 from uuid import uuid4
@@ -11,8 +11,14 @@ from vonk_control.inventory_repository import (
     InventoryRepository,
     NodeInventoryReport,
 )
-from vonk_control.models import RecipeRun, ResourceReservation, RunNode
-from vonk_control.run_admission import RunAdmissionService, RunPlanInvalid
+from vonk_control.models import (
+    CatalogDocumentRevision,
+    RecipeRun,
+    ResourceReservation,
+    RunNode,
+)
+from vonk_control.observed_run_memory import observed_role_peaks
+from vonk_control.run_admission import RunAdmissionService
 from vonk_control.telemetry import TelemetryRepository, TelemetrySample
 
 from .test_run_admission import setup
@@ -111,14 +117,15 @@ def _inventory(sessions, now, node, free):
     )
 
 
-def test_a_run_over_its_declaration_is_not_readmitted_where_its_real_use_does_not_fit(
+def test_a_runs_whole_run_peak_never_raises_its_steady_reservation(
     tmp_path,
 ) -> None:
-    """Catches admission trusting a declaration that real use already exceeded.
+    """Catches a swap-backed load poisoning its own content (2026-10-28).
 
-    The 2026-10-11 freeze: a recipe whose declared peak fit with a thin margin
-    really used more, and the Spark thrashed. Once a run of the same content
-    has shown its real peak, that peak plus the floor must fit.
+    The observed peak spans the whole run, its load included, and
+    MemAvailable leaves out swap: raising the steady demand with it made a
+    content whose load swapped never fit again (demand_exceeds_capacity,
+    stored by content digest). It bounds the load only.
     """
     sessions, now, node, installation = setup(tmp_path, free_memory=_FREE)
     service, observed = _serve(
@@ -126,23 +133,11 @@ def test_a_run_over_its_declaration_is_not_readmitted_where_its_real_use_does_no
     )
     assert observed == 280
 
-    refused = service.plan_run(installation, alias="qwen", now=now)
-    assert not refused.allowed
-    assert refused.nodes[0].required_memory_bytes == 280
-    # Production 2026-10-16: no Vonk claim was left to wait for, so the load
-    # backed off for hours. Nothing the platform holds frees more memory: a
-    # definite refusal, never a wait.
-    assert {item.code for item in refused.nodes[0].blockers} == {
-        "resource.demand_exceeds_capacity"
+    plan = service.plan_run(installation, alias="qwen", now=now)
+    assert plan.nodes[0].required_memory_bytes == 225
+    assert "resource.demand_exceeds_capacity" not in {
+        item.code for item in plan.nodes[0].blockers
     }
-    with pytest.raises(RunPlanInvalid):
-        service.accept_run(refused, actor="admin", now=now)
-
-    # A fresh request is never banned: it fits once the host frees memory.
-    later = now + timedelta(seconds=2)
-    _inventory(sessions, later, node, 280 + _FLOOR)
-    fits = service.plan_run(installation, alias="qwen", now=later)
-    assert fits.allowed and fits.nodes[0].free_after_bytes == _FLOOR
 
 
 def test_real_use_below_the_declaration_never_loosens_admission(tmp_path) -> None:
@@ -182,8 +177,8 @@ def test_a_runs_real_use_outlives_its_collected_history(tmp_path) -> None:
     """Catches the observed peak leaving with the run's terminal history.
 
     Terminal history is collected a day after a run ends (its rank rows go
-    with it), so an over-declaration was forgotten and the next run was
-    admitted on the declaration again. The installation keeps the peak.
+    with it), so an over-declaration was forgotten and the next run's load
+    was bounded by the declaration again. The installation keeps the peak.
     """
     sessions, now, node, installation = setup(tmp_path, free_memory=_FREE)
     service, observed = _serve(
@@ -195,7 +190,12 @@ def test_a_runs_real_use_outlives_its_collected_history(tmp_path) -> None:
         session.execute(delete(RunNode))
         session.execute(delete(RecipeRun))
 
-    refused = service.plan_run(installation, alias="qwen", now=now)
-
-    assert not refused.allowed
-    assert refused.nodes[0].required_memory_bytes == 280
+    with sessions() as session:
+        digest = session.scalars(
+            select(CatalogDocumentRevision.content_digest).where(
+                CatalogDocumentRevision.kind == "recipe"
+            )
+        ).one()
+        assert observed_role_peaks(session, digest) == {
+            service.plan_run(installation, alias="qwen", now=now).nodes[0].role: 280
+        }

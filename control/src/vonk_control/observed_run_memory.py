@@ -10,8 +10,9 @@ installation's rank keeps the highest of them too
 day after it ends, its installation's evidence stays while it is installed.
 
 Admission reads it back by content identity (recipe revision digest and role,
-on shared-pool Sparks): a peak above the recipe's declaration replaces the
-declaration; one below never loosens it.
+on shared-pool Sparks). The peak spans the whole run, its load included, and
+``MemAvailable`` leaves out swap, so it bounds only the load phase (what swap
+must carry above the steady demand), never the steady demand itself.
 """
 
 from __future__ import annotations

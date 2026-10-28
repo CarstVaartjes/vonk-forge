@@ -131,7 +131,8 @@ class ResourceEvidence:
     evidence_digest: str | None = None
     declared_total_bytes: int | None = None
     #: The highest attributed use of earlier runs of this exact recipe content
-    #: on this memory kind. It only ever raises the declared bound.
+    #: on this memory kind, over their whole run (load included). It bounds
+    #: the load only, never the steady demand.
     observed_total_bytes: int | None = None
 
 
@@ -145,6 +146,10 @@ class ResourceDemand:
     total_bytes: int | None
     evidence_state: EvidenceState
     reasons: tuple[ResourceReason, ...] = ()
+    #: How far the load phase may rise above the steady ``total_bytes``: the
+    #: whole-run observed peak above it. Swap carries it, never the memory
+    #: reservation.
+    load_overshoot_bytes: int = 0
 
     @property
     def allowed(self) -> bool:

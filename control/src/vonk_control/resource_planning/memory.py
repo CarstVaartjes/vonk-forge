@@ -45,8 +45,9 @@ def memory_requirement(
 
     The recipe's ``reserve_bytes`` is informational: it is not added to the peak.
     ``observed_peak_bytes`` is what earlier runs of this exact recipe content
-    really used on this memory kind (``None`` when nothing was observed). Every
-    caller passes it: an observed peak above the declaration replaces it.
+    really used on this memory kind over a whole run (``None`` when nothing was
+    observed). Every caller passes it: it bounds the load phase only, never
+    the steady demand.
     """
     if platform_floor_bytes < 0:
         raise ValueError("recipe memory envelope is invalid")

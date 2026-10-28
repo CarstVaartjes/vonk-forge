@@ -297,7 +297,11 @@ def test_changed_physical_pool_loads_against_the_current_plan(
 def test_profile_review_and_run_admission_share_the_observed_peak(
     tmp_path, postgres_engine
 ):
-    """Catches one admission path using real use while the other trusts the declaration."""
+    """Catches either admission path raising the steady demand with a whole-run peak.
+
+    The observed peak includes the load (swap-backed, invisible to
+    MemAvailable): both paths keep reserving the declaration.
+    """
     sessions, _, planner, profile, api, headers, _, nodes = _capacity_profile(
         tmp_path, postgres_engine
     )
@@ -333,5 +337,5 @@ def test_profile_review_and_run_admission_share_the_observed_peak(
     review = api.post(f"/api/profile/{profile.number}/preview", headers=headers)
     assert review.status_code == 200, review.text
     node = review.json()["assessments"][0]["assessment"]["fit_current"]["nodes"][0]
-    assert runtime.nodes[0].required_memory_bytes == declared + 1
-    assert node["memory_required_bytes"] == declared + 1
+    assert runtime.nodes[0].required_memory_bytes == declared
+    assert node["memory_required_bytes"] == declared

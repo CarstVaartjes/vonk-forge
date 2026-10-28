@@ -123,13 +123,14 @@ def resource_demand(
         and evidence.declared_total_bytes >= 0
         else None
     )
-    # Real use above the declaration is better evidence than the declaration;
-    # use below it never loosens the creator's contract.
+    # The observed peak spans the whole run, its load included, and
+    # MemAvailable leaves out swap: it bounds the load, never the steady
+    # demand (a swap-backed load must not make its content never fit).
     observed_bound = (
         evidence.observed_total_bytes
         if declared_bound is not None
         and type(evidence.observed_total_bytes) is int
-        and evidence.observed_total_bytes > declared_bound
+        and evidence.observed_total_bytes >= 0
         else None
     )
     uncertain: list[str] = []
@@ -232,7 +233,7 @@ def resource_demand(
             reasons.extend(term[1])
     total: int | None = None
     if not reasons and all(isinstance(term[0], int) for term in terms):
-        base = observed_bound if observed_bound is not None else declared_bound
+        base = declared_bound
         if (
             base is None
             and type(evidence.weights_bytes) is int
@@ -247,12 +248,7 @@ def resource_demand(
                 + require_integer(terms[2][0], "batch")
             )
     detail = None
-    if observed_bound is not None and total is not None:
-        detail = (
-            f"Forecast {total} bytes from the observed peak of this exact recipe content ({observed_bound} bytes), "
-            f"above its declared recipe-role memory envelope ({declared_bound} bytes); the declaration understates real use."
-        )
-    elif uncertain and declared_bound is not None and total is not None:
+    if uncertain and declared_bound is not None and total is not None:
         detail = f"Forecast {total} bytes from the declared recipe-role memory envelope ({declared_bound} bytes); {', '.join(dict.fromkeys(uncertain))} is unavailable, so actual demand may exceed this bound."
     if detail is not None:
         reasons.append(
@@ -272,8 +268,11 @@ def resource_demand(
         concurrency[0],
         batch[0],
         total,
-        "measured" if observed_bound is not None else evidence.evidence_state,
+        evidence.evidence_state,
         tuple(reasons),
+        load_overshoot_bytes=max(0, observed_bound - total)
+        if observed_bound is not None and total is not None
+        else 0,
     )
 
 
