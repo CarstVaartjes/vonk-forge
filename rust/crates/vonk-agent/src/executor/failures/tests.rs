@@ -1484,3 +1484,67 @@ fn a_guard_kill_crosses_the_helper_boundary_with_every_reading_on_both_paths() {
         &crate::failure_evidence::host_memory_receipt(&receipt).expect("a guard receipt"),
     );
 }
+
+#[test]
+fn every_guard_trigger_at_worst_case_values_keeps_every_fact_on_every_path() {
+    // Break caught (#1936 third review): `trigger=sustained_memavailable_exhaustion`
+    // is a 41-character opaque-charset run, so the sanitizer redacted it and
+    // the commonest guard kill reached the Controller with no trigger.
+    let vectors: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../../../agent_protocol/src/vonk_agent_protocol/vectors/host-memory-guard-summary-v1.json"
+    ))
+    .unwrap();
+    let summaries = vectors["worst_case"].as_array().unwrap();
+    assert_eq!(summaries.len(), 6, "one per trigger");
+    for summary in summaries {
+        let summary = summary.as_str().unwrap();
+        let written: Vec<(String, String)> = summary
+            .split_whitespace()
+            .filter_map(|token| token.split_once('='))
+            .map(|(name, value)| (name.to_owned(), value.to_owned()))
+            .collect();
+        assert_eq!(
+            written.len(),
+            vonk_agent_protocol::failure_evidence::MAX_PREFLIGHT_PROPERTIES
+        );
+        let kept = |preflight: &[vonk_agent_protocol::generated::FailureProperty]| {
+            preflight
+                .iter()
+                .map(|property| (property.name.clone(), property.value.clone()))
+                .collect::<Vec<_>>()
+        };
+        // Receipt path.
+        let sanitized = crate::failure_evidence::sanitize_exit_summary(summary);
+        let facts: Vec<(String, String)> = crate::failure_evidence::exit_facts(&sanitized)
+            .map(|(name, value)| (name.to_owned(), value.to_owned()))
+            .collect();
+        assert_eq!(facts, written, "{summary}");
+        let receipt = crate::failure_evidence::host_memory_receipt(&sanitized).unwrap();
+        assert_eq!(kept(&receipt.preflight), written, "{summary}");
+        // Start and exited paths: the helper's reply through runtime_rejection.
+        let response: vonk_agent_protocol::generated::HostHelperResponse =
+            vonk_agent_protocol::parse_strict(
+                &serde_json::to_vec(&serde_json::json!({
+                    "schema_version": 1,
+                    "request_id": null,
+                    "status": "rejected",
+                    "error_code": "runtime_process_exited",
+                    "diagnostic": summary,
+                }))
+                .unwrap(),
+            )
+            .unwrap();
+        let error = crate::host_runtime::runtime_rejection(
+            &response,
+            vonk_agent_protocol::HostRuntimeAction::RunInspect,
+        );
+        let ExecutionResult::Failed(failure) = runtime_observation_failure(&error) else {
+            panic!("expected failure");
+        };
+        let value = crate::failure_evidence::from_failure(
+            &vonk_agent_protocol::generated::AgentOperation::RecipeStart,
+            &failure,
+        );
+        assert_eq!(kept(&value.preflight), written, "{summary}");
+    }
+}

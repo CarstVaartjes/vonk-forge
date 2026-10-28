@@ -35,9 +35,20 @@ pub enum Trigger {
 }
 
 impl Trigger {
+    pub const ALL: [Self; 6] = [
+        Self::MemoryExhausted,
+        Self::MemoryAndSwapExhausted,
+        Self::SwapFilling,
+        Self::Thrashing,
+        Self::SustainedPressure,
+        Self::DriverAllocationFailure,
+    ];
+
+    /// The evidence token. `trigger=<token>` stays under the sanitizers'
+    /// 40-character opaque-value run, which would redact it whole.
     pub fn as_str(self) -> &'static str {
         match self {
-            Self::MemoryExhausted => "sustained_memavailable_exhaustion",
+            Self::MemoryExhausted => "memavailable_exhausted",
             Self::MemoryAndSwapExhausted => "memory_and_swap_exhausted",
             Self::SwapFilling => "swap_nearly_full_and_filling",
             Self::Thrashing => "swap_and_refault_thrashing",

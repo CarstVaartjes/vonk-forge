@@ -53,7 +53,13 @@ pub(super) fn failed_with_evidence(
 ) -> ExecutionResult {
     ExecutionResult::Failed(
         Failure::new(reason)
-            .diagnostic(evidence.account.chars().take(480).collect::<String>())
+            .diagnostic(
+                evidence
+                    .account
+                    .chars()
+                    .take(vonk_agent_protocol::failure_evidence::EXIT_SUMMARY_CHARS)
+                    .collect::<String>(),
+            )
             .exit_summary(evidence.exit_summary.as_deref())
             .process_logs(evidence.logs),
     )
@@ -238,7 +244,12 @@ pub(super) fn runtime_observation_failure(
     // typed reason there are none.
     let diagnostic = match (exited, error.diagnostic(), error.process_logs()) {
         (true, None, None) => Some("exit_state_unavailable=\"helper reported no detail\" logs_unavailable=\"not captured\"".to_owned()),
-        (_, detail, _) => detail.map(|detail| detail.chars().take(480).collect::<String>()),
+        (_, detail, _) => detail.map(|detail| {
+            detail
+                .chars()
+                .take(vonk_agent_protocol::failure_evidence::EXIT_SUMMARY_CHARS)
+                .collect::<String>()
+        }),
     };
     let mut failure = Failure::new(reason)
         .process_logs(crate::failure_evidence::diagnostic_logs(
