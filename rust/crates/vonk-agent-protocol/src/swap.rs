@@ -35,6 +35,16 @@ pub fn tolerance_bytes() -> u64 {
     SWAP_POLICY.tolerance_mib * 1024 * 1024
 }
 
+/// The swap a load may fill before the host memory guard's R1 or R2 applies;
+/// the same arithmetic as `vonk_agent_protocol.swap.usable_swap_bytes`.
+pub fn usable_swap_bytes(total: u64) -> u64 {
+    let kept_free = (u64::from(SWAP_POLICY.exhausted_free_floor_gib) * GIB)
+        .max(total / 100 * u64::from(SWAP_POLICY.exhausted_free_percent));
+    total
+        .saturating_sub(kept_free)
+        .min(total / 100 * u64::from(SWAP_POLICY.filling_used_percent))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -70,6 +80,23 @@ mod tests {
         let observation: SwapObservation =
             parse_strict(&serde_json::to_vec(&vectors["observation"]).unwrap()).unwrap();
         assert_eq!(observation.total_bytes, 64 * GIB);
+    }
+
+    #[test]
+    fn usable_swap_matches_the_python_vectors() {
+        let vectors: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../agent_protocol/src/vonk_agent_protocol/vectors/swap-v1.json"
+        ))
+        .unwrap();
+        let usable = vectors["usable"].as_array().unwrap();
+        assert!(!usable.is_empty());
+        for pair in usable {
+            assert_eq!(
+                usable_swap_bytes(pair["total_bytes"].as_u64().unwrap()),
+                pair["usable_bytes"].as_u64().unwrap(),
+                "{pair}"
+            );
+        }
     }
 
     #[test]

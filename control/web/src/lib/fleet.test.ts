@@ -266,6 +266,9 @@ test("swap shows the active size beside the desired size and the helper's wait r
         maximum_gib: 128,
         tolerance_mib: 512,
         release_headroom_gib: 16,
+        exhausted_free_floor_gib: 2,
+        exhausted_free_percent: 10,
+        filling_used_percent: 90,
       },
     }),
   );

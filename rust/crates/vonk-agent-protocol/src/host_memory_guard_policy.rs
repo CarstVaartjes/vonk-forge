@@ -1,6 +1,8 @@
 //! Host guard policy, independent of creator-kit runtime settings.
 use std::time::Duration;
 
+use crate::swap::{GIB, SWAP_POLICY};
+
 // spark-3542 froze 2026-10-07 after NVRM NV_ERR_NO_MEMORY without kernel OOM.
 // gb10-oom-research-2026-10-08: GPU allocations bypass cgroup accounting.
 //
@@ -19,14 +21,16 @@ pub const SAMPLE_INTERVAL: Duration = Duration::from_millis(250);
 pub const EXHAUSTED_BYTES: u64 = 256 * 1024 * 1024;
 pub const SUSTAINED_PRESSURE: Duration = Duration::from_secs(3);
 // R1 with swap: MemAvailable below 1 GiB AND free swap below the larger of
-// 2 GiB and 10% of swap, for 2 s. CALIBRATABLE.
+// 2 GiB and 10% of swap, for 2 s. CALIBRATABLE. The swap margins of R1 and R2
+// are the shared SwapPolicy's, so Controller admission keeps every load's
+// swap within them (`swap::usable_swap_bytes`).
 pub const SWAP_EXHAUSTED_MEMORY_BYTES: u64 = 1024 * 1024 * 1024;
-pub const SWAP_EXHAUSTED_FREE_FLOOR_BYTES: u64 = 2 * 1024 * 1024 * 1024;
-pub const SWAP_EXHAUSTED_FREE_PERCENT: u64 = 10;
+pub const SWAP_EXHAUSTED_FREE_FLOOR_BYTES: u64 = SWAP_POLICY.exhausted_free_floor_gib as u64 * GIB;
+pub const SWAP_EXHAUSTED_FREE_PERCENT: u64 = SWAP_POLICY.exhausted_free_percent as u64;
 pub const SWAP_EXHAUSTED_SUSTAIN: Duration = Duration::from_secs(2);
 // R2: swap more than 90% used AND still swapping out AND MemAvailable below
 // 4 GiB, for 3 s. CALIBRATABLE.
-pub const SWAP_FILLING_USED_PERCENT: u64 = 90;
+pub const SWAP_FILLING_USED_PERCENT: u64 = SWAP_POLICY.filling_used_percent as u64;
 pub const SWAP_FILLING_MEMORY_BYTES: u64 = 4 * 1024 * 1024 * 1024;
 pub const SWAP_FILLING_SUSTAIN: Duration = Duration::from_secs(3);
 // R3, thrash: swap-ins plus workingset refaults (anon + file) at or above this

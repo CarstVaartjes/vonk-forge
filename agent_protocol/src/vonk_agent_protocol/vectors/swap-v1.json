@@ -63,5 +63,57 @@
       "deadline": 2200,
       "applied_boot_id": "1c5c4a63-3b5c-4cc8-9d3d-4a5c1b0e8f52"
     }
-  }
+  },
+  "usable": [
+    {
+      "total_bytes": 0,
+      "usable_bytes": 0
+    },
+    {
+      "total_bytes": 17179869184,
+      "usable_bytes": 15032385536
+    },
+    {
+      "total_bytes": 21474836480,
+      "usable_bytes": 19327352760
+    },
+    {
+      "total_bytes": 68719476736,
+      "usable_bytes": 61847529030
+    },
+    {
+      "total_bytes": 137438953472,
+      "usable_bytes": 123695058060
+    }
+  ],
+  "needed": [
+    {
+      "load_bytes": 0,
+      "swap_bytes": 0
+    },
+    {
+      "load_bytes": 1,
+      "swap_bytes": 3221225472
+    },
+    {
+      "load_bytes": 15032385536,
+      "swap_bytes": 17179869184
+    },
+    {
+      "load_bytes": 15032385537,
+      "swap_bytes": 18253611008
+    },
+    {
+      "load_bytes": 61847529030,
+      "swap_bytes": 68719476736
+    },
+    {
+      "load_bytes": 61847529031,
+      "swap_bytes": 69793218560
+    },
+    {
+      "load_bytes": 123695058060,
+      "swap_bytes": 137438953472
+    }
+  ]
 }

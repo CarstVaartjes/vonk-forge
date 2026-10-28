@@ -769,3 +769,68 @@ fn the_nvrm_line_counts_long_enough_for_corroboration_to_complete() {
         started + DRIVER_FAILURE_SUSTAIN + SAMPLE_INTERVAL
     ));
 }
+
+#[test]
+fn a_load_at_the_usable_swap_bound_is_never_killed_and_one_byte_past_is() {
+    // Break caught: admission and the guard disagreeing on how much swap a
+    // load may fill (R1/R2 margins duplicated in two places). Controller
+    // admission keeps every load within `usable_swap_bytes`; the guard must
+    // leave such a load alone and still stop one byte more.
+    let vectors: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../../../agent_protocol/src/vonk_agent_protocol/vectors/swap-v1.json"
+    ))
+    .unwrap();
+    let start = Instant::now();
+    for pair in vectors["usable"].as_array().unwrap() {
+        let total = pair["total_bytes"].as_u64().unwrap();
+        if total == 0 {
+            continue;
+        }
+        let usable = vonk_agent_protocol::swap::usable_swap_bytes(total);
+        assert_eq!(usable, pair["usable_bytes"].as_u64().unwrap());
+        // Memory low, swap still moving both ways (so R2 sees it filling)
+        // while its level holds.
+        let at_bound = Host {
+            available: 700 * 1024 * 1024,
+            free: 1536 * 1024 * 1024,
+            swap_total: total,
+            swap_free: total - usable,
+            avg10: 10.0,
+            avg60: 10.0,
+            swap_out_per_s: 4,
+            swap_in_per_s: 4,
+            ..Host::serving()
+        };
+        let mut host = at_bound;
+        assert_eq!(
+            run(
+                &mut host,
+                &mut Decision::default(),
+                start,
+                0..ticks(Duration::from_secs(600)),
+                true
+            ),
+            None,
+            "{total}"
+        );
+        let mut past = Host {
+            swap_free: total - usable - 1,
+            ..at_bound
+        };
+        let (_, trigger) = run(
+            &mut past,
+            &mut Decision::default(),
+            start,
+            0..ticks(Duration::from_secs(10)),
+            true,
+        )
+        .unwrap_or_else(|| panic!("one byte past {usable} of {total} was not stopped"));
+        assert!(
+            matches!(
+                trigger,
+                Trigger::MemoryAndSwapExhausted | Trigger::SwapFilling
+            ),
+            "{trigger:?}"
+        );
+    }
+}

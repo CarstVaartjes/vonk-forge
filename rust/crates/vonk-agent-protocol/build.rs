@@ -44,6 +44,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 "maximum_gib",
                 "tolerance_mib",
                 "release_headroom_gib",
+                "exhausted_free_floor_gib",
+                "exhausted_free_percent",
+                "filling_used_percent",
             ][..],
         ),
         (
