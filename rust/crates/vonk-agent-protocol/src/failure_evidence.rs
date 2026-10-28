@@ -70,8 +70,9 @@ impl ExitCause {
 
     /// The process ended without running its own cleanup: the host memory
     /// guard or the kernel's OOM killer sent it SIGKILL (`host_memory_exhausted`,
-    /// `oom_killed`, exit 137), or it crashed natively (`crashed_by_signal`:
-    /// SIGABRT/SIGBUS/SIGSEGV, exit 134/135/139). What it left behind is a
+    /// `oom_killed`: the runtime's OOMKilled fact), or it ended by a signal
+    /// (`crashed_by_signal`: SIGABRT/SIGBUS/SIGKILL/SIGSEGV, exit
+    /// 134/135/137/139; a bare 137 is not proof of OOM). What it left behind is a
     /// consequence of that ending, not something it chose to produce. A
     /// SIGTERM (143) is `unclassified`: the process could clean up.
     pub fn skipped_cleanup(self) -> bool {
@@ -152,9 +153,9 @@ mod tests {
 
     #[test]
     fn only_an_ending_that_skipped_cleanup_excuses_what_a_process_left() {
-        // The helper's summaries for each exit: 137 is a SIGKILL (the OOM
-        // killer or the host memory guard), 139 a native SIGSEGV, 143 a SIGTERM
-        // the process could clean up after, 1 its own exception.
+        // The helper's summaries for each exit: an OOMKilled=true exit is the OOM
+        // killer's SIGKILL, 139 a native SIGSEGV, 143 a SIGTERM the process
+        // could clean up after, 1 its own exception.
         for (summary, cause, skipped) in [
             (
                 "exit_code=137 oom_killed=true exit_cause=oom_killed",
