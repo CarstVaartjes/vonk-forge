@@ -1,0 +1,67 @@
+{
+  "valid": [
+    {
+      "generation": 0,
+      "size_gib": 16
+    },
+    {
+      "generation": 3,
+      "size_gib": 64
+    },
+    {
+      "generation": 9007199254740993,
+      "size_gib": 128
+    }
+  ],
+  "invalid": [
+    {
+      "generation": 1,
+      "size_gib": 15
+    },
+    {
+      "generation": 1,
+      "size_gib": 129
+    },
+    {
+      "generation": 1,
+      "size_gib": 0
+    },
+    {
+      "generation": 1,
+      "size_gib": 64.5
+    },
+    {
+      "generation": 1,
+      "size_gib": "64"
+    },
+    {
+      "generation": 1,
+      "size_gib": true
+    },
+    {
+      "generation": -1,
+      "size_gib": 64
+    },
+    {
+      "generation": 1,
+      "size_gib": 64,
+      "path": "/swap.img"
+    }
+  ],
+  "observation": {
+    "total_bytes": 68719476736,
+    "free_bytes": 68580143104,
+    "receipt": {
+      "desired": {
+        "generation": 3,
+        "size_gib": 64
+      },
+      "state": "waiting",
+      "reason": "release-deferred",
+      "detail": "old swap file holds 9 GiB in use; MemAvailable 20 GiB keeps it until the next pass",
+      "next_attempt_at": 1600,
+      "deadline": 2200,
+      "applied_boot_id": "1c5c4a63-3b5c-4cc8-9d3d-4a5c1b0e8f52"
+    }
+  }
+}

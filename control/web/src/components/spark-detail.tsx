@@ -11,6 +11,7 @@ import { safeErrorText } from "../lib/error-display";
 import {
   nodeCpuClock,
   nodeGpuClock,
+  nodeSwap,
   nodeDisplayMemory,
   nodeDisplayName,
   nodeRecipeUpdates,
@@ -212,6 +213,10 @@ export function SparkDetail({
                   <div>
                     <dt>GPU clock</dt>
                     <dd>{nodeGpuClock(node)}</dd>
+                  </div>
+                  <div>
+                    <dt>Swap</dt>
+                    <dd>{nodeSwap(node)}</dd>
                   </div>
                   <div>
                     <dt>Recipes</dt>

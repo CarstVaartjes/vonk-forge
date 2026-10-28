@@ -773,7 +773,8 @@ fn the_low_space_line_is_the_controllers() {
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../control/src/vonk_control/settings.py");
     let settings = fs::read_to_string(settings).unwrap();
     for line in [
-        format!("STORAGE_LOW_FREE_FRACTION = 0.{LOW_FREE_PERCENT}"),
+        // One owner: the protocol's storage policy, which LOW_FREE_PERCENT reads.
+        "STORAGE_LOW_FREE_FRACTION = STORAGE_POLICY.low_free_percent / 100".to_owned(),
         format!("STORAGE_EVICTION_RESERVE_FRACTION = 0.0{RESERVE_PERCENT}"),
         format!(
             "STORAGE_EVICTION_RESERVE_FLOOR_BYTES = {} * 1024**3",
@@ -802,6 +803,16 @@ fn every_store_below_the_data_root_has_an_owner_and_a_collector() {
     ] {
         sources.push(repository.join(package));
     }
+    // Shared store names have one owner in the protocol crate, visible to both.
+    let mut protocol = Vec::new();
+    collect_sources(
+        &repository.join("rust/crates/vonk-agent-protocol/src"),
+        &mut protocol,
+    );
+    let shared: std::collections::BTreeMap<_, _> = protocol
+        .iter()
+        .flat_map(|source| super::source_guard::constants(&fs::read_to_string(source).unwrap()))
+        .collect();
     let mut names = BTreeSet::new();
     for source in &sources {
         let text = fs::read_to_string(source).unwrap();
@@ -809,7 +820,7 @@ fn every_store_below_the_data_root_has_an_owner_and_a_collector() {
             .extension()
             .is_some_and(|extension| extension == "rs")
         {
-            let mut constants = std::collections::BTreeMap::new();
+            let mut constants = shared.clone();
             // Constants in a parent module are visible in its child sources.
             for parent in source
                 .ancestors()
@@ -1178,6 +1189,7 @@ fn inventory_rotates_past_protected_prefix_and_only_judges_its_observed_batch() 
                         .collect(),
                     untracked_runs: Some(runs.iter().copied().filter(|id| *id == tail).collect()),
                     gpu_clock_grant: None,
+                    swap_grant: None,
                     store_retention: Some(retention()),
                 }),
                 &installations,

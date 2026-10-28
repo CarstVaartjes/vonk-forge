@@ -45,7 +45,8 @@ pub use vonk_agent_protocol::store_retention::GRACE;
 
 /// The Controller's low-space line (`STORAGE_LOW_FREE_FRACTION`) without its
 /// largest-install term; a current load can request more free space.
-pub const LOW_FREE_PERCENT: u64 = 10;
+pub const LOW_FREE_PERCENT: u64 =
+    vonk_agent_protocol::store_retention::STORAGE_POLICY.low_free_percent as u64;
 /// The Controller's eviction reserve (`STORAGE_EVICTION_RESERVE_FRACTION` and
 /// `STORAGE_EVICTION_RESERVE_FLOOR_BYTES`).
 pub const RESERVE_PERCENT: u64 = 2;

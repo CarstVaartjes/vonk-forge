@@ -25,6 +25,7 @@ from vonk_agent_protocol.gpu_clock import (
 from vonk_agent_protocol.inventory import (
     InventoryRequest,
 )
+from vonk_agent_protocol.swap import SwapIntent, SwapPolicy
 from vonk_agent_protocol.wire_model import strict_json_datetime
 from vonk_forge_contracts import RecipeDefinition, document_sha256, read_recipe
 
@@ -503,6 +504,9 @@ class FleetNode(StrictModel):
     agent_runtime: AgentRuntimeIdentity | None = None
     gpu_clock_desired: GpuClockRange | None = None
     gpu_clock_policy: GpuClockPolicy = GpuClockPolicy()
+    # Desired beside the policy; actual is inventory.host_settings.swap.
+    swap_desired: SwapIntent | None = None
+    swap_policy: SwapPolicy = SwapPolicy()
     id: NodeId
     display_name: Text200
     hostname: Annotated[str, StringConstraints(max_length=255)]

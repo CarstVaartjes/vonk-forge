@@ -20,6 +20,7 @@ from .contracts import (
 )
 from .gpu_clock import GpuClockIntent
 from .package_upgrade import PackageRollbackAuthority
+from .swap import SwapIntent
 from .wire_model import MAX_RUN_GENERATION, WireModel
 
 if TYPE_CHECKING:
@@ -190,6 +191,7 @@ class ContainerRuntimeAction(StrEnum):
 
 class HostOperationKind(StrEnum):
     APPLY_GPU_CLOCK = "apply-gpu-clock"
+    APPLY_SWAP = "apply-swap"
     INSTALL_VONK_DEB = "install-vonk-deb"
     CONFIRM_PACKAGE_ACTIVATION = "confirm-package-activation"
     EXECUTE_CONTAINER_RUNTIME_REQUEST = "execute-container-runtime-request"
@@ -203,6 +205,11 @@ class _HostOperation(WireModel):
 class ApplyGpuClockOperation(_HostOperation):
     type: Literal[HostOperationKind.APPLY_GPU_CLOCK] = HostOperationKind.APPLY_GPU_CLOCK
     desired: GpuClockIntent
+
+
+class ApplySwapOperation(_HostOperation):
+    type: Literal[HostOperationKind.APPLY_SWAP] = HostOperationKind.APPLY_SWAP
+    desired: SwapIntent
 
 
 class InstallVonkDebOperation(_HostOperation):
@@ -311,6 +318,7 @@ class ExecuteContainerRuntimeRequestOperation(_HostOperation):
 
 type HostOperation = Annotated[
     ApplyGpuClockOperation
+    | ApplySwapOperation
     | InstallVonkDebOperation
     | ConfirmPackageActivationOperation
     | ExecuteContainerRuntimeRequestOperation,

@@ -700,9 +700,17 @@ async fn run_inventory_lane(config: AgentConfig, client: AgentHttpClient, verdic
                 let installations = inventory.installations.clone().unwrap_or_default();
                 let runs = inventory.runs.clone().unwrap_or_default();
                 let answer = client.report_inventory_request(inventory).await?;
-                if let Some(grant) = answer.as_ref().and_then(|answer| answer.gpu_clock_grant.clone()) {
-                    let applied = tokio::task::spawn_blocking(move || vonk_agent::host_runtime::apply_gpu_clock_grant(&grant)).await;
-                    if !matches!(applied, Ok(Ok(()))) { eprintln!("vonk-agent: GPU clock grant not applied; next inventory retries: {applied:?}"); }
+                use vonk_agent_protocol::generated::HostHelperResponseStatus as Reply;
+                let grants = answer.as_ref().map(|answer| {
+                    [
+                        (answer.gpu_clock_grant.clone(), Reply::GpuClockReconciled, "GPU clock", Duration::from_secs(30)),
+                        (answer.swap_grant.clone(), Reply::SwapReconciled, "swap", Duration::from_secs(vonk_agent_protocol::swap::SWAP_PASS_SECONDS)),
+                    ]
+                });
+                for (grant, reconciled, setting, inactivity) in grants.into_iter().flatten() {
+                    let Some(grant) = grant else { continue };
+                    let applied = tokio::task::spawn_blocking(move || vonk_agent::host_runtime::apply_host_setting_grant(&grant, reconciled, inactivity)).await;
+                    if !matches!(applied, Ok(Ok(()))) { eprintln!("vonk-agent: {setting} grant not applied; next inventory retries: {applied:?}"); }
                 }
                 verdict.record(answer, &installations, &runs);
                 Ok(())

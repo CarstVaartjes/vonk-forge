@@ -28,6 +28,7 @@ from vonk_agent_protocol.host_helper import (
     HOST_HELPER_AUTHORITY,
     MAX_HOST_HELPER_GRANT_SECONDS,
     ApplyGpuClockOperation,
+    ApplySwapOperation,
     ConfirmPackageActivationOperation,
     ContainerRuntimeAction,
     ExecuteContainerRuntimeRequestOperation,
@@ -209,6 +210,7 @@ class HostHelperGrantIssuer:
             operation,
             (
                 ApplyGpuClockOperation,
+                ApplySwapOperation,
                 ExecuteContainerRuntimeRequestOperation,
                 InstallVonkDebOperation,
                 ConfirmPackageActivationOperation,
@@ -326,6 +328,17 @@ class HostRuntimeAuthorityService:
         return self._issuer.issue_grant(
             node_id=node_id,
             operation=ApplyGpuClockOperation(desired=desired),
+            expires_in_seconds=60,
+        )
+
+    def swap_grant(self, node_id: str) -> SignedHostHelperGrant:
+        from .swap import selected_swap
+
+        with self._sessions() as session:
+            desired = selected_swap(session, node_id)
+        return self._issuer.issue_grant(
+            node_id=node_id,
+            operation=ApplySwapOperation(desired=desired),
             expires_in_seconds=60,
         )
 

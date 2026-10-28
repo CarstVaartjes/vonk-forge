@@ -8,6 +8,7 @@ import {
   nodeRecipeUpdates,
   nodeSecondaryName,
   nodeStatus,
+  nodeSwap,
   offlineReasonLabel,
   telemetryFreshnessAt,
 } from "./fleet";
@@ -234,4 +235,42 @@ test("GPU reset warnings retain the operator fix while a Spark remains online", 
   });
   expect(nodeStatus(spark, NOW)).toEqual({ status: "needs attention", reasons: [detail] });
   expect(nodeStatus({ ...spark, warnings: [] }, NOW)).toEqual({ status: "online", reasons: [] });
+});
+
+test("swap shows the active size beside the desired size and the helper's wait reason", () => {
+  // Break caught: a Spark short of swap read as fine because only one side was shown.
+  const inventory = {
+    host_settings: {
+      display_manager_active: false,
+      graphical_default_target: false,
+      swap: {
+        total_bytes: 16 * 1024 ** 3,
+        free_bytes: 15 * 1024 ** 3,
+        receipt: {
+          desired: { generation: 1, size_gib: 64 },
+          state: "waiting",
+          reason: "insufficient-disk",
+          detail: "a swap file needs more space",
+          deadline: 2200,
+        },
+      },
+    },
+  } as unknown as VisualFleetNode["inventory"];
+  const text = nodeSwap(
+    node({
+      inventory,
+      swap_desired: { generation: 1, size_gib: 64 },
+      swap_policy: {
+        minimum_gib: 16,
+        default_gib: 64,
+        maximum_gib: 128,
+        tolerance_mib: 512,
+        release_headroom_gib: 16,
+      },
+    }),
+  );
+  expect(text).toContain("16.0 GiB active");
+  expect(text).toContain("desired 64 GiB (policy 16–128 GiB)");
+  expect(text).toContain("waiting (insufficient-disk)");
+  expect(nodeSwap(node())).toContain("desired unknown");
 });

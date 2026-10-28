@@ -581,10 +581,12 @@ def test_read_uses_postgresql_registration_latest_rows_and_a_bounded_query_set()
         ],
     }
     from vonk_agent_protocol.gpu_clock import default_gpu_clock
+    from vonk_agent_protocol.swap import default_swap
 
     expected = FleetSnapshot.model_validate_json(json.dumps(expected_document))
     for node in expected.nodes:
         node.gpu_clock_desired = default_gpu_clock()
+        node.swap_desired = default_swap()
         node.agent_runtime = AgentRuntimeIdentity.model_validate(
             {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
         )

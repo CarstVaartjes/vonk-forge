@@ -1,4 +1,4 @@
-//! Headless host enforcement and the active durable GPU clock intent.
+//! Headless host enforcement and the active durable GPU clock and swap intents.
 use super::*;
 
 /// How often the helper checks the host settings.
@@ -50,6 +50,9 @@ impl<R: CommandRunner> OperationExecutor<R> {
             .unwrap_or_else(|error| {
                 eprintln!("vonk-agent-helper: GPU clock settings unavailable: {error}");
             });
+        self.reconcile_swap(None, true).unwrap_or_else(|error| {
+            eprintln!("vonk-agent-helper: swap settings unavailable: {error}");
+        });
     }
 
     /// The default boot target, when systemd names one.

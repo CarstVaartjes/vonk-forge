@@ -236,6 +236,11 @@ def install_observations_routes(
                 _LOGGER.warning(
                     "selected GPU clock intent unavailable for %s", identity.node_id
                 )
+            # Only an agent that reports swap reads the field.
+            if body.host_settings is not None and body.host_settings.swap is not None:
+                verdict = verdict.model_copy(
+                    update={"swap_grant": clock_authority.swap_grant(identity.node_id)}
+                )
         return Response(
             content=canonical_message(verdict), media_type="application/json"
         )

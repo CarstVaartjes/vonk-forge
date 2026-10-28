@@ -35,6 +35,7 @@ pub mod stall_window;
 pub mod state;
 pub mod store_retention;
 mod stream_governor;
+mod swap;
 pub mod systemd_notify;
 pub mod telemetry;
 pub mod vocabulary;
