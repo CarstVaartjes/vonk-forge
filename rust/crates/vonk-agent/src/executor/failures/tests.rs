@@ -995,6 +995,38 @@ fn grant_403_ends_its_operation_with_evidence_without_refusing_agent_identity() 
 }
 
 #[test]
+fn a_grant_refusal_names_its_typed_reason_and_request_in_the_sent_evidence() {
+    // Wrong implementation: the evidence a Start grant refusal sends reads
+    // `http_status=403 [redacted opaque value] endpoint=... [redacted opaque
+    // value]`, because the opaque-value rule judged `error_code=<code>` and
+    // `request_id=<uuid>` as single 40+ character words.
+    let request_id = "6f1c2a3b-8d4e-4f5a-9b6c-7d8e9f0a1b2c";
+    let reason =
+        vonk_agent_protocol::generated::SecurityRefusalReason::HelperRequestPlanBindingInvalid;
+    let refused = ClientError::Controller(Box::new(crate::client::controller_error(
+        reqwest::StatusCode::FORBIDDEN,
+        "/agent/host-runtime/grant",
+        Some(request_id.to_owned()),
+        Some(reason.to_string()),
+    )));
+    let error = crate::host_runtime::HostRuntimeError::Controller(refused);
+    let finished =
+        runtime_failure("runtime grant denied", &error).finish_for(&AgentOperation::RecipeStart);
+    let AgentResultResult::OutcomeFailed(failed) = finished.result else {
+        panic!("a grant refusal is definite");
+    };
+    let diagnostic = failed.evidence.unwrap().diagnostic.unwrap();
+    assert!(
+        diagnostic.contains(&format!("error_code={}", reason.as_str())),
+        "{diagnostic}"
+    );
+    assert!(
+        diagnostic.contains(&format!("request_id={request_id}")),
+        "{diagnostic}"
+    );
+}
+
+#[test]
 fn a_full_disk_during_distribution_is_a_resource_wait_not_a_credential_failure() {
     // Wrong implementation: every local I/O error converted into
     // `CredentialRead`, so a full disk reported an authority failure and the

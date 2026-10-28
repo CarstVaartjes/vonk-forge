@@ -133,15 +133,40 @@ fn redact_word(word: &str) -> String {
         url.set_fragment(None);
         return url.to_string();
     }
-    if word.len() >= 40
+    if !is_opaque(word) {
+        return word.to_owned();
+    }
+    // A `name=value` field is judged by its value: the name is no secret, and
+    // a typed code (`error_code=helper_request_plan_binding_invalid`) is no
+    // opaque value however long the pair is. Base64 padding never forms a
+    // field: its body is no short name.
+    match word.split_once('=') {
+        Some((name, value)) if is_field_name(name) => {
+            if is_opaque(value) {
+                format!("{name}=[redacted opaque value]")
+            } else {
+                word.to_owned()
+            }
+        }
+        _ => "[redacted opaque value]".to_owned(),
+    }
+}
+
+fn is_opaque(word: &str) -> bool {
+    word.len() >= 40
         && word
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || "+/=_-".contains(c))
-    {
-        "[redacted opaque value]".to_owned()
-    } else {
-        word.to_owned()
-    }
+}
+
+/// A diagnostic field name (`error_code`, `request_id`): a short identifier.
+fn is_field_name(name: &str) -> bool {
+    let mut characters = name.chars();
+    name.len() <= 32
+        && characters
+            .next()
+            .is_some_and(|first| first.is_ascii_alphabetic() || first == '_')
+        && characters.all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
 /// The typed facts of a process-exit summary (`exit_code=1 exit_cause=...`):
@@ -1093,6 +1118,28 @@ mod tests {
             assert!(sanitized.text.len() <= LOG_BYTES);
             assert_eq!(sanitized.dropped_bytes, None);
             assert_eq!(sanitized.dropped_lines, None);
+        }
+    }
+
+    #[test]
+    fn a_typed_field_survives_the_opaque_value_rule() {
+        // Wrong implementation this catches: judging `name=value` as one
+        // opaque word erased `error_code=helper_request_plan_binding_invalid`
+        // (46 characters) and `request_id=<uuid>` from a Controller grant
+        // refusal, so the evidence named no cause. Bare and field-valued
+        // opaque values and padded base64 stay redacted; the Controller
+        // applies the same cases.
+        let vector: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../agent_protocol/src/vonk_agent_protocol/vectors/opaque-value-redaction-v1.json"
+        ))
+        .unwrap();
+        for case in vector["cases"].as_array().unwrap() {
+            let text = case["text"].as_str().unwrap();
+            assert_eq!(
+                sanitize_text(text),
+                case["redacted"].as_str().unwrap(),
+                "{text}"
+            );
         }
     }
 

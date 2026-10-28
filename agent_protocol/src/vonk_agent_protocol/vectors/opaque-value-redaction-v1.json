@@ -1,0 +1,29 @@
+{
+ "marker": "[redacted opaque value]",
+ "cases": [
+  {
+   "text": "http_status=403 error_code=helper_request_plan_binding_invalid endpoint=agent.host-runtime.grant request_id=6f1c2a3b-8d4e-4f5a-9b6c-7d8e9f0a1b2c disposition=security",
+   "redacted": "http_status=403 error_code=helper_request_plan_binding_invalid endpoint=agent.host-runtime.grant request_id=6f1c2a3b-8d4e-4f5a-9b6c-7d8e9f0a1b2c disposition=security"
+  },
+  {
+   "text": "error_code=helper_runtime_image_identity_invalid",
+   "redacted": "error_code=helper_runtime_image_identity_invalid"
+  },
+  {
+   "text": "blob 9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08 was refused",
+   "redacted": "blob [redacted opaque value] was refused"
+  },
+  {
+   "text": "digest=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+   "redacted": "digest=[redacted opaque value]"
+  },
+  {
+   "text": "payload QUJDQUJDQUJDQUJDQUJDQUJDQUJDQUJDQUJDQUJDQUJDQUJD==",
+   "redacted": "payload [redacted opaque value]"
+  },
+  {
+   "text": "an_unusually_long_field_name_that_is_no_name=BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+   "redacted": "[redacted opaque value]"
+  }
+ ]
+}

@@ -75,6 +75,24 @@ _SECRET_LINE = re.compile(
 _OPAQUE_SECRET = re.compile(
     r"(?<![A-Za-z0-9/.])([A-Za-z0-9+/=_-]{40,})(?![A-Za-z0-9/.])"
 )
+# A ``name=value`` field is judged by its value: the name is no secret, and a
+# typed code (``error_code=helper_request_plan_binding_invalid``) is no opaque
+# value however long the pair is.  Base64 padding never forms a field: its body
+# is no short name.  The agent applies the same rule (shared vector
+# ``opaque-value-redaction-v1.json``).
+_FIELD = re.compile(r"([A-Za-z_][A-Za-z0-9_]{0,31})=(.*)", re.DOTALL)
+_OPAQUE_MARKER = "[redacted opaque value]"
+
+
+def _redact_opaque(match: re.Match[str]) -> str:
+    token = match.group(1)
+    field = _FIELD.fullmatch(token)
+    if field is None:
+        return _OPAQUE_MARKER
+    if len(field.group(2)) < 40:
+        return token
+    return f"{field.group(1)}={_OPAQUE_MARKER}"
+
 
 # The failure-evidence closed sets are named once here so the bundle fields and
 # the helpers that build them cannot disagree. ``FailureCategory`` mirrors the
@@ -180,9 +198,7 @@ def safe_text(value: str) -> str:
         if _SECRET_LINE.search(line):
             lines.append("[redacted diagnostic line]")
         else:
-            lines.append(
-                _OPAQUE_SECRET.sub("[redacted opaque value]", redact_text(line))
-            )
+            lines.append(_OPAQUE_SECRET.sub(_redact_opaque, redact_text(line)))
     return "\n".join(lines) + ("\n" if value.endswith("\n") else "")
 
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import json
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from uuid import uuid4
 
 import pytest
@@ -240,6 +241,28 @@ def test_a_traceback_frame_path_is_not_redacted() -> None:
     assert safe_text(frame) == frame
     opaque = "A" * 64
     assert opaque not in safe_text(f"signature={opaque}")
+
+
+def test_a_typed_field_survives_the_opaque_value_rule() -> None:
+    """A ``name=value`` field is judged by its value, as the agent judges it.
+
+    The whole ``error_code=helper_request_plan_binding_invalid`` pair is 46
+    base64-ish characters, so the opaque-value rule erased the one typed reason
+    a Controller grant refusal names, and ``request_id=<uuid>`` with it: a
+    sweep start refused at the Start grant arrived as two redacted values and
+    named no cause.  An opaque value, bare or as a field's value, and padded
+    base64 stay redacted.  The cases are the agent's too.
+    """
+
+    vector = json.loads(
+        (
+            Path(__file__).parents[2]
+            / "agent_protocol/src/vonk_agent_protocol/vectors"
+            / "opaque-value-redaction-v1.json"
+        ).read_text()
+    )
+    for case in vector["cases"]:
+        assert safe_text(case["text"]) == case["redacted"], case["text"]
 
 
 def test_a_configuration_line_that_names_tokens_is_not_redacted() -> None:
