@@ -3,7 +3,7 @@
  "cases": [
   {
    "text": "http_status=403 error_code=helper_request_plan_binding_invalid endpoint=agent.host-runtime.grant request_id=6f1c2a3b-8d4e-4f5a-9b6c-7d8e9f0a1b2c disposition=security",
-   "redacted": "http_status=403 error_code=helper_request_plan_binding_invalid endpoint=agent.host-runtime.grant request_id=[redacted opaque value] disposition=security"
+   "redacted": "http_status=403 error_code=helper_request_plan_binding_invalid endpoint=agent.host-runtime.grant [redacted opaque value] disposition=security"
   },
   {
    "text": "error_code=helper_runtime_image_identity_invalid",
@@ -15,7 +15,7 @@
   },
   {
    "text": "digest=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
-   "redacted": "digest=[redacted opaque value]"
+   "redacted": "[redacted opaque value]"
   },
   {
    "text": "payload QUJDQUJDQUJDQUJDQUJDQUJDQUJDQUJDQUJDQUJDQUJDQUJD==",
@@ -31,15 +31,23 @@
   },
   {
    "text": "reason=some_made_up_code_that_is_not_in_the_contract",
-   "redacted": "reason=[redacted opaque value]"
+   "redacted": "[redacted opaque value]"
   },
   {
    "text": "args \"key=6f1c2a3b-8d4e-4f5a-9b6c-7d8e9f0a1b2c\", next",
-   "redacted": "args \"key=[redacted opaque value]\", next"
+   "redacted": "args \"[redacted opaque value]\", next"
   },
   {
    "text": "container=\"vonk-6f1c2a3b-8d4e-4f5a-9b6c-7d8e9f0a1b2c\"",
    "redacted": "container=\"[redacted opaque value]\""
+  },
+  {
+   "text": "Zq9xW2vB7nM4kL1pR8tY5uE3oI6aS0dF=yes_please",
+   "redacted": "[redacted opaque value]"
+  },
+  {
+   "text": "saw key=6f1c2a3b-8d4e-4f5a-9b6c-7d8e9f0a1b2c.",
+   "redacted": "saw key=6f1c2a3b-8d4e-4f5a-9b6c-7d8e9f0a1b2c."
   }
  ],
  "must_not_contain": [
@@ -118,7 +126,11 @@
   {
    "text": "key=6f1c2a3b-8d4e-4f5a-9b6c-7d8e9f0a1b2c,",
    "secret": "6f1c2a3b-8d4e-4f5a-9b6c-7d8e9f0a1b2c"
+  },
+  {
+   "text": "Zq9xW2vB7nM4kL1pR8tY5uE3oI6aS0dF=yes_please",
+   "secret": "Zq9xW2vB7nM4kL1pR8tY5uE3oI6aS0dF"
   }
  ],
- "note": "cases bind both sides to the exact output; must_not_contain binds both sides to redacting the secret where the line rules differ (Python blanks a PGPASSWORD= line, the agent redacts its value)"
+ "note": "cases bind both sides to the exact output; must_not_contain binds both sides to redacting the secret where the line rules differ (Python blanks a PGPASSWORD= line, the agent redacts its value). The opaque rule covers 40+ character runs that touch no '.': a value ending a sentence ('saw key=<uuid>.') is out of its scope on both sides, as on main."
 }

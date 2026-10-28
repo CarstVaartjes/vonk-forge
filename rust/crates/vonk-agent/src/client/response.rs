@@ -181,9 +181,9 @@ pub(super) fn render_rejection_location(segment: &RequestValidationIssueLocItem)
             .take(MAX_REJECTION_LOCATION_CHARS)
             .collect(),
         RequestValidationIssueLocItem::VonkInteger(index) => {
-            // A validated integer is path authority, not an opaque credential.
-            // Brackets distinguish it from string members and retain the final
-            // digest sanitizer without hiding an otherwise valid wide index.
+            // Brackets distinguish a validated integer from string members. The
+            // text sanitizer still judges the digits: an index of 40+ digits is
+            // an opaque run and is redacted, as the Controller redacts it.
             let bounded: String = index
                 .to_string()
                 .chars()

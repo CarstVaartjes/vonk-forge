@@ -164,12 +164,11 @@ fn redact_opaque_runs(word: &str) -> String {
     out
 }
 
-/// One opaque value. A `name=value` field keeps its name, and its value only
-/// when the value is a refusal code of the contract (its own enum decides):
-/// `error_code=helper_request_plan_binding_invalid`. Every other value is
-/// redacted however short, a UUID included, so a credential behind a name
-/// never survives. Base64 padding never forms a field: its body is no short
-/// name.
+/// One opaque value. It is kept only as a `name=value` field whose value is a
+/// refusal code of the contract (its own enum decides):
+/// `error_code=helper_request_plan_binding_invalid`. Anything else, name
+/// included, is redacted whole: a UUID or a short value behind a name may be a
+/// credential, and so may the name.
 fn redact_opaque(token: &str) -> String {
     match token.split_once('=') {
         Some((name, value))
@@ -180,12 +179,11 @@ fn redact_opaque(token: &str) -> String {
         {
             token.to_owned()
         }
-        Some((name, _)) if is_field_name(name) => format!("{name}=[redacted opaque value]"),
         _ => "[redacted opaque value]".to_owned(),
     }
 }
 
-/// A diagnostic field name (`error_code`, `request_id`): a short identifier.
+/// A diagnostic field name (`error_code`): a short identifier.
 fn is_field_name(name: &str) -> bool {
     let mut characters = name.chars();
     name.len() <= 32

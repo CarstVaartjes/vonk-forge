@@ -80,13 +80,12 @@ _SECRET_LINE = re.compile(
 _OPAQUE_SECRET = re.compile(
     r"(?<![A-Za-z0-9/.])([A-Za-z0-9+/=_-]{40,})(?![A-Za-z0-9/.])"
 )
-# An opaque ``name=value`` word keeps its name, and its value only when the
-# value is a refusal code of the contract (the enum decides):
-# ``error_code=helper_request_plan_binding_invalid``.  Every other value is
-# redacted however short, a UUID included, so a credential behind a name never
-# survives.  Base64 padding never forms a field: its body is no short name.
-# The agent applies the same rule (shared vector
-# ``opaque-value-redaction-v1.json``).
+# An opaque run is kept only as a ``name=value`` field whose value is a refusal
+# code of the contract (the enum decides):
+# ``error_code=helper_request_plan_binding_invalid``.  Anything else, name
+# included, is redacted whole: a UUID or a short value behind a name may be a
+# credential, and so may the name.  The agent applies the same rule (shared
+# vector ``opaque-value-redaction-v1.json``).
 _FIELD = re.compile(r"([A-Za-z_][A-Za-z0-9_]{0,31})=(.*)", re.DOTALL)
 _OPAQUE_MARKER = "[redacted opaque value]"
 _REFUSAL_CODES = frozenset(reason.value for reason in SecurityRefusalReason)
@@ -95,11 +94,9 @@ _REFUSAL_CODES = frozenset(reason.value for reason in SecurityRefusalReason)
 def _redact_opaque(match: re.Match[str]) -> str:
     token = match.group(1)
     field = _FIELD.fullmatch(token)
-    if field is None:
-        return _OPAQUE_MARKER
-    if field.group(2) in _REFUSAL_CODES:
+    if field is not None and field.group(2) in _REFUSAL_CODES:
         return token
-    return f"{field.group(1)}={_OPAQUE_MARKER}"
+    return _OPAQUE_MARKER
 
 
 # The failure-evidence closed sets are named once here so the bundle fields and
