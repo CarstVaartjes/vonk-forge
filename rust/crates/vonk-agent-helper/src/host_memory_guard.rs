@@ -1,5 +1,7 @@
 //! Independent protection for the one physical GB10 memory pool. No kit tuning.
 mod cgroup;
+mod decision;
+pub use decision::{Counters, Decision, Rates, Sample, Trigger, meminfo_bytes, read_sample};
 
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -22,120 +24,14 @@ use vonk_agent_protocol::failure_evidence::{
 use wait_timeout::ChildExt;
 
 pub use vonk_agent_protocol::host_memory_guard_policy::{
-    COMMAND_TIMEOUT, EXHAUSTED_BYTES, FULL_PSI_PERCENT, JOURNAL_RETRY, PRELOAD_MARGIN_BYTES,
-    SAMPLE_INTERVAL, STALL_AVAILABLE_BYTES, SUSTAINED_PRESSURE,
+    COMMAND_TIMEOUT, JOURNAL_RETRY, PRELOAD_MARGIN_BYTES, SAMPLE_INTERVAL, SUSTAINED_PRESSURE,
 };
 fn failure_reason() -> &'static str {
     vonk_agent_protocol::generated::FailureCode::WorkloadHostMemoryExhausted.as_str()
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Sample {
-    pub available_bytes: Option<u64>,
-    pub full_avg10: Option<f64>,
-}
-
-/// One `/proc/meminfo` field (`key` with its colon) in bytes.
-pub fn meminfo_bytes(text: &str, key: &str) -> Option<u64> {
-    text.lines().find_map(|line| {
-        let mut fields = line.split_whitespace();
-        (fields.next()? == key).then(|| fields.next()?.parse::<u64>().ok()?.checked_mul(1024))?
-    })
-}
-
-pub fn read_sample(mut read: impl FnMut(&str) -> std::io::Result<String>) -> Sample {
-    let available_bytes = read("/proc/meminfo")
-        .ok()
-        .and_then(|text| meminfo_bytes(&text, "MemAvailable:"));
-    let full_avg10 = read("/proc/pressure/memory").ok().and_then(|text| {
-        text.lines().find_map(|line| {
-            let mut fields = line.split_whitespace();
-            if fields.next()? != "full" {
-                return None;
-            }
-            let value = fields
-                .find_map(|field| field.strip_prefix("avg10="))?
-                .parse::<f64>()
-                .ok()?;
-            (value.is_finite() && (0.0..=100.0).contains(&value)).then_some(value)
-        })
-    });
-    Sample {
-        available_bytes,
-        full_avg10,
-    }
-}
-
 fn nvidia_allocation_failure(line: &str) -> bool {
     line.contains("NVRM:") && line.contains("Out of memory") && line.contains("NV_ERR_NO_MEMORY")
-}
-
-#[derive(Default)]
-pub struct Decision {
-    exhausted_since: Option<Instant>,
-    stalled_since: Option<Instant>,
-}
-
-impl Decision {
-    pub fn observe(
-        &mut self,
-        now: Instant,
-        sample: Sample,
-        driver_failure: bool,
-        managed: bool,
-    ) -> Option<&'static str> {
-        // A sampler stall is no reset: thrash stalls the sampler itself. Pressure
-        // stays continuous only while every observed sample shows it.
-        if !managed {
-            *self = Self::default();
-            return None;
-        }
-        let sustained = |since: &mut Option<Instant>, active: bool| {
-            if !active {
-                *since = None;
-                return false;
-            }
-            now.duration_since(*since.get_or_insert(now)) >= SUSTAINED_PRESSURE
-        };
-        let exhausted = sustained(
-            &mut self.exhausted_since,
-            sample
-                .available_bytes
-                .is_some_and(|bytes| bytes < EXHAUSTED_BYTES),
-        );
-        // Full PSI is a stall only while memory is actually running out: a load's
-        // page-cache reclaim shows the same PSI with tens of GB available.
-        let stalled = sustained(
-            &mut self.stalled_since,
-            sample.full_avg10.is_some_and(|psi| psi > FULL_PSI_PERCENT),
-        ) && sample
-            .available_bytes
-            .is_some_and(|bytes| bytes < STALL_AVAILABLE_BYTES);
-        // The line alone is non-fatal on GB10 (once per normal vLLM load, which can
-        // briefly spike full PSI): it counts only with MemAvailable exhausted in this
-        // sample or full PSI sustained as above. Unknown readings never do.
-        let pressured = stalled
-            || sample
-                .available_bytes
-                .is_some_and(|bytes| bytes < EXHAUSTED_BYTES);
-        if driver_failure && pressured {
-            Some("nvidia_allocation_failure")
-        } else if stalled {
-            Some("sustained_full_psi")
-        } else if exhausted {
-            Some("sustained_memavailable_exhaustion")
-        } else {
-            None
-        }
-    }
-    fn pressure_duration(&self, now: Instant, trigger: &str) -> Duration {
-        let since = match trigger {
-            "sustained_full_psi" | "nvidia_allocation_failure" => self.stalled_since,
-            "sustained_memavailable_exhaustion" => self.exhausted_since,
-            _ => None,
-        };
-        since.map_or(Duration::ZERO, |since| now.duration_since(since))
-    }
 }
 
 fn property(name: &str, value: impl ToString) -> FailureProperty {
@@ -145,7 +41,13 @@ fn property(name: &str, value: impl ToString) -> FailureProperty {
     }
 }
 
-fn evidence(sample: Sample, trigger: &str, duration: Duration) -> FailureDiagnostics {
+fn evidence(
+    sample: Sample,
+    trigger: Trigger,
+    duration: Duration,
+    rates: Option<Rates>,
+    loading: bool,
+) -> FailureDiagnostics {
     let observed_at = chrono::Utc::now();
     let began_at = observed_at - chrono::Duration::from_std(duration).unwrap_or_default();
     let empty = || FailureLogTail {
@@ -174,7 +76,7 @@ fn evidence(sample: Sample, trigger: &str, duration: Duration) -> FailureDiagnos
                 vonk_agent_protocol::failure_evidence::EXIT_CAUSE_FIELD,
                 vonk_agent_protocol::failure_evidence::ExitCause::HostMemoryExhausted.token(),
             ),
-            property("trigger", trigger),
+            property("trigger", trigger.as_str()),
             property(
                 "mem_available_bytes",
                 sample
@@ -189,6 +91,10 @@ fn evidence(sample: Sample, trigger: &str, duration: Duration) -> FailureDiagnos
             ),
             property("sustained_ms", duration.as_millis()),
             property("pressure_started_at", began_at.to_rfc3339()),
+            property(
+                "pressure_readings",
+                decision::readings(&sample, rates, loading),
+            ),
         ],
     }
 }
@@ -594,15 +500,26 @@ pub fn spawn(data_root: PathBuf) {
                 })
                 .unwrap_or_default();
             let sample = read_sample(|path| fs::read_to_string(path));
-            if let Some(trigger) =
-                decision.observe(now, sample, !driver_targets.is_empty(), !ids.is_empty())
-            {
-                let targets = if trigger == "nvidia_allocation_failure" {
+            let loading = crate::page_cache::loading(now);
+            if let Some(trigger) = decision.observe(
+                now,
+                sample,
+                !driver_targets.is_empty(),
+                !ids.is_empty(),
+                loading,
+            ) {
+                let targets = if trigger == Trigger::DriverAllocationFailure {
                     driver_targets
                 } else {
                     ids
                 };
-                let value = evidence(sample, trigger, decision.pressure_duration(now, trigger));
+                let value = evidence(
+                    sample,
+                    trigger,
+                    decision.pressure_duration(now, trigger),
+                    decision.rates(),
+                    loading,
+                );
                 kill_now(&known, &targets, &value, &mut reported);
                 let _ = send.try_send((targets, value));
             }
@@ -648,375 +565,6 @@ mod tests {
     }
 
     #[test]
-    fn tight_kit_and_bursts_are_allowed_but_sustained_exhaustion_is_not() {
-        let now = Instant::now();
-        let mut decision = Decision::default();
-        let tight = Sample {
-            available_bytes: Some(3 * 1024 * 1024 * 1024),
-            full_avg10: Some(0.0),
-        };
-        for tick in 0..40 {
-            assert_eq!(
-                decision.observe(now + SAMPLE_INTERVAL * tick, tight, false, true),
-                None
-            );
-        }
-        let exhausted = Sample {
-            available_bytes: Some(EXHAUSTED_BYTES - 1),
-            ..tight
-        };
-        for tick in 40..52 {
-            assert_eq!(
-                decision.observe(now + SAMPLE_INTERVAL * tick, exhausted, false, true),
-                None
-            );
-        }
-        assert_eq!(
-            decision.observe(now + SAMPLE_INTERVAL * 52, exhausted, false, true),
-            Some("sustained_memavailable_exhaustion")
-        );
-        // Recovery and a fresh operation never inherit a permanent gate.
-        assert_eq!(
-            decision.observe(now + SAMPLE_INTERVAL * 53, tight, false, true),
-            None
-        );
-    }
-    #[test]
-    fn psi_requires_continuity_and_unknown_resets_it() {
-        let now = Instant::now();
-        let mut decision = Decision::default();
-        let pressure = Sample {
-            available_bytes: Some(EXHAUSTED_BYTES),
-            full_avg10: Some(FULL_PSI_PERCENT + 0.1),
-        };
-        for tick in 0..12 {
-            assert_eq!(
-                decision.observe(now + SAMPLE_INTERVAL * tick, pressure, false, true),
-                None
-            );
-        }
-        assert_eq!(
-            decision.observe(now + SAMPLE_INTERVAL * 12, pressure, false, true),
-            Some("sustained_full_psi")
-        );
-        assert_eq!(
-            decision.observe(
-                now + SAMPLE_INTERVAL * 13,
-                Sample {
-                    full_avg10: None,
-                    ..pressure
-                },
-                false,
-                true
-            ),
-            None
-        );
-        assert_eq!(
-            decision.observe(now + SAMPLE_INTERVAL * 14, pressure, false, true),
-            None
-        );
-        // A sampler stall between two over-bar readings is pressure, not a reset.
-        assert_eq!(
-            decision.observe(now + Duration::from_secs(20), pressure, false, true),
-            Some("sustained_full_psi")
-        );
-    }
-    #[test]
-    fn fake_readers_use_available_and_full_never_free_or_some() {
-        let sample = read_sample(|path| {
-            Ok(if path.ends_with("meminfo") {
-                "MemFree: 1 kB\nMemAvailable: 3145728 kB\n"
-            } else {
-                "some avg10=99.00 avg60=0 total=0\nfull avg10=0.00 avg60=0 total=0\n"
-            }
-            .into())
-        });
-        assert_eq!(sample.available_bytes, Some(3 * 1024 * 1024 * 1024));
-        assert_eq!(sample.full_avg10, Some(0.0));
-        assert_eq!(
-            read_sample(|_| Err(std::io::Error::other("unavailable"))).available_bytes,
-            None
-        );
-    }
-    #[test]
-    fn nvrm_line_kills_only_with_corroborating_pressure_and_unmanaged_is_never_a_victim() {
-        let sample = |available_bytes, full_avg10| Sample {
-            available_bytes,
-            full_avg10,
-        };
-        let healthy = sample(Some(EXHAUSTED_BYTES * 100), Some(0.0));
-        let low = sample(Some(EXHAUSTED_BYTES - 1), Some(0.0));
-        let stalled = sample(Some(EXHAUSTED_BYTES * 100), Some(FULL_PSI_PERCENT + 1.0));
-        assert!(nvidia_allocation_failure(
-            "NVRM: Out of memory [NV_ERR_NO_MEMORY] _memdescAllocInternal"
-        ));
-        assert!(!nvidia_allocation_failure("unrelated out of memory"));
-        let observe =
-            |sample, managed| Decision::default().observe(Instant::now(), sample, true, managed);
-        assert_eq!(observe(healthy, true), None);
-        assert_eq!(observe(sample(None, None), true), None);
-        assert_eq!(observe(low, true), Some("nvidia_allocation_failure"));
-        // One PSI sample over the bar is a load's spike, not a wedge.
-        assert_eq!(observe(stalled, true), None);
-        assert_eq!(observe(low, false), None);
-        let id = "a".repeat(64);
-        let digest = "b".repeat(64);
-        let target = "10000000-0000-4000-8000-000000000001";
-        assert_eq!(
-            managed_identity(&format!("{id}\ttrue\tfalse\t{target}\t{digest}\t123"), &id),
-            None
-        );
-        assert_eq!(
-            managed_identity(&format!("{id}\ttrue\ttrue\t{target}\t{digest}\t123"), &id),
-            Some(123)
-        );
-    }
-    // 2026-10-15 spark-3542, diffusiongemma vLLM: one NVRM line during its normal
-    // KV-cache allocation, full avg10 30.43 for one kernel update, 34.5 GB free.
-    const LOADING_AVAILABLE: u64 = 34_546_176_000;
-    const LOAD_SPIKE_PSI: f64 = 30.43;
-    const WINDOW_TICKS: u32 = (SUSTAINED_PRESSURE.as_millis() / SAMPLE_INTERVAL.as_millis()) as u32;
-
-    #[test]
-    fn nvrm_line_during_a_loads_brief_psi_spike_with_memory_available_never_kills() {
-        let now = Instant::now();
-        let mut decision = Decision::default();
-        let sample = |full_avg10| Sample {
-            available_bytes: Some(LOADING_AVAILABLE),
-            full_avg10: Some(full_avg10),
-        };
-        // The line holds for its whole window; the spike lasts one 2 s PSI update.
-        for tick in 0..WINDOW_TICKS * 4 {
-            let psi = if (4..12).contains(&tick) {
-                LOAD_SPIKE_PSI
-            } else {
-                12.0
-            };
-            let line = tick <= WINDOW_TICKS;
-            assert_eq!(
-                decision.observe(now + SAMPLE_INTERVAL * tick, sample(psi), line, true),
-                None,
-                "tick {tick}"
-            );
-        }
-    }
-
-    // 2026-10-13 spark-3542 wedge: last telemetry 120.95e9 used of 130.67e9.
-    const WEDGE_AVAILABLE: u64 = 9_720_000_000;
-
-    #[test]
-    fn nvrm_line_with_full_psi_sustained_for_the_window_kills_with_its_duration() {
-        let now = Instant::now();
-        let mut decision = Decision::default();
-        let pressure = Sample {
-            available_bytes: Some(WEDGE_AVAILABLE),
-            full_avg10: Some(LOAD_SPIKE_PSI),
-        };
-        for tick in 0..WINDOW_TICKS {
-            let at = now + SAMPLE_INTERVAL * tick;
-            assert_eq!(decision.observe(at, pressure, true, true), None);
-        }
-        let at = now + SAMPLE_INTERVAL * WINDOW_TICKS;
-        let trigger = decision.observe(at, pressure, true, true);
-        assert_eq!(trigger, Some("nvidia_allocation_failure"));
-        assert_eq!(
-            decision.pressure_duration(at, trigger.unwrap()),
-            SUSTAINED_PRESSURE
-        );
-    }
-
-    // 2026-10-15 12:05Z spark-3542, same 112.53e9 declaration: KV-cache allocation
-    // after a fastsafetensors load; full avg10 46.68 for 3 s, 27.08 GB available,
-    // NVRM lines 6.6 s before onset and 13 ms after the old guard's kill.
-    const RECLAIM_AVAILABLE: u64 = 27_084_484_608;
-
-    #[test]
-    fn a_loads_sustained_page_cache_reclaim_with_memory_available_never_kills() {
-        let now = Instant::now();
-        let onset = Duration::from_secs(10);
-        let lines = [
-            onset - Duration::from_millis(6600),
-            onset + Duration::from_millis(3013),
-        ];
-        let mut decision = Decision::default();
-        // PSI 35-50 for 14 s from onset, with every NVRM line in its window.
-        for tick in 0..(WINDOW_TICKS * 8) {
-            let elapsed = SAMPLE_INTERVAL * tick;
-            let psi = if elapsed >= onset {
-                35.0 + f64::from(tick % 16)
-            } else {
-                12.0
-            };
-            let line = lines
-                .iter()
-                .any(|at| elapsed >= *at && elapsed - *at <= SUSTAINED_PRESSURE);
-            let sample = Sample {
-                available_bytes: Some(RECLAIM_AVAILABLE),
-                full_avg10: Some(psi),
-            };
-            assert_eq!(
-                decision.observe(now + elapsed, sample, line, true),
-                None,
-                "at {elapsed:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn sustained_psi_kills_once_memory_falls_below_the_low_water_bar() {
-        let now = Instant::now();
-        let mut decision = Decision::default();
-        let gib: u64 = 1024 * 1024 * 1024;
-        // Pressure holds while available memory collapses from the load's level.
-        let mut killed = None;
-        for tick in 0..400 {
-            let available = RECLAIM_AVAILABLE.saturating_sub(u64::from(tick) * gib / 4);
-            let sample = Sample {
-                available_bytes: Some(available),
-                full_avg10: Some(46.68),
-            };
-            let at = now + SAMPLE_INTERVAL * tick;
-            if let Some(trigger) = decision.observe(at, sample, false, true) {
-                killed = Some((
-                    tick,
-                    available,
-                    trigger,
-                    decision.pressure_duration(at, trigger),
-                ));
-                break;
-            }
-        }
-        let (tick, available, trigger, duration) = killed.expect("never killed");
-        assert_eq!(trigger, "sustained_full_psi");
-        assert!(available < STALL_AVAILABLE_BYTES);
-        assert!(
-            available + gib / 4 >= STALL_AVAILABLE_BYTES,
-            "late at {available}"
-        );
-        assert_eq!(duration, SAMPLE_INTERVAL * tick);
-        // The 2026-10-13 level without any NVRM line: kill at the window's end.
-        let mut decision = Decision::default();
-        let wedge = Sample {
-            available_bytes: Some(WEDGE_AVAILABLE),
-            full_avg10: Some(45.0),
-        };
-        for tick in 0..WINDOW_TICKS {
-            assert_eq!(
-                decision.observe(now + SAMPLE_INTERVAL * tick, wedge, false, true),
-                None
-            );
-        }
-        assert_eq!(
-            decision.observe(now + SUSTAINED_PRESSURE, wedge, false, true),
-            Some("sustained_full_psi")
-        );
-    }
-
-    #[test]
-    fn repeated_nvrm_lines_under_rising_use_and_sustained_psi_kill_within_the_window() {
-        // 2026-10-13 spark-3542: lines at 21:49Z and 21:54Z while use climbed past
-        // the declared peak; the Spark wedged. Free memory never needs to reach
-        // the exhaustion bar for the guard to act.
-        let now = Instant::now();
-        let mut decision = Decision::default();
-        let lines = [Duration::ZERO, Duration::from_secs(300)];
-        let onset = SAMPLE_INTERVAL * 1200 - SAMPLE_INTERVAL * 4;
-        let gib: u64 = 1024 * 1024 * 1024;
-        let mut killed = None;
-        for tick in 0..1400 {
-            let elapsed = SAMPLE_INTERVAL * tick;
-            let sample = Sample {
-                available_bytes: Some((20 * gib).saturating_sub(u64::from(tick) * 12_000_000)),
-                full_avg10: Some(if elapsed >= onset { 45.0 } else { 5.0 }),
-            };
-            let line = lines
-                .iter()
-                .any(|at| elapsed >= *at && elapsed - *at <= SUSTAINED_PRESSURE);
-            if let Some(trigger) = decision.observe(now + elapsed, sample, line, true) {
-                assert!(sample.available_bytes.unwrap() > EXHAUSTED_BYTES);
-                killed = Some((elapsed, trigger));
-                break;
-            }
-        }
-        assert_eq!(
-            killed,
-            Some((onset + SUSTAINED_PRESSURE, "nvidia_allocation_failure"))
-        );
-    }
-
-    // Thrash stalls the sampler itself: 0.3-2 s between samples, deterministic.
-    const MAX_STALL: Duration = Duration::from_millis(2000);
-    fn stalls(seed: u64) -> impl Iterator<Item = Duration> {
-        let mut state = seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1;
-        std::iter::from_fn(move || {
-            state ^= state << 13;
-            state ^= state >> 7;
-            state ^= state << 17;
-            Some(Duration::from_millis(300 + state % 1701))
-        })
-    }
-
-    #[test]
-    fn sampler_stalls_neither_hide_a_wedge_nor_turn_a_load_spike_into_a_kill() {
-        let gib: u64 = 1024 * 1024 * 1024;
-        let lines = [Duration::ZERO, Duration::from_secs(300)];
-        let onset = Duration::from_secs(299);
-        // Bound: the first over-bar sample is at most one stall after onset, and
-        // the kill at most one stall after the window closes.
-        let bound = onset + SUSTAINED_PRESSURE + MAX_STALL * 2;
-        for seed in 1..=32 {
-            let now = Instant::now();
-            // The 2026-10-13 pattern: lines minutes apart, use rising, full PSI
-            // well over the bar from onset, free memory above the exhaustion bar.
-            let mut decision = Decision::default();
-            let mut elapsed = Duration::ZERO;
-            let mut killed = None;
-            for stall in stalls(seed).take(2000) {
-                let sample = Sample {
-                    available_bytes: Some(20 * gib - elapsed.as_secs() * 40_000_000),
-                    full_avg10: Some(if elapsed >= onset { 45.0 } else { 5.0 }),
-                };
-                let line = lines
-                    .iter()
-                    .any(|at| elapsed >= *at && elapsed - *at <= SUSTAINED_PRESSURE);
-                if let Some(trigger) = decision.observe(now + elapsed, sample, line, true) {
-                    assert!(sample.available_bytes.unwrap() > EXHAUSTED_BYTES);
-                    killed = Some((elapsed, trigger));
-                    break;
-                }
-                elapsed += stall;
-            }
-            let (at, trigger) = killed.unwrap_or_else(|| panic!("seed {seed}: never killed"));
-            assert!(at >= onset && at <= bound, "seed {seed}: killed at {at:?}");
-            assert!(
-                ["nvidia_allocation_failure", "sustained_full_psi"].contains(&trigger),
-                "seed {seed}: {trigger}"
-            );
-            // A load's one-update PSI spike with its NVRM line stays harmless.
-            let mut decision = Decision::default();
-            let mut elapsed = Duration::ZERO;
-            let spike = Duration::from_secs(10)..Duration::from_secs(12);
-            for stall in stalls(seed).take(200) {
-                let sample = Sample {
-                    available_bytes: Some(LOADING_AVAILABLE),
-                    full_avg10: Some(if spike.contains(&elapsed) {
-                        LOAD_SPIKE_PSI
-                    } else {
-                        12.0
-                    }),
-                };
-                let line = elapsed >= spike.start && elapsed - spike.start <= SUSTAINED_PRESSURE;
-                assert_eq!(
-                    decision.observe(now + elapsed, sample, line, true),
-                    None,
-                    "seed {seed} at {elapsed:?}"
-                );
-                elapsed += stall;
-            }
-        }
-    }
-
-    #[test]
     fn stop_path_records_hardware_failure_and_leaves_fresh_attempt_admissible() {
         use crate::operations::{CommandOutput, OperationError};
         use std::sync::Mutex;
@@ -1055,9 +603,12 @@ mod tests {
             Sample {
                 available_bytes: Some(1),
                 full_avg10: Some(99.0),
+                ..Sample::default()
             },
-            "sustained_full_psi",
+            Trigger::SustainedPressure,
             SUSTAINED_PRESSURE,
+            None,
+            false,
         );
         let id = "a".repeat(64);
         // Without a recorded cgroup, the identity-checked Docker kill remains.
@@ -1097,37 +648,7 @@ mod tests {
         assert_eq!(foreign.calls.lock().unwrap().len(), 1);
     }
     #[test]
-    fn equality_bursts_and_partial_inventory_never_trigger_false_stops() {
-        let now = Instant::now();
-        let mut decision = Decision::default();
-        let boundary = Sample {
-            available_bytes: Some(EXHAUSTED_BYTES),
-            full_avg10: Some(FULL_PSI_PERCENT),
-        };
-        for tick in 0..20 {
-            assert_eq!(
-                decision.observe(now + SAMPLE_INTERVAL * tick, boundary, false, true),
-                None
-            );
-        }
-        let burst = Sample {
-            available_bytes: Some(1),
-            full_avg10: Some(99.0),
-        };
-        for tick in 20..31 {
-            assert_eq!(
-                decision.observe(now + SAMPLE_INTERVAL * tick, burst, false, true),
-                None
-            );
-        }
-        assert_eq!(
-            decision.observe(now + SAMPLE_INTERVAL * 31, boundary, false, true),
-            None
-        );
-        assert_eq!(
-            decision.observe(now + SAMPLE_INTERVAL * 32, burst, false, true),
-            None
-        );
+    fn partial_inventory_never_triggers_false_stops() {
         assert!(inventory_ids(format!("{}\npartial", "a".repeat(64)).as_bytes()).is_err());
         assert!(inventory_ids(b"daemon error").is_err());
         assert_eq!(inventory_ids(b"").unwrap(), Vec::<String>::new());
@@ -1179,9 +700,12 @@ mod tests {
             Sample {
                 available_bytes: Some(1),
                 full_avg10: Some(99.0),
+                ..Sample::default()
             },
-            "nvidia_allocation_failure",
+            Trigger::DriverAllocationFailure,
             Duration::ZERO,
+            None,
+            false,
         )
     }
 
