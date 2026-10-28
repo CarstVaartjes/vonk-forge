@@ -137,15 +137,10 @@ impl HelperRejection {
             } => (
                 // Always present: the exit code, OOM flag and cause token, and
                 // when the output could not be read, why.
-                Some(
-                    match capture_error {
-                        Some(reason) => format!("{exit_summary}; {reason}"),
-                        None => exit_summary.clone(),
-                    }
-                    .chars()
-                    .take(480)
-                    .collect(),
-                ),
+                Some(vonk_agent_helper::runtime_logs::exited_diagnostic(
+                    exit_summary,
+                    *capture_error,
+                )),
                 logs.clone(),
             ),
             OperationError::RuntimeJobWaitFailed { evidence } => (

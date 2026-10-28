@@ -833,6 +833,29 @@ pub fn exit_summary(
     summary
 }
 
+/// The diagnostic an exited workload's rejection carries: its exit summary,
+/// then why its output could not be read. A host-memory-guard summary is all
+/// typed facts and keeps its own bound; every other summary is cut at
+/// `EXIT_SUMMARY_CHARS`. The reason stays a separate token so the last fact
+/// (`observed_at`) is never glued to it.
+pub fn exited_diagnostic(exit_summary: &str, capture_error: Option<&str>) -> String {
+    use vonk_agent_protocol::failure_evidence::{
+        EXIT_SUMMARY_CHARS, ExitCause as Cause, HOST_MEMORY_SUMMARY_CHARS,
+    };
+    let bound = if Cause::of_summary(exit_summary) == Some(Cause::HostMemoryExhausted) {
+        HOST_MEMORY_SUMMARY_CHARS
+    } else {
+        EXIT_SUMMARY_CHARS
+    };
+    match capture_error {
+        Some(reason) => format!("{exit_summary} ; {reason}"),
+        None => exit_summary.to_owned(),
+    }
+    .chars()
+    .take(bound)
+    .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

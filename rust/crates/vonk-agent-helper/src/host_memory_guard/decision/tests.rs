@@ -693,7 +693,7 @@ fn the_kill_evidence_carries_the_recent_samples_oldest_first() {
         .unwrap()
         .strip_prefix(&format!("{}:", RECENT_FIELDS[0]))
         .unwrap()
-        .split('-')
+        .split(':')
         .map(|v| v.parse().unwrap())
         .collect();
     assert_eq!(available.len(), RECENT_SAMPLES);

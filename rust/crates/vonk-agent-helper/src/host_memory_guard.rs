@@ -696,6 +696,25 @@ mod tests {
         ))
         .unwrap();
         assert_eq!(vector_summary(), vectors["summary"].as_str().unwrap());
+        // The exited-workload reply keeps every fact (no 480-character cut),
+        // and an unread log never glues itself to the last fact.
+        let reply = crate::runtime_logs::exited_diagnostic(
+            &vector_summary(),
+            Some("the container log command failed"),
+        );
+        assert_eq!(reply, vectors["diagnostic"].as_str().unwrap());
+        assert!(reply.contains(" observed_at=2026-10-28T12:00:00+00:00 ; "));
+        // Every other exit summary keeps its bound.
+        let other = format!(
+            "exit_code=1 exit_cause=python_exception {}",
+            "x".repeat(600)
+        );
+        assert_eq!(
+            crate::runtime_logs::exited_diagnostic(&other, None)
+                .chars()
+                .count(),
+            vonk_agent_protocol::failure_evidence::EXIT_SUMMARY_CHARS
+        );
     }
 
     #[test]

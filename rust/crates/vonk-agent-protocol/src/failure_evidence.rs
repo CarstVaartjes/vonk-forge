@@ -19,6 +19,12 @@ pub const OOM_KILLED_FIELD: &str = "oom_killed";
 pub const MAX_PREFLIGHT_PROPERTIES: usize = 8;
 /// The longest value one failure property carries (the wire contract's bound).
 pub const FAILURE_PROPERTY_VALUE_CHARS: usize = 256;
+/// A process-exit summary's bound on the helper's reply.
+pub const EXIT_SUMMARY_CHARS: usize = 480;
+/// A host-memory-guard summary is all facts, each its own failure property:
+/// bounded by those properties, not cut at EXIT_SUMMARY_CHARS.
+pub const HOST_MEMORY_SUMMARY_CHARS: usize =
+    MAX_PREFLIGHT_PROPERTIES * (64 + 2 + FAILURE_PROPERTY_VALUE_CHARS);
 
 /// Why a container exited, as a stable token the Controller can show and
 /// group. The helper names it; the agent decides by it.

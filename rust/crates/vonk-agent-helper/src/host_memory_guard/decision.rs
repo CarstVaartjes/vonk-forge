@@ -393,14 +393,16 @@ pub fn readings(sample: &Sample, rates: Option<Rates>, loading: bool) -> (String
 impl Decision {
     /// The last samples, one per `RECENT_SAMPLE_SPACING`, oldest first, as one
     /// evidence property, `RECENT_PROPERTY`: each `RECENT_FIELDS` series is its
-    /// readings joined by `-`.
+    /// readings joined by `:`.
     pub fn recent(&self) -> (String, String) {
         let series = |reading: &dyn Fn(&Sample) -> String| {
             self.recent
                 .iter()
                 .map(|(_, sample)| reading(sample))
                 .collect::<Vec<_>>()
-                .join("-")
+                // `:` bounds every run below the sanitizers' 40-character
+                // opaque-value rule (`-` and `+` would join one long run).
+                .join(":")
         };
         let columns = [
             series(&|s| mib(s.available_bytes)),

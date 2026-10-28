@@ -367,10 +367,8 @@ impl<R> RecipeExecutor<'_, R> {
                     })?;
                 let process_running = inspection.running;
                 let failure_diagnostics = inspection.log_error.as_deref()
-                    .filter(|detail| !process_running && crate::failure_evidence::ExitCause::of_summary(detail) == Some(crate::failure_evidence::ExitCause::HostMemoryExhausted))
-                    .map(|detail| {
-                    crate::failure_evidence::from_failure(&AgentOperation::RecipeStart, &Failure::new(FailureCode::WorkloadHostMemoryExhausted.as_str()).diagnostic(detail))
-                });
+                    .filter(|_| !process_running)
+                    .and_then(crate::failure_evidence::host_memory_receipt);
                 // A stopped process of a run this Controller never owned (for
                 // example after its database was rebuilt) is retired locally
                 // instead of being reported forever.

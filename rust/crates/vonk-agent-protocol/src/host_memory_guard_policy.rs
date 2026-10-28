@@ -75,7 +75,7 @@ pub const PRESSURE_FIELDS: [&str; 8] = [
     "swapout_per_s",
     "refault_per_s",
 ];
-/// The series `RECENT_PROPERTY` packs (each series' samples joined by `-`,
+/// The series `RECENT_PROPERTY` packs (each series' samples joined by `:`,
 /// oldest first).
 pub const RECENT_FIELDS: [&str; 4] = [
     "recent_available_mib",

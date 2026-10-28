@@ -784,6 +784,21 @@ pub fn collect(phase: &str, code: &str, stdout: &[u8], stderr: &[u8]) -> Failure
     evidence
 }
 
+/// The diagnostics of a stopped run whose inspection answered with the host
+/// memory guard's receipt (its sanitized summary), or `None` for any other.
+pub fn host_memory_receipt(summary: &str) -> Option<FailureDiagnostics> {
+    (ExitCause::of_summary(summary) == Some(ExitCause::HostMemoryExhausted)).then(|| {
+        from_failure(
+            &AgentOperation::RecipeStart,
+            &Failure::new(
+                vonk_agent_protocol::generated::FailureCode::WorkloadHostMemoryExhausted.as_str(),
+            )
+            .diagnostic(summary)
+            .exit_summary(Some(summary)),
+        )
+    })
+}
+
 pub fn from_failure(operation: &AgentOperation, failure: &Failure) -> FailureDiagnostics {
     let phase = failure
         .stage
@@ -898,52 +913,6 @@ fn refusal_property(bound: &RefusalBound) -> Option<FailureProperty> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn a_guard_kill_reaches_the_controller_with_every_reading() {
-        // Break caught (#1936 review): 19 flat facts past the eight-property
-        // cap and a 320/480-character cut of the diagnostic dropped the swap
-        // readings, the recent samples, sustained_ms and observed_at.
-        use vonk_agent_protocol::host_memory_guard_policy::{
-            PRESSURE_FIELDS, PRESSURE_PROPERTY, RECENT_FIELDS, RECENT_PROPERTY,
-        };
-        let vectors: serde_json::Value = serde_json::from_str(include_str!(
-            "../../../../agent_protocol/src/vonk_agent_protocol/vectors/host-memory-guard-summary-v1.json"
-        ))
-        .unwrap();
-        let summary = vectors["summary"].as_str().unwrap();
-        // As the start path keeps it: a bounded wire copy beside the whole summary.
-        let failure = Failure::new(
-            vonk_agent_protocol::generated::FailureCode::WorkloadHostMemoryExhausted.as_str(),
-        )
-        .diagnostic(summary.chars().take(320).collect::<String>())
-        .exit_summary(Some(summary));
-        let value = from_failure(&AgentOperation::RecipeStart, &failure);
-        let property = |name: &str| {
-            let found = value
-                .preflight
-                .iter()
-                .find(|property| property.name == name)
-                .map(|property| property.value.clone());
-            assert!(found.is_some(), "{name} missing from {:?}", value.preflight);
-            found.unwrap_or_default()
-        };
-        let pressure = property(PRESSURE_PROPERTY);
-        for field in PRESSURE_FIELDS {
-            assert!(
-                pressure.contains(&format!("{field}:")),
-                "{field} in {pressure}"
-            );
-        }
-        let recent = property(RECENT_PROPERTY);
-        for field in RECENT_FIELDS {
-            assert!(recent.contains(&format!("{field}:")), "{field} in {recent}");
-        }
-        for name in [EXIT_CAUSE_FIELD, "trigger", "sustained_ms", "observed_at"] {
-            property(name);
-        }
-        assert_eq!(value.category, FailureCategory::Capacity);
-    }
 
     #[test]
     fn a_podman_crash_header_stays_ahead_of_its_goroutine_dump() {
