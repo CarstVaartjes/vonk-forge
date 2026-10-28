@@ -38,7 +38,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "SwapPolicy",
             "SWAP_POLICY",
             "swap_policy.rs",
-            &["minimum_gib", "default_gib", "maximum_gib", "tolerance_mib"][..],
+            &[
+                "minimum_gib",
+                "default_gib",
+                "maximum_gib",
+                "tolerance_mib",
+                "release_headroom_gib",
+            ][..],
         ),
         (
             "StoragePolicy",

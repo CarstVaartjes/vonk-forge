@@ -242,7 +242,7 @@ fn a_shrink_while_a_workload_holds_its_pages_keeps_the_old_file_and_waits() {
     assert_eq!(record.state, SwapApplyState::Waiting);
     assert_eq!(record.reason, Some(SwapWaitReason::ReleaseDeferred));
     assert_eq!(record.next_attempt_at, Some(1070));
-    // Once the pages fit in memory with the guard's bar to spare, it converges.
+    // Once the pages fit in memory with the release headroom to spare, it converges.
     kernel.state().available_memory = 60 * GIB;
     helper.reconcile_swap_at(None, false, 1070).unwrap();
     assert_eq!(kernel.total(), 48 * GIB);

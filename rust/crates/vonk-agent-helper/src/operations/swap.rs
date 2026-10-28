@@ -3,14 +3,13 @@
 //!
 //! A change activates the new file before it releases the old one, so the host
 //! is never left with less swap mid-change. An old file is released only while
-//! the pages it holds fit in memory with the host memory guard's stall bar to
+//! the pages it holds fit in memory with the policy's release headroom to
 //! spare; otherwise it stays active (more swap than desired) and the next pass
 //! tries again. Swap the helper does not own (`/swap.img`, fstab) is never
 //! touched. Retries ride inventory and the hourly host-settings pass, bounded
 //! by a persisted deadline, like the GPU clock.
 use super::*;
 use vonk_agent_protocol::generated::{SwapApplyState, SwapCheckpoint, SwapIntent, SwapWaitReason};
-use vonk_agent_protocol::host_memory_guard_policy::STALL_AVAILABLE_BYTES;
 use vonk_agent_protocol::store_retention::{
     HELPER_DATA_ROOT, HOST_SETTING_ATTEMPT_SECONDS as ATTEMPT_SECONDS,
     HOST_SETTING_RECEIPT_BYTES as RECORD_BYTES, HOST_SETTING_RETRY_SECONDS as RETRY_SECONDS,
@@ -455,11 +454,12 @@ impl<R: CommandRunner> OperationExecutor<R> {
                 ),
             ));
         };
-        if old.used_bytes.saturating_add(STALL_AVAILABLE_BYTES) > available {
+        let headroom = u64::from(policy().release_headroom_gib) * GIB;
+        if old.used_bytes.saturating_add(headroom) > available {
             return Err((
                 SwapWaitReason::ReleaseDeferred,
                 format!(
-                    "old swap file {} kept: it holds {} bytes in use and only {available} bytes are available (the memory guard's {STALL_AVAILABLE_BYTES}-byte bar must stay free)",
+                    "old swap file {} kept: it holds {} bytes in use and only {available} bytes are available ({headroom} bytes of headroom must stay free)",
                     old.path.display(),
                     old.used_bytes
                 ),

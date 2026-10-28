@@ -30,6 +30,10 @@ class SwapPolicy(WireModel):
     # (/swap.img's 16 GiB reports 16 GiB minus one page), never a reason for a
     # swap file.
     tolerance_mib: Literal[512] = 512
+    # An old managed swap file is released only while its pages in use plus
+    # this much stay available in memory; otherwise it stays active (more swap,
+    # never less) until they fit.
+    release_headroom_gib: Literal[16] = 16
 
 
 SWAP_POLICY = SwapPolicy()
