@@ -19,6 +19,7 @@ from vonk_agent_protocol import (
     AgentProgress,
     AgentResult,
     ContainerRuntimeAction,
+    InvalidRequestReason,
     SecurityRefusalReason,
     SignedHostHelperGrant,
     UnknownError,
@@ -53,7 +54,7 @@ from ..host_helper_authority import (
     HostRuntimeEvidenceUnavailable,
     HostRuntimeGrantUnsatisfiable,
 )
-from ..http_errors import SecurityHTTPError
+from ..http_errors import DEFAULT_RETRY_AFTER, SecurityHTTPError
 from ..logging import redact_text
 from ..models import AgentOperation, AgentOperationAttempt, Job
 from ..operator_acceptance import ReceiptPolicy, operator_acceptance
@@ -161,10 +162,13 @@ def install_authority_routes(
             return noted
 
     def note_grant(
-        node_id: str, subject: str, *, denied: SecurityRefusalReason | None
+        node_id: str,
+        subject: str,
+        *,
+        denied: SecurityRefusalReason | InvalidRequestReason | None,
     ) -> None:
-        # A grant denied on every ask is shown as repeated evidence; the
-        # answer itself is unchanged, and a granted ask clears it.
+        # A grant denied (or waiting) on every ask is shown as repeated
+        # evidence; the answer itself is unchanged, and a granted ask clears it.
         required = _require_services(services)
         with suppress(SQLAlchemyError), required.sessions.begin() as session:
             if denied is not None:
@@ -187,6 +191,7 @@ def install_authority_routes(
     ) -> SignedHostHelperGrant:
         # A new read of the exact authority precedes each attempt. No grant is
         # issued on unreadable evidence, and this request owns no durable slot.
+        waiting_for: InvalidRequestReason | None = None
         for delay in (0.0, 0.05, 0.1, 0.2):
             if delay:
                 time.sleep(delay)
@@ -200,8 +205,9 @@ def install_authority_routes(
                     detail="grant authority can never bind this attempt",
                     headers={"x-vonk-error-code": refused.reason.value},
                 ) from None
-            except HostRuntimeEvidenceUnavailable:
+            except HostRuntimeEvidenceUnavailable as unavailable:
                 # Evidence not readable yet: observe again, then retry later.
+                waiting_for = unavailable.waiting_for
                 continue
             except HostHelperAuthorityError as refused:
                 try:
@@ -220,6 +226,18 @@ def install_authority_routes(
                 continue
             note_grant(node_id, subject, denied=None)
             return grant
+        if waiting_for is not None:
+            # The plan's run is not ready for it: the agent asks again later,
+            # and the wait says what it waits for, on the node and the answer.
+            note_grant(node_id, subject, denied=waiting_for)
+            raise HTTPException(
+                status_code=503,
+                detail="grant authority waits for the plan's run",
+                headers={
+                    "x-vonk-error-code": waiting_for.value,
+                    "retry-after": str(DEFAULT_RETRY_AFTER),
+                },
+            )
         raise UnknownOutcomeError(
             "grant authority observation is unavailable",
             reason=WaitReason.OBSERVATION_UNAVAILABLE,

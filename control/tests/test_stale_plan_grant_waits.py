@@ -1,16 +1,22 @@
-"""A Start whose durable authority moved on waits; it is never a security refusal.
+"""A grant whose plan is not current answers by behaviour, never by default 403.
 
 The 2026-10-28 dual DSV4 start: both ranks asked for their Start grant while
-the Controller's own records said the plan was not current yet (or any more),
-and the grant route answered 403 ``host runtime authority denied``. The agent
-ends a 403 as a security failure, so a transient conflict became a terminal
-refusal. Stale authority is the agent's wait (503, ask again, bounded by the
-attempt); a refused binding and a request that differs from the exact plan
-stay 403.
+the Controller's own records did not bind the plan, and the grant route
+answered 403 ``host runtime authority denied``. The agent ends a 403 as a
+security failure, so a conflict became a terminal refusal. Now:
+
+* a run that is not ready for its plan (``NOT_READY``) is a wait: 503 naming
+  what it waits for, recorded as repeated evidence, asked again;
+* a plan the records can never bind again (a superseded generation, a remapped
+  installation, a Stop request without its own document) is a definite 409:
+  the old order ends at once and the newer order is granted;
+* a refused binding and a request that differs from the exact plan stay 403.
 """
 
 from __future__ import annotations
 
+import hashlib
+import json
 from collections.abc import Callable
 
 import pytest
@@ -24,7 +30,9 @@ from vonk_agent_protocol import (
     SecurityRefusalReason,
     SignedHostHelperGrant,
     WaitReason,
+    canonical_message,
 )
+from vonk_agent_protocol.recipe_operations import RecipeStartPayload
 from vonk_control import host_helper_authority
 from vonk_control.host_helper_authority import (
     HostHelperAuthorityError,
@@ -39,8 +47,26 @@ from vonk_control.host_runtime_plan_authority import (
     RuntimePlanEvidenceUnavailable,
     RuntimePlanUnsatisfiable,
 )
-from vonk_control.models import AgentOperation, RecipeInstallation, RecipeRun
+from vonk_control.models import (
+    AgentOperation,
+    ClusterMapping,
+    Job,
+    RecipeInstallation,
+    RecipeRun,
+)
+from vonk_control.recipe_execution_contract import (
+    parse_stored_run_plan,
+    run_plan_document,
+)
 
+from .test_agent_api import (
+    NODE_A,
+    STOP_PAYLOAD,
+    agent_headers,
+    make_agent_system,
+    parent,
+)
+from .test_evidence_repeats import LIMIT, _repeating
 from .test_host_helper_authority import (
     FENCE,
     RUNTIME_INSTALLATION_ID,
@@ -49,22 +75,34 @@ from .test_host_helper_authority import (
     runtime_plan_binding,
     runtime_service,
 )
+from .test_host_runtime_grant_answers import _BODY
 
 _NODE = "spk_" + "1" * 32
+_JOB_ID = "20000000-0000-4000-8000-000000000002"
 _OPERATION_ID = "30000000-0000-4000-8000-000000000003"
 
 
-def _ask_start(
-    service: HostRuntimeAuthorityService, binding: _RuntimePlanBinding
+def _ask(
+    service: HostRuntimeAuthorityService,
+    binding: _RuntimePlanBinding,
+    action: ContainerRuntimeAction = ContainerRuntimeAction.START,
 ) -> SignedHostHelperGrant:
     return service.issue_grant(
         node_id=_NODE,
         fence=FENCE,
-        action=ContainerRuntimeAction.START,
+        action=action,
         request_sha256="e" * 64,
         certificate_serial="certificate-1",
         **binding,
     )
+
+
+def _answer(
+    service: HostRuntimeAuthorityService, binding: _RuntimePlanBinding
+) -> HostHelperAuthorityError:
+    with pytest.raises(HostHelperAuthorityError) as answered:
+        _ask(service, binding)
+    return answered.value
 
 
 def _installation(session: Session) -> RecipeInstallation:
@@ -79,50 +117,126 @@ def _run(session: Session) -> RecipeRun:
     return run
 
 
-def _set(
-    row: Callable[[Session], object], field: str, value: object
-) -> Callable[[Session], None]:
-    return lambda session: setattr(row(session), field, value)
-
-
-#: (drift, heal): the Controller's own records move on, then settle again.
-_DRIFTS = {
-    "installation-not-installed": (
-        _set(_installation, "state", InstallationState.PARTIAL),
-        _set(_installation, "state", InstallationState.INSTALLED),
-    ),
-    "run-no-longer-starting": (
-        _set(_run, "state", RunState.STOPPING),
-        _set(_run, "state", RunState.STARTING),
-    ),
-    "run-plan-superseded": (
-        _set(_run, "plan_digest", "f" * 64),
-        _set(_run, "plan_digest", "a" * 64),
-    ),
-}
-
-
-@pytest.mark.parametrize("drift", sorted(_DRIFTS))
-def test_a_start_whose_authority_moved_on_waits_then_is_granted(drift: str) -> None:
-    # Wrong implementation (main): the stale plan was a 403 security refusal
-    # (``helper_request_plan_binding_invalid``) the agent ends the start with.
-    move_on, settle = _DRIFTS[drift]
+def test_an_installation_under_repair_waits_then_its_start_is_granted() -> None:
+    # Wrong implementation (main): a 403 security refusal the agent ends the
+    # start with. A reconcile repairing the installation (PARTIAL, then
+    # INSTALLED again) is the production event that clears it.
     service = runtime_service()
     binding = runtime_plan_binding(service, ContainerRuntimeAction.START)
     with service._sessions.begin() as session:
-        move_on(session)
-    with pytest.raises(HostHelperAuthorityError) as answered:
-        _ask_start(service, binding)
-    assert type(answered.value) is HostRuntimeEvidenceUnavailable
-    assert isinstance(answered.value.__cause__, RuntimePlanAuthorityStale)
+        _installation(session).state = InstallationState.PARTIAL
+    waiting = _answer(service, binding)
+    assert type(waiting) is HostRuntimeEvidenceUnavailable
+    assert waiting.waiting_for is InvalidRequestReason.NOT_READY
+    assert isinstance(waiting.__cause__, RuntimePlanAuthorityStale)
 
-    # The records settle: the same exact request is granted, no new attempt.
     with service._sessions.begin() as session:
-        settle(session)
-    grant = _ask_start(service, binding)
-    operation = grant.claims.operation
+        _installation(session).state = InstallationState.INSTALLED
+    operation = _ask(service, binding).claims.operation
     assert isinstance(operation, ExecuteContainerRuntimeRequestOperation)
     assert operation.start_plan_sha256 == binding["start_plan_sha256"]
+
+
+def test_a_run_that_is_stopping_is_a_named_wait_not_a_refusal() -> None:
+    # A Stop under way does not revert; this order's attempt bounds the wait
+    # (the UNKNOWN recovery window, or a distributed start's deadline).
+    service = runtime_service()
+    binding = runtime_plan_binding(service, ContainerRuntimeAction.START)
+    with service._sessions.begin() as session:
+        _run(session).state = RunState.STOPPING
+    waiting = _answer(service, binding)
+    assert type(waiting) is HostRuntimeEvidenceUnavailable
+    assert waiting.waiting_for is InvalidRequestReason.NOT_READY
+
+
+def _bump_generation(session: Session) -> None:
+    # What distributed recovery does (``distributed_recovery/coordinator.py``):
+    # the run's generation and its stored plan move to the next generation.
+    run = _run(session)
+    run.run_generation += 1
+    run.plan = run_plan_document(
+        parse_stored_run_plan(run.plan).model_copy(
+            update={"run_generation": run.run_generation}
+        )
+    )
+
+
+def _remap_installation(session: Session) -> None:
+    # A remapped installation: its mapping is formed again at a new generation.
+    installation = _installation(session)
+    mapping = session.get(ClusterMapping, installation.mapping_id)
+    assert mapping is not None
+    mapping.generation += 1
+    installation.mapping_generation = mapping.generation
+
+
+def _reissue_for_current_generation(session: Session) -> None:
+    # The newer order recovery issues: this node's Start of the run's current
+    # generation, recorded in its parent's manifest.
+    operation = session.get(AgentOperation, _OPERATION_ID)
+    job = session.get(Job, _JOB_ID)
+    assert operation is not None and job is not None
+    start = RecipeStartPayload.model_validate_json(
+        canonical_message(operation.payload)
+    ).model_copy(update={"run_generation": _run(session).run_generation})
+    document = json.loads(canonical_message(start))
+    operation.payload = document
+    operation.payload_digest = hashlib.sha256(canonical_message(document)).hexdigest()
+    manifest = json.loads(canonical_message(job.payload))
+    for phase in manifest["phases"]:
+        for item in phase:
+            if item["operation_id"] == _OPERATION_ID:
+                item["payload"] = document
+    job.payload = manifest
+    job.payload_digest = hashlib.sha256(canonical_message(manifest)).hexdigest()
+
+
+_SUPERSESSIONS: dict[str, Callable[[Session], None]] = {
+    "recovery-generation-bump": _bump_generation,
+    "installation-remap": _remap_installation,
+}
+
+
+@pytest.mark.parametrize("event", sorted(_SUPERSESSIONS))
+def test_a_superseded_start_ends_at_once_with_a_definite_answer(event: str) -> None:
+    # Wrong implementation (main): a 403 security refusal; a 503 would keep
+    # the old order observing a plan that can never be current again.
+    service = runtime_service()
+    binding = runtime_plan_binding(service, ContainerRuntimeAction.START)
+    with service._sessions.begin() as session:
+        _SUPERSESSIONS[event](session)
+    ended = _answer(service, binding)
+    assert type(ended) is HostRuntimeGrantUnsatisfiable
+    assert ended.reason is InvalidRequestReason.SUPERSEDED
+
+
+def test_the_newer_generations_start_is_granted_after_the_old_one_ends() -> None:
+    service = runtime_service()
+    old = runtime_plan_binding(service, ContainerRuntimeAction.START)
+    with service._sessions.begin() as session:
+        _bump_generation(session)
+    assert type(_answer(service, old)) is HostRuntimeGrantUnsatisfiable
+
+    with service._sessions.begin() as session:
+        _reissue_for_current_generation(session)
+    fresh = runtime_plan_binding(service, ContainerRuntimeAction.START)
+    assert fresh["run_generation"] == 2
+    operation = _ask(service, fresh).claims.operation
+    assert isinstance(operation, ExecuteContainerRuntimeRequestOperation)
+    assert operation.run_generation == 2
+
+
+def test_a_stop_request_without_its_own_document_is_definite() -> None:
+    # Wrong implementation (main): a 403 for the agent's own malformed Stop
+    # request; it never changes by asking again, so it is no wait either.
+    service = runtime_service()
+    binding = runtime_plan_binding(service, ContainerRuntimeAction.STOP)
+    with pytest.raises(HostHelperAuthorityError) as answered:
+        _ask(
+            service, {**binding, "stop_plan_sha256": None}, ContainerRuntimeAction.STOP
+        )
+    assert type(answered.value) is HostRuntimeGrantUnsatisfiable
+    assert answered.value.reason is InvalidRequestReason.MALFORMED
 
 
 def test_a_refused_binding_and_a_differing_request_stay_security_refusals() -> None:
@@ -134,11 +248,10 @@ def test_a_refused_binding_and_a_differing_request_stay_security_refusals() -> N
         {**binding, "runtime_installation_id": RUNTIME_RUN_ID},
     ]
     for changed in differing:
-        with pytest.raises(HostHelperAuthorityError) as refused:
-            _ask_start(service, changed)
-        assert type(refused.value) is HostHelperAuthorityError
+        refused = _answer(service, changed)
+        assert type(refused) is HostHelperAuthorityError
         assert (
-            refused.value.denial_reason
+            refused.denial_reason
             is SecurityRefusalReason.HELPER_REQUEST_PLAN_BINDING_INVALID
         )
     # The operation record no longer matches its own digest: refused.
@@ -146,10 +259,45 @@ def test_a_refused_binding_and_a_differing_request_stay_security_refusals() -> N
         operation = session.get(AgentOperation, _OPERATION_ID)
         assert operation is not None
         operation.payload_digest = "0" * 64
-    with pytest.raises(HostHelperAuthorityError) as refused:
-        _ask_start(service, binding)
-    assert type(refused.value) is HostHelperAuthorityError
-    assert isinstance(refused.value.__cause__, RuntimePlanAuthorityRefused)
+    refused = _answer(service, binding)
+    assert type(refused) is HostHelperAuthorityError
+    assert isinstance(refused.__cause__, RuntimePlanAuthorityRefused)
+
+
+class _WaitingAuthority:
+    def issue_grant(self, **_arguments: object) -> object:
+        raise HostRuntimeEvidenceUnavailable(
+            "plan is not ready", waiting_for=InvalidRequestReason.NOT_READY
+        )
+
+
+def test_a_waiting_grant_names_its_cause_and_repeats_as_attention(tmp_path) -> None:
+    # Wrong implementation: the wait answered a generic observation-unavailable
+    # 503 and recorded nothing, so a start waiting on its run was silent.
+    client, services, _codec, clock = make_agent_system(tmp_path)
+    object.__setattr__(services, "host_runtime_authority", _WaitingAuthority())
+    services.operations.enqueue(
+        parent(services.sessions, clock).id,
+        NODE_A,
+        "recipe.stop",
+        "a" * 64,
+        STOP_PAYLOAD,
+    )
+    claim = client.post("/agent/claim", headers=agent_headers(NODE_A, "serial-a"))
+    body = _BODY | {"fence": claim.json()["fence"]}
+    for _ in range(LIMIT):
+        response = client.post(
+            "/agent/host-runtime/grant",
+            headers=agent_headers(NODE_A, "serial-a"),
+            json=body,
+        )
+        assert response.status_code == 503
+        assert int(response.headers["retry-after"]) >= 1
+        assert response.headers["x-vonk-error-code"] == (
+            InvalidRequestReason.NOT_READY.value
+        )
+    [attention] = _repeating(services.sessions, NODE_A, clock.now)
+    assert InvalidRequestReason.NOT_READY.value in attention
 
 
 #: What each typed plan-authority answer becomes at the grant: one row per
@@ -164,7 +312,7 @@ _ANSWERS: dict[type[RuntimePlanAuthorityError], tuple[Exception, type]] = {
         HostHelperAuthorityError,
     ),
     RuntimePlanAuthorityStale: (
-        RuntimePlanAuthorityStale("stale", reason=InvalidRequestReason.SUPERSEDED),
+        RuntimePlanAuthorityStale("not ready", reason=InvalidRequestReason.NOT_READY),
         HostRuntimeEvidenceUnavailable,
     ),
     RuntimePlanEvidenceUnavailable: (
@@ -174,7 +322,7 @@ _ANSWERS: dict[type[RuntimePlanAuthorityError], tuple[Exception, type]] = {
         HostRuntimeEvidenceUnavailable,
     ),
     RuntimePlanUnsatisfiable: (
-        RuntimePlanUnsatisfiable("never", reason=InvalidRequestReason.INCOMPLETE),
+        RuntimePlanUnsatisfiable("never", reason=InvalidRequestReason.SUPERSEDED),
         HostRuntimeGrantUnsatisfiable,
     ),
 }
@@ -185,11 +333,16 @@ def test_every_plan_authority_answer_is_classified() -> None:
 
 
 @pytest.mark.parametrize(
+    "action", [ContainerRuntimeAction.START, ContainerRuntimeAction.STOP]
+)
+@pytest.mark.parametrize(
     "kind",
     [pytest.param(kind, id=kind.__name__) for kind in _ANSWERS],
 )
 def test_each_plan_authority_answer_reaches_the_grant_as_classified(
-    kind: type[RuntimePlanAuthorityError], monkeypatch: pytest.MonkeyPatch
+    kind: type[RuntimePlanAuthorityError],
+    action: ContainerRuntimeAction,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     raised, expected = _ANSWERS[kind]
 
@@ -197,8 +350,8 @@ def test_each_plan_authority_answer_reaches_the_grant_as_classified(
         raise raised
 
     service = runtime_service()
-    binding = runtime_plan_binding(service, ContainerRuntimeAction.START)
+    binding = runtime_plan_binding(service, action)
     monkeypatch.setattr(host_helper_authority, "derive_runtime_plan_binding", answer)
     with pytest.raises(HostHelperAuthorityError) as answered:
-        _ask_start(service, binding)
+        _ask(service, binding, action)
     assert type(answered.value) is expected

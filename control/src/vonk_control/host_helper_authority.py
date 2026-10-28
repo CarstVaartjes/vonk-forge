@@ -104,7 +104,14 @@ class HostRuntimeGrantUnsatisfiable(HostHelperAuthorityError):
 
 
 class HostRuntimeEvidenceUnavailable(HostHelperAuthorityError):
-    """The evidence that would authorize the plan is not readable now."""
+    """The evidence that would authorize the plan is not readable now, or the
+    plan's own run is not ready for it (``waiting_for``): ask again later."""
+
+    def __init__(
+        self, message: str, *, waiting_for: InvalidRequestReason | None = None
+    ) -> None:
+        super().__init__(message)
+        self.waiting_for = waiting_for
 
 
 def _load_private_key(path: Path) -> ed25519.Ed25519PrivateKey:
@@ -694,13 +701,17 @@ class HostRuntimeAuthorityService:
             except RuntimePlanUnsatisfiable as error:
                 reason = error.typed_reason or InvalidRequestReason.INCOMPLETE
                 raise HostRuntimeGrantUnsatisfiable(reason) from error
-            except (RuntimePlanEvidenceUnavailable, RuntimePlanAuthorityStale) as error:
-                # Unreadable evidence, or the Controller's own records moved on
-                # (a run not yet or no longer starting, a superseded identity):
-                # never a security refusal. The agent waits and asks again; the
-                # attempt's bounded observation ends an order that stays stale.
+            except RuntimePlanEvidenceUnavailable as error:
                 raise HostRuntimeEvidenceUnavailable(
-                    "container runtime lifecycle authority is not current"
+                    "container runtime lifecycle evidence is unavailable"
+                ) from error
+            except RuntimePlanAuthorityStale as error:
+                # The run is not ready for this plan now (an installation not
+                # installed, a run not starting): never a security refusal. The
+                # agent waits and asks again within its attempt's bounds.
+                raise HostRuntimeEvidenceUnavailable(
+                    "container runtime lifecycle plan is not ready",
+                    waiting_for=error.typed_reason or InvalidRequestReason.NOT_READY,
                 ) from error
             except (RuntimePlanAuthorityError, TypeError, ValueError) as error:
                 raise HostHelperAuthorityError(
