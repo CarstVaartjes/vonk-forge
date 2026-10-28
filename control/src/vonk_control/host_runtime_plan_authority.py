@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import re
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -53,10 +53,6 @@ class RuntimePlanAuthorityError(ValueError):
 
 class RuntimePlanAuthorityRefused(SecurityRefusalError, RuntimePlanAuthorityError):
     """The requested plan is not the one this durable owner and digest bind."""
-
-
-class RuntimePlanAuthorityStale(InvalidRequestError, RuntimePlanAuthorityError):
-    """Durable state moved on: the plan is stale and the caller must refresh it."""
 
 
 class RuntimePlanEvidenceUnavailable(UnknownOutcomeError, RuntimePlanAuthorityError):
@@ -119,17 +115,23 @@ def derive_runtime_plan_binding(
         from .cancelled_runtime import cancellation_stop_current
         from .job_documents import RecipeStopParent
 
-        document = read_row_column(parent, "payload")
-        if not cancellation_stop_current(session, parent, operation) or (
-            isinstance(document, RecipeStopParent)
-            and document.owner_kind == WaitOwnerKind.ARTIFACT_JOB
-            and stop_plan_sha256 != operation.payload_digest
-        ):
-            raise RuntimePlanAuthorityStale(
+        if not cancellation_stop_current(session, parent, operation):
+            # The cancellation's runtime owner moved on: this order can never
+            # be its Stop again. A definite answer, never a refusal.
+            raise RuntimePlanUnsatisfiable(
                 "accepted cancellation runtime owner changed",
                 reason=InvalidRequestReason.SUPERSEDED,
             )
-        return _own_stop_binding(parent, operation, stop_plan_sha256)
+        binding = _own_stop_binding(parent, operation, stop_plan_sha256)
+        document = read_row_column(parent, "payload")
+        if (
+            isinstance(document, RecipeStopParent)
+            and document.owner_kind == WaitOwnerKind.ARTIFACT_JOB
+        ):
+            # A cancellation's Stop runs exactly its accepted order: the grant
+            # binds that document, so the exact-plan comparison refuses another.
+            return replace(binding, stop_plan_sha256=operation.payload_digest)
+        return binding
     _validate_child_record(parent, operation, node_id)
     if operation.kind not in {
         AgentOperationKind.RECIPE_START.value,
@@ -174,6 +176,13 @@ def derive_runtime_plan_binding(
 
 _DIGEST = re.compile(r"[0-9a-f]{64}")
 
+#: A run its Start or JobRun can never be current for again in this
+#: generation: every writer of these states ends the run, and a restart is a
+#: new generation (``distributed_recovery/coordinator.py``).
+_RUN_ENDED = frozenset(
+    {RunState.STOPPING, RunState.STOPPED, RunState.FAILED, RunState.LOST}
+)
+
 
 def _own_stop_binding(
     parent: Job, operation: AgentOperation, stop_plan_sha256: str | None
@@ -198,14 +207,14 @@ def _own_stop_binding(
         else _parse_job_run(operation.payload)
     )
     target = own_runtime_target(parent, order)
-    # Neither is ever an end of the cleanup: the agent waits and asks again.
+    # Neither changes for this request: a definite answer, never a refusal.
     if target is None:
-        raise RuntimePlanAuthorityStale(
+        raise RuntimePlanUnsatisfiable(
             "the order is not its parent's own",
             reason=InvalidRequestReason.MALFORMED,
         )
     if stop_plan_sha256 is None or not _DIGEST.fullmatch(stop_plan_sha256):
-        raise RuntimePlanAuthorityStale(
+        raise RuntimePlanUnsatisfiable(
             "the Stop document digest is missing",
             reason=InvalidRequestReason.MALFORMED,
         )
@@ -246,9 +255,13 @@ def _service_run_authority(
         or parent.authority_revision
         != authority.revision.content_digest.removeprefix("sha256:")
     ):
-        raise RuntimePlanAuthorityStale(
+        raise RuntimePlanUnsatisfiable(
             "service Start identity is stale",
             reason=InvalidRequestReason.SUPERSEDED,
+        )
+    if run.state in _RUN_ENDED:
+        raise RuntimePlanUnsatisfiable(
+            "service Start's run has ended", reason=InvalidRequestReason.SUPERSEDED
         )
     if (
         run.state not in {RunState.STARTING, RunState.RUNNING}
@@ -256,8 +269,10 @@ def _service_run_authority(
         or authority.mapping.state != "ready"
         or authority.revision.state != "active"
     ):
-        raise RuntimePlanAuthorityStale(
-            "service Start is no longer authorized",
+        # No producer readies these again for this order (a mapping is born
+        # ready, an installation is repaired only by a new request): definite.
+        raise RuntimePlanUnsatisfiable(
+            "service Start's run is not ready for it",
             reason=InvalidRequestReason.NOT_READY,
         )
     return authority
@@ -293,22 +308,26 @@ def _job_run_authority(
         or request.installation_id != run.installation_id
         or request.mapping_id != run.mapping_id
         or request.plan_digest != run.plan_digest
+        or request.run_generation != run.run_generation
         or parent.authority_revision
         != authority.revision.content_digest.removeprefix("sha256:")
     ):
-        raise RuntimePlanAuthorityStale(
+        raise RuntimePlanUnsatisfiable(
             "artifact JobRun identity is stale",
             reason=InvalidRequestReason.SUPERSEDED,
         )
+    if run.state in _RUN_ENDED:
+        raise RuntimePlanUnsatisfiable(
+            "artifact JobRun's run has ended", reason=InvalidRequestReason.SUPERSEDED
+        )
     if (
-        request.run_generation != run.run_generation
-        or run.state != RunState.RUNNING
+        run.state != RunState.RUNNING
         or authority.installation.state != InstallationState.INSTALLED
         or authority.mapping.state != "ready"
         or authority.revision.state != "active"
     ):
-        raise RuntimePlanAuthorityStale(
-            "artifact JobRun start is no longer authorized",
+        raise RuntimePlanUnsatisfiable(
+            "artifact JobRun's run is not ready for it",
             reason=InvalidRequestReason.NOT_READY,
         )
     return authority
@@ -379,7 +398,7 @@ def _load_run_authority(session: Session, run: RecipeRun | None) -> _RunAuthorit
         or placement != {(node.node_id, node.rank, node.role) for node in stored.nodes}
         or placement != {(node.node_id, node.rank, node.role) for node in mapping_nodes}
     ):
-        raise RuntimePlanAuthorityStale(
+        raise RuntimePlanUnsatisfiable(
             "recipe run authority is stale",
             reason=InvalidRequestReason.SUPERSEDED,
         )

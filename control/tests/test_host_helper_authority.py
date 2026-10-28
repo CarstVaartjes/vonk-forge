@@ -43,7 +43,7 @@ from vonk_control.host_helper_authority import (
     HostRuntimeEvidenceUnavailable,
 )
 from vonk_control.host_runtime_plan_authority import (
-    RuntimePlanAuthorityStale,
+    RuntimePlanUnsatisfiable,
     derive_runtime_plan_binding,
 )
 from vonk_control.models import (
@@ -1025,7 +1025,7 @@ def test_a_start_grant_binds_the_recipe_content_not_the_revision_row(
         mapping.recipe_revision_id = "b2000000-0000-4000-8000-00000000000b"
 
     if not same_content:
-        with pytest.raises(RuntimePlanAuthorityStale):
+        with pytest.raises(RuntimePlanUnsatisfiable):
             runtime_plan_binding(service, ContainerRuntimeAction.START)
         return
     binding = runtime_plan_binding(service, ContainerRuntimeAction.START)

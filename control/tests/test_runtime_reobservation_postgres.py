@@ -400,7 +400,7 @@ def test_worker_recovers_retained_output_receipt_as_delivery_only(service, exit_
         assert attempt is not None and attempt.lease_deadline == deadline
 
 
-@pytest.mark.parametrize("change", ["owner", "revoked", "identity"])
+@pytest.mark.parametrize("change", ["owner", "revoked", "identity", "document"])
 def test_accepted_cancel_stop_rechecks_authority_before_grant_and_receipt(
     tmp_path, postgres_engine, change
 ):
@@ -449,6 +449,10 @@ def test_accepted_cancel_stop_rechecks_authority_before_grant_and_receipt(
             node.workload_intent_ordinal += 1
         elif change == "revoked":
             node.revoked_at = clock.now
+        elif change == "document":
+            # Another Stop document than the accepted order: the only exact
+            # document check of a cancellation Stop is a security refusal.
+            arguments["stop_plan_sha256"] = "0" * 64
         else:
             operation = session.scalar(
                 select(AgentOperation).where(AgentOperation.kind == Kind.RECIPE_STOP)
@@ -457,13 +461,16 @@ def test_accepted_cancel_stop_rechecks_authority_before_grant_and_receipt(
             operation.payload = stop.payload.model_copy(
                 update={"target_runtime_id": str(uuid4())}
             ).model_dump(mode="json")
-    with pytest.raises(HostHelperAuthorityError):
+    with pytest.raises(HostHelperAuthorityError) as refused:
         authority.issue_grant(
             node_id=node_id,
             certificate_serial="serial-0",
             action=ContainerRuntimeAction.STOP,
             **arguments,
         )
+    if change == "document":
+        assert type(refused.value) is HostHelperAuthorityError
+        return
     with pytest.raises(StaleAgentFence):
         queue.record_result(
             AgentResult(
