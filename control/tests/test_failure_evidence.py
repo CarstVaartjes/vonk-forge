@@ -14,6 +14,8 @@ from vonk_agent_protocol import AgentOperation as ProtocolAgentOperation
 from vonk_agent_protocol import AgentResult, LifecycleState
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.failure_evidence import FailureDiagnostics
+from vonk_agent_protocol.optional_evidence import EvidenceDrop
+from vonk_agent_protocol.reason_codes import AgentEvidenceCode
 from vonk_control import agent_operation_states as aos
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.failure_evidence import (
@@ -670,6 +672,63 @@ def test_a_late_failure_keeps_its_diagnostics_as_an_on_time_one_would(
     assert bundle.diagnostics.stderr.text == stderr
     # The same bytes delivered again are the same evidence, not a conflict.
     assert jobs.record_late_result(late) is True
+
+
+def test_a_failure_whose_diagnostics_were_dropped_says_what_was_lost(
+    durable_evidence,
+):
+    """A dropped evidence group is stored and shown with the field that refused it.
+
+    Wrong implementation caught: ingress dropped a failure's whole diagnostics
+    for one invalid field and recorded the code only in a log line, so the
+    stored attempt and its evidence download showed nothing at all about why
+    (the 2026-10-27 page-cache report strings: every failed start's
+    diagnostics lost silently).
+    """
+
+    jobs, sessions, clock, evidence = durable_evidence
+    operation = _enqueue_distribution(jobs, sessions, clock)
+    claim = claim_agent(jobs, NODE_A, "serial-a")
+    assert claim is not None
+    diagnostics = collect_failure(
+        FailedAttempt.model_validate(item()), now=NOW
+    ).diagnostics.model_dump(mode="json")
+    diagnostics["phase"] = ""
+    # FastAPI hands the decoded body to the model: Python mode.
+    report = AgentResult.model_validate(
+        {
+            **_claim_envelope(claim),
+            "state": "failed",
+            "result": {
+                "status": "failed",
+                "error_code": "artifact_distribution_failed",
+                "reason": "transfer refused",
+                "failure_kind": "temporary-dependency",
+                "diagnostics": diagnostics,
+            },
+        }
+    )
+    drop = EvidenceDrop(
+        code=AgentEvidenceCode.FAILURE_DIAGNOSTICS_DROPPED,
+        location="result.diagnostics.phase",
+        error_type="string_too_short",
+    )
+    assert report.evidence_drops == (drop,)
+    jobs.record_result(report)
+
+    with sessions() as session:
+        stored = session.scalar(
+            select(AgentOperationAttempt).where(
+                AgentOperationAttempt.operation_id == operation.id
+            )
+        )
+        assert stored is not None and stored.result is not None
+        assert stored.result["dropped_evidence"] == [drop.model_dump(mode="json")]
+    bundle = evidence.read(operation.id, 1)
+    assert (
+        f"{drop.code.value} at {drop.location} ({drop.error_type})"
+        in bundle.collector_errors
+    )
 
 
 def test_superseded_lease_lapse_without_a_receipt_is_not_fabricated(tmp_path):
