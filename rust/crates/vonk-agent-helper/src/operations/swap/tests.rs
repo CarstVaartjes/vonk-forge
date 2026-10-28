@@ -82,7 +82,10 @@ impl CommandRunner for Kernel {
                     used_bytes: 0,
                 });
             }
-            SWAPOFF => state.active.retain(|swap| swap.path != path),
+            // The kernel matches the file, not the path it prints.
+            SWAPOFF => state
+                .active
+                .retain(|swap| swap.path.file_name() != path.file_name()),
             other => panic!("unexpected {other}"),
         }
         Ok(CommandOutput {
@@ -329,7 +332,7 @@ fn a_reboot_or_crash_leftover_is_removed_and_the_file_recreated() {
 }
 
 #[test]
-fn an_older_generation_never_overrides_and_a_conflicting_one_is_refused() {
+fn an_older_generation_never_overrides_and_a_changed_default_in_the_same_one_re_plans() {
     let temp = tempfile::tempdir().unwrap();
     let kernel = Kernel::new();
     let helper = helper(temp.path(), &kernel);
@@ -340,15 +343,74 @@ fn an_older_generation_never_overrides_and_a_conflicting_one_is_refused() {
         .reconcile_swap_at(Some(&intent(4, 32)), false, 1010)
         .unwrap();
     assert_eq!(kernel.total(), 96 * GIB);
-    assert!(matches!(
-        helper.reconcile_swap_at(Some(&intent(5, 32)), false, 1020),
-        Err(OperationError::InvalidOperation)
-    ));
+    // A Controller release that changes the policy default keeps the
+    // selection generation: the signed grant steers, never a refusal.
+    helper
+        .reconcile_swap_at(Some(&intent(5, 32)), false, 1020)
+        .unwrap();
+    assert_eq!(kernel.total(), 32 * GIB);
+    assert_eq!(checkpoint(temp.path()).desired, intent(5, 32));
     assert!(matches!(
         helper.reconcile_swap_at(Some(&intent(6, 129)), false, 1030),
         Err(OperationError::InvalidOperation)
     ));
-    assert_eq!(kernel.total(), 96 * GIB);
+    assert_eq!(kernel.total(), 32 * GIB);
+}
+
+#[test]
+fn a_helper_restart_that_detaches_its_mount_keeps_the_live_file_managed() {
+    let temp = tempfile::tempdir().unwrap();
+    let kernel = Kernel::new();
+    let helper = helper(temp.path(), &kernel);
+    helper
+        .reconcile_swap_at(Some(&intent(1, 64)), false, 1000)
+        .unwrap();
+    let live = managed_files(temp.path());
+    // A restarted helper has a new private mount namespace: the kernel now
+    // prints the file through the detached mount of the old one.
+    for swap in &mut kernel.state().active {
+        if swap.path != Path::new(OS_SWAP) {
+            swap.path = Path::new("/swap").join(swap.path.file_name().unwrap());
+        }
+    }
+    helper.reconcile_swap_at(None, true, 5000).unwrap();
+    assert_eq!(
+        managed_files(temp.path()),
+        live,
+        "the live file is never unlinked"
+    );
+    assert_eq!(kernel.total(), 64 * GIB);
+    assert_eq!(kernel.commands().len(), 3, "converged: nothing recreated");
+    // And it can still be released by its own path.
+    helper
+        .reconcile_swap_at(Some(&intent(2, 16)), false, 5010)
+        .unwrap();
+    assert_eq!(kernel.total(), 16 * GIB - HEADER_BYTES);
+    assert!(managed_files(temp.path()).is_empty());
+}
+
+#[test]
+fn an_interrupted_swapoff_keeps_the_old_file_active_and_the_next_pass_releases_it() {
+    let temp = tempfile::tempdir().unwrap();
+    let kernel = Kernel::new();
+    let helper = helper(temp.path(), &kernel);
+    helper
+        .reconcile_swap_at(Some(&intent(1, 96)), false, 1000)
+        .unwrap();
+    kernel.state().fail = Some(SWAPOFF);
+    helper
+        .reconcile_swap_at(Some(&intent(2, 64)), false, 1010)
+        .unwrap();
+    assert!(kernel.total() >= 96 * GIB, "never less swap than before");
+    assert_eq!(managed_files(temp.path()).len(), 2);
+    let record = checkpoint(temp.path());
+    assert_eq!(record.state, SwapApplyState::Waiting);
+    assert_eq!(record.reason, Some(SwapWaitReason::ReleaseDeferred));
+    kernel.state().fail = None;
+    helper.reconcile_swap_at(None, false, 1070).unwrap();
+    assert_eq!(kernel.total(), 64 * GIB);
+    assert_eq!(managed_files(temp.path()).len(), 1);
+    assert_eq!(checkpoint(temp.path()).state, SwapApplyState::Applied);
 }
 
 #[test]
@@ -384,14 +446,6 @@ fn the_process_boundary_accepts_only_managed_swap_paths() {
             managed
         ]
     ));
-}
-
-#[test]
-fn the_agent_reads_the_receipt_the_helper_publishes() {
-    assert_eq!(
-        OBSERVATION_FILE,
-        vonk_agent_protocol::swap::OBSERVATION_FILE
-    );
 }
 
 #[test]

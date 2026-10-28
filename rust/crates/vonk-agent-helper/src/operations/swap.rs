@@ -12,7 +12,8 @@ use super::*;
 use vonk_agent_protocol::generated::{SwapApplyState, SwapCheckpoint, SwapIntent, SwapWaitReason};
 use vonk_agent_protocol::host_memory_guard_policy::STALL_AVAILABLE_BYTES;
 use vonk_agent_protocol::swap::{
-    GIB, default_intent, desired_bytes, policy, tolerance_bytes, valid_intent,
+    GIB, OBSERVATION_FILE, RECEIPT_BYTES, default_intent, desired_bytes, policy, tolerance_bytes,
+    valid_intent,
 };
 
 pub(super) const FALLOCATE: &str = "/usr/bin/fallocate";
@@ -22,19 +23,17 @@ pub(super) const SWAPOFF: &str = "/usr/sbin/swapoff";
 /// Root-private directory of the managed swap file, its checkpoint and lock.
 const DIRECTORY: &str = "swap";
 const CHECKPOINT_FILE: &str = "swap.json";
-/// The checkpoint, public for the agent (`vonk_agent_protocol::swap::OBSERVATION_FILE`).
-const OBSERVATION_FILE: &str = "swap-observation.json";
 const PROC_SWAPS: &str = "/proc/swaps";
 const PROC_MEMINFO: &str = "/proc/meminfo";
 const BOOT_ID: &str = "/proc/sys/kernel/random/boot_id";
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
-// Below the agent's helper-call inactivity bound. An interrupted swapoff
-// leaves the file active (the kernel re-enables it); the pages it already
-// moved stay in memory, so each pass makes progress.
+// An interrupted swapoff leaves the file active (the kernel re-enables it);
+// the pages it already moved stay in memory, so each pass makes progress.
+// The agent waits SWAP_PASS_SECONDS for the whole pass.
 const RELEASE_TIMEOUT: Duration = Duration::from_secs(20);
 const RETRY_SECONDS: u64 = 60;
 const ATTEMPT_SECONDS: u64 = 10 * 60;
-const RECORD_BYTES: u64 = 16 * 1024;
+const RECORD_BYTES: u64 = RECEIPT_BYTES;
 /// mkswap keeps the first page for its header; /proc/swaps reports the rest.
 const HEADER_BYTES: u64 = 4096;
 const FILE_PREFIX: &str = "swap-";
@@ -67,6 +66,14 @@ pub(super) fn parse_swaps(text: &str) -> Option<Vec<ActiveSwap>> {
             })
         })
         .collect()
+}
+
+/// The managed file a `/proc/swaps` row names, in this helper's own path.
+fn managed_row(root: &Path, listed: &Path) -> Option<PathBuf> {
+    let name = listed.file_name()?.to_str()?;
+    (name.starts_with(FILE_PREFIX) && managed_name(name))
+        .then(|| root.join(name))
+        .filter(|path| path.is_file())
 }
 
 fn managed_name(name: &str) -> bool {
@@ -165,17 +172,21 @@ impl<R: CommandRunner> OperationExecutor<R> {
             .mode(0o600)
             .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits() as i32)
             .open(root.join("lock"))?;
-        let _guard = HeldLock::try_exclusive(lock)
-            .map_err(|_| OperationError::InstallationReconciliationBusy)?;
+        // Another pass is converging and writes the receipt; the next
+        // inventory brings this intent again.
+        let Ok(_guard) = HeldLock::try_exclusive(lock) else {
+            eprintln!("vonk-agent-helper: swap: a pass is already running");
+            return Ok(());
+        };
         let path = root.join(CHECKPOINT_FILE);
         let current = read_checkpoint(&path)?;
-        if let (Some(old), Some(new)) = (&current, desired) {
-            if new.generation < old.desired.generation {
-                return Ok(());
-            }
-            if new.generation == old.desired.generation && new.size_gib != old.desired.size_gib {
-                return Err(OperationError::InvalidOperation);
-            }
+        // An older generation never overrides. The same generation with another
+        // size is a changed policy default (a Controller release): the signed,
+        // short-lived grant steers, as any newer one does.
+        if let (Some(old), Some(new)) = (&current, desired)
+            && new.generation < old.desired.generation
+        {
+            return Ok(());
         }
         let wanted = desired
             .cloned()
@@ -238,7 +249,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
                 record.applied_boot_id = boot;
             }
             Ok(_) => {
-                record.reason = Some(SwapWaitReason::CommandFailed);
+                record.reason = Some(SwapWaitReason::HostUnreadable);
                 record.detail =
                     Some("Swap is active but the boot identity is unreadable; retry".to_owned());
             }
@@ -259,8 +270,9 @@ impl<R: CommandRunner> OperationExecutor<R> {
     }
 
     fn plan_swap(&self, root: &Path, desired: &SwapIntent) -> Result<Plan, Wait> {
-        let failed =
-            |what: &str, cause: String| (SwapWaitReason::CommandFailed, format!("{what}: {cause}"));
+        let failed = |what: &str, cause: String| {
+            (SwapWaitReason::HostUnreadable, format!("{what}: {cause}"))
+        };
         let text = self
             .runner
             .read_host_text(Path::new(PROC_SWAPS))
@@ -271,10 +283,19 @@ impl<R: CommandRunner> OperationExecutor<R> {
                 "unexpected /proc/swaps".to_owned(),
             )
         })?;
+        // A row names a managed file by its name, not its path: the kernel
+        // prints the path through the mount the helper activated it from,
+        // and a restarted helper's private mount namespace is a new one (a
+        // detached mount prints only `/swap/swap-<uuid>.img`).
         let (managed, other): (Vec<_>, Vec<_>) = active
             .into_iter()
-            .partition(|swap| swap.path.parent() == Some(root));
-        let other_bytes: u64 = other.iter().map(|swap| swap.size_bytes).sum();
+            .map(|swap| match managed_row(root, &swap.path) {
+                Some(path) => (true, ActiveSwap { path, ..swap }),
+                None => (false, swap),
+            })
+            .partition(|(managed, _)| *managed);
+        let managed: Vec<_> = managed.into_iter().map(|(_, swap)| swap).collect();
+        let other_bytes: u64 = other.iter().map(|(_, swap)| swap.size_bytes).sum();
         let usable_bytes = match desired_bytes(desired).saturating_sub(other_bytes) {
             shortfall if shortfall < tolerance_bytes() => 0,
             shortfall => shortfall,
@@ -342,7 +363,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
         let file_bytes = usable_bytes + HEADER_BYTES;
         let space = self.runner.filesystem_space(root).map_err(|error| {
             (
-                SwapWaitReason::CommandFailed,
+                SwapWaitReason::HostUnreadable,
                 format!("filesystem space unreadable: {error}"),
             )
         })?;
@@ -364,7 +385,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
         let created = (|| -> Result<(), Wait> {
             let io = |what: &'static str| {
                 move |error: std::io::Error| {
-                    (SwapWaitReason::CommandFailed, format!("{what}: {error}"))
+                    (SwapWaitReason::FileFailed, format!("{what}: {error}"))
                 }
             };
             OpenOptions::new()
@@ -387,7 +408,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
             fs::rename(&temporary, &target).map_err(io("swap file not published"))?;
             sync_directory(root).map_err(|error| {
                 (
-                    SwapWaitReason::CommandFailed,
+                    SwapWaitReason::FileFailed,
                     format!("swap directory not synced: {error}"),
                 )
             })?;
@@ -442,7 +463,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
         .map_err(|(_, detail)| (SwapWaitReason::ReleaseDeferred, detail))?;
         fs::remove_file(&old.path).map_err(|error| {
             (
-                SwapWaitReason::CommandFailed,
+                SwapWaitReason::FileFailed,
                 format!(
                     "released swap file {} not removed: {error}",
                     old.path.display()

@@ -27,8 +27,8 @@ class SwapPolicy(WireModel):
     # The whole unified pool of one Spark.
     maximum_gib: Literal[128] = 128
     # A swap file is created only while this share of the filesystem stays
-    # free after it, the share below which the Controller calls storage short
-    # (STORAGE_LOW_FREE_FRACTION).
+    # free after it: the share below which storage is short (the Controller's
+    # STORAGE_LOW_FREE_FRACTION; a Rust test binds the two).
     free_disk_percent_after: Literal[10] = 10
     # Sizes are whole GiB: a smaller shortfall is only swap-area header pages
     # (/swap.img's 16 GiB reports 16 GiB minus one page), never a reason for a
@@ -81,6 +81,10 @@ class SwapWaitReason(WireEnum):
     INSUFFICIENT_DISK = "insufficient-disk"
     # fallocate, mkswap or swapon failed; the detail carries its account.
     COMMAND_FAILED = "command-failed"
+    # Creating, publishing or removing a managed swap file failed.
+    FILE_FAILED = "file-failed"
+    # A kernel or filesystem reading (active swap, boot id, free space) failed.
+    HOST_UNREADABLE = "host-unreadable"
     # Releasing an old swap file would pull more pages into memory than the
     # host can spare; it stays active (more swap than desired) until it can.
     RELEASE_DEFERRED = "release-deferred"

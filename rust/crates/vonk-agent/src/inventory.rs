@@ -520,7 +520,10 @@ impl<R: ProcessRunner> InventoryCollector<'_, R> {
             host_settings: host_settings(self.runner, memory_total_bytes).map(|mut host| {
                 host.store_retention_failure =
                     crate::store_retention::retention_failure(self.store_path);
-                host.swap = crate::swap::observe(&meminfo, Path::new("/var/lib/vonk-forge"));
+                host.swap = crate::swap::observe(
+                    &meminfo,
+                    Path::new(vonk_agent_protocol::store_retention::HELPER_DATA_ROOT),
+                );
                 host
             }),
             installations,

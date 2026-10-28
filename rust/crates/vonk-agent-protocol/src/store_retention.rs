@@ -3,6 +3,8 @@ use Collector::*;
 use StoreRoot::*;
 
 /// All unused Spark data, including model copies, expires after one day.
+/// The privileged helper's data root, which the agent reads receipts from.
+pub const HELPER_DATA_ROOT: &str = "/var/lib/vonk-forge";
 pub const GRACE: std::time::Duration = std::time::Duration::from_secs(24 * 60 * 60);
 
 /// How one store's entries leave.

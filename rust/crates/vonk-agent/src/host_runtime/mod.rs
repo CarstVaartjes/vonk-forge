@@ -105,13 +105,14 @@ use transport::{call_helper, write_request};
 pub fn apply_host_setting_grant(
     grant: &vonk_agent_protocol::SignedHostHelperGrant,
     reconciled: HostHelperResponseStatus,
+    inactivity: Duration,
 ) -> Result<(), HostRuntimeError> {
     let body = canonical_json(grant)
         .map_err(|_| HostRuntimeError::HelperProtocol(HelperProtocolCause::MessageFraming))?;
     let response = call_helper(
         Path::new(HELPER_SOCKET),
         &body,
-        &Inactivity::new(Duration::from_secs(30)),
+        &Inactivity::new(inactivity),
     )?;
     require_bound_response(&response, &grant.claims.request_id.to_string())?;
     if response.status == HostHelperResponseStatus::Rejected

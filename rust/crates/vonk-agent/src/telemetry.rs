@@ -147,7 +147,7 @@ impl<R: ProcessRunner, F: FileSystemProvider> TelemetryCollector<R, F> {
         let mut gpu_clock = collect_gpu_clock(
             &self.runner,
             &self.boot_id,
-            Path::new("/var/lib/vonk-forge"),
+            Path::new(vonk_agent_protocol::store_retention::HELPER_DATA_ROOT),
         );
         // Available sensor values do not prove device health when clock
         // readings fail. N/A alone is not a reset; the shared NVML probe decides.
