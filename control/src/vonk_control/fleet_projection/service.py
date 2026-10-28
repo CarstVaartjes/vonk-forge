@@ -190,6 +190,9 @@ class FleetProjection:
                 }
             except ValueError:
                 clock_desired = {node_id: None for node_id in node_ids}
+            from ..swap import selected_swaps
+
+            swap_desired = selected_swaps(session, node_ids)
             slow_nas = slow_nas_transfers(
                 session,
                 {
@@ -214,6 +217,7 @@ class FleetProjection:
                     inventory=inventories.get(node_id),
                     telemetry=telemetry.get(node_id),
                     gpu_clock_desired=clock_desired[node_id],
+                    swap_desired=swap_desired[node_id],
                     telemetry_unreadable=node_id in unreadable_telemetry,
                     recent_telemetry=recent_telemetry.get(node_id, ()),
                     installed=installed.get(node_id, ()),

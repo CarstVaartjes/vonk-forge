@@ -49,6 +49,7 @@ pub use operation_progress::{
 pub mod failure_evidence;
 pub mod gpu_clock;
 pub mod host_memory_guard_policy;
+pub mod swap;
 
 pub mod passthrough;
 pub use passthrough::{revalidate, rewrite_named_strings, validate_generated};

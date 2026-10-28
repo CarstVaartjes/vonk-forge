@@ -42,6 +42,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             fields.join(",")
         ),
     )?;
+    let policy = &graph["$defs"]["SwapPolicy"]["properties"];
+    let mut fields = Vec::new();
+    for name in [
+        "minimum_gib",
+        "default_gib",
+        "maximum_gib",
+        "free_disk_percent_after",
+        "tolerance_mib",
+    ] {
+        let value = policy[name]["const"]
+            .as_u64()
+            .ok_or("swap policy needs typed integer constants")?;
+        fields.push(format!("{name}: {value}"));
+    }
+    fs::write(
+        output.join("swap_policy.rs"),
+        format!(
+            "pub const SWAP_POLICY: crate::generated::SwapPolicy = crate::generated::SwapPolicy {{ {} }};",
+            fields.join(",")
+        ),
+    )?;
     fs::write(
         output.join("generated.rs"),
         vonk_wire_codegen::render(schema.to_str().ok_or("non-UTF8 schema path")?)?,

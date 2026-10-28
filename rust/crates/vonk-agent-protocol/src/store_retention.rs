@@ -101,6 +101,7 @@ pub const STORES: &[Store] = &[
     Store(".machine-evidence.*", Claim, "the package step publishing machine-evidence; its cleanup trap", Agent),
     Store("machine-evidence", Bookkeeping, "the package", Agent),
     Store("gpu-clock-observation.json", Bookkeeping, "the helper's latest GPU clock observation", Agent),
+    Store("swap-observation.json", Bookkeeping, "the helper's latest swap receipt", Agent),
     // Interrupted quarantine renames are unused scratch, including at the root.
     Store(".preflight-*", Ended, "damaged generated preflight state", Agent),
     Store(".build-staging-*", Ended, "isolated build staging", Agent),
@@ -115,6 +116,9 @@ pub const STORES: &[Store] = &[
     Store("gpu-clock/", Bookkeeping, "one current checkpoint and lock; interrupted writes expire", Helper),
     Store("gpu-clock-observation.json", Bookkeeping, "the helper's latest GPU clock observation", Helper),
     Store(".gpu-clock-*.tmp", Ended, "an interrupted GPU clock observation publication", Helper),
+    Store("swap/", Bookkeeping, "the active managed swap file, its checkpoint and lock; inactive files are removed each pass", Helper),
+    Store("swap-observation.json", Bookkeeping, "the helper's latest swap receipt", Helper),
+    Store(".swap-observation-*.tmp", Ended, "an interrupted swap receipt publication", Helper),
     Store("runtime-identities/", Ended, "UID/GID identity files while mounted by a container", Helper),
     Store("installation-intent-fences/", Reconciliation, "the installation's current nonce and ordinal", Helper),
     Store("runtime-generation-fences/", Reconciliation, "a runtime's generation; a miss challenges current intent", Helper),

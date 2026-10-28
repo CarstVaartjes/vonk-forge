@@ -2858,6 +2858,21 @@ def test_builder_produces_reproducible_verified_arm64_deb(tmp_path: Path) -> Non
         ):
             VERIFY_MODULE._verify_payload(payload, control, "arm64", "0.1.1")
     helper_path.write_text(helper_unit)
+    # swapon/swapoff for the managed swap file, and no other widening.
+    assert "SystemCallFilter=@swap" in helper_unit.splitlines()
+    for widened in (
+        helper_unit.replace("SystemCallFilter=@swap", "SystemCallFilter=@swap @mount"),
+        helper_unit.replace(
+            "SystemCallFilter=@swap", "SystemCallFilter=@swap\nSystemCallFilter=@debug"
+        ),
+        helper_unit.replace("SystemCallFilter=@swap\n", ""),
+    ):
+        helper_path.write_text(widened)
+        with pytest.raises(
+            VERIFY_MODULE.VerificationError, match="helper system-call boundary"
+        ):
+            VERIFY_MODULE._verify_payload(payload, control, "arm64", "0.1.1")
+    helper_path.write_text(helper_unit)
     assert "AF_INET" not in helper_unit
     assert (
         "ReadWritePaths=/usr/share/keyrings /usr/share/doc/vonk-forge-agent"

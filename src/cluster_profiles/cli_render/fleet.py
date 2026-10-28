@@ -15,6 +15,10 @@ from ..generated_control.models.display_memory_observation import (
 from ..generated_control.models.gpu_clock_observation import GpuClockObservation
 from ..generated_control.models.gpu_clock_policy import GpuClockPolicy
 from ..generated_control.models.gpu_clock_range import GpuClockRange
+from ..generated_control.models.swap_checkpoint import SwapCheckpoint
+from ..generated_control.models.swap_intent import SwapIntent
+from ..generated_control.models.swap_observation import SwapObservation
+from ..generated_control.models.swap_policy import SwapPolicy
 from ..generated_control.types import Unset
 from .common import (
     _bytes,
@@ -57,6 +61,7 @@ def _node(node: Mapping[str, object], *, detail: bool) -> None:
     _field("CPU", _cpu_clock(node))
     _field("GPU clock", _gpu_clock(node))
     host = _optional(inventory.get("host_settings"), "host settings")
+    _field("Swap", _swap(node))
     raw_memory = host.get("display_memory")
     observation = (
         None
@@ -194,6 +199,49 @@ def _gpu_clock(node: object) -> str:
             if not sample.get("gpu_clock")
             else ""
         )
+    )
+
+
+def _swap(node: object) -> str:
+    """Active swap beside the desired size and the helper's last receipt."""
+    document = _object(node, "Fleet node")
+    inventory = _optional(document.get("inventory"), "Spark inventory evidence")
+    host = _optional(inventory.get("host_settings"), "host settings")
+    desired_document = _optional(document.get("swap_desired"), "swap desired")
+    desired = SwapIntent.from_dict(dict(desired_document)) if desired_document else None
+    policy_document = _optional(document.get("swap_policy"), "swap policy")
+    policy = SwapPolicy.from_dict(dict(policy_document)) if policy_document else None
+    wanted = (
+        f"desired {desired.size_gib} GiB"
+        if desired is not None
+        else f"desired {UNKNOWN}"
+    ) + (
+        f" (policy {policy.minimum_gib}–{policy.maximum_gib} GiB)"
+        if policy is not None
+        else ""
+    )
+    swap_document = _optional(host.get("swap"), "swap")
+    if not swap_document:
+        return f"{UNKNOWN}; {wanted}"
+    swap = SwapObservation.from_dict(dict(swap_document))
+    actual = f"{_bytes(swap.total_bytes)} active, {_bytes(swap.free_bytes)} free"
+    receipt = swap.receipt if isinstance(swap.receipt, SwapCheckpoint) else None
+    if receipt is None:
+        detail = (
+            swap.receipt_detail if isinstance(swap.receipt_detail, str) else UNKNOWN
+        )
+        return f"{actual}; {wanted}; receipt {detail}"
+    reason = receipt.reason
+    return (
+        f"{actual}; {wanted}; {_clock_reading(receipt.state)}"
+        + (
+            f" ({_clock_reading(reason)})"
+            if reason is not None and not isinstance(reason, Unset)
+            else ""
+        )
+        + f"; next {_clock_reading(receipt.next_attempt_at)}"
+        + f"; deadline {_clock_reading(receipt.deadline)}"
+        + f"; {_clock_reading(receipt.detail)}"
     )
 
 

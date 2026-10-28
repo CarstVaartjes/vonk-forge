@@ -381,8 +381,8 @@ pub struct InventoryCollector<'a, R> {
 
 impl<R: ProcessRunner> InventoryCollector<'_, R> {
     pub fn collect(&self) -> Result<Inventory, InventoryError> {
-        let (memory_total_bytes, memory_available_bytes) =
-            parse_meminfo(&fs::read_to_string(self.meminfo_path)?)?;
+        let meminfo = fs::read_to_string(self.meminfo_path)?;
+        let (memory_total_bytes, memory_available_bytes) = parse_meminfo(&meminfo)?;
         let filesystem = rustix::fs::statvfs(self.store_path)?;
         let fragment = filesystem.f_frsize;
         let disk_total_bytes = filesystem
@@ -520,6 +520,7 @@ impl<R: ProcessRunner> InventoryCollector<'_, R> {
             host_settings: host_settings(self.runner, memory_total_bytes).map(|mut host| {
                 host.store_retention_failure =
                     crate::store_retention::retention_failure(self.store_path);
+                host.swap = crate::swap::observe(&meminfo, Path::new("/var/lib/vonk-forge"));
                 host
             }),
             installations,
@@ -576,6 +577,7 @@ fn host_settings<R: ProcessRunner>(
             .ok()
             .filter(|output| output.success)
             .and_then(|output| vonk_agent_protocol::gpu_clock::supported_range(&output.stdout)),
+        swap: None,
     })
 }
 

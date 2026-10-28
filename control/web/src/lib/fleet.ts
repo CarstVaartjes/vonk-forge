@@ -251,6 +251,25 @@ export function nodeGpuClock(node: VisualFleetNode): string {
   return `Graphics ${clock?.graphics_mhz ?? OutcomeKind.UNKNOWN} / SM ${clock?.sm_mhz ?? OutcomeKind.UNKNOWN} MHz · last applied ${range(clock?.locked_range)} (helper receipt) · desired ${range(node.gpu_clock_desired)} · reported maximum graphics ${clock?.max_graphics_mhz ?? OutcomeKind.UNKNOWN} / SM ${clock?.max_sm_mhz ?? OutcomeKind.UNKNOWN} MHz · policy limit ${node.gpu_clock_policy?.hard_max_mhz ?? OutcomeKind.UNKNOWN} MHz · throttle bits ${clock?.throttle_reasons ?? OutcomeKind.UNKNOWN}${clock?.apply_state ? ` · enforcement ${clock.apply_state}` : ""}${clock?.next_attempt_at != null ? ` · next attempt ${when(clock.next_attempt_at)}` : ""}${clock?.deadline != null ? ` · deadline ${when(clock.deadline)}` : ""}${clock?.detail ? ` · ${clock.detail}` : ""}`;
 }
 
+/** Active swap beside the desired size and the helper's last receipt. */
+export function nodeSwap(node: VisualFleetNode): string {
+  const swap = node.inventory?.host_settings?.swap;
+  const receipt = swap?.receipt;
+  const desired = node.swap_desired ? `${node.swap_desired.size_gib} GiB` : OutcomeKind.UNKNOWN;
+  const policy = node.swap_policy
+    ? ` (policy ${node.swap_policy.minimum_gib}–${node.swap_policy.maximum_gib} GiB)`
+    : "";
+  const active = swap
+    ? `${formatBytes(swap.total_bytes)} active · ${formatBytes(swap.free_bytes)} free`
+    : OutcomeKind.UNKNOWN;
+  const state = receipt
+    ? ` · ${receipt.state}${receipt.reason ? ` (${receipt.reason})` : ""}${receipt.detail ? ` · ${receipt.detail}` : ""}`
+    : swap?.receipt_detail
+      ? ` · ${swap.receipt_detail}`
+      : "";
+  return `${active} · desired ${desired}${policy}${state}`;
+}
+
 /** Firmware capability and measured reservation are separate; neither proves Auto. */
 export function nodeDisplayMemory(node: VisualFleetNode): string {
   const observation = node.inventory?.host_settings?.display_memory;

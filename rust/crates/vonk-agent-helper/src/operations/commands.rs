@@ -24,7 +24,15 @@ impl CommandRunner for ProcessCommandRunner {
         if nvidia && !gpu_clock::allowed_arguments(arguments) {
             return Err("GPU clock command is not compiled into the helper".to_owned());
         }
+        let swap = matches!(
+            executable.to_str(),
+            Some(swap::FALLOCATE | swap::MKSWAP | swap::SWAPON | swap::SWAPOFF)
+        );
+        if swap && !swap::allowed_arguments(executable.to_str().unwrap_or_default(), arguments) {
+            return Err("swap command is not compiled into the helper".to_owned());
+        }
         if !nvidia
+            && !swap
             && !matches!(
                 executable.to_str(),
                 Some(
