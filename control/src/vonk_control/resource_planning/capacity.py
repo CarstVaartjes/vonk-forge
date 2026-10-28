@@ -13,6 +13,7 @@ from vonk_agent_protocol.swap import (
     GIB,
     SWAP_POLICY,
     swap_needed_bytes,
+    swap_reaches,
     usable_swap_bytes,
 )
 from vonk_forge_contracts.memory_admission import evaluate_memory_admission
@@ -165,7 +166,7 @@ def _load_swap_reason(
         return None
     largest_setting = SWAP_POLICY.maximum_gib * GIB
     largest = usable_swap_bytes(largest_setting)
-    if rise > largest or minimum > largest_setting:
+    if rise > largest or not swap_reaches(largest_setting, minimum):
         return _reason(
             ResourceBlockerCode.DEMAND_EXCEEDS_CAPACITY,
             f"The load rises {rise} bytes above its steady demand and needs "
@@ -179,9 +180,8 @@ def _load_swap_reason(
         return None
     swap = capacity.swap
     usable = usable_swap_bytes(swap.total_bytes)
-    if (
-        rise + swap.held_bytes + swap.used_bytes <= usable
-        and swap.total_bytes >= minimum
+    if rise + swap.held_bytes + swap.used_bytes <= usable and swap_reaches(
+        swap.total_bytes, minimum
     ):
         return None
     setting = max(swap_needed_bytes(rise + swap.used_bytes), -(-minimum // GIB) * GIB)
@@ -199,7 +199,9 @@ def _load_swap_reason(
         )
     elif swap.held_bytes:
         remedy = "It starts once the other loads here finish loading."
-    elif swap.desired_bytes is not None and swap.total_bytes < swap.desired_bytes:
+    elif swap.desired_bytes is not None and not swap_reaches(
+        swap.total_bytes, swap.desired_bytes
+    ):
         remedy = "It starts once the Spark's swap reaches its setting."
     else:
         remedy = "It starts once swap in use falls."
@@ -229,11 +231,9 @@ def stop_can_clear_swap(demand: ResourceDemand, swap: SwapCapacity) -> bool:
     before the stop, and the run that would be stopped keeps serving.
     """
 
-    return (
-        demand.load_overshoot_bytes + swap.held_bytes
-        <= usable_swap_bytes(swap.total_bytes)
-        and swap.total_bytes >= demand.minimum_swap_bytes
-    )
+    return demand.load_overshoot_bytes + swap.held_bytes <= usable_swap_bytes(
+        swap.total_bytes
+    ) and swap_reaches(swap.total_bytes, demand.minimum_swap_bytes)
 
 
 def plan_capacity(

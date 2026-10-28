@@ -124,9 +124,18 @@ class SwapObservation(WireModel):
     receipt_detail: str | None = Field(default=None, max_length=512)
 
 
+def swap_reaches(total_bytes: int, size_bytes: int) -> bool:
+    """Active swap reaches ``size_bytes``, within the policy tolerance.
+
+    The kernel's SwapTotal leaves out each swap area's header page, so a
+    Spark set to a size reports a little less unless the helper compensated.
+    """
+    return total_bytes + SWAP_POLICY.tolerance_mib * 1024**2 >= size_bytes
+
+
 def swap_satisfied(total_bytes: int, desired: SwapIntent) -> bool:
     """Active swap reaches the desired total, within the policy tolerance."""
-    return total_bytes + SWAP_POLICY.tolerance_mib * 1024**2 >= desired.size_gib * GIB
+    return swap_reaches(total_bytes, desired.size_gib * GIB)
 
 
 def usable_swap_bytes(total_bytes: int) -> int:

@@ -77,10 +77,28 @@ def _inventory(sessions, at, node, *, free=_FREE, swap=None):
     )
 
 
-def _swap(total_gib, *, used=0):
+_PAGE = 4096
+#: What both Sparks report at the 64 GiB default (2026-10-29): /swap.img's
+#: 16777212 kB plus the helper's 50331652 kB area, sized to make up both
+#: areas' header pages.
+_FLEET_64_GIB = (16777212 + 50331652) * 1024
+
+
+def _swap(total_gib, *, used=0, header_pages=0):
+    """SwapTotal as the kernel reports a Spark set to ``total_gib``.
+
+    The helper sizes its area to make up the header pages (the 64 GiB default
+    reads exactly as the fleet reports it). ``header_pages`` models a layout
+    that does not: SwapTotal leaves out one page per swap area.
+    """
+    total = (
+        _FLEET_64_GIB
+        if total_gib == 64 and not header_pages
+        else total_gib * GIB - _PAGE * header_pages
+    )
     return {
-        "total_bytes": total_gib * GIB,
-        "free_bytes": total_gib * GIB - used,
+        "total_bytes": total,
+        "free_bytes": total - used,
         "receipt_detail": "test",
     }
 
@@ -645,13 +663,21 @@ def test_j_a_declared_load_peak_rides_on_swap_without_any_earlier_run(
     ("minimum_gib", "remedy"),
     [
         (48, "reaches its setting"),
+        # The minimum equals the 64 GiB setting.
+        (64, "reaches its setting"),
         (96, "Raise the Spark swap setting to at least 96 GiB"),
+        (128, "Raise the Spark swap setting to at least 128 GiB"),
     ],
 )
 def test_k_a_load_waits_until_the_spark_has_its_minimum_swap(
     tmp_path, postgres_engine, minimum_gib, remedy
 ) -> None:
-    """Catches a load starting on less swap than its creator requires."""
+    """Catches a load starting on less swap than its creator requires.
+
+    And one never starting at all: a Spark set to exactly the minimum reports
+    a header page per swap area less, which an exact byte comparison read
+    as short forever (128 GiB passes the recipe check, so it must fit).
+    """
     steady = 30 * GIB
     sessions, now, node, installation, service = _world(
         tmp_path,
@@ -661,12 +687,14 @@ def test_k_a_load_waits_until_the_spark_has_its_minimum_swap(
         minimum_swap_bytes=minimum_gib * GIB,
     )
     at = now + timedelta(seconds=1)
-    _inventory(sessions, at, node, swap=_swap(32))
+    _inventory(sessions, at, node, swap=_swap(32, header_pages=2))
     assert remedy in _swap_wait(service.plan_run(installation, alias="qwen", now=at))
 
+    # /swap.img and the helper's area, each less its header page.
     later = at + timedelta(seconds=1)
-    _inventory(sessions, later, node, swap=_swap(minimum_gib))
-    assert service.plan_run(installation, alias="qwen", now=later).allowed
+    _inventory(sessions, later, node, swap=_swap(minimum_gib, header_pages=2))
+    plan = service.plan_run(installation, alias="qwen", now=later)
+    assert plan.allowed, _codes(plan)
 
 
 def test_l_only_a_minimum_swap_beyond_the_largest_setting_never_fits(

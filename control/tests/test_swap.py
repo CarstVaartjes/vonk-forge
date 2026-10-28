@@ -22,6 +22,7 @@ from vonk_agent_protocol.swap import (
     SwapWaitReason,
     default_swap,
     swap_needed_bytes,
+    swap_reaches,
     swap_satisfied,
     usable_swap_bytes,
 )
@@ -102,6 +103,15 @@ def test_usable_and_needed_swap_follow_the_shared_vectors_at_each_margin() -> No
         assert usable_swap_bytes(needed) >= pair["load_bytes"]
         # The smallest whole-GiB total: one GiB less no longer holds it.
         assert needed == 0 or usable_swap_bytes(needed - GIB) < pair["load_bytes"]
+
+
+def test_active_swap_reaches_a_size_within_the_header_page_tolerance() -> None:
+    """Catches an exact byte comparison against a size the kernel reports less of."""
+    two_areas = 128 * GIB - 2 * 4096
+    assert swap_reaches(two_areas, 128 * GIB)
+    assert not swap_reaches(
+        128 * GIB - SWAP_POLICY.tolerance_mib * 1024**2 - 1, 128 * GIB
+    )
 
 
 def test_the_os_swap_meets_16_gib_but_not_the_64_gib_default() -> None:
