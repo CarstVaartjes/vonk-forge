@@ -39,6 +39,7 @@ from vonk_agent_protocol.contracts import (
     validate_result_for_operation,
 )
 from vonk_agent_protocol.failure_evidence import FailureDiagnostics
+from vonk_agent_protocol.optional_evidence import EvidenceDrop
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunResult
 
 from . import agent_operation_states
@@ -110,6 +111,8 @@ class OperationResultFacts(BaseModel):
     bounded_failure: OperationFailureEvidence | None = None
     #: The result carried diagnostics that do not satisfy their contract.
     diagnostics_invalid: bool = False
+    #: The optional evidence ingress dropped from the agent's report.
+    dropped_evidence: list[EvidenceDrop] = Field(default_factory=list)
 
     @model_validator(mode="before")
     @classmethod
@@ -134,6 +137,13 @@ class OperationResultFacts(BaseModel):
             except (TypeError, ValueError):
                 document["diagnostics"] = None
                 document["diagnostics_invalid"] = True
+        try:
+            document["dropped_evidence"] = [
+                read_stored_model(EvidenceDrop, drop)
+                for drop in document.get("dropped_evidence") or ()
+            ]
+        except (TypeError, ValueError):
+            document["dropped_evidence"] = []
         for name in (
             "error_code",
             "code",

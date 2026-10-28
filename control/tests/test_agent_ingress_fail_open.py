@@ -89,6 +89,9 @@ REVIEWED_CORE_DEFAULTS = {
     "PageCacheDropReport.mem_available_after_bytes",
     "PageCacheDropReport.sync",
     "PageCacheDropReport.problem",
+    # Written by the Controller from what its own ingress dropped; an agent's
+    # report carries no such field.
+    "AgentFailureResult.dropped_evidence",
     "AgentFailureResult.error_code",
     "AgentFailureResult.failure_kind",
     "AgentFailureResult.operation",
@@ -313,6 +316,10 @@ CASES: list[
         _failed_result(),
         {
             "result.diagnostics": _failed_result(diagnostics={"phase": 1}),
+            "result.diagnostics.page_cache": _failed_result(
+                diagnostics=_diagnostics()
+                | {"page_cache": {"drops": -1, "problems": 0, "reclaimed_bytes": 0}}
+            ),
             "result.diagnostic": _failed_result(diagnostic="x" * 600),
             "result.stage": _failed_result(stage="s" * 200),
             "result.helper_error_code": _failed_result(helper_error_code=""),

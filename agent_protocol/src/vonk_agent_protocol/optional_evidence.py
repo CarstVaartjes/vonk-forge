@@ -7,7 +7,8 @@ a damaged optional part loses the core: an inventory stops updating, a result
 is lost with its lease. A model that mixes in :class:`OptionalEvidenceModel`
 names its optional evidence as groups of field paths; when validation fails and
 dropping some groups makes it pass, the groups are dropped and the model carries
-one typed :class:`AgentEvidenceCode` per dropped group. When the core itself is
+one typed :class:`EvidenceDrop` per dropped group: its code and the field that
+refused it, so a stored report can say what it lost. When the core itself is
 invalid the original error is raised unchanged.
 
 This is confined to evidence the Controller only displays or ignores. Identity,
@@ -30,10 +31,11 @@ import re
 from collections.abc import Mapping
 from typing import Any, ClassVar, NamedTuple
 
-from pydantic import BaseModel, PrivateAttr, ValidationError, model_validator
+from pydantic import BaseModel, Field, PrivateAttr, ValidationError, model_validator
 from pydantic_core.core_schema import ValidatorFunctionWrapHandler
 
 from .reason_codes import AgentEvidenceCode
+from .wire_model import WireModel
 
 
 class EvidenceGroup(NamedTuple):
@@ -42,6 +44,21 @@ class EvidenceGroup(NamedTuple):
     code: AgentEvidenceCode
     #: Each path is the keys from the model's input down to one optional field.
     paths: tuple[tuple[str, ...], ...]
+
+
+#: One key of a refused field's location: a model key, or ``*`` for any other
+#: (a free-form mapping key), so a location is never path- or secret-bearing.
+_LOCATION_KEY = re.compile(r"[A-Za-z0-9_-]{1,64}\Z")
+
+
+class EvidenceDrop(WireModel):
+    """One optional evidence group a report lost, and the field that refused it."""
+
+    code: AgentEvidenceCode
+    #: The refused field inside the group: keys from the report's root, by ``.``.
+    location: str = Field(pattern=r"^[A-Za-z0-9_*.-]{1,256}$")
+    #: Pydantic's error type for that field, such as ``is_instance_of``.
+    error_type: str = Field(pattern=r"^[a-z0-9_]{1,64}$")
 
 
 #: What stands in for a host path inside prose. It carries no path separator.
@@ -119,6 +136,57 @@ def _without(
     return stripped
 
 
+def _data_location(data: Any, loc: tuple[int | str, ...]) -> tuple[str, ...]:
+    """The keys of ``loc`` that address ``data``; a union member's tag is skipped."""
+
+    keys: list[str] = []
+    node: Any = data
+    for part in loc:
+        if isinstance(node, Mapping) and isinstance(part, str) and part in node:
+            keys.append(part if _LOCATION_KEY.match(part) else "*")
+            node = node[part]
+        elif isinstance(node, list) and isinstance(part, int) and 0 <= part < len(node):
+            keys.append(str(part))
+            node = node[part]
+    return tuple(keys)
+
+
+def _error_type(name: str) -> str:
+    return re.sub(r"[^a-z0-9_]", "_", name.lower())[:64] or "value_error"
+
+
+def _drop(group: EvidenceGroup, data: Any, refusal: ValidationError) -> EvidenceDrop:
+    """``group``'s drop, located at the field inside it that ``refusal`` names.
+
+    A union reports every member's refusal; the member that reads the group
+    reaches deepest into it, so the deepest location is the field at fault.
+    """
+
+    present = [path for path in group.paths if _present(data, path)]
+    errors = refusal.errors()
+    located = [
+        (keys, error)
+        for error in errors
+        if any(
+            (keys := _data_location(data, tuple(error["loc"])))[: len(path)] == path
+            for path in present
+        )
+    ]
+    if located:
+        keys, error = max(located, key=lambda item: len(item[0]))
+        return EvidenceDrop(
+            code=group.code,
+            location=".".join(keys)[:256],
+            error_type=_error_type(error["type"]),
+        )
+    # Refused by a check of the whole report rather than by one of its fields.
+    return EvidenceDrop(
+        code=group.code,
+        location=".".join(present[0])[:256],
+        error_type=_error_type(errors[0]["type"] if errors else "value_error"),
+    )
+
+
 class OptionalEvidenceModel(BaseModel):
     """Mixin: drop invalid optional evidence instead of refusing the report."""
 
@@ -127,12 +195,19 @@ class OptionalEvidenceModel(BaseModel):
     #: redacted rather than refusing the report.
     HOST_PATH_TEXT: ClassVar[frozenset[str]] = frozenset()
     _evidence_warnings: tuple[AgentEvidenceCode, ...] = PrivateAttr(default=())
+    _evidence_drops: tuple[EvidenceDrop, ...] = PrivateAttr(default=())
 
     @property
     def evidence_warnings(self) -> tuple[AgentEvidenceCode, ...]:
         """The optional evidence this report lost, empty when it arrived whole."""
 
         return self._evidence_warnings
+
+    @property
+    def evidence_drops(self) -> tuple[EvidenceDrop, ...]:
+        """Each dropped group with the field that refused it; empty when none was."""
+
+        return self._evidence_drops
 
     @classmethod
     def __pydantic_init_subclass__(cls, **kwargs: Any) -> None:
@@ -156,9 +231,10 @@ def _drop_invalid_optional_evidence(
 ) -> Any:
     try:
         return handler(data)
-    except ValidationError:
+    except ValidationError as error:
         if not isinstance(data, Mapping):
             raise
+        refusal = error
         redacted: tuple[AgentEvidenceCode, ...] = ()
         prose = redacted_prose(data, cls.HOST_PATH_TEXT)
         if prose is not None:
@@ -166,8 +242,8 @@ def _drop_invalid_optional_evidence(
             data, redacted = prose, (AgentEvidenceCode.RESULT_HOST_PATH_REDACTED,)
             try:
                 model = handler(data)
-            except ValidationError:
-                pass
+            except ValidationError as still:
+                refusal = still
             else:
                 model._evidence_warnings = redacted
                 return model
@@ -186,6 +262,9 @@ def _drop_invalid_optional_evidence(
                 model._evidence_warnings = redacted + tuple(
                     group.code for group in dropped
                 )
+                model._evidence_drops = tuple(
+                    _drop(group, data, refusal) for group in dropped
+                )
                 return model
         raise
 
@@ -203,6 +282,7 @@ def fail_open_on_optional_evidence() -> Any:
 
 __all__ = [
     "HOST_PATH_MARKER",
+    "EvidenceDrop",
     "EvidenceGroup",
     "OptionalEvidenceModel",
     "fail_open_on_optional_evidence",
