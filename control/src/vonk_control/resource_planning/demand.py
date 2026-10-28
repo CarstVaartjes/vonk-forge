@@ -84,6 +84,9 @@ def _resource_evidence(
     declared_total_bytes: int,
     settings: EffectiveResourceSettings | None,
     observed_total_bytes: int | None,
+    *,
+    declared_load_rise_bytes: int = 0,
+    minimum_swap_bytes: int = 0,
 ) -> ResourceEvidence:
     model_bytes = _selected_model_bytes(recipe_document, model_documents, role_name)
     return ResourceEvidence(
@@ -91,6 +94,8 @@ def _resource_evidence(
         runtime_overhead_bytes=None,
         declared_total_bytes=declared_total_bytes if model_bytes is not None else None,
         observed_total_bytes=observed_total_bytes,
+        declared_load_rise_bytes=declared_load_rise_bytes,
+        minimum_swap_bytes=minimum_swap_bytes,
         baseline_context_tokens=settings.context_tokens
         if settings is not None
         else None,
@@ -270,9 +275,15 @@ def resource_demand(
         total,
         evidence.evidence_state,
         tuple(reasons),
-        load_overshoot_bytes=max(0, observed_bound - total)
-        if observed_bound is not None and total is not None
+        # L_eff = max(S + declared rise, observed whole-run peak); O = L_eff - S.
+        load_overshoot_bytes=max(
+            evidence.declared_load_rise_bytes,
+            observed_bound - total if observed_bound is not None else 0,
+            0,
+        )
+        if total is not None
         else 0,
+        minimum_swap_bytes=evidence.minimum_swap_bytes,
     )
 
 

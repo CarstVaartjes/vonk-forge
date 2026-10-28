@@ -125,9 +125,9 @@ def _stop(sessions, run_id, at):
             claim.released_at = at
 
 
-def _world(tmp_path, postgres_engine, steady=_STEADY):
+def _world(tmp_path, postgres_engine, steady=_STEADY, **declared):
     sessions, now, node, installation = setup(
-        tmp_path, peak_bytes=steady, engine=postgres_engine
+        tmp_path, peak_bytes=steady, engine=postgres_engine, **declared
     )
     service = RunAdmissionService(
         sessions, inventory_max_age=300, memory_floor_bytes=_FLOOR
@@ -539,3 +539,70 @@ def test_i_a_job_run_holds_its_rise_while_its_ranks_run_jobs(
 
     second = operations.preview_run(installation_id, "image-job-b")
     assert RunAdmissionCode.INSUFFICIENT_SWAP in _codes(second)
+
+
+def test_j_a_declared_load_peak_rides_on_swap_without_any_earlier_run(
+    tmp_path, postgres_engine
+) -> None:
+    """Catches the recipe's declared load peak being ignored (contracts 2.7.0)."""
+    steady, load = 60 * GIB, 80 * GIB
+    sessions, now, node, installation, service = _world(
+        tmp_path, postgres_engine, steady, load_peak_bytes=load
+    )
+    at = now + timedelta(seconds=1)
+    _inventory(sessions, at, node, swap=_swap(16))
+    _swap_wait(service.plan_run(installation, alias="qwen", now=at))
+
+    later = at + timedelta(seconds=1)
+    _inventory(sessions, later, node, swap=_swap(64))
+    plan = service.plan_run(installation, alias="qwen", now=later)
+    assert plan.allowed, _codes(plan)
+    run_id = _accept(sessions, service, plan, later)
+    assert _claim_bytes(sessions, run_id) == steady
+    assert _stored_load(sessions, run_id) == load
+
+
+@pytest.mark.parametrize(
+    ("minimum_gib", "remedy"),
+    [
+        (48, "reaches its setting"),
+        (96, "Raise the Spark swap setting to at least 96 GiB"),
+    ],
+)
+def test_k_a_load_waits_until_the_spark_has_its_minimum_swap(
+    tmp_path, postgres_engine, minimum_gib, remedy
+) -> None:
+    """Catches a load starting on less swap than its creator requires."""
+    steady = 30 * GIB
+    sessions, now, node, installation, service = _world(
+        tmp_path,
+        postgres_engine,
+        steady,
+        load_peak_bytes=steady + GIB,
+        minimum_swap_bytes=minimum_gib * GIB,
+    )
+    at = now + timedelta(seconds=1)
+    _inventory(sessions, at, node, swap=_swap(32))
+    assert remedy in _swap_wait(service.plan_run(installation, alias="qwen", now=at))
+
+    later = at + timedelta(seconds=1)
+    _inventory(sessions, later, node, swap=_swap(minimum_gib))
+    assert service.plan_run(installation, alias="qwen", now=later).allowed
+
+
+def test_l_only_a_minimum_swap_beyond_the_largest_setting_never_fits(
+    tmp_path, postgres_engine
+) -> None:
+    """Catches a requirement no swap setting can meet waiting forever."""
+    steady = 30 * GIB
+    sessions, now, node, installation, service = _world(
+        tmp_path,
+        postgres_engine,
+        steady,
+        load_peak_bytes=steady + GIB,
+        minimum_swap_bytes=(SWAP_POLICY.maximum_gib + 1) * GIB,
+    )
+    at = now + timedelta(seconds=1)
+    _inventory(sessions, at, node, swap=_swap(SWAP_POLICY.maximum_gib))
+    plan = service.plan_run(installation, alias="qwen", now=at)
+    assert _codes(plan) == {ResourceBlockerCode.DEMAND_EXCEEDS_CAPACITY}

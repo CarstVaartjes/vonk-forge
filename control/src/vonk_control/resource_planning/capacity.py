@@ -159,16 +159,18 @@ def _load_swap_reason(
     """
 
     rise = demand.load_overshoot_bytes
-    if rise <= 0:
+    minimum = demand.minimum_swap_bytes
+    if rise <= 0 and minimum <= 0:
         return None
-    largest = usable_swap_bytes(SWAP_POLICY.maximum_gib * GIB)
-    if rise > largest:
+    largest_setting = SWAP_POLICY.maximum_gib * GIB
+    largest = usable_swap_bytes(largest_setting)
+    if rise > largest or minimum > largest_setting:
         return _reason(
             ResourceBlockerCode.DEMAND_EXCEEDS_CAPACITY,
-            f"The load rises {rise} bytes above its steady demand; even the "
-            f"largest swap setting ({SWAP_POLICY.maximum_gib} GiB) holds only "
-            f"{largest} bytes within the host memory guard's margins, so it can "
-            "never fit here.",
+            f"The load rises {rise} bytes above its steady demand and needs "
+            f"{minimum} bytes of swap; the largest swap setting "
+            f"({SWAP_POLICY.maximum_gib} GiB) holds only {largest} bytes within "
+            "the host memory guard's margins, so it can never fit here.",
             node_id=node_id,
         )
     if capacity is None:
@@ -176,9 +178,12 @@ def _load_swap_reason(
         return None
     swap = capacity.swap
     usable = usable_swap_bytes(swap.total_bytes)
-    if rise + swap.held_bytes + swap.used_bytes <= usable:
+    if (
+        rise + swap.held_bytes + swap.used_bytes <= usable
+        and swap.total_bytes >= minimum
+    ):
         return None
-    setting = swap_needed_bytes(rise + swap.used_bytes)
+    setting = max(swap_needed_bytes(rise + swap.used_bytes), -(-minimum // GIB) * GIB)
     if swap.desired_bytes is not None and setting > swap.desired_bytes:
         remedy = f"Raise the Spark swap setting to at least {setting // GIB} GiB."
     elif swap.held_bytes:
@@ -194,7 +199,8 @@ def _load_swap_reason(
     )
     return _reason(
         ResourceBlockerCode.INSUFFICIENT_SWAP,
-        f"The load rises {rise} bytes above its steady demand. Swap: "
+        f"The load rises {rise} bytes above its steady demand and needs at "
+        f"least {minimum} bytes of swap. Swap: "
         f"{swap.total_bytes} bytes active ({setting_text}), "
         f"{swap.used_bytes} in use, {swap.held_bytes} held by loads still "
         f"starting; {usable} bytes are usable within the host memory guard's "

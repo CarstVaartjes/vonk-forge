@@ -66,6 +66,10 @@ def memory_requirement(
         memory.peak_bytes,
         resolution.settings,
         observed_peak_bytes,
+        declared_load_rise_bytes=memory.load_peak_bytes - memory.peak_bytes
+        if memory.load_peak_bytes is not None
+        else 0,
+        minimum_swap_bytes=memory.minimum_swap_bytes,
     )
     demand = resource_demand(
         resolution.settings if resolution.settings is not None else selected,

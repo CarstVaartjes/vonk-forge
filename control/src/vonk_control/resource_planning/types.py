@@ -134,6 +134,10 @@ class ResourceEvidence:
     #: on this memory kind, over their whole run (load included). It bounds
     #: the load only, never the steady demand.
     observed_total_bytes: int | None = None
+    #: The recipe's declared load peak above its steady peak (0 when none).
+    declared_load_rise_bytes: int = 0
+    #: The host swap the recipe needs to finish its load (0 when none).
+    minimum_swap_bytes: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -150,6 +154,8 @@ class ResourceDemand:
     #: whole-run observed peak above it. Swap carries it, never the memory
     #: reservation.
     load_overshoot_bytes: int = 0
+    #: The active swap a Spark must have before this load starts.
+    minimum_swap_bytes: int = 0
 
     @property
     def allowed(self) -> bool:
