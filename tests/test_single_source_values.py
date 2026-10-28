@@ -538,3 +538,47 @@ def test_uv_guard_refuses_floating_or_duplicate_owner(tmp_path: Path, pin: str) 
     # Wrong implementation: the CI owner silently contains two conflicting selections.
     (tmp_path / ".tool-versions").write_text(f"uv {pin}\n")
     assert uv_pin_violations(tmp_path, [".tool-versions"])
+
+
+def isolated_wheel_build_violations(root: Path, files: list[str]) -> list[str]:
+    """An image never rebuilds a wheel with a build backend resolved at build time.
+
+    An isolated build downloads the newest backend the project allows, so its
+    bytes follow upstream releases and a digest check on them breaks without
+    any change here. Ship the reviewed wheel by its locked digest instead.
+    """
+    import re
+
+    errors = []
+    for file in files:
+        if Path(file).name != "Dockerfile":
+            continue
+        logical = re.sub(r"\\\r?\n\s*", " ", (root / file).read_text())
+        for command in re.split(r"&&|;|\n", logical):
+            if re.search(r"\bpip\s+wheel\b", command) and (
+                "--no-build-isolation" not in command
+            ):
+                errors.append(f"{file}: pip wheel resolves its build backend")
+    return errors
+
+
+def test_images_do_not_rebuild_wheels_with_a_floating_backend() -> None:
+    from tools.single_source_values import tracked_files
+
+    assert isolated_wheel_build_violations(ROOT, tracked_files(ROOT)) == []
+
+
+def test_isolated_wheel_build_guard_rejects_a_rebuilt_contract_wheel(
+    tmp_path: Path,
+) -> None:
+    # Wrong implementation: the image rebuilds the pinned contracts wheel from
+    # source, and a new hatchling release changes its digest.
+    path = tmp_path / "Dockerfile"
+    path.write_text(
+        "RUN git clone https://example.invalid/recipes.git /src \\\n"
+        "    && python -m pip wheel --no-cache-dir --no-deps --wheel-dir /wheels \\\n"
+        "        /src/contracts\n"
+    )
+    assert isolated_wheel_build_violations(tmp_path, [path.name])
+    path.write_text("COPY inventory/wheels/contracts.whl /wheels/\n")
+    assert isolated_wheel_build_violations(tmp_path, [path.name]) == []
