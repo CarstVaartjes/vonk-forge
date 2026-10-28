@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import hashlib
+import importlib.metadata
 import re
 import tomllib
+import zipfile
 from pathlib import Path
 
 import yaml
@@ -58,3 +61,33 @@ def test_spark_acceptance_uses_the_locked_control_environment() -> None:
         if "python tests/acceptance/test_spark_lifecycle.py run" in step.get("run", "")
     )
     assert "uv run --project control --frozen" in run
+
+
+def test_shipped_contract_wheel_is_the_tested_revision() -> None:
+    """The image ships the vendored wheel; every suite tests the locked source.
+
+    The control environment installs ``vonk_forge_contracts`` from the locked
+    recipes revision, while the Controller image installs the reviewed wheel by
+    its digest without rebuilding it. Their package files must be identical so
+    the image runs exactly the contract code the suites ran.
+    """
+
+    lock = tomllib.loads(CONTRACTS_LOCK.read_text(encoding="utf-8"))
+    tested = importlib.metadata.distribution("vonk-forge-public-contracts")
+    assert lock["package"] == f"{tested.name}=={tested.version}"
+
+    def package_file(name: str) -> bool:
+        return not name.split("/", 1)[0].endswith(".dist-info")
+
+    with zipfile.ZipFile(ROOT / lock["wheel"]) as wheel:
+        shipped = {
+            name: hashlib.sha256(wheel.read(name)).hexdigest()
+            for name in wheel.namelist()
+            if package_file(name)
+        }
+    installed = {
+        str(path): hashlib.sha256(path.read_binary()).hexdigest()
+        for path in tested.files or ()
+        if path.hash is not None and package_file(str(path))
+    }
+    assert shipped == installed
