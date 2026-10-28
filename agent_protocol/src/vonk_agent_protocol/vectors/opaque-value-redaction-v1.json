@@ -1,0 +1,136 @@
+{
+ "marker": "[redacted opaque value]",
+ "cases": [
+  {
+   "text": "http_status=403 error_code=helper_request_plan_binding_invalid endpoint=agent.host-runtime.grant request_id=6f1c2a3b-8d4e-4f5a-9b6c-7d8e9f0a1b2c disposition=security",
+   "redacted": "http_status=403 error_code=helper_request_plan_binding_invalid endpoint=agent.host-runtime.grant [redacted opaque value] disposition=security"
+  },
+  {
+   "text": "error_code=helper_runtime_image_identity_invalid",
+   "redacted": "error_code=helper_runtime_image_identity_invalid"
+  },
+  {
+   "text": "blob 9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08 was refused",
+   "redacted": "blob [redacted opaque value] was refused"
+  },
+  {
+   "text": "digest=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+   "redacted": "[redacted opaque value]"
+  },
+  {
+   "text": "payload QUJDQUJDQUJDQUJDQUJDQUJDQUJDQUJDQUJDQUJDQUJDQUJD==",
+   "redacted": "payload [redacted opaque value]"
+  },
+  {
+   "text": "an_unusually_long_field_name_that_is_no_name=BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+   "redacted": "[redacted opaque value]"
+  },
+  {
+   "text": "id=abcdef0123456789",
+   "redacted": "id=abcdef0123456789"
+  },
+  {
+   "text": "reason=some_made_up_code_that_is_not_in_the_contract",
+   "redacted": "[redacted opaque value]"
+  },
+  {
+   "text": "args \"key=6f1c2a3b-8d4e-4f5a-9b6c-7d8e9f0a1b2c\", next",
+   "redacted": "args \"[redacted opaque value]\", next"
+  },
+  {
+   "text": "container=\"vonk-6f1c2a3b-8d4e-4f5a-9b6c-7d8e9f0a1b2c\"",
+   "redacted": "container=\"[redacted opaque value]\""
+  },
+  {
+   "text": "Zq9xW2vB7nM4kL1pR8tY5uE3oI6aS0dF=yes_please",
+   "redacted": "[redacted opaque value]"
+  },
+  {
+   "text": "saw key=6f1c2a3b-8d4e-4f5a-9b6c-7d8e9f0a1b2c.",
+   "redacted": "saw key=6f1c2a3b-8d4e-4f5a-9b6c-7d8e9f0a1b2c."
+  }
+ ],
+ "must_not_contain": [
+  {
+   "text": "key=hf_Qx7Lm2Np9Rs4Tv6Wz8Yb1Cd3Fg5Hj0Kk2M",
+   "secret": "hf_Qx7Lm2Np9Rs4Tv6Wz8Yb1Cd3Fg5Hj0Kk2M"
+  },
+  {
+   "text": "auth=hf_Qx7Lm2Np9Rs4Tv6Wz8Yb1Cd3Fg5Hj0Kk2M",
+   "secret": "hf_Qx7Lm2Np9Rs4Tv6Wz8Yb1Cd3Fg5Hj0Kk2M"
+  },
+  {
+   "text": "STRIPE_KEY=sk_live_EXAMPLE-not-a-real-key-0000",
+   "secret": "sk_live_EXAMPLE-not-a-real-key-0000"
+  },
+  {
+   "text": "sessionid=9f86d081884c7d659a2feaa0c55ad015",
+   "secret": "9f86d081884c7d659a2feaa0c55ad015"
+  },
+  {
+   "text": "cookie_value=Zm9vYmFyYmF6cXV4cXV1eGNvcmdl1234",
+   "secret": "Zm9vYmFyYmF6cXV4cXV1eGNvcmdl1234"
+  },
+  {
+   "text": "sig=a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8",
+   "secret": "a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8"
+  },
+  {
+   "text": "abc=cmVkYWN0aW9uLXZlY3Rvci1wYWQtMjhieXRlcw==",
+   "secret": "cmVkYWN0aW9uLXZlY3Rvci1wYWQtMjhieXRlcw=="
+  },
+  {
+   "text": "PGPASSWORD=Pq8wE3rT6yU1iO4pA7sD0fG2hJ5kL9zX",
+   "secret": "Pq8wE3rT6yU1iO4pA7sD0fG2hJ5kL9zX"
+  },
+  {
+   "text": "trace_id=0123456789abcdef0123456789abcdef",
+   "secret": "0123456789abcdef0123456789abcdef"
+  },
+  {
+   "text": "request_id=6F1C2A3B-8D4E-4F5A-9B6C-7D8E9F0A1B2C",
+   "secret": "6F1C2A3B-8D4E-4F5A-9B6C-7D8E9F0A1B2C"
+  },
+  {
+   "text": "reason=some_made_up_code_that_is_not_in_the_contract",
+   "secret": "some_made_up_code_that_is_not_in_the_contract"
+  },
+  {
+   "text": "key=6f1c2a3b-8d4e-4f5a-9b6c-7d8e9f0a1b2c",
+   "secret": "6f1c2a3b-8d4e-4f5a-9b6c-7d8e9f0a1b2c"
+  },
+  {
+   "text": "sid=6f1c2a3b-8d4e-4f5a-9b6c-7d8e9f0a1b2c",
+   "secret": "6f1c2a3b-8d4e-4f5a-9b6c-7d8e9f0a1b2c"
+  },
+  {
+   "text": "sessionid=6f1c2a3b-8d4e-4f5a-9b6c-7d8e9f0a1b2c",
+   "secret": "6f1c2a3b-8d4e-4f5a-9b6c-7d8e9f0a1b2c"
+  },
+  {
+   "text": "pass=6f1c2a3b-8d4e-4f5a-9b6c-7d8e9f0a1b2c",
+   "secret": "6f1c2a3b-8d4e-4f5a-9b6c-7d8e9f0a1b2c"
+  },
+  {
+   "text": "PGPASSWORD=6f1c2a3b-8d4e-4f5a-9b6c-7d8e9f0a1b2c",
+   "secret": "6f1c2a3b-8d4e-4f5a-9b6c-7d8e9f0a1b2c"
+  },
+  {
+   "text": "apikey=6f1c2a3b-8d4e-4f5a-9b6c-7d8e9f0a1b2c",
+   "secret": "6f1c2a3b-8d4e-4f5a-9b6c-7d8e9f0a1b2c"
+  },
+  {
+   "text": "\"key=6f1c2a3b-8d4e-4f5a-9b6c-7d8e9f0a1b2c\"",
+   "secret": "6f1c2a3b-8d4e-4f5a-9b6c-7d8e9f0a1b2c"
+  },
+  {
+   "text": "key=6f1c2a3b-8d4e-4f5a-9b6c-7d8e9f0a1b2c,",
+   "secret": "6f1c2a3b-8d4e-4f5a-9b6c-7d8e9f0a1b2c"
+  },
+  {
+   "text": "Zq9xW2vB7nM4kL1pR8tY5uE3oI6aS0dF=yes_please",
+   "secret": "Zq9xW2vB7nM4kL1pR8tY5uE3oI6aS0dF"
+  }
+ ],
+ "note": "cases bind both sides to the exact output; must_not_contain binds both sides to redacting the secret where the line rules differ (Python blanks a PGPASSWORD= line, the agent redacts its value). The opaque rule covers 40+ character runs that touch no '.': a value ending a sentence ('saw key=<uuid>.') is out of its scope on both sides, as on main."
+}

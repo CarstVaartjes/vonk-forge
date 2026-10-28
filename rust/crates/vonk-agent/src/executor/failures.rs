@@ -99,9 +99,10 @@ impl StopStall {
 }
 
 /// A container this agent cannot prove it owns occupies the name the start
-/// needs. The name is quoted because the text sanitizer redacts a bare 40+
-/// character identifier-like word, and the operator needs this one. It is left untouched, the start waits visibly (a prerequisite, not a
-/// broken contract) and proceeds once the name is free.
+/// needs (`vonk-<run id>`, the operation's own run). Its 41-character name is
+/// an opaque value to the sanitizers, quoted or not. It is left untouched, the
+/// start waits visibly (a prerequisite, not a broken contract) and proceeds
+/// once the name is free.
 pub(super) fn retained_container_foreign(run_id: &str) -> ExecutionResult {
     ExecutionResult::Failed(
         Failure::new(format!(

@@ -30,6 +30,7 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol.contracts import AgentFailureResult
 from vonk_agent_protocol.failure_evidence import FailureDiagnostics
 from vonk_control.agent_jobs.stored import column_message
+from vonk_control.failure_evidence import safe_text
 from vonk_control.models import AgentOperationAttempt
 from vonk_control.operation_api import (
     JobDetailResponse,
@@ -370,7 +371,8 @@ def test_real_agent_client_reads_bounded_422_and_preserves_503_status(
                 location = json.loads(selected["text"])["issues"][0]["loc"][2]
                 # The actual reader bounds summaries; huge loc is either represented
                 # faithfully or explicitly clipped by its published summary bound.
-                assert str(location)[:40] in observed["summary"]
+                # A 40+ character opaque loc is redacted as the Controller would.
+                assert safe_text(str(location))[:40] in observed["summary"]
         else:
             # This production branch classifies headers/status, not body content.
             assert observed["summary"] is None

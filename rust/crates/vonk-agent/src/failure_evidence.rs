@@ -133,15 +133,64 @@ fn redact_word(word: &str) -> String {
         url.set_fragment(None);
         return url.to_string();
     }
-    if word.len() >= 40
-        && word
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || "+/=_-".contains(c))
-    {
-        "[redacted opaque value]".to_owned()
-    } else {
-        word.to_owned()
+    redact_opaque_runs(word)
+}
+
+/// An opaque value is a 40+ character run of base64-ish characters within a
+/// word, bounded by anything else (a quote, comma, colon, bracket): a quote or
+/// comma around a value never hides it. A run that touches a `.` is part of a
+/// dotted name (a path, a module, a host) and is kept whole, as before.
+fn redact_opaque_runs(word: &str) -> String {
+    let charset = |c: char| c.is_ascii_alphanumeric() || "+/=_-".contains(c);
+    let mut out = String::with_capacity(word.len());
+    let mut segment = String::new();
+    let flush = |segment: &mut String, out: &mut String| {
+        if segment.len() >= 40 && segment.chars().all(charset) {
+            out.push_str(&redact_opaque(segment));
+        } else {
+            out.push_str(segment);
+        }
+        segment.clear();
+    };
+    for c in word.chars() {
+        if charset(c) || c == '.' {
+            segment.push(c);
+        } else {
+            flush(&mut segment, &mut out);
+            out.push(c);
+        }
     }
+    flush(&mut segment, &mut out);
+    out
+}
+
+/// One opaque value. It is kept only as a `name=value` field whose value is a
+/// refusal code of the contract (its own enum decides):
+/// `error_code=helper_request_plan_binding_invalid`. Anything else, name
+/// included, is redacted whole: a UUID or a short value behind a name may be a
+/// credential, and so may the name.
+fn redact_opaque(token: &str) -> String {
+    match token.split_once('=') {
+        Some((name, value))
+            if is_field_name(name)
+                && value
+                    .parse::<vonk_agent_protocol::generated::SecurityRefusalReason>()
+                    .is_ok() =>
+        {
+            token.to_owned()
+        }
+        _ => "[redacted opaque value]".to_owned(),
+    }
+}
+
+/// A diagnostic field name (`error_code`): a short identifier.
+fn is_field_name(name: &str) -> bool {
+    let mut characters = name.chars();
+    name.len() <= 32
+        && characters
+            .next()
+            .is_some_and(|first| first.is_ascii_alphabetic() || first == '_')
+        && characters.all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
 /// The typed facts of a process-exit summary (`exit_code=1 exit_cause=...`):
@@ -1093,6 +1142,35 @@ mod tests {
             assert!(sanitized.text.len() <= LOG_BYTES);
             assert_eq!(sanitized.dropped_bytes, None);
             assert_eq!(sanitized.dropped_lines, None);
+        }
+    }
+
+    #[test]
+    fn a_typed_field_survives_the_opaque_value_rule() {
+        // Wrong implementation this catches: judging `name=value` as one
+        // opaque word erased `error_code=helper_request_plan_binding_invalid`
+        // (46 characters) from a Controller grant refusal, so the evidence
+        // named no cause. Only a contract code survives behind a name; the
+        // Controller applies the same cases.
+        let vector: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../agent_protocol/src/vonk_agent_protocol/vectors/opaque-value-redaction-v1.json"
+        ))
+        .unwrap();
+        for case in vector["cases"].as_array().unwrap() {
+            let text = case["text"].as_str().unwrap();
+            assert_eq!(
+                sanitize_text(text),
+                case["redacted"].as_str().unwrap(),
+                "{text}"
+            );
+        }
+        // Wrong implementation: keeping any short value behind a name leaked
+        // `key=hf_...`, `sessionid=<hex>` and `PGPASSWORD=...` from workload
+        // tails. Only a contract code survives, never a UUID.
+        for case in vector["must_not_contain"].as_array().unwrap() {
+            let text = case["text"].as_str().unwrap();
+            let secret = case["secret"].as_str().unwrap();
+            assert!(!sanitize_text(text).contains(secret), "{text}");
         }
     }
 
