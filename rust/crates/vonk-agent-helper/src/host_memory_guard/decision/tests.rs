@@ -776,18 +776,28 @@ fn a_load_at_the_usable_swap_bound_is_never_killed_and_one_byte_past_is() {
     // load may fill (R1/R2 margins duplicated in two places). Controller
     // admission keeps every load within `usable_swap_bytes`; the guard must
     // leave such a load alone and still stop one byte more.
-    let vectors: serde_json::Value = serde_json::from_str(include_str!(
+    #[derive(serde::Deserialize)]
+    struct UsableSwap {
+        total_bytes: u64,
+        usable_bytes: u64,
+    }
+    #[derive(serde::Deserialize)]
+    struct SwapVectors {
+        usable: Vec<UsableSwap>,
+    }
+    let vectors: SwapVectors = serde_json::from_str(include_str!(
         "../../../../../../agent_protocol/src/vonk_agent_protocol/vectors/swap-v1.json"
     ))
     .unwrap();
+    assert!(!vectors.usable.is_empty());
     let start = Instant::now();
-    for pair in vectors["usable"].as_array().unwrap() {
-        let total = pair["total_bytes"].as_u64().unwrap();
+    for pair in vectors.usable {
+        let total = pair.total_bytes;
         if total == 0 {
             continue;
         }
         let usable = vonk_agent_protocol::swap::usable_swap_bytes(total);
-        assert_eq!(usable, pair["usable_bytes"].as_u64().unwrap());
+        assert_eq!(usable, pair.usable_bytes);
         // Memory low, swap still moving both ways (so R2 sees it filling)
         // while its level holds.
         let at_bound = Host {
