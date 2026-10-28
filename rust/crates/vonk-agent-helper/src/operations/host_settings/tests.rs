@@ -3,6 +3,14 @@
 use super::*;
 use std::sync::Arc;
 
+/// Every program the swap pass may run; the desktop tests refuse them all.
+const SWAP_EXECUTABLES: [&str; 4] = [
+    crate::operations::swap::FALLOCATE,
+    crate::operations::swap::MKSWAP,
+    crate::operations::swap::SWAPON,
+    crate::operations::swap::SWAPOFF,
+];
+
 /// systemd as `systemctl` answers it: `None` cannot be read, and every
 /// command is recorded.
 #[derive(Clone)]
@@ -52,6 +60,11 @@ impl CommandRunner for Systemd {
     fn run(&self, executable: &Path, arguments: &[String]) -> Result<CommandOutput, String> {
         if executable == Path::new("/usr/bin/nvidia-smi") {
             return Err("driver unavailable to desktop test".to_owned());
+        }
+        // Swap is kept by the same pass; these tests cover headless only, and
+        // a swap failure must never keep the headless settings from being kept.
+        if SWAP_EXECUTABLES.contains(&executable.to_str().unwrap_or_default()) {
+            return Err("swap unavailable to desktop test".to_owned());
         }
         assert_eq!(executable, Path::new("/usr/bin/systemctl"));
         let call = arguments.join(" ");

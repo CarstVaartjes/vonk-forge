@@ -688,6 +688,72 @@ mod tests {
         ))
     }
 
+    /// Every trigger's summary at worst-case values: 13-digit bytes, 7-digit
+    /// MiB, rates and durations, PSI at 100.
+    pub(crate) fn worst_case_summaries() -> Vec<(Trigger, String)> {
+        let start = Instant::now();
+        let mut decision = Decision::default();
+        let big = 9_999_999_999_999_u64;
+        let sample = Sample {
+            available_bytes: Some(big),
+            free_bytes: Some(big),
+            swap_total_bytes: Some(big),
+            swap_free_bytes: Some(big),
+            full_avg10: Some(100.0),
+            full_avg60: Some(99.99),
+            counters: None,
+        };
+        for second in 0..6u64 {
+            decision.observe(
+                start + Duration::from_secs(second),
+                sample,
+                false,
+                true,
+                true,
+            );
+        }
+        let rates = Some(Rates {
+            swap_in: 9_999_999.0,
+            swap_out: 9_999_999.0,
+            refault: 9_999_999.0,
+        });
+        Trigger::ALL
+            .into_iter()
+            .map(|trigger| {
+                let text = summary(&evidence(
+                    sample,
+                    trigger,
+                    Duration::from_millis(9_999_999),
+                    decision::readings(&sample, rates, true),
+                    decision.recent(),
+                    chrono::DateTime::parse_from_rfc3339("2026-12-31T23:59:59.999999999+00:00")
+                        .unwrap()
+                        .to_utc(),
+                ));
+                (trigger, text)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn every_trigger_at_worst_case_values_is_the_shared_vector() {
+        let vectors: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../agent_protocol/src/vonk_agent_protocol/vectors/host-memory-guard-summary-v1.json"
+        ))
+        .unwrap();
+        let expected: Vec<&str> = vectors["worst_case"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|value| value.as_str().unwrap())
+            .collect();
+        let actual: Vec<String> = worst_case_summaries()
+            .into_iter()
+            .map(|(_, text)| text)
+            .collect();
+        assert_eq!(actual, expected);
+    }
+
     #[test]
     fn the_kill_summary_is_the_shared_vector_the_agent_reads() {
         // The agent's side reads this same vector through from_failure.

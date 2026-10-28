@@ -152,7 +152,7 @@ impl HelperRejection {
                             |evidence| format!("runtime job wait failed; {}", evidence.summary),
                         )
                         .chars()
-                        .take(480)
+                        .take(vonk_agent_protocol::failure_evidence::EXIT_SUMMARY_CHARS)
                         .collect(),
                 ),
                 evidence.as_ref().and_then(|evidence| evidence.logs.clone()),
