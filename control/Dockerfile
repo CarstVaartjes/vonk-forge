@@ -131,8 +131,8 @@ RUN npm run build --ignore-scripts
 FROM ${PYTHON_IMAGE} AS build
 WORKDIR /build
 # Layers are ordered from least to most frequently changing so an ordinary
-# source change rebuilds only the last two steps: the pinned public-contracts
-# wheel first (it depends only on the lock files), then the third-party
+# source change rebuilds only the last two steps: the pinned local wheels
+# first (they depend only on the lock files), then the third-party
 # dependencies (they depend only on pyproject.toml), then our own source.
 COPY control/pyproject.toml ./
 COPY control/uv.lock ./uv.lock
@@ -140,23 +140,20 @@ COPY control/packaging/public-contracts.lock ./packaging/public-contracts.lock
 # The repository image build runs scripts/build-control-wheel before invoking
 # Docker so this local dependency exists and has the digest pinned in uv.lock.
 COPY inventory/wheels/vonk_agent_protocol-*.whl /wheels/
+# The reviewed public-contracts wheel is installed by its locked digest, never
+# rebuilt: a rebuild resolves a build backend at build time and its bytes follow
+# whichever release is newest.
+COPY inventory/wheels/vonk_forge_public_contracts-2.6.0-py3-none-any.whl /wheels/
 COPY agent_protocol/pyproject.toml ./agent_protocol/
 COPY scripts/protocol-wheel-name scripts/protocol_wheel.py ./scripts/
 COPY deploy/compose/python-bootstrap.lock /tmp/python-bootstrap.lock
 RUN apt-get update \
-    && apt-get install --yes --no-install-recommends ca-certificates git \
+    && apt-get install --yes --no-install-recommends ca-certificates \
     && python -m pip install --no-cache-dir --require-hashes -r /tmp/python-bootstrap.lock \
-    && public_contracts_revision="$(sed -n 's/^revision = "//p' packaging/public-contracts.lock | tr -d '"')" \
-    && test "$(printf '%s' "$public_contracts_revision" | wc -c)" = 40 \
-    && git clone --filter=blob:none --no-checkout \
-        https://github.com/CarstVaartjes/vonk-forge-recipes.git /public-contracts \
-    && git -C /public-contracts checkout --detach "$public_contracts_revision" \
-    && python -m pip wheel --no-cache-dir --no-deps --wheel-dir /wheels \
-        /public-contracts/contracts \
     && protocol_wheel="$(scripts/protocol-wheel-name)" \
     && python -c 'import hashlib, pathlib, sys, tomllib; [package] = [p for p in tomllib.loads(pathlib.Path("uv.lock").read_text())["package"] if p["name"] == "vonk-agent-protocol"]; [wheel] = package["wheels"]; assert wheel["hash"] == "sha256:" + hashlib.sha256(pathlib.Path("/wheels", sys.argv[1]).read_bytes()).hexdigest()' "$protocol_wheel" \
     && test "$(sha256sum /wheels/vonk_forge_public_contracts-2.6.0-py3-none-any.whl | cut -d' ' -f1)" = "$(sed -n 's/^sha256 = "//p' packaging/public-contracts.lock | tr -d '"')" \
-    && rm -rf /public-contracts /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/*
 # Third-party dependencies resolve to the newest allowed release, so this layer
 # is only reused within one UTC day: CI passes the date, and a fix released
 # upstream reaches the next day's image even when pyproject.toml is unchanged.
