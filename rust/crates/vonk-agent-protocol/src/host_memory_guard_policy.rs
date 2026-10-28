@@ -51,12 +51,20 @@ pub const DRIVER_FAILURE_FREE_BYTES: u64 = 1024 * 1024 * 1024;
 // R5's corroboration is sustained like R1, never one sample: a healthy load's
 // derived MemFree touches ~0.9 GB at its NVRM line (GLM mosaic a0 2026-10-28).
 pub const DRIVER_FAILURE_SUSTAIN: Duration = Duration::from_secs(2);
+// The line counts this long: corroboration that starts within
+// SUSTAINED_PRESSURE of it still completes its DRIVER_FAILURE_SUSTAIN.
+pub const DRIVER_LINE_WINDOW: Duration =
+    Duration::from_secs(SUSTAINED_PRESSURE.as_secs() + DRIVER_FAILURE_SUSTAIN.as_secs());
 // Kill evidence keeps one reading per RECENT_SAMPLE_SPACING for the last
 // RECENT_SAMPLES of them, so each kill can be judged afterwards.
 pub const RECENT_SAMPLES: usize = 6;
 pub const RECENT_SAMPLE_SPACING: Duration = Duration::from_secs(1);
-/// The kill evidence's reading names, in summary order; the agent keeps each
-/// as a typed exit fact. The decision fills them in this order.
+/// The kill evidence's two packed properties: each value is `field:reading`
+/// pairs joined by `+`, one summary token the agent keeps as one exit fact
+/// (the agent keeps at most MAX_PREFLIGHT_PROPERTIES facts per failure).
+pub const PRESSURE_PROPERTY: &str = "pressure_readings";
+pub const RECENT_PROPERTY: &str = "recent_samples";
+/// The readings `PRESSURE_PROPERTY` packs, in order.
 pub const PRESSURE_FIELDS: [&str; 8] = [
     "loading",
     "mem_free_mib",
@@ -67,7 +75,8 @@ pub const PRESSURE_FIELDS: [&str; 8] = [
     "swapout_per_s",
     "refault_per_s",
 ];
-/// The recent-sample series names (values joined by `:`, oldest first).
+/// The series `RECENT_PROPERTY` packs (each series' samples joined by `-`,
+/// oldest first).
 pub const RECENT_FIELDS: [&str; 4] = [
     "recent_available_mib",
     "recent_free_mib",

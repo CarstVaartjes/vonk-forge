@@ -475,7 +475,7 @@ impl<R> RecipeExecutor<'_, R> {
         arguments: &[String],
         run_generation: u64,
         why: &str,
-    ) -> (Option<crate::failure_evidence::FailureProcessLogs>, String) {
+    ) -> super::failures::WorkloadEvidence {
         let request_root = self.runtime_root.join("runtime-requests");
         let boundary = HostRuntimeBoundary {
             client: self.client,
@@ -498,7 +498,16 @@ impl<R> RecipeExecutor<'_, R> {
                         reason.chars().take(160).collect::<String>()
                     ));
                 }
-                (report.process_logs.map(|logs| *logs), account)
+                // A guard stop's receipt answers as the inspection's log error.
+                let exit_summary = report.log_error.clone().filter(|text| {
+                    crate::failure_evidence::ExitCause::of_summary(text)
+                        == Some(crate::failure_evidence::ExitCause::HostMemoryExhausted)
+                });
+                super::failures::WorkloadEvidence {
+                    logs: report.process_logs.map(|logs| *logs),
+                    account,
+                    exit_summary,
+                }
             }
             // An exited container answers with the process-exit rejection and
             // its output and exit account.
@@ -514,7 +523,11 @@ impl<R> RecipeExecutor<'_, R> {
                         error.preflight_code()
                     ));
                 }
-                (error.process_logs().cloned(), account)
+                super::failures::WorkloadEvidence {
+                    logs: error.process_logs().cloned(),
+                    account,
+                    exit_summary: error.diagnostic().map(str::to_owned),
+                }
             }
         }
     }

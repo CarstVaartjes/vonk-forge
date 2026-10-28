@@ -26,9 +26,6 @@ use wait_timeout::ChildExt;
 pub use vonk_agent_protocol::host_memory_guard_policy::{
     COMMAND_TIMEOUT, JOURNAL_RETRY, PRELOAD_MARGIN_BYTES, SAMPLE_INTERVAL, SUSTAINED_PRESSURE,
 };
-fn failure_reason() -> &'static str {
-    vonk_agent_protocol::generated::FailureCode::WorkloadHostMemoryExhausted.as_str()
-}
 
 fn nvidia_allocation_failure(line: &str) -> bool {
     line.contains("NVRM:") && line.contains("Out of memory") && line.contains("NV_ERR_NO_MEMORY")
@@ -49,8 +46,8 @@ fn evidence(
     duration: Duration,
     readings: (String, String),
     recent: (String, String),
+    observed_at: chrono::DateTime<chrono::Utc>,
 ) -> FailureDiagnostics {
-    let observed_at = chrono::Utc::now();
     let empty = || FailureLogTail {
         text: String::new(),
         truncated: false,
@@ -72,7 +69,8 @@ fn evidence(
         storage: vec![],
         collector_errors: vec![],
         preflight: vec![
-            property("reason", failure_reason()),
+            // Eight facts with observed_at (the agent keeps at most eight):
+            // the failure code follows from exit_cause, so no `reason`.
             property(
                 vonk_agent_protocol::failure_evidence::EXIT_CAUSE_FIELD,
                 vonk_agent_protocol::failure_evidence::ExitCause::HostMemoryExhausted.token(),
@@ -491,7 +489,7 @@ pub fn spawn(data_root: PathBuf) {
             }
             let driver_targets = driver_failure
                 .as_ref()
-                .filter(|(event, _)| now.duration_since(*event) <= SUSTAINED_PRESSURE)
+                .filter(|(event, _)| decision::driver_line_counts(*event, now))
                 .map(|(_, targets)| {
                     targets
                         .iter()
@@ -520,6 +518,7 @@ pub fn spawn(data_root: PathBuf) {
                     decision.pressure_duration(now, trigger),
                     decision::readings(&sample, decision.rates(), loading),
                     decision.recent(),
+                    chrono::Utc::now(),
                 );
                 kill_now(&known, &targets, &value, &mut reported);
                 let _ = send.try_send((targets, value));
@@ -610,6 +609,7 @@ mod tests {
             SUSTAINED_PRESSURE,
             decision::readings(&Sample::default(), None, false),
             Decision::default().recent(),
+            chrono::Utc::now(),
         );
         let id = "a".repeat(64);
         // Without a recorded cgroup, the identity-checked Docker kill remains.
@@ -629,7 +629,6 @@ mod tests {
         let OperationError::RuntimeProcessExited { exit_summary, .. } = failed else {
             panic!("wrong failure type");
         };
-        assert!(exit_summary.contains("reason=workload.host_memory_exhausted"));
         assert!(exit_summary.contains("exit_cause=host_memory_exhausted"));
         assert!(exit_summary.contains("mem_available_bytes=1"));
         let calls = runner.calls.lock().unwrap();
@@ -648,47 +647,55 @@ mod tests {
         assert!(stop_managed(&foreign, data_root.path(), None, &id, &value).is_err());
         assert_eq!(foreign.calls.lock().unwrap().len(), 1);
     }
-    #[test]
-    fn the_swap_readings_survive_the_agents_diagnostic_bound() {
-        // Break caught: readings placed last were cut off by the agent's
-        // 320-character exit diagnostic, so kills carried no swap data.
-        let sample = Sample {
-            available_bytes: Some(700 * 1024 * 1024),
-            free_bytes: Some(1536 * 1024 * 1024),
+    /// The shared vector's evidence: a swapping load stopped by R2, with six
+    /// recent samples.
+    pub(crate) fn vector_summary() -> String {
+        let start = Instant::now();
+        let mut decision = Decision::default();
+        let mut sample = Sample {
+            available_bytes: Some(3 << 30),
+            free_bytes: Some(1536 << 20),
             swap_total_bytes: Some(64 << 30),
-            swap_free_bytes: Some(20 << 30),
+            swap_free_bytes: Some(5 << 30),
             full_avg10: Some(45.5),
             full_avg60: Some(50.25),
             counters: None,
         };
+        for second in 0..6u64 {
+            sample.available_bytes = Some((3 << 30) - second * (64 << 20));
+            decision.observe(
+                start + Duration::from_secs(second),
+                sample,
+                false,
+                true,
+                true,
+            );
+        }
         let rates = Some(Rates {
             swap_in: 300.0,
             swap_out: 20_000.0,
             refault: 2_000.0,
         });
-        let mut decision = Decision::default();
-        decision.observe(Instant::now(), sample, false, true, true);
-        let value = evidence(
+        summary(&evidence(
             sample,
             Trigger::SwapFilling,
-            SUSTAINED_PRESSURE,
+            Duration::from_millis(3_250),
             decision::readings(&sample, rates, true),
             decision.recent(),
-        );
-        let text: String = summary(&value).chars().take(320).collect();
-        assert!(text.contains("refault_per_s=2000"), "{text}");
-        assert!(text.contains("swap_free_mib=20480"), "{text}");
-        assert!(text.contains("loading=true"), "{text}");
-        assert!(value.preflight.len() <= 8);
-        assert!(value.preflight.iter().all(|p| p.value.len() <= 256));
-        // The agent keeps every reading as a typed exit fact.
-        let full = summary(&value);
-        for name in vonk_agent_protocol::host_memory_guard_policy::PRESSURE_FIELDS
-            .iter()
-            .chain(&vonk_agent_protocol::host_memory_guard_policy::RECENT_FIELDS)
-        {
-            assert!(full.contains(&format!("{name}=")), "{name} in {full}");
-        }
+            chrono::DateTime::parse_from_rfc3339("2026-10-28T12:00:00+00:00")
+                .unwrap()
+                .to_utc(),
+        ))
+    }
+
+    #[test]
+    fn the_kill_summary_is_the_shared_vector_the_agent_reads() {
+        // The agent's side reads this same vector through from_failure.
+        let vectors: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../agent_protocol/src/vonk_agent_protocol/vectors/host-memory-guard-summary-v1.json"
+        ))
+        .unwrap();
+        assert_eq!(vector_summary(), vectors["summary"].as_str().unwrap());
     }
 
     #[test]
@@ -750,6 +757,7 @@ mod tests {
             Duration::ZERO,
             decision::readings(&Sample::default(), None, false),
             Decision::default().recent(),
+            chrono::Utc::now(),
         )
     }
 

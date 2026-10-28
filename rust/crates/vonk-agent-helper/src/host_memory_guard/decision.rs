@@ -3,16 +3,18 @@
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
+use vonk_agent_protocol::failure_evidence::FAILURE_PROPERTY_VALUE_CHARS;
 use vonk_agent_protocol::generated::ResourceTermProblem;
 
 use vonk_agent_protocol::host_memory_guard_policy::{
-    DRIVER_FAILURE_FREE_BYTES, DRIVER_FAILURE_SUSTAIN, EXHAUSTED_BYTES, LOADING_FULL_AVG60_PERCENT,
-    LOADING_PRESSURE_SUSTAIN, PRESSURE_FIELDS, PSI_FALLING_RATIO, RECENT_FIELDS,
-    RECENT_SAMPLE_SPACING, RECENT_SAMPLES, SERVING_FULL_PSI_PERCENT, SERVING_PRESSURE_SUSTAIN,
-    SUSTAINED_PRESSURE, SWAP_EXHAUSTED_FREE_FLOOR_BYTES, SWAP_EXHAUSTED_FREE_PERCENT,
-    SWAP_EXHAUSTED_MEMORY_BYTES, SWAP_EXHAUSTED_SUSTAIN, SWAP_FILLING_MEMORY_BYTES,
-    SWAP_FILLING_SUSTAIN, SWAP_FILLING_USED_PERCENT, THRASH_FULL_PSI_PERCENT,
-    THRASH_HEADROOM_BYTES, THRASH_PAGES_PER_SECOND, THRASH_SUSTAIN,
+    DRIVER_FAILURE_FREE_BYTES, DRIVER_FAILURE_SUSTAIN, DRIVER_LINE_WINDOW, EXHAUSTED_BYTES,
+    LOADING_FULL_AVG60_PERCENT, LOADING_PRESSURE_SUSTAIN, PRESSURE_FIELDS, PRESSURE_PROPERTY,
+    PSI_FALLING_RATIO, RECENT_FIELDS, RECENT_PROPERTY, RECENT_SAMPLE_SPACING, RECENT_SAMPLES,
+    SERVING_FULL_PSI_PERCENT, SERVING_PRESSURE_SUSTAIN, SUSTAINED_PRESSURE,
+    SWAP_EXHAUSTED_FREE_FLOOR_BYTES, SWAP_EXHAUSTED_FREE_PERCENT, SWAP_EXHAUSTED_MEMORY_BYTES,
+    SWAP_EXHAUSTED_SUSTAIN, SWAP_FILLING_MEMORY_BYTES, SWAP_FILLING_SUSTAIN,
+    SWAP_FILLING_USED_PERCENT, THRASH_FULL_PSI_PERCENT, THRASH_HEADROOM_BYTES,
+    THRASH_PAGES_PER_SECOND, THRASH_SUSTAIN,
 };
 
 /// Why the guard stopped the managed workloads; the evidence's `trigger`.
@@ -141,6 +143,11 @@ pub fn read_sample(mut read: impl FnMut(&str) -> std::io::Result<String>) -> Sam
         full_avg60: full("avg60="),
         counters,
     }
+}
+
+/// Whether an NVRM line seen at `line` still counts at `now` (R5).
+pub fn driver_line_counts(line: Instant, now: Instant) -> bool {
+    now.saturating_duration_since(line) <= DRIVER_LINE_WINDOW
 }
 
 /// Each rule's condition, evaluated on one sample. Unknown readings never
@@ -351,14 +358,20 @@ fn mib(value: Option<u64>) -> String {
     value.map_or_else(unknown, |bytes| (bytes >> 20).to_string())
 }
 
-fn value(name: &str, value: &str) -> String {
-    let text = format!("{name}={value}");
-    text.chars().take(256).collect()
+/// One packed evidence value: `field:reading` pairs joined by `+`, a single
+/// summary token the agent keeps whole as one typed exit fact.
+fn packed(fields: &[&str], readings: &[String]) -> String {
+    let text = fields
+        .iter()
+        .zip(readings)
+        .map(|(field, reading)| format!("{field}:{reading}"))
+        .collect::<Vec<_>>()
+        .join("+");
+    text.chars().take(FAILURE_PROPERTY_VALUE_CHARS).collect()
 }
 
-/// The readings behind a kill (Step 0) as one evidence property: its name is
-/// the first `PRESSURE_FIELDS` entry and its value carries the others as
-/// `name=value` tokens, so the summary reads as flat typed facts.
+/// The readings behind a kill (Step 0) as one evidence property,
+/// `PRESSURE_PROPERTY`, its value packing every `PRESSURE_FIELDS` reading.
 pub fn readings(sample: &Sample, rates: Option<Rates>, loading: bool) -> (String, String) {
     let rate = |value: Option<f64>| value.map_or_else(unknown, |v| format!("{v:.0}"));
     let values = [
@@ -371,27 +384,23 @@ pub fn readings(sample: &Sample, rates: Option<Rates>, loading: bool) -> (String
         rate(rates.map(|r| r.swap_out)),
         rate(rates.map(|r| r.refault)),
     ];
-    let mut text = values[0].clone();
-    for (name, reading) in PRESSURE_FIELDS.iter().zip(&values).skip(1) {
-        text.push(' ');
-        text.push_str(&value(name, reading));
-    }
     (
-        PRESSURE_FIELDS[0].to_owned(),
-        text.chars().take(256).collect(),
+        PRESSURE_PROPERTY.to_owned(),
+        packed(&PRESSURE_FIELDS, &values),
     )
 }
 
 impl Decision {
-    /// The last samples, one per `RECENT_SAMPLE_SPACING`, oldest first, as
-    /// one evidence property shaped like `readings`.
+    /// The last samples, one per `RECENT_SAMPLE_SPACING`, oldest first, as one
+    /// evidence property, `RECENT_PROPERTY`: each `RECENT_FIELDS` series is its
+    /// readings joined by `-`.
     pub fn recent(&self) -> (String, String) {
         let series = |reading: &dyn Fn(&Sample) -> String| {
             self.recent
                 .iter()
                 .map(|(_, sample)| reading(sample))
                 .collect::<Vec<_>>()
-                .join(":")
+                .join("-")
         };
         let columns = [
             series(&|s| mib(s.available_bytes)),
@@ -399,15 +408,7 @@ impl Decision {
             series(&|s| mib(s.swap_free_bytes)),
             series(&|s| s.full_avg10.map_or_else(unknown, |v| format!("{v:.0}"))),
         ];
-        let mut text = columns[0].clone();
-        for (name, column) in RECENT_FIELDS.iter().zip(&columns).skip(1) {
-            text.push(' ');
-            text.push_str(&value(name, column));
-        }
-        (
-            RECENT_FIELDS[0].to_owned(),
-            text.chars().take(256).collect(),
-        )
+        (RECENT_PROPERTY.to_owned(), packed(&RECENT_FIELDS, &columns))
     }
 }
 

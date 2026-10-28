@@ -46,9 +46,9 @@ SystemCallArchitectures=native
 SystemCallFilter=@system-service
 SystemCallFilter=~@mount @raw-io @obsolete @debug
 # swapon/swapoff (not in @system-service) for the managed swap file only: the
-# compiled argv accepts only swap-<uuid>.img files in a directory named swap,
-# and the helper builds them under /var/lib/vonk-forge/swap. CAP_SYS_ADMIN
-# below is what the kernel checks; the children inherit this filter.
+# compiled argv accepts only /var/lib/vonk-forge/swap/swap-<uuid>.img (and its
+# managed temporary). CAP_SYS_ADMIN below is what the kernel checks; the
+# children inherit this filter.
 SystemCallFilter=@swap
 RestrictAddressFamilies=AF_UNIX AF_NETLINK
 # NVIDIA's privileged clock ioctl checks CAP_SYS_ADMIN; argv stays compiled

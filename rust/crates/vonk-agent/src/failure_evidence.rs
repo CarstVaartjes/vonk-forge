@@ -203,7 +203,9 @@ pub fn exit_facts(text: &str) -> impl Iterator<Item = (&str, &str)> {
         .split_whitespace()
         .filter_map(|token| token.split_once('='))
         .filter(|(key, value)| {
-            use vonk_agent_protocol::host_memory_guard_policy::{PRESSURE_FIELDS, RECENT_FIELDS};
+            use vonk_agent_protocol::host_memory_guard_policy::{
+                PRESSURE_PROPERTY, RECENT_PROPERTY,
+            };
             (matches!(
                 *key,
                 "exit_code"
@@ -215,8 +217,8 @@ pub fn exit_facts(text: &str) -> impl Iterator<Item = (&str, &str)> {
                     | "memory_full_avg10"
                     | "sustained_ms"
                     | "observed_at"
-            ) || PRESSURE_FIELDS.contains(key)
-                || RECENT_FIELDS.contains(key))
+            ) || *key == PRESSURE_PROPERTY
+                || *key == RECENT_PROPERTY)
                 && value.chars().all(|c| {
                     c.is_ascii_alphanumeric()
                         || c == '_'
@@ -835,7 +837,13 @@ fn exit_properties(failure: &Failure) -> Vec<FailureProperty> {
             value: value.chars().take(256).collect(),
         })
     };
-    if let Some(text) = failure.diagnostic.as_deref() {
+    // The helper's whole exit summary when the failure kept one: the wire
+    // diagnostic is a bounded copy that can cut its facts.
+    if let Some(text) = failure
+        .exit_summary
+        .as_deref()
+        .or(failure.diagnostic.as_deref())
+    {
         for (key, value) in exit_facts(text) {
             push(key, value.to_owned());
         }
@@ -892,21 +900,49 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_host_memory_guard_readings_are_kept_as_exit_facts() {
-        // Break caught: readings the sanitizer did not know were dropped, so a
-        // kill could not be judged afterwards.
-        use vonk_agent_protocol::host_memory_guard_policy::{PRESSURE_FIELDS, RECENT_FIELDS};
-        let text = format!(
-            "reason=workload.host_memory_exhausted trigger=sustained_full_psi {} {}",
-            PRESSURE_FIELDS.map(|name| format!("{name}=1")).join(" "),
-            RECENT_FIELDS
-                .map(|name| format!("{name}=19600:18900"))
-                .join(" "),
-        );
-        let kept: Vec<_> = exit_facts(&text).map(|(key, _)| key).collect();
-        for name in PRESSURE_FIELDS.iter().chain(&RECENT_FIELDS) {
-            assert!(kept.contains(name), "{name} kept in {kept:?}");
+    fn a_guard_kill_reaches_the_controller_with_every_reading() {
+        // Break caught (#1936 review): 19 flat facts past the eight-property
+        // cap and a 320/480-character cut of the diagnostic dropped the swap
+        // readings, the recent samples, sustained_ms and observed_at.
+        use vonk_agent_protocol::host_memory_guard_policy::{
+            PRESSURE_FIELDS, PRESSURE_PROPERTY, RECENT_FIELDS, RECENT_PROPERTY,
+        };
+        let vectors: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../agent_protocol/src/vonk_agent_protocol/vectors/host-memory-guard-summary-v1.json"
+        ))
+        .unwrap();
+        let summary = vectors["summary"].as_str().unwrap();
+        // As the start path keeps it: a bounded wire copy beside the whole summary.
+        let failure = Failure::new(
+            vonk_agent_protocol::generated::FailureCode::WorkloadHostMemoryExhausted.as_str(),
+        )
+        .diagnostic(summary.chars().take(320).collect::<String>())
+        .exit_summary(Some(summary));
+        let value = from_failure(&AgentOperation::RecipeStart, &failure);
+        let property = |name: &str| {
+            let found = value
+                .preflight
+                .iter()
+                .find(|property| property.name == name)
+                .map(|property| property.value.clone());
+            assert!(found.is_some(), "{name} missing from {:?}", value.preflight);
+            found.unwrap_or_default()
+        };
+        let pressure = property(PRESSURE_PROPERTY);
+        for field in PRESSURE_FIELDS {
+            assert!(
+                pressure.contains(&format!("{field}:")),
+                "{field} in {pressure}"
+            );
         }
+        let recent = property(RECENT_PROPERTY);
+        for field in RECENT_FIELDS {
+            assert!(recent.contains(&format!("{field}:")), "{field} in {recent}");
+        }
+        for name in [EXIT_CAUSE_FIELD, "trigger", "sustained_ms", "observed_at"] {
+            property(name);
+        }
+        assert_eq!(value.category, FailureCategory::Capacity);
     }
 
     #[test]

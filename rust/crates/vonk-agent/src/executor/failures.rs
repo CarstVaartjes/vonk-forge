@@ -37,17 +37,25 @@ pub fn distribution_success(evidence: DistributionDownloadEvidence) -> Execution
     })
 }
 
+/// What a running workload left behind: its output, the bounded account and
+/// the helper's whole exit summary when the container had exited.
+pub(super) struct WorkloadEvidence {
+    pub logs: Option<crate::failure_evidence::FailureProcessLogs>,
+    pub account: String,
+    pub exit_summary: Option<String>,
+}
+
 /// A failure that carries the workload's own output, or the typed reason there
 /// is none.
 pub(super) fn failed_with_evidence(
     reason: &'static str,
-    evidence: (Option<crate::failure_evidence::FailureProcessLogs>, String),
+    evidence: WorkloadEvidence,
 ) -> ExecutionResult {
-    let (logs, account) = evidence;
     ExecutionResult::Failed(
         Failure::new(reason)
-            .diagnostic(account.chars().take(480).collect::<String>())
-            .process_logs(logs),
+            .diagnostic(evidence.account.chars().take(480).collect::<String>())
+            .exit_summary(evidence.exit_summary.as_deref())
+            .process_logs(evidence.logs),
     )
 }
 
@@ -232,10 +240,12 @@ pub(super) fn runtime_observation_failure(
         (true, None, None) => Some("exit_state_unavailable=\"helper reported no detail\" logs_unavailable=\"not captured\"".to_owned()),
         (_, detail, _) => detail.map(|detail| detail.chars().take(480).collect::<String>()),
     };
-    let mut failure = Failure::new(reason).process_logs(crate::failure_evidence::diagnostic_logs(
-        error.process_logs(),
-        diagnostic.as_deref(),
-    ));
+    let mut failure = Failure::new(reason)
+        .process_logs(crate::failure_evidence::diagnostic_logs(
+            error.process_logs(),
+            diagnostic.as_deref(),
+        ))
+        .exit_summary(error.diagnostic());
     if diagnostic
         .as_deref()
         .and_then(crate::failure_evidence::ExitCause::of_summary)

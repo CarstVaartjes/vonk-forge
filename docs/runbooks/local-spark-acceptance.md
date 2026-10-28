@@ -64,8 +64,10 @@ runs (the agent's page-cache drop cadence marks a loading Spark). An NVIDIA
 `NVRM: Out of memory [NV_ERR_NO_MEMORY]` line (R5, non-fatal alone on GB10)
 stops only together with R1's or R3's condition or MemFree < 1 GiB, held
 for 2 s like R1 (never one sample). There is no per-sample MemAvailable bar.
-Every stop's evidence carries MemFree, swap, full avg10/avg60, the swap and
-refault rates and the last six samples (one per second). The thresholds live in
+Every stop's evidence carries, within the eight failure properties the agent
+keeps: the trigger, MemAvailable and full avg10, `pressure_readings` (MemFree,
+swap, full avg60, swap and refault rates), `sustained_ms`, `recent_samples`
+(the last six samples, one per second) and `observed_at`. The thresholds live in
 `host_memory_guard_policy.rs`, marked calibratable; the evidence is the
 2026-10-07 spark-3542 freeze, the 2026-10-08 GB10 OOM research and the
 systemd-oomd, oomd and earlyoom defaults.

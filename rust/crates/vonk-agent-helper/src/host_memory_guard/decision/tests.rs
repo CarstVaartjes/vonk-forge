@@ -534,15 +534,16 @@ fn the_kernel_files_are_read_into_one_sample_and_the_evidence_names_swap() {
         }),
         true,
     );
-    assert_eq!(text.0, "loading");
+    assert_eq!(text.0, PRESSURE_PROPERTY);
     assert!(text.1.len() <= 256);
+    assert!(!text.1.contains(char::is_whitespace), "one summary token");
     for field in [
-        "true ",
-        "swap_total_mib=65536",
-        "swap_free_mib=32768",
-        "swapin_per_s=1",
-        "swapout_per_s=2",
-        "refault_per_s=3",
+        "loading:true",
+        "swap_total_mib:65536",
+        "swap_free_mib:32768",
+        "swapin_per_s:1",
+        "swapout_per_s:2",
+        "refault_per_s:3",
     ] {
         assert!(text.1.contains(field), "{field} in {text:?}");
     }
@@ -550,7 +551,7 @@ fn the_kernel_files_are_read_into_one_sample_and_the_evidence_names_swap() {
         readings(&Sample::default(), None, false)
             .1
             .contains(&format!(
-                "swapin_per_s={}",
+                "swapin_per_s:{}",
                 ResourceTermProblem::Unknown.as_str()
             ))
     );
@@ -683,13 +684,16 @@ fn the_kill_evidence_carries_the_recent_samples_oldest_first() {
         decision.observe(start + SAMPLE_INTERVAL * tick, sample, false, true, false);
     }
     let (name, value) = decision.recent();
-    assert_eq!(name, RECENT_FIELDS[0]);
+    assert_eq!(name, RECENT_PROPERTY);
     assert!(value.len() <= 256);
+    assert!(!value.contains(char::is_whitespace), "one summary token");
     let available: Vec<u64> = value
-        .split_whitespace()
+        .split('+')
         .next()
         .unwrap()
-        .split(':')
+        .strip_prefix(&format!("{}:", RECENT_FIELDS[0]))
+        .unwrap()
+        .split('-')
         .map(|v| v.parse().unwrap())
         .collect();
     assert_eq!(available.len(), RECENT_SAMPLES);
@@ -698,6 +702,70 @@ fn the_kill_evidence_carries_the_recent_samples_oldest_first() {
         "{available:?}"
     );
     for field in &RECENT_FIELDS[1..] {
-        assert!(value.contains(&format!("{field}=")), "{field} in {value}");
+        assert!(value.contains(&format!("+{field}:")), "{field} in {value}");
     }
+}
+
+/// Kernel PSI averages: exponential moving averages of the stalled share over
+/// 10 s and 60 s, here updated every sample.
+fn ramp(average: f64, stalled: f64, window: f64) -> f64 {
+    let decay = (-SAMPLE_INTERVAL.as_secs_f64() / window).exp();
+    average * decay + stalled * (1.0 - decay)
+}
+
+#[test]
+fn gpu_pinned_growth_with_swap_free_is_killed_within_two_and_a_half_minutes_loading() {
+    // The class swap cannot absorb: driver-pinned allocations stall every task
+    // while swap stays free. avg60 climbs as the kernel averages it; while
+    // loading, R4 needs avg60 > 80% for 60 s: ~97 s to cross plus 60 s.
+    let start = Instant::now();
+    for loading in [true, false] {
+        let mut host = Host {
+            available: 300 * 1024 * 1024,
+            free: 1536 * 1024 * 1024,
+            ..Host::serving()
+        };
+        let mut decision = Decision::default();
+        let (mut avg10, mut avg60) = (0.0, 0.0);
+        let limit = ticks(Duration::from_secs(300));
+        let killed = (0..limit).find_map(|tick| {
+            avg10 = ramp(avg10, 100.0, 10.0);
+            avg60 = ramp(avg60, 100.0, 60.0);
+            host.avg10 = avg10;
+            host.avg60 = avg60;
+            let sample = host.tick();
+            decision
+                .observe(start + SAMPLE_INTERVAL * tick, sample, false, true, loading)
+                .map(|trigger| (tick, trigger))
+        });
+        let (tick, trigger) = killed.expect("a stalled host is killed");
+        assert_eq!(trigger, Trigger::SustainedPressure);
+        let seconds = f64::from(tick) * SAMPLE_INTERVAL.as_secs_f64();
+        if loading {
+            // 60 ln 5 ≈ 96.6 s to cross 80%, then the 60 s sustain.
+            assert!(
+                (150.0..=160.0).contains(&seconds),
+                "loading kill at {seconds} s"
+            );
+        } else {
+            // 10 ln 2.5 ≈ 9.2 s to cross 60%, then the 30 s sustain.
+            assert!(
+                (38.0..=41.0).contains(&seconds),
+                "serving kill at {seconds} s"
+            );
+        }
+    }
+}
+
+#[test]
+fn the_nvrm_line_counts_long_enough_for_corroboration_to_complete() {
+    // Break caught: a 3 s line window with a 2 s sustain dropped corroboration
+    // that began more than 1 s after the line.
+    let line = Instant::now();
+    let started = line + SUSTAINED_PRESSURE;
+    assert!(driver_line_counts(line, started + DRIVER_FAILURE_SUSTAIN));
+    assert!(!driver_line_counts(
+        line,
+        started + DRIVER_FAILURE_SUSTAIN + SAMPLE_INTERVAL
+    ));
 }
