@@ -45,6 +45,7 @@ from .capacity import (
     _resident_usage_uncertainty_detail as _resident_usage_uncertainty_detail,
 )
 from .capacity import plan_capacity as plan_capacity
+from .capacity import stop_can_clear_swap as stop_can_clear_swap
 from .demand import _resource_evidence as _resource_evidence
 from .demand import _selected_model_bytes as _selected_model_bytes
 from .demand import _term as _term
@@ -81,5 +82,6 @@ from .types import ResourcePreflightPlan as ResourcePreflightPlan
 from .types import ResourceReason as ResourceReason
 from .types import SettingsResolution as SettingsResolution
 from .types import SwapCapacity as SwapCapacity
+from .types import SwapHolder as SwapHolder
 from .types import UnknownRunMemoryResidual as UnknownRunMemoryResidual
 from .types import installation_disk_requirement as installation_disk_requirement

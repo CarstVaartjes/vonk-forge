@@ -15,6 +15,7 @@ from vonk_agent_protocol import (
     ResourceBlockerCode,
     RunAdmissionCode,
     RunState,
+    RunSwitchCode,
     canonical_message,
 )
 from vonk_agent_protocol.inventory import HostSettings
@@ -424,18 +425,13 @@ def _host_swap(total_gib, *, used=0):
 def _set_swap(sessions, *, total_gib, used=0):
     with sessions.begin() as session:
         for snapshot in session.scalars(select(NodeInventorySnapshot)):
-            snapshot.host_settings = _host_swap(total_gib, used=used)
+            snapshot.host_settings = (
+                None if total_gib is None else _host_swap(total_gib, used=used)
+            )
 
 
-def test_h_a_switch_away_from_a_swapping_run_stops_it_first_then_starts_once_swap_falls(
-    tmp_path, postgres_engine
-) -> None:
-    """Catches a switch deadlocking on swap the run it replaces holds.
-
-    Swap in use is a live reading that includes the old run's pages, so the
-    after-stop fit was short too; swap was no stop-conditional shortfall, the
-    stop never went first and nothing freed the swap.
-    """
+def _switch_world(tmp_path, postgres_engine, *, rise, total_gib, used, loading=0):
+    """A serving run on one Spark, then a switch to the same content rising ``rise``."""
     from .test_recipe_operations import installed_recipe, setup_services
     from .test_run_switch_operations import (
         RecordingArtifactExecutor,
@@ -447,7 +443,6 @@ def test_h_a_switch_away_from_a_swapping_run_stops_it_first_then_starts_once_swa
     sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(
         tmp_path, engine=postgres_engine
     )
-    node = nodes[0]
     installation_id = installed_recipe(
         lifecycle, mapping_id, build_id, nodes, request_id=str(uuid4())
     ).owner_id
@@ -455,6 +450,24 @@ def test_h_a_switch_away_from_a_swapping_run_stops_it_first_then_starts_once_swa
     old_plan = admission.plan_run(installation_id, "old", now=lifecycle._clock())
     old = admission.accept_run(old_plan, actor="admin", now=lifecycle._clock())
     steady = old_plan.nodes[0].required_memory_bytes
+    if loading:
+        # Another load of this content on the Spark is still starting.
+        with sessions.begin() as session:
+            session.execute(
+                update(InstallationNode).values(observed_memory_bytes=steady + rise)
+            )
+        _set_swap(sessions, total_gib=SWAP_POLICY.maximum_gib)
+        other = admission.accept_run(
+            admission.plan_run(installation_id, "other", now=lifecycle._clock()),
+            actor="admin",
+            now=lifecycle._clock(),
+        )
+        with sessions.begin() as session:
+            session.execute(
+                update(RunNode)
+                .where(RunNode.run_id == other)
+                .values(state=RunState.STARTING)
+            )
     with sessions.begin() as session:
         installation = session.get(RecipeInstallation, installation_id)
         run = session.get(RecipeRun, old)
@@ -464,12 +477,11 @@ def test_h_a_switch_away_from_a_swapping_run_stops_it_first_then_starts_once_swa
         run.route_state = "published"
         for rank in session.scalars(select(RunNode).where(RunNode.run_id == old)):
             rank.state = "running"
-        # This content's load rises 35 GiB above its steady demand.
+        # This content's load rises ``rise`` above its steady demand.
         session.execute(
-            update(InstallationNode).values(observed_memory_bytes=steady + 35 * GIB)
+            update(InstallationNode).values(observed_memory_bytes=steady + rise)
         )
-    _set_swap(sessions, total_gib=64, used=25 * GIB)
-
+    _set_swap(sessions, total_gib=total_gib, used=used)
     service = _service(
         sessions,
         lifecycle._clock(),
@@ -477,7 +489,22 @@ def test_h_a_switch_away_from_a_swapping_run_stops_it_first_then_starts_once_swa
         RecordingArtifactExecutor(),
         phase_executor=SynchronousPhaseExecutor(),
     )
-    plan = service.preview(_request(sessions, node, action="switch"), actor="admin")
+    plan = service.preview(_request(sessions, nodes[0], action="switch"), actor="admin")
+    return sessions, lifecycle, installation_id, old, plan
+
+
+def test_h_a_switch_away_from_a_swapping_run_stops_it_first_then_starts_once_swap_falls(
+    tmp_path, postgres_engine
+) -> None:
+    """Catches a switch deadlocking on swap the run it replaces holds.
+
+    Swap in use is a live reading that includes the old run's pages, so the
+    after-stop fit was short too; swap was no stop-conditional shortfall, the
+    stop never went first and nothing freed the swap.
+    """
+    sessions, lifecycle, installation_id, old, plan = _switch_world(
+        tmp_path, postgres_engine, rise=35 * GIB, total_gib=64, used=25 * GIB
+    )
 
     assert plan.allowed, plan.blockers
     assert plan.post_stop_memory_check is not None
@@ -491,6 +518,7 @@ def test_h_a_switch_away_from_a_swapping_run_stops_it_first_then_starts_once_swa
         assert installation is not None
         installation.state = "installed"
     _stop(sessions, old, lifecycle._clock())
+    admission = lifecycle._run_admission
     _swap_wait(admission.plan_run(installation_id, "qwen", now=lifecycle._clock()))
     _set_swap(sessions, total_gib=64)
     started = admission.plan_run(installation_id, "qwen", now=lifecycle._clock())
@@ -503,6 +531,44 @@ def test_h_a_switch_away_from_a_swapping_run_stops_it_first_then_starts_once_swa
     )
 
 
+@pytest.mark.parametrize(
+    ("rise", "total_gib", "used", "loading"),
+    [
+        # The old run uses no swap; the rise alone exceeds 64 GiB's usable.
+        (60 * GIB, 64, 0, 0),
+        # No swap reported: nothing to free.
+        (20 * GIB, None, 0, 0),
+        # Another load still starting holds the swap the rise needs.
+        (35 * GIB, 64, 0, 1),
+    ],
+    ids=["rise-beyond-usable", "no-swap", "held-by-another-load"],
+)
+def test_h2_a_swap_shortfall_no_stop_clears_waits_before_stopping_anything(
+    tmp_path, postgres_engine, rise, total_gib, used, loading
+) -> None:
+    """Catches a switch stopping a serving run that frees no swap it needs.
+
+    The stop went first whenever the stopped run held any claim on the
+    Spark: the Spark then served nothing while the start waited out the
+    stall window.
+    """
+    _, _, _, _, plan = _switch_world(
+        tmp_path,
+        postgres_engine,
+        rise=rise,
+        total_gib=total_gib,
+        used=used,
+        loading=loading,
+    )
+
+    assert not plan.allowed
+    assert plan.post_stop_memory_check is None
+    assert plan.stop_before_prepare is False
+    assert RunSwitchCode.RESOURCE_INSUFFICIENT_SWAP in {
+        reason.code for reason in plan.blockers
+    }
+
+
 def test_i_a_job_run_holds_its_rise_while_its_ranks_run_jobs(
     tmp_path, postgres_engine
 ) -> None:
@@ -513,7 +579,7 @@ def test_i_a_job_run_holds_its_rise_while_its_ranks_run_jobs(
     free swap.
     """
     from .test_artifact_jobs import _configure_artifact_recipe
-    from .test_recipe_operations import installed_recipe, setup_services
+    from .test_recipe_operations import NOW, installed_recipe, setup_services
 
     sessions, operations, _queue, mapping_id, build_id, nodes = setup_services(
         tmp_path, recipe_transform=_configure_artifact_recipe, engine=postgres_engine
@@ -537,8 +603,21 @@ def test_i_a_job_run_holds_its_rise_while_its_ranks_run_jobs(
     with sessions() as session:
         assert set(session.scalars(select(RunNode.state))) == {RunState.RUNNING}
 
+    with sessions() as session:
+        first = session.scalars(select(RecipeRun.id)).one()
+
     second = operations.preview_run(installation_id, "image-job-b")
     assert RunAdmissionCode.INSUFFICIENT_SWAP in _codes(second)
+    detail = " ".join(r.detail for node in second.nodes for r in node.blockers)
+    assert f"once job run {first} here stops" in detail
+
+    # The wait ends when the first job run stops: a fresh activation starts.
+    _stop(sessions, first, NOW)
+    fresh = operations.preview_run(installation_id, "image-job")
+    assert fresh.allowed, _codes(fresh)
+    operations.activate_job_run(
+        fresh, plan_digest=fresh.plan_digest, actor="operator", request_id=str(uuid4())
+    )
 
 
 def test_j_a_declared_load_peak_rides_on_swap_without_any_earlier_run(

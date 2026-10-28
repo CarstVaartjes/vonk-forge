@@ -397,8 +397,8 @@ RETRYABLE_PLAN_BLOCKERS = frozenset(
 def _admission_code(code: str) -> str:
     """The run admission word for one capacity-fit reason.
 
-    A swap shortfall keeps its own word: it is not a memory shortfall a stop
-    or a claim release frees, and it names a different remedy.
+    A swap shortfall keeps its own word: it names a different remedy, and a
+    reviewed stop clears it only when swap in use alone keeps the load out.
     """
 
     if code == ResourceBlockerCode.INSUFFICIENT_SWAP:

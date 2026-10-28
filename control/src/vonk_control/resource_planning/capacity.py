@@ -25,6 +25,7 @@ from .types import (
     PlannedStopRelease,
     ResourceDemand,
     ResourceReason,
+    SwapCapacity,
     UnknownRunMemoryResidual,
 )
 
@@ -184,8 +185,18 @@ def _load_swap_reason(
     ):
         return None
     setting = max(swap_needed_bytes(rise + swap.used_bytes), -(-minimum // GIB) * GIB)
+    jobs = [holder.run_id for holder in swap.holders if holder.job_run]
     if swap.desired_bytes is not None and setting > swap.desired_bytes:
         remedy = f"Raise the Spark swap setting to at least {setting // GIB} GiB."
+    elif jobs:
+        remedy = (
+            f"It starts once job run {', '.join(jobs[:_NAMED_CLAIMS])} here stops"
+            + (
+                " and the other loads finish loading."
+                if len(jobs) < len(swap.holders)
+                else "."
+            )
+        )
     elif swap.held_bytes:
         remedy = "It starts once the other loads here finish loading."
     elif swap.desired_bytes is not None and swap.total_bytes < swap.desired_bytes:
@@ -203,9 +214,25 @@ def _load_swap_reason(
         f"least {minimum} bytes of swap. Swap: "
         f"{swap.total_bytes} bytes active ({setting_text}), "
         f"{swap.used_bytes} in use, {swap.held_bytes} held by loads still "
-        f"starting; {usable} bytes are usable within the host memory guard's "
+        f"starting or job runs; {usable} bytes are usable within the host memory guard's "
         f"margins. {remedy}",
         node_id=node_id,
+    )
+
+
+def stop_can_clear_swap(demand: ResourceDemand, swap: SwapCapacity) -> bool:
+    """Whether only swap in use keeps this load out, so a stop may clear it.
+
+    ``swap`` must leave out the stopped runs' held rises (an after-stop
+    view). A stop frees at most the swap in use; a rise or other loads' held
+    rises beyond the usable swap, or too little active swap, stay a wait
+    before the stop, and the run that would be stopped keeps serving.
+    """
+
+    return (
+        demand.load_overshoot_bytes + swap.held_bytes
+        <= usable_swap_bytes(swap.total_bytes)
+        and swap.total_bytes >= demand.minimum_swap_bytes
     )
 
 

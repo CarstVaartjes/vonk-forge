@@ -223,6 +223,17 @@ class MemoryRequirement:
 
 
 @dataclass(frozen=True, slots=True)
+class SwapHolder:
+    """One run on the Spark whose admitted load rise still holds swap."""
+
+    run_id: str
+    held_bytes: int
+    #: A one-shot job run holds its rise while it is active (each job loads
+    #: again); any other run only while its rank is planned or starting.
+    job_run: bool = False
+
+
+@dataclass(frozen=True, slots=True)
 class SwapCapacity:
     """The swap a Spark can lend a load phase; unknown swap is none.
 
@@ -233,11 +244,15 @@ class SwapCapacity:
     #: Active swap as the agent reports it (0 when unreported).
     total_bytes: int = 0
     used_bytes: int = 0
-    #: The rise other ranks on this Spark still loading (planned or starting)
-    #: hold, from their admitted plans.
-    held_bytes: int = 0
+    #: The other runs on this Spark whose admitted rise still holds swap:
+    #: ranks still planned or starting, and active one-shot job runs.
+    holders: tuple[SwapHolder, ...] = ()
     #: The Spark's swap setting, for the remedy (``None`` when unknown).
     desired_bytes: int | None = None
+
+    @property
+    def held_bytes(self) -> int:
+        return sum(holder.held_bytes for holder in self.holders)
 
 
 #: No swap reported.

@@ -23,7 +23,7 @@ from .recipe_execution_contract import (
     RecipeExecutionContractError,
     parse_stored_run_plan,
 )
-from .resource_planning import SwapCapacity
+from .resource_planning import SwapCapacity, SwapHolder
 from .swap import selected_swap
 
 _LOADING = (RunState.PLANNED, RunState.STARTING)
@@ -42,7 +42,7 @@ def swap_capacity(
     observation = (
         host_settings.swap if isinstance(host_settings, HostSettings) else None
     )
-    held = 0
+    holders: list[SwapHolder] = []
     for run, rank_state in session.execute(
         select(RecipeRun, RunNode.state)
         .join(RunNode, RunNode.run_id == RecipeRun.id)
@@ -65,12 +65,18 @@ def swap_capacity(
             # A running service has loaded; a job run loads per job.
             and (rank_state in _LOADING or plan.execution_mode is not None)
         ):
-            held += max(0, rank.load_memory_bytes - rank.required_memory_bytes)
+            holders.append(
+                SwapHolder(
+                    run.id,
+                    max(0, rank.load_memory_bytes - rank.required_memory_bytes),
+                    job_run=plan.execution_mode is not None,
+                )
+            )
     return SwapCapacity(
         total_bytes=observation.total_bytes if observation is not None else 0,
         used_bytes=max(0, observation.total_bytes - observation.free_bytes)
         if observation is not None
         else 0,
-        held_bytes=held,
+        holders=tuple(holders),
         desired_bytes=selected_swap(session, node_id).size_gib * GIB,
     )
