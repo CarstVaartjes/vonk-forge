@@ -136,20 +136,27 @@ fn redact_word(word: &str) -> String {
     if !is_opaque(word) {
         return word.to_owned();
     }
-    // A `name=value` field is judged by its value: the name is no secret, and
-    // a typed code (`error_code=helper_request_plan_binding_invalid`) is no
-    // opaque value however long the pair is. Base64 padding never forms a
-    // field: its body is no short name.
+    // An opaque `name=value` word keeps its name and only a value of a
+    // known-safe shape: a contract refusal code
+    // (`error_code=helper_request_plan_binding_invalid`) or a canonical UUID
+    // (`request_id=<uuid>`). Every other value is redacted however short, so a
+    // credential behind a name (`key=hf_...`, `sessionid=<hex>`) never
+    // survives. Base64 padding never forms a field: its body is no short name.
     match word.split_once('=') {
-        Some((name, value)) if is_field_name(name) => {
-            if is_opaque(value) {
-                format!("{name}=[redacted opaque value]")
-            } else {
-                word.to_owned()
-            }
-        }
+        Some((name, value)) if is_field_name(name) && is_safe_field_value(value) => word.to_owned(),
+        Some((name, _)) if is_field_name(name) => format!("{name}=[redacted opaque value]"),
         _ => "[redacted opaque value]".to_owned(),
     }
+}
+
+/// A value a diagnostic field may carry in clear: a refusal code of the
+/// contract (its own enum decides), or a canonical lowercase UUID. A bare hex
+/// identifier is neither and stays redacted.
+fn is_safe_field_value(value: &str) -> bool {
+    value
+        .parse::<vonk_agent_protocol::generated::SecurityRefusalReason>()
+        .is_ok()
+        || uuid::Uuid::parse_str(value).is_ok_and(|parsed| parsed.hyphenated().to_string() == value)
 }
 
 fn is_opaque(word: &str) -> bool {
@@ -1126,9 +1133,9 @@ mod tests {
         // Wrong implementation this catches: judging `name=value` as one
         // opaque word erased `error_code=helper_request_plan_binding_invalid`
         // (46 characters) and `request_id=<uuid>` from a Controller grant
-        // refusal, so the evidence named no cause. Bare and field-valued
-        // opaque values and padded base64 stay redacted; the Controller
-        // applies the same cases.
+        // refusal, so the evidence named no cause. Only a contract code or a
+        // canonical UUID survives behind a name; the Controller applies the
+        // same cases.
         let vector: serde_json::Value = serde_json::from_str(include_str!(
             "../../../../agent_protocol/src/vonk_agent_protocol/vectors/opaque-value-redaction-v1.json"
         ))
@@ -1140,6 +1147,14 @@ mod tests {
                 case["redacted"].as_str().unwrap(),
                 "{text}"
             );
+        }
+        // Wrong implementation: keeping any short value behind a name leaked
+        // `key=hf_...`, `sessionid=<hex>` and `PGPASSWORD=...` from workload
+        // tails. Only a contract code or a canonical UUID survives.
+        for case in vector["must_not_contain"].as_array().unwrap() {
+            let text = case["text"].as_str().unwrap();
+            let secret = case["secret"].as_str().unwrap();
+            assert!(!sanitize_text(text).contains(secret), "{text}");
         }
     }
 

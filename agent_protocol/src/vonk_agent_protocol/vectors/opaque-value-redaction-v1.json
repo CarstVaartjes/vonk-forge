@@ -24,6 +24,60 @@
   {
    "text": "an_unusually_long_field_name_that_is_no_name=BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
    "redacted": "[redacted opaque value]"
+  },
+  {
+   "text": "id=abcdef0123456789",
+   "redacted": "id=abcdef0123456789"
+  },
+  {
+   "text": "reason=some_made_up_code_that_is_not_in_the_contract",
+   "redacted": "reason=[redacted opaque value]"
+  }
+ ],
+ "must_not_contain": [
+  {
+   "text": "key=hf_Qx7Lm2Np9Rs4Tv6Wz8Yb1Cd3Fg5Hj0Kk2M",
+   "secret": "hf_Qx7Lm2Np9Rs4Tv6Wz8Yb1Cd3Fg5Hj0Kk2M"
+  },
+  {
+   "text": "auth=hf_Qx7Lm2Np9Rs4Tv6Wz8Yb1Cd3Fg5Hj0Kk2M",
+   "secret": "hf_Qx7Lm2Np9Rs4Tv6Wz8Yb1Cd3Fg5Hj0Kk2M"
+  },
+  {
+   "text": "STRIPE_KEY=sk_live_EXAMPLE-not-a-real-key-0000",
+   "secret": "sk_live_EXAMPLE-not-a-real-key-0000"
+  },
+  {
+   "text": "sessionid=9f86d081884c7d659a2feaa0c55ad015",
+   "secret": "9f86d081884c7d659a2feaa0c55ad015"
+  },
+  {
+   "text": "cookie_value=Zm9vYmFyYmF6cXV4cXV1eGNvcmdl1234",
+   "secret": "Zm9vYmFyYmF6cXV4cXV1eGNvcmdl1234"
+  },
+  {
+   "text": "sig=a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8",
+   "secret": "a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8"
+  },
+  {
+   "text": "abc=cmVkYWN0aW9uLXZlY3Rvci1wYWQtMjhieXRlcw==",
+   "secret": "cmVkYWN0aW9uLXZlY3Rvci1wYWQtMjhieXRlcw=="
+  },
+  {
+   "text": "PGPASSWORD=Pq8wE3rT6yU1iO4pA7sD0fG2hJ5kL9zX",
+   "secret": "Pq8wE3rT6yU1iO4pA7sD0fG2hJ5kL9zX"
+  },
+  {
+   "text": "trace_id=0123456789abcdef0123456789abcdef",
+   "secret": "0123456789abcdef0123456789abcdef"
+  },
+  {
+   "text": "request_id=6F1C2A3B-8D4E-4F5A-9B6C-7D8E9F0A1B2C",
+   "secret": "6F1C2A3B-8D4E-4F5A-9B6C-7D8E9F0A1B2C"
+  },
+  {
+   "text": "reason=some_made_up_code_that_is_not_in_the_contract",
+   "secret": "some_made_up_code_that_is_not_in_the_contract"
   }
  ]
 }
