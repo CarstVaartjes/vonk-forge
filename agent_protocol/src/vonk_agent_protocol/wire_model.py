@@ -130,7 +130,7 @@ def _bind_json_string_scalars(schema: CoreSchema) -> CoreSchema:
             if type(value) is not str:
                 return value
             try:
-                return json_mode.validate_json(json.dumps(value))
+                return json_mode.validate_json(json.dumps(value), strict=True)
             except ValidationError:
                 return value
 

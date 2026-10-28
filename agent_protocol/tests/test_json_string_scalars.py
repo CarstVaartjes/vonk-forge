@@ -84,6 +84,37 @@ def test_a_string_the_json_contract_refuses_is_still_refused(
         PageCacheDropReport.model_validate_json(json.dumps(document))
 
 
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("dropped_at", "1761606661"),
+        ("dropped_at", "2026-10-27"),
+        ("dropped_at", "2026-10-27 23:11:01Z"),
+        ("dropped_at", "2026-10-27T23:11:01.123456789Z"),
+        ("request_id", "7ee6ed1ccd7a46399498e4e4e543d849"),
+        ("request_id", "urn:uuid:7ee6ed1c-cd7a-4639-9498-e4e4e543d849"),
+    ],
+)
+def test_python_mode_accepts_a_string_exactly_when_json_mode_does(
+    field: str, value: str
+) -> None:
+    document = dict(
+        _vector()["result"]["evidence"]["diagnostics"]["page_cache"]["last"]
+    )
+    document[field] = value
+
+    def accepts(parse: Callable[[], object]) -> bool:
+        try:
+            parse()
+        except ValueError:
+            return False
+        return True
+
+    assert accepts(lambda: PageCacheDropReport.model_validate(document)) == accepts(
+        lambda: PageCacheDropReport.model_validate_json(json.dumps(document))
+    )
+
+
 @pytest.mark.parametrize("mode", PARSERS)
 def test_a_bad_page_cache_report_costs_only_itself(mode: str) -> None:
     document = copy.deepcopy(_vector())
