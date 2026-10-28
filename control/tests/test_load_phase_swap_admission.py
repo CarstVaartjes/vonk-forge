@@ -17,11 +17,14 @@ from vonk_agent_protocol import (
     RunState,
     canonical_message,
 )
+from vonk_agent_protocol.inventory import HostSettings
 from vonk_agent_protocol.swap import GIB, SWAP_POLICY, usable_swap_bytes
 from vonk_control.fleet_profiles.dependencies import ENDING_BLOCKER_CODES
 from vonk_control.inventory_repository import InventoryRepository, NodeInventoryReport
 from vonk_control.models import (
     InstallationNode,
+    NodeInventorySnapshot,
+    RecipeInstallation,
     RecipeRun,
     ResourceReservation,
     RunNode,
@@ -404,3 +407,135 @@ def test_g_the_shared_swap_vector_admits_exactly_its_usable_bound(
     )
     _inventory(sessions, past, node, swap=observation)
     _swap_wait(service.plan_run(installation, alias="qwen", now=past))
+
+
+def _host_swap(total_gib, *, used=0):
+    return HostSettings.model_validate_json(
+        canonical_message(
+            {
+                "display_manager_active": False,
+                "graphical_default_target": False,
+                "swap": _swap(total_gib, used=used),
+            }
+        )
+    )
+
+
+def _set_swap(sessions, *, total_gib, used=0):
+    with sessions.begin() as session:
+        for snapshot in session.scalars(select(NodeInventorySnapshot)):
+            snapshot.host_settings = _host_swap(total_gib, used=used)
+
+
+def test_h_a_switch_away_from_a_swapping_run_stops_it_first_then_starts_once_swap_falls(
+    tmp_path, postgres_engine
+) -> None:
+    """Catches a switch deadlocking on swap the run it replaces holds.
+
+    Swap in use is a live reading that includes the old run's pages, so the
+    after-stop fit was short too; swap was no stop-conditional shortfall, the
+    stop never went first and nothing freed the swap.
+    """
+    from .test_recipe_operations import installed_recipe, setup_services
+    from .test_run_switch_operations import (
+        RecordingArtifactExecutor,
+        SynchronousPhaseExecutor,
+        _request,
+        _service,
+    )
+
+    sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(
+        tmp_path, engine=postgres_engine
+    )
+    node = nodes[0]
+    installation_id = installed_recipe(
+        lifecycle, mapping_id, build_id, nodes, request_id=str(uuid4())
+    ).owner_id
+    admission = lifecycle._run_admission
+    old_plan = admission.plan_run(installation_id, "old", now=lifecycle._clock())
+    old = admission.accept_run(old_plan, actor="admin", now=lifecycle._clock())
+    steady = old_plan.nodes[0].required_memory_bytes
+    with sessions.begin() as session:
+        installation = session.get(RecipeInstallation, installation_id)
+        run = session.get(RecipeRun, old)
+        assert installation is not None and run is not None
+        installation.state = "partial"
+        run.state = "running"
+        run.route_state = "published"
+        for rank in session.scalars(select(RunNode).where(RunNode.run_id == old)):
+            rank.state = "running"
+        # This content's load rises 35 GiB above its steady demand.
+        session.execute(
+            update(InstallationNode).values(observed_memory_bytes=steady + 35 * GIB)
+        )
+    _set_swap(sessions, total_gib=64, used=25 * GIB)
+
+    service = _service(
+        sessions,
+        lifecycle._clock(),
+        lifecycle,
+        RecordingArtifactExecutor(),
+        phase_executor=SynchronousPhaseExecutor(),
+    )
+    plan = service.preview(_request(sessions, node, action="switch"), actor="admin")
+
+    assert plan.allowed, plan.blockers
+    assert plan.post_stop_memory_check is not None
+    assert plan.post_stop_memory_check.stop_run_ids == [old]
+    assert plan.stop_before_prepare is True
+
+    # Preparation reinstalled and the stop ran; the start re-checks swap on
+    # the post-stop inventory.
+    with sessions.begin() as session:
+        installation = session.get(RecipeInstallation, installation_id)
+        assert installation is not None
+        installation.state = "installed"
+    _stop(sessions, old, lifecycle._clock())
+    _swap_wait(admission.plan_run(installation_id, "qwen", now=lifecycle._clock()))
+    _set_swap(sessions, total_gib=64)
+    started = admission.plan_run(installation_id, "qwen", now=lifecycle._clock())
+    assert started.allowed, _codes(started)
+    lifecycle.start(
+        started,
+        plan_digest=started.plan_digest,
+        actor="admin",
+        request_id=str(uuid4()),
+    )
+
+
+def test_i_a_job_run_holds_its_rise_while_its_ranks_run_jobs(
+    tmp_path, postgres_engine
+) -> None:
+    """Catches one-shot job runs never holding their rise.
+
+    Activation marks a job run's ranks running in the same transaction, and
+    each job loads again while they run; two such runs counted on the same
+    free swap.
+    """
+    from .test_artifact_jobs import _configure_artifact_recipe
+    from .test_recipe_operations import installed_recipe, setup_services
+
+    sessions, operations, _queue, mapping_id, build_id, nodes = setup_services(
+        tmp_path, recipe_transform=_configure_artifact_recipe, engine=postgres_engine
+    )
+    installation_id = installed_recipe(
+        operations, mapping_id, build_id, nodes, request_id=str(uuid4())
+    ).owner_id
+    steady = operations.preview_run(installation_id, "image-job").nodes[0]
+    with sessions.begin() as session:
+        session.execute(
+            update(InstallationNode).values(
+                observed_memory_bytes=steady.required_memory_bytes + 30 * GIB
+            )
+        )
+    _set_swap(sessions, total_gib=64)
+    plan = operations.preview_run(installation_id, "image-job")
+    assert plan.allowed, _codes(plan)
+    operations.activate_job_run(
+        plan, plan_digest=plan.plan_digest, actor="operator", request_id=str(uuid4())
+    )
+    with sessions() as session:
+        assert set(session.scalars(select(RunNode.state))) == {RunState.RUNNING}
+
+    second = operations.preview_run(installation_id, "image-job-b")
+    assert RunAdmissionCode.INSUFFICIENT_SWAP in _codes(second)

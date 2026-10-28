@@ -93,8 +93,14 @@ _MEMORY_CAPACITY_REFUSALS = frozenset(
     {
         f"run-switch.{ResourceBlockerCode.INSUFFICIENT_CAPACITY}",
         f"run-switch.{ResourceBlockerCode.INSUFFICIENT_CAPACITY_AFTER_STOP}",
+        # Swap in use is a live reading the stopped run's pages are part of:
+        # only the post-stop inventory can tell what the stop frees.
+        f"run-switch.{ResourceBlockerCode.INSUFFICIENT_SWAP}",
     }
 )
+
+#: A swap shortfall among a node's insufficient memory components.
+_SWAP_COMPONENT = ResourceBlockerCode.INSUFFICIENT_SWAP.value
 
 
 _MEMORY_STOP_CONDITIONAL_REFUSALS = _MEMORY_CAPACITY_REFUSALS | {

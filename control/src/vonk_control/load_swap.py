@@ -3,7 +3,9 @@
 A load may rise above its steady demand (the reservation) while it loads;
 swap carries that rise. Ranks that are still planned or starting hold their
 admitted rise (``StoredRunNodePlan.load_memory_bytes`` above
-``required_memory_bytes``) until the rank runs.
+``required_memory_bytes``) until the rank runs. A one-shot job run's ranks
+run from activation and each job loads again, so they hold it while the run
+is active.
 """
 
 from __future__ import annotations
@@ -25,6 +27,7 @@ from .resource_planning import SwapCapacity
 from .swap import selected_swap
 
 _LOADING = (RunState.PLANNED, RunState.STARTING)
+_HOLDING = (*_LOADING, RunState.RUNNING)
 
 
 def swap_capacity(
@@ -40,12 +43,12 @@ def swap_capacity(
         host_settings.swap if isinstance(host_settings, HostSettings) else None
     )
     held = 0
-    for run in session.scalars(
-        select(RecipeRun)
+    for run, rank_state in session.execute(
+        select(RecipeRun, RunNode.state)
         .join(RunNode, RunNode.run_id == RecipeRun.id)
         .where(
             RunNode.node_id == node_id,
-            RunNode.state.in_(_LOADING),
+            RunNode.state.in_(_HOLDING),
             RecipeRun.id.not_in(excluded_run_ids),
         )
     ):
@@ -59,6 +62,8 @@ def swap_capacity(
             rank is not None
             and plan.plan_digest == run.plan_digest
             and rank.load_memory_bytes is not None
+            # A running service has loaded; a job run loads per job.
+            and (rank_state in _LOADING or plan.execution_mode is not None)
         ):
             held += max(0, rank.load_memory_bytes - rank.required_memory_bytes)
     return SwapCapacity(

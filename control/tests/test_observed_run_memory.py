@@ -1,4 +1,10 @@
-from vonk_agent_protocol import RunAdmissionCode, canonical_message
+from vonk_agent_protocol import (
+    ResourceBlockerCode,
+    RunAdmissionCode,
+    RunState,
+    canonical_message,
+)
+from vonk_agent_protocol.swap import GIB
 
 """Admission bounds a recipe's load by what its runs really used."""
 
@@ -6,11 +12,7 @@ from datetime import timedelta
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import delete, select
-from vonk_control.inventory_repository import (
-    InventoryRepository,
-    NodeInventoryReport,
-)
+from sqlalchemy import delete, select, update
 from vonk_control.models import (
     CatalogDocumentRevision,
     RecipeRun,
@@ -21,6 +23,16 @@ from vonk_control.observed_run_memory import observed_role_peaks
 from vonk_control.run_admission import RunAdmissionService
 from vonk_control.telemetry import TelemetryRepository, TelemetrySample
 
+from .test_load_phase_swap_admission import _FREE as _LIVE_FREE
+from .test_load_phase_swap_admission import (
+    _accept,
+    _codes,
+    _inventory,
+    _observe_rise,
+    _swap,
+    _swap_wait,
+    _world,
+)
 from .test_run_admission import setup
 
 # The fixture Spark: 300 bytes free at admission, a declared peak of 225 and a
@@ -91,55 +103,49 @@ def _serve(sessions, now, node, installation, *, lowest_available, other_claim=N
     return service, observed
 
 
-def _inventory(sessions, now, node, free):
-    InventoryRepository(sessions, clock=lambda: now).record(
-        NodeInventoryReport.model_validate_json(
-            canonical_message(
-                {
-                    "node_id": node,
-                    "observed_at": now,
-                    "disk_total_bytes": 1000,
-                    "disk_free_bytes": 500,
-                    "host_memory_total_bytes": 1000,
-                    "host_memory_free_bytes": free,
-                    "gpu_memory_total_bytes": 1000,
-                    "gpu_memory_free_bytes": free,
-                    "gpu_count": 1,
-                    "artifact_store_read_only": False,
-                    "capabilities": ("runtime.vonk.v1", "recipe.image.pull.v1"),
-                    "memory_pool": "shared",
-                    "schema_version": 1,
-                    "nvidia_driver_version": "unknown",
-                    "container_runtime_version": "unknown",
-                }
-            )
-        )
-    )
-
-
-def test_a_runs_whole_run_peak_never_raises_its_steady_reservation(
-    tmp_path,
+def test_a_run_over_its_declaration_is_bounded_by_held_swap_then_live_memory(
+    tmp_path, postgres_engine
 ) -> None:
-    """Catches a swap-backed load poisoning its own content (2026-10-28).
+    """Catches admission trusting a declaration that real use already exceeded.
 
-    The observed peak spans the whole run, its load included, and
-    MemAvailable leaves out swap: raising the steady demand with it made a
-    content whose load swapped never fit again (demand_exceeds_capacity,
-    stored by content digest). It bounds the load only.
+    The 2026-10-11 freeze: a recipe whose declared peak fit with a thin margin
+    really used more, and the Spark thrashed. The whole-run peak no longer
+    raises the reservation (a swap-backed load poisoned its content that way,
+    2026-10-28). What protects a second load beside it today: while the first
+    still loads, its admitted rise holds the swap; once it runs, its real use
+    is in the Spark's live occupied memory.
     """
-    sessions, now, node, installation = setup(tmp_path, free_memory=_FREE)
-    service, observed = _serve(
-        sessions, now, node, installation, lowest_available=_FREE - 280
+    steady, real = 50 * GIB, 80 * GIB
+    sessions, now, node, installation, service = _world(
+        tmp_path, postgres_engine, steady
     )
-    assert observed == 280
+    at = _observe_rise(
+        sessions, service, installation, node, now, steady=steady, rise=real - steady
+    )
+    _inventory(sessions, at, node, swap=_swap(64))
+    first = _accept(
+        sessions, service, service.plan_run(installation, alias="a", now=at), at
+    )
+    with sessions.begin() as session:
+        session.execute(
+            update(RunNode)
+            .where(RunNode.run_id == first)
+            .values(state=RunState.STARTING)
+        )
+    _swap_wait(service.plan_run(installation, alias="b", now=at))
 
-    plan = service.plan_run(installation, alias="qwen", now=now)
-    assert plan.nodes[0].required_memory_bytes == 225
-    # The rise above it is the load's, for swap to carry; this Spark reports
-    # none, so the load waits (never ends) until it does.
-    assert {item.code for item in plan.nodes[0].blockers} == {
-        RunAdmissionCode.INSUFFICIENT_SWAP
-    }
+    running = at + timedelta(seconds=1)
+    with sessions.begin() as session:
+        session.execute(
+            update(RunNode)
+            .where(RunNode.run_id == first)
+            .values(state=RunState.RUNNING)
+        )
+    _inventory(sessions, running, node, free=_LIVE_FREE - real, swap=_swap(64))
+    second = service.plan_run(installation, alias="b", now=running)
+    assert not second.allowed
+    assert RunAdmissionCode.INSUFFICIENT_MEMORY in _codes(second)
+    assert ResourceBlockerCode.DEMAND_EXCEEDS_CAPACITY not in _codes(second)
 
 
 def test_real_use_below_the_declaration_never_loosens_admission(tmp_path) -> None:

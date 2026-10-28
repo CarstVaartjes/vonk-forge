@@ -13,6 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
     ReservationState,
+    ResourceBlockerCode,
     RunSwitchCode,
 )
 from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
@@ -75,6 +76,7 @@ from ..run_switch_contract import (
 from ..spark_disk import spark_free_bytes
 from ..unused_storage_collection import spark_eviction_capacity
 from .build_helpers import _recipe_model_digests
+from .constants import _SWAP_COMPONENT
 from .planning_helpers import (
     PlanInventory,
     _as_reason,
@@ -427,6 +429,16 @@ class ResourceFitMixin:
                                 and snapshot.memory_pool == "shared"
                                 else component
                                 for component in fit_node.insufficient_components
+                            )
+                        if health_reason is None and any(
+                            reason.code == ResourceBlockerCode.INSUFFICIENT_SWAP
+                            for reason in fit_node.reasons
+                        ):
+                            insufficient_components_by_node[item.node_id] = (
+                                insufficient_components_by_node.get(
+                                    item.node_id, frozenset()
+                                )
+                                | {_SWAP_COMPONENT}
                             )
                         # A failed GPU discovery is a platform wait, not proof
                         # that this recipe exceeds the physical memory pool.
