@@ -3,7 +3,7 @@ use std::{fs::File, io::Read, path::Path};
 
 use vonk_agent_protocol::generated::{SwapCheckpoint, SwapObservation};
 
-use vonk_agent_protocol::swap::RECEIPT_BYTES as RECEIPT_LIMIT;
+use vonk_agent_protocol::store_retention::HOST_SETTING_RECEIPT_BYTES as RECEIPT_LIMIT;
 
 fn meminfo_bytes(text: &str, key: &str) -> Option<u64> {
     text.lines().find_map(|line| {

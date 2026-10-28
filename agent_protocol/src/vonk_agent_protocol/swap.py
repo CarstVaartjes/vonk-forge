@@ -26,10 +26,6 @@ class SwapPolicy(WireModel):
     default_gib: Literal[64] = 64
     # The whole unified pool of one Spark.
     maximum_gib: Literal[128] = 128
-    # A swap file is created only while this share of the filesystem stays
-    # free after it: the share below which storage is short (the Controller's
-    # STORAGE_LOW_FREE_FRACTION; a Rust test binds the two).
-    free_disk_percent_after: Literal[10] = 10
     # Sizes are whole GiB: a smaller shortfall is only swap-area header pages
     # (/swap.img's 16 GiB reports 16 GiB minus one page), never a reason for a
     # swap file.

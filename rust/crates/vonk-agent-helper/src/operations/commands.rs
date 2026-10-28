@@ -28,7 +28,13 @@ impl CommandRunner for ProcessCommandRunner {
             executable.to_str(),
             Some(swap::FALLOCATE | swap::MKSWAP | swap::SWAPON | swap::SWAPOFF)
         );
-        if swap && !swap::allowed_arguments(executable.to_str().unwrap_or_default(), arguments) {
+        if swap
+            && !swap::allowed_arguments(
+                &swap::swap_directory(),
+                executable.to_str().unwrap_or_default(),
+                arguments,
+            )
+        {
             return Err("swap command is not compiled into the helper".to_owned());
         }
         if !nvidia

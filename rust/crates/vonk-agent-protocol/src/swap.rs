@@ -4,8 +4,6 @@ use crate::generated::{SwapIntent, SwapPolicy};
 pub const GIB: u64 = 1024 * 1024 * 1024;
 /// The helper's swap checkpoint, published read-only for the agent.
 pub const OBSERVATION_FILE: &str = "swap-observation.json";
-/// The bound on that record, for its writer and its reader.
-pub const RECEIPT_BYTES: u64 = 16 * 1024;
 /// The agent's wait for one helper swap pass: create (fallocate, mkswap,
 /// swapon at 30 s each) and release (swapoff at 20 s) in the worst case.
 pub const SWAP_PASS_SECONDS: u64 = 120;

@@ -11,9 +11,10 @@ pub(super) const NVIDIA_SMI: &str = "/usr/bin/nvidia-smi";
 pub(super) const OBSERVATION_QUERY: &str =
     "--query-gpu=clocks.current.graphics,clocks.current.sm,clocks_event_reasons.active";
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(10);
-const RETRY_SECONDS: u64 = 60;
-const ATTEMPT_SECONDS: u64 = 10 * 60;
-const RECORD_BYTES: u64 = 16 * 1024;
+use vonk_agent_protocol::store_retention::{
+    HOST_SETTING_ATTEMPT_SECONDS as ATTEMPT_SECONDS, HOST_SETTING_RECEIPT_BYTES as RECORD_BYTES,
+    HOST_SETTING_RETRY_SECONDS as RETRY_SECONDS,
+};
 
 // One command definition serves the producer and the privileged process boundary.
 fn lock_arguments(range: &GpuClockRange) -> Option<[String; 2]> {

@@ -2,9 +2,20 @@
 use Collector::*;
 use StoreRoot::*;
 
-/// All unused Spark data, including model copies, expires after one day.
+// The low-space line shared by the Controller, the agent and the helper.
+include!(concat!(env!("OUT_DIR"), "/storage_policy.rs"));
+
+/// The bound on a helper host-setting receipt (GPU clock, swap), for its
+/// writer and its reader.
+pub const HOST_SETTING_RECEIPT_BYTES: u64 = 16 * 1024;
+/// A host-setting change retries this often inside a window of this length;
+/// after it the hourly host-settings pass opens a fresh one.
+pub const HOST_SETTING_RETRY_SECONDS: u64 = 60;
+pub const HOST_SETTING_ATTEMPT_SECONDS: u64 = 10 * 60;
+
 /// The privileged helper's data root, which the agent reads receipts from.
 pub const HELPER_DATA_ROOT: &str = "/var/lib/vonk-forge";
+/// All unused Spark data, including model copies, expires after one day.
 pub const GRACE: std::time::Duration = std::time::Duration::from_secs(24 * 60 * 60);
 
 /// How one store's entries leave.

@@ -22,6 +22,7 @@ from functools import cached_property
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from vonk_agent_protocol.store_cleanup import STORAGE_POLICY
 from vonk_forge_contracts import CONTRACT_MAJOR
 
 _LOGGER = logging.getLogger(__name__)
@@ -54,7 +55,7 @@ MODEL_CACHE_RESERVE_BYTES = 10 * 1024**3
 # fraction of its capacity and the largest install or model set already known
 # to it, never above the cap. A refused load, install, build or download asks
 # for more than that; either way eviction goes on to the demand plus a reserve.
-STORAGE_LOW_FREE_FRACTION = 0.10
+STORAGE_LOW_FREE_FRACTION = STORAGE_POLICY.low_free_percent / 100
 STORAGE_LOW_FREE_CAP_FRACTION = 0.25
 STORAGE_EVICTION_RESERVE_FRACTION = 0.02
 STORAGE_EVICTION_RESERVE_FLOOR_BYTES = 5 * 1024**3

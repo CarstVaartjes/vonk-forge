@@ -1,11 +1,22 @@
 """Local retention delegation; no arbitrary privileged filesystem paths."""
 
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import UUID
 
 from pydantic import Field
 
 from .wire_model import WireEnum, WireModel
+
+
+class StoragePolicy(WireModel):
+    """Exported with the wire graph: the Controller, the agent and the helper's
+    swap file share this one low-space line."""
+
+    # A Spark or the NAS is short of storage below this share of its capacity.
+    low_free_percent: Literal[10] = 10
+
+
+STORAGE_POLICY = StoragePolicy()
 
 
 class AgentRetainedStore(WireEnum):

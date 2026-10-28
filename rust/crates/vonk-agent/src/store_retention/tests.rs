@@ -773,7 +773,8 @@ fn the_low_space_line_is_the_controllers() {
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../control/src/vonk_control/settings.py");
     let settings = fs::read_to_string(settings).unwrap();
     for line in [
-        format!("STORAGE_LOW_FREE_FRACTION = 0.{LOW_FREE_PERCENT}"),
+        // One owner: the protocol's storage policy, which LOW_FREE_PERCENT reads.
+        "STORAGE_LOW_FREE_FRACTION = STORAGE_POLICY.low_free_percent / 100".to_owned(),
         format!("STORAGE_EVICTION_RESERVE_FRACTION = 0.0{RESERVE_PERCENT}"),
         format!(
             "STORAGE_EVICTION_RESERVE_FLOOR_BYTES = {} * 1024**3",
@@ -782,11 +783,6 @@ fn the_low_space_line_is_the_controllers() {
     ] {
         assert!(settings.lines().any(|setting| setting == line), "{line}");
     }
-    // The helper keeps the same share free when it creates a swap file.
-    assert_eq!(
-        u64::from(vonk_agent_protocol::swap::policy().free_disk_percent_after),
-        LOW_FREE_PERCENT
-    );
 }
 
 /// Every top-level name written below the agent data root, by the agent, its

@@ -11,9 +11,13 @@
 use super::*;
 use vonk_agent_protocol::generated::{SwapApplyState, SwapCheckpoint, SwapIntent, SwapWaitReason};
 use vonk_agent_protocol::host_memory_guard_policy::STALL_AVAILABLE_BYTES;
+use vonk_agent_protocol::store_retention::{
+    HELPER_DATA_ROOT, HOST_SETTING_ATTEMPT_SECONDS as ATTEMPT_SECONDS,
+    HOST_SETTING_RECEIPT_BYTES as RECORD_BYTES, HOST_SETTING_RETRY_SECONDS as RETRY_SECONDS,
+    STORAGE_POLICY,
+};
 use vonk_agent_protocol::swap::{
-    GIB, OBSERVATION_FILE, RECEIPT_BYTES, default_intent, desired_bytes, policy, tolerance_bytes,
-    valid_intent,
+    GIB, OBSERVATION_FILE, default_intent, desired_bytes, policy, tolerance_bytes, valid_intent,
 };
 
 pub(super) const FALLOCATE: &str = "/usr/bin/fallocate";
@@ -31,11 +35,6 @@ const COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
 // the pages it already moved stay in memory, so each pass makes progress.
 // The agent waits SWAP_PASS_SECONDS for the whole pass.
 const RELEASE_TIMEOUT: Duration = Duration::from_secs(20);
-const RETRY_SECONDS: u64 = 60;
-const ATTEMPT_SECONDS: u64 = 10 * 60;
-const RECORD_BYTES: u64 = RECEIPT_BYTES;
-/// mkswap keeps the first page for its header; /proc/swaps reports the rest.
-const HEADER_BYTES: u64 = 4096;
 const FILE_PREFIX: &str = "swap-";
 const FILE_SUFFIX: &str = ".img";
 const TEMPORARY_PREFIX: &str = ".swap-";
@@ -87,18 +86,24 @@ fn managed_name(name: &str) -> bool {
             .is_some_and(uuid)
 }
 
-/// A managed swap file path: absolute, in a `swap` directory, with a managed
-/// name. The process boundary accepts no other path.
-fn managed_path(path: &str) -> bool {
+/// mkswap keeps the first page for its header; /proc/swaps reports the rest.
+fn header_bytes() -> u64 {
+    rustix::param::page_size() as u64
+}
+
+/// The directory the process boundary accepts swap files in.
+pub(super) fn swap_directory() -> PathBuf {
+    Path::new(HELPER_DATA_ROOT).join(DIRECTORY)
+}
+
+/// A managed swap file path: exactly `<directory>/<managed name>`. The process
+/// boundary accepts no other path.
+fn managed_path(directory: &Path, path: &str) -> bool {
     let path = Path::new(path);
-    path.is_absolute()
+    path.parent() == Some(directory)
         && path
             .components()
             .all(|part| matches!(part, Component::RootDir | Component::Normal(_)))
-        && path
-            .parent()
-            .and_then(Path::file_name)
-            .is_some_and(|name| name == DIRECTORY)
         && path
             .file_name()
             .and_then(|name| name.to_str())
@@ -114,16 +119,17 @@ fn allocate_arguments(path: &Path, bytes: u64) -> Vec<String> {
     ]
 }
 
-pub(super) fn allowed_arguments(executable: &str, arguments: &[String]) -> bool {
+pub(super) fn allowed_arguments(directory: &Path, executable: &str, arguments: &[String]) -> bool {
     match (executable, arguments) {
         (FALLOCATE, [flag, bytes, path]) => {
             flag == "--length"
                 && bytes.parse::<u64>().is_ok_and(|n| {
-                    n > HEADER_BYTES && n <= u64::from(policy().maximum_gib) * GIB + HEADER_BYTES
+                    n > header_bytes()
+                        && n <= u64::from(policy().maximum_gib) * GIB + header_bytes()
                 })
-                && managed_path(path)
+                && managed_path(directory, path)
         }
-        (MKSWAP | SWAPON | SWAPOFF, [path]) => managed_path(path),
+        (MKSWAP | SWAPON | SWAPOFF, [path]) => managed_path(directory, path),
         _ => false,
     }
 }
@@ -303,7 +309,11 @@ impl<R: CommandRunner> OperationExecutor<R> {
         let mut release = managed;
         let keep = release
             .iter()
-            .position(|swap| usable_bytes > 0 && swap.size_bytes == usable_bytes)
+            // Within the tolerance: an OS swap that moved by a page never
+            // recreates the file.
+            .position(|swap| {
+                usable_bytes > 0 && swap.size_bytes.abs_diff(usable_bytes) < tolerance_bytes()
+            })
             .map(|index| release.remove(index));
         Ok(Plan {
             keep,
@@ -360,21 +370,21 @@ impl<R: CommandRunner> OperationExecutor<R> {
     }
 
     fn activate_swap_file(&self, root: &Path, usable_bytes: u64) -> Result<ActiveSwap, Wait> {
-        let file_bytes = usable_bytes + HEADER_BYTES;
+        let file_bytes = usable_bytes + header_bytes();
         let space = self.runner.filesystem_space(root).map_err(|error| {
             (
                 SwapWaitReason::HostUnreadable,
                 format!("filesystem space unreadable: {error}"),
             )
         })?;
-        let reserve = space.total_bytes / 100 * u64::from(policy().free_disk_percent_after);
+        let reserve = space.total_bytes / 100 * u64::from(STORAGE_POLICY.low_free_percent);
         if space.available_bytes < file_bytes.saturating_add(reserve) {
             return Err((
                 SwapWaitReason::InsufficientDisk,
                 format!(
                     "a {file_bytes}-byte swap file needs {} bytes available ({}% of the filesystem stays free); {} available",
                     file_bytes.saturating_add(reserve),
-                    policy().free_disk_percent_after,
+                    STORAGE_POLICY.low_free_percent,
                     space.available_bytes
                 ),
             ));
@@ -501,7 +511,11 @@ impl<R: CommandRunner> OperationExecutor<R> {
         record: &SwapCheckpoint,
     ) -> Result<(), OperationError> {
         let bytes = canonical_json(record).map_err(|_| OperationError::InvalidOperation)?;
-        let temporary = root.join(format!(".{}.tmp", uuid::Uuid::new_v4()));
+        // A managed temporary name: a crash's leftover is removed next pass.
+        let temporary = root.join(format!(
+            "{TEMPORARY_PREFIX}{}{TEMPORARY_SUFFIX}",
+            uuid::Uuid::new_v4()
+        ));
         let mut file = OpenOptions::new()
             .write(true)
             .create_new(true)

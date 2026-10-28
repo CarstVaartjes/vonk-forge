@@ -14,6 +14,7 @@ struct State {
     fail: Option<&'static str>,
     calls: Vec<(String, Vec<String>)>,
     boot: String,
+    directory: PathBuf,
 }
 
 #[derive(Clone)]
@@ -24,7 +25,7 @@ impl Kernel {
         Self(Arc::new(Mutex::new(State {
             active: vec![ActiveSwap {
                 path: PathBuf::from(OS_SWAP),
-                size_bytes: 16 * GIB - HEADER_BYTES,
+                size_bytes: 16 * GIB - header_bytes(),
                 used_bytes: 0,
             }],
             available_memory: 100 * GIB,
@@ -53,8 +54,9 @@ impl CommandRunner for Kernel {
     fn run(&self, executable: &Path, arguments: &[String]) -> Result<CommandOutput, String> {
         let executable = executable.to_str().unwrap().to_owned();
         // The fake enforces the same compiled argv as the process boundary.
+        let directory = self.state().directory.clone();
         assert!(
-            allowed_arguments(&executable, arguments),
+            allowed_arguments(&directory, &executable, arguments),
             "{executable} {arguments:?}"
         );
         let mut state = self.state();
@@ -78,7 +80,7 @@ impl CommandRunner for Kernel {
                 let bytes: u64 = fs::read_to_string(&path).unwrap().parse().unwrap();
                 state.active.push(ActiveSwap {
                     path,
-                    size_bytes: bytes - HEADER_BYTES,
+                    size_bytes: bytes - header_bytes(),
                     used_bytes: 0,
                 });
             }
@@ -127,6 +129,7 @@ impl CommandRunner for Kernel {
 }
 
 fn helper(root: &Path, kernel: &Kernel) -> OperationExecutor<Kernel> {
+    kernel.state().directory = root.join(DIRECTORY);
     OperationExecutor::new(ManagedRoots::under(root), &[0; 32], kernel.clone(), None).unwrap()
 }
 
@@ -206,7 +209,7 @@ fn a_size_the_os_swap_already_meets_removes_the_managed_file() {
     helper
         .reconcile_swap_at(Some(&intent(2, 16)), false, 1010)
         .unwrap();
-    assert_eq!(kernel.total(), 16 * GIB - HEADER_BYTES);
+    assert_eq!(kernel.total(), 16 * GIB - header_bytes());
     assert!(managed_files(temp.path()).is_empty());
     assert_eq!(checkpoint(temp.path()).state, SwapApplyState::Applied);
 }
@@ -278,7 +281,11 @@ fn a_failed_swapon_leaves_no_file_and_retries_until_the_deadline_then_hourly() {
     let helper = helper(temp.path(), &kernel);
     helper.reconcile_swap_at(None, false, 1000).unwrap();
     assert!(managed_files(temp.path()).is_empty());
-    assert_eq!(kernel.total(), 16 * GIB - HEADER_BYTES, "OS swap untouched");
+    assert_eq!(
+        kernel.total(),
+        16 * GIB - header_bytes(),
+        "OS swap untouched"
+    );
     let record = checkpoint(temp.path());
     assert_eq!(record.reason, Some(SwapWaitReason::CommandFailed));
     assert!(record.detail.unwrap().contains("injected failure"));
@@ -293,7 +300,7 @@ fn a_failed_swapon_leaves_no_file_and_retries_until_the_deadline_then_hourly() {
     // Expired stays quiet on inventory; the hourly pass opens a fresh window.
     kernel.state().fail = None;
     helper.reconcile_swap_at(None, false, 2000).unwrap();
-    assert_eq!(kernel.total(), 16 * GIB - HEADER_BYTES);
+    assert_eq!(kernel.total(), 16 * GIB - header_bytes());
     helper.reconcile_swap_at(None, true, 5000).unwrap();
     assert_eq!(kernel.total(), 64 * GIB);
     assert_eq!(checkpoint(temp.path()).state, SwapApplyState::Applied);
@@ -385,7 +392,7 @@ fn a_helper_restart_that_detaches_its_mount_keeps_the_live_file_managed() {
     helper
         .reconcile_swap_at(Some(&intent(2, 16)), false, 5010)
         .unwrap();
-    assert_eq!(kernel.total(), 16 * GIB - HEADER_BYTES);
+    assert_eq!(kernel.total(), 16 * GIB - header_bytes());
     assert!(managed_files(temp.path()).is_empty());
 }
 
@@ -415,37 +422,71 @@ fn an_interrupted_swapoff_keeps_the_old_file_active_and_the_next_pass_releases_i
 
 #[test]
 fn the_process_boundary_accepts_only_managed_swap_paths() {
-    let managed = format!("/var/lib/vonk-forge/swap/swap-{}.img", uuid::Uuid::new_v4());
-    assert!(allowed_arguments(SWAPON, std::slice::from_ref(&managed)));
-    assert!(allowed_arguments(SWAPOFF, std::slice::from_ref(&managed)));
+    let directory = swap_directory();
+    let managed = directory
+        .join(format!("swap-{}.img", uuid::Uuid::new_v4()))
+        .to_string_lossy()
+        .into_owned();
+    assert!(allowed_arguments(
+        &directory,
+        SWAPON,
+        std::slice::from_ref(&managed)
+    ));
+    assert!(allowed_arguments(
+        &directory,
+        SWAPOFF,
+        std::slice::from_ref(&managed)
+    ));
+    let elsewhere = format!("/tmp/x/swap/swap-{}.img", uuid::Uuid::new_v4());
+    let root_swap = format!("/swap/swap-{}.img", uuid::Uuid::new_v4());
     for path in [
         "/swap.img".to_owned(),
         "/var/lib/vonk-forge/swap/../swap.img".to_owned(),
         "/var/lib/vonk-forge/swap/swap-not-a-uuid.img".to_owned(),
         "relative/swap/swap.img".to_owned(),
+        elsewhere,
+        root_swap,
     ] {
         assert!(
-            !allowed_arguments(SWAPOFF, std::slice::from_ref(&path)),
+            !allowed_arguments(&directory, SWAPOFF, std::slice::from_ref(&path)),
             "{path}"
         );
     }
-    assert!(!allowed_arguments(SWAPON, &["-a".to_owned()]));
+    assert!(!allowed_arguments(&directory, SWAPON, &["-a".to_owned()]));
     assert!(!allowed_arguments(
+        &directory,
         FALLOCATE,
         &[
             "--length".to_owned(),
-            (129 * GIB + 2 * HEADER_BYTES).to_string(),
+            (129 * GIB + 2 * header_bytes()).to_string(),
             managed.clone()
         ]
     ));
     assert!(allowed_arguments(
+        &directory,
         FALLOCATE,
         &[
             "--length".to_owned(),
-            (48 * GIB + HEADER_BYTES).to_string(),
+            (48 * GIB + header_bytes()).to_string(),
             managed
         ]
     ));
+}
+
+#[test]
+fn a_crash_left_checkpoint_temporary_is_removed_on_the_next_pass() {
+    let temp = tempfile::tempdir().unwrap();
+    let kernel = Kernel::new();
+    let helper = helper(temp.path(), &kernel);
+    helper.reconcile_swap_at(None, false, 1000).unwrap();
+    let leftover = temp.path().join(DIRECTORY).join(format!(
+        "{TEMPORARY_PREFIX}{}{TEMPORARY_SUFFIX}",
+        uuid::Uuid::new_v4()
+    ));
+    fs::write(&leftover, b"{").unwrap();
+    helper.reconcile_swap_at(None, true, 5000).unwrap();
+    assert!(!leftover.exists());
+    assert_eq!(kernel.total(), 64 * GIB);
 }
 
 #[test]
