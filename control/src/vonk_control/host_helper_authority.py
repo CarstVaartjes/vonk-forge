@@ -51,7 +51,6 @@ from . import agent_operation_states
 from .agent_jobs import _WORKLOAD_INTENT_OPERATIONS
 from .host_runtime_plan_authority import (
     RuntimePlanAuthorityError,
-    RuntimePlanAuthorityStale,
     RuntimePlanBinding,
     RuntimePlanEvidenceUnavailable,
     RuntimePlanUnsatisfiable,
@@ -104,14 +103,7 @@ class HostRuntimeGrantUnsatisfiable(HostHelperAuthorityError):
 
 
 class HostRuntimeEvidenceUnavailable(HostHelperAuthorityError):
-    """The evidence that would authorize the plan is not readable now, or the
-    plan's own run is not ready for it (``waiting_for``): ask again later."""
-
-    def __init__(
-        self, message: str, *, waiting_for: InvalidRequestReason | None = None
-    ) -> None:
-        super().__init__(message)
-        self.waiting_for = waiting_for
+    """The evidence that would authorize the plan is not readable now."""
 
 
 def _load_private_key(path: Path) -> ed25519.Ed25519PrivateKey:
@@ -704,14 +696,6 @@ class HostRuntimeAuthorityService:
             except RuntimePlanEvidenceUnavailable as error:
                 raise HostRuntimeEvidenceUnavailable(
                     "container runtime lifecycle evidence is unavailable"
-                ) from error
-            except RuntimePlanAuthorityStale as error:
-                # The run is not ready for this plan now (an installation not
-                # installed, a run not starting): never a security refusal. The
-                # agent waits and asks again within its attempt's bounds.
-                raise HostRuntimeEvidenceUnavailable(
-                    "container runtime lifecycle plan is not ready",
-                    waiting_for=error.typed_reason or InvalidRequestReason.NOT_READY,
                 ) from error
             except (RuntimePlanAuthorityError, TypeError, ValueError) as error:
                 raise HostHelperAuthorityError(

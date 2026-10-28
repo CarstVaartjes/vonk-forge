@@ -55,11 +55,6 @@ class RuntimePlanAuthorityRefused(SecurityRefusalError, RuntimePlanAuthorityErro
     """The requested plan is not the one this durable owner and digest bind."""
 
 
-class RuntimePlanAuthorityStale(InvalidRequestError, RuntimePlanAuthorityError):
-    """The plan's own run is not ready for it now (``NOT_READY``): the caller
-    waits and asks again; a superseded plan is :class:`RuntimePlanUnsatisfiable`."""
-
-
 class RuntimePlanEvidenceUnavailable(UnknownOutcomeError, RuntimePlanAuthorityError):
     """The durable evidence that would authorize the plan is missing or unreadable."""
 
@@ -182,9 +177,11 @@ def derive_runtime_plan_binding(
 _DIGEST = re.compile(r"[0-9a-f]{64}")
 
 #: A run its Start or JobRun can never be current for again in this
-#: generation (a restart is a new generation); a planned or lost run may still
-#: become current, so it is waited on.
-_RUN_ENDED = frozenset({RunState.STOPPING, RunState.STOPPED, RunState.FAILED})
+#: generation: every writer of these states ends the run, and a restart is a
+#: new generation (``distributed_recovery/coordinator.py``).
+_RUN_ENDED = frozenset(
+    {RunState.STOPPING, RunState.STOPPED, RunState.FAILED, RunState.LOST}
+)
 
 
 def _own_stop_binding(
@@ -272,8 +269,10 @@ def _service_run_authority(
         or authority.mapping.state != "ready"
         or authority.revision.state != "active"
     ):
-        raise RuntimePlanAuthorityStale(
-            "service Start is no longer authorized",
+        # No producer readies these again for this order (a mapping is born
+        # ready, an installation is repaired only by a new request): definite.
+        raise RuntimePlanUnsatisfiable(
+            "service Start's run is not ready for it",
             reason=InvalidRequestReason.NOT_READY,
         )
     return authority
@@ -327,8 +326,8 @@ def _job_run_authority(
         or authority.mapping.state != "ready"
         or authority.revision.state != "active"
     ):
-        raise RuntimePlanAuthorityStale(
-            "artifact JobRun start is no longer authorized",
+        raise RuntimePlanUnsatisfiable(
+            "artifact JobRun's run is not ready for it",
             reason=InvalidRequestReason.NOT_READY,
         )
     return authority

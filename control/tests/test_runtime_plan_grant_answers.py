@@ -1,16 +1,14 @@
-"""A grant whose plan is not current answers by behaviour, never by default 403.
+"""A grant whose plan the records cannot bind answers by behaviour, never 403.
 
 The 2026-10-28 dual DSV4 start: both ranks asked for their Start grant while
 the Controller's own records did not bind the plan, and the grant route
 answered 403 ``host runtime authority denied``. The agent ends a 403 as a
-security failure, so a conflict became a terminal refusal. Now:
-
-* a run that is not ready for its plan (``NOT_READY``) is a wait: 503 naming
-  what it waits for, recorded as repeated evidence, asked again;
-* a plan the records can never bind again (a superseded generation, a remapped
-  installation, a Stop request without its own document) is a definite 409:
-  the old order ends at once and the newer order is granted;
-* a refused binding and a request that differs from the exact plan stay 403.
+security failure, so bookkeeping became a terminal refusal. Now a plan the
+records do not bind (superseded, its run ended, its run not ready) is a
+definite 409 that ends the order at once and leaves the work to its owner;
+nothing waits, because no producer readies such a record again for the same
+order. A refused binding and a request that differs from the exact plan stay
+403.
 """
 
 from __future__ import annotations
@@ -43,7 +41,6 @@ from vonk_control.host_helper_authority import (
 from vonk_control.host_runtime_plan_authority import (
     RuntimePlanAuthorityError,
     RuntimePlanAuthorityRefused,
-    RuntimePlanAuthorityStale,
     RuntimePlanEvidenceUnavailable,
     RuntimePlanUnsatisfiable,
 )
@@ -59,14 +56,6 @@ from vonk_control.recipe_execution_contract import (
     run_plan_document,
 )
 
-from .test_agent_api import (
-    NODE_A,
-    STOP_PAYLOAD,
-    agent_headers,
-    make_agent_system,
-    parent,
-)
-from .test_evidence_repeats import LIMIT, _repeating
 from .test_host_helper_authority import (
     FENCE,
     RUNTIME_INSTALLATION_ID,
@@ -75,7 +64,6 @@ from .test_host_helper_authority import (
     runtime_plan_binding,
     runtime_service,
 )
-from .test_host_runtime_grant_answers import _BODY
 
 _NODE = "spk_" + "1" * 32
 _JOB_ID = "20000000-0000-4000-8000-000000000002"
@@ -117,32 +105,43 @@ def _run(session: Session) -> RecipeRun:
     return run
 
 
-def test_an_installation_under_repair_waits_then_its_start_is_granted() -> None:
-    # Wrong implementation (main): a 403 security refusal the agent ends the
-    # start with. A reconcile repairing the installation (PARTIAL, then
-    # INSTALLED again) is the production event that clears it.
+#: What leaves the run not ready for its Start, by its production writer.
+#: None is ever readied again for the same order, so none is a wait.
+_NOT_READY: dict[str, Callable[[Session], None]] = {
+    # ``installed_bytes.py``: a Spark's listing lost the installed ranks.
+    "installation-partial": lambda session: setattr(
+        _installation(session), "state", InstallationState.PARTIAL
+    ),
+    # A failed install or an uninstall; only a new request installs again.
+    "installation-failed": lambda session: setattr(
+        _installation(session), "state", InstallationState.FAILED
+    ),
+    "installation-uninstalled": lambda session: setattr(
+        _installation(session), "state", InstallationState.UNINSTALLED
+    ),
+}
+
+
+@pytest.mark.parametrize("cause", sorted(_NOT_READY))
+def test_a_start_whose_installation_is_not_installed_ends_definite(cause: str) -> None:
+    # Wrong implementation (main): a 403 security refusal; a 503 wait would
+    # observe for an hour a record no producer repairs for this order.
     service = runtime_service()
     binding = runtime_plan_binding(service, ContainerRuntimeAction.START)
     with service._sessions.begin() as session:
-        _installation(session).state = InstallationState.PARTIAL
-    waiting = _answer(service, binding)
-    assert type(waiting) is HostRuntimeEvidenceUnavailable
-    assert waiting.waiting_for is InvalidRequestReason.NOT_READY
-    assert isinstance(waiting.__cause__, RuntimePlanAuthorityStale)
-
-    with service._sessions.begin() as session:
-        _installation(session).state = InstallationState.INSTALLED
-    operation = _ask(service, binding).claims.operation
-    assert isinstance(operation, ExecuteContainerRuntimeRequestOperation)
-    assert operation.start_plan_sha256 == binding["start_plan_sha256"]
+        _NOT_READY[cause](session)
+    answered = _answer(service, binding)
+    assert type(answered) is HostRuntimeGrantUnsatisfiable
+    assert answered.reason is InvalidRequestReason.NOT_READY
 
 
 @pytest.mark.parametrize(
-    "ended", [RunState.STOPPING, RunState.STOPPED, RunState.FAILED]
+    "ended",
+    [RunState.STOPPING, RunState.STOPPED, RunState.FAILED, RunState.LOST],
 )
-def test_a_start_of_a_run_that_ended_is_definite_not_a_wait(ended: RunState) -> None:
-    # A Stop under way or done never reverts for this generation (a restart
-    # is a new one), so its Start ends at once rather than waiting an hour.
+def test_a_start_of_a_run_that_ended_is_definite(ended: RunState) -> None:
+    # Every writer of these states ends the run; a restart is a new
+    # generation, so this Start can never be current again.
     service = runtime_service()
     binding = runtime_plan_binding(service, ContainerRuntimeAction.START)
     with service._sessions.begin() as session:
@@ -150,22 +149,6 @@ def test_a_start_of_a_run_that_ended_is_definite_not_a_wait(ended: RunState) -> 
     answered = _answer(service, binding)
     assert type(answered) is HostRuntimeGrantUnsatisfiable
     assert answered.reason is InvalidRequestReason.SUPERSEDED
-
-
-def test_a_planned_run_is_a_named_wait_then_its_start_is_granted() -> None:
-    # A start ordered before its run reached STARTING waits, then is granted.
-    service = runtime_service()
-    binding = runtime_plan_binding(service, ContainerRuntimeAction.START)
-    with service._sessions.begin() as session:
-        _run(session).state = RunState.PLANNED
-    waiting = _answer(service, binding)
-    assert type(waiting) is HostRuntimeEvidenceUnavailable
-    assert waiting.waiting_for is InvalidRequestReason.NOT_READY
-    with service._sessions.begin() as session:
-        _run(session).state = RunState.STARTING
-    assert isinstance(
-        _ask(service, binding).claims.operation, ExecuteContainerRuntimeRequestOperation
-    )
 
 
 def _bump_generation(session: Session) -> None:
@@ -283,42 +266,6 @@ def test_a_refused_binding_and_a_differing_request_stay_security_refusals() -> N
     assert isinstance(refused.__cause__, RuntimePlanAuthorityRefused)
 
 
-class _WaitingAuthority:
-    def issue_grant(self, **_arguments: object) -> object:
-        raise HostRuntimeEvidenceUnavailable(
-            "plan is not ready", waiting_for=InvalidRequestReason.NOT_READY
-        )
-
-
-def test_a_waiting_grant_names_its_cause_and_repeats_as_attention(tmp_path) -> None:
-    # Wrong implementation: the wait answered a generic observation-unavailable
-    # 503 and recorded nothing, so a start waiting on its run was silent.
-    client, services, _codec, clock = make_agent_system(tmp_path)
-    object.__setattr__(services, "host_runtime_authority", _WaitingAuthority())
-    services.operations.enqueue(
-        parent(services.sessions, clock).id,
-        NODE_A,
-        "recipe.stop",
-        "a" * 64,
-        STOP_PAYLOAD,
-    )
-    claim = client.post("/agent/claim", headers=agent_headers(NODE_A, "serial-a"))
-    body = _BODY | {"fence": claim.json()["fence"]}
-    for _ in range(LIMIT):
-        response = client.post(
-            "/agent/host-runtime/grant",
-            headers=agent_headers(NODE_A, "serial-a"),
-            json=body,
-        )
-        assert response.status_code == 503
-        assert int(response.headers["retry-after"]) >= 1
-        assert response.headers["x-vonk-error-code"] == (
-            InvalidRequestReason.NOT_READY.value
-        )
-    [attention] = _repeating(services.sessions, NODE_A, clock.now)
-    assert InvalidRequestReason.NOT_READY.value in attention
-
-
 #: What each typed plan-authority answer becomes at the grant: one row per
 #: concrete subclass, so a new subclass cannot fall into the security refusal
 #: unreviewed.
@@ -329,10 +276,6 @@ _ANSWERS: dict[type[RuntimePlanAuthorityError], tuple[Exception, type]] = {
             reason=SecurityRefusalReason.HELPER_REQUEST_PLAN_BINDING_INVALID,
         ),
         HostHelperAuthorityError,
-    ),
-    RuntimePlanAuthorityStale: (
-        RuntimePlanAuthorityStale("not ready", reason=InvalidRequestReason.NOT_READY),
-        HostRuntimeEvidenceUnavailable,
     ),
     RuntimePlanEvidenceUnavailable: (
         RuntimePlanEvidenceUnavailable(
