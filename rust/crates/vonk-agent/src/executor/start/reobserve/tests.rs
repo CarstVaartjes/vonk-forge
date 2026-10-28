@@ -447,3 +447,34 @@ async fn the_readiness_reads_name_the_starts_generation() {
         assert_eq!(named, [Some(GENERATION)]);
     }
 }
+
+/// A Start grant the Controller answers with a definite 409 (`superseded`):
+/// the start is refused before any effect, so its own container is stopped
+/// and the start ends with the Controller's typed code in its evidence.
+#[test]
+fn a_start_refused_with_a_typed_conflict_ends_with_that_code() {
+    // Wrong implementation: only a 403 kept its code and kind; a 409 ended as
+    // a generic `helper_grant_unavailable` that reads like a wait.
+    let mut answer = crate::client::ControllerError::from_status(409);
+    answer.endpoint = "/agent/host-runtime/grant".into();
+    answer.code = "superseded".into();
+    let error =
+        HostRuntimeError::Controller(crate::client::ClientError::Controller(Box::new(answer)));
+    assert!(refused_authority(&error));
+    let ExecutionResult::Failed(failure) = runtime_failure(START_FAILED, &error) else {
+        panic!("a definite refusal ends the start");
+    };
+    assert_eq!(
+        failure.failure_kind,
+        Some(AgentFailureKind::InvalidContract)
+    );
+    assert_eq!(failure.stage, Some(FailureStage::RuntimeAdapter));
+    assert!(failure.retry_after_seconds.is_none());
+    let diagnostic = failure.diagnostic.as_deref().unwrap_or_default();
+    assert!(diagnostic.contains("error_code=superseded"), "{diagnostic}");
+    assert!(diagnostic.contains("http_status=409"), "{diagnostic}");
+    assert_ne!(
+        failure.helper_error_code,
+        Some(HelperErrorCode::GrantUnauthorized)
+    );
+}

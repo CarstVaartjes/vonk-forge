@@ -450,6 +450,21 @@ pub(super) fn runtime_failure(
                 .helper(HelperErrorCode::GrantUnauthorized, None),
         );
     }
+    if let crate::host_runtime::HostRuntimeError::Controller(refusal) = error
+        && refusal.disposition() == Disposition::Fail
+    {
+        // A definite Controller answer (a plan it can never bind: superseded,
+        // not ready, malformed) keeps its typed code in the evidence. It is
+        // no authority denial, so it names no helper grant code.
+        return ExecutionResult::Failed(
+            Failure::new(format!(
+                "{reason}: the Controller refused this exact request"
+            ))
+            .kind(recipe_build_client_failure_kind(refusal))
+            .stage(FailureStage::RuntimeAdapter)
+            .diagnostic(controller_denial_diagnostic(refusal)),
+        );
+    }
     if runtime_helper_code(error) == HelperErrorCode::GrantTimeWindow {
         return ExecutionResult::Failed(
             Failure::new("helper grant time window elapsed; Controller will issue a fresh grant")

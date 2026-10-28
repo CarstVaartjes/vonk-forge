@@ -290,8 +290,16 @@ _ANSWERS: dict[type[RuntimePlanAuthorityError], tuple[Exception, type]] = {
 }
 
 
+def _descendants(kind: type) -> set[type]:
+    return {
+        descendant
+        for child in kind.__subclasses__()
+        for descendant in {child, *_descendants(child)}
+    }
+
+
 def test_every_plan_authority_answer_is_classified() -> None:
-    assert set(RuntimePlanAuthorityError.__subclasses__()) == set(_ANSWERS)
+    assert _descendants(RuntimePlanAuthorityError) == set(_ANSWERS)
 
 
 @pytest.mark.parametrize(
