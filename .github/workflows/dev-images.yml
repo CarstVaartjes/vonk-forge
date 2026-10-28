@@ -338,7 +338,7 @@ jobs:
           role: api
       - name: Upload reused api findings under main's category
         if: steps.pr_security.outputs.reused == 'true'
-        uses: github/codeql-action/upload-sarif@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
+        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
         with:
           sarif_file: trivy-results/development-api.sarif
           category: trivy-development-api
@@ -350,7 +350,7 @@ jobs:
           role: worker
       - name: Upload reused worker findings under main's category
         if: steps.pr_security.outputs.reused == 'true'
-        uses: github/codeql-action/upload-sarif@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
+        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
         with:
           sarif_file: trivy-results/development-worker.sarif
           category: trivy-development-worker
@@ -362,7 +362,7 @@ jobs:
           role: hermes
       - name: Upload reused hermes findings under main's category
         if: steps.pr_security.outputs.reused == 'true'
-        uses: github/codeql-action/upload-sarif@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
+        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
         with:
           sarif_file: trivy-results/development-hermes.sarif
           category: trivy-development-hermes
@@ -374,7 +374,7 @@ jobs:
           role: litellm
       - name: Upload reused litellm findings under main's category
         if: steps.pr_security.outputs.reused == 'true'
-        uses: github/codeql-action/upload-sarif@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
+        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
         with:
           sarif_file: trivy-results/development-litellm.sarif
           category: trivy-development-litellm
