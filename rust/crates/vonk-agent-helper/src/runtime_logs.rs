@@ -710,7 +710,10 @@ pub fn classify(exit: Option<&ContainerExit>, logs: Option<&HostHelperProcessLog
         .unwrap_or_default();
     let runtime_error = exit.map(|e| e.error.to_lowercase()).unwrap_or_default();
     let code = exit.and_then(|e| e.exit_code);
-    if exit.and_then(|e| e.oom_killed) == Some(true) || code == Some(137) {
+    // Only the runtime's own OOM fact names this cause. A bare 137 is just a
+    // SIGKILL (an engine killing its own process tree after an exception, the
+    // host guard, `docker kill`), so it is read like the other signal exits.
+    if exit.and_then(|e| e.oom_killed) == Some(true) {
         return ExitCause::OomKilled;
     }
     if has(&runtime_error, &["exec format error"]) {
@@ -774,7 +777,7 @@ pub fn classify(exit: Option<&ContainerExit>, logs: Option<&HostHelperProcessLog
     if logs.and_then(python_exception).is_some() {
         return ExitCause::PythonException;
     }
-    if matches!(code, Some(134 | 135 | 139)) {
+    if matches!(code, Some(134 | 135 | 137 | 139)) {
         return ExitCause::CrashedBySignal;
     }
     ExitCause::Unclassified
@@ -1578,7 +1581,7 @@ mod tests {
         let silent = logs("", "");
         for (state, output, cause) in [
             (exit(137, true, ""), &silent, ExitCause::OomKilled),
-            (exit(137, false, ""), &silent, ExitCause::OomKilled),
+            (exit(137, false, ""), &silent, ExitCause::CrashedBySignal),
             (
                 exit(255, false, "exec format error"),
                 &silent,
@@ -1726,6 +1729,33 @@ mod tests {
         // The helper sends at most 480 characters; the facts and the
         // exception both fit.
         assert!(summary.chars().count() <= 480, "{summary}");
+    }
+
+    /// Live shape (2026-10-28): sglang raises at startup, then SIGKILLs its own
+    /// process tree, so Docker reports 137 with OOMKilled=false.
+    const SGLANG_SELF_KILL: &str = "Traceback (most recent call last):\n  File \"/sgl/engine.py\", line 9, in init\nRuntimeError: Hybrid (mamba/linear-attention) state cache is too small\nReceived sigquit from a child process. It usually means the child failed.\nkill_process_tree called: parent_pid=55, include_parent=True\n";
+
+    #[test]
+    fn a_bare_137_is_never_an_oom_kill() {
+        // Class guard: only the runtime's own OOM fact names `oom_killed`; a
+        // 137 with OOMKilled=false is a plain SIGKILL, whatever the log says.
+        let output = logs("", SGLANG_SELF_KILL);
+        assert_eq!(
+            classify(Some(&exit(137, false, "")), Some(&output)),
+            ExitCause::PythonException
+        );
+        for tail in ["", SGLANG_SELF_KILL, "Killed\n", "out of memory\n"] {
+            assert_ne!(
+                classify(Some(&exit(137, false, "")), Some(&logs("", tail))),
+                ExitCause::OomKilled,
+                "{tail:?}"
+            );
+        }
+        assert_eq!(
+            classify(Some(&exit(137, true, "")), Some(&output)),
+            ExitCause::OomKilled
+        );
+        assert!(ExitCause::CrashedBySignal.skipped_cleanup());
     }
 
     #[test]

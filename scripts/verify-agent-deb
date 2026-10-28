@@ -813,6 +813,18 @@ def _verify_payload(
         )
     ]:
         raise VerificationError("helper capability boundary is invalid")
+    # The managed swap file needs swapon/swapoff and nothing more: an exact
+    # list, so another allow line cannot widen the filter unnoticed.
+    if [
+        line.strip()
+        for line in helper.splitlines()
+        if line.strip().startswith("SystemCallFilter=")
+    ] != [
+        "SystemCallFilter=@system-service",
+        "SystemCallFilter=~@mount @raw-io @obsolete @debug",
+        "SystemCallFilter=@swap",
+    ]:
+        raise VerificationError("helper system-call boundary is invalid")
     for boundary in (
         "Wants=docker.service",
         "After=local-fs.target docker.service",

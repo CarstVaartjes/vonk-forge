@@ -19,6 +19,7 @@ from .optional_evidence import (
 )
 from .reason_codes import AgentEvidenceCode
 from .store_cleanup import StoreRetentionFailure
+from .swap import SwapObservation
 from .wire_model import WireEnum, WireModel, strict_json_datetime
 
 
@@ -95,8 +96,9 @@ class HostSettings(WireModel):
     """The Spark host maintenance the platform keeps, as the agent observes it.
 
     A Spark runs headless: a desktop costs about 1 GB of the memory recipes
-    count on. Its GPU clock is capped so sustained load cannot power it off.
-    The privileged helper corrects drift; this is what is left.
+    count on. Its GPU clock is capped so sustained load cannot power it off,
+    and its swap is sized for the biggest loads' transient peaks. The
+    privileged helper corrects drift; this is what is left.
     """
 
     model_config = ConfigDict(
@@ -110,6 +112,9 @@ class HostSettings(WireModel):
     gpu_clock_support: GpuClockSupport | None = None
     display_memory: DisplayMemoryObservation | None = None
     store_retention_failure: StoreRetentionFailure | None = None
+    # None: the agent predates swap management; the Controller then sends it
+    # no swap grant (its strict reader would refuse the field).
+    swap: SwapObservation | None = None
 
 
 class ModelStoreObject(WireModel):
@@ -301,6 +306,8 @@ class InventoryVerdict(WireModel):
     )
 
     gpu_clock_grant: SignedHostHelperGrant | None = None
+    # Only for an agent that reports swap: an older strict reader never sees it.
+    swap_grant: SignedHostHelperGrant | None = None
     store_retention: StoreRetentionRequest | None = None
 
     untracked_installations: list[InstallationId] = Field(

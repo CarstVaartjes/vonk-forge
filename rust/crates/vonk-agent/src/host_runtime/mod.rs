@@ -100,15 +100,19 @@ pub(crate) use transport::inspect_helper;
 pub(crate) use transport::read_observed;
 use transport::{call_helper, write_request};
 
-pub fn apply_gpu_clock_grant(
+/// Hand a Controller-signed host-setting grant (GPU clock, swap) to the helper;
+/// `reconciled` is the reply its operation answers with.
+pub fn apply_host_setting_grant(
     grant: &vonk_agent_protocol::SignedHostHelperGrant,
+    reconciled: HostHelperResponseStatus,
+    inactivity: Duration,
 ) -> Result<(), HostRuntimeError> {
     let body = canonical_json(grant)
         .map_err(|_| HostRuntimeError::HelperProtocol(HelperProtocolCause::MessageFraming))?;
     let response = call_helper(
         Path::new(HELPER_SOCKET),
         &body,
-        &Inactivity::new(Duration::from_secs(30)),
+        &Inactivity::new(inactivity),
     )?;
     require_bound_response(&response, &grant.claims.request_id.to_string())?;
     if response.status == HostHelperResponseStatus::Rejected
@@ -123,9 +127,7 @@ pub fn apply_gpu_clock_grant(
             process_logs: None,
         });
     }
-    if response.status == HostHelperResponseStatus::GpuClockReconciled
-        && response.error_code.is_none()
-    {
+    if response.status == reconciled && response.error_code.is_none() {
         Ok(())
     } else {
         Err(HostRuntimeError::HelperProtocol(

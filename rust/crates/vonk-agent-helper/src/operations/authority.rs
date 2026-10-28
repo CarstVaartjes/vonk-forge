@@ -30,7 +30,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
         match request.action {
             HostRuntimeAction::RuntimePreflight => {
                 let code = crate::runtime_preflight::run(
-                    Path::new("/var/lib/vonk-forge"),
+                    Path::new(vonk_agent_protocol::store_retention::HELPER_DATA_ROOT),
                     Path::new(crate::runtime_preflight::PROBE_BINARY),
                     |arguments, timeout| {
                         self.runner

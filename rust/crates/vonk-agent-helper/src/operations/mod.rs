@@ -215,6 +215,20 @@ pub trait CommandRunner: Send + Sync {
 
     fn run(&self, executable: &Path, arguments: &[String]) -> Result<CommandOutput, String>;
 
+    /// A kernel reading (`/proc/swaps`, `/proc/meminfo`, the boot id).
+    fn read_host_text(&self, path: &Path) -> std::io::Result<String> {
+        fs::read_to_string(path)
+    }
+
+    /// Space of the filesystem holding `path`, as an unprivileged writer sees it.
+    fn filesystem_space(&self, path: &Path) -> std::io::Result<FilesystemSpace> {
+        let stat = rustix::fs::statvfs(path)?;
+        Ok(FilesystemSpace {
+            available_bytes: stat.f_bavail.saturating_mul(stat.f_frsize),
+            total_bytes: stat.f_blocks.saturating_mul(stat.f_frsize),
+        })
+    }
+
     fn run_with_timeout(
         &self,
         executable: &Path,
@@ -223,6 +237,12 @@ pub trait CommandRunner: Send + Sync {
     ) -> Result<CommandOutput, String> {
         self.run(executable, arguments)
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FilesystemSpace {
+    pub available_bytes: u64,
+    pub total_bytes: u64,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -439,6 +459,7 @@ mod gpu_clock;
 mod host_settings;
 mod stop;
 mod stray_jobs;
+mod swap;
 pub use host_settings::HOST_SETTINGS_INTERVAL;
 mod unused_images;
 pub use unused_images::UNUSED_IMAGE_SWEEP_INTERVAL;

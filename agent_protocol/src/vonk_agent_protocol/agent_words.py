@@ -157,6 +157,7 @@ class HostHelperResponseStatus(WireEnum):
     """The verdict a privileged-helper reply carries."""
 
     GPU_CLOCK_RECONCILED = "gpu-clock-reconciled"
+    SWAP_RECONCILED = "swap-reconciled"
     REJECTED = "rejected"
     PACKAGE_INSTALLED = "package-installed"
     PACKAGE_ACTIVATION_CONFIRMED = "package-activation-confirmed"

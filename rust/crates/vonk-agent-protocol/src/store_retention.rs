@@ -2,6 +2,19 @@
 use Collector::*;
 use StoreRoot::*;
 
+// The low-space line shared by the Controller, the agent and the helper.
+include!(concat!(env!("OUT_DIR"), "/storage_policy.rs"));
+
+/// The bound on a helper host-setting receipt (GPU clock, swap), for its
+/// writer and its reader.
+pub const HOST_SETTING_RECEIPT_BYTES: u64 = 16 * 1024;
+/// A host-setting change retries this often inside a window of this length;
+/// after it the hourly host-settings pass opens a fresh one.
+pub const HOST_SETTING_RETRY_SECONDS: u64 = 60;
+pub const HOST_SETTING_ATTEMPT_SECONDS: u64 = 10 * 60;
+
+/// The privileged helper's data root, which the agent reads receipts from.
+pub const HELPER_DATA_ROOT: &str = "/var/lib/vonk-forge";
 /// All unused Spark data, including model copies, expires after one day.
 pub const GRACE: std::time::Duration = std::time::Duration::from_secs(24 * 60 * 60);
 
@@ -101,6 +114,7 @@ pub const STORES: &[Store] = &[
     Store(".machine-evidence.*", Claim, "the package step publishing machine-evidence; its cleanup trap", Agent),
     Store("machine-evidence", Bookkeeping, "the package", Agent),
     Store("gpu-clock-observation.json", Bookkeeping, "the helper's latest GPU clock observation", Agent),
+    Store("swap-observation.json", Bookkeeping, "the helper's latest swap receipt", Agent),
     // Interrupted quarantine renames are unused scratch, including at the root.
     Store(".preflight-*", Ended, "damaged generated preflight state", Agent),
     Store(".build-staging-*", Ended, "isolated build staging", Agent),
@@ -115,6 +129,9 @@ pub const STORES: &[Store] = &[
     Store("gpu-clock/", Bookkeeping, "one current checkpoint and lock; interrupted writes expire", Helper),
     Store("gpu-clock-observation.json", Bookkeeping, "the helper's latest GPU clock observation", Helper),
     Store(".gpu-clock-*.tmp", Ended, "an interrupted GPU clock observation publication", Helper),
+    Store("swap/", Bookkeeping, "the active managed swap file, its checkpoint and lock; inactive files are removed each pass", Helper),
+    Store("swap-observation.json", Bookkeeping, "the helper's latest swap receipt", Helper),
+    Store(".swap-observation-*.tmp", Ended, "an interrupted swap receipt publication", Helper),
     Store("runtime-identities/", Ended, "UID/GID identity files while mounted by a container", Helper),
     Store("installation-intent-fences/", Reconciliation, "the installation's current nonce and ordinal", Helper),
     Store("runtime-generation-fences/", Reconciliation, "a runtime's generation; a miss challenges current intent", Helper),

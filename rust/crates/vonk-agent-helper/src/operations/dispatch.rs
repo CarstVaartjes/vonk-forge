@@ -65,6 +65,10 @@ impl<R: CommandRunner> OperationExecutor<R> {
                 self.reconcile_gpu_clock(Some(&operation.desired), false)?;
                 (HostHelperResponseStatus::GpuClockReconciled, None, None)
             }
+            HostOperation::ApplySwapOperation(operation) => {
+                self.reconcile_swap(Some(&operation.desired), false)?;
+                (HostHelperResponseStatus::SwapReconciled, None, None)
+            }
             HostOperation::InstallVonkDebOperation(InstallVonkDebOperation {
                 package_sha256,
                 package_signature,

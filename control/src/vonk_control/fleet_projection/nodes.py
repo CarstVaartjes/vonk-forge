@@ -18,6 +18,7 @@ from vonk_agent_protocol.gpu_clock import (
     GpuClockRange,
 )
 from vonk_agent_protocol.inventory import HostSettings
+from vonk_agent_protocol.swap import GIB, SwapIntent, swap_satisfied
 
 from ..agent_contacts import last_seen as last_seen_at
 from ..gpu_health import gpu_health_reason
@@ -77,6 +78,7 @@ def _node(
     layout_notices: Sequence[ProjectionReason] = (),
     telemetry_unreadable: bool = False,
     gpu_clock_desired: GpuClockRange | None = None,
+    swap_desired: SwapIntent | None = None,
 ) -> FleetNode:
     warnings: list[ProjectionReason] = list(layout_notices)
     contact = agent.contact
@@ -191,6 +193,12 @@ def _node(
             None if inventory_state is None else inventory_state.host_settings,
         )
     )
+    swap_warning = _swap_warning(
+        None if inventory_state is None else inventory_state.host_settings,
+        swap_desired,
+    )
+    if swap_warning is not None:
+        warnings.append(swap_warning)
     if telemetry_state is None:
         warnings.append(
             ProjectionReason(
@@ -326,6 +334,7 @@ def _node(
     return FleetNode(
         agent_runtime=agent_runtime,
         gpu_clock_desired=gpu_clock_desired,
+        swap_desired=swap_desired,
         id=node_id,
         display_name=node_id if profile is None else profile.display_name,
         hostname="" if items is None else items.hostname or "",
@@ -425,6 +434,39 @@ _HELPER_CORRECTS = (
     "The agent helper switches this Spark to headless on its next hourly pass; "
     "if this stays, read the helper's journal (vonk-forge-package-helper)."
 )
+
+
+def _swap_warning(
+    host: HostSettings | None, desired: SwapIntent | None
+) -> ProjectionReason | None:
+    """Less active swap than desired; unknown (an older agent) is none."""
+    swap = None if host is None else host.swap
+    if swap is None or desired is None or swap_satisfied(swap.total_bytes, desired):
+        return None
+    receipt = swap.receipt
+    if receipt is None:
+        cause = swap.receipt_detail or "no helper swap receipt"
+        retry = "inventory/hourly helper reconciliation"
+    else:
+        cause = (
+            f"{receipt.state.value}"
+            f"{'' if receipt.reason is None else f' ({receipt.reason.value})'}: "
+            f"{receipt.detail or 'not reported'}"
+        )
+        retry = (
+            f"next check {receipt.next_attempt_at}, deadline {receipt.deadline}"
+            if receipt.next_attempt_at is not None
+            else "hourly helper reconciliation"
+        )
+    return ProjectionReason(
+        code=ProjectionCode.HOST_SWAP_SHORT,
+        detail=(
+            f"Swap {swap.total_bytes / GIB:.1f} GiB of {desired.size_gib} GiB desired; "
+            f"{cause}"
+        )[:256],
+        severity=ProfileReasonSeverity.WARNING.value,
+        recommendation=f"The helper retries ({retry}); see the Spark's swap evidence.",
+    )
 
 
 def _host_settings_warnings(host: HostSettings | None) -> list[ProjectionReason]:

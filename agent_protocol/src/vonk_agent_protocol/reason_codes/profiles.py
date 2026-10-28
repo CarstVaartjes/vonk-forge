@@ -84,6 +84,8 @@ class ProjectionCode(WireEnum):
     HOST_DISPLAY_MEMORY = "host.display-memory"
     #: The GPU clock ceiling is not applied: sustained load can power it off.
     HOST_GPU_CLOCK_UNCAPPED = "host.gpu-clock-uncapped"
+    #: Active swap is below the desired size: big loads lose their cushion.
+    HOST_SWAP_SHORT = "host.swap-short"
     MODEL_STORE_LAYOUT = "model.store_layout"
     INSTALL_PARTIAL = "install.partial"
     INVENTORY_MISSING = "inventory.missing"
