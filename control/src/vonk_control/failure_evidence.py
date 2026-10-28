@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import re
 import unicodedata
-import uuid
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from typing import Literal
@@ -81,25 +80,16 @@ _SECRET_LINE = re.compile(
 _OPAQUE_SECRET = re.compile(
     r"(?<![A-Za-z0-9/.])([A-Za-z0-9+/=_-]{40,})(?![A-Za-z0-9/.])"
 )
-# An opaque ``name=value`` word keeps its name and only a value of a known-safe
-# shape: a contract refusal code (``error_code=helper_request_plan_binding_invalid``)
-# or a canonical UUID (``request_id=<uuid>``).  Every other value is redacted
-# however short, so a credential behind a name (``key=hf_...``,
-# ``sessionid=<hex>``) never survives.  Base64 padding never forms a field: its
-# body is no short name.  The agent applies the same rule (shared vector
+# An opaque ``name=value`` word keeps its name, and its value only when the
+# value is a refusal code of the contract (the enum decides):
+# ``error_code=helper_request_plan_binding_invalid``.  Every other value is
+# redacted however short, a UUID included, so a credential behind a name never
+# survives.  Base64 padding never forms a field: its body is no short name.
+# The agent applies the same rule (shared vector
 # ``opaque-value-redaction-v1.json``).
 _FIELD = re.compile(r"([A-Za-z_][A-Za-z0-9_]{0,31})=(.*)", re.DOTALL)
 _OPAQUE_MARKER = "[redacted opaque value]"
 _REFUSAL_CODES = frozenset(reason.value for reason in SecurityRefusalReason)
-
-
-def _is_safe_field_value(value: str) -> bool:
-    if value in _REFUSAL_CODES:
-        return True
-    try:
-        return str(uuid.UUID(value)) == value
-    except ValueError:
-        return False
 
 
 def _redact_opaque(match: re.Match[str]) -> str:
@@ -107,7 +97,7 @@ def _redact_opaque(match: re.Match[str]) -> str:
     field = _FIELD.fullmatch(token)
     if field is None:
         return _OPAQUE_MARKER
-    if _is_safe_field_value(field.group(2)):
+    if field.group(2) in _REFUSAL_CODES:
         return token
     return f"{field.group(1)}={_OPAQUE_MARKER}"
 

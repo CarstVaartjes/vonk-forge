@@ -140,7 +140,7 @@ fn a_still_running_build_unit_is_named_with_what_it_shows() {
 }
 
 #[test]
-fn a_still_present_proxy_container_is_named_by_its_id() {
+fn a_still_present_proxy_container_is_a_named_wait() {
     let staging = staging();
     let container = format!("vonk-build-proxy-{}", staging.request.build_id.simple());
     let spark = Spark {
@@ -148,13 +148,14 @@ fn a_still_present_proxy_container_is_named_by_its_id() {
         proxy_container: Some(container.clone()),
     };
     let (reason, diagnostic) = waiting(cleanup(&spark, &staging));
-    // Quoted, the 49-character name survives the sanitizer's opaque-value
-    // redaction: the operator sees which container the cleanup waits for.
+    // The 49-character name is an opaque value to both sanitizers, quoted or
+    // not (the Controller always redacted it at ingress); the wait still says
+    // which kind of effect it waits for, and the build is the operation's own.
     assert!(
-        reason.contains(&format!("container \"{container}\" is still present")),
+        reason.contains("container \"[redacted opaque value]\" is still present"),
         "{reason}"
     );
-    assert!(!reason.contains("redacted"), "{reason}");
+    assert!(!reason.contains(&container), "{reason}");
     assert_eq!(diagnostic, "build-effect-still-present");
     assert!(staging.entry.exists());
 }

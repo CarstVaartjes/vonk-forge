@@ -995,11 +995,13 @@ fn grant_403_ends_its_operation_with_evidence_without_refusing_agent_identity() 
 }
 
 #[test]
-fn a_grant_refusal_names_its_typed_reason_and_request_in_the_sent_evidence() {
+fn a_grant_refusal_names_its_typed_reason_in_the_sent_evidence() {
     // Wrong implementation: the evidence a Start grant refusal sends reads
     // `http_status=403 [redacted opaque value] endpoint=... [redacted opaque
-    // value]`, because the opaque-value rule judged `error_code=<code>` and
-    // `request_id=<uuid>` as single 40+ character words.
+    // value]`, because the opaque-value rule judged `error_code=<code>` as
+    // one 40+ character word. The request id stays redacted: a UUID behind a
+    // name may be a credential, and the evidence carries its operation and
+    // attempt.
     let request_id = "6f1c2a3b-8d4e-4f5a-9b6c-7d8e9f0a1b2c";
     let reason =
         vonk_agent_protocol::generated::SecurityRefusalReason::HelperRequestPlanBindingInvalid;
@@ -1020,8 +1022,9 @@ fn a_grant_refusal_names_its_typed_reason_and_request_in_the_sent_evidence() {
         diagnostic.contains(&format!("error_code={}", reason.as_str())),
         "{diagnostic}"
     );
+    assert!(!diagnostic.contains(request_id), "{diagnostic}");
     assert!(
-        diagnostic.contains(&format!("request_id={request_id}")),
+        diagnostic.contains("request_id=[redacted opaque value]"),
         "{diagnostic}"
     );
 }

@@ -252,8 +252,8 @@ def test_a_typed_field_survives_the_opaque_value_rule() -> None:
     base64-ish characters, so the opaque-value rule erased the one typed reason
     a Controller grant refusal names, and ``request_id=<uuid>`` with it: a
     sweep start refused at the Start grant arrived as two redacted values and
-    named no cause.  Only a contract refusal code or a canonical UUID survives
-    behind a name; every other value of an opaque word, a bare opaque value
+    named no cause.  Only a contract refusal code survives behind a name;
+    every other value of an opaque word (a UUID included), a bare opaque value
     and padded base64 stay redacted.  The cases are the agent's too.
     """
 
@@ -266,7 +266,7 @@ def test_a_typed_field_survives_the_opaque_value_rule() -> None:
     )
     for case in vector["cases"]:
         assert safe_text(case["text"]) == case["redacted"], case["text"]
-    # A field keeps only a contract code or a canonical UUID: a credential
+    # A field keeps only a contract code, never a UUID: a credential
     # behind a name, however short, never survives.
     for case in vector["must_not_contain"]:
         assert case["secret"] not in safe_text(case["text"]), case["text"]
