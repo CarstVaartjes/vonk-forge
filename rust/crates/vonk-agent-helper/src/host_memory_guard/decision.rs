@@ -1,16 +1,18 @@
 //! Policy R1-R5 over one host sample; every threshold lives in
 //! `vonk_agent_protocol::host_memory_guard_policy`.
+use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
 use vonk_agent_protocol::generated::ResourceTermProblem;
 
 use vonk_agent_protocol::host_memory_guard_policy::{
-    DRIVER_FAILURE_FREE_BYTES, EXHAUSTED_BYTES, LOADING_FULL_AVG60_PERCENT,
-    LOADING_PRESSURE_SUSTAIN, PSI_FALLING_RATIO, SERVING_FULL_PSI_PERCENT,
-    SERVING_PRESSURE_SUSTAIN, SUSTAINED_PRESSURE, SWAP_EXHAUSTED_FREE_FLOOR_BYTES,
-    SWAP_EXHAUSTED_FREE_PERCENT, SWAP_EXHAUSTED_MEMORY_BYTES, SWAP_EXHAUSTED_SUSTAIN,
-    SWAP_FILLING_MEMORY_BYTES, SWAP_FILLING_SUSTAIN, SWAP_FILLING_USED_PERCENT,
-    THRASH_FULL_PSI_PERCENT, THRASH_HEADROOM_BYTES, THRASH_PAGES_PER_SECOND, THRASH_SUSTAIN,
+    DRIVER_FAILURE_FREE_BYTES, DRIVER_FAILURE_SUSTAIN, EXHAUSTED_BYTES, LOADING_FULL_AVG60_PERCENT,
+    LOADING_PRESSURE_SUSTAIN, PRESSURE_FIELDS, PSI_FALLING_RATIO, RECENT_FIELDS,
+    RECENT_SAMPLE_SPACING, RECENT_SAMPLES, SERVING_FULL_PSI_PERCENT, SERVING_PRESSURE_SUSTAIN,
+    SUSTAINED_PRESSURE, SWAP_EXHAUSTED_FREE_FLOOR_BYTES, SWAP_EXHAUSTED_FREE_PERCENT,
+    SWAP_EXHAUSTED_MEMORY_BYTES, SWAP_EXHAUSTED_SUSTAIN, SWAP_FILLING_MEMORY_BYTES,
+    SWAP_FILLING_SUSTAIN, SWAP_FILLING_USED_PERCENT, THRASH_FULL_PSI_PERCENT,
+    THRASH_HEADROOM_BYTES, THRASH_PAGES_PER_SECOND, THRASH_SUSTAIN,
 };
 
 /// Why the guard stopped the managed workloads; the evidence's `trigger`.
@@ -208,8 +210,12 @@ pub struct Decision {
     filling_since: Option<Instant>,
     thrashing_since: Option<Instant>,
     pressure_since: Option<Instant>,
+    // The phase the pressure window was measured in; a flip starts it over.
+    pressure_loading: bool,
+    corroborated_since: Option<Instant>,
     previous: Option<(Instant, Counters)>,
     rates: Option<Rates>,
+    recent: VecDeque<(Instant, Sample)>,
 }
 
 impl Decision {
@@ -249,6 +255,20 @@ impl Decision {
             return None;
         }
         self.update_rates(now, sample.counters);
+        if self
+            .recent
+            .back()
+            .is_none_or(|(then, _)| now.saturating_duration_since(*then) >= RECENT_SAMPLE_SPACING)
+        {
+            if self.recent.len() == RECENT_SAMPLES {
+                self.recent.pop_front();
+            }
+            self.recent.push_back((now, sample));
+        }
+        if loading != self.pressure_loading {
+            self.pressure_loading = loading;
+            self.pressure_since = None;
+        }
         let condition = conditions(&sample, self.rates, loading);
         let sustained = |since: &mut Option<Instant>, active: bool, bound: Duration| {
             if !active {
@@ -286,10 +306,13 @@ impl Decision {
             },
         );
         // R5: the line alone is non-fatal on GB10; it counts only with R1's or
-        // R3's condition in this sample, or MemFree exhausted.
-        if driver_failure
-            && (condition.exhausted || condition.thrashing || condition.driver_free_low)
-        {
+        // R3's condition, or MemFree exhausted, sustained like R1.
+        let corroborated = sustained(
+            &mut self.corroborated_since,
+            condition.exhausted || condition.thrashing || condition.driver_free_low,
+            DRIVER_FAILURE_SUSTAIN,
+        );
+        if driver_failure && corroborated {
             Some(Trigger::DriverAllocationFailure)
         } else if exhausted {
             Some(if condition.swap {
@@ -314,28 +337,78 @@ impl Decision {
             Trigger::SwapFilling => self.filling_since,
             Trigger::Thrashing => self.thrashing_since,
             Trigger::SustainedPressure => self.pressure_since,
-            Trigger::DriverAllocationFailure => None,
+            Trigger::DriverAllocationFailure => self.corroborated_since,
         };
         since.map_or(Duration::ZERO, |since| now.duration_since(since))
     }
 }
 
-/// The readings behind a kill, in one bounded evidence property (Step 0).
-pub fn readings(sample: &Sample, rates: Option<Rates>, loading: bool) -> String {
-    let unknown = || ResourceTermProblem::Unknown.as_str().to_owned();
-    let bytes = |value: Option<u64>| value.map_or_else(unknown, |v| v.to_string());
+fn unknown() -> String {
+    ResourceTermProblem::Unknown.as_str().to_owned()
+}
+
+fn mib(value: Option<u64>) -> String {
+    value.map_or_else(unknown, |bytes| (bytes >> 20).to_string())
+}
+
+fn value(name: &str, value: &str) -> String {
+    let text = format!("{name}={value}");
+    text.chars().take(256).collect()
+}
+
+/// The readings behind a kill (Step 0) as one evidence property: its name is
+/// the first `PRESSURE_FIELDS` entry and its value carries the others as
+/// `name=value` tokens, so the summary reads as flat typed facts.
+pub fn readings(sample: &Sample, rates: Option<Rates>, loading: bool) -> (String, String) {
     let rate = |value: Option<f64>| value.map_or_else(unknown, |v| format!("{v:.0}"));
-    let text = format!(
-        "loading={loading} mem_free_bytes={} swap_total_bytes={} swap_free_bytes={} full_avg60={} pswpin_per_s={} pswpout_per_s={} refault_per_s={}",
-        bytes(sample.free_bytes),
-        bytes(sample.swap_total_bytes),
-        bytes(sample.swap_free_bytes),
+    let values = [
+        loading.to_string(),
+        mib(sample.free_bytes),
+        mib(sample.swap_total_bytes),
+        mib(sample.swap_free_bytes),
         sample.full_avg60.map_or_else(unknown, |v| v.to_string()),
         rate(rates.map(|r| r.swap_in)),
         rate(rates.map(|r| r.swap_out)),
         rate(rates.map(|r| r.refault)),
-    );
-    text.chars().take(256).collect()
+    ];
+    let mut text = values[0].clone();
+    for (name, reading) in PRESSURE_FIELDS.iter().zip(&values).skip(1) {
+        text.push(' ');
+        text.push_str(&value(name, reading));
+    }
+    (
+        PRESSURE_FIELDS[0].to_owned(),
+        text.chars().take(256).collect(),
+    )
+}
+
+impl Decision {
+    /// The last samples, one per `RECENT_SAMPLE_SPACING`, oldest first, as
+    /// one evidence property shaped like `readings`.
+    pub fn recent(&self) -> (String, String) {
+        let series = |reading: &dyn Fn(&Sample) -> String| {
+            self.recent
+                .iter()
+                .map(|(_, sample)| reading(sample))
+                .collect::<Vec<_>>()
+                .join(":")
+        };
+        let columns = [
+            series(&|s| mib(s.available_bytes)),
+            series(&|s| mib(s.free_bytes)),
+            series(&|s| mib(s.swap_free_bytes)),
+            series(&|s| s.full_avg10.map_or_else(unknown, |v| format!("{v:.0}"))),
+        ];
+        let mut text = columns[0].clone();
+        for (name, column) in RECENT_FIELDS.iter().zip(&columns).skip(1) {
+            text.push(' ');
+            text.push_str(&value(name, column));
+        }
+        (
+            RECENT_FIELDS[0].to_owned(),
+            text.chars().take(256).collect(),
+        )
+    }
 }
 
 #[cfg(test)]

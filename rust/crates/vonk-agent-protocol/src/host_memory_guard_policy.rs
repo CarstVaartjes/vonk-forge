@@ -48,13 +48,39 @@ pub const PSI_FALLING_RATIO: f64 = 0.85;
 // load); it kills within SUSTAINED_PRESSURE of the line only together with
 // R1's condition, MemFree below this, or R3's condition. CALIBRATABLE.
 pub const DRIVER_FAILURE_FREE_BYTES: u64 = 1024 * 1024 * 1024;
-// A Spark is loading while the agent's page-cache drop cadence (one drop every
-// PAGE_CACHE_DROP_INTERVAL while any run loads) was heard within this window.
-pub const LOADING_PHASE_WINDOW: Duration =
-    Duration::from_secs(3 * PAGE_CACHE_DROP_INTERVAL.as_secs());
-// Memory a swap release must leave available: the 2026-10-13 wedge ran with
-// ~10-15 GB left and healthy runs settle at ~19 GB.
-pub const STALL_AVAILABLE_BYTES: u64 = 16 * 1024 * 1024 * 1024;
+// R5's corroboration is sustained like R1, never one sample: a healthy load's
+// derived MemFree touches ~0.9 GB at its NVRM line (GLM mosaic a0 2026-10-28).
+pub const DRIVER_FAILURE_SUSTAIN: Duration = Duration::from_secs(2);
+// Kill evidence keeps one reading per RECENT_SAMPLE_SPACING for the last
+// RECENT_SAMPLES of them, so each kill can be judged afterwards.
+pub const RECENT_SAMPLES: usize = 6;
+pub const RECENT_SAMPLE_SPACING: Duration = Duration::from_secs(1);
+/// The kill evidence's reading names, in summary order; the agent keeps each
+/// as a typed exit fact. The decision fills them in this order.
+pub const PRESSURE_FIELDS: [&str; 8] = [
+    "loading",
+    "mem_free_mib",
+    "swap_total_mib",
+    "swap_free_mib",
+    "memory_full_avg60",
+    "swapin_per_s",
+    "swapout_per_s",
+    "refault_per_s",
+];
+/// The recent-sample series names (values joined by `:`, oldest first).
+pub const RECENT_FIELDS: [&str; 4] = [
+    "recent_available_mib",
+    "recent_free_mib",
+    "recent_swap_free_mib",
+    "recent_full_avg10",
+];
+// A Spark is loading while the agent's page-cache drop cadence was heard
+// within this window. The agent waits PAGE_CACHE_DROP_INTERVAL after each
+// answer and an answer takes up to PAGE_CACHE_DROP_REPLY_TIMEOUT, so the
+// longest healthy gap between asks is their sum; one more interval is margin.
+pub const LOADING_PHASE_WINDOW: Duration = Duration::from_secs(
+    2 * PAGE_CACHE_DROP_INTERVAL.as_secs() + PAGE_CACHE_DROP_REPLY_TIMEOUT.as_secs(),
+);
 // Informational only: never changes admission or kit settings.
 pub const PRELOAD_MARGIN_BYTES: u64 = 1024 * 1024 * 1024;
 pub const COMMAND_TIMEOUT: Duration = Duration::from_secs(1);

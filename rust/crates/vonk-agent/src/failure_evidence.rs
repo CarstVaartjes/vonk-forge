@@ -203,7 +203,8 @@ pub fn exit_facts(text: &str) -> impl Iterator<Item = (&str, &str)> {
         .split_whitespace()
         .filter_map(|token| token.split_once('='))
         .filter(|(key, value)| {
-            matches!(
+            use vonk_agent_protocol::host_memory_guard_policy::{PRESSURE_FIELDS, RECENT_FIELDS};
+            (matches!(
                 *key,
                 "exit_code"
                     | EXIT_CAUSE_FIELD
@@ -214,15 +215,16 @@ pub fn exit_facts(text: &str) -> impl Iterator<Item = (&str, &str)> {
                     | "memory_full_avg10"
                     | "sustained_ms"
                     | "observed_at"
-                    | "pressure_started_at"
-            ) && value.chars().all(|c| {
-                c.is_ascii_alphanumeric()
-                    || c == '_'
-                    || c == '-'
-                    || c == '.'
-                    || c == ':'
-                    || c == '+'
-            })
+            ) || PRESSURE_FIELDS.contains(key)
+                || RECENT_FIELDS.contains(key))
+                && value.chars().all(|c| {
+                    c.is_ascii_alphanumeric()
+                        || c == '_'
+                        || c == '-'
+                        || c == '.'
+                        || c == ':'
+                        || c == '+'
+                })
         })
 }
 
@@ -888,6 +890,24 @@ fn refusal_property(bound: &RefusalBound) -> Option<FailureProperty> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_host_memory_guard_readings_are_kept_as_exit_facts() {
+        // Break caught: readings the sanitizer did not know were dropped, so a
+        // kill could not be judged afterwards.
+        use vonk_agent_protocol::host_memory_guard_policy::{PRESSURE_FIELDS, RECENT_FIELDS};
+        let text = format!(
+            "reason=workload.host_memory_exhausted trigger=sustained_full_psi {} {}",
+            PRESSURE_FIELDS.map(|name| format!("{name}=1")).join(" "),
+            RECENT_FIELDS
+                .map(|name| format!("{name}=19600:18900"))
+                .join(" "),
+        );
+        let kept: Vec<_> = exit_facts(&text).map(|(key, _)| key).collect();
+        for name in PRESSURE_FIELDS.iter().chain(&RECENT_FIELDS) {
+            assert!(kept.contains(name), "{name} kept in {kept:?}");
+        }
+    }
 
     #[test]
     fn a_podman_crash_header_stays_ahead_of_its_goroutine_dump() {

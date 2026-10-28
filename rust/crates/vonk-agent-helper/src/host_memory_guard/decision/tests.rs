@@ -79,6 +79,23 @@ fn run(
     None
 }
 
+fn run_with_line(
+    host: &mut Host,
+    decision: &mut Decision,
+    start: Instant,
+    ticks: std::ops::Range<u32>,
+) -> Option<(u32, Trigger)> {
+    for tick in ticks {
+        let sample = host.tick();
+        if let Some(trigger) =
+            decision.observe(start + SAMPLE_INTERVAL * tick, sample, true, true, true)
+        {
+            return Some((tick, trigger));
+        }
+    }
+    None
+}
+
 fn ticks(duration: Duration) -> u32 {
     (duration.as_millis() / SAMPLE_INTERVAL.as_millis()) as u32
 }
@@ -318,7 +335,9 @@ fn r4_serving_pressure_kills_after_thirty_seconds_and_loading_waits_longer() {
 }
 
 #[test]
-fn r5_the_nvrm_line_kills_only_with_corroborating_exhaustion() {
+fn r5_the_nvrm_line_kills_only_with_sustained_corroboration() {
+    // Break caught: a healthy load's derived MemFree touches ~0.9 GB at its
+    // NVRM line for one sample (GLM mosaic a0 2026-10-28); one sample never kills.
     let start = Instant::now();
     let roomy = Sample {
         available_bytes: Some(10 * GIB),
@@ -329,31 +348,48 @@ fn r5_the_nvrm_line_kills_only_with_corroborating_exhaustion() {
         full_avg60: Some(20.0),
         counters: Some(Counters::default()),
     };
-    let mut decision = Decision::default();
-    // Once per normal load: never alone.
-    assert_eq!(decision.observe(start, roomy, true, true, true), None);
     let free_low = Sample {
         free_bytes: Some(DRIVER_FAILURE_FREE_BYTES - 1),
         ..roomy
     };
+    let mut decision = Decision::default();
+    // Once per normal load: never alone, and never with one low sample.
+    assert_eq!(decision.observe(start, roomy, true, true, true), None);
     assert_eq!(
         decision.observe(start + SAMPLE_INTERVAL, free_low, true, true, true),
-        Some(Trigger::DriverAllocationFailure)
-    );
-    let exhausted = Sample {
-        available_bytes: Some(512 * 1024 * 1024),
-        swap_free_bytes: Some(GIB),
-        ..roomy
-    };
-    assert_eq!(
-        Decision::default().observe(start, exhausted, true, true, true),
-        Some(Trigger::DriverAllocationFailure)
-    );
-    // Without the line, the same exhaustion waits for its sustain bound.
-    assert_eq!(
-        Decision::default().observe(start, exhausted, false, true, true),
         None
     );
+    assert_eq!(
+        decision.observe(start + SAMPLE_INTERVAL * 2, roomy, true, true, true),
+        None
+    );
+    // Sustained for the R1 window with the line: killed.
+    let bound = ticks(DRIVER_FAILURE_SUSTAIN);
+    for tick in 3..3 + bound {
+        assert_eq!(
+            decision.observe(start + SAMPLE_INTERVAL * tick, free_low, true, true, true),
+            None
+        );
+    }
+    assert_eq!(
+        decision.observe(
+            start + SAMPLE_INTERVAL * (3 + bound),
+            free_low,
+            true,
+            true,
+            true
+        ),
+        Some(Trigger::DriverAllocationFailure)
+    );
+    // The same sustained low MemFree without the line is no kill (healthy
+    // loads run with little free memory).
+    let mut quiet = Decision::default();
+    for tick in 0..400 {
+        assert_eq!(
+            quiet.observe(start + SAMPLE_INTERVAL * tick, free_low, false, true, true),
+            None
+        );
+    }
 }
 
 #[test]
@@ -498,19 +534,170 @@ fn the_kernel_files_are_read_into_one_sample_and_the_evidence_names_swap() {
         }),
         true,
     );
-    assert!(text.len() <= 256);
+    assert_eq!(text.0, "loading");
+    assert!(text.1.len() <= 256);
     for field in [
-        "loading=true",
-        "swap_total_bytes=68719476736",
-        "swap_free_bytes=34359738368",
-        "pswpin_per_s=1",
-        "pswpout_per_s=2",
+        "true ",
+        "swap_total_mib=65536",
+        "swap_free_mib=32768",
+        "swapin_per_s=1",
+        "swapout_per_s=2",
         "refault_per_s=3",
     ] {
-        assert!(text.contains(field), "{field} in {text}");
+        assert!(text.1.contains(field), "{field} in {text:?}");
     }
-    assert!(readings(&Sample::default(), None, false).contains(&format!(
-        "pswpin_per_s={}",
-        ResourceTermProblem::Unknown.as_str()
-    )));
+    assert!(
+        readings(&Sample::default(), None, false)
+            .1
+            .contains(&format!(
+                "swapin_per_s={}",
+                ResourceTermProblem::Unknown.as_str()
+            ))
+    );
+}
+
+#[test]
+fn a_phase_flip_starts_the_pressure_window_over() {
+    // Break caught: 40 s of loading pressure read as 40 s of serving pressure
+    // the moment one slow drop let the loading phase lapse.
+    let mut host = Host {
+        avg10: 85.0,
+        avg60: 85.0,
+        ..Host::serving()
+    };
+    let mut decision = Decision::default();
+    let start = Instant::now();
+    let loading = ticks(Duration::from_secs(40));
+    assert_eq!(run(&mut host, &mut decision, start, 0..loading, true), None);
+    let serving = loading + ticks(SERVING_PRESSURE_SUSTAIN);
+    assert_eq!(
+        run(&mut host, &mut decision, start, loading..serving, false),
+        None
+    );
+    assert_eq!(
+        run(&mut host, &mut decision, start, serving..serving + 1, false),
+        Some((serving, Trigger::SustainedPressure))
+    );
+}
+
+#[test]
+fn unswappable_growth_with_swap_still_free_is_killed_by_the_pressure_backstop() {
+    // GPU and pinned allocations never reach swap: memory runs out while swap
+    // stays free, so only R4 (and R5 with the driver line) can act.
+    let mut host = Host {
+        available: 300 * 1024 * 1024,
+        free: 200 * 1024 * 1024,
+        avg10: 95.0,
+        avg60: 90.0,
+        ..Host::serving()
+    };
+    let start = Instant::now();
+    let bound = ticks(SERVING_PRESSURE_SUSTAIN);
+    assert_eq!(
+        run(
+            &mut host,
+            &mut Decision::default(),
+            start,
+            0..bound + 1,
+            false
+        ),
+        Some((bound, Trigger::SustainedPressure))
+    );
+    let bound = ticks(LOADING_PRESSURE_SUSTAIN);
+    assert_eq!(
+        run(
+            &mut host,
+            &mut Decision::default(),
+            start,
+            0..bound + 1,
+            true
+        ),
+        Some((bound, Trigger::SustainedPressure))
+    );
+    // With the NVRM line and MemFree exhausted for the R1 window: killed.
+    let mut decision = Decision::default();
+    let bound = ticks(DRIVER_FAILURE_SUSTAIN);
+    assert_eq!(
+        run_with_line(&mut host, &mut decision, start, 0..bound + 1),
+        Some((bound, Trigger::DriverAllocationFailure))
+    );
+}
+
+#[test]
+fn the_recorded_glm_mosaic_load_curve_is_never_killed() {
+    // Hardware 2026-10-21 and 2026-10-28 (GLM 5.3 Flash mosaic, 7 false
+    // kills under the old 30%/3 s/16 GiB rule): MemAvailable falls ~2 GB per
+    // 5 s from 19.6 to ~13 GB with full avg10 55-67 for ~100 s while ~6 GB is
+    // written to swap, then stays flat as the weights sit on the GPU.
+    let mut host = Host {
+        available: 19_600_000_000,
+        free: 1_500_000_000,
+        avg10: 60.0,
+        avg60: 58.0,
+        swap_out_per_s: 14_650,
+        swap_in_per_s: 200,
+        refault_per_s: 3_000,
+        ..Host::serving()
+    };
+    let mut decision = Decision::default();
+    let start = Instant::now();
+    let falling = ticks(Duration::from_secs(100));
+    for tick in 0..falling + ticks(Duration::from_secs(300)) {
+        if tick < falling {
+            host.available = 19_600_000_000_u64
+                .saturating_sub(u64::from(tick) * 2_000_000_000 / 20)
+                .max(13_000_000_000);
+            host.avg10 = [55.0, 60.0, 67.0, 62.0][tick as usize % 4];
+        } else {
+            host.swap_out_per_s = 0;
+            host.avg10 = 20.0;
+            host.avg60 = 30.0;
+        }
+        let sample = host.tick();
+        assert_eq!(
+            decision.observe(
+                start + SAMPLE_INTERVAL * tick,
+                sample,
+                tick % 40 == 0,
+                true,
+                true
+            ),
+            None,
+            "tick {tick}: available {} avg10 {}",
+            host.available,
+            host.avg10
+        );
+    }
+    let written = host.swap_total - host.swap_free;
+    assert!((5 * GIB..7 * GIB).contains(&written), "{written}");
+}
+
+#[test]
+fn the_kill_evidence_carries_the_recent_samples_oldest_first() {
+    let mut host = Host::serving();
+    let mut decision = Decision::default();
+    let start = Instant::now();
+    for tick in 0..ticks(Duration::from_secs(20)) {
+        host.available = 20 * GIB - u64::from(tick) * (GIB / 40);
+        let sample = host.tick();
+        decision.observe(start + SAMPLE_INTERVAL * tick, sample, false, true, false);
+    }
+    let (name, value) = decision.recent();
+    assert_eq!(name, RECENT_FIELDS[0]);
+    assert!(value.len() <= 256);
+    let available: Vec<u64> = value
+        .split_whitespace()
+        .next()
+        .unwrap()
+        .split(':')
+        .map(|v| v.parse().unwrap())
+        .collect();
+    assert_eq!(available.len(), RECENT_SAMPLES);
+    assert!(
+        available.windows(2).all(|pair| pair[0] > pair[1]),
+        "{available:?}"
+    );
+    for field in &RECENT_FIELDS[1..] {
+        assert!(value.contains(&format!("{field}=")), "{field} in {value}");
+    }
 }

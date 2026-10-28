@@ -62,8 +62,10 @@ avg10 > 60% and MemAvailable + free swap < 8 GiB for 10 s; R4 full avg10 > 60%
 for 30 s while serving, or full avg60 > 80% and not falling for 60 s while a load
 runs (the agent's page-cache drop cadence marks a loading Spark). An NVIDIA
 `NVRM: Out of memory [NV_ERR_NO_MEMORY]` line (R5, non-fatal alone on GB10)
-stops at once only together with R1's or R3's condition or MemFree < 1 GiB.
-Every stop's evidence carries the swap and rate readings. The thresholds live in
+stops only together with R1's or R3's condition or MemFree < 1 GiB, held
+for 2 s like R1 (never one sample). There is no per-sample MemAvailable bar.
+Every stop's evidence carries MemFree, swap, full avg10/avg60, the swap and
+refault rates and the last six samples (one per second). The thresholds live in
 `host_memory_guard_policy.rs`, marked calibratable; the evidence is the
 2026-10-07 spark-3542 freeze, the 2026-10-08 GB10 OOM research and the
 systemd-oomd, oomd and earlyoom defaults.

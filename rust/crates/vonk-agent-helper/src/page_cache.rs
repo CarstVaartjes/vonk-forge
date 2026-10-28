@@ -200,13 +200,17 @@ pub fn handle(
         return Ok(None);
     };
     verifier.authorize_peer(peer)?;
+    // Heard at the ask and again at its answer: a slow drop never reads as a
+    // finished load.
     record_load_ask(Instant::now());
-    Ok(Some(drop_page_cache(
+    let report = drop_page_cache(
         Path::new("/"),
         &SYNC,
         PAGE_CACHE_SYNC_TIMEOUT,
         request.request_id,
-    )))
+    );
+    record_load_ask(Instant::now());
+    Ok(Some(report))
 }
 
 #[cfg(test)]
@@ -228,11 +232,12 @@ mod tests {
             Some(ask),
             ask + LOADING_PHASE_WINDOW + Duration::from_millis(1)
         ));
-        // Three missed asks of the agent's cadence end the phase.
-        assert!(
-            LOADING_PHASE_WINDOW
-                >= 3 * vonk_agent_protocol::host_memory_guard_policy::PAGE_CACHE_DROP_INTERVAL
-        );
+        // The agent's longest healthy gap (its interval after an answer that
+        // took the whole reply bound) stays inside the window.
+        use vonk_agent_protocol::host_memory_guard_policy::{
+            PAGE_CACHE_DROP_INTERVAL, PAGE_CACHE_DROP_REPLY_TIMEOUT,
+        };
+        assert!(LOADING_PHASE_WINDOW > PAGE_CACHE_DROP_INTERVAL + PAGE_CACHE_DROP_REPLY_TIMEOUT);
     }
 
     const MEMINFO: &str =

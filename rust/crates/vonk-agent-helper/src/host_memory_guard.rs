@@ -41,15 +41,16 @@ fn property(name: &str, value: impl ToString) -> FailureProperty {
     }
 }
 
+/// Every kill's account: the trigger, the sample that decided it, its rates
+/// and phase, and the recent samples before it (within the 8 preflight slots).
 fn evidence(
     sample: Sample,
     trigger: Trigger,
     duration: Duration,
-    rates: Option<Rates>,
-    loading: bool,
+    readings: (String, String),
+    recent: (String, String),
 ) -> FailureDiagnostics {
     let observed_at = chrono::Utc::now();
-    let began_at = observed_at - chrono::Duration::from_std(duration).unwrap_or_default();
     let empty = || FailureLogTail {
         text: String::new(),
         truncated: false,
@@ -89,12 +90,11 @@ fn evidence(
                     .full_avg10
                     .map_or_else(|| "unknown".into(), |v| v.to_string()),
             ),
+            // The sample's readings early: the agent's diagnostic paths bound
+            // the summary's length.
+            property(&readings.0, readings.1),
             property("sustained_ms", duration.as_millis()),
-            property("pressure_started_at", began_at.to_rfc3339()),
-            property(
-                "pressure_readings",
-                decision::readings(&sample, rates, loading),
-            ),
+            property(&recent.0, recent.1),
         ],
     }
 }
@@ -383,14 +383,15 @@ impl<R: CommandRunner> Lane<R> {
     }
 }
 
+/// The facts first, the observation time last: a bounded reader keeps the
+/// readings (the time is also the evidence's `collected_at`).
 pub fn summary(value: &FailureDiagnostics) -> String {
-    let mut tokens = vec![format!("observed_at={}", value.collected_at)];
-    tokens.extend(
-        value
-            .preflight
-            .iter()
-            .map(|p| format!("{}={}", p.name, p.value)),
-    );
+    let mut tokens: Vec<_> = value
+        .preflight
+        .iter()
+        .map(|p| format!("{}={}", p.name, p.value))
+        .collect();
+    tokens.push(format!("observed_at={}", value.collected_at));
     tokens.join(" ")
 }
 
@@ -517,8 +518,8 @@ pub fn spawn(data_root: PathBuf) {
                     sample,
                     trigger,
                     decision.pressure_duration(now, trigger),
-                    decision.rates(),
-                    loading,
+                    decision::readings(&sample, decision.rates(), loading),
+                    decision.recent(),
                 );
                 kill_now(&known, &targets, &value, &mut reported);
                 let _ = send.try_send((targets, value));
@@ -607,8 +608,8 @@ mod tests {
             },
             Trigger::SustainedPressure,
             SUSTAINED_PRESSURE,
-            None,
-            false,
+            decision::readings(&Sample::default(), None, false),
+            Decision::default().recent(),
         );
         let id = "a".repeat(64);
         // Without a recorded cgroup, the identity-checked Docker kill remains.
@@ -647,6 +648,49 @@ mod tests {
         assert!(stop_managed(&foreign, data_root.path(), None, &id, &value).is_err());
         assert_eq!(foreign.calls.lock().unwrap().len(), 1);
     }
+    #[test]
+    fn the_swap_readings_survive_the_agents_diagnostic_bound() {
+        // Break caught: readings placed last were cut off by the agent's
+        // 320-character exit diagnostic, so kills carried no swap data.
+        let sample = Sample {
+            available_bytes: Some(700 * 1024 * 1024),
+            free_bytes: Some(1536 * 1024 * 1024),
+            swap_total_bytes: Some(64 << 30),
+            swap_free_bytes: Some(20 << 30),
+            full_avg10: Some(45.5),
+            full_avg60: Some(50.25),
+            counters: None,
+        };
+        let rates = Some(Rates {
+            swap_in: 300.0,
+            swap_out: 20_000.0,
+            refault: 2_000.0,
+        });
+        let mut decision = Decision::default();
+        decision.observe(Instant::now(), sample, false, true, true);
+        let value = evidence(
+            sample,
+            Trigger::SwapFilling,
+            SUSTAINED_PRESSURE,
+            decision::readings(&sample, rates, true),
+            decision.recent(),
+        );
+        let text: String = summary(&value).chars().take(320).collect();
+        assert!(text.contains("refault_per_s=2000"), "{text}");
+        assert!(text.contains("swap_free_mib=20480"), "{text}");
+        assert!(text.contains("loading=true"), "{text}");
+        assert!(value.preflight.len() <= 8);
+        assert!(value.preflight.iter().all(|p| p.value.len() <= 256));
+        // The agent keeps every reading as a typed exit fact.
+        let full = summary(&value);
+        for name in vonk_agent_protocol::host_memory_guard_policy::PRESSURE_FIELDS
+            .iter()
+            .chain(&vonk_agent_protocol::host_memory_guard_policy::RECENT_FIELDS)
+        {
+            assert!(full.contains(&format!("{name}=")), "{name} in {full}");
+        }
+    }
+
     #[test]
     fn partial_inventory_never_triggers_false_stops() {
         assert!(inventory_ids(format!("{}\npartial", "a".repeat(64)).as_bytes()).is_err());
@@ -704,8 +748,8 @@ mod tests {
             },
             Trigger::DriverAllocationFailure,
             Duration::ZERO,
-            None,
-            false,
+            decision::readings(&Sample::default(), None, false),
+            Decision::default().recent(),
         )
     }
 
