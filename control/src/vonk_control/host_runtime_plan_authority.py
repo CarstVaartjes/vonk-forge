@@ -181,6 +181,11 @@ def derive_runtime_plan_binding(
 
 _DIGEST = re.compile(r"[0-9a-f]{64}")
 
+#: A run its Start or JobRun can never be current for again in this
+#: generation (a restart is a new generation); a planned or lost run may still
+#: become current, so it is waited on.
+_RUN_ENDED = frozenset({RunState.STOPPING, RunState.STOPPED, RunState.FAILED})
+
 
 def _own_stop_binding(
     parent: Job, operation: AgentOperation, stop_plan_sha256: str | None
@@ -257,6 +262,10 @@ def _service_run_authority(
             "service Start identity is stale",
             reason=InvalidRequestReason.SUPERSEDED,
         )
+    if run.state in _RUN_ENDED:
+        raise RuntimePlanUnsatisfiable(
+            "service Start's run has ended", reason=InvalidRequestReason.SUPERSEDED
+        )
     if (
         run.state not in {RunState.STARTING, RunState.RUNNING}
         or authority.installation.state != InstallationState.INSTALLED
@@ -307,6 +316,10 @@ def _job_run_authority(
         raise RuntimePlanUnsatisfiable(
             "artifact JobRun identity is stale",
             reason=InvalidRequestReason.SUPERSEDED,
+        )
+    if run.state in _RUN_ENDED:
+        raise RuntimePlanUnsatisfiable(
+            "artifact JobRun's run has ended", reason=InvalidRequestReason.SUPERSEDED
         )
     if (
         run.state != RunState.RUNNING

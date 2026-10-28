@@ -137,16 +137,35 @@ def test_an_installation_under_repair_waits_then_its_start_is_granted() -> None:
     assert operation.start_plan_sha256 == binding["start_plan_sha256"]
 
 
-def test_a_run_that_is_stopping_is_a_named_wait_not_a_refusal() -> None:
-    # A Stop under way does not revert; this order's attempt bounds the wait
-    # (the UNKNOWN recovery window, or a distributed start's deadline).
+@pytest.mark.parametrize(
+    "ended", [RunState.STOPPING, RunState.STOPPED, RunState.FAILED]
+)
+def test_a_start_of_a_run_that_ended_is_definite_not_a_wait(ended: RunState) -> None:
+    # A Stop under way or done never reverts for this generation (a restart
+    # is a new one), so its Start ends at once rather than waiting an hour.
     service = runtime_service()
     binding = runtime_plan_binding(service, ContainerRuntimeAction.START)
     with service._sessions.begin() as session:
-        _run(session).state = RunState.STOPPING
+        _run(session).state = ended
+    answered = _answer(service, binding)
+    assert type(answered) is HostRuntimeGrantUnsatisfiable
+    assert answered.reason is InvalidRequestReason.SUPERSEDED
+
+
+def test_a_planned_run_is_a_named_wait_then_its_start_is_granted() -> None:
+    # A start ordered before its run reached STARTING waits, then is granted.
+    service = runtime_service()
+    binding = runtime_plan_binding(service, ContainerRuntimeAction.START)
+    with service._sessions.begin() as session:
+        _run(session).state = RunState.PLANNED
     waiting = _answer(service, binding)
     assert type(waiting) is HostRuntimeEvidenceUnavailable
     assert waiting.waiting_for is InvalidRequestReason.NOT_READY
+    with service._sessions.begin() as session:
+        _run(session).state = RunState.STARTING
+    assert isinstance(
+        _ask(service, binding).claims.operation, ExecuteContainerRuntimeRequestOperation
+    )
 
 
 def _bump_generation(session: Session) -> None:
