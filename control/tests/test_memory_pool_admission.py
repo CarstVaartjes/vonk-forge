@@ -4,7 +4,7 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
-from vonk_agent_protocol import ReservationState
+from vonk_agent_protocol import ReservationState, RunAdmissionCode, RunSwitchCode
 from vonk_control.install_admission import InstallAdmissionService
 from vonk_control.models import (
     ClusterMapping,
@@ -339,3 +339,11 @@ def test_profile_review_and_run_admission_share_the_observed_peak(
     node = review.json()["assessments"][0]["assessment"]["fit_current"]["nodes"][0]
     assert runtime.nodes[0].required_memory_bytes == declared
     assert node["memory_required_bytes"] == declared
+    # Both carry the rise to the same load-phase swap check (no swap here).
+    assert RunAdmissionCode.INSUFFICIENT_SWAP in {
+        reason.code for item in runtime.nodes for reason in item.blockers
+    }
+    assert RunSwitchCode.RESOURCE_INSUFFICIENT_SWAP in {
+        reason["code"]
+        for reason in review.json()["assessments"][0]["assessment"]["blockers"]
+    }

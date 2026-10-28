@@ -217,6 +217,28 @@ class MemoryRequirement:
 
 
 @dataclass(frozen=True, slots=True)
+class SwapCapacity:
+    """The swap a Spark can lend a load phase; unknown swap is none.
+
+    Swap is a load-time cushion, never memory capacity: only the rise of a
+    load above its steady demand is checked against it.
+    """
+
+    #: Active swap as the agent reports it (0 when unreported).
+    total_bytes: int = 0
+    used_bytes: int = 0
+    #: The rise other ranks on this Spark still loading (planned or starting)
+    #: hold, from their admitted plans.
+    held_bytes: int = 0
+    #: The Spark's swap setting, for the remedy (``None`` when unknown).
+    desired_bytes: int | None = None
+
+
+#: No swap reported.
+NO_SWAP = SwapCapacity()
+
+
+@dataclass(frozen=True, slots=True)
 class CapacitySnapshot:
     node_id: str
     memory_kind: str
@@ -238,6 +260,7 @@ class CapacitySnapshot:
     #: How much more the Spark reported free over the last stall window than in
     #: this sample: the host's own use moving, not capacity to admit against.
     free_upside_bytes: int = 0
+    swap: SwapCapacity = NO_SWAP
 
 
 @dataclass(frozen=True, slots=True)

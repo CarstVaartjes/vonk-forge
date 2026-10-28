@@ -133,6 +133,11 @@ class StoredRunNodePlan(_PersistedModel):
     memory_kind: Literal["unified", "host", "accelerator"]
     memory_pool: MemoryPool
     required_memory_bytes: int = Field(ge=0)
+    # The load phase's admitted peak when it rises above the steady
+    # ``required_memory_bytes`` (swap carries the rise). Optional with a
+    # declared ``None`` default and omitted again on serialization, so plans
+    # admitted without a rise keep their canonical bytes and digest.
+    load_memory_bytes: int | None = Field(default=None, ge=0)
     available_memory_bytes: int | None
     active_reserved_bytes: int = Field(ge=0)
     free_after_bytes: int | None

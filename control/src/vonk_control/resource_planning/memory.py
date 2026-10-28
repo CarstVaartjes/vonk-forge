@@ -19,12 +19,14 @@ from .demand import _resource_evidence, resource_demand
 from .memory_kinds import memory_reservation_kind, memory_reservation_kinds
 from .settings import resolve_effective_settings
 from .types import (
+    NO_SWAP,
     CapacitySnapshot,
     EffectiveResourceSettings,
     EvidenceState,
     MemoryRequirement,
     MemoryReservationTotals,
     SettingsResolution,
+    SwapCapacity,
 )
 
 
@@ -84,6 +86,7 @@ def memory_capacity_snapshot(
     evidence_digest: str | None = None,
     evidence_observed_at: datetime | None = None,
     recent_best_free_bytes: int | None = None,
+    swap: SwapCapacity = NO_SWAP,
 ) -> CapacitySnapshot:
     def component(kind: MemoryKind, values: tuple[int, int] | None) -> CapacitySnapshot:
         reserved = (
@@ -181,6 +184,7 @@ def memory_capacity_snapshot(
             and recent_best_free_bytes is not None
             and free is not None
             else 0,
+            swap=swap,
         )
 
     if memory_pool == "shared":

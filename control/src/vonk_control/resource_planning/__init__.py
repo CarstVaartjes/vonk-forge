@@ -80,5 +80,6 @@ from .types import ResourceEvidence as ResourceEvidence
 from .types import ResourcePreflightPlan as ResourcePreflightPlan
 from .types import ResourceReason as ResourceReason
 from .types import SettingsResolution as SettingsResolution
+from .types import SwapCapacity as SwapCapacity
 from .types import UnknownRunMemoryResidual as UnknownRunMemoryResidual
 from .types import installation_disk_requirement as installation_disk_requirement

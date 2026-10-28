@@ -33,6 +33,7 @@ from ..lifecycle.evidence import (
     BookkeepingReason,
     retire_as_unknown,
 )
+from ..load_swap import swap_capacity
 from ..memory_reservations import (
     memory_reservations,
 )
@@ -334,6 +335,12 @@ class ResourceFitMixin:
                             )
                             if snapshot
                             else None,
+                            swap=swap_capacity(
+                                session,
+                                item.node_id,
+                                snapshot.host_settings if snapshot else None,
+                                excluded_run_ids=excluded_run_ids,
+                            ),
                         )
                         capacity_totals = [
                             part.available_bytes for part in capacity.components

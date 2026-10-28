@@ -45,6 +45,7 @@ from .gpu_health import gpu_health_reason
 from .install_admission import AdmissionReason
 from .inventory_repository import InventoryRepository
 from .legal_admission import territorial_admission
+from .load_swap import swap_capacity
 from .memory_reservations import memory_reservations
 from .models import (
     AgentNode,
@@ -385,11 +386,26 @@ RETRYABLE_PLAN_BLOCKERS = frozenset(
         RunAdmissionCode.INVENTORY_MISSING,
         RunAdmissionCode.STALE_INVENTORY,
         RunAdmissionCode.INSUFFICIENT_MEMORY,
+        RunAdmissionCode.INSUFFICIENT_SWAP,
         RunAdmissionCode.PORT_OCCUPIED,
         RunAdmissionCode.RENDEZVOUS_PORT_OCCUPIED,
         ResourceBlockerCode.INSUFFICIENT,
     }
 )
+
+
+def _admission_code(code: str) -> str:
+    """The run admission word for one capacity-fit reason.
+
+    A swap shortfall keeps its own word: it is not a memory shortfall a stop
+    or a claim release frees, and it names a different remedy.
+    """
+
+    if code == ResourceBlockerCode.INSUFFICIENT_SWAP:
+        return RunAdmissionCode.INSUFFICIENT_SWAP
+    if code.startswith(ResourceBlockerCode.INSUFFICIENT):
+        return RunAdmissionCode.INSUFFICIENT_MEMORY
+    return code
 
 
 def require_admissible(plan: RunPlan) -> None:
@@ -453,6 +469,8 @@ class RunNodePlan:
     blockers: tuple[AdmissionReason, ...]
     warnings: tuple[AdmissionReason, ...]
     memory_pool: MemoryPool | None
+    #: The load phase's peak when it rises above ``required_memory_bytes``.
+    load_memory_bytes: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -774,6 +792,12 @@ class RunAdmissionService:
                     if snapshot
                     else None
                 )
+                swap = swap_capacity(
+                    session,
+                    placement.node_id,
+                    snapshot.host_settings if snapshot else None,
+                    excluded_run_ids=released,
+                )
                 excluded_profiles = (
                     *excluded_profile_application_ids,
                     *((profile_application_id,) if profile_application_id else ()),
@@ -850,6 +874,7 @@ class RunAdmissionService:
                 evidence_digest=snapshot.evidence_digest if snapshot else None,
                 evidence_observed_at=snapshot.observed_at if snapshot else None,
                 recent_best_free_bytes=best_free,
+                swap=swap,
             )
             reserved = capacity.reserved_bytes or 0
             available = (
@@ -871,9 +896,7 @@ class RunAdmissionService:
             # a zero-byte physical pool the driver never measured.
             for reason in memory_fit.reasons if health_reason is None else ():
                 projected = AdmissionReason(
-                    RunAdmissionCode.INSUFFICIENT_MEMORY
-                    if reason.code.startswith(ResourceBlockerCode.INSUFFICIENT)
-                    else reason.code,
+                    _admission_code(reason.code),
                     reason.detail,
                 )
                 if reason.severity == "blocker":
@@ -901,6 +924,9 @@ class RunAdmissionService:
                     tuple(blockers),
                     tuple(warnings),
                     snapshot.memory_pool if snapshot else None,
+                    required + memory_need.demand.load_overshoot_bytes
+                    if memory_need.demand.load_overshoot_bytes > 0
+                    else None,
                 )
             )
         if multi_node and len(fabric_addresses) != len(set(fabric_addresses)):
@@ -1276,7 +1302,7 @@ def _planned_port_demand(demand: RunPortDemand, node: RunNodePlan) -> RunPortDem
 
 
 def _node_document(node: RunNodePlan) -> dict[str, object]:
-    return {
+    document = {
         **asdict(node),
         "inventory_observed_at": (
             node.inventory_observed_at.isoformat()
@@ -1284,3 +1310,7 @@ def _node_document(node: RunNodePlan) -> dict[str, object]:
             else None
         ),
     }
+    if node.load_memory_bytes is None:
+        # The stored contract omits it: a plan without a rise keeps its digest.
+        del document["load_memory_bytes"]
+    return document

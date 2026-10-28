@@ -4,15 +4,35 @@ Every test drives the real ``plan_run`` / ``accept_run_in_session`` and the
 real inventory repository against PostgreSQL.
 """
 
+import json
 from datetime import timedelta
+from importlib.resources import files
 from uuid import uuid4
 
-from sqlalchemy import select
-from vonk_agent_protocol import ResourceBlockerCode, canonical_message
-from vonk_agent_protocol.swap import GIB
+import pytest
+from sqlalchemy import select, update
+from vonk_agent_protocol import (
+    ResourceBlockerCode,
+    RunAdmissionCode,
+    RunState,
+    canonical_message,
+)
+from vonk_agent_protocol.swap import GIB, SWAP_POLICY, usable_swap_bytes
+from vonk_control.fleet_profiles.dependencies import ENDING_BLOCKER_CODES
 from vonk_control.inventory_repository import InventoryRepository, NodeInventoryReport
-from vonk_control.models import RecipeRun, ResourceReservation, RunNode
-from vonk_control.run_admission import RunAdmissionService
+from vonk_control.models import (
+    InstallationNode,
+    RecipeRun,
+    ResourceReservation,
+    RunNode,
+)
+from vonk_control.recipe_execution_contract import parse_stored_run_plan
+from vonk_control.run_admission import (
+    RETRYABLE_PLAN_BLOCKERS,
+    RunAdmissionBusy,
+    RunAdmissionService,
+    require_admissible,
+)
 from vonk_control.telemetry import TelemetryRepository, TelemetrySample
 
 from .test_run_admission import setup
@@ -102,9 +122,9 @@ def _stop(sessions, run_id, at):
             claim.released_at = at
 
 
-def _world(tmp_path, postgres_engine):
+def _world(tmp_path, postgres_engine, steady=_STEADY):
     sessions, now, node, installation = setup(
-        tmp_path, peak_bytes=_STEADY, engine=postgres_engine
+        tmp_path, peak_bytes=steady, engine=postgres_engine
     )
     service = RunAdmissionService(
         sessions, inventory_max_age=300, memory_floor_bytes=_FLOOR
@@ -119,6 +139,51 @@ def _codes(plan):
 def _accept(sessions, service, plan, now):
     with sessions.begin() as session:
         return service.accept_run_in_session(session, plan, actor="admin", now=now)
+
+
+def _observe_rise(sessions, service, installation, node, at, *, steady, rise):
+    """One earlier run of this content whose load rose ``rise`` above ``steady``."""
+    at += timedelta(seconds=1)
+    _inventory(sessions, at, node, swap=_swap(128))
+    run_id = _accept(
+        sessions,
+        service,
+        service.plan_run(installation, alias="observed", now=at),
+        at,
+    )
+    _telemetry(sessions, at + timedelta(seconds=1), node, _FREE - steady - rise)
+    _stop(sessions, run_id, at + timedelta(seconds=2))
+    return at + timedelta(seconds=3)
+
+
+def _swap_wait(plan):
+    """The plan waits on swap alone, and accepting it is the same typed wait."""
+    assert not plan.allowed
+    assert _codes(plan) == {RunAdmissionCode.INSUFFICIENT_SWAP}
+    assert RunAdmissionCode.INSUFFICIENT_SWAP in RETRYABLE_PLAN_BLOCKERS
+    with pytest.raises(RunAdmissionBusy) as waited:
+        require_admissible(plan)
+    assert waited.value.code == RunAdmissionCode.INSUFFICIENT_SWAP
+    return " ".join(reason.detail for node in plan.nodes for reason in node.blockers)
+
+
+def _claim_bytes(sessions, run_id):
+    with sessions() as session:
+        claim = session.scalar(
+            select(ResourceReservation).where(
+                ResourceReservation.owner_id == run_id,
+                ResourceReservation.kind == "unified-memory",
+            )
+        )
+        assert claim is not None
+        return claim.amount_bytes
+
+
+def _stored_load(sessions, run_id):
+    with sessions() as session:
+        run = session.get(RecipeRun, run_id)
+        assert run is not None
+        return parse_stored_run_plan(run.plan).nodes[0].load_memory_bytes
 
 
 def test_f_a_swap_backed_load_never_poisons_its_content(
@@ -152,11 +217,190 @@ def test_f_a_swap_backed_load_never_poisons_its_content(
     assert plan.allowed, _codes(plan)
     assert plan.nodes[0].required_memory_bytes == _STEADY
     readmitted = _accept(sessions, service, plan, later)
-    with sessions() as session:
-        claim = session.scalar(
-            select(ResourceReservation).where(
-                ResourceReservation.owner_id == readmitted,
-                ResourceReservation.kind == "unified-memory",
-            )
+    assert _claim_bytes(sessions, readmitted) == _STEADY
+    assert _stored_load(sessions, readmitted) == _FREE - int(0.7 * GIB)
+
+
+def test_a_a_load_waits_on_16_gib_swap_and_starts_on_64_reserving_its_steady_demand(
+    tmp_path, postgres_engine
+) -> None:
+    """Catches a load whose rise swap cannot carry being admitted (no check)."""
+    steady, rise = 60 * GIB, 20 * GIB
+    sessions, now, node, installation, service = _world(
+        tmp_path, postgres_engine, steady
+    )
+    at = _observe_rise(
+        sessions, service, installation, node, now, steady=steady, rise=rise
+    )
+
+    _inventory(sessions, at, node, swap=_swap(16))
+    detail = _swap_wait(service.plan_run(installation, alias="qwen", now=at))
+    # 20 GiB needs 23 GiB of swap within the guard's margins.
+    assert "at least 23 GiB" not in detail and "reaches its setting" in detail
+
+    later = at + timedelta(seconds=1)
+    _inventory(sessions, later, node, swap=_swap(64))
+    plan = service.plan_run(installation, alias="qwen", now=later)
+    assert plan.allowed, _codes(plan)
+    run_id = _accept(sessions, service, plan, later)
+    assert _claim_bytes(sessions, run_id) == steady
+    assert _stored_load(sessions, run_id) == steady + rise
+
+
+def test_b_unknown_swap_waits_then_the_load_starts_once_swap_is_reported(
+    tmp_path, postgres_engine
+) -> None:
+    """Catches an agent that reports no swap being treated as having some."""
+    steady, rise = 60 * GIB, 20 * GIB
+    sessions, now, node, installation, service = _world(
+        tmp_path, postgres_engine, steady
+    )
+    at = _observe_rise(
+        sessions, service, installation, node, now, steady=steady, rise=rise
+    )
+
+    _inventory(sessions, at, node)
+    _swap_wait(service.plan_run(installation, alias="qwen", now=at))
+
+    later = at + timedelta(seconds=1)
+    _inventory(sessions, later, node, swap=_swap(64))
+    assert service.plan_run(installation, alias="qwen", now=later).allowed
+
+
+def test_c_a_second_load_waits_while_the_first_still_loads_and_no_rise_never_waits(
+    tmp_path, postgres_engine
+) -> None:
+    """Catches two loads on one Spark each counting on the same free swap."""
+    steady, rise = 30 * GIB, 30 * GIB
+    sessions, now, node, installation, service = _world(
+        tmp_path, postgres_engine, steady
+    )
+    at = _observe_rise(
+        sessions, service, installation, node, now, steady=steady, rise=rise
+    )
+    _inventory(sessions, at, node, swap=_swap(64))
+    first = _accept(
+        sessions, service, service.plan_run(installation, alias="a", now=at), at
+    )
+    with sessions.begin() as session:
+        session.execute(
+            update(RunNode)
+            .where(RunNode.run_id == first)
+            .values(state=RunState.STARTING)
         )
-        assert claim is not None and claim.amount_bytes == _STEADY
+
+    detail = _swap_wait(service.plan_run(installation, alias="b", now=at))
+    assert f"{rise} held by loads still starting" in detail
+    assert "other loads here finish loading" in detail
+
+    with sessions.begin() as session:
+        session.execute(
+            update(RunNode)
+            .where(RunNode.run_id == first)
+            .values(state=RunState.RUNNING)
+        )
+    assert service.plan_run(installation, alias="b", now=at).allowed
+
+    # A load that does not rise above its steady demand needs no swap: it
+    # never waits on another load's.
+    with sessions.begin() as session:
+        session.execute(
+            update(RunNode)
+            .where(RunNode.run_id == first)
+            .values(state=RunState.STARTING)
+        )
+        session.execute(update(RunNode).values(observed_memory_bytes=None))
+        session.execute(update(InstallationNode).values(observed_memory_bytes=None))
+    plan = service.plan_run(installation, alias="c", now=at)
+    assert plan.allowed, _codes(plan)
+    assert plan.nodes[0].load_memory_bytes is None
+
+
+def test_d_a_rise_past_the_guard_margin_waits_with_the_setting_to_raise(
+    tmp_path, postgres_engine
+) -> None:
+    """Catches admitting a load the host memory guard would stop at once.
+
+    63 GiB fits under a 64 GiB swap total but not within the guard's 10%
+    margin (57.6 GiB usable): admitting it would invite R1/R2.
+    """
+    steady, rise = 30 * GIB, 63 * GIB
+    sessions, now, node, installation, service = _world(
+        tmp_path, postgres_engine, steady
+    )
+    at = _observe_rise(
+        sessions, service, installation, node, now, steady=steady, rise=rise
+    )
+
+    _inventory(sessions, at, node, swap=_swap(64))
+    detail = _swap_wait(service.plan_run(installation, alias="qwen", now=at))
+    # 70 GiB leaves a few bytes under 63 GiB usable (the guard's integer
+    # percent): 71 GiB is the smallest setting that holds it.
+    assert "Raise the Spark swap setting to at least 71 GiB" in detail
+
+
+def test_e_only_a_rise_beyond_the_largest_swap_setting_never_fits(
+    tmp_path, postgres_engine
+) -> None:
+    """Catches a large rise ending the load although a bigger setting holds it."""
+    steady = GIB
+    largest = usable_swap_bytes(SWAP_POLICY.maximum_gib * GIB)
+    sessions, now, node, installation, service = _world(
+        tmp_path, postgres_engine, steady
+    )
+    at = _observe_rise(
+        sessions, service, installation, node, now, steady=steady, rise=largest
+    )
+    _inventory(sessions, at, node, swap=_swap(64))
+    detail = _swap_wait(service.plan_run(installation, alias="qwen", now=at))
+    assert (
+        f"Raise the Spark swap setting to at least {SWAP_POLICY.maximum_gib} GiB"
+        in detail
+    )
+
+    beyond = _observe_rise(
+        sessions, service, installation, node, at, steady=steady, rise=largest + 1
+    )
+    _inventory(sessions, beyond, node, swap=_swap(SWAP_POLICY.maximum_gib))
+    plan = service.plan_run(installation, alias="qwen", now=beyond)
+    assert _codes(plan) == {ResourceBlockerCode.DEMAND_EXCEEDS_CAPACITY}
+    assert ResourceBlockerCode.DEMAND_EXCEEDS_CAPACITY in ENDING_BLOCKER_CODES
+    assert ResourceBlockerCode.INSUFFICIENT_SWAP not in ENDING_BLOCKER_CODES
+
+
+def test_g_the_shared_swap_vector_admits_exactly_its_usable_bound(
+    tmp_path, postgres_engine
+) -> None:
+    """Catches the Controller's usable swap drifting from the guard's vectors.
+
+    The Spark reports the shared vector's observation through the real
+    inventory validator; a rise of exactly its usable swap less the swap in
+    use starts, one byte more waits.
+    """
+    vectors = json.loads(
+        files("vonk_agent_protocol")
+        .joinpath("vectors/swap-v1.json")
+        .read_text(encoding="utf-8")
+    )
+    observation = vectors["observation"]
+    usable = next(
+        pair["usable_bytes"]
+        for pair in vectors["usable"]
+        if pair["total_bytes"] == observation["total_bytes"]
+    )
+    bound = usable - (observation["total_bytes"] - observation["free_bytes"])
+    steady = 30 * GIB
+    sessions, now, node, installation, service = _world(
+        tmp_path, postgres_engine, steady
+    )
+    at = _observe_rise(
+        sessions, service, installation, node, now, steady=steady, rise=bound
+    )
+    _inventory(sessions, at, node, swap=observation)
+    assert service.plan_run(installation, alias="qwen", now=at).allowed
+
+    past = _observe_rise(
+        sessions, service, installation, node, at, steady=steady, rise=bound + 1
+    )
+    _inventory(sessions, past, node, swap=observation)
+    _swap_wait(service.plan_run(installation, alias="qwen", now=past))

@@ -1,4 +1,4 @@
-from vonk_agent_protocol import canonical_message
+from vonk_agent_protocol import RunAdmissionCode, canonical_message
 
 """Admission bounds a recipe's load by what its runs really used."""
 
@@ -135,8 +135,10 @@ def test_a_runs_whole_run_peak_never_raises_its_steady_reservation(
 
     plan = service.plan_run(installation, alias="qwen", now=now)
     assert plan.nodes[0].required_memory_bytes == 225
-    assert "resource.demand_exceeds_capacity" not in {
-        item.code for item in plan.nodes[0].blockers
+    # The rise above it is the load's, for swap to carry; this Spark reports
+    # none, so the load waits (never ends) until it does.
+    assert {item.code for item in plan.nodes[0].blockers} == {
+        RunAdmissionCode.INSUFFICIENT_SWAP
     }
 
 
