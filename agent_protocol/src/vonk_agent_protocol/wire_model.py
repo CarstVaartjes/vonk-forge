@@ -17,7 +17,7 @@ from pydantic import (
     field_validator,
     model_validator,
 )
-from pydantic_core import CoreSchema, core_schema
+from pydantic_core import CoreSchema, SchemaValidator, ValidationError, core_schema
 
 # RecipeRun owns generations in a PostgreSQL BIGINT column. The helper and
 # agent carry that exact identity; their storage/argv representations must not
@@ -98,6 +98,58 @@ def _bind_string_enum_values(schema: CoreSchema) -> CoreSchema:
     return schema
 
 
+#: Scalar types whose JSON value is a string that strict Python mode refuses.
+JSON_STRING_SCALARS = frozenset({"uuid", "datetime"})
+#: Marks a scalar schema already bound by :func:`_bind_json_string_scalars`.
+JSON_STRING_BOUND = "vonk_json_string_bound"
+
+
+def _bind_json_string_scalars(schema: CoreSchema) -> CoreSchema:
+    """Read a UUID or timestamp from its JSON string in either mode.
+
+    Strict Python mode accepts only a ``UUID``/``datetime`` instance, so a body
+    decoded to Python objects before validation (FastAPI does that for
+    ``body: Model``; so does every wrap validator, in either mode) refused the
+    string the wire contract declares.  An agent result whose page-cache
+    report carried a UUID and a timestamp lost all of its failure diagnostics
+    that way (2026-10-27).  An exact ``str`` is parsed by the same scalar
+    schema in JSON mode, so both modes accept exactly what the JSON contract
+    does; any other value reaches Pydantic's own error unchanged.
+    """
+
+    if not isinstance(schema, dict):
+        return schema
+    metadata = schema.get("metadata")
+    if isinstance(metadata, dict) and metadata.get(JSON_STRING_BOUND):
+        return schema
+    scalar = schema.get("type")
+    if isinstance(scalar, str) and scalar in JSON_STRING_SCALARS:
+        json_mode = SchemaValidator(cast(CoreSchema, deepcopy(schema)))
+
+        def bind_string(value: object) -> object:
+            if type(value) is not str:
+                return value
+            try:
+                return json_mode.validate_json(json.dumps(value), strict=True)
+            except ValidationError:
+                return value
+
+        return core_schema.no_info_before_validator_function(
+            bind_string, schema, metadata={JSON_STRING_BOUND: True}
+        )
+    for key, nested in tuple(schema.items()):
+        if isinstance(nested, dict):
+            schema[key] = _bind_json_string_scalars(cast(CoreSchema, nested))
+        elif isinstance(nested, list):
+            schema[key] = [
+                _bind_json_string_scalars(cast(CoreSchema, item))
+                if isinstance(item, dict)
+                else item
+                for item in nested
+            ]
+    return schema
+
+
 def typed_tag() -> Any:
     """Mark a union member's tag so the Rust generator types it.
 
@@ -136,8 +188,8 @@ class StrictJSONModel(BaseModel):
     models require an exact type/value match.  In the other direction strict
     mode rejects a string enum's own member string when the input was decoded
     to Python objects, so a declared member string is bound here once for every
-    mode.  Numeric/enum coercion beyond those two rules remains Pydantic's
-    responsibility.
+    mode, and so is a UUID's or timestamp's JSON string.  Numeric/enum
+    coercion beyond those rules remains Pydantic's responsibility.
     """
 
     @classmethod
@@ -152,8 +204,10 @@ class StrictJSONModel(BaseModel):
         built = cls.__dict__.get("__pydantic_core_schema__")
         if source_type is cls and isinstance(built, dict):
             return cast(CoreSchema, built)
-        return _bind_string_enum_values(
-            _wrap_numeric_literals(deepcopy(handler(source_type)))
+        return _bind_json_string_scalars(
+            _bind_string_enum_values(
+                _wrap_numeric_literals(deepcopy(handler(source_type)))
+            )
         )
 
 

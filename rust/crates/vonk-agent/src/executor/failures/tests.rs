@@ -1210,6 +1210,112 @@ fn a_start_whose_exception_names_host_paths_is_the_shared_vector_on_the_wire() {
 }
 
 #[test]
+fn a_start_failure_carries_its_page_cache_drops_as_the_shared_vector_on_the_wire() {
+    // Every start that failed after the page-cache drops shipped (2026-10-27)
+    // lost all of its diagnostics at the Controller: strict Python-mode ingress
+    // refused the reports' UUID and timestamp strings. This is that failure as
+    // the agent sends it (`recipe-start-page-cache-v1`); the Controller's
+    // ingress tests read the same vector. The clock- and host-dependent
+    // diagnostics are compared by shape, the drops exactly.
+    use vonk_agent_protocol::generated::{
+        PageCacheDropEvidence, PageCacheDropProblem, PageCacheDropReport, PageCacheSync,
+    };
+    let vector: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../../../agent_protocol/src/vonk_agent_protocol/vectors/recipe-start-page-cache-v1.json"
+    ))
+    .unwrap();
+    let report = |id: &str, at: &str| PageCacheDropReport {
+        request_id: uuid::Uuid::parse_str(id).unwrap(),
+        dropped_at: chrono::DateTime::parse_from_rfc3339(at).unwrap(),
+        cached_before_bytes: None,
+        cached_after_bytes: None,
+        mem_available_after_bytes: None,
+        sync: None,
+        problem: None,
+    };
+    let in_progress = PageCacheDropReport {
+        problem: Some(PageCacheDropProblem::DropInProgress),
+        ..report(
+            "a2303dec-b351-4817-80b4-065bfd50376d",
+            "2026-10-27T23:11:00.512345Z",
+        )
+    };
+    let dropped = PageCacheDropReport {
+        cached_before_bytes: Some(75_787_431_936),
+        cached_after_bytes: Some(207_085_568),
+        mem_available_after_bytes: Some(128_297_287_680),
+        sync: Some(PageCacheSync::Completed),
+        ..report(
+            "7ee6ed1c-cd7a-4639-9498-e4e4e543d849",
+            "2026-10-27T23:11:01.123456Z",
+        )
+    };
+    let mut evidence = PageCacheDropEvidence {
+        drops: 0,
+        problems: 0,
+        reclaimed_bytes: 0,
+        first: None,
+        last: None,
+        last_problem: None,
+    };
+    crate::page_cache::record(&mut evidence, &in_progress);
+    crate::page_cache::record(&mut evidence, &dropped);
+    let summary = "exit_code=1 oom_killed=false exit_cause=python_exception exception=\"RuntimeError: CUDA error: out of memory\"";
+    let error = crate::host_runtime::HostRuntimeError::HelperRejected {
+        code: HelperErrorCode::RuntimeProcessExited,
+        diagnostic: Some(crate::failure_evidence::sanitize_exit_summary(summary)),
+        process_logs: Some(Box::new(crate::failure_evidence::FailureProcessLogs {
+            exit_code: None,
+            stdout: crate::failure_evidence::log_tail(b"loading weights\n"),
+            stderr: crate::failure_evidence::log_tail(b"RuntimeError: CUDA error: out of memory\n"),
+        })),
+    };
+    let ExecutionResult::Failed(mut failure) = runtime_observation_failure(&error) else {
+        panic!("a process exit is a failed start");
+    };
+    failure.page_cache = Some(evidence);
+    let mut start_claim = claim();
+    start_claim.operation = AgentOperation::RecipeStart;
+    let finished = ExecutionResult::Failed(failure).finish(&start_claim);
+    let mut produced = serde_json::to_value(crate::wire_prose::wire_result(
+        &vonk_agent_protocol::generated::AgentResult {
+            fence: start_claim.fence,
+            result: finished.result,
+            state: finished.state,
+        },
+    ))
+    .unwrap();
+    if let Some(path) = std::env::var_os("VONK_WRITE_PAGE_CACHE_VECTOR") {
+        std::fs::write(path, serde_json::to_vec_pretty(&produced).unwrap()).unwrap();
+    }
+    let mut expected = vector.clone();
+    let take_diagnostics = |body: &mut serde_json::Value| {
+        body["result"]["evidence"]
+            .as_object_mut()
+            .unwrap()
+            .remove("diagnostics")
+            .unwrap()
+    };
+    let produced_diagnostics = take_diagnostics(&mut produced);
+    let vector_diagnostics = take_diagnostics(&mut expected);
+    produced["fence"] = expected["fence"].clone();
+    assert_eq!(produced, expected);
+    for field in [
+        "page_cache",
+        "phase",
+        "category",
+        "preflight",
+        "stdout",
+        "stderr",
+    ] {
+        assert_eq!(
+            produced_diagnostics[field], vector_diagnostics[field],
+            "{field}"
+        );
+    }
+}
+
+#[test]
 fn time_window_refusal_reaches_the_controller_without_becoming_a_security_failure() {
     let error = crate::host_runtime::HostRuntimeError::HelperRejected {
         code: HelperErrorCode::GrantTimeWindow,

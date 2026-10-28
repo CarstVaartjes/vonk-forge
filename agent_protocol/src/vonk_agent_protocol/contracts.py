@@ -27,6 +27,7 @@ from pydantic import (
 from .failure_evidence import FailureDiagnostics, ModelStoreLayoutFault
 from .lifecycle_vocabulary import AgentResultState, FailureCode, WaitReason
 from .optional_evidence import (
+    EvidenceDrop,
     EvidenceGroup,
     OptionalEvidenceModel,
     fail_open_on_optional_evidence,
@@ -231,6 +232,9 @@ class AgentFailureResult(WireModel):
     diagnostic: str | None = Field(default=None, min_length=1, max_length=512)
     helper_error_code: str | None = Field(default=None, min_length=1, max_length=128)
     helper_exit_code: int | None = Field(default=None, strict=True, ge=0, le=255)
+    #: The optional evidence the Controller dropped from the agent's report,
+    #: each with the field that refused it: a lost group is never silent.
+    dropped_evidence: list[EvidenceDrop] | None = Field(default=None, max_length=8)
 
     @model_validator(mode="after")
     def requires_failure_identity(self) -> AgentFailureResult:
@@ -1151,6 +1155,13 @@ class AgentDirective(_ProtocolEnvelopeModel):
             raise AgentProtocolError(str(error)) from error
 
 
+# Where a started workload's diagnostics ride: the diagnostics groups' paths.
+_PRELOAD_DIAGNOSTICS: tuple[tuple[str, ...], ...] = (
+    ("result", "preload_diagnostics"),
+    ("result", "result", "preload_diagnostics"),
+)
+
+
 class AgentResult(OptionalEvidenceModel, _ProtocolEnvelopeModel):
     """The fence, state and outcome (its failure identity: reason, error code,
     summary, kind) are mandatory; the diagnostics, the failing stage and the
@@ -1159,38 +1170,42 @@ class AgentResult(OptionalEvidenceModel, _ProtocolEnvelopeModel):
 
     # One group per field: no evidence field needs another to be read, so an
     # invalid one costs only itself. A field name spans the result shapes; the
-    # agent sends each field in only one of them.
+    # agent sends each field in only one of them. The page-cache drops inside
+    # the diagnostics are their own group, listed first so that dropping them
+    # alone is tried before dropping the whole diagnostics document.
     EVIDENCE_GROUPS: ClassVar[tuple[EvidenceGroup, ...]] = tuple(
         EvidenceGroup(
             code,
             tuple(
-                (*prefix, name)
+                (*prefix, *name)
                 for prefix in (
                     ("result",),
                     ("result", "evidence"),
                     ("result", "receipt"),
                 )
             )
-            + extra,
+            + tuple((*preload, *name[1:]) for preload in extra),
         )
         for name, code, extra in (
             (
-                "diagnostics",
-                AgentEvidenceCode.FAILURE_DIAGNOSTICS_DROPPED,
-                (
-                    ("result", "preload_diagnostics"),
-                    ("result", "result", "preload_diagnostics"),
-                ),
+                ("diagnostics", "page_cache"),
+                AgentEvidenceCode.FAILURE_PAGE_CACHE_DROPPED,
+                _PRELOAD_DIAGNOSTICS,
             ),
-            ("diagnostic", AgentEvidenceCode.FAILURE_DIAGNOSTIC_LINE_DROPPED, ()),
-            ("stage", AgentEvidenceCode.FAILURE_STAGE_DROPPED, ()),
             (
-                "helper_error_code",
+                ("diagnostics",),
+                AgentEvidenceCode.FAILURE_DIAGNOSTICS_DROPPED,
+                _PRELOAD_DIAGNOSTICS,
+            ),
+            (("diagnostic",), AgentEvidenceCode.FAILURE_DIAGNOSTIC_LINE_DROPPED, ()),
+            (("stage",), AgentEvidenceCode.FAILURE_STAGE_DROPPED, ()),
+            (
+                ("helper_error_code",),
                 AgentEvidenceCode.FAILURE_HELPER_ERROR_CODE_DROPPED,
                 (),
             ),
             (
-                "helper_exit_code",
+                ("helper_exit_code",),
                 AgentEvidenceCode.FAILURE_HELPER_EXIT_CODE_DROPPED,
                 (),
             ),
