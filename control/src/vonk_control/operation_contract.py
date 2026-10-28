@@ -323,6 +323,8 @@ def sanitize_failure_evidence(value: Mapping[str, object]) -> dict[str, object]:
                 "reason",
                 "uncertain",
                 "retryable",
+                # What ingress dropped is bounded and says why evidence is missing.
+                "dropped_evidence",
             )
             if key in result
         }

@@ -143,6 +143,9 @@ class EvidenceContext(EvidenceModel):
     rank: int | None = Field(default=None, ge=0, le=MAX_DATABASE_INTEGER)
 
 
+_MAX_COLLECTOR_ERRORS = 8
+
+
 class FailureEvidenceBundle(EvidenceModel):
     schema_version: Literal[2] = 2
     context: EvidenceContext
@@ -153,7 +156,7 @@ class FailureEvidenceBundle(EvidenceModel):
     #: The measured exit code of the job process, when its receipt reports one.
     exit_code: int | None = Field(default=None, ge=0, le=255)
     diagnostics: FailureDiagnostics
-    collector_errors: list[str] = Field(max_length=8)
+    collector_errors: list[str] = Field(max_length=_MAX_COLLECTOR_ERRORS)
     #: What the operation was waiting for when it stopped, when it recorded that.
     blockers: list[OperationBlocker] = Field(default_factory=list, max_length=16)
 
@@ -395,6 +398,11 @@ def collect_failure(item: FailedAttempt, *, now: datetime) -> FailureEvidenceBun
             diagnostics = sanitize_diagnostics(result.diagnostics)
         except (ValueError, TypeError):
             errors.append("agent-diagnostics-invalid")
+    # Evidence the Controller dropped at ingress, with the field that refused it.
+    errors.extend(
+        f"{drop.code.value} at {drop.location} ({drop.error_type})"
+        for drop in result.dropped_evidence[: _MAX_COLLECTOR_ERRORS - len(errors)]
+    )
     if diagnostics is None:
         phase = (
             (item.progress.phase if item.progress is not None else None)

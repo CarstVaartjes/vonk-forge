@@ -169,14 +169,17 @@ def stored_report(
     """
 
     outcome = agent_outcome(operation_kind, message.state, message.result)
-    if message.result is outcome:
+    body = outcome_body(outcome) if message.result is outcome else message.result
+    # The evidence ingress dropped is named in the stored failure, with the
+    # field that refused it, so the failure's evidence says what it lost.
+    if message.evidence_drops and isinstance(body, AgentFailureResult):
+        body = body.model_copy(
+            update={"dropped_evidence": list(message.evidence_drops)}
+        )
+    if body is not message.result:
         message = AgentResult.model_validate_json(
             canonical_message(
-                {
-                    "fence": message.fence,
-                    "state": message.state,
-                    "result": outcome_body(outcome),
-                }
+                {"fence": message.fence, "state": message.state, "result": body}
             )
         )
     return message, outcome
