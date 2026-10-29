@@ -151,6 +151,7 @@ def _certificate(serial, generation, *, revoked, expired, now=NOW):
     )
 
 
+@pytest.mark.slow(30)  # 1,200 real CA journal rows drained 64 per pass on PostgreSQL
 def test_production_scale_drains_in_bounded_passes(world, monkeypatch):
     """Catches the observe gate and expiry skips stranding ~1,100 rows forever."""
     ca, sessions, _clock, service = world
