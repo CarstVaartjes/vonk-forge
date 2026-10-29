@@ -425,6 +425,10 @@ SCOPED: tuple[tuple[str, str], ...] = (
         "Agent package set version record over a fake GitHub API; no product scan.",
     ),
     (
+        "tests/scripts/test_sign_package_keyless.py",
+        "Keyless package signing retry over a fake cosign; no product scan.",
+    ),
+    (
         "tests/scripts/test_resolve_pr_setups.py",
         "Pull request setup reuse selection over a fake GitHub API; no product scan.",
     ),
