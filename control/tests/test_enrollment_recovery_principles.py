@@ -541,6 +541,8 @@ def test_canonical_pending_owner_expires_after_restart_and_fresh_same_node_is_ad
 
     def responder(request):
         nonlocal old
+        if request.url.path == "/1.0/revoke":
+            return httpx2.Response(200, json={"status": "ok"})
         body = json.loads(request.content)
         binding = body["request"]
         observations.append(binding)

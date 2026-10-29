@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import logging
 import time
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 from cryptography import x509
@@ -46,6 +48,7 @@ from ..enrollment_validation import (
 from ..enrollment_validation import (
     _validate_node_id as _validate_node_id,  # noqa: PLC0414 -- shared helper export
 )
+from ..logging import log_event, redact_text
 from ..models import (
     AgentCertificate,
     AgentCertificateRotation,
@@ -57,7 +60,7 @@ from ..models import (
     Job,
 )
 from ..owner_liveness import OwnerKind, OwnerRef, owner
-from ..persisted_waits import schedule_wait
+from ..persisted_waits import read_wait, schedule_wait
 from ..pki import IssuedCertificate
 from ..security.enrollment import (
     require_activation_identity,
@@ -69,7 +72,7 @@ from ..security.enrollment import (
 from ..security.enrollment import (
     require_expired_source as _require_expired_source,
 )
-from ..step_ca import StepCAIssuancePending, StepCAUnavailable
+from ..step_ca import StepCAError, StepCAIssuancePending, StepCAUnavailable
 from .persistence import _issuance_binding
 from .rotation import RotationService
 from .types import (
@@ -79,6 +82,28 @@ from .types import (
     RenewalInProgress,
     RenewalIssuanceUncertain,
 )
+
+_LOGGER = logging.getLogger("vonk_control.enrollment")
+_REVOCATION_BATCH = 64
+_REVOCATION_PASS_BUDGET_SECONDS = 5.0
+_REVOCATION_RETRY_FIRST_SECONDS = 5.0
+_REVOCATION_RETRY_CAP_SECONDS = 300.0
+_REVOCATION_RETRYABLE = (
+    StepCAError,
+    EnrollmentIssuanceUncertain,
+    RuntimeError,
+    ValueError,
+    OSError,
+    SQLAlchemyError,
+)
+
+_RevocationRow = AgentCertificate | AgentIssuedCertificateRevocation
+
+
+@dataclass(frozen=True)
+class _RevocationAttempt:
+    changed: bool = False
+    error: Exception | None = None
 
 
 class EnrollmentService(RotationService):
@@ -170,12 +195,20 @@ class EnrollmentService(RotationService):
             ca_confirmation_complete=pending is None and orphan is None,
         )
 
-    def reconcile_revocations(self, serial: str | None = None) -> bool:
+    def reconcile_revocations(
+        self,
+        serial: str | None = None,
+        *,
+        limit: int = _REVOCATION_BATCH,
+        budget_seconds: float = _REVOCATION_PASS_BUDGET_SECONDS,
+        monotonic: Callable[[], float] = time.monotonic,
+    ) -> bool:
         """Worker-owned, restart-safe confirmation without any admission gate.
 
-        Each provider observation has its transport deadline. Failed serials
-        back off independently; other nodes and newer requests keep progressing.
-        An ended exact binding is only observed, never issued or adopted.
+        The local CA revokes by serial alone, so every row (expired, unsigned or
+        not) is revoked the same way. A pass is bounded in rows and time; the
+        persisted due time is the cursor and failed serials back off by how long
+        they have been blocked. True when any row was confirmed or deleted.
         """
         now = _utc(self._clock())
         from .ending import retain_ended_effect
@@ -223,10 +256,13 @@ class EnrollmentService(RotationService):
                         now,
                     )
                     session.delete(accepted_rotation)
+        started = monotonic()
         with self._sessions() as session:
-            certificates = list(
-                session.scalars(
-                    select(AgentCertificate).where(
+            certificates = [
+                (row.serial, row.node_id)
+                for row in session.execute(
+                    select(AgentCertificate.serial, AgentCertificate.node_id)
+                    .where(
                         AgentCertificate.serial == serial
                         if serial is not None
                         else true(),
@@ -237,11 +273,21 @@ class EnrollmentService(RotationService):
                             | (AgentCertificate.next_action_at <= now)
                         ),
                     )
+                    .order_by(
+                        AgentCertificate.next_action_at.asc().nulls_first(),
+                        AgentCertificate.serial,
+                    )
+                    .limit(limit)
                 )
-            )
-            evidence = list(
-                session.scalars(
-                    select(AgentIssuedCertificateRevocation).where(
+            ]
+            evidence = [
+                (row.serial, row.node_id)
+                for row in session.execute(
+                    select(
+                        AgentIssuedCertificateRevocation.serial,
+                        AgentIssuedCertificateRevocation.node_id,
+                    )
+                    .where(
                         AgentIssuedCertificateRevocation.serial == serial
                         if serial is not None
                         else true(),
@@ -251,86 +297,95 @@ class EnrollmentService(RotationService):
                             | (AgentIssuedCertificateRevocation.next_action_at <= now)
                         ),
                     )
+                    .order_by(
+                        AgentIssuedCertificateRevocation.next_action_at.asc().nulls_first(),
+                        AgentIssuedCertificateRevocation.serial,
+                    )
+                    .limit(max(0, limit - len(certificates)))
                 )
-            )
+            ]
         changed = False
-        for row in evidence:
-            binding = _issuance_binding(row.provider_request)
-            if binding is not None and datetime.fromisoformat(binding.not_after) <= now:
-                with self._transaction() as session:
-                    expired = session.get(AgentIssuedCertificateRevocation, row.serial)
-                    if expired is not None:
-                        changed |= schedule_wait(expired, None)
-                continue  # Expired bytes can no longer authenticate ingress.
-            # Persist the next check before HTTP: process death cannot hot-loop.
+        failures: list[Exception] = []
+        rows: list[tuple[type[_RevocationRow], str, str]] = []
+        rows.extend((AgentCertificate, *row) for row in certificates)
+        rows.extend((AgentIssuedCertificateRevocation, *row) for row in evidence)
+        for model, row_serial, node_id in rows:
+            if monotonic() >= started + budget_seconds:
+                break
+            result = self._confirm_revocation_once(model, row_serial, node_id, now)
+            changed |= result.changed
+            if result.error is not None:
+                failures.append(result.error)
+        if failures:
+            log_event(
+                _LOGGER,
+                "enrollment.revocation_unconfirmed",
+                service="control-worker",
+                failed=len(failures),
+                error=type(failures[0]).__name__,
+                message=redact_text(str(failures[0])),
+            )
+        return changed
+
+    def _confirm_revocation_once(
+        self,
+        model: type[_RevocationRow],
+        serial: str,
+        node_id: str,
+        now: datetime,
+    ) -> _RevocationAttempt:
+        """One row: persist the next check, revoke at the CA, then confirm.
+
+        ``ca_revoked_at`` is only set after the CA journal accepted the serial,
+        so a crash anywhere leaves the row due again, never falsely confirmed.
+        """
+        try:
             with self._transaction() as session:
-                current = session.get(AgentIssuedCertificateRevocation, row.serial)
+                current = session.get(
+                    model, serial, with_for_update=model is AgentCertificate
+                )
                 if current is None or current.ca_revoked_at is not None:
-                    continue
+                    return _RevocationAttempt()
+                if isinstance(current, AgentIssuedCertificateRevocation):
+                    accepted = session.get(AgentCertificate, serial)
+                    if (
+                        accepted is not None
+                        and accepted.node_id == current.node_id
+                        and accepted.state == CertificateRecordState.ACTIVE
+                        and accepted.revoked_at is None
+                    ):
+                        # The accepted credential owns this serial: revoking it
+                        # would refuse the node's next rotation.
+                        session.delete(current)
+                        log_event(
+                            _LOGGER,
+                            "enrollment.revocation_evidence_superseded",
+                            service="control-worker",
+                            serial=serial,
+                            node_id=current.node_id,
+                        )
+                        return _RevocationAttempt(changed=True)
+                previous = read_wait(current)
+                blocked = (
+                    (now - previous.first_blocked_at).total_seconds()
+                    if previous
+                    else 0.0
+                )
+                retry_in = min(
+                    _REVOCATION_RETRY_CAP_SECONDS,
+                    max(_REVOCATION_RETRY_FIRST_SECONDS, blocked),
+                )
                 schedule_wait(
                     current,
-                    now + timedelta(seconds=5),
+                    now + timedelta(seconds=retry_in),
                     now=now,
                     reason=WaitReason.OBSERVATION_UNAVAILABLE,
-                    deadline=datetime.fromisoformat(binding.not_after)
-                    if binding is not None
-                    else None,
                 )
-            try:
-                if binding is not None:
-                    if row.csr_pem is None:
-                        continue
-                    issued = self._authority.observe_node(
-                        row.csr_pem.encode("ascii"), now, request=binding
-                    )
-                    if issued is None:
-                        continue
-                self._authority.revoke_node(row.serial, now)
-                self._confirm_remote_revocation(row.node_id, row.serial, now)
-                changed = True
-            except (
-                StepCAUnavailable,
-                EnrollmentIssuanceUncertain,
-                RuntimeError,
-                ValueError,
-                SQLAlchemyError,
-            ):
-                continue
-        for row in certificates:
-            if _stored_utc(row.not_after) <= now:
-                with self._transaction() as session:
-                    expired_certificate = session.get(AgentCertificate, row.serial)
-                    if expired_certificate is not None:
-                        changed |= schedule_wait(expired_certificate, None)
-                continue
-            with self._transaction() as session:
-                current_certificate = session.get(
-                    AgentCertificate, row.serial, with_for_update=True
-                )
-                if (
-                    current_certificate is None
-                    or current_certificate.ca_revoked_at is not None
-                ):
-                    continue
-                schedule_wait(
-                    current_certificate,
-                    now + timedelta(seconds=5),
-                    now=now,
-                    deadline=current_certificate.not_after,
-                )
-            try:
-                self._authority.revoke_node(row.serial, now)
-                self._confirm_remote_revocation(row.node_id, row.serial, now)
-                changed = True
-            except (
-                StepCAUnavailable,
-                EnrollmentIssuanceUncertain,
-                RuntimeError,
-                ValueError,
-                SQLAlchemyError,
-            ):
-                continue
-        return changed
+            self._authority.revoke_node(serial, now)
+            self._confirm_remote_revocation(node_id, serial, now)
+            return _RevocationAttempt(changed=True)
+        except _REVOCATION_RETRYABLE as error:
+            return _RevocationAttempt(error=error)
 
     def activate(
         self, node_id: str, serial: str, generation: int

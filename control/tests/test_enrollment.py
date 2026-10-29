@@ -1032,7 +1032,8 @@ def test_recovery_conflict_revocation_is_durable_across_response_loss(
     assert isinstance(recovered, IssuedCertificate)
     restarted = EnrollmentService(sessions, authority, clock=_clock)
     assert restarted.recover_rotation(NODE_ID, source.serial, pending_csr) == recovered
-    assert authority.revocations == [obsolete.serial] * 5
+    # The ended recovery binding is revoked by serial too, signed or not.
+    assert authority.revocations == [obsolete.serial] * 5 + [recovered.serial]
     assert len(authority.renew_request_ids) == 2
 
 
