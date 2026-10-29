@@ -20,6 +20,7 @@ from vonk_agent_protocol.state_machines import (
 )
 
 from ..agent_contacts import retire_contact
+from ..coordinator_failures import _RETRY_CAP_SECONDS
 from ..enrollment_contract import (
     EnrollmentObservationOutcome,
     EnrollmentRevocationStatus,
@@ -87,7 +88,6 @@ _LOGGER = logging.getLogger("vonk_control.enrollment")
 _REVOCATION_BATCH = 64
 _REVOCATION_PASS_BUDGET_SECONDS = 5.0
 _REVOCATION_RETRY_FIRST_SECONDS = 5.0
-_REVOCATION_RETRY_CAP_SECONDS = 300.0
 _REVOCATION_RETRYABLE = (
     StepCAError,
     EnrollmentIssuanceUncertain,
@@ -321,6 +321,7 @@ class EnrollmentService(RotationService):
                 _LOGGER,
                 "enrollment.revocation_unconfirmed",
                 service="control-worker",
+                level=logging.WARNING,
                 failed=len(failures),
                 error=type(failures[0]).__name__,
                 message=redact_text(str(failures[0])),
@@ -372,7 +373,7 @@ class EnrollmentService(RotationService):
                     else 0.0
                 )
                 retry_in = min(
-                    _REVOCATION_RETRY_CAP_SECONDS,
+                    _RETRY_CAP_SECONDS,
                     max(_REVOCATION_RETRY_FIRST_SECONDS, blocked),
                 )
                 schedule_wait(

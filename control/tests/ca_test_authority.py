@@ -40,6 +40,11 @@ class FixtureCertificateAuthority(CertificateAuthority):
         generation: int,
     ) -> CertificateIssuanceBinding:
         csr = x509.load_pem_x509_csr(csr_pem)
+        # Like the real CA, every prepared request gets a fresh serial, so an
+        # ended (never issued) binding's serial is never reused by a later one.
+        self._prepared = (
+            max(getattr(self, "_prepared", 0), getattr(self, "_serial", 0)) + 1
+        )
         return CertificateIssuanceBinding.model_validate(
             {
                 "request_id": secrets.token_urlsafe(32),
@@ -47,7 +52,7 @@ class FixtureCertificateAuthority(CertificateAuthority):
                 "csr_sha256": hashlib.sha256(
                     csr.public_bytes(serialization.Encoding.DER)
                 ).hexdigest(),
-                "serial": str(getattr(self, "_serial", 0) + 1),
+                "serial": str(self._prepared),
                 "not_before": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
                 "not_after": (now + timedelta(days=30)).strftime("%Y-%m-%dT%H:%M:%SZ"),
                 "issuer_fingerprint": "a" * 64,
