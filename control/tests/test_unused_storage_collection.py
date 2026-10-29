@@ -2243,10 +2243,12 @@ def test_model_no_recipe_needs_is_removed_when_disk_is_short_through_the_fenced_
             select(ModelCacheOperation).where(ModelCacheOperation.kind == "remove")
         )
         assert removal is not None and removal.actor == ACTOR
-    # Until the cache has deleted the files, free space says nothing new.
+    # Until the cache has deleted the files, free space says nothing new: a
+    # queued removal is not yet settling, but the round that freed nothing
+    # pauses eviction.
     waiting = collector.collect()
     assert waiting.models == 0
-    assert _scope(waiting, "nas")["outcome"] == "waiting"
+    assert _scope(waiting, "nas")["outcome"] == "paused"
     _settle(service)
     assert not _set_exists(world, set_digest)
 
