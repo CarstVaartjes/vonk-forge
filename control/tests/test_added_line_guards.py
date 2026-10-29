@@ -1574,3 +1574,49 @@ def test_follow_validator_asserting_an_operation_count_is_flagged() -> None:
         {3},
         modes=("follow-validators",),
     )
+
+
+_DOCUMENT_READS = (
+    "release = document.get('release')\n",
+    "name = row.document['identity']\n",
+    "slug = entry['document']['identity']['slug']\n",
+    "runtime = json.loads(files['recipe.json'])['runtime']\n",
+    "def f(row):\n    bound = row.document\n    return bound['models']\n",
+)
+
+
+@pytest.mark.parametrize("source", _DOCUMENT_READS)
+def test_added_raw_document_read_fails_untouched_read_does_not(source: str) -> None:
+    path = "control/src/vonk_control/example.py"
+    last = source.count("\n")
+    assert check_source(
+        path, source, set(range(1, last + 1)), modes=("document-reads",)
+    )
+    assert not check_source(path, source, set(), modes=("document-reads",))
+    assert not check_source(
+        "src/cluster_profiles/generated_control/x.py",
+        source,
+        {1},
+        modes=("document-reads",),
+    )
+    assert not check_source(
+        "control/tests/example.py", source, {1}, modes=("document-reads",)
+    )
+    assert not check_source(
+        "agent_protocol/src/example.py", source, {1}, modes=("document-reads",)
+    )
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "release = read_recipe(row.document).release\n",
+        "runtime = payload.get('runtime')\n",
+        "title = display_model.title\n",
+        "name = document['unlisted_key']\n",
+    ],
+)
+def test_typed_or_unrelated_read_passes_document_reads(source: str) -> None:
+    assert not check_source(
+        "control/src/vonk_control/example.py", source, {1}, modes=("document-reads",)
+    )
