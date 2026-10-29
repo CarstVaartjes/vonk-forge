@@ -1383,3 +1383,39 @@ def test_every_worker_step_runs_through_the_one_timing_wrapper() -> None:
         assert called <= allowed, (
             f"{method.name} calls {called - allowed} outside _timed"
         )
+
+
+@pytest.mark.parametrize("sources", [1, 6, 20])
+def test_due_run_switch_wait_is_redriven_within_one_step_of_any_number_of_slow_sources(
+    tmp_path, monkeypatch, sources: int
+) -> None:
+    """Catches due waits drained only at the start of a pass: a due run-switch
+    wait would sit behind every slow source (a full rotation), not one step."""
+    step_seconds = 120.0
+    now = [0.0]
+    monkeypatch.setattr("vonk_control.worker.time.monotonic", lambda: now[0])
+    due_at = 1.0
+    redriven: list[float] = []
+
+    def due_waits() -> None:
+        if now[0] >= due_at and not redriven:
+            redriven.append(now[0])
+
+    def slow_source() -> bool:
+        now[0] += step_seconds
+        return False
+
+    worker = Worker(
+        _service(tmp_path),
+        "worker-1",
+        {},
+        background_services=tuple((lambda: slow_source()) for _ in range(sources)),
+        coordinator_failures=_failures(tmp_path),
+        due_waits=due_waits,
+    )
+
+    worker.run_once()
+
+    assert now[0] >= sources * step_seconds
+    assert redriven, "the due wait was never redriven"
+    assert redriven[0] <= step_seconds + 1
