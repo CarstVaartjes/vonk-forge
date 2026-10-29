@@ -7,14 +7,14 @@ use vonk_agent_protocol::failure_evidence::FAILURE_PROPERTY_VALUE_CHARS;
 use vonk_agent_protocol::generated::ResourceTermProblem;
 
 use vonk_agent_protocol::host_memory_guard_policy::{
-    DRIVER_FAILURE_FREE_BYTES, DRIVER_FAILURE_SUSTAIN, DRIVER_LINE_WINDOW, EXHAUSTED_BYTES,
-    LOADING_FULL_AVG60_PERCENT, LOADING_PRESSURE_SUSTAIN, PRESSURE_FIELDS, PRESSURE_PROPERTY,
-    PSI_FALLING_RATIO, RECENT_FIELDS, RECENT_PROPERTY, RECENT_SAMPLE_SPACING, RECENT_SAMPLES,
-    SERVING_FULL_PSI_PERCENT, SERVING_PRESSURE_SUSTAIN, SUSTAINED_PRESSURE,
-    SWAP_EXHAUSTED_FREE_FLOOR_BYTES, SWAP_EXHAUSTED_FREE_PERCENT, SWAP_EXHAUSTED_MEMORY_BYTES,
-    SWAP_EXHAUSTED_SUSTAIN, SWAP_FILLING_MEMORY_BYTES, SWAP_FILLING_SUSTAIN,
-    SWAP_FILLING_USED_PERCENT, THRASH_FULL_PSI_PERCENT, THRASH_HEADROOM_BYTES,
-    THRASH_PAGES_PER_SECOND, THRASH_SUSTAIN,
+    DRIVER_FAILURE_FREE_BYTES, DRIVER_FAILURE_RECLAIM_PAGES_PER_SECOND, DRIVER_FAILURE_SUSTAIN,
+    DRIVER_LINE_WINDOW, EXHAUSTED_BYTES, LOADING_FULL_AVG60_PERCENT, LOADING_PRESSURE_SUSTAIN,
+    PRESSURE_FIELDS, PRESSURE_PROPERTY, PSI_FALLING_RATIO, RECENT_FIELDS, RECENT_PROPERTY,
+    RECENT_SAMPLE_SPACING, RECENT_SAMPLES, SERVING_FULL_PSI_PERCENT, SERVING_PRESSURE_SUSTAIN,
+    SUSTAINED_PRESSURE, SWAP_EXHAUSTED_FREE_FLOOR_BYTES, SWAP_EXHAUSTED_FREE_PERCENT,
+    SWAP_EXHAUSTED_MEMORY_BYTES, SWAP_EXHAUSTED_SUSTAIN, SWAP_FILLING_MEMORY_BYTES,
+    SWAP_FILLING_SUSTAIN, SWAP_FILLING_USED_PERCENT, THRASH_FULL_PSI_PERCENT,
+    THRASH_HEADROOM_BYTES, THRASH_PAGES_PER_SECOND, THRASH_SUSTAIN,
 };
 
 /// Why the guard stopped the managed workloads; the evidence's `trigger`.
@@ -218,7 +218,12 @@ fn conditions(sample: &Sample, rates: Option<Rates>, loading: bool) -> Condition
         filling,
         thrashing,
         pressure,
-        driver_free_low: below(sample.free_bytes, DRIVER_FAILURE_FREE_BYTES),
+        // With swap, low MemFree while pages are swapping out is reclaim
+        // absorbing the load; it counts only once swap-out has stopped.
+        driver_free_low: below(sample.free_bytes, DRIVER_FAILURE_FREE_BYTES)
+            && (!swap
+                || rates
+                    .is_some_and(|rates| rates.swap_out < DRIVER_FAILURE_RECLAIM_PAGES_PER_SECOND)),
     }
 }
 
@@ -324,7 +329,8 @@ impl Decision {
             },
         );
         // R5: the line alone is non-fatal on GB10; it counts only with R1's or
-        // R3's condition, or MemFree exhausted, sustained like R1.
+        // R3's condition, or MemFree exhausted while no swap-out is reclaiming
+        // (always, without swap), sustained like R1.
         let corroborated = sustained(
             &mut self.corroborated_since,
             condition.exhausted || condition.thrashing || condition.driver_free_low,

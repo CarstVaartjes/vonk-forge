@@ -615,12 +615,13 @@ fn unswappable_growth_with_swap_still_free_is_killed_by_the_pressure_backstop() 
         ),
         Some((bound, Trigger::SustainedPressure))
     );
-    // With the NVRM line and MemFree exhausted for the R1 window: killed.
+    // With the NVRM line and MemFree exhausted for the R1 window: killed. The
+    // first sample has no swap-out rate yet, so the window starts one tick in.
     let mut decision = Decision::default();
     let bound = ticks(DRIVER_FAILURE_SUSTAIN);
     assert_eq!(
-        run_with_line(&mut host, &mut decision, start, 0..bound + 1),
-        Some((bound, Trigger::DriverAllocationFailure))
+        run_with_line(&mut host, &mut decision, start, 0..bound + 2),
+        Some((bound + 1, Trigger::DriverAllocationFailure))
     );
 }
 
@@ -828,4 +829,57 @@ fn a_load_at_the_usable_swap_bound_is_never_killed_and_one_byte_past_is() {
             "{trigger:?}"
         );
     }
+}
+
+/// The Inkling dspark load's readings at the 2026-10-29 kill (spark-3542, NVRM
+/// line present throughout): MemAvailable 6420 -> 1006 MiB, MemFree 976 MiB,
+/// 64 GiB swap with 63.1 GiB free, swap-out 148195 pages/s, swap-in 12,
+/// refault 711, loading. `swap_out_per_s` is the only knob the tests vary.
+fn inkling_dspark_kill_readings(swap_out_per_s: u64) -> Host {
+    Host {
+        available: 1_040_000_000,
+        free: 976 * 1024 * 1024,
+        swap_total: 64 * GIB,
+        swap_free: 63 * GIB + GIB / 10,
+        avg10: 2.35,
+        avg60: 0.42,
+        swap_in_per_s: 12,
+        swap_out_per_s,
+        refault_per_s: 711,
+        ..Host::serving()
+    }
+}
+
+#[test]
+fn the_recorded_inkling_dspark_load_is_never_killed() {
+    // Break caught: R5 killed a load that finished on 2026-10-25 while 148k
+    // pages/s were swapping out, the swap cushion working as designed.
+    let mut host = inkling_dspark_kill_readings(148_195);
+    assert_eq!(
+        run_with_line(&mut host, &mut Decision::default(), Instant::now(), 0..400),
+        None
+    );
+}
+
+#[test]
+fn r5_kills_on_low_memfree_when_swap_is_not_absorbing_the_load() {
+    let start = Instant::now();
+    let bound = ticks(DRIVER_FAILURE_SUSTAIN);
+    // Same readings, swap-out about zero: pinned memory that cannot reclaim.
+    let mut host = inkling_dspark_kill_readings(0);
+    assert_eq!(
+        run_with_line(&mut host, &mut Decision::default(), start, 0..bound + 2).map(|k| k.1),
+        Some(Trigger::DriverAllocationFailure)
+    );
+    // No swap: unchanged, MemFree alone corroborates (swap-out is unread).
+    let mut host = Host {
+        swap_total: 0,
+        swap_free: 0,
+        swap_out_per_s: 148_195,
+        ..inkling_dspark_kill_readings(0)
+    };
+    assert_eq!(
+        run_with_line(&mut host, &mut Decision::default(), start, 0..bound + 2).map(|k| k.1),
+        Some(Trigger::DriverAllocationFailure)
+    );
 }
