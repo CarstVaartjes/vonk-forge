@@ -554,13 +554,8 @@ runs:
         esac
         for architecture in arm64; do
           package="vonk-forge-agent_${VERSION}_${architecture}.deb"
-          cosign sign-blob --yes --bundle \
-            "dist/${package}.sigstore.json" "dist/$package"
-          cosign verify-blob \
-            --bundle "dist/${package}.sigstore.json" \
-            --certificate-identity-regexp "$identity" \
-            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-            "dist/$package"
+          scripts/sign-package-keyless "dist/$package" \
+            "dist/${package}.sigstore.json" "$identity"
         done
 
     - name: Revalidate source before provenance attestation

@@ -134,12 +134,8 @@ runs:
       run: |
         set -euo pipefail
         identity="^https://github\.com/${GITHUB_REPOSITORY}/\.github/workflows/agent-release\.yml@refs/heads/main$"
-        cosign sign-blob --yes --bundle "dist/${ARM64_PACKAGE}.sigstore.json" \
-          "dist/$ARM64_PACKAGE"
-        cosign verify-blob --bundle "dist/${ARM64_PACKAGE}.sigstore.json" \
-          --certificate-identity-regexp "$identity" \
-          --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-          "dist/$ARM64_PACKAGE"
+        scripts/sign-package-keyless "dist/$ARM64_PACKAGE" \
+          "dist/${ARM64_PACKAGE}.sigstore.json" "$identity"
     - name: Attest package provenance
       uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
       with:
