@@ -448,7 +448,7 @@ def test_reusable_agent_package_build_preserves_acceptance_gates() -> None:
     assert "wget " not in text
     assert "actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6" in text
     assert "sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6" in text
-    assert "cosign sign-blob --yes --bundle" in text
+    assert "scripts/sign-package-keyless" in text
     assert "agent-release\\.yml@refs/heads/main" in text
     assert "ci\\.yml@refs/tags/v" in text
 
@@ -1511,8 +1511,7 @@ def test_main_seals_the_agent_packages_its_pull_request_accepted() -> None:
         "scripts/seal-agent-deb",
         "scripts/verify-agent-deb --json",
         "scripts/verify-agent-systemd --json",
-        "cosign sign-blob",
-        "cosign verify-blob",
+        "scripts/sign-package-keyless",
         "subject-path: dist/",
         "sbom-path: dist/",
         "scripts/agent-package-versions write",

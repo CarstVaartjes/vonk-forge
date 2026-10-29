@@ -1,0 +1,65 @@
+#!/usr/bin/env python3
+"""Keyless-sign one package and verify the signature against the log.
+
+usage: sign-package-keyless PACKAGE BUNDLE IDENTITY_REGEXP
+
+cosign generates a fresh ephemeral key per ``sign-blob``. When Rekor is slow,
+cosign can resend a log entry the first request already created and then
+fails with 409 "an equivalent entry already exists"; that entry belongs to the
+discarded key, so the bundle was never written. A new attempt makes a new key
+and a new entry, so the signing is retried a bounded number of times. The
+result is accepted only after ``verify-blob`` passes against the bundle, so a
+missing or invalid entry still fails closed.
+"""
+
+from __future__ import annotations
+
+import subprocess
+import sys
+from pathlib import Path
+
+ATTEMPTS = 3
+TIMEOUT_SECONDS = 300
+OIDC_ISSUER = "https://token.actions.githubusercontent.com"
+
+
+def sign(package: Path, bundle: Path) -> bool:
+    for attempt in range(1, ATTEMPTS + 1):
+        bundle.unlink(missing_ok=True)
+        done = subprocess.run(
+            ["cosign", "sign-blob", "--yes", "--bundle", str(bundle), str(package)],
+            check=False,
+            timeout=TIMEOUT_SECONDS,
+        )
+        if done.returncode == 0:
+            return True
+        print(f"cosign sign-blob attempt {attempt}/{ATTEMPTS} failed", file=sys.stderr)
+    return False
+
+
+def main(argv: list[str]) -> int:
+    if len(argv) != 3:
+        print(__doc__, file=sys.stderr)
+        return 64
+    package, bundle, identity = Path(argv[0]), Path(argv[1]), argv[2]
+    if not sign(package, bundle):
+        return 1
+    return subprocess.run(
+        [
+            "cosign",
+            "verify-blob",
+            "--bundle",
+            str(bundle),
+            "--certificate-identity-regexp",
+            identity,
+            "--certificate-oidc-issuer",
+            OIDC_ISSUER,
+            str(package),
+        ],
+        check=False,
+        timeout=TIMEOUT_SECONDS,
+    ).returncode
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))
