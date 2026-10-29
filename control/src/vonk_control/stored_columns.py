@@ -13,6 +13,7 @@ from typing import Annotated
 
 from pydantic import Field
 from vonk_agent_protocol import CacheReferenceReason, OperationProgress
+from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
 from vonk_agent_protocol.contracts import (
     PAYLOAD_MODELS,
     AgentResultPayload,
@@ -104,6 +105,7 @@ from .model_cache_contract import (
     ModelCacheRemovalPayload,
     ModelCacheRepairPayload,
 )
+from .operator_receipt_contract import ReceiptOwner
 from .profile_stop_authority import ProfileJobRunStopJob
 from .recipe_execution_contract import (
     StoredBuildPolicyReport,
@@ -182,7 +184,10 @@ bind(
 bind(
     "catalog_documents",
     "display",
-    {"model": ModelDisplay, "recipe": RecipeDisplay},
+    {
+        RunSwitchReasonScopeName.MODEL: ModelDisplay,
+        ReceiptOwner.RECIPE: RecipeDisplay,
+    },
     nullable=True,
     discriminator="kind",
 )
