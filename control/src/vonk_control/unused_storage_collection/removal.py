@@ -30,7 +30,7 @@ from ..models import AgentNode, ModelCacheSet, RecipeRun
 from ..oci_image_store import DAMAGED_MANIFEST_CODES, OciImageStoreError
 from ..runtime_image_preparation import RuntimeImagePreparationError
 from .common import _RECEIPT_SUFFIX, ACTOR, _Kept, _Stopping
-from .evidence import _Evidence, _Item
+from .evidence import _CollectorEvidence, _Evidence, _Item
 from .references import _image_kept, _installation_kept, _model_kept, _mtime, _utc
 
 if TYPE_CHECKING:
@@ -120,7 +120,7 @@ def _stop_failed_runs(self: UnusedStorageCollector, installation_id: str) -> Non
 def _nas_items(
     self: UnusedStorageCollector,
     session: Session,
-    evidence: _Evidence,
+    evidence: _CollectorEvidence,
     kept: Counter[str],
 ) -> list[_Item]:
 
@@ -131,7 +131,7 @@ def _nas_items(
 
 
 def _image_items(
-    self: UnusedStorageCollector, evidence: _Evidence, kept: Counter[str]
+    self: UnusedStorageCollector, evidence: _CollectorEvidence, kept: Counter[str]
 ) -> list[_Item]:
 
     if self._images is None or self._image_cache is None:
@@ -151,7 +151,7 @@ def _scan_image_receipts(
     self: UnusedStorageCollector,
     images: FilesystemRuntimeImageStorage,
     image_cache: Path,
-    evidence: _Evidence,
+    evidence: _CollectorEvidence,
     kept: Counter[str],
 ) -> list[_Item]:
     items: list[_Item] = []
@@ -182,7 +182,8 @@ def _scan_image_receipts(
                 archive,
                 (archive,),
                 modified,
-                modified > evidence.cutoff or archive in evidence.recent_archives,
+                modified > evidence.reference.cutoff
+                or archive in evidence.recent_archives,
                 size,
             )
         )
@@ -230,7 +231,7 @@ def _remove_receipt(self: UnusedStorageCollector, archive: str, path: Path) -> N
             rows = lock_reference_gates(session, (identity,), now=now)
             if any(row.removal_owner_id is not None for row in rows):
                 raise _Kept("another removal owns it")
-            evidence = _Evidence.read(session, now)
+            evidence = _CollectorEvidence.read(session, now)
             reason = _image_kept(archive, evidence, modified)
             if reason is None and runtime_image_reference_findings(
                 session, (archive,)
@@ -277,7 +278,7 @@ def _remove_receipt(self: UnusedStorageCollector, archive: str, path: Path) -> N
 def _model_items(
     self: UnusedStorageCollector,
     session: Session,
-    evidence: _Evidence,
+    evidence: _CollectorEvidence,
     kept: Counter[str],
 ) -> list[_Item]:
 
@@ -297,8 +298,8 @@ def _model_items(
     for set_digest, model_digest, verified, accessed, updated in rows:
         if model_digest is None:
             if (
-                evidence.pointers is None
-                or set_digest in evidence.operations
+                evidence.reference.pointers is None
+                or set_digest in evidence.reference.operations
                 or model_set_reference_findings(session, (set_digest,)).get(set_digest)
             ):
                 kept["model: referenced or unreadable"] += 1
@@ -315,7 +316,7 @@ def _model_items(
                         set_digest,
                         (set_digest,),
                         last_used,
-                        last_used > evidence.cutoff,
+                        last_used > evidence.reference.cutoff,
                         measured,
                     )
                 )
@@ -343,7 +344,7 @@ def _model_items(
                 digest,
                 (digest,),
                 last_used,
-                last_used > evidence.cutoff
+                last_used > evidence.reference.cutoff
                 or any(set_digest in evidence.recent_sets for set_digest, *_ in sets),
                 size,
             )
@@ -374,7 +375,9 @@ def _remove_model(self: UnusedStorageCollector, digest: str) -> None:
     assert self._model_cache is not None
 
     def verify(session: Session, sets: tuple[str, ...]) -> None:
-        reason = _model_kept(session, digest, _Evidence.read(session, self._clock()))
+        reason = _model_kept(
+            session, digest, _CollectorEvidence.read(session, self._clock())
+        )
         if reason is None and any(model_set_reference_findings(session, sets).values()):
             reason = "referenced"
         if reason is not None:

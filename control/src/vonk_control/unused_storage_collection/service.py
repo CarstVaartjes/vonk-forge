@@ -49,7 +49,7 @@ from .common import (
     _kept_sentence,
     _model_objects,
 )
-from .evidence import _Evidence, _Item, _Outcome, _Round
+from .evidence import _CollectorEvidence, _Evidence, _Item, _Outcome, _Round
 from .pressure import (
     _check_round,
     _nas_filesystems,
@@ -202,7 +202,7 @@ class UnusedStorageCollector:
         self._refused.clear()
         pressures = self._pressures(now)
         with self._sessions() as session:
-            evidence = _Evidence.read(session, now)
+            evidence = _CollectorEvidence.read(session, now)
         # The budget starts after the inventory so every pass reaches an item.
         deadline = time.monotonic() + self._budget_seconds
         kept: Counter[str] = Counter()
@@ -247,7 +247,7 @@ class UnusedStorageCollector:
 
     def _expire(
         self,
-        evidence: _Evidence,
+        evidence: _CollectorEvidence,
         deadline: float,
         kept: Counter[str],
         attempted: dict[tuple[str, str], bool],
@@ -269,9 +269,11 @@ class UnusedStorageCollector:
                 )
             ):
                 last_used = _installation_last_used(session, installation_id)
-                if last_used >= evidence.cutoff:
+                if last_used >= evidence.reference.cutoff:
                     continue
-                reason = _installation_kept(session, installation_id, evidence)
+                reason = _installation_kept(
+                    session, installation_id, evidence.reference
+                )
                 if reason is not None:
                     continue
                 items.append(
@@ -287,7 +289,7 @@ class UnusedStorageCollector:
             items.extend(
                 item
                 for item in self._image_items(evidence, Counter())
-                if not item.recent and item.last_used < evidence.cutoff
+                if not item.recent and item.last_used < evidence.reference.cutoff
             )
         for item in items:
             if (item.kind, item.key) in attempted:

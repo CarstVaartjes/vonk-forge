@@ -41,8 +41,8 @@ from .common import (
 )
 from .evidence import (
     StorageItemKind,
+    _CollectorEvidence,
     _DueRemovalTarget,
-    _Evidence,
     _Item,
     _Outcome,
     _Pressure,
@@ -192,7 +192,7 @@ def _nas_filesystems(
 def _relieve(
     self: UnusedStorageCollector,
     pressure: _Pressure,
-    evidence: _Evidence,
+    evidence: _CollectorEvidence,
     deadline: float,
     kept: Counter[str],
     attempted: dict[tuple[str, str], bool],
@@ -203,7 +203,9 @@ def _relieve(
     with self._sessions() as session:
         if pressure.node_id is not None and pressure.observed_at is not None:
             settling = _spark_settling(session, pressure.node_id, pressure.observed_at)
-            items = self._spark_items(session, pressure.node_id, evidence, kept)
+            items = self._spark_items(
+                session, pressure.node_id, evidence.reference, kept
+            )
         else:
             settling = _model_removal_in_flight(session)
             items = self._nas_items(session, evidence, kept)

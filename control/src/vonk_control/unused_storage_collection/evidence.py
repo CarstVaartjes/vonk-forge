@@ -33,11 +33,14 @@ from .references import (
 
 @dataclass(frozen=True, slots=True)
 class _Evidence:
-    """Everything that can keep something, read in one snapshot."""
+    """What references keep something, read in one snapshot.
+
+    Cheap enough for request paths. The 24-hour scans of jobs, profile
+    applications and model operations live only in ``_CollectorEvidence``.
+    """
 
     now: datetime
     cutoff: datetime
-    live: frozenset[str]
     #: Named by an operation that has not ended; one that just finished only
     #: makes its installation recently used (removed last), never in use.
     operations: frozenset[str]
@@ -45,7 +48,8 @@ class _Evidence:
     pinned: frozenset[str]
     pointed_digests: frozenset[str]
     pointed_models: frozenset[str]
-    pointed_archives: frozenset[str]
+    #: Ids of the newest revisions a saved profile (or a load) names.
+    pointed_ids: frozenset[str]
     # Newest active recipe revision of each document: id, creation time, number
     # and content digest (what an installation is compared on).
     newest: Mapping[str, tuple[str, datetime, int, str]]
@@ -56,8 +60,6 @@ class _Evidence:
     loaded_pointers: (
         Mapping[tuple[str, str], tuple[tuple[str, frozenset[str]], ...]] | None
     )
-    recent_sets: frozenset[str]
-    recent_archives: frozenset[str]
     application_references_readable: bool
 
     @classmethod
@@ -159,7 +161,6 @@ class _Evidence:
             now=now,
             application_references_readable=application_references_readable,
             cutoff=cutoff,
-            live=live_tokens(session, now, include_removals=False),
             operations=operation_tokens(
                 session,
                 now,
@@ -170,6 +171,36 @@ class _Evidence:
             pinned=pinned,
             pointed_digests=frozenset(row.content_digest for row in pointed),
             pointed_models=bound | pinned,
+            pointed_ids=pointed_ids,
+            newest=newest,
+            pointers=pointers,
+            loaded_pointers=loaded_pointers,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class _CollectorEvidence:
+    """The reference core plus what only the background collector may scan.
+
+    ``live`` replays 24 hours of jobs, profile applications and model
+    operations; no request path may build this (guarded in
+    ``test_principle_guards``).
+    """
+
+    reference: _Evidence
+    live: frozenset[str]
+    pointed_archives: frozenset[str]
+    recent_sets: frozenset[str]
+    recent_archives: frozenset[str]
+
+    @classmethod
+    def read(cls, session: Session, now: datetime) -> _CollectorEvidence:
+        reference = _Evidence.read(session, now)
+        cutoff = reference.cutoff
+        pointed_ids = reference.pointed_ids
+        return cls(
+            reference=reference,
+            live=live_tokens(session, now, include_removals=False),
             # What a pointed recipe can run is every image its document built,
             # including a predecessor's build that a successor reuses.
             pointed_archives=revision_archives(session, pointed_ids)
@@ -182,10 +213,7 @@ class _Evidence:
                 )
                 if value is not None
             )
-            | pinned,
-            newest=newest,
-            pointers=pointers,
-            loaded_pointers=loaded_pointers,
+            | reference.pinned,
             recent_sets=frozenset(
                 session.scalars(
                     select(ArtifactDistributionAssignment.model_artifact_set_sha256)

@@ -28,6 +28,7 @@ from .common import _Kept as _Kept
 from .common import _kept_sentence as _kept_sentence
 from .common import _model_objects as _model_objects
 from .common import spark_eviction_capacity as spark_eviction_capacity
+from .evidence import _CollectorEvidence as _CollectorEvidence
 from .evidence import _Evidence as _Evidence
 from .evidence import _Item as _Item
 from .evidence import _Outcome as _Outcome
