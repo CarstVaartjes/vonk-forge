@@ -12,6 +12,7 @@ from vonk_forge_contracts.recipe import (
     Scalar,
 )
 
+from ..operation_blockers import SwapShortfallEvidence
 from ..run_switch_contract import (
     MemoryKind,
     RunSwitchChangeEffect,
@@ -37,6 +38,8 @@ class ResourceReason:
     detail: str
     severity: Literal["blocker", "warning"] = "blocker"
     node_id: str | None = None
+    #: Set on a wait for swap only (computed once, in ``_load_swap_reason``).
+    swap: SwapShortfallEvidence | None = None
 
 
 @dataclass(frozen=True, slots=True)

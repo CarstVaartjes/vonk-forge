@@ -33,6 +33,7 @@ from ..models import (
     Job,
     NodeInventorySnapshot,
 )
+from ..operation_blockers import SwapShortfallEvidence
 from ..resource_planning import (
     ResourceReason,
     memory_reservation_kinds,
@@ -138,6 +139,7 @@ def _as_reason(
     severity: RunSwitchReasonSeverity = "blocker",
     node_ids: Sequence[str] = (),
     stale: bool = False,
+    swap: SwapShortfallEvidence | None = None,
 ) -> RunSwitchReason:
     return RunSwitchReason(
         code=code,
@@ -146,6 +148,7 @@ def _as_reason(
         scope=scope,
         node_ids=list(node_ids),
         stale=stale,
+        swap=swap,
     )
 
 
@@ -178,6 +181,7 @@ def _resource_reason(
         scope="node" if isinstance(node_id, str) else "operation",
         severity=reason.severity,
         node_ids=(node_id,) if isinstance(node_id, str) else node_ids,
+        swap=reason.swap,
     )
 
 

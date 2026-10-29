@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Literal
 
+from ..operation_blockers import SwapShortfallEvidence
 from .types import ResourceReason
 
 
@@ -21,6 +22,9 @@ def _reason(
     *,
     severity: Literal["blocker", "warning"] = "blocker",
     node_id: str | None = None,
+    swap: SwapShortfallEvidence | None = None,
 ) -> ResourceReason:
     # Every reason's detail is persisted with a 512-character bound.
-    return ResourceReason(code, detail[:512], severity=severity, node_id=node_id)
+    return ResourceReason(
+        code, detail[:512], severity=severity, node_id=node_id, swap=swap
+    )

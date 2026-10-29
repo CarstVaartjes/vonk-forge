@@ -100,6 +100,26 @@ test("a running workload shows the recipe options it was started with", async ()
   expect(list).toHaveTextContent("adaptive-k");
 });
 
+test("a loading rank shows the swap it holds, and a running one shows none", async () => {
+  const loading = {
+    ...node,
+    loaded: [
+      { run_id: "r1", rank: 0, title: "GLM", healthy: null, load_swap_held_bytes: 35 * 1024 ** 3 },
+      { run_id: "r2", rank: 0, title: "Qwen", healthy: true, load_swap_held_bytes: null },
+    ],
+  };
+  render(
+    <SparkDetail
+      api={{ fleetNode: vi.fn().mockResolvedValue(loading) } as unknown as ControlApi}
+      id="spk_1"
+      onClose={vi.fn()}
+    />,
+  );
+  const list = await screen.findByRole("list", { name: "Swap held while loading" });
+  expect(list).toHaveTextContent("GLM Swap held while loading: 35.0 GiB");
+  expect(list).not.toHaveTextContent("Qwen");
+});
+
 test("the Overview shows the CPU clock next to the temperature", async () => {
   const measured = {
     ...node,

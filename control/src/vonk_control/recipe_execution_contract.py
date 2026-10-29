@@ -26,6 +26,7 @@ from vonk_agent_protocol.inventory import MemoryPool
 from .content_identity import ImageContent, same_image
 from .integer_domains import MAX_DATABASE_BIGINT, MAX_DATABASE_INTEGER
 from .library_contract import Digest, ImageDigest, NodeId, Text64, UuidId
+from .operation_blockers import SwapShortfallEvidence
 from .platform_ports import serving_port
 from .strict_json import StrictJSONModel
 from .validation_detail import validation_error_detail
@@ -65,6 +66,7 @@ class _PersistedModel(StrictJSONModel):
 class StoredAdmissionReason(_PersistedModel):
     code: str = Field(min_length=1, max_length=80)
     detail: str = Field(min_length=1, max_length=512)
+    swap: SwapShortfallEvidence | None = None
 
 
 class StoredInstallNodePlan(_PersistedModel):

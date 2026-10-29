@@ -50,8 +50,15 @@ pub const LOADING_PRESSURE_SUSTAIN: Duration = Duration::from_secs(60);
 pub const PSI_FALLING_RATIO: f64 = 0.85;
 // R5: the NVRM NV_ERR_NO_MEMORY line is non-fatal on GB10 (once per normal
 // load); it kills within SUSTAINED_PRESSURE of the line only together with
-// R1's condition, MemFree below this, or R3's condition. CALIBRATABLE.
+// R1's condition, R3's condition, or MemFree below this while no reclaim is
+// moving pages: without swap, or with swap and swap-out below
+// DRIVER_FAILURE_RECLAIM_PAGES_PER_SECOND. A load whose host pages are being
+// swapped out is absorbed, not wedged (spark-3542, 2026-10-29T12:35:29Z: 976 MiB
+// MemFree, 63 GiB free swap, 148k pages/s swap-out, a load that finished on
+// 2026-10-25 with the same content); pinned memory that cannot reclaim still
+// stops. CALIBRATABLE.
 pub const DRIVER_FAILURE_FREE_BYTES: u64 = 1024 * 1024 * 1024;
+pub const DRIVER_FAILURE_RECLAIM_PAGES_PER_SECOND: f64 = 100.0;
 // R5's corroboration is sustained like R1, never one sample: a healthy load's
 // derived MemFree touches ~0.9 GB at its NVRM line (GLM mosaic a0 2026-10-28).
 pub const DRIVER_FAILURE_SUSTAIN: Duration = Duration::from_secs(2);

@@ -37,6 +37,7 @@ from ..operation_blockers import (
     make_blocker,
 )
 from ..preparation_contract import RolloutPreparation
+from ..run_switch_contract import RunSwitchReason
 from ..storage_demands import STORAGE_INSUFFICIENT, StorageRelief
 from ..strict_json import read_stored_model
 from .contracts import (
@@ -122,6 +123,20 @@ def _preview_blocker_codes(preview: FleetProfilePreview) -> list[str]:
     ]
 
 
+def operation_blocker_of(reason: RunSwitchReason) -> OperationBlocker:
+    """The one conversion of a review reason to a wait, typed evidence kept."""
+
+    return make_blocker(
+        reason.code,
+        reason.detail,
+        severity=ProfileReasonSeverity.ERROR.value
+        if reason.severity == ProfileReasonSeverity.BLOCKER.value
+        else reason.severity,
+        node_ids=reason.node_ids,
+        swap=reason.swap,
+    )
+
+
 def _preview_blockers(preview: FleetProfilePreview) -> list[OperationBlocker]:
     """The typed reasons a reviewed plan cannot be admitted yet, node ids included."""
 
@@ -132,15 +147,7 @@ def _preview_blockers(preview: FleetProfilePreview) -> list[OperationBlocker]:
     ]
     for item in preview.assessments:
         blockers.extend(
-            make_blocker(
-                reason.code,
-                reason.detail,
-                severity=ProfileReasonSeverity.ERROR.value
-                if reason.severity == ProfileReasonSeverity.BLOCKER.value
-                else reason.severity,
-                node_ids=reason.node_ids,
-            )
-            for reason in item.assessment.blockers
+            operation_blocker_of(reason) for reason in item.assessment.blockers
         )
     return bound_blockers(blockers)
 
