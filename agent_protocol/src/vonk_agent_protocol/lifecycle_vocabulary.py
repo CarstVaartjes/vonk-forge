@@ -804,6 +804,7 @@ class RunAdmissionCode(WireEnum):
     INVENTORY_MISSING = "run.inventory_missing"
     STALE_INVENTORY = "run.stale_inventory"
     INSUFFICIENT_MEMORY = "run.insufficient_memory"
+    INSUFFICIENT_SWAP = "run.insufficient_swap"
     PORT_OCCUPIED = "run.port_occupied"
     RENDEZVOUS_PORT_OCCUPIED = "run.rendezvous_port_occupied"
     UNRECONCILED_LOST_RANK = "run.unreconciled_lost_rank"
@@ -822,6 +823,9 @@ class ResourceBlockerCode(WireEnum):
     that family: nothing the platform holds or plans to release can make the
     demand fit the Spark (or one load's own assignments fit beside each other),
     so the same request fails the same way and ends on its first occurrence.
+    ``insufficient_swap`` is a wait too: the load phase's rise above the
+    steady demand needs more usable swap than the Spark has free now (another
+    load still starting holds it, or the swap setting is too small).
     """
 
     CAPACITY_UNKNOWN = "resource.capacity_unknown"
@@ -830,6 +834,7 @@ class ResourceBlockerCode(WireEnum):
     INSUFFICIENT_CAPACITY = "resource.insufficient_capacity"
     INSUFFICIENT_CAPACITY_AFTER_STOP = "resource.insufficient_capacity_after_stop"
     INSUFFICIENT_RESERVATION_BUDGET = "resource.insufficient_reservation_budget"
+    INSUFFICIENT_SWAP = "resource.insufficient_swap"
     RESIDENT_USAGE_UNKNOWN = "resource.resident_usage_unknown"
 
 

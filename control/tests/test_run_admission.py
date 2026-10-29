@@ -50,6 +50,8 @@ def setup(
     port_reserved: bool | tuple[str, ...] = False,
     system_reserve=0,
     peak_bytes=225,
+    load_peak_bytes=None,
+    minimum_swap_bytes=0,
     memory_pool: MemoryPool = "shared",
     denied_jurisdictions=(),
     github_release_source=False,
@@ -91,6 +93,13 @@ def setup(
     document["models"][0]["model"]["content_sha256"] = document_sha256(model_document)
     memory = document["topology"]["roles"][0]["resources"]["memory"]
     memory.update({"peak_bytes": peak_bytes, "reserve_bytes": system_reserve})
+    if load_peak_bytes is not None:
+        memory.update(
+            {
+                "load_peak_bytes": load_peak_bytes,
+                "minimum_swap_bytes": minimum_swap_bytes,
+            }
+        )
     with sessions.begin() as session:
         session.add(
             AgentNode(

@@ -19,12 +19,14 @@ from .demand import _resource_evidence, resource_demand
 from .memory_kinds import memory_reservation_kind, memory_reservation_kinds
 from .settings import resolve_effective_settings
 from .types import (
+    NO_SWAP,
     CapacitySnapshot,
     EffectiveResourceSettings,
     EvidenceState,
     MemoryRequirement,
     MemoryReservationTotals,
     SettingsResolution,
+    SwapCapacity,
 )
 
 
@@ -45,8 +47,9 @@ def memory_requirement(
 
     The recipe's ``reserve_bytes`` is informational: it is not added to the peak.
     ``observed_peak_bytes`` is what earlier runs of this exact recipe content
-    really used on this memory kind (``None`` when nothing was observed). Every
-    caller passes it: an observed peak above the declaration replaces it.
+    really used on this memory kind over a whole run (``None`` when nothing was
+    observed). Every caller passes it: it bounds the load phase only, never
+    the steady demand.
     """
     if platform_floor_bytes < 0:
         raise ValueError("recipe memory envelope is invalid")
@@ -63,6 +66,10 @@ def memory_requirement(
         memory.peak_bytes,
         resolution.settings,
         observed_peak_bytes,
+        declared_load_rise_bytes=memory.load_peak_bytes - memory.peak_bytes
+        if memory.load_peak_bytes is not None
+        else 0,
+        minimum_swap_bytes=memory.minimum_swap_bytes,
     )
     demand = resource_demand(
         resolution.settings if resolution.settings is not None else selected,
@@ -83,6 +90,7 @@ def memory_capacity_snapshot(
     evidence_digest: str | None = None,
     evidence_observed_at: datetime | None = None,
     recent_best_free_bytes: int | None = None,
+    swap: SwapCapacity = NO_SWAP,
 ) -> CapacitySnapshot:
     def component(kind: MemoryKind, values: tuple[int, int] | None) -> CapacitySnapshot:
         reserved = (
@@ -180,6 +188,7 @@ def memory_capacity_snapshot(
             and recent_best_free_bytes is not None
             and free is not None
             else 0,
+            swap=swap,
         )
 
     if memory_pool == "shared":

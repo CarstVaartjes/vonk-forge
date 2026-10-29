@@ -1,20 +1,38 @@
-from vonk_agent_protocol import canonical_message
+from vonk_agent_protocol import (
+    ResourceBlockerCode,
+    RunAdmissionCode,
+    RunState,
+    canonical_message,
+)
+from vonk_agent_protocol.swap import GIB
 
-"""Admission uses what a recipe really used once that exceeds its declaration."""
+"""Admission bounds a recipe's load by what its runs really used."""
 
 from datetime import timedelta
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import delete, select
-from vonk_control.inventory_repository import (
-    InventoryRepository,
-    NodeInventoryReport,
+from sqlalchemy import delete, select, update
+from vonk_control.models import (
+    CatalogDocumentRevision,
+    RecipeRun,
+    ResourceReservation,
+    RunNode,
 )
-from vonk_control.models import RecipeRun, ResourceReservation, RunNode
-from vonk_control.run_admission import RunAdmissionService, RunPlanInvalid
+from vonk_control.observed_run_memory import observed_role_peaks
+from vonk_control.run_admission import RunAdmissionService
 from vonk_control.telemetry import TelemetryRepository, TelemetrySample
 
+from .test_load_phase_swap_admission import _FREE as _LIVE_FREE
+from .test_load_phase_swap_admission import (
+    _accept,
+    _codes,
+    _inventory,
+    _observe_rise,
+    _swap,
+    _swap_wait,
+    _world,
+)
 from .test_run_admission import setup
 
 # The fixture Spark: 300 bytes free at admission, a declared peak of 225 and a
@@ -85,64 +103,49 @@ def _serve(sessions, now, node, installation, *, lowest_available, other_claim=N
     return service, observed
 
 
-def _inventory(sessions, now, node, free):
-    InventoryRepository(sessions, clock=lambda: now).record(
-        NodeInventoryReport.model_validate_json(
-            canonical_message(
-                {
-                    "node_id": node,
-                    "observed_at": now,
-                    "disk_total_bytes": 1000,
-                    "disk_free_bytes": 500,
-                    "host_memory_total_bytes": 1000,
-                    "host_memory_free_bytes": free,
-                    "gpu_memory_total_bytes": 1000,
-                    "gpu_memory_free_bytes": free,
-                    "gpu_count": 1,
-                    "artifact_store_read_only": False,
-                    "capabilities": ("runtime.vonk.v1", "recipe.image.pull.v1"),
-                    "memory_pool": "shared",
-                    "schema_version": 1,
-                    "nvidia_driver_version": "unknown",
-                    "container_runtime_version": "unknown",
-                }
-            )
-        )
-    )
-
-
-def test_a_run_over_its_declaration_is_not_readmitted_where_its_real_use_does_not_fit(
-    tmp_path,
+def test_a_run_over_its_declaration_is_bounded_by_held_swap_then_live_memory(
+    tmp_path, postgres_engine
 ) -> None:
     """Catches admission trusting a declaration that real use already exceeded.
 
     The 2026-10-11 freeze: a recipe whose declared peak fit with a thin margin
-    really used more, and the Spark thrashed. Once a run of the same content
-    has shown its real peak, that peak plus the floor must fit.
+    really used more, and the Spark thrashed. The whole-run peak no longer
+    raises the reservation (a swap-backed load poisoned its content that way,
+    2026-10-28). What protects a second load beside it today: while the first
+    still loads, its admitted rise holds the swap; once it runs, its real use
+    is in the Spark's live occupied memory.
     """
-    sessions, now, node, installation = setup(tmp_path, free_memory=_FREE)
-    service, observed = _serve(
-        sessions, now, node, installation, lowest_available=_FREE - 280
+    steady, real = 50 * GIB, 80 * GIB
+    sessions, now, node, installation, service = _world(
+        tmp_path, postgres_engine, steady
     )
-    assert observed == 280
+    at = _observe_rise(
+        sessions, service, installation, node, now, steady=steady, rise=real - steady
+    )
+    _inventory(sessions, at, node, swap=_swap(64))
+    first = _accept(
+        sessions, service, service.plan_run(installation, alias="a", now=at), at
+    )
+    with sessions.begin() as session:
+        session.execute(
+            update(RunNode)
+            .where(RunNode.run_id == first)
+            .values(state=RunState.STARTING)
+        )
+    _swap_wait(service.plan_run(installation, alias="b", now=at))
 
-    refused = service.plan_run(installation, alias="qwen", now=now)
-    assert not refused.allowed
-    assert refused.nodes[0].required_memory_bytes == 280
-    # Production 2026-10-16: no Vonk claim was left to wait for, so the load
-    # backed off for hours. Nothing the platform holds frees more memory: a
-    # definite refusal, never a wait.
-    assert {item.code for item in refused.nodes[0].blockers} == {
-        "resource.demand_exceeds_capacity"
-    }
-    with pytest.raises(RunPlanInvalid):
-        service.accept_run(refused, actor="admin", now=now)
-
-    # A fresh request is never banned: it fits once the host frees memory.
-    later = now + timedelta(seconds=2)
-    _inventory(sessions, later, node, 280 + _FLOOR)
-    fits = service.plan_run(installation, alias="qwen", now=later)
-    assert fits.allowed and fits.nodes[0].free_after_bytes == _FLOOR
+    running = at + timedelta(seconds=1)
+    with sessions.begin() as session:
+        session.execute(
+            update(RunNode)
+            .where(RunNode.run_id == first)
+            .values(state=RunState.RUNNING)
+        )
+    _inventory(sessions, running, node, free=_LIVE_FREE - real, swap=_swap(64))
+    second = service.plan_run(installation, alias="b", now=running)
+    assert not second.allowed
+    assert RunAdmissionCode.INSUFFICIENT_MEMORY in _codes(second)
+    assert ResourceBlockerCode.DEMAND_EXCEEDS_CAPACITY not in _codes(second)
 
 
 def test_real_use_below_the_declaration_never_loosens_admission(tmp_path) -> None:
@@ -182,8 +185,8 @@ def test_a_runs_real_use_outlives_its_collected_history(tmp_path) -> None:
     """Catches the observed peak leaving with the run's terminal history.
 
     Terminal history is collected a day after a run ends (its rank rows go
-    with it), so an over-declaration was forgotten and the next run was
-    admitted on the declaration again. The installation keeps the peak.
+    with it), so an over-declaration was forgotten and the next run's load
+    was bounded by the declaration again. The installation keeps the peak.
     """
     sessions, now, node, installation = setup(tmp_path, free_memory=_FREE)
     service, observed = _serve(
@@ -195,7 +198,12 @@ def test_a_runs_real_use_outlives_its_collected_history(tmp_path) -> None:
         session.execute(delete(RunNode))
         session.execute(delete(RecipeRun))
 
-    refused = service.plan_run(installation, alias="qwen", now=now)
-
-    assert not refused.allowed
-    assert refused.nodes[0].required_memory_bytes == 280
+    with sessions() as session:
+        digest = session.scalars(
+            select(CatalogDocumentRevision.content_digest).where(
+                CatalogDocumentRevision.kind == "recipe"
+            )
+        ).one()
+        assert observed_role_peaks(session, digest) == {
+            service.plan_run(installation, alias="qwen", now=now).nodes[0].role: 280
+        }

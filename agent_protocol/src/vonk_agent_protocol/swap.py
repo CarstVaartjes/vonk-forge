@@ -34,6 +34,14 @@ class SwapPolicy(WireModel):
     # this much stay available in memory; otherwise it stays active (more swap,
     # never less) until they fit.
     release_headroom_gib: Literal[16] = 16
+    # The host memory guard's swap margins (owner-approved R1/R2, 2026-10-28;
+    # earlyoom and systemd-oomd shapes). R1 stops the workloads once free swap
+    # falls below the larger of this floor and this percent of the total
+    # (with memory low); R2 once more than this percent is used and still
+    # filling. Admission keeps a load's swap within both.
+    exhausted_free_floor_gib: Literal[2] = 2
+    exhausted_free_percent: Literal[10] = 10
+    filling_used_percent: Literal[90] = 90
 
 
 SWAP_POLICY = SwapPolicy()
@@ -116,6 +124,44 @@ class SwapObservation(WireModel):
     receipt_detail: str | None = Field(default=None, max_length=512)
 
 
+def swap_reaches(total_bytes: int, size_bytes: int) -> bool:
+    """Active swap reaches ``size_bytes``, within the policy tolerance.
+
+    The kernel's SwapTotal leaves out each swap area's header page, so a
+    Spark set to a size reports a little less unless the helper compensated.
+    """
+    return total_bytes + SWAP_POLICY.tolerance_mib * 1024**2 >= size_bytes
+
+
 def swap_satisfied(total_bytes: int, desired: SwapIntent) -> bool:
     """Active swap reaches the desired total, within the policy tolerance."""
-    return total_bytes + SWAP_POLICY.tolerance_mib * 1024**2 >= desired.size_gib * GIB
+    return swap_reaches(total_bytes, desired.size_gib * GIB)
+
+
+def usable_swap_bytes(total_bytes: int) -> int:
+    """The swap a load may fill before the host memory guard's R1 or R2 applies.
+
+    The same integer arithmetic as the guard: R1 keeps the larger of the floor
+    and ``total // 100 * percent`` free, R2 at most ``total // 100 * percent``
+    used.
+    """
+    policy = SWAP_POLICY
+    kept_free = max(
+        policy.exhausted_free_floor_gib * GIB,
+        total_bytes // 100 * policy.exhausted_free_percent,
+    )
+    return max(
+        0,
+        min(total_bytes - kept_free, total_bytes // 100 * policy.filling_used_percent),
+    )
+
+
+def swap_needed_bytes(load_bytes: int) -> int:
+    """The smallest whole-GiB swap total whose usable part holds ``load_bytes``."""
+    if load_bytes <= 0:
+        return 0
+    size_gib = -(-load_bytes // GIB)
+    # Usable swap grows by about 0.9 GiB per GiB: a handful of steps.
+    while usable_swap_bytes(size_gib * GIB) < load_bytes:
+        size_gib += 1
+    return size_gib * GIB

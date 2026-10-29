@@ -21,7 +21,10 @@ from vonk_agent_protocol.swap import (
     SwapObservation,
     SwapWaitReason,
     default_swap,
+    swap_needed_bytes,
+    swap_reaches,
     swap_satisfied,
+    usable_swap_bytes,
 )
 from vonk_control.fleet_projection.nodes import _swap_warning
 
@@ -32,10 +35,22 @@ agent_system = _agent_system
 OS_SWAP_BYTES = 16 * GIB - 4096
 
 
+class _Usable(TypedDict):
+    total_bytes: int
+    usable_bytes: int
+
+
+class _Needed(TypedDict):
+    load_bytes: int
+    swap_bytes: int
+
+
 class _Vectors(TypedDict):
     valid: list[dict[str, JsonValue]]
     invalid: list[dict[str, JsonValue]]
     observation: dict[str, JsonValue]
+    usable: list[_Usable]
+    needed: list[_Needed]
 
 
 def _vectors() -> _Vectors:
@@ -71,6 +86,32 @@ def test_shared_vectors_bind_the_policy_and_refuse_out_of_range_sizes() -> None:
     # Refused with the policy's own explanation, never clamped to a bound.
     with pytest.raises(ValidationError, match="from 16 to 128"):
         SwapIntent(generation=1, size_gib=256)
+
+
+def test_usable_and_needed_swap_follow_the_shared_vectors_at_each_margin() -> None:
+    """Catches admission and the host memory guard disagreeing on swap margins.
+
+    The Rust guard test reads the same vectors: a load at the usable bound is
+    never stopped, one byte past it is.
+    """
+    vectors = _vectors()
+    for pair in vectors["usable"]:
+        assert usable_swap_bytes(pair["total_bytes"]) == pair["usable_bytes"]
+    for pair in vectors["needed"]:
+        needed = swap_needed_bytes(pair["load_bytes"])
+        assert needed == pair["swap_bytes"]
+        assert usable_swap_bytes(needed) >= pair["load_bytes"]
+        # The smallest whole-GiB total: one GiB less no longer holds it.
+        assert needed == 0 or usable_swap_bytes(needed - GIB) < pair["load_bytes"]
+
+
+def test_active_swap_reaches_a_size_within_the_header_page_tolerance() -> None:
+    """Catches an exact byte comparison against a size the kernel reports less of."""
+    two_areas = 128 * GIB - 2 * 4096
+    assert swap_reaches(two_areas, 128 * GIB)
+    assert not swap_reaches(
+        128 * GIB - SWAP_POLICY.tolerance_mib * 1024**2 - 1, 128 * GIB
+    )
 
 
 def test_the_os_swap_meets_16_gib_but_not_the_64_gib_default() -> None:

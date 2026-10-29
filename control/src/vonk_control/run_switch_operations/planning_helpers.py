@@ -56,6 +56,7 @@ from .constants import (
     _CHANGE_EFFECTS_ADAPTER,
     _KNOBS_ADAPTER,
     _MEMORY_STOP_CONDITIONAL_REFUSALS,
+    _SWAP_COMPONENT,
 )
 from .interfaces import ArtifactInspection
 
@@ -247,7 +248,9 @@ def _stop_covered_nodes(
             for stop in stops
             for claim in reviewed_run_memory_reservations(session, node.node_id, stop)
         }
-        if all(
+        # Any claim of a stopped run here may hold the swap in use; the start
+        # re-checks swap against the post-stop inventory.
+        if (_SWAP_COMPONENT not in components or held) and all(
             (
                 reservation_kind := {
                     "host": "host-memory",
@@ -259,7 +262,7 @@ def _stop_covered_nodes(
             and not held.isdisjoint(
                 memory_reservation_kinds(reservation_kind, node.memory_pool)
             )
-            for component in components
+            for component in components - {_SWAP_COMPONENT}
         ):
             covered.add(node.node_id)
     return frozenset(covered)
