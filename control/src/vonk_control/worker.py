@@ -382,8 +382,12 @@ class Worker:
                     message=redact_text(error),
                     traceback=redact_text(traceback.format_exc()),
                 )
+                # Drain due waits after every step: a due owner waits one step,
+                # not a full rotation behind slow sources.
+                self._run_housekeeping("due-waits", self._due_waits, minimum_interval=1)
                 continue
             self._failures.succeeded(name)
+            self._run_housekeeping("due-waits", self._due_waits, minimum_interval=1)
             if progressed:
                 self._source_cursor = (index + 1) % len(sources)
                 advanced = True
