@@ -21,6 +21,7 @@ from vonk_control.models import Base, CatalogDocumentRevision
 from vonk_control.recipe_library_types import RecipeLibraryItem, RecipeLibrarySnapshot
 from vonk_forge_contracts import ModelDefinition, document_sha256
 
+from .display_fixtures import model_entry
 from .test_model_removal_reference_lifecycle import _one_model
 
 NOW = datetime(2026, 10, 20, tzinfo=UTC)
@@ -175,7 +176,9 @@ def test_current_head_reports_field_and_normal_sync_rebuilds_exact_revision(
     model = _one_model(tmp_path, "current")
     source = Source(
         RecipeLibrarySnapshot(
-            commit="a" * 40, items=(), catalog_entities=(model.model_dump(mode="json"),)
+            commit="a" * 40,
+            items=(),
+            catalog_entities=(model_entry(model.model_dump(mode="json")),),
         )
     )
     sync = ManagedRecipeCatalogSyncService(
@@ -252,7 +255,9 @@ def test_sync_replaces_a_damaged_head_when_source_revision_is_already_local(
     model = _one_model(tmp_path, "source-head")
     source = Source(
         RecipeLibrarySnapshot(
-            commit="a" * 40, items=(), catalog_entities=(model.model_dump(mode="json"),)
+            commit="a" * 40,
+            items=(),
+            catalog_entities=(model_entry(model.model_dump(mode="json")),),
         )
     )
     now = [NOW]

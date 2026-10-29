@@ -6,6 +6,7 @@ import hashlib
 import json
 import logging
 from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
 from typing import Literal, cast
 from urllib.parse import urlsplit
 
@@ -13,7 +14,9 @@ from pydantic import BaseModel
 from vonk_agent_protocol import AssetAvailability, RunState, UnknownOutcomeError
 from vonk_forge_contracts import (
     ModelDefinition,
+    ModelDisplay,
     RecipeDefinition,
+    RecipeDisplay,
 )
 
 from cluster_profiles.control_limits import MAX_CONTROL_DOCUMENT_BYTES
@@ -30,7 +33,8 @@ from ..library_contract import (
     RecipeLibraryResponse,
 )
 from ..machine_states import RUN_LIVE
-from ..models import CatalogDocumentRevision
+from ..models import CatalogDocument, CatalogDocumentRevision
+from ..operator_receipt_contract import ReceiptOwner
 from ..request_fault import RequestFault
 from ..strict_json import serialize_json_value
 
@@ -230,6 +234,34 @@ _LOGGER = logging.getLogger("vonk_control.library_projection")
 _LOGGED_UNREADABLE: set[str] = set()
 
 
+@dataclass(frozen=True, slots=True)
+class DocumentText:
+    """The library text of one catalog document: its title column and display.
+
+    The display is null before the first sync after the column was added and
+    when the stored display cannot be read; the next sync rewrites it.
+    """
+
+    title: str
+    recipe: RecipeDisplay | None = None
+    model: ModelDisplay | None = None
+
+    @property
+    def description(self) -> str:
+        display = self.recipe or self.model
+        return "" if display is None else display.description
+
+
+def _document_text(row: CatalogDocument) -> DocumentText:
+    try:
+        if row.kind == ReceiptOwner.RECIPE:
+            return DocumentText(row.title, recipe=row.recipe_display())
+        return DocumentText(row.title, model=row.model_display())
+    except ValueError as error:
+        _note_unreadable("catalog display", f"{row.kind}/{row.slug}", str(error)[:120])
+        return DocumentText(row.title)
+
+
 def _note_unreadable(kind: str, key: str, detail: str) -> None:
     """Say once that a stored row is unreadable.
 
@@ -329,6 +361,7 @@ def _recipe_creator(
 def _canonical_recipe_summary(
     revision: CatalogDocumentRevision,
     document: RecipeDefinition,
+    text: DocumentText,
 ) -> LibraryRecipeSummary:
     return LibraryRecipeSummary(
         recipe_id=revision.document_id,
@@ -336,8 +369,9 @@ def _canonical_recipe_summary(
         publisher=document.identity.publisher,
         slug=document.identity.slug,
         content_sha256=revision.content_digest,
-        title=document.metadata.title,
-        description=document.metadata.description,
+        title=text.title,
+        description=text.description,
+        recipe_display=text.recipe,
         recipe_document=document,
         capabilities=[],
         topology_name=document.topology.name,

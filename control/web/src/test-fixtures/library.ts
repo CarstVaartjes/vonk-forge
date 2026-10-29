@@ -23,6 +23,36 @@ const recipeId = (index: number): string =>
   `00000001-0000-4000-8000-${String(index + 1).padStart(12, "0")}`;
 const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 
+// The Controller serves the library text as its own display, built from the
+// signed index; the fixtures derive it from the same fixture documents.
+type RecipeSeed = Omit<LibraryViewRecipe, "recipe_display">;
+type ModelSeed = Omit<LibraryViewModel, "model_display">;
+function withRecipeDisplay(entry: RecipeSeed): LibraryViewRecipe {
+  const { metadata, identity } = entry.recipe_document;
+  return {
+    ...entry,
+    recipe_display: {
+      kind: "recipe-display",
+      identity: { publisher: entry.publisher, slug: entry.slug },
+      title: entry.title,
+      description: entry.description,
+      tags: metadata.tags,
+      ...(metadata.alignment ? { alignment: metadata.alignment } : {}),
+    },
+    recipe_document: { ...entry.recipe_document, identity },
+  };
+}
+function modelDisplayOf(document: ModelDefinition): LibraryViewModel["model_display"] {
+  return {
+    kind: "model-display",
+    identity: { publisher: document.identity.publisher, slug: document.identity.slug },
+    family_title: document.identity.family.title,
+    model_title: document.identity.model.title,
+    description: document.metadata.description,
+    tags: document.metadata.tags,
+  };
+}
+
 // Projected from the Controller schema2 catalog corpus (92 Models / 85 Recipes).
 const actualModelDocument36 = JSON.parse(
   String.raw`{"capabilities":[],"dependencies":[],"files":[{"id":"metadata-11ad7efa2497","path":".gitattributes","roles":["metadata"],"sha256":"11ad7efa24975ee4b0c3c3a38ed18737f0658a5f75a0a96787b576a78a023361","size_bytes":1519},{"id":"readme-078ab3a40e93","path":"README.md","roles":["metadata"],"sha256":"078ab3a40e931ed2ba11fe5b761dbaf0cfcfc2ab29a4d4f6368229516803aafa","size_bytes":3140},{"id":"config-d7fa25034d78","path":"config.json","roles":["configuration"],"sha256":"d7fa25034d782b4e98582df19feeb8cdfd39503ae808e0e178bc776056270201","size_bytes":1272},{"id":"model-0885659804b3","path":"model.safetensors","roles":["weights"],"sha256":"0885659804b3e4460f4bcd50c292923ea4f60e5a83745f96ff3d0736a5e5ddb5","size_bytes":2727422642}],"format":{"precision":"bf16","quantization":"none"},"identity":{"family":{"publisher":"inclusionai","slug":"ling-3-0","title":"Ling 3.0"},"model":{"publisher":"inclusionai","slug":"ling-3-0-flash-dspark","title":"Ling 3.0 Flash DSpark companion"},"publisher":"inclusionai","slug":"ling-3-0-flash-dspark-8e5d9988","variant":"Ling 3.0 Flash DSpark 8e5d9988","version":"Ling 3.0 Flash DSpark 8e5d9988"},"kind":"model","license":{"attribution":["InclusionAI"],"spdx":"LicenseRef-Ling-DSpark","territorial_restrictions":null,"url":"https://huggingface.co/inclusionAI/Ling-3.0-flash-dspark/blob/8e5d9988c9b09de13f1f7c9d999ff2bfa533a149/README.md"},"metadata":{"description":"Exact public Ling 3.0 Flash DSpark 8e5d9988 checkpoint.","tags":["inclusionai","ling-3-0","language","candidate"]},"modalities":["text"],"requires_token":false,"source":{"repository":"https://huggingface.co/inclusionAI/Ling-3.0-flash-dspark","revision":"8e5d9988c9b09de13f1f7c9d999ff2bfa533a149"}}`,
@@ -76,7 +106,7 @@ function modelDocument(index: number): ModelDefinition {
   return document;
 }
 
-function model(index: number, recipes: LibraryViewRecipe[]): LibraryViewModel {
+function model(index: number, recipes: LibraryViewRecipe[]): ModelSeed {
   const document = modelDocument(index);
   const actual = index >= 2 && index <= 6 ? actualLtxModels[index - 2]!.model : undefined;
   const local = { controller: "not_cached" as const, running_on: [], preparation: null };
@@ -89,9 +119,7 @@ function model(index: number, recipes: LibraryViewRecipe[]): LibraryViewModel {
   const alignment = [
     ...new Set(
       recipes.flatMap((recipe) =>
-        recipe.recipe_document.metadata.alignment
-          ? [recipe.recipe_document.metadata.alignment]
-          : [],
+        recipe.recipe_display?.alignment ? [recipe.recipe_display.alignment] : [],
       ),
     ),
   ];
@@ -134,7 +162,7 @@ function syntheticModelTarget(recipeIndex: number): number {
   ]!;
 }
 
-function recipe(index: number): LibraryViewRecipe {
+function recipe(index: number): RecipeSeed {
   if (index < actualLtxRecipes.length) return clone(actualLtxRecipes[index]!);
   const id = index === 0 ? actualRecipeDocumentSeed.identity.slug : `recipe-${index + 1}`;
   const title =
@@ -214,8 +242,8 @@ function recipe(index: number): LibraryViewRecipe {
 export function libraryRecipeSummary(
   input: Partial<LibraryViewRecipe> & Pick<LibraryViewRecipe, "recipe_id" | "slug" | "title">,
 ): LibraryViewRecipe {
-  const base = recipe(0);
-  return {
+  const base = withRecipeDisplay(recipe(0));
+  return withRecipeDisplay({
     ...base,
     ...input,
     recipe_document: {
@@ -227,20 +255,24 @@ export function libraryRecipeSummary(
       },
       identity: { ...base.recipe_document.identity, slug: input.slug },
     },
-  };
+  });
 }
 
-const recipes = Array.from({ length: 85 }, (_, index) => recipe(index));
+const recipes = Array.from({ length: 85 }, (_, index) => withRecipeDisplay(recipe(index)));
 const models = Array.from({ length: 92 }, (_, index) => {
-  if (index >= 2 && index <= 5) return model(index, [recipes[index - 2]!]);
-  if (index === 6) return model(index, recipes.slice(0, actualLtxRecipes.length));
-  if (index >= 79) return model(index, []);
+  const withDisplay = (seed: ModelSeed): LibraryViewModel => ({
+    ...seed,
+    model_display: modelDisplayOf(seed.model_document as ModelDefinition),
+  });
+  if (index >= 2 && index <= 5) return withDisplay(model(index, [recipes[index - 2]!]));
+  if (index === 6) return withDisplay(model(index, recipes.slice(0, actualLtxRecipes.length)));
+  if (index >= 79) return withDisplay(model(index, []));
   const assigned = recipes.slice(actualLtxRecipes.length).filter((_, recipeIndex) => {
     const catalogIndex = recipeIndex + actualLtxRecipes.length;
     return syntheticModelTarget(catalogIndex) === index;
   });
   if (index === 1) assigned.unshift(recipes[4]!);
-  return model(index, assigned);
+  return withDisplay(model(index, assigned));
 });
 
 export const libraryViewSnapshot: LibraryViewSnapshot = {
@@ -272,6 +304,7 @@ export const modelLibrary: ModelLibrary = {
     return {
       selector: entry.model.content_sha256,
       identity: entry.model,
+      model_display: entry.model_display,
       projected: {
         identity: entry.model_document.identity,
         metadata: entry.model_document.metadata,
@@ -314,6 +347,7 @@ export const recipeLibrary: RecipeLibrary = {
       slug: entry.slug,
       title: entry.title,
     },
+    recipe_display: entry.recipe_display,
     projected: {
       identity: entry.recipe_document.identity,
       metadata: entry.recipe_document.metadata,
@@ -334,7 +368,7 @@ export const recipeLibrary: RecipeLibrary = {
     usage: entry.capabilities,
     resources: projectionResources,
     local: projectionLocal,
-    alignment: entry.recipe_document.metadata.alignment,
+    alignment: entry.recipe_display?.alignment,
     node_count: entry.recipe_document.topology.node_count,
     engine: entry.recipe_document.runtime.engine,
     creator: entry.recipe_document.provenance.source_reference?.split("/")[3] ?? null,
@@ -355,6 +389,9 @@ const detailModelDocuments = recipes[0]!.recipe_document.models.map((selection) 
     ...models.find((model) => model.model.content_sha256 === selection.model.content_sha256)!
       .model_document,
   },
+  model_display: models.find(
+    (model) => model.model.content_sha256 === selection.model.content_sha256,
+  )!.model_display,
   selection: { ...actualRecipeDocumentSeed.models[0]!, ...selection },
 }));
 export const minimalLibraryDetail: LibraryViewRecipeDetail = {
@@ -381,6 +418,7 @@ export const currentRecipeDetail: RecipeDetail = {
   identity: recipeLibrary.recipes[0]!.identity,
   document: minimalLibraryDetail.definition,
   projected: recipeLibrary.recipes[0]!.projected,
+  recipe_display: recipeLibrary.recipes[0]!.recipe_display,
   model_selectors: recipeLibrary.recipes[0]!.model_selectors,
   model_documents: detailModelDocuments,
   usage: recipeLibrary.recipes[0]!.usage,

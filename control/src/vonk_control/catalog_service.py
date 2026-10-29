@@ -16,11 +16,15 @@ from vonk_agent_protocol import (
     SourceBundleCode,
     canonical_message,
 )
+from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
 from vonk_forge_contracts import (
     ModelDefinition,
+    ModelDisplay,
     RecipeDefinition,
+    RecipeDisplay,
     canonical_json,
     document_sha256,
+    published_json,
     read_model,
     read_recipe,
 )
@@ -50,6 +54,7 @@ from .models import (
     CatalogDocumentHead,
     RecipeSourceBundle,
 )
+from .operator_receipt_contract import ReceiptOwner
 from .recipe_runtime_specs import RecipeRuntimeSpecError, recipe_topology
 from .source_bundles import (
     SourceBundleError,
@@ -360,6 +365,34 @@ class CatalogService:
             for value in captured:
                 self._upsert_canonical_document(session, value, actor=actor)
         return len(captured)
+
+    def apply_display(self, display: RecipeDisplay | ModelDisplay) -> bool:
+        """Make the library text of one existing document the published display.
+
+        The document, its revisions and digests are never touched, so a
+        display-only release creates no revision. An absent document is left
+        for import to create. Returns whether anything was written.
+        """
+        kind, title = (
+            (RunSwitchReasonScopeName.MODEL, display.model_title)
+            if isinstance(display, ModelDisplay)
+            else (ReceiptOwner.RECIPE, display.title)
+        )
+        published = published_json(display)
+        with self._sessions.begin() as session:
+            row = session.scalar(
+                select(CatalogDocument).where(
+                    CatalogDocument.kind == kind,
+                    CatalogDocument.publisher == display.identity.publisher,
+                    CatalogDocument.slug == display.identity.slug,
+                )
+            )
+            if row is None or (row.title == title and row.display == published):
+                return False
+            row.title = title
+            row.display = published
+            row.updated_at = self._clock()
+            return True
 
     def refresh_build_policy(self) -> tuple[ManagedCatalogSyncProblem, ...]:
         return CatalogEntityService(

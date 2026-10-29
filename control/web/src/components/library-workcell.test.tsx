@@ -481,3 +481,37 @@ test("leaves the memory line unchanged for a role declaring neither", () => {
   expect(screen.queryByText(/load peak/)).toBeNull();
   expect(screen.queryByText(/min swap/)).toBeNull();
 });
+
+test("record titles and the alignment filter follow the published display", () => {
+  const snapshot = structuredClone(libraryViewSnapshot);
+  const model = snapshot.models.find((entry) => entry.recipes.length > 0)!;
+  model.model_display = {
+    kind: "model-display",
+    identity: { publisher: model.model.publisher, slug: model.model.slug },
+    family_title: "Family from display",
+    model_title: "Model from display",
+    description: "Display only.",
+    tags: [],
+  };
+  const recipe = model.recipes[0]!;
+  recipe.recipe_display = {
+    kind: "recipe-display",
+    identity: { publisher: recipe.publisher, slug: recipe.slug },
+    title: recipe.title,
+    description: recipe.description,
+    tags: [],
+    alignment: "abliterated",
+  };
+  recipe.recipe_document.metadata = { ...recipe.recipe_document.metadata, alignment: undefined };
+  const records = buildLibraryRecipeRecords(snapshot);
+  const own = records.filter((record) => record.recipe?.recipe_id === recipe.recipe_id);
+  expect(own[0]!.modelTitle).toBe("Model from display");
+  const aligned = filterLibraryRecipeRecords(
+    records,
+    { ...EMPTY_LIBRARY_WORKCELL_FILTERS, alignment: "abliterated" },
+    "",
+  );
+  expect(new Set(aligned.map((record) => record.recipe?.recipe_id))).toEqual(
+    new Set([recipe.recipe_id]),
+  );
+});

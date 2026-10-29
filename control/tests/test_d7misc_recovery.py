@@ -1,6 +1,8 @@
 """Hermetic regressions for range recovery and package content admission."""
 
+import json
 from dataclasses import replace
+from importlib.resources import files
 from threading import Event
 from typing import Never
 
@@ -14,6 +16,8 @@ from vonk_control.catalog_sync_contract import (
 from vonk_control.model_cache_ranges import download_ranges, range_partial_bytes
 from vonk_control.recipe_library_types import RecipeLibrarySnapshot
 from vonk_control.recipe_packages import RecipePackageClient, RecipePackageError
+
+from .display_fixtures import model_entry
 
 
 def _unused_job_operations(*_args: object) -> Never:
@@ -59,7 +63,20 @@ def test_package_preparation_rejects_changed_content_with_same_commit(tmp_path):
     client._snapshot = snapshot
     try:
         with pytest.raises(RecipePackageError):
-            client.prepare(replace(snapshot, catalog_entities=({"changed": True},)))
+            client.prepare(
+                replace(
+                    snapshot,
+                    catalog_entities=(
+                        model_entry(
+                            json.loads(
+                                files("vonk_forge_contracts")
+                                .joinpath("examples", "model-definition.json")
+                                .read_text()
+                            )
+                        ),
+                    ),
+                )
+            )
         client.prepare(snapshot)
     finally:
         client.close()

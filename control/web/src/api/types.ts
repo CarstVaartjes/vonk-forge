@@ -61,6 +61,8 @@ export type RecipeReadinessState = components["schemas"]["RecipeReadinessCheck"]
 // They are never sent to the operator API and keep the existing Library layout
 // mechanical while the wire authority remains the four current nouns.
 export type LibraryViewRecipe = {
+  // The published library text; null until the first sync that carries it.
+  recipe_display: components["schemas"]["RecipeDisplay"] | null;
   capabilities: string[];
   content_sha256: string;
   description: string;
@@ -101,6 +103,8 @@ export function canonicalRecipeSelector(
 }
 export type LibraryViewModel = {
   page_local?: boolean;
+  // The published library text; null until the first sync that carries it.
+  model_display: components["schemas"]["ModelDisplay"] | null;
   model: { kind: "model"; publisher: string; slug: string; content_sha256: string };
   model_document: Pick<ModelDefinition, "identity" | "metadata" | "format" | "capabilities">;
   model_file_count: WireNumber;

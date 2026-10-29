@@ -577,8 +577,8 @@ class ManagedRecipeCatalogSyncService:
             ):
                 return False
         with self._sessions() as session:
-            for document in snapshot.catalog_entities:
-                digest = document_sha256(document)
+            for entry in snapshot.catalog_entities:
+                digest = document_sha256(entry.document)
                 row = session.scalar(
                     select(CatalogDocumentRevision)
                     .join(
@@ -683,9 +683,10 @@ class ManagedRecipeCatalogSyncService:
         # Catalog index entries are independent immutable documents. Import each
         # in its own transaction so one malformed model cannot hold up recipes
         # and models that are otherwise ready to apply.
-        for model_document in snapshot.catalog_entities:
+        for model_entry in snapshot.catalog_entities:
             try:
-                self._catalog.import_catalog_models(actor, [model_document])
+                self._catalog.import_catalog_models(actor, [model_entry.document])
+                self._catalog.apply_display(model_entry.display)
             except Exception as error:  # noqa: BLE001 - isolate document failures; cancellation still propagates
                 self._record_problem_values(
                     result,
@@ -726,6 +727,7 @@ class ManagedRecipeCatalogSyncService:
                 )
             ):
                 result.unchanged_count += 1
+                self._apply_display(result, item)
             else:
                 try:
                     hydrated = self._reader.fetch(item.uri)
@@ -778,6 +780,7 @@ class ManagedRecipeCatalogSyncService:
                         result.imported_count += 1
                     else:
                         result.updated_count += 1
+                    self._apply_display(result, item)
                 except SourceBundleUnknown as error:
                     # Keep the previous revision; the automatic sync retries
                     # this exact source ingress on its next bounded pass.
@@ -858,6 +861,20 @@ class ManagedRecipeCatalogSyncService:
         if source_bundle is not None and isinstance(source_digest, str):
             self._catalog.store_source_bundle(
                 source_digest, io.BytesIO(source_bundle), actor
+            )
+
+    def _apply_display(
+        self, result: ManagedCatalogSyncResult, item: RecipeLibraryItem
+    ) -> None:
+        """Keep the recipe's library text current; a failure is this item's alone."""
+        try:
+            self._catalog.apply_display(item.display)
+        except Exception as error:  # noqa: BLE001 - isolate display failures per recipe
+            self._record_problem(
+                result,
+                item,
+                str(getattr(error, "code", CatalogSyncCode.ITEM_FAILED)),
+                str(getattr(error, "detail", str(error))),
             )
 
     def _record_problem(

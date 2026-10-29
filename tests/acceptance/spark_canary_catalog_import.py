@@ -40,10 +40,20 @@ from vonk_control.catalog_sync import (
     SyncTrigger,
 )
 from vonk_control.db import build_engine, session_factory
-from vonk_control.recipe_library_types import RecipeLibraryItem, RecipeLibrarySnapshot
+from vonk_control.recipe_library_types import (
+    CatalogModelEntry,
+    RecipeLibraryItem,
+    RecipeLibrarySnapshot,
+)
 from vonk_control.recipe_packages import load_recipe_package
 from vonk_control.settings import Settings
 from vonk_control.source_bundles import DatabaseSourceBundleStore
+from vonk_forge_contracts import (
+    model_display_of,
+    read_model,
+    read_recipe,
+    recipe_display_of,
+)
 
 SYNC_ACTOR = "system:spark-lifecycle-canary"
 # The Controller's own automatic sync may hold the single sync slot.
@@ -70,7 +80,11 @@ def _cache_package(cache_root: Path, archive: bytes, digest: str) -> Path:
 
 
 class FixtureReader:
-    """The snapshot of the producer's canary index: one Recipe, or siblings."""
+    """The snapshot of the producer's canary index: one Recipe, or siblings.
+
+    The canary index predates the per-entry display, so each display is the one
+    the contracts derive from its own document.
+    """
 
     def __init__(self, index: dict[str, Any], archives: dict[str, Path]) -> None:
         commit = str(index["source_commit"])
@@ -88,6 +102,7 @@ class FixtureReader:
                 title=str(metadata["title"]),
                 description=str(metadata["description"]),
                 tags=tuple(str(tag) for tag in metadata.get("tags", [])),
+                display=recipe_display_of(read_recipe(document)),
                 content_sha256=digest,
                 source_bundle_sha256=str(entry["source_bundle_sha256"]),
                 package_sha256=str(entry["package"]["sha256"]),
@@ -105,7 +120,11 @@ class FixtureReader:
             items=tuple(items),
             repository=str(index["repository"]),
             catalog_entities=tuple(
-                dict(value["document"]) for value in index["catalog_entities"]
+                CatalogModelEntry(
+                    dict(value["document"]),
+                    model_display_of(read_model(value["document"])),
+                )
+                for value in index["catalog_entities"]
             ),
         )
 
@@ -125,6 +144,7 @@ class FixtureReader:
             recipe_content_sha256=item.content_sha256,
             library_commit=item.library_commit,
             source_path=item.source_path,
+            display=item.display,
         )
 
 

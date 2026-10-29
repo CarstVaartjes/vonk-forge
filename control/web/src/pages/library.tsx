@@ -45,6 +45,7 @@ function viewRecipe(recipe: RecipeLibrary["recipes"][number]): LibraryViewRecipe
     capabilities: recipe.usage,
     content_sha256: recipe.identity.content_sha256,
     description: recipe.identity.description,
+    recipe_display: recipe.recipe_display,
     recipe_document: {
       ...recipe.projected,
       models: recipe.projected.models.map((model) => ({ model })),
@@ -75,6 +76,7 @@ function viewModel(
       slug: model.identity.slug,
       content_sha256: model.identity.content_sha256,
     },
+    model_display: model.model_display,
     model_document: model.projected,
     model_file_count: model.projected.artifact_count,
     model_bytes: model.resources.disk_bytes ?? null,
@@ -160,6 +162,7 @@ function viewRecipeDetail(detail: RecipeDetail): LibraryViewRecipeDetail {
     capabilities: detail.usage,
     content_sha256: detail.identity.content_sha256,
     description: detail.identity.description,
+    recipe_display: detail.recipe_display,
     recipe_document: detail.document,
     recipe_id: detail.identity.recipe_id,
     recipe_revision_id: detail.identity.recipe_revision_id,

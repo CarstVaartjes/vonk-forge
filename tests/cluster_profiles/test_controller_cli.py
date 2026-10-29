@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import cast
 
 import pytest
-from library_route_fixtures import _model_projection_fields, _recipe_projection
+from library_route_fixtures import _recipe_projection
 from vonk_agent_protocol import LifecycleState, OperatorActionName
 from vonk_forge_contracts import ModelDefinition, document_sha256
 
@@ -4516,17 +4516,17 @@ def test_fleet_progress_never_reports_another_job(follow: bool) -> None:
 def test_run_resolves_a_recipe_or_its_model_to_one_catalog_recipe(
     requested: str, expected: str
 ) -> None:
-    model = json.loads(
+    display = json.loads(
         files("vonk_forge_contracts")
-        .joinpath("examples", "model-definition.json")
+        .joinpath("examples", "model-display.json")
         .read_text()
     )
-    model["identity"]["model"]["title"] = "Qwen 3"
+    display["model_title"] = "Qwen 3"
     client = FakeClient(
         {
             ("GET", "/api/model/Qwen%2Fqwen3"): {
                 "selector": "Qwen/qwen3",
-                "projected": _model_projection_fields(model),
+                "model_display": display,
             },
             ("GET", "/api/recipe/library"): {
                 "recipes": [

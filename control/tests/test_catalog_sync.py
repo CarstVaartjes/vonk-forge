@@ -41,6 +41,7 @@ from vonk_control.models import (
 )
 from vonk_control.recipe_builds import RecipeBuildService
 from vonk_control.recipe_library_types import (
+    CatalogModelEntry,
     RecipeLibraryError,
     RecipeLibraryItem,
     RecipeLibrarySnapshot,
@@ -148,7 +149,9 @@ def _fixture(
             entity
             for entity in snapshot.catalog_entities
             if (
-                (model := ModelDefinition.model_validate(entity)).identity.publisher,
+                (
+                    model := ModelDefinition.model_validate(entity.document)
+                ).identity.publisher,
                 model.identity.slug,
             )
             in selected
@@ -247,7 +250,12 @@ def test_invalid_model_document_does_not_block_other_catalog_items(
     sessions, service, reader, _item = _fixture(tmp_path)
     reader.snapshot = replace(
         reader.snapshot,
-        catalog_entities=(*reader.snapshot.catalog_entities, {"invalid": True}),
+        catalog_entities=(
+            *reader.snapshot.catalog_entities,
+            CatalogModelEntry(
+                {"invalid": True}, reader.snapshot.catalog_entities[0].display
+            ),
+        ),
     )
 
     result = _sync(sessions, service, reader).sync(
@@ -1045,10 +1053,10 @@ def test_reader_skips_unreadable_index_documents_and_keeps_the_rest(
     assert len(snapshot.problems) == 2
     assert (skipped_model["publisher"], skipped_model["slug"]) not in {
         (
-            str(read_model(document).identity.publisher),
-            str(read_model(document).identity.slug),
+            str(read_model(entry.document).identity.publisher),
+            str(read_model(entry.document).identity.slug),
         )
-        for document in snapshot.catalog_entities
+        for entry in snapshot.catalog_entities
     }
     recipe_problem = next(
         problem for problem in snapshot.problems if problem.recipe_uri is not None

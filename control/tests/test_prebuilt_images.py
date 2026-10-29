@@ -136,7 +136,9 @@ def _published_library(
             entity
             for entity in listed.catalog_entities
             if (
-                (model := ModelDefinition.model_validate(entity)).identity.publisher,
+                (
+                    model := ModelDefinition.model_validate(entity.document)
+                ).identity.publisher,
                 model.identity.slug,
             )
             in selected

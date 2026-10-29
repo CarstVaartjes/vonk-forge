@@ -1118,11 +1118,13 @@ def check_source(
             )
         if "identity" in modes:
             ingress = path.startswith(
-                "control/src/vonk_control/catalog_sync"
+                (
+                    "control/src/vonk_control/catalog_sync",
+                    "control/src/vonk_control/recipe_packages/",
+                )
             ) or path in {
                 "control/src/vonk_control/catalog_entities.py",
                 "control/src/vonk_control/catalog_service.py",
-                "control/src/vonk_control/recipe_packages.py",
             }
             if not ingress:
                 tree = ast.parse(source)

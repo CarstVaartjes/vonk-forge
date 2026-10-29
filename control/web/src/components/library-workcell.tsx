@@ -159,6 +159,7 @@ export type LibraryRecipeRecord = {
   recipe?: LibraryViewRecipe;
   model?: LibraryViewModel["model"];
   modelDocument?: LibraryViewModel["model_document"];
+  modelDisplay?: LibraryViewModel["model_display"];
   modelCapabilities?: LibraryViewModel["model_capabilities"];
   modelKey: string;
   modelTitle: string;
@@ -193,8 +194,8 @@ export function activeFilterSummary(filters: LibraryWorkcellFilters, query: stri
 
 function modelTitle(model: LibraryViewModel): string {
   return (
-    model.model_document.identity.model.title ||
-    model.model_document.identity.family.title ||
+    model.model_display?.model_title ||
+    model.model_display?.family_title ||
     `${model.model.publisher}/${model.model.slug}`
   );
 }
@@ -299,6 +300,7 @@ export function buildLibraryRecipeRecords(snapshot: LibraryViewSnapshot): Librar
           title,
           model: model.model,
           modelDocument: model.model_document,
+          modelDisplay: model.model_display,
           modelCapabilities: model.model_capabilities,
           modelKey: key,
           modelTitle: title,
@@ -315,6 +317,7 @@ export function buildLibraryRecipeRecords(snapshot: LibraryViewSnapshot): Librar
       recipe,
       model: model.model,
       modelDocument: model.model_document,
+      modelDisplay: model.model_display,
       modelCapabilities: model.model_capabilities,
       modelKey: key,
       modelTitle: title,
@@ -365,8 +368,7 @@ export function filterLibraryRecipeRecords(
       (!filters.creator ||
         recipeCreator(record.recipe ?? ({} as LibraryViewRecipe))?.toLocaleLowerCase() ===
           filters.creator.toLocaleLowerCase()) &&
-      (!filters.alignment ||
-        record.recipe?.recipe_document.metadata.alignment === filters.alignment) &&
+      (!filters.alignment || record.recipe?.recipe_display?.alignment === filters.alignment) &&
       (!filters.sparks ||
         String(record.recipe?.recipe_document.topology.node_count) === filters.sparks)
     );
@@ -659,8 +661,8 @@ export function LibraryWorkcell({
             {[
               ...new Set(
                 records.flatMap((record) =>
-                  record.recipe?.recipe_document.metadata.alignment
-                    ? [record.recipe.recipe_document.metadata.alignment]
+                  record.recipe?.recipe_display?.alignment
+                    ? [record.recipe.recipe_display.alignment]
                     : [],
                 ),
               ),
