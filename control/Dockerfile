@@ -143,7 +143,7 @@ COPY inventory/wheels/vonk_agent_protocol-*.whl /wheels/
 # The reviewed public-contracts wheel is installed by its locked digest, never
 # rebuilt: a rebuild resolves a build backend at build time and its bytes follow
 # whichever release is newest.
-COPY inventory/wheels/vonk_forge_public_contracts-2.7.0-py3-none-any.whl /wheels/
+COPY inventory/wheels/vonk_forge_public_contracts-2.8.0-py3-none-any.whl /wheels/
 COPY agent_protocol/pyproject.toml ./agent_protocol/
 COPY scripts/protocol-wheel-name scripts/protocol_wheel.py ./scripts/
 COPY deploy/compose/python-bootstrap.lock /tmp/python-bootstrap.lock
@@ -152,7 +152,7 @@ RUN apt-get update \
     && python -m pip install --no-cache-dir --require-hashes -r /tmp/python-bootstrap.lock \
     && protocol_wheel="$(scripts/protocol-wheel-name)" \
     && python -c 'import hashlib, pathlib, sys, tomllib; [package] = [p for p in tomllib.loads(pathlib.Path("uv.lock").read_text())["package"] if p["name"] == "vonk-agent-protocol"]; [wheel] = package["wheels"]; assert wheel["hash"] == "sha256:" + hashlib.sha256(pathlib.Path("/wheels", sys.argv[1]).read_bytes()).hexdigest()' "$protocol_wheel" \
-    && test "$(sha256sum /wheels/vonk_forge_public_contracts-2.7.0-py3-none-any.whl | cut -d' ' -f1)" = "$(sed -n 's/^sha256 = "//p' packaging/public-contracts.lock | tr -d '"')" \
+    && test "$(sha256sum /wheels/vonk_forge_public_contracts-2.8.0-py3-none-any.whl | cut -d' ' -f1)" = "$(sed -n 's/^sha256 = "//p' packaging/public-contracts.lock | tr -d '"')" \
     && rm -rf /var/lib/apt/lists/*
 # Third-party dependencies resolve to the newest allowed release, so this layer
 # is only reused within one UTC day: CI passes the date, and a fix released
@@ -180,7 +180,7 @@ COPY --from=web /repo/control/web/dist ./src/vonk_control/web
 RUN PYTHONPATH="$(python -c 'import sysconfig; print(sysconfig.get_path("purelib", vars={"base": "/install", "platbase": "/install"}))')" \
     python -m pip install --no-cache-dir --prefix=/install \
     "/wheels/$(scripts/protocol-wheel-name)" \
-    /wheels/vonk_forge_public_contracts-2.7.0-py3-none-any.whl \
+    /wheels/vonk_forge_public_contracts-2.8.0-py3-none-any.whl \
     /cli-wheels/*.whl .
 
 FROM ${PYTHON_IMAGE} AS runtime-root
