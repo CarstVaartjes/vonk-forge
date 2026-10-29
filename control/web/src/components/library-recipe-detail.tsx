@@ -9,18 +9,10 @@ import { LibraryRecipeVisual } from "./library-recipe-visual";
 import { RecipeBadges, recipeAttribution, sparkLabel } from "./library-workcell";
 import "./library-recipe-detail.css";
 
-const CACHE_WORDS: Record<string, string> = {
-  cached: "cached",
-  preparing: "preparing",
-  not_cached: "not cached",
-  failed: "cache failed",
-  unknown: "cache unknown",
-};
-const FIT_WORDS: Record<string, string> = {
-  ready: "fits fleet",
-  blocked: "does not fit fleet",
-  unavailable: "fit unknown",
-};
+// biome-ignore format: one-line label tables, unchanged by the display switch
+const CACHE_WORDS: Record<string, string> = {cached: "cached", preparing: "preparing", not_cached: "not cached", failed: "cache failed", unknown: "cache unknown"};
+// biome-ignore format: one-line label tables, unchanged by the display switch
+const FIT_WORDS: Record<string, string> = {ready: "fits fleet", blocked: "does not fit fleet", unavailable: "fit unknown"};
 
 /** Other recipes for the same model, one comparable line each. */
 export function LibraryRecipeAlternatives({
