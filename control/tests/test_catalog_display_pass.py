@@ -10,12 +10,14 @@ from __future__ import annotations
 import copy
 import itertools
 import json
+import re
 from datetime import UTC, datetime, timedelta
 from importlib import metadata, resources
 from pathlib import Path
+from typing import Self
 
 import pytest
-from sqlalchemy import Engine, func, inspect, select, text
+from sqlalchemy import Engine, event, func, inspect, select, text
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import CatalogSyncState
 from vonk_control.auth import TokenCodec
@@ -474,3 +476,124 @@ def test_every_invalid_display_vector_is_a_per_entry_problem_with_the_named_erro
     assert len(snapshot.problems) == 1
     assert "display is invalid" in snapshot.problems[0].detail
     client.close()
+
+
+class Statements:
+    """The SQL statements an action sends, so cost can be asserted."""
+
+    def __init__(self, engine: Engine) -> None:
+        self.engine = engine
+        self.sent: list[str] = []
+
+    def __enter__(self) -> Self:
+        event.listen(self.engine, "before_cursor_execute", self._record)
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        event.remove(self.engine, "before_cursor_execute", self._record)
+
+    def _record(self, _c, _cursor, statement, _p, _context, _many) -> None:
+        self.sent.append(statement)
+
+    def selecting(self, table: str) -> list[str]:
+        return [
+            statement
+            for statement in self.sent
+            if statement.lstrip().upper().startswith("SELECT")
+            and re.search(rf"\b{table}\b", statement)
+        ]
+
+
+def _seed(world: World, count: int) -> list[RecipeDisplay | ModelDisplay]:
+    displays: list[RecipeDisplay | ModelDisplay] = []
+    now = datetime(2026, 10, 29, tzinfo=UTC)
+    with world.sessions.begin() as session:
+        for number in range(count):
+            slug = f"seeded-{number:04d}"
+            kind = "model" if number % 2 else "recipe"
+            session.add(
+                CatalogDocument(
+                    kind=kind,
+                    publisher="seed",
+                    slug=slug,
+                    title="Before",
+                    created_by="test",
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+            identity = {"publisher": "seed", "slug": slug}
+            displays.append(
+                ModelDisplay.model_validate(
+                    {
+                        "identity": identity,
+                        "family_title": "Family",
+                        "model_title": "After",
+                        "description": "d",
+                        "tags": [],
+                    }
+                )
+                if kind == "model"
+                else RecipeDisplay.model_validate(
+                    {
+                        "identity": identity,
+                        "title": "After",
+                        "description": "d",
+                        "tags": [],
+                    }
+                )
+            )
+    return displays
+
+
+@pytest.mark.parametrize("count", [10, 600])
+def test_the_display_pass_reads_once_however_many_documents_it_covers(
+    world: World, count: int
+) -> None:
+    displays = _seed(world, count)
+
+    with Statements(world.engine) as first:
+        assert world.catalog.apply_displays(displays) == []
+    with Statements(world.engine) as settled:
+        assert world.catalog.apply_displays(displays) == []
+
+    assert len(first.selecting("catalog_documents")) == 1
+    assert len(settled.selecting("catalog_documents")) == 1
+    assert not [s for s in settled.sent if s.lstrip().upper().startswith("UPDATE")]
+    assert {row[0] for row in world.documents().values()} <= {"After", "Tiny Recipe"}
+
+
+def test_a_library_request_reads_no_catalog_document(world: World) -> None:
+    world.sync()
+    world.library_recipe()
+    with Statements(world.engine) as requests:
+        world.projection.recipe_library(limit=10)
+        world.projection.models(limit=10)
+    assert requests.selecting("catalog_documents") == []
+
+
+def test_a_failed_display_write_is_that_documents_problem_and_the_next_tick_heals_it(
+    world: World,
+) -> None:
+    world.sync()
+    world.publish(recipe={"title": "Retitled on the wire"})
+
+    def refuse(_c, _cursor, statement, parameters, _context, _many) -> None:
+        if statement.lstrip().upper().startswith("UPDATE CATALOG_DOCUMENTS"):
+            raise RuntimeError("disk full")
+
+    event.listen(world.engine, "before_cursor_execute", refuse)
+    try:
+        failed = world.sync()
+    finally:
+        event.remove(world.engine, "before_cursor_execute", refuse)
+
+    assert failed.state == CatalogSyncState.PARTIAL
+    assert [problem.detail for problem in failed.problems] == ["disk full"]
+    assert failed.problems[0].recipe_uri is not None
+    assert world.library_recipe().identity.title == "Tiny Recipe"
+
+    healed = world.sync()
+
+    assert healed.state == CatalogSyncState.CURRENT and healed.problems == ()
+    assert world.library_recipe().identity.title == "Retitled on the wire"

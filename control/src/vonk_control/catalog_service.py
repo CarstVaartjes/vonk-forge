@@ -54,7 +54,6 @@ from .models import (
     CatalogDocumentHead,
     RecipeSourceBundle,
 )
-from .operator_receipt_contract import ReceiptOwner
 from .recipe_runtime_specs import RecipeRuntimeSpecError, recipe_topology
 from .source_bundles import (
     SourceBundleError,
@@ -366,33 +365,72 @@ class CatalogService:
                 self._upsert_canonical_document(session, value, actor=actor)
         return len(captured)
 
-    def apply_display(self, display: RecipeDisplay | ModelDisplay) -> bool:
-        """Make the library text of one existing document the published display.
+    def apply_displays(
+        self, displays: Sequence[RecipeDisplay | ModelDisplay]
+    ) -> list[tuple[RecipeDisplay | ModelDisplay, Exception]]:
+        """Make the library text of existing documents the published displays.
 
-        The document, its revisions and digests are never touched, so a
-        display-only release creates no revision. An absent document is left
-        for import to create. Returns whether anything was written.
+        One select reads every named document; the comparison is in memory and
+        only a changed row is written, each in its own short transaction. The
+        documents, revisions and digests are never touched, so a display-only
+        release creates no revision. An absent document is left for import to
+        create. Returns the displays whose write failed, with the error; the
+        next sync applies them again.
         """
-        kind, title = (
-            (RunSwitchReasonScopeName.MODEL, display.model_title)
-            if isinstance(display, ModelDisplay)
-            else (ReceiptOwner.RECIPE, display.title)
-        )
-        published = published_json(display)
-        with self._sessions.begin() as session:
-            row = session.scalar(
-                select(CatalogDocument).where(
-                    CatalogDocument.kind == kind,
-                    CatalogDocument.publisher == display.identity.publisher,
-                    CatalogDocument.slug == display.identity.slug,
+        wanted = {
+            (
+                ModelDisplay if isinstance(display, ModelDisplay) else RecipeDisplay,
+                display.identity.publisher,
+                display.identity.slug,
+            ): display
+            for display in displays
+        }
+        if not wanted:
+            return []
+        with self._sessions() as session:
+            rows = session.execute(
+                select(
+                    CatalogDocument.id,
+                    CatalogDocument.kind,
+                    CatalogDocument.publisher,
+                    CatalogDocument.slug,
+                    CatalogDocument.title,
+                    CatalogDocument.display,
+                ).where(CatalogDocument.slug.in_({key[2] for key in wanted}))
+            ).all()
+        failed: list[tuple[RecipeDisplay | ModelDisplay, Exception]] = []
+        for row in rows:
+            display = wanted.get(
+                (
+                    ModelDisplay
+                    if row.kind == RunSwitchReasonScopeName.MODEL
+                    else RecipeDisplay,
+                    row.publisher,
+                    row.slug,
                 )
             )
-            if row is None or (row.title == title and row.display == published):
-                return False
-            row.title = title
-            row.display = published
-            row.updated_at = self._clock()
-            return True
+            if display is None:
+                continue
+            title = (
+                display.model_title
+                if isinstance(display, ModelDisplay)
+                else display.title
+            )
+            published = published_json(display)
+            if row.title == title and row.display == published:
+                continue
+            try:
+                with self._sessions.begin() as session:
+                    session.execute(
+                        update(CatalogDocument)
+                        .where(CatalogDocument.id == row.id)
+                        .values(
+                            title=title, display=published, updated_at=self._clock()
+                        )
+                    )
+            except Exception as error:  # noqa: BLE001 - one row's write never stops the others
+                failed.append((display, error))
+        return failed
 
     def refresh_build_policy(self) -> tuple[ManagedCatalogSyncProblem, ...]:
         return CatalogEntityService(

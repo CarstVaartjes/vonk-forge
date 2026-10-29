@@ -176,19 +176,19 @@ def _recipe_projection(
 
 
 def _document_texts(
-    self: LibraryProjection, document_ids: Iterable[str]
+    self: LibraryProjection, revisions: Iterable[CatalogDocumentRevision]
 ) -> dict[str, DocumentText]:
-    """The library text of the given documents, in one query by primary key."""
-    wanted = set(document_ids)
-    if not wanted:
-        return {}
-    with self._sessions() as session:
-        return {
-            row.id: _document_text(row)
-            for row in session.scalars(
-                select(CatalogDocument).where(CatalogDocument.id.in_(wanted))
-            )
-        }
+    """The library text of the documents the revisions belong to, from memory.
+
+    The texts are read with the catalog snapshot by the background refresh, so
+    a request does no catalog read. A document first seen after the last
+    refresh shows its slug until the next one.
+    """
+    return {
+        row.document_id: self._catalog_texts.get(row.document_id)
+        or DocumentText(title=row.slug)
+        for row in revisions
+    }
 
 
 def _catalog_documents[T](
@@ -285,6 +285,11 @@ def refresh_catalog(self: LibraryProjection, *, observe_storage: bool = True) ->
             projection_only=True,
         ),
     )
+    with self._sessions() as session:
+        self._catalog_texts = {
+            row.id: _document_text(row)
+            for row in session.scalars(select(CatalogDocument))
+        }
     self._catalog_snapshot = snapshot
     self._catalog_observed_at = self._clock()
     if observe_storage:

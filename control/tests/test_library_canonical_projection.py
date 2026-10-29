@@ -232,10 +232,10 @@ def test_published_corpus_projects_all_models_and_exact_recipe_bindings(
     catalog = CatalogService(
         sessions, clock=clock, cursors=TokenCodec(b"l" * 32).cursor_codec()
     )
-    for entry in index["catalog_entities"]:
-        catalog.apply_display(read_model_display(entry["display"]))
-    for row in index["recipes"]:
-        catalog.apply_display(read_recipe_display(row["display"]))
+    assert not catalog.apply_displays(
+        [read_model_display(entry["display"]) for entry in index["catalog_entities"]]
+        + [read_recipe_display(row["display"]) for row in index["recipes"]]
+    )
 
     projection = LibraryProjection(
         sessions,

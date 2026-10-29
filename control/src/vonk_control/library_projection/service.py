@@ -127,6 +127,7 @@ class LibraryProjection:
             list[tuple[CatalogDocumentRevision, RecipeRevisionProjection]],
         ] = ([], [])
         self._catalog_observed_at = self._clock()
+        self._catalog_texts: dict[str, DocumentText] = {}
         # The automatic refresh owns the first storage observation too.
         self.refresh_catalog(observe_storage=False)
 

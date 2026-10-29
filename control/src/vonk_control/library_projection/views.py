@@ -73,9 +73,7 @@ def models(
         else None
     )
     storage = self._storage_observer.snapshot()
-    texts = self._document_texts(
-        row.document_id for row, _ in (*model_rows, *recipe_rows)
-    )
+    texts = self._document_texts(row for row, _ in (*model_rows, *recipe_rows))
     alignment_by_model = self._alignment_by_model(recipe_rows, texts)
     entries = [
         self._model_projection(
@@ -279,9 +277,7 @@ def model_detail(self: LibraryProjection, selector: str) -> ModelDetailResponse:
     row, model = max(rows, key=lambda pair: pair[0].created_at)
     # Alignment comes from the derived catalog index, never a catalog read.
     _, recipes = self._documents_for_snapshot(None)
-    texts = self._document_texts(
-        [row.document_id, *(recipe_row.document_id for recipe_row, _ in recipes)]
-    )
+    texts = self._document_texts([row, *(recipe_row for recipe_row, _ in recipes)])
     alignment = self._alignment_by_model(recipes, texts).get(
         (model.identity.publisher, model.identity.slug), ()
     )
@@ -336,9 +332,7 @@ def recipe_library(
         else None
     )
     model_by_key = {row.content_digest: model for row, model in model_rows}
-    texts = self._document_texts(
-        row.document_id for row, _ in (*model_rows, *recipe_rows)
-    )
+    texts = self._document_texts(row for row, _ in (*model_rows, *recipe_rows))
     alignment_by_model = self._alignment_by_model(recipe_rows, texts)
     model_entries = [
         self._model_projection(
@@ -619,9 +613,7 @@ def recipe_detail(self: LibraryProjection, selector: str) -> RecipeDetailRespons
         [row.content_digest for row, _ in recipe_rows]
     )
     model_by_key = {row.content_digest: model for row, model in model_rows}
-    texts = self._document_texts(
-        row.document_id for row, _ in (*model_rows, *recipe_rows)
-    )
+    texts = self._document_texts(row for row, _ in (*model_rows, *recipe_rows))
     entries = [
         self._recipe_projection(
             row, recipe, model_by_key, snapshot, texts[row.document_id]
@@ -747,9 +739,7 @@ def authoring_recipe_detail(
                     continue
                 model_revisions.append((selection, model_revision))
     document = recipe_document
-    texts = self._document_texts(
-        [revision.document_id, *(row.document_id for _, row in model_revisions)]
-    )
+    texts = self._document_texts([revision, *(row for _, row in model_revisions)])
     model_documents = [
         LibraryRecipeModel(
             selection=selection,

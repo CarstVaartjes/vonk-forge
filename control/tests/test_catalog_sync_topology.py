@@ -71,8 +71,8 @@ class _Catalog:
     def import_catalog_models(self, actor, documents) -> int:
         return 0
 
-    def apply_display(self, display) -> bool:
-        return False
+    def apply_displays(self, displays) -> list:
+        return []
 
     def retract_recipes_absent_from(self, published):
         return []
