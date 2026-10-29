@@ -15,6 +15,7 @@ import {
 import { cacheRemovalReview } from "../test-fixtures/cache-removal";
 import { libraryViewSnapshot } from "../test-fixtures/library";
 import { recipeLibraryPath, modelKey } from "../lib/library-route";
+import { formatBytes } from "../lib/fleet";
 
 test("renders every selected model's own recipe identities", () => {
   const model = libraryViewSnapshot.models.find((entry) => entry.recipes.length > 1)!;
@@ -218,7 +219,10 @@ test("offers to cache the missing models when downloading a recipe", () => {
       entry === base
         ? {
             ...entry,
-            recipes: entry.recipes.map((recipe) => ({ ...recipe, model_selectors: [selector] })),
+            recipes: entry.recipes.map((recipe) => ({
+              ...recipe,
+              model_selectors: [selector],
+            })),
           }
         : entry,
     ),
@@ -236,7 +240,9 @@ test("offers to cache the missing models when downloading a recipe", () => {
     />,
   );
   expect(
-    screen.getAllByRole("button", { name: /Download recipe and 1 missing model/ }).length,
+    screen.getAllByRole("button", {
+      name: /Download recipe and 1 missing model/,
+    }).length,
   ).toBeGreaterThan(0);
   expect(screen.getAllByText(new RegExp(`Also caches ${selector}`)).length).toBeGreaterThan(0);
 });
@@ -280,7 +286,14 @@ test("engine and creator narrow recipes, are read from the URL, and show as badg
   const tagged = records.map((record, index) =>
     index % 2 === 0
       ? { ...record, recipe: { ...record.recipe!, creator } }
-      : { ...record, recipe: { ...record.recipe!, creator: "tonyd2wild", engine: "sglang" } },
+      : {
+          ...record,
+          recipe: {
+            ...record.recipe!,
+            creator: "tonyd2wild",
+            engine: "sglang",
+          },
+        },
   );
   const byCreator = filterLibraryRecipeRecords(
     tagged,
@@ -321,7 +334,10 @@ test("a recipe row shows engine, creator and Spark count badges", () => {
       entry === base
         ? {
             ...entry,
-            recipes: entry.recipes.map((recipe) => ({ ...recipe, creator: "MiaAI-Lab" })),
+            recipes: entry.recipes.map((recipe) => ({
+              ...recipe,
+              creator: "MiaAI-Lab",
+            })),
           }
         : entry,
     ),
@@ -422,4 +438,46 @@ test("fleet fit is read from the URL as --fits-fleet, keeps unknown verdicts, an
     "blocked capacity",
   );
   expect(screen.getByRole("checkbox", { name: "Fits fleet" })).not.toBeChecked();
+});
+
+function renderWithRoleMemory(memory: { load_peak_bytes?: number; minimum_swap_bytes?: number }) {
+  const snapshot = structuredClone(libraryViewSnapshot);
+  const base = snapshot.models.find((entry) => entry.recipes.length > 0)!;
+  const role = base.recipes[0]!.recipe_document.topology.roles[0]!;
+  role.resources.memory = { ...role.resources.memory, ...memory };
+  const steady = formatBytes(role.resources.memory.peak_bytes);
+  render(
+    <LibraryWorkcell
+      api={{} as never}
+      filters={EMPTY_LIBRARY_WORKCELL_FILTERS}
+      onFiltersChange={() => undefined}
+      onNavigate={() => undefined}
+      onQueryChange={() => undefined}
+      query=""
+      route={{ kind: "model", modelKey: modelKey(base.model) }}
+      snapshot={snapshot}
+    />,
+  );
+  return `${role.name}: ${steady} peak`;
+}
+
+test("shows a role's declared load peak and minimum swap beside its steady peak", () => {
+  const steady = renderWithRoleMemory({
+    load_peak_bytes: 200 * 1024 ** 3,
+    minimum_swap_bytes: 16 * 1024 ** 3,
+  });
+  expect(
+    screen.getAllByText(
+      (text) =>
+        text.includes(steady) &&
+        text.includes("200.0 GiB load peak") &&
+        text.includes("16.0 GiB min swap"),
+    ).length,
+  ).toBeGreaterThan(0);
+});
+
+test("leaves the memory line unchanged for a role declaring neither", () => {
+  renderWithRoleMemory({ minimum_swap_bytes: 0 });
+  expect(screen.queryByText(/load peak/)).toBeNull();
+  expect(screen.queryByText(/min swap/)).toBeNull();
 });

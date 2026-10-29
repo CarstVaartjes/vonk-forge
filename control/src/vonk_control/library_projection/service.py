@@ -214,8 +214,26 @@ class LibraryProjection:
             default=None,
         )
         image = max((role.resources.disk.image_bytes for role in roles), default=None)
+        load_peak = max(
+            (
+                role.resources.memory.load_peak_bytes
+                for role in roles
+                if role.resources.memory.load_peak_bytes is not None
+            ),
+            default=None,
+        )
+        minimum_swap = max(
+            (
+                role.resources.memory.minimum_swap_bytes
+                for role in roles
+                if role.resources.memory.minimum_swap_bytes
+            ),
+            default=None,
+        )
         return LibraryResourceProjection(
             memory_bytes=memory,
+            load_peak_bytes=load_peak,
+            minimum_swap_bytes=minimum_swap,
             disk_bytes=disk,
             runtime_memory_bytes=memory,
             image_bytes=image,

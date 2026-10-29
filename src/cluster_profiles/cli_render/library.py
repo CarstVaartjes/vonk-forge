@@ -7,6 +7,9 @@ from collections.abc import Mapping
 from enum import StrEnum
 
 from ..cli_telemetry_render import size as _size
+from ..generated_control.models.library_resource_projection import (
+    LibraryResourceProjection,
+)
 from ..generated_control.models.model_cache_usage import ModelCacheUsage
 from .common import (
     _bytes,
@@ -31,7 +34,9 @@ class LibraryNoun(StrEnum):
 def _library_item(item: Mapping[str, object], noun: str, *, detail: bool) -> None:
     identity = _object(item.get("identity"), "identity")
     local = _object(item.get("local"), "local")
-    resources = _object(item.get("resources"), "resources")
+    resources = LibraryResourceProjection.from_dict(
+        _object(item.get("resources"), "resources")
+    )
     name = identity.get("title") if noun == "recipe" else identity.get("slug")
     _table(
         (
@@ -44,12 +49,16 @@ def _library_item(item: Mapping[str, object], noun: str, *, detail: bool) -> Non
     selector = item.get("selector")
     print(f"USE {_text(selector)}")
     _field("Usage", _words(item.get("usage")))
-    _field("Disk", _bytes(resources.get("disk_bytes")))
+    _field("Disk", _bytes(resources.disk_bytes))
     if noun == LibraryNoun.MODEL:
         raw_usage = _optional(item.get("cache_usage"), "cache_usage")
         if raw_usage:
             _model_storage_note(ModelCacheUsage.from_dict(raw_usage))
-    _field("Memory", _bytes(resources.get("memory_bytes")))
+    _field("Memory", _bytes(resources.memory_bytes))
+    if isinstance(resources.load_peak_bytes, int):
+        _field("Load peak", _bytes(resources.load_peak_bytes))
+    if isinstance(resources.minimum_swap_bytes, int):
+        _field("Minimum swap", _bytes(resources.minimum_swap_bytes))
     if noun == "recipe":
         assessment = _optional(item.get("assessment"), "assessment")
         if assessment:
