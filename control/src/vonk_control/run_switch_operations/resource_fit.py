@@ -13,6 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
     ReservationState,
+    ResourceBlockerCode,
     RunSwitchCode,
 )
 from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
@@ -33,6 +34,7 @@ from ..lifecycle.evidence import (
     BookkeepingReason,
     retire_as_unknown,
 )
+from ..load_swap import swap_capacity
 from ..memory_reservations import (
     memory_reservations,
 )
@@ -55,6 +57,7 @@ from ..resource_planning import (
     memory_capacity_snapshot,
     memory_requirement,
     plan_capacity,
+    stop_can_clear_swap,
 )
 from ..run_admission import (
     allocate_service_port,
@@ -74,6 +77,7 @@ from ..run_switch_contract import (
 from ..spark_disk import spark_free_bytes
 from ..unused_storage_collection import spark_eviction_capacity
 from .build_helpers import _recipe_model_digests
+from .constants import _SWAP_BEYOND_STOP_COMPONENT, _SWAP_COMPONENT
 from .planning_helpers import (
     PlanInventory,
     _as_reason,
@@ -303,6 +307,12 @@ class ResourceFitMixin:
                             kept_run_ids=kept_run_ids,
                             observed_at=snapshot.observed_at if snapshot else None,
                         )
+                        swap = swap_capacity(
+                            session,
+                            item.node_id,
+                            snapshot.host_settings if snapshot else None,
+                            excluded_run_ids=excluded_run_ids,
+                        )
                         capacity = memory_capacity_snapshot(
                             item.node_id,
                             memory_need.kind,
@@ -334,6 +344,7 @@ class ResourceFitMixin:
                             )
                             if snapshot
                             else None,
+                            swap=swap,
                         )
                         capacity_totals = [
                             part.available_bytes for part in capacity.components
@@ -420,6 +431,20 @@ class ResourceFitMixin:
                                 and snapshot.memory_pool == "shared"
                                 else component
                                 for component in fit_node.insufficient_components
+                            )
+                        if health_reason is None and any(
+                            reason.code == ResourceBlockerCode.INSUFFICIENT_SWAP
+                            for reason in fit_node.reasons
+                        ):
+                            insufficient_components_by_node[item.node_id] = (
+                                insufficient_components_by_node.get(
+                                    item.node_id, frozenset()
+                                )
+                                | {
+                                    _SWAP_COMPONENT
+                                    if stop_can_clear_swap(demand, swap)
+                                    else _SWAP_BEYOND_STOP_COMPONENT
+                                }
                             )
                         # A failed GPU discovery is a platform wait, not proof
                         # that this recipe exceeds the physical memory pool.

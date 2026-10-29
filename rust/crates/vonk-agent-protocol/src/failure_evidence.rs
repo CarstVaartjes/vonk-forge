@@ -17,6 +17,14 @@ pub const OOM_KILLED_FIELD: &str = "oom_killed";
 
 /// How many preflight properties a diagnostics document holds (its wire bound).
 pub const MAX_PREFLIGHT_PROPERTIES: usize = 8;
+/// The longest value one failure property carries (the wire contract's bound).
+pub const FAILURE_PROPERTY_VALUE_CHARS: usize = 256;
+/// A process-exit summary's bound on the helper's reply.
+pub const EXIT_SUMMARY_CHARS: usize = 480;
+/// A host-memory-guard summary is all facts, each its own failure property:
+/// bounded by those properties, not cut at EXIT_SUMMARY_CHARS.
+pub const HOST_MEMORY_SUMMARY_CHARS: usize =
+    MAX_PREFLIGHT_PROPERTIES * (64 + 2 + FAILURE_PROPERTY_VALUE_CHARS);
 
 /// Why a container exited, as a stable token the Controller can show and
 /// group. The helper names it; the agent decides by it.
@@ -116,7 +124,7 @@ impl FailureDiagnostics {
                 && values.iter().all(|value| {
                     !value.name.is_empty()
                         && value.name.chars().count() <= 64
-                        && value.value.chars().count() <= 256
+                        && value.value.chars().count() <= FAILURE_PROPERTY_VALUE_CHARS
                 })
         };
         let valid = serde_json::to_vec(self).is_ok_and(|bytes| bytes.len() <= 16 * 1024)
@@ -136,7 +144,7 @@ impl FailureDiagnostics {
             && self
                 .collector_errors
                 .iter()
-                .all(|value| value.chars().count() <= 256);
+                .all(|value| value.chars().count() <= FAILURE_PROPERTY_VALUE_CHARS);
         if valid {
             Ok(())
         } else {

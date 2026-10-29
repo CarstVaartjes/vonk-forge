@@ -203,7 +203,10 @@ pub fn exit_facts(text: &str) -> impl Iterator<Item = (&str, &str)> {
         .split_whitespace()
         .filter_map(|token| token.split_once('='))
         .filter(|(key, value)| {
-            matches!(
+            use vonk_agent_protocol::host_memory_guard_policy::{
+                PRESSURE_PROPERTY, RECENT_PROPERTY,
+            };
+            (matches!(
                 *key,
                 "exit_code"
                     | EXIT_CAUSE_FIELD
@@ -214,15 +217,16 @@ pub fn exit_facts(text: &str) -> impl Iterator<Item = (&str, &str)> {
                     | "memory_full_avg10"
                     | "sustained_ms"
                     | "observed_at"
-                    | "pressure_started_at"
-            ) && value.chars().all(|c| {
-                c.is_ascii_alphanumeric()
-                    || c == '_'
-                    || c == '-'
-                    || c == '.'
-                    || c == ':'
-                    || c == '+'
-            })
+            ) || *key == PRESSURE_PROPERTY
+                || *key == RECENT_PROPERTY)
+                && value.chars().all(|c| {
+                    c.is_ascii_alphanumeric()
+                        || c == '_'
+                        || c == '-'
+                        || c == '.'
+                        || c == ':'
+                        || c == '+'
+                })
         })
 }
 
@@ -780,6 +784,21 @@ pub fn collect(phase: &str, code: &str, stdout: &[u8], stderr: &[u8]) -> Failure
     evidence
 }
 
+/// The diagnostics of a stopped run whose inspection answered with the host
+/// memory guard's receipt (its sanitized summary), or `None` for any other.
+pub fn host_memory_receipt(summary: &str) -> Option<FailureDiagnostics> {
+    (ExitCause::of_summary(summary) == Some(ExitCause::HostMemoryExhausted)).then(|| {
+        from_failure(
+            &AgentOperation::RecipeStart,
+            &Failure::new(
+                vonk_agent_protocol::generated::FailureCode::WorkloadHostMemoryExhausted.as_str(),
+            )
+            .diagnostic(summary)
+            .exit_summary(Some(summary)),
+        )
+    })
+}
+
 pub fn from_failure(operation: &AgentOperation, failure: &Failure) -> FailureDiagnostics {
     let phase = failure
         .stage
@@ -833,7 +852,13 @@ fn exit_properties(failure: &Failure) -> Vec<FailureProperty> {
             value: value.chars().take(256).collect(),
         })
     };
-    if let Some(text) = failure.diagnostic.as_deref() {
+    // The helper's whole exit summary when the failure kept one: the wire
+    // diagnostic is a bounded copy that can cut its facts.
+    if let Some(text) = failure
+        .exit_summary
+        .as_deref()
+        .or(failure.diagnostic.as_deref())
+    {
         for (key, value) in exit_facts(text) {
             push(key, value.to_owned());
         }

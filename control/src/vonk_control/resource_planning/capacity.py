@@ -3,10 +3,18 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from dataclasses import replace
 
 from vonk_agent_protocol import (
     ResourceBlockerCode,
     ResourcePlanningCode,
+)
+from vonk_agent_protocol.swap import (
+    GIB,
+    SWAP_POLICY,
+    swap_needed_bytes,
+    swap_reaches,
+    usable_swap_bytes,
 )
 from vonk_forge_contracts.memory_admission import evaluate_memory_admission
 
@@ -18,6 +26,7 @@ from .types import (
     PlannedStopRelease,
     ResourceDemand,
     ResourceReason,
+    SwapCapacity,
     UnknownRunMemoryResidual,
 )
 
@@ -141,7 +150,124 @@ def _never_fits_detail(
     return None
 
 
+def _load_swap_reason(
+    node_id: str, demand: ResourceDemand, capacity: CapacitySnapshot | None
+) -> ResourceReason | None:
+    """Whether swap can carry this load's rise above its steady demand.
+
+    Swap left usable within the host memory guard's margins must hold the
+    rise plus what other ranks still loading on this Spark hold. A rise no
+    swap setting can hold never fits; any other shortfall is a wait.
+    """
+
+    rise = demand.load_overshoot_bytes
+    minimum = demand.minimum_swap_bytes
+    if rise <= 0 and minimum <= 0:
+        return None
+    largest_setting = SWAP_POLICY.maximum_gib * GIB
+    largest = usable_swap_bytes(largest_setting)
+    if rise > largest or not swap_reaches(largest_setting, minimum):
+        return _reason(
+            ResourceBlockerCode.DEMAND_EXCEEDS_CAPACITY,
+            f"The load rises {rise} bytes above its steady demand and needs "
+            f"{minimum} bytes of swap; the largest swap setting "
+            f"({SWAP_POLICY.maximum_gib} GiB) holds only {largest} bytes within "
+            "the host memory guard's margins, so it can never fit here.",
+            node_id=node_id,
+        )
+    if capacity is None:
+        # Unknown capacity is already the blocker.
+        return None
+    swap = capacity.swap
+    usable = usable_swap_bytes(swap.total_bytes)
+    if rise + swap.held_bytes + swap.used_bytes <= usable and swap_reaches(
+        swap.total_bytes, minimum
+    ):
+        return None
+    setting = max(swap_needed_bytes(rise + swap.used_bytes), -(-minimum // GIB) * GIB)
+    jobs = [holder.run_id for holder in swap.holders if holder.job_run]
+    if swap.desired_bytes is not None and setting > swap.desired_bytes:
+        remedy = f"Raise the Spark swap setting to at least {setting // GIB} GiB."
+    elif jobs:
+        remedy = (
+            f"It starts once job run {', '.join(jobs[:_NAMED_CLAIMS])} here stops"
+            + (
+                " and the other loads finish loading."
+                if len(jobs) < len(swap.holders)
+                else "."
+            )
+        )
+    elif swap.held_bytes:
+        remedy = "It starts once the other loads here finish loading."
+    elif swap.desired_bytes is not None and not swap_reaches(
+        swap.total_bytes, swap.desired_bytes
+    ):
+        remedy = "It starts once the Spark's swap reaches its setting."
+    else:
+        remedy = "It starts once swap in use falls."
+    setting_text = (
+        "no setting known"
+        if swap.desired_bytes is None
+        else f"setting {swap.desired_bytes} bytes"
+    )
+    return _reason(
+        ResourceBlockerCode.INSUFFICIENT_SWAP,
+        f"The load rises {rise} bytes above its steady demand and needs at "
+        f"least {minimum} bytes of swap. Swap: "
+        f"{swap.total_bytes} bytes active ({setting_text}), "
+        f"{swap.used_bytes} in use, {swap.held_bytes} held by loads still "
+        f"starting or job runs; {usable} bytes are usable within the host memory guard's "
+        f"margins. {remedy}",
+        node_id=node_id,
+    )
+
+
+def stop_can_clear_swap(demand: ResourceDemand, swap: SwapCapacity) -> bool:
+    """Whether only swap in use keeps this load out, so a stop may clear it.
+
+    ``swap`` must leave out the stopped runs' held rises (an after-stop
+    view). A stop frees at most the swap in use; a rise or other loads' held
+    rises beyond the usable swap, or too little active swap, stay a wait
+    before the stop, and the run that would be stopped keeps serving.
+    """
+
+    return demand.load_overshoot_bytes + swap.held_bytes <= usable_swap_bytes(
+        swap.total_bytes
+    ) and swap_reaches(swap.total_bytes, demand.minimum_swap_bytes)
+
+
 def plan_capacity(
+    requirements: Mapping[str, ResourceDemand],
+    capacities: Sequence[CapacitySnapshot],
+    planned_stops: Sequence[PlannedStopRelease] = (),
+    *,
+    memory_floor_bytes: int = 0,
+) -> CapacityPlan:
+    """The steady demand against memory, then the load's rise against swap."""
+
+    memory = _plan_memory_capacity(
+        requirements, capacities, planned_stops, memory_floor_bytes=memory_floor_bytes
+    )
+    by_node = {item.node_id: item for item in capacities}
+    nodes: list[NodeCapacityPlan] = []
+    swap_reasons: list[ResourceReason] = []
+    for node in memory.nodes:
+        reason = _load_swap_reason(
+            node.node_id, requirements[node.node_id], by_node.get(node.node_id)
+        )
+        if reason is not None:
+            swap_reasons.append(reason)
+            node = replace(node, allowed=False, reasons=(*node.reasons, reason))
+        nodes.append(node)
+    return CapacityPlan(
+        tuple(nodes),
+        memory.allowed and not swap_reasons,
+        memory.stop_before_prepare,
+        (*memory.reasons, *swap_reasons),
+    )
+
+
+def _plan_memory_capacity(
     requirements: Mapping[str, ResourceDemand],
     capacities: Sequence[CapacitySnapshot],
     planned_stops: Sequence[PlannedStopRelease] = (),
@@ -194,7 +320,7 @@ def plan_capacity(
         available = capacity.available_bytes
         if capacity.components:
             parts = [
-                plan_capacity(
+                _plan_memory_capacity(
                     {node_id: demand},
                     [part],
                     planned_stops,

@@ -45,6 +45,9 @@ pub struct Failure {
     pub retry_after_seconds: Option<u32>,
     pub stage: Option<FailureStage>,
     pub diagnostic: Option<String>,
+    /// The helper's whole process-exit summary, whose typed facts become the
+    /// diagnostics' properties; `diagnostic` is its bounded wire copy.
+    pub exit_summary: Option<String>,
     pub model_store_layout: Option<vonk_agent_protocol::generated::ModelStoreLayoutFault>,
     /// The page-cache drops made while the failed workload started.
     pub page_cache: Option<vonk_agent_protocol::generated::PageCacheDropEvidence>,
@@ -67,6 +70,7 @@ impl Failure {
             retry_after_seconds: None,
             stage: None,
             diagnostic: None,
+            exit_summary: None,
             model_store_layout: None,
             page_cache: None,
             helper_error_code: None,
@@ -100,6 +104,11 @@ impl Failure {
 
     pub fn diagnostic(mut self, diagnostic: impl Into<String>) -> Self {
         self.diagnostic = Some(diagnostic.into());
+        self
+    }
+
+    pub fn exit_summary(mut self, summary: Option<&str>) -> Self {
+        self.exit_summary = summary.map(str::to_owned);
         self
     }
 

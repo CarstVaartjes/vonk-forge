@@ -50,18 +50,27 @@ message. Known acceptance credentials are redacted before excerpts are bounded.
 
 ## GB10 host memory safety
 
-The privileged Spark agent helper samples host MemAvailable and memory PSI every
-250 ms independently of workload commands. It follows only new kernel journal
-records. `full avg10 > 30%` sustained for three seconds while MemAvailable is below
-16 GiB, or MemAvailable below 256 MiB sustained for three seconds triggers a safety
-stop; full PSI with more memory available is treated as a load reclaiming page cache
-(kits that run below 16 GiB keep the plain three-second PSI rule). An NVIDIA
-`NVRM: Out of memory [NV_ERR_NO_MEMORY]` line stops at once when the same sample
-shows MemAvailable below 256 MiB, or once that sustained full PSI holds (the line alone, or with a brief PSI spike during a normal load, is
-non-fatal on GB10). The 2026-10-13 wedge (about 10-15 GB available) is still covered;
-no MemAvailable record exists for the 2026-10-07 freeze. Low MemFree alone never
-triggers it. Policy constants live in `host_memory_guard_policy.rs`; the evidence
-is the 2026-10-07 spark-3542 freeze and the 2026-10-08 GB10 OOM research.
+The privileged Spark agent helper samples MemAvailable, MemFree, swap, memory PSI
+(full avg10/avg60) and the swap-in, swap-out and refault counters every 250 ms,
+independently of workload commands, and follows only new kernel journal records.
+Swap is a load-time cushion: a load that swaps steadily is never stopped. The
+swap-aware policy (owner approved 2026-10-28) stops managed workloads when:
+R1 MemAvailable < 1 GiB and free swap < max(2 GiB, 10% of swap) for 2 s (no
+swap: MemAvailable < 256 MiB for 3 s); R2 swap > 90% used, still swapping out,
+MemAvailable < 4 GiB for 3 s; R3 swap-ins plus refaults ≥ 50k pages/s with full
+avg10 > 60% and MemAvailable + free swap < 8 GiB for 10 s; R4 full avg10 > 60%
+for 30 s while serving, or full avg60 > 80% and not falling for 60 s while a load
+runs (the agent's page-cache drop cadence marks a loading Spark). An NVIDIA
+`NVRM: Out of memory [NV_ERR_NO_MEMORY]` line (R5, non-fatal alone on GB10)
+stops only together with R1's or R3's condition or MemFree < 1 GiB, held
+for 2 s like R1 (never one sample). There is no per-sample MemAvailable bar.
+Every stop's evidence carries, within the eight failure properties the agent
+keeps: the trigger, MemAvailable and full avg10, `pressure_readings` (MemFree,
+swap, full avg60, swap and refault rates), `sustained_ms`, `recent_samples`
+(the last six samples, one per second) and `observed_at`. The thresholds live in
+`host_memory_guard_policy.rs`, marked calibratable; the evidence is the
+2026-10-07 spark-3542 freeze, the 2026-10-08 GB10 OOM research and the
+systemd-oomd, oomd and earlyoom defaults.
 
 The helper verifies the exact agent-managed container identity, SIGKILLs its
 own process group when that group can be proved to belong to the container,

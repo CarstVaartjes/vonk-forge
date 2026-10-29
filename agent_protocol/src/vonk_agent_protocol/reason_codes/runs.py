@@ -135,6 +135,7 @@ class RunSwitchCode(WireEnum):
     RESOURCE_INSUFFICIENT_RESERVATION_BUDGET = (
         "run-switch.resource.insufficient_reservation_budget"
     )
+    RESOURCE_INSUFFICIENT_SWAP = "run-switch.resource.insufficient_swap"
     RESOURCE_RESIDENT_USAGE_UNKNOWN = "run-switch.resource.resident_usage_unknown"
     RUN_NOT_ACTIVE = "run-switch.run-not-active"
     RUN_ADMISSION_BLOCKED = "run-switch.run_admission_blocked"

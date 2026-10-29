@@ -432,7 +432,11 @@ class RunPlanningMixin:
                                 # installs and excludes only exact reviewed stops.
                                 continue
                             if (
-                                reason.code == RunAdmissionCode.INSUFFICIENT_MEMORY
+                                reason.code
+                                in {
+                                    RunAdmissionCode.INSUFFICIENT_MEMORY,
+                                    RunAdmissionCode.INSUFFICIENT_SWAP,
+                                }
                                 and resource_fits.post_stop_memory_check is not None
                             ):
                                 # The reviewed exact stops require a fresh

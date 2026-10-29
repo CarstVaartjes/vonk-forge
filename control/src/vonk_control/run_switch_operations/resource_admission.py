@@ -38,6 +38,8 @@ from .build_helpers import _refreshed_freshness
 from .constants import (
     _MEMORY_CAPACITY_REFUSALS,
     _MEMORY_STOP_CONDITIONAL_REFUSALS,
+    _SWAP_BEYOND_STOP_COMPONENT,
+    _SWAP_COMPONENT,
     _active_recipe_revision,
 )
 from .errors import RunSwitchRequestInvalid
@@ -242,8 +244,10 @@ class ResourceAdmissionMixin:
                     for reason in after_stop.blockers
                 )
                 memory_shortfalls = {
-                    node_id: current_memory_shortfalls.get(node_id, frozenset())
-                    | after_stop_memory_shortfalls.get(node_id, frozenset())
+                    node_id: _with_after_stop_swap(
+                        current_memory_shortfalls.get(node_id, frozenset()),
+                        after_stop_memory_shortfalls.get(node_id, frozenset()),
+                    )
                     for node_id in set(current_memory_shortfalls)
                     | set(after_stop_memory_shortfalls)
                 }
@@ -313,6 +317,23 @@ class ResourceAdmissionMixin:
             kept,
             already_kept,
         )
+
+
+def _with_after_stop_swap(
+    current: frozenset[str], after_stop: frozenset[str]
+) -> frozenset[str]:
+    """One node's shortfalls, with the swap judged as it stands after the stop.
+
+    The current fit still counts the stopped runs' held rises; whether a stop
+    can clear a swap shortfall is the after-stop fit's judgement. One the stop
+    removes entirely is cleared by it.
+    """
+
+    swap = {_SWAP_COMPONENT, _SWAP_BEYOND_STOP_COMPONENT}
+    merged = (current - swap) | after_stop
+    if current & swap and not after_stop & swap:
+        merged |= {_SWAP_COMPONENT}
+    return frozenset(merged)
 
 
 def _serves_as_kept_run(

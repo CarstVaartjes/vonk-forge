@@ -131,8 +131,13 @@ class ResourceEvidence:
     evidence_digest: str | None = None
     declared_total_bytes: int | None = None
     #: The highest attributed use of earlier runs of this exact recipe content
-    #: on this memory kind. It only ever raises the declared bound.
+    #: on this memory kind, over their whole run (load included). It bounds
+    #: the load only, never the steady demand.
     observed_total_bytes: int | None = None
+    #: The recipe's declared load peak above its steady peak (0 when none).
+    declared_load_rise_bytes: int = 0
+    #: The host swap the recipe needs to finish its load (0 when none).
+    minimum_swap_bytes: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -145,6 +150,12 @@ class ResourceDemand:
     total_bytes: int | None
     evidence_state: EvidenceState
     reasons: tuple[ResourceReason, ...] = ()
+    #: How far the load phase may rise above the steady ``total_bytes``: the
+    #: whole-run observed peak above it. Swap carries it, never the memory
+    #: reservation.
+    load_overshoot_bytes: int = 0
+    #: The active swap a Spark must have before this load starts.
+    minimum_swap_bytes: int = 0
 
     @property
     def allowed(self) -> bool:
@@ -212,6 +223,43 @@ class MemoryRequirement:
 
 
 @dataclass(frozen=True, slots=True)
+class SwapHolder:
+    """One run on the Spark whose admitted load rise still holds swap."""
+
+    run_id: str
+    held_bytes: int
+    #: A one-shot job run holds its rise while it is active (each job loads
+    #: again); any other run only while its rank is planned or starting.
+    job_run: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class SwapCapacity:
+    """The swap a Spark can lend a load phase; unknown swap is none.
+
+    Swap is a load-time cushion, never memory capacity: only the rise of a
+    load above its steady demand is checked against it.
+    """
+
+    #: Active swap as the agent reports it (0 when unreported).
+    total_bytes: int = 0
+    used_bytes: int = 0
+    #: The other runs on this Spark whose admitted rise still holds swap:
+    #: ranks still planned or starting, and active one-shot job runs.
+    holders: tuple[SwapHolder, ...] = ()
+    #: The Spark's swap setting, for the remedy (``None`` when unknown).
+    desired_bytes: int | None = None
+
+    @property
+    def held_bytes(self) -> int:
+        return sum(holder.held_bytes for holder in self.holders)
+
+
+#: No swap reported.
+NO_SWAP = SwapCapacity()
+
+
+@dataclass(frozen=True, slots=True)
 class CapacitySnapshot:
     node_id: str
     memory_kind: str
@@ -233,6 +281,7 @@ class CapacitySnapshot:
     #: How much more the Spark reported free over the last stall window than in
     #: this sample: the host's own use moving, not capacity to admit against.
     free_upside_bytes: int = 0
+    swap: SwapCapacity = NO_SWAP
 
 
 @dataclass(frozen=True, slots=True)

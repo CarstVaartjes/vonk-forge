@@ -11,14 +11,16 @@ use std::{
     path::Path,
     sync::{Mutex, mpsc},
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use vonk_agent_protocol::generated::{
     PageCacheDropProblem, PageCacheDropReport, PageCacheDropRequest, PageCacheSync,
     ResourceTermProblem,
 };
-use vonk_agent_protocol::host_memory_guard_policy::PAGE_CACHE_SYNC_TIMEOUT;
+use vonk_agent_protocol::host_memory_guard_policy::{
+    LOADING_PHASE_WINDOW, PAGE_CACHE_SYNC_TIMEOUT,
+};
 
 use crate::host_memory_guard::meminfo_bytes;
 use crate::protocol::{GrantVerifier, HelperError, PeerIdentity};
@@ -161,6 +163,33 @@ pub fn drop_page_cache(
     report
 }
 
+/// The last authorized drop ask: the agent asks before each container start and
+/// every PAGE_CACHE_DROP_INTERVAL while any run loads, so this cadence is the
+/// one owner of "a load is in progress" for the host memory guard.
+static LAST_LOAD_ASK: Mutex<Option<Instant>> = Mutex::new(None);
+
+fn record_load_ask(now: Instant) {
+    let mut last = LAST_LOAD_ASK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    *last = Some(last.map_or(now, |previous| previous.max(now)));
+}
+
+/// Whether a load asked within `LOADING_PHASE_WINDOW`. A silent agent (dead,
+/// restarted) reads as serving: the stricter backstop.
+pub fn loading(now: Instant) -> bool {
+    loading_since(
+        *LAST_LOAD_ASK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()),
+        now,
+    )
+}
+
+fn loading_since(last: Option<Instant>, now: Instant) -> bool {
+    last.is_some_and(|ask| now.saturating_duration_since(ask) <= LOADING_PHASE_WINDOW)
+}
+
 /// The agent peer's drop frame, or `None` for any other frame.
 pub fn handle(
     raw: &[u8],
@@ -171,12 +200,17 @@ pub fn handle(
         return Ok(None);
     };
     verifier.authorize_peer(peer)?;
-    Ok(Some(drop_page_cache(
+    // Heard at the ask and again at its answer: a slow drop never reads as a
+    // finished load.
+    record_load_ask(Instant::now());
+    let report = drop_page_cache(
         Path::new("/"),
         &SYNC,
         PAGE_CACHE_SYNC_TIMEOUT,
         request.request_id,
-    )))
+    );
+    record_load_ask(Instant::now());
+    Ok(Some(report))
 }
 
 #[cfg(test)]
@@ -188,6 +222,23 @@ mod tests {
         sync::atomic::{AtomicBool, AtomicUsize, Ordering},
         time::Instant,
     };
+
+    #[test]
+    fn the_drop_cadence_marks_a_load_until_it_falls_silent() {
+        let ask = Instant::now();
+        assert!(!loading_since(None, ask));
+        assert!(loading_since(Some(ask), ask + LOADING_PHASE_WINDOW));
+        assert!(!loading_since(
+            Some(ask),
+            ask + LOADING_PHASE_WINDOW + Duration::from_millis(1)
+        ));
+        // The agent's longest healthy gap (its interval after an answer that
+        // took the whole reply bound) stays inside the window.
+        use vonk_agent_protocol::host_memory_guard_policy::{
+            PAGE_CACHE_DROP_INTERVAL, PAGE_CACHE_DROP_REPLY_TIMEOUT,
+        };
+        assert!(LOADING_PHASE_WINDOW > PAGE_CACHE_DROP_INTERVAL + PAGE_CACHE_DROP_REPLY_TIMEOUT);
+    }
 
     const MEMINFO: &str =
         "MemTotal: 129170372 kB\nMemAvailable: 110000000 kB\nCached: 13493384 kB\n";

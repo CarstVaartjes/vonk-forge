@@ -67,7 +67,7 @@ pub(super) fn require_executed_outcome(
     Ok(())
 }
 
-pub(super) fn runtime_rejection(
+pub(crate) fn runtime_rejection(
     response: &HelperResponse,
     action: HostRuntimeAction,
 ) -> HostRuntimeError {
