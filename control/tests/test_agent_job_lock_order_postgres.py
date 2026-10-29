@@ -325,36 +325,54 @@ def test_revocation_between_hint_and_lock_stays_fail_closed(queue, postgres_engi
         event.remove(postgres_engine, "before_cursor_execute", hook)
 
 
-def test_dual_node_enqueues_follow_claim_lock_order(queue, postgres_engine):
+@pytest.mark.parametrize(
+    "acquirer_delay",
+    [0.0, 0.3],
+    ids=["concurrent", "acquirer-hook-descheduled"],
+)
+def test_dual_node_enqueues_follow_claim_lock_order(
+    queue, postgres_engine, acquirer_delay
+):
+    """A dual-node enqueue takes the first node's key; the loser refuses fast.
+
+    The held "owner" is the thread whose try-lock really returned true, never
+    the one whose hook ran first: ``acquirer-hook-descheduled`` lets the
+    acquirer's hook run 0.3 s late while the loser's try-lock (false) runs in
+    between, the order that made the old hook-order owner flaky (#1940 CI).
+    """
     sessions, parent, services, original = queue
     operation_ids = (str(uuid.uuid4()), str(uuid.uuid4()))
     expected_key = f"vonk-admission:node:{NODES[0]}"
-    first_key_owner: int | None = None
-    owner_guard = threading.Lock()
     owner_has_key = threading.Event()
     release_owner = threading.Event()
-    observed_key_threads: set[int] = set()
+    first_tried = threading.Event()
+    thread_index = threading.local()
 
     def hold_first_key_owner(
-        _connection, _cursor, statement, parameters, _context, _many
+        _connection, cursor, statement, parameters, _context, _many
     ):
-        nonlocal first_key_owner
         if "pg_try_advisory_xact_lock" not in statement:
             return
         values = parameters if isinstance(parameters, dict) else {}
         if values.get("key") != expected_key:
             return
-        thread_id = threading.get_ident()
-        with owner_guard:
-            observed_key_threads.add(thread_id)
-            if first_key_owner is None:
-                first_key_owner = thread_id
-            owns_key = thread_id == first_key_owner
-        if owns_key:
+        # Read the try-lock's own answer, then rewind for SQLAlchemy.
+        row = cursor.fetchone()
+        cursor.scroll(0, mode="absolute")
+        acquired = row is not None and row[0] is True
+        index = getattr(thread_index, "value", None)
+        if index == 0:
+            first_tried.set()
+            time.sleep(acquirer_delay)
+        if acquired:
             owner_has_key.set()
             assert release_owner.wait(timeout=10), "test did not release the key owner"
 
     def enqueue(index):
+        thread_index.value = index
+        if acquirer_delay and index == 1:
+            # Thread 0 has tried (and taken) the key; this one tries next.
+            assert first_tried.wait(timeout=10)
         try:
             with sessions.begin() as session:
                 return services[index].enqueue_in_session(
@@ -403,6 +421,8 @@ def test_dual_node_enqueues_follow_claim_lock_order(queue, postgres_engine):
         if isinstance(result, AdmissionLockBusy)
     ]
     assert len(busy_indexes) == 1
+    if acquirer_delay:
+        assert busy_indexes == [1]
     completed_index = 1 - busy_indexes[0]
     completed_result = results[completed_index]
     assert isinstance(completed_result, AgentOperation), completed_result
