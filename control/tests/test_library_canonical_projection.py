@@ -18,6 +18,7 @@ from vonk_control.catalog_revision_contract import (
     ModelRevisionProjection,
     RecipeRevisionProjection,
 )
+from vonk_control.catalog_service import CatalogService
 from vonk_control.library_api import install_library_routes
 from vonk_control.library_contract import _MAX_PAGE_RECIPES, ModelLibraryResponse
 from vonk_control.library_projection import LibraryProjection
@@ -38,11 +39,19 @@ from vonk_control.models import (
 )
 from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
 from vonk_control.strict_json import ControllerAPIRoute, serialize_json_value
-from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
+from vonk_forge_contracts import (
+    ModelDefinition,
+    RecipeDefinition,
+    document_sha256,
+    published_json,
+    read_model_display,
+    read_recipe_display,
+)
 
 from cluster_profiles.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 from tests.recipe_library_source import recipe_library_root
 
+from .display_fixtures import display_of_model, display_of_recipe
 from .runtime_image_fixtures import place_test_image
 
 ROOT = recipe_library_root()
@@ -128,6 +137,11 @@ def _insert_canonical_rows(
                 publisher=canonical.identity.publisher,
                 slug=canonical.identity.slug,
                 title=title,
+                display=published_json(
+                    display_of_model(clean)
+                    if kind == "model"
+                    else display_of_recipe(clean)
+                ),
                 created_by="test",
                 created_at=now,
                 updated_at=now,
@@ -214,6 +228,14 @@ def test_published_corpus_projects_all_models_and_exact_recipe_bindings(
         entities.resolve(revision.id, actor="test")
         recipe_ids.add(revision.document_id)
         recipe_revision_ids[row["content_sha256"]] = revision.id
+    # Library text is the published display, which sync applies per entry.
+    catalog = CatalogService(
+        sessions, clock=clock, cursors=TokenCodec(b"l" * 32).cursor_codec()
+    )
+    assert not catalog.apply_displays(
+        [read_model_display(entry["display"]) for entry in index["catalog_entities"]]
+        + [read_recipe_display(row["display"]) for row in index["recipes"]]
+    )
 
     projection = LibraryProjection(
         sessions,

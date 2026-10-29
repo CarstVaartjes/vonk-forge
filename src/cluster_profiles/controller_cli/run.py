@@ -162,9 +162,7 @@ def _resolve_run_recipe(
             }:
                 model_matches.add(selector)
     if not matches and not model_matches:
-        from ..generated_control.models.model_revision_projection import (
-            ModelRevisionProjection,
-        )
+        from ..generated_control.models.model_display import ModelDisplay
 
         for model_selector, recipes in model_recipes.items():
 
@@ -178,11 +176,13 @@ def _resolve_run_recipe(
                     raise ControlMalformedResponse(
                         "model title observation identifies another selection"
                     )
-                return ModelRevisionProjection.from_dict(
-                    validate_control_document(
-                        "ModelRevisionProjection", detail.get("projected")
-                    )
-                ).identity.model.title
+                display = detail.get("model_display")
+                if display is None:
+                    # No published display yet: there is no title to match.
+                    return ""
+                return ModelDisplay.from_dict(
+                    validate_control_document("ModelDisplay", display)
+                ).model_title
 
             title = _observe_selection(model_title, deadline=deadline)
             if title.casefold() == needle:

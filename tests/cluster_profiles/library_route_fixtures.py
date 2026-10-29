@@ -181,6 +181,7 @@ def _recipe_projection(
             recipe_document_projection(read_recipe(document.to_dict()))
         ),
         engine="vllm",
+        recipe_display=None,
         identity=LibraryRecipeIdentity(
             content_sha256="a" * 64,
             description="fixture",
@@ -200,19 +201,3 @@ def _recipe_projection(
         updated_at=datetime(2026, 10, 9, tzinfo=UTC),
         usage=[],
     ).to_dict()
-
-
-def _model_projection_fields(document):
-    """Use the producer's projection repair path for a model title fixture."""
-    from vonk_control.catalog_revision_contract import read_catalog_projection
-    from vonk_control.models import CatalogDocumentRevision
-    from vonk_control.strict_json import serialize_json_value
-    from vonk_forge_contracts import document_sha256
-
-    row = CatalogDocumentRevision(
-        kind="model",
-        document=document,
-        projected={},
-        content_digest=document_sha256(document),
-    )
-    return serialize_json_value(read_catalog_projection(row))

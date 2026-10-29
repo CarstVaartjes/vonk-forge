@@ -34,6 +34,7 @@ from ..model_cache_contract import (
 from ..models import CatalogDocumentRevision
 from .catalog import (
     _catalog_documents,
+    _document_texts,
     _documents_for_snapshot,
     _library_release,
     _model_projection,
@@ -43,6 +44,7 @@ from .catalog import (
 )
 from .common import (
     _LOCAL_STATE_PRIORITY,
+    DocumentText,
     LibraryControllerState,
     LibrarySelectorAmbiguous,
     _note_unreadable,
@@ -125,6 +127,7 @@ class LibraryProjection:
             list[tuple[CatalogDocumentRevision, RecipeRevisionProjection]],
         ] = ([], [])
         self._catalog_observed_at = self._clock()
+        self._catalog_texts: dict[str, DocumentText] = {}
         # The automatic refresh owns the first storage observation too.
         self.refresh_catalog(observe_storage=False)
 
@@ -241,13 +244,20 @@ class LibraryProjection:
 
     @staticmethod
     def _alignment_by_model(
-        recipe_documents: Iterable[RecipeDefinition | RecipeRevisionProjection],
+        recipes: Iterable[
+            tuple[
+                CatalogDocumentRevision,
+                RecipeDefinition | RecipeRevisionProjection,
+            ]
+        ],
+        texts: Mapping[str, DocumentText],
     ) -> dict[tuple[str, str], set[str]]:
         """Map each model publisher/slug to the alignments of recipes serving it."""
 
         alignments: dict[tuple[str, str], set[str]] = {}
-        for document in recipe_documents:
-            alignment = document.metadata.alignment
+        for row, document in recipes:
+            display = texts[row.document_id].recipe
+            alignment = None if display is None else display.alignment
             if alignment is None:
                 continue
             references = (
@@ -332,6 +342,7 @@ class LibraryProjection:
     refresh_catalog = refresh_catalog
     _catalog_documents = _catalog_documents
     _documents_for_snapshot = _documents_for_snapshot
+    _document_texts = _document_texts
     _recipe_facet_values = _recipe_facet_values
     models = models
     model_detail = model_detail

@@ -42,6 +42,7 @@ from vonk_control.source_policy import inspect_build_source_policy
 from tests.recipe_library_source import recipe_library_root
 from tests.signed_recipe_release import SignedRecipeRelease, signed_recipe_releases
 
+from .display_fixtures import publish_displays
 from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
 
 ROOT = recipe_library_root()
@@ -105,7 +106,7 @@ def test_canonical_synthetic_nested_source_path_lists_and_fetches(
     tmp_path: Path,
 ) -> None:
     index_path = ROOT / "tests/fixtures/canonical-synthetic-canary/index.json"
-    index = json.loads(index_path.read_text(encoding="utf-8"))
+    index = publish_displays(json.loads(index_path.read_text(encoding="utf-8")))
     row = index["recipes"][0]
     package = (ROOT / row["package"]["path"]).read_bytes()
     assert row["source_path"] == (

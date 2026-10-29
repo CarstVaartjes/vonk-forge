@@ -30,7 +30,7 @@ from vonk_control.models import (
 )
 from vonk_control.recipe_packages import load_recipe_package
 from vonk_control.source_bundles import SourceBundleStore
-from vonk_forge_contracts import document_sha256
+from vonk_forge_contracts import document_sha256, read_recipe_display
 
 from tests.recipe_library_source import recipe_library_root
 from tests.signed_recipe_release import SignedRecipeRelease, signed_recipe_releases
@@ -451,6 +451,7 @@ def test_publisher_packages_sync_as_one_active_generation_and_survive_failures(
         recipe_content_sha256=current_row["content_sha256"],
         library_commit=changed_index["source_commit"],
         source_path=current_row["source_path"],
+        display=read_recipe_display(current_row["display"]),
     )
     assert offline.release is not None
     catalog.import_recipe_library(

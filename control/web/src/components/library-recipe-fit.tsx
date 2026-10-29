@@ -42,7 +42,7 @@ export function recipeMemoryFit(detail: LibraryViewRecipeDetail): {
 export function LibraryRecipeFit({ detail }: { detail: LibraryViewRecipeDetail }) {
   const fit = recipeMemoryFit(detail);
   const title =
-    detail.model_documents[0]?.model_document.identity.model.title ?? "Model metadata unavailable";
+    detail.model_documents[0]?.model_display?.model_title ?? "Model metadata unavailable";
   const selected = selectedRecipeFiles(detail.model_documents);
   const modelBytes = selected.unresolved.length
     ? "Unknown"

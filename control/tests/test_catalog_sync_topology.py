@@ -21,6 +21,8 @@ from vonk_control.models import Base
 from vonk_control.recipe_library_types import RecipeLibraryItem, RecipeLibrarySnapshot
 from vonk_forge_contracts import document_sha256
 
+from .display_fixtures import display_of_recipe
+
 _EXAMPLES = files("vonk_forge_contracts").joinpath("examples")
 
 
@@ -40,6 +42,7 @@ def _item(document: dict[str, object]) -> RecipeLibraryItem:
         title="x",
         description="x",
         tags=(),
+        display=display_of_recipe(document),
         content_sha256=digest,
         uri=f"vonk://catalog/{identity['publisher']}/{identity['slug']}@sha256:{digest}",
         document=document,
@@ -67,6 +70,9 @@ class _Catalog:
 
     def import_catalog_models(self, actor, documents) -> int:
         return 0
+
+    def apply_displays(self, displays) -> list:
+        return []
 
     def retract_recipes_absent_from(self, published):
         return []

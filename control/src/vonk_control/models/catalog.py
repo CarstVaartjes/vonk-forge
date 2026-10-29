@@ -22,6 +22,12 @@ from sqlalchemy import (
     literal_column,
 )
 from sqlalchemy.orm import Mapped, Session, mapped_column
+from vonk_forge_contracts import (
+    ModelDisplay,
+    RecipeDisplay,
+    read_model_display,
+    read_recipe_display,
+)
 
 from ..exact_integer_storage import DecimalIntegerToken, ExactNonnegativeInteger
 from ..model_primitives import Base, _lower_hex
@@ -92,6 +98,9 @@ class CatalogDocument(Base):
     publisher: Mapped[str] = mapped_column(String(63), nullable=False, index=True)
     slug: Mapped[str] = mapped_column(String(63), nullable=False, index=True)
     title: Mapped[str] = mapped_column(String(120), nullable=False)
+    #: The published display (RecipeDisplay or ModelDisplay) as the signed index
+    #: carried it; null until the first sync after the column was added.
+    display: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_by: Mapped[str] = mapped_column(String(200), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
@@ -99,6 +108,12 @@ class CatalogDocument(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, index=True
     )
+
+    def recipe_display(self) -> RecipeDisplay | None:
+        return None if self.display is None else read_recipe_display(self.display)
+
+    def model_display(self) -> ModelDisplay | None:
+        return None if self.display is None else read_model_display(self.display)
 
 
 class CatalogDocumentRevision(Base):

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from typing import TYPE_CHECKING, cast
 
 from sqlalchemy import and_, or_, select
@@ -30,10 +30,17 @@ from ..model_cache_contract import (
     CacheManifest,
     ModelStorageSnapshot,
 )
-from ..models import CatalogDocumentRevision, ModelCacheSet, RecipeLibrarySyncRun
+from ..models import (
+    CatalogDocument,
+    CatalogDocumentRevision,
+    ModelCacheSet,
+    RecipeLibrarySyncRun,
+)
 from ..operator_receipt_contract import ReceiptOwner
 from ..stored_json import read_row_column
 from .common import (
+    DocumentText,
+    _document_text,
     _model_identity,
     _readable_document,
     _recipe_creator,
@@ -73,6 +80,7 @@ def _model_projection(
     revision: CatalogDocumentRevision,
     document: ModelDefinition | ModelRevisionProjection,
     snapshot: Mapping[str, LibraryLocalState] | None,
+    text: DocumentText,
     alignment: Sequence[str] = (),
     storage: ModelStorageSnapshot | None = None,
 ) -> LibraryModelProjection:
@@ -86,6 +94,7 @@ def _model_projection(
         projected=document
         if isinstance(document, ModelRevisionProjection)
         else cast(ModelRevisionProjection, read_catalog_projection(revision)),
+        model_display=text.model,
         family=self.selector(
             document.identity.family.publisher, document.identity.family.slug
         ),
@@ -109,6 +118,7 @@ def _recipe_projection(
     document: RecipeDefinition | RecipeRevisionProjection,
     model_by_key: Mapping[str, ModelDefinition | ModelRevisionProjection],
     snapshot: Mapping[str, LibraryLocalState] | None,
+    text: DocumentText,
 ) -> LibraryRecipeProjection:
     projected = (
         document
@@ -136,9 +146,10 @@ def _recipe_projection(
             publisher=document.identity.publisher,
             slug=document.identity.slug,
             content_sha256=revision.content_digest,
-            title=document.metadata.title,
-            description=document.metadata.description,
+            title=text.title,
+            description=text.description,
         ),
+        recipe_display=text.recipe,
         projected=projected.model_copy(
             update={
                 "build_resources": None,
@@ -157,11 +168,27 @@ def _recipe_projection(
             revision.content_digest, kind=ReceiptOwner.RECIPE, snapshot=snapshot
         ),
         updated_at=_utc(revision.created_at),
-        alignment=document.metadata.alignment,
+        alignment=None if text.recipe is None else text.recipe.alignment,
         node_count=document.topology.node_count,
         engine=projected.runtime_engine,
         creator=_recipe_creator(document),
     )
+
+
+def _document_texts(
+    self: LibraryProjection, revisions: Iterable[CatalogDocumentRevision]
+) -> dict[str, DocumentText]:
+    """The library text of the documents the revisions belong to, from memory.
+
+    The texts are read with the catalog snapshot by the background refresh, so
+    a request does no catalog read. A document first seen after the last
+    refresh shows its slug until the next one.
+    """
+    return {
+        row.document_id: self._catalog_texts.get(row.document_id)
+        or DocumentText(title=row.slug)
+        for row in revisions
+    }
 
 
 def _catalog_documents[T](
@@ -258,6 +285,11 @@ def refresh_catalog(self: LibraryProjection, *, observe_storage: bool = True) ->
             projection_only=True,
         ),
     )
+    with self._sessions() as session:
+        self._catalog_texts = {
+            row.id: _document_text(row)
+            for row in session.scalars(select(CatalogDocument))
+        }
     self._catalog_snapshot = snapshot
     self._catalog_observed_at = self._clock()
     if observe_storage:

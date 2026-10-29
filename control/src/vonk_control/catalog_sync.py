@@ -29,7 +29,7 @@ from vonk_agent_protocol import (
     WaitReason,
     canonical_message,
 )
-from vonk_forge_contracts import document_sha256
+from vonk_forge_contracts import RecipeDisplay, document_sha256
 
 from .admission_locking import ConstraintReplan, ConstraintReplay, admitting
 from .capabilities import CapabilityUnavailableError
@@ -577,8 +577,8 @@ class ManagedRecipeCatalogSyncService:
             ):
                 return False
         with self._sessions() as session:
-            for document in snapshot.catalog_entities:
-                digest = document_sha256(document)
+            for entry in snapshot.catalog_entities:
+                digest = document_sha256(entry.document)
                 row = session.scalar(
                     select(CatalogDocumentRevision)
                     .join(
@@ -683,9 +683,9 @@ class ManagedRecipeCatalogSyncService:
         # Catalog index entries are independent immutable documents. Import each
         # in its own transaction so one malformed model cannot hold up recipes
         # and models that are otherwise ready to apply.
-        for model_document in snapshot.catalog_entities:
+        for model_entry in snapshot.catalog_entities:
             try:
-                self._catalog.import_catalog_models(actor, [model_document])
+                self._catalog.import_catalog_models(actor, [model_entry.document])
             except Exception as error:  # noqa: BLE001 - isolate document failures; cancellation still propagates
                 self._record_problem_values(
                     result,
@@ -791,6 +791,22 @@ class ManagedRecipeCatalogSyncService:
                     )
             if not self._progress(run_id, result):
                 return None
+        # Library text is one pass over the whole snapshot: a single read, then a
+        # write for each document whose text changed. A failed write is that
+        # document's problem; the next sync applies it again.
+        recipe_uris = {(item.publisher, item.slug): item.uri for item in snapshot.items}
+        for display, error in self._catalog.apply_displays(
+            [entry.display for entry in snapshot.catalog_entities]
+            + [item.display for item in snapshot.items]
+        ):
+            self._record_problem_values(
+                result,
+                uri=recipe_uris.get((display.identity.publisher, display.identity.slug))
+                if isinstance(display, RecipeDisplay)
+                else None,
+                code=str(getattr(error, "code", CatalogSyncCode.ITEM_FAILED)),
+                detail=str(getattr(error, "detail", str(error))),
+            )
         # Newest only: a recipe the published library no longer lists stops
         # being offered.  Installed and running revisions are untouched.  A
         # snapshot with skipped documents or no recipes may be incomplete, so

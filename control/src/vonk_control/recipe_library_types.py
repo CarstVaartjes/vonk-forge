@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING
 
+from vonk_forge_contracts import ModelDisplay, RecipeDisplay
+
 if TYPE_CHECKING:
     from .catalog_revision_contract import PrebuiltImage
     from .catalog_sync_contract import ManagedCatalogSyncProblem
@@ -49,6 +51,7 @@ class RecipeLibraryItem:
     title: str
     description: str
     tags: tuple[str, ...]
+    display: RecipeDisplay
     content_sha256: str
     uri: str
     document: dict[str, object]
@@ -77,6 +80,7 @@ class RecipePackageEntry:
     title: str
     description: str
     tags: tuple[str, ...]
+    display: RecipeDisplay
     #: The published recipe document, carried as published: its digest is over
     #: exactly these JSON values and is verified where it is imported.
     document: dict[str, object]
@@ -85,11 +89,19 @@ class RecipePackageEntry:
 
 
 @dataclass(frozen=True, slots=True)
+class CatalogModelEntry:
+    """One index Model: the signed document and the display that travels with it."""
+
+    document: dict
+    display: ModelDisplay
+
+
+@dataclass(frozen=True, slots=True)
 class RecipeLibrarySnapshot:
     commit: str
     items: tuple[RecipeLibraryItem, ...]
     repository: str = "CarstVaartjes/vonk-forge-recipes"
-    catalog_entities: tuple[dict[str, object], ...] = ()
+    catalog_entities: tuple[CatalogModelEntry, ...] = ()
     # Index documents skipped because they could not be read, each a sync problem.
     problems: tuple[ManagedCatalogSyncProblem, ...] = ()
     # The library release version (its contract version) and when its
@@ -99,6 +111,7 @@ class RecipeLibrarySnapshot:
 
 
 __all__ = [
+    "CatalogModelEntry",
     "RecipeLibraryError",
     "RecipeLibraryItem",
     "RecipeLibraryRelease",

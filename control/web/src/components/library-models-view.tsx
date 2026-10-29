@@ -483,8 +483,8 @@ function ModelRevisionsRow({
 
 function modelTitle(model: LibraryViewModel): string {
   return (
-    model.model_document.identity.model.title ||
-    model.model_document.identity.family.title ||
+    model.model_display?.model_title ||
+    model.model_display?.family_title ||
     `${model.model.publisher}/${model.model.slug}`
   );
 }

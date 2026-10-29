@@ -10,7 +10,7 @@ import re
 import shutil
 import tarfile
 import tempfile
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
@@ -22,16 +22,24 @@ from vonk_agent_protocol import RecipePackageCode
 from vonk_forge_contracts import (
     CONTRACT_MAJOR,
     ModelDefinition,
+    ModelDisplay,
     RecipeDefinition,
+    RecipeDisplay,
     document_sha256,
     read_model,
+    read_model_display,
     read_recipe,
+    read_recipe_display,
+    require_display_of,
 )
+from vonk_forge_contracts.model import ModelIdentity
+from vonk_forge_contracts.recipe import RecipeIdentity
 from vonk_forge_contracts.resolver import validate_recipe_models
 
 from ..catalog_revision_contract import read_prebuilt_image
 from ..catalog_sync_contract import ManagedCatalogSyncProblem
 from ..recipe_library_types import (
+    CatalogModelEntry,
     RecipeLibraryError,
     RecipeLibraryItem,
     RecipeLibraryRelease,
@@ -613,7 +621,7 @@ class RecipePackageClient:
                 RecipePackageCode.RESPONSE_INVALID,
                 "recipe package index identity is invalid",
             )
-        catalog_entities: list[dict[str, object]] = []
+        catalog_entities: list[CatalogModelEntry] = []
         identities: set[tuple[str, str]] = set()
         # Each model and recipe document is validated on its own: one document
         # this Controller's contract cannot read (for example from a newer
@@ -637,6 +645,17 @@ class RecipePackageClient:
                     )
                 )
                 continue
+            try:
+                model_display = _entry_display(
+                    entry, model.identity, read_model_display
+                )
+            except (TypeError, ValueError) as error:
+                problems.append(
+                    _index_problem(
+                        None, "catalog model display is invalid", entry, error
+                    )
+                )
+                continue
             digest = entry.get("content_sha256")
             if not isinstance(digest, str) or not _SHA256.fullmatch(digest):
                 problems.append(
@@ -650,7 +669,11 @@ class RecipePackageClient:
                     "catalog model identity is duplicated",
                 )
             identities.add(identity)
-            catalog_entities.append(dict(entry["document"]))
+            catalog_entities.append(
+                CatalogModelEntry(
+                    document=dict(entry["document"]), display=model_display
+                )
+            )
         packages: dict[str, RecipePackageEntry] = {}
         items: list[RecipeLibraryItem] = []
         for recipe in raw_recipes:
@@ -670,6 +693,18 @@ class RecipePackageClient:
                     _index_problem(
                         _entry_uri(recipe),
                         "recipe package recipe document is invalid",
+                        recipe,
+                        error,
+                    )
+                )
+                continue
+            try:
+                display = _entry_display(recipe, document.identity, read_recipe_display)
+            except (TypeError, ValueError) as error:
+                problems.append(
+                    _index_problem(
+                        _entry_uri(recipe),
+                        "recipe package display is invalid",
                         recipe,
                         error,
                     )
@@ -756,9 +791,10 @@ class RecipePackageClient:
                 package_sha256=package_digest,
                 size=size,
                 location=location,
-                title=document.metadata.title,
-                description=document.metadata.description,
-                tags=tuple(document.metadata.tags),
+                title=display.title,
+                description=display.description,
+                tags=tuple(display.tags),
+                display=display,
                 document=dict(recipe["document"]),
                 prebuilt_image=prebuilt_image,
                 publication_commit=publication_commit,
@@ -769,9 +805,10 @@ class RecipePackageClient:
                     source_path=source_path,
                     publisher=publisher,
                     slug=slug,
-                    title=document.metadata.title,
-                    description=document.metadata.description,
-                    tags=tuple(document.metadata.tags),
+                    title=display.title,
+                    description=display.description,
+                    tags=tuple(display.tags),
+                    display=display,
                     content_sha256=digest,
                     uri=f"vonk://catalog/{publisher}/{slug}@sha256:{digest}",
                     document=dict(recipe["document"]),
@@ -1302,6 +1339,24 @@ def _entry_uri(entry: Mapping[str, object]) -> str | None:
     return f"vonk://catalog/{publisher}/{slug}@sha256:{digest}"
 
 
+def _entry_display[D: (RecipeDisplay, ModelDisplay)](
+    entry: Mapping,
+    identity: RecipeIdentity | ModelIdentity,
+    read: Callable[..., D],
+) -> D:
+    """The display an index entry carries for exactly its own document.
+
+    Display is never hashed: it arrives inside the signed index. A missing,
+    unreadable or foreign display is a per-entry problem for the caller.
+    """
+    raw = entry.get("display")
+    if not isinstance(raw, Mapping):
+        raise TypeError("index entry carries no display")
+    display = read(raw)
+    require_display_of(display, identity)
+    return display
+
+
 def _index_problem(
     uri: str | None,
     detail: str,
@@ -1446,6 +1501,7 @@ def load_recipe_package(
     recipe_content_sha256: str,
     library_commit: str,
     source_path: str,
+    display: RecipeDisplay,
 ) -> RecipeLibraryItem:
     try:
         archive = path.read_bytes()
@@ -1470,6 +1526,7 @@ def load_recipe_package(
         title="",
         description="",
         tags=(),
+        display=display,
         content_sha256=recipe_content_sha256,
         uri=f"vonk://catalog/{publisher}/{slug}@sha256:{recipe_content_sha256}",
         document={},
@@ -1490,6 +1547,7 @@ def load_recipe_package(
             title="",
             description="",
             tags=(),
+            display=display,
             document={},
             prebuilt_image=None,
             publication_commit=library_commit,

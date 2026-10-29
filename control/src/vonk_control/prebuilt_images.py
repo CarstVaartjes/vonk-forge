@@ -44,7 +44,7 @@ from vonk_agent_protocol import (
     canonical_message,
 )
 from vonk_agent_protocol.build_import import RecipeBuildEvidence, RecipeBuildOptions
-from vonk_forge_contracts import RecipeDefinition, read_recipe
+from vonk_forge_contracts import RecipeDefinition, read_recipe, read_recipe_display
 
 from .catalog_revision_contract import (
     PREBUILT_REFERENCE_PATTERN,
@@ -390,7 +390,9 @@ def _library_recipe(
     assert isinstance(document, Mapping)
     identity = document["identity"]
     package = entry["package"]
+    display = entry["display"]
     assert isinstance(identity, Mapping) and isinstance(package, Mapping)
+    assert isinstance(display, Mapping)
     item = load_recipe_package(
         library_root / str(package["path"]),
         package_sha256=str(package["sha256"]),
@@ -399,6 +401,7 @@ def _library_recipe(
         recipe_content_sha256=str(entry["content_sha256"]),
         library_commit=str(index["source_commit"]),
         source_path=str(entry["source_path"]),
+        display=read_recipe_display(display),
     )
     if item.source_bundle is None or item.source_bundle_sha256 is None:
         raise ValueError("package has no build context")

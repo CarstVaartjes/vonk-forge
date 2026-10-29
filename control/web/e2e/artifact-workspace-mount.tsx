@@ -18,7 +18,7 @@ export async function mountArtifactWorkspace(definitionJson: string, revisionId:
       recipe_id: revisionId, recipe_revision_id: revisionId, content_sha256: digest,
       publisher: definition.identity.publisher, slug: definition.identity.slug,
       title: definition.metadata.title, description: definition.metadata.description,
-      recipe_document: definition, capabilities: [], topology_name: definition.topology.name,
+      recipe_display: null, recipe_document: definition, capabilities: [], topology_name: definition.topology.name,
     },
   };
   const container = document.createElement("div"); document.body.append(container);

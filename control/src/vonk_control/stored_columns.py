@@ -13,6 +13,7 @@ from typing import Annotated
 
 from pydantic import Field
 from vonk_agent_protocol import CacheReferenceReason, OperationProgress
+from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
 from vonk_agent_protocol.contracts import (
     PAYLOAD_MODELS,
     AgentResultPayload,
@@ -36,7 +37,12 @@ from vonk_agent_protocol.route_activation import ActivationMarker
 from vonk_agent_protocol.runtime_preflight import RuntimePreflightRequest
 from vonk_agent_protocol.source_bundles import SourceBundleManifest
 from vonk_agent_protocol.telemetry import HostResourceSample
-from vonk_forge_contracts import ModelDefinition, RecipeDefinition
+from vonk_forge_contracts import (
+    ModelDefinition,
+    ModelDisplay,
+    RecipeDefinition,
+    RecipeDisplay,
+)
 
 from .agent_upgrade_contract import (
     AgentUpgradeRolloutPayload,
@@ -99,6 +105,7 @@ from .model_cache_contract import (
     ModelCacheRemovalPayload,
     ModelCacheRepairPayload,
 )
+from .operator_receipt_contract import ReceiptOwner
 from .profile_stop_authority import ProfileJobRunStopJob
 from .recipe_execution_contract import (
     StoredBuildPolicyReport,
@@ -174,6 +181,16 @@ bind(
     nullable=True,
 )
 
+bind(
+    "catalog_documents",
+    "display",
+    {
+        RunSwitchReasonScopeName.MODEL: ModelDisplay,
+        ReceiptOwner.RECIPE: RecipeDisplay,
+    },
+    nullable=True,
+    discriminator="kind",
+)
 bind(
     "catalog_document_revisions",
     "document",

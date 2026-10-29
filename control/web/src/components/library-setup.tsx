@@ -97,7 +97,7 @@ function facetOptions(
   for (const record of records) {
     if (facet === "family") {
       const value = recordFamily(record);
-      if (value) labels.set(value, record.modelDocument?.identity.family.title || value);
+      if (value) labels.set(value, record.modelDisplay?.family_title || value);
     } else if (record.recipe) {
       const value = facet === "engine" ? recipeEngine(record.recipe) : recipeCreator(record.recipe);
       if (value) labels.set(value.toLocaleLowerCase(), value);

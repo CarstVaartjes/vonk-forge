@@ -141,6 +141,19 @@
           ]
         }
       },
+      "recipe_display": {
+        "kind": "recipe-display",
+        "identity": {
+          "publisher": "vonk-forge",
+          "slug": "synthetic-tiny-build"
+        },
+        "title": "Synthetic Tiny build",
+        "description": "Synthetic source-build example.",
+        "tags": [
+          "synthetic",
+          "text"
+        ]
+      },
       "model_selectors": [
         "vonk-forge/synthetic-tiny-fp16"
       ],

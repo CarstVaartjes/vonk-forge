@@ -110,6 +110,6 @@ def _snapshot_content(value: RecipeLibrarySnapshot) -> bytes:
                 ],
                 key=lambda item: item[0],
             ),
-            sorted(document_sha256(document) for document in value.catalog_entities),
+            sorted(document_sha256(entry.document) for entry in value.catalog_entities),
         )
     )

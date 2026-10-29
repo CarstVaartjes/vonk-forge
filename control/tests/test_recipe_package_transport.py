@@ -46,8 +46,15 @@ from vonk_control.recipe_packages import (
 )
 from vonk_control.recipe_release import RecipeReleaseError
 from vonk_control.source_bundles import generate_source_bundle
-from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
+from vonk_forge_contracts import (
+    ModelDefinition,
+    RecipeDefinition,
+    RecipeDisplay,
+    document_sha256,
+    published_json,
+)
 
+from .display_fixtures import display_of_model, display_of_recipe
 from .signed_recipe_release import SignedRecipeRelease, signed_recipe_releases
 from .test_recipe_builds import setup
 
@@ -277,6 +284,7 @@ def _canonical_package_fixture(
         "source_path": "recipes/tiny-recipe.json",
         "source_bundle_sha256": source_digest,
         "document": recipe_document,
+        "display": published_json(display_of_recipe(recipe_document)),
         "content_sha256": recipe_digest,
         "package": {
             "path": "packages/tiny-recipe.tar.gz",
@@ -300,6 +308,7 @@ def _canonical_package_fixture(
             {
                 "source_path": "models/tiny-model.json",
                 "document": model_document,
+                "display": published_json(display_of_model(model_document)),
                 "content_sha256": model_digest,
             }
         ],
@@ -634,6 +643,14 @@ def test_bundle_member_names_are_bounded_and_safe() -> None:
             title="",
             description="",
             tags=(),
+            display=RecipeDisplay.model_validate(
+                {
+                    "identity": {"publisher": "vonk-forge", "slug": slug},
+                    "title": slug,
+                    "description": slug,
+                    "tags": [],
+                }
+            ),
             document={},
             prebuilt_image=None,
             publication_commit=SIGNED_COMMIT,

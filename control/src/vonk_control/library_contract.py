@@ -22,7 +22,12 @@ from vonk_agent_protocol import (
     RunState,
     machine_adopter,
 )
-from vonk_forge_contracts import ModelDefinition, RecipeDefinition
+from vonk_forge_contracts import (
+    ModelDefinition,
+    ModelDisplay,
+    RecipeDefinition,
+    RecipeDisplay,
+)
 from vonk_forge_contracts.recipe import RecipeModelSelection, RecipeTopology
 
 from .catalog_revision_contract import (
@@ -162,6 +167,7 @@ class LibraryModelIdentity(StrictModel):
 
 
 class LibraryRecipeSummary(LibraryRecipeIdentity):
+    recipe_display: RecipeDisplay | None
     recipe_document: RecipeDefinition
     capabilities: list[Text64] = Field(max_length=64)
     topology_name: Text64 | None
@@ -223,6 +229,8 @@ class LibraryModelProjection(StrictModel):
     selector: Text256
     identity: LibraryModelIdentity
     projected: ModelRevisionProjection
+    # The published library text; null until the first sync that carries it.
+    model_display: ModelDisplay | None
     family: Text128
     version: Text128
     variant: Text128
@@ -324,6 +332,8 @@ class LibraryRecipeProjection(StrictModel):
     selector: Text256
     identity: LibraryRecipeIdentity
     projected: RecipeRevisionProjection
+    # The published library text; null until the first sync that carries it.
+    recipe_display: RecipeDisplay | None
     model_selectors: list[Text256] = Field(min_length=1, max_length=32)
     usage: list[Text64] = Field(max_length=64)
     resources: LibraryResourceProjection
@@ -555,6 +565,7 @@ class TopologyPlacement(StrictModel):
 class LibraryRecipeModel(StrictModel):
     selection: RecipeModelSelection
     model_document: ModelDefinition
+    model_display: ModelDisplay | None
 
 
 class RecipeAlternative(StrictModel):

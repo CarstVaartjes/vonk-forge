@@ -73,14 +73,14 @@ def models(
         else None
     )
     storage = self._storage_observer.snapshot()
-    alignment_by_model = self._alignment_by_model(
-        document for _, document in recipe_rows
-    )
+    texts = self._document_texts(row for row, _ in (*model_rows, *recipe_rows))
+    alignment_by_model = self._alignment_by_model(recipe_rows, texts)
     entries = [
         self._model_projection(
             row,
             model,
             snapshot,
+            texts[row.document_id],
             storage=storage,
             alignment=sorted(
                 alignment_by_model.get(
@@ -130,8 +130,13 @@ def models(
         and (
             wanted_search is None
             or wanted_search in item.selector.casefold()
-            or wanted_search in item.projected.identity.model.title.casefold()
-            or wanted_search in item.projected.metadata.description.casefold()
+            or (
+                item.model_display is not None
+                and (
+                    wanted_search in item.model_display.model_title.casefold()
+                    or wanted_search in item.model_display.description.casefold()
+                )
+            )
         )
         and (updated_since is None or item.updated_at >= _utc(updated_since))
     ]
@@ -272,13 +277,19 @@ def model_detail(self: LibraryProjection, selector: str) -> ModelDetailResponse:
     row, model = max(rows, key=lambda pair: pair[0].created_at)
     # Alignment comes from the derived catalog index, never a catalog read.
     _, recipes = self._documents_for_snapshot(None)
-    alignment = self._alignment_by_model(document for _, document in recipes).get(
+    texts = self._document_texts([row, *(recipe_row for recipe_row, _ in recipes)])
+    alignment = self._alignment_by_model(recipes, texts).get(
         (model.identity.publisher, model.identity.slug), ()
     )
     snapshot = self._local_state_snapshot((digest,))
     storage = self._storage_observer.snapshot()
     entry = self._model_projection(
-        row, model, snapshot, alignment=sorted(alignment), storage=storage
+        row,
+        model,
+        snapshot,
+        texts[row.document_id],
+        alignment=sorted(alignment),
+        storage=storage,
     )
     return ModelDetailResponse.model_validate(
         entry.model_dump(mode="python")
@@ -321,14 +332,14 @@ def recipe_library(
         else None
     )
     model_by_key = {row.content_digest: model for row, model in model_rows}
-    alignment_by_model = self._alignment_by_model(
-        document for _, document in recipe_rows
-    )
+    texts = self._document_texts(row for row, _ in (*model_rows, *recipe_rows))
+    alignment_by_model = self._alignment_by_model(recipe_rows, texts)
     model_entries = [
         self._model_projection(
             row,
             model,
             snapshot,
+            texts[row.document_id],
             alignment=sorted(
                 alignment_by_model.get(
                     (model.identity.publisher, model.identity.slug), ()
@@ -363,7 +374,9 @@ def recipe_library(
         else:
             selected_keys &= cached_keys
     entries = [
-        self._recipe_projection(row, recipe, model_by_key, snapshot)
+        self._recipe_projection(
+            row, recipe, model_by_key, snapshot, texts[row.document_id]
+        )
         for row, recipe in recipe_rows
     ]
     wanted_search = search.casefold() if search else None
@@ -387,8 +400,8 @@ def recipe_library(
         and (
             wanted_search is None
             or wanted_search in item.selector.casefold()
-            or wanted_search in item.projected.metadata.title.casefold()
-            or wanted_search in item.projected.metadata.description.casefold()
+            or wanted_search in item.identity.title.casefold()
+            or wanted_search in item.identity.description.casefold()
         )
         and (updated_since is None or item.updated_at >= _utc(updated_since))
     ]
@@ -600,8 +613,11 @@ def recipe_detail(self: LibraryProjection, selector: str) -> RecipeDetailRespons
         [row.content_digest for row, _ in recipe_rows]
     )
     model_by_key = {row.content_digest: model for row, model in model_rows}
+    texts = self._document_texts(row for row, _ in (*model_rows, *recipe_rows))
     entries = [
-        self._recipe_projection(row, recipe, model_by_key, snapshot)
+        self._recipe_projection(
+            row, recipe, model_by_key, snapshot, texts[row.document_id]
+        )
         for row, recipe in recipe_rows
     ]
     entry = self._assessed([entries[0]], deadline=deadline)[0]
@@ -637,6 +653,7 @@ def recipe_detail(self: LibraryProjection, selector: str) -> RecipeDetailRespons
             ),
         )
     ]
+    model_row_by_key = {row.content_digest: row for row, _ in model_rows}
     model_documents = []
     for selection in recipe.models:
         model = model_by_key.get(selection.model.content_sha256)
@@ -651,7 +668,13 @@ def recipe_detail(self: LibraryProjection, selector: str) -> RecipeDetailRespons
             )
             continue
         model_documents.append(
-            LibraryRecipeModel(selection=selection, model_document=model)
+            LibraryRecipeModel(
+                selection=selection,
+                model_document=model,
+                model_display=texts[
+                    model_row_by_key[selection.model.content_sha256].document_id
+                ].model,
+            )
         )
     return RecipeDetailResponse.model_validate(
         entry.model_dump(mode="python")
@@ -716,16 +739,20 @@ def authoring_recipe_detail(
                     continue
                 model_revisions.append((selection, model_revision))
     document = recipe_document
+    texts = self._document_texts([revision, *(row for _, row in model_revisions)])
     model_documents = [
         LibraryRecipeModel(
             selection=selection,
             model_document=_canonical_model(model_revision),
+            model_display=texts[model_revision.document_id].model,
         )
         for selection, model_revision in model_revisions
     ]
     return LibraryRecipeAuthoringDetail(
         generated_at=_utc(self._clock()),
-        recipe=_canonical_recipe_summary(revision, document),
+        recipe=_canonical_recipe_summary(
+            revision, document, texts[revision.document_id]
+        ),
         definition=document,
         topology=document.topology,
         operational_state=OperationalState(
