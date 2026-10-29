@@ -412,6 +412,11 @@ class RunPresence(StrictModel):
     option_choices: dict[Text64, Text64] = Field(default_factory=dict, max_length=16)
     # Set when a newer revision of this recipe exists; informational only.
     recipe_update: RecipeUpdateNotice | None = None
+    #: The load rise this rank still holds in swap while it loads (a job run
+    #: while active); ``None`` when it holds none.
+    load_swap_held_bytes: Annotated[int, Field(ge=1, le=_MAX_SIGNED_BIGINT)] | None = (
+        None
+    )
 
 
 class UnavailableRecipePresence(StrictModel):
@@ -469,6 +474,7 @@ class UnavailableRunPresence(StrictModel):
     route_reason: None = None
     option_choices: None = None
     recipe_update: None = None
+    load_swap_held_bytes: None = None
 
 
 InstallationPresence = RecipePresence | UnavailableRecipePresence

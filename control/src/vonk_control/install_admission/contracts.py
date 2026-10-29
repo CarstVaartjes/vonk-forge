@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import asdict, dataclass
 from datetime import datetime
 
@@ -18,7 +19,9 @@ from vonk_agent_protocol.compiled_execution_plan import (
     CompiledExecutionPlan as WireCompiledExecutionPlan,
 )
 
+from ..operation_blockers import SwapShortfallEvidence
 from ..recipe_execution_contract import (
+    StoredAdmissionReason,
     StoredInstallationPlan,
     parse_stored_installation_plan,
 )
@@ -39,6 +42,7 @@ AGENT_UPGRADE_REQUIRED_DETAIL = (
 class AdmissionReason:
     code: str
     detail: str
+    swap: SwapShortfallEvidence | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -178,9 +182,23 @@ _REFRESHABLE_PREFLIGHT_BLOCKERS = {
 }
 
 
+def reason_documents(reasons: Iterable[AdmissionReason]) -> list[object]:
+    """Stored form of admission reasons; ``swap`` appears only when the reason
+    has it, so a plan without swap evidence keeps its digest."""
+
+    return [
+        StoredAdmissionReason(
+            code=reason.code, detail=reason.detail, swap=reason.swap
+        ).model_dump(mode="json", exclude_none=True)
+        for reason in reasons
+    ]
+
+
 def _node_document(node: InstallNodePlan) -> dict[str, object]:
     return {
         **asdict(node),
+        "blockers": reason_documents(node.blockers),
+        "warnings": reason_documents(node.warnings),
         "inventory_observed_at": (
             node.inventory_observed_at.isoformat()
             if node.inventory_observed_at

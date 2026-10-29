@@ -15,6 +15,7 @@ from ..generated_control.models.display_memory_observation import (
 from ..generated_control.models.gpu_clock_observation import GpuClockObservation
 from ..generated_control.models.gpu_clock_policy import GpuClockPolicy
 from ..generated_control.models.gpu_clock_range import GpuClockRange
+from ..generated_control.models.run_presence import RunPresence
 from ..generated_control.models.swap_checkpoint import SwapCheckpoint
 from ..generated_control.models.swap_intent import SwapIntent
 from ..generated_control.models.swap_observation import SwapObservation
@@ -84,6 +85,11 @@ def _node(node: Mapping[str, object], *, detail: bool) -> None:
         if run.get("route_reason") is not None:
             _field("Route reason", run.get("route_reason"))
         _field("Members", _words(run.get("member_node_ids")))
+        # An unavailable presence (no rank freshness) names no swap it holds.
+        if run.get("rank_fresh") is not None:
+            held = RunPresence.from_dict(dict(run)).load_swap_held_bytes
+            if isinstance(held, int):
+                _field("Swap held while loading", _size(held))
         if run.get("degraded_reason") is not None:
             _reasons([run["degraded_reason"]], subject=name)
     if detail:

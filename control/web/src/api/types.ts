@@ -29,6 +29,7 @@ export type ProfileDefinition = components["schemas"]["FleetProfileDefinitionVie
 export type ReconcilePlan = components["schemas"]["RunSwitchPlan"];
 export type ActivityFilters = { state?: string; target?: string; requestId?: string };
 export type OperationsResponse = components["schemas"]["OperationsResponse"];
+export type SwapShortfallEvidence = components["schemas"]["SwapShortfallEvidence"];
 export type OperationBlocker = components["schemas"]["OperationBlocker"];
 export type ModelDefinition = components["schemas"]["ModelDefinition"];
 export type RecipeDefinition = components["schemas"]["RecipeDefinition"];

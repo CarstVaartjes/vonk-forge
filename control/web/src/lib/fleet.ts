@@ -6,7 +6,7 @@ import {
   subtractWire,
   type WireNumber,
 } from "../api/contract-numeric";
-import type { VisualFleetNode } from "../api/types";
+import type { SwapShortfallEvidence, VisualFleetNode } from "../api/types";
 import { NodeOfflineReason, OutcomeKind, ProjectionCode } from "../api/vocabulary.generated";
 
 export type TelemetryFreshness = "live" | "delayed" | "stale";
@@ -153,6 +153,22 @@ export function formatBytes(value: WireNumber | null | undefined): string {
   return Number.isFinite(displayed)
     ? `${displayed.toFixed(1)} ${unit[1]}`
     : `${formatWire(value)} B`;
+}
+
+/** The Controller's swap numbers for one wait, shown as it computed them. */
+export function swapShortfallText(evidence: SwapShortfallEvidence): string {
+  const setting =
+    evidence.desired_bytes == null
+      ? "setting unknown"
+      : `setting ${formatBytes(evidence.desired_bytes)}`;
+  return (
+    `Swap: ${formatBytes(evidence.active_bytes)} active (${setting}), ` +
+    `${formatBytes(evidence.used_bytes)} in use, ` +
+    `${formatBytes(evidence.held_bytes)} held by loading runs; ` +
+    `usable ${formatBytes(evidence.usable_bytes)}; ` +
+    `this load rises ${formatBytes(evidence.rise_bytes)}; ` +
+    `needs a setting of at least ${formatBytes(evidence.needed_setting_bytes)}`
+  );
 }
 
 const SPARK_ID = /^spk_[0-9a-f]{32}$/i;

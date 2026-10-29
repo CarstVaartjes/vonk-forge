@@ -14,7 +14,14 @@ from collections.abc import Iterable, Mapping, Sequence
 from datetime import datetime
 from typing import Annotated, Literal
 
-from pydantic import Field, StringConstraints, TypeAdapter, ValidationError
+from pydantic import (
+    Field,
+    SerializerFunctionWrapHandler,
+    StringConstraints,
+    TypeAdapter,
+    ValidationError,
+    model_serializer,
+)
 from vonk_agent_protocol import (
     OperationReason,
     ProgressAlarmCode,
@@ -24,6 +31,7 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol.contracts import DigestText
 
 from .child_phases import FleetProfileChildPhase
+from .integer_domains import MAX_DATABASE_BIGINT
 from .strict_json import StrictJSONModel
 
 MAX_BLOCKERS = 16
@@ -65,6 +73,24 @@ class StorageReliefEvidence(StrictJSONModel):
     reclaimable_bytes: int = Field(ge=0)
 
 
+class SwapShortfallEvidence(StrictJSONModel):
+    """The swap numbers behind one load's wait for swap, computed once at admission."""
+
+    #: Active swap as the agent reports it (0 when unreported).
+    active_bytes: int = Field(ge=0, le=MAX_DATABASE_BIGINT)
+    #: The Spark's swap setting; ``None`` when unknown.
+    desired_bytes: int | None = Field(default=None, ge=0, le=MAX_DATABASE_BIGINT)
+    used_bytes: int = Field(ge=0, le=MAX_DATABASE_BIGINT)
+    #: Rises held by other loads still starting and by active job runs.
+    held_bytes: int = Field(ge=0, le=MAX_DATABASE_BIGINT)
+    #: Swap usable within the host memory guard's margins.
+    usable_bytes: int = Field(ge=0, le=MAX_DATABASE_BIGINT)
+    #: This load's rise above its steady demand.
+    rise_bytes: int = Field(ge=0, le=MAX_DATABASE_BIGINT)
+    #: The whole-GiB swap setting that admits this load.
+    needed_setting_bytes: int = Field(ge=0, le=MAX_DATABASE_BIGINT)
+
+
 class OperationBlocker(StrictJSONModel):
     """One reason an operation is waiting or blocked, with the Sparks it concerns."""
 
@@ -76,10 +102,20 @@ class OperationBlocker(StrictJSONModel):
     #: The operation this wait is behind, when one is known.
     operation: BlockingOperation | None = None
     storage: StorageReliefEvidence | None = None
+    swap: SwapShortfallEvidence | None = None
     #: Exact workload whose effect the blocking operation owns, when present.
     run_id: Annotated[str, StringConstraints(min_length=1, max_length=128)] | None = (
         None
     )
+
+    @model_serializer(mode="wrap")
+    def _serialize(self, handler: SerializerFunctionWrapHandler):
+        # Without a shortfall the key is absent: rows and digests written
+        # before it existed stay equal.
+        data = handler(self)
+        if data.get("swap") is None:
+            data.pop("swap", None)
+        return data
 
 
 _OPERATION_PHASE = Annotated[str, StringConstraints(min_length=1, max_length=80)]
@@ -142,6 +178,7 @@ def make_blocker(
     *,
     severity: Literal["info", "warning", "error"] = "warning",
     node_ids: Iterable[str] = (),
+    swap: SwapShortfallEvidence | None = None,
 ) -> OperationBlocker:
     """Build a blocker from free text, bounding it instead of failing on length."""
 
@@ -151,6 +188,7 @@ def make_blocker(
         detail=(detail or code or "waiting")[:512],
         severity=severity,
         node_ids=nodes[:32],
+        swap=swap,
     )
 
 
@@ -203,6 +241,7 @@ __all__ = [
     "ProgressAlarmCode",
     "ProgressStall",
     "StorageReliefEvidence",
+    "SwapShortfallEvidence",
     "bound_blockers",
     "dump_blockers",
     "make_blocker",
