@@ -14,7 +14,6 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol.agent_words import (
     ProfileChildJobKind,
     ProfileChildPhase,
-    ProfileReasonSeverity,
     ProfileSwitchChildKind,
 )
 
@@ -46,6 +45,7 @@ from ..stored_json import read_row_column
 from .assessment_support import (
     _disk_shortfalls,
     _require_recovery_preparation,
+    operation_blocker_of,
 )
 from .colocation import colocated_memory_overcommit
 from .contracts import (
@@ -234,17 +234,7 @@ class RunSwitchFleetProfileAdapter:
                 *plan.blockers,
                 *(reason for reason in plan.warnings if reason.code in _DISK_REFUSALS),
             ]
-            blockers = tuple(
-                make_blocker(
-                    reason.code,
-                    reason.detail,
-                    severity=ProfileReasonSeverity.ERROR.value
-                    if reason.severity == ProfileReasonSeverity.BLOCKER.value
-                    else reason.severity,
-                    node_ids=reason.node_ids,
-                )
-                for reason in reasons
-            )
+            blockers = tuple(operation_blocker_of(reason) for reason in reasons)
             raise FleetProfileChildPlanBlocked(
                 "profile child plan blocked: "
                 + "; ".join(reason.detail for reason in reasons),
@@ -489,12 +479,7 @@ def _ending_blockers(
     nodes = {node.node_id for node in plan.spark_group.nodes}
     return tuple(
         [
-            make_blocker(
-                reason.code,
-                reason.detail,
-                severity=ProfileReasonSeverity.ERROR.value,
-                node_ids=reason.node_ids,
-            )
+            operation_blocker_of(reason)
             for reason in plan.blockers
             if reason.code in ENDING_BLOCKER_CODES
         ]

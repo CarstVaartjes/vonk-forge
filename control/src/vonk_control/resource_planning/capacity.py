@@ -18,6 +18,7 @@ from vonk_agent_protocol.swap import (
 )
 from vonk_forge_contracts.memory_admission import evaluate_memory_admission
 
+from ..operation_blockers import SwapShortfallEvidence
 from .reasons import _reason, _same_memory_kind
 from .types import (
     CapacityPlan,
@@ -219,6 +220,15 @@ def _load_swap_reason(
         f"starting or job runs; {usable} bytes are usable within the host memory guard's "
         f"margins. {remedy}",
         node_id=node_id,
+        swap=SwapShortfallEvidence(
+            active_bytes=swap.total_bytes,
+            desired_bytes=swap.desired_bytes,
+            used_bytes=swap.used_bytes,
+            held_bytes=swap.held_bytes,
+            usable_bytes=usable,
+            rise_bytes=rise,
+            needed_setting_bytes=setting,
+        ),
     )
 
 

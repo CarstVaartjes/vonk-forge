@@ -18,6 +18,8 @@ from .common import (
     _object,
     _optional,
     _records,
+    _swap_of,
+    _swap_shortfall,
     _table,
     _text,
     _time,
@@ -76,6 +78,8 @@ def _library_item(item: Mapping[str, object], noun: str, *, detail: bool) -> Non
                     )
                     if explanation not in explained:
                         _field("Reason", explanation)
+                        if (evidence := _swap_of(reason.get("swap"))) is not None:
+                            print(_swap_shortfall(evidence))
                         explained.add(explanation)
             group = _optional(assessment.get("group"), "group")
             if group:

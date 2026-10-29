@@ -9,7 +9,9 @@ from collections.abc import Mapping, Sequence
 from datetime import datetime
 
 from ..cli_states_generated import ENDPOINT_UNAVAILABLE
+from ..cli_telemetry_render import size as _size
 from ..control_client import ControlMalformedResponse
+from ..generated_control.models.swap_shortfall_evidence import SwapShortfallEvidence
 
 
 def terminal_text(value: str) -> str:
@@ -201,6 +203,30 @@ def _recommendation(item: Mapping[str, object]) -> str:
     return f" {_text(recommendation)}" if recommendation is not None else ""
 
 
+def _swap_shortfall(evidence: SwapShortfallEvidence) -> str:
+    """The Controller's swap numbers for one wait, printed as it computed them."""
+    setting = (
+        f"setting {_size(evidence.desired_bytes)}"
+        if isinstance(evidence.desired_bytes, int)
+        else "setting unknown"
+    )
+    return (
+        f"Swap: {_size(evidence.active_bytes)} active ({setting}), "
+        f"{_size(evidence.used_bytes)} in use, "
+        f"{_size(evidence.held_bytes)} held by loading runs; "
+        f"usable {_size(evidence.usable_bytes)}; "
+        f"this load rises {_size(evidence.rise_bytes)}; "
+        f"needs a setting of at least {_size(evidence.needed_setting_bytes)}"
+    )
+
+
+def _swap_of(swap: object) -> SwapShortfallEvidence | None:
+    """The swap numbers of one wait or reason (``item.get("swap")``), typed."""
+    if swap is None:
+        return None
+    return SwapShortfallEvidence.from_dict(dict(_object(swap, "swap")))
+
+
 def _reasons(value: object, *, subject: object = None) -> None:
     if value is None:
         return
@@ -219,6 +245,11 @@ def _reasons(value: object, *, subject: object = None) -> None:
             message = _text(item)
         prefix = f"{_text(subject)}: " if subject is not None else ""
         _warn(f"Attention: {prefix}{message}")
+        if (
+            isinstance(item, Mapping)
+            and (evidence := _swap_of(item.get("swap"))) is not None
+        ):
+            _warn(_swap_shortfall(evidence))
 
 
 def _failure(value: object) -> None:
@@ -253,6 +284,8 @@ def _waiting(payload: Mapping[str, object]) -> None:
                 "Waiting for",
                 f"{_text(item.get('code'))}: {_text(item.get('detail'))}{where}",
             )
+            if (evidence := _swap_of(item.get("swap"))) is not None:
+                print(_swap_shortfall(evidence))
     if payload.get("next_attempt_at") is not None:
         _field("Next attempt", _time(payload["next_attempt_at"]))
 

@@ -623,6 +623,8 @@ def test_i_a_job_run_holds_its_rise_while_its_ranks_run_jobs(
 
     with sessions() as session:
         first = session.scalars(select(RecipeRun.id)).one()
+    # The fleet shows the rise the running job run holds, until it stops.
+    assert _held(sessions, operations._clock())[first] == 30 * GIB
 
     second = operations.preview_run(installation_id, "image-job-b")
     assert RunAdmissionCode.INSUFFICIENT_SWAP in _codes(second)
@@ -713,3 +715,165 @@ def test_l_only_a_minimum_swap_beyond_the_largest_setting_never_fits(
     _inventory(sessions, at, node, swap=_swap(SWAP_POLICY.maximum_gib))
     plan = service.plan_run(installation, alias="qwen", now=at)
     assert _codes(plan) == {ResourceBlockerCode.DEMAND_EXCEEDS_CAPACITY}
+
+
+def _swap_reason(plan):
+    (reason,) = [
+        reason
+        for reason in plan.blockers
+        if reason.code == RunSwitchCode.RESOURCE_INSUFFICIENT_SWAP
+    ]
+    return reason
+
+
+def _expected_swap(reason, *, active, desired, used, held, rise):
+    from vonk_agent_protocol.swap import swap_needed_bytes
+
+    swap = reason.swap
+    assert swap is not None
+    assert (swap.active_bytes, swap.desired_bytes) == (active, desired)
+    assert (swap.used_bytes, swap.held_bytes, swap.rise_bytes) == (used, held, rise)
+    assert swap.usable_bytes == usable_swap_bytes(active)
+    assert swap.needed_setting_bytes == swap_needed_bytes(rise + used)
+    return swap
+
+
+def test_m_a_review_wait_for_swap_carries_the_numbers_it_computed(
+    tmp_path, postgres_engine
+) -> None:
+    """Catches the swap shortfall living only in prose (2026-10-28).
+
+    The wait named its numbers in ``detail`` only; every renderer then had to
+    show a sentence or nothing. The review's reason now carries them typed.
+    """
+    rise = 35 * GIB
+    _, _, _, _, plan = _switch_world(
+        tmp_path, postgres_engine, rise=rise, total_gib=16, used=0
+    )
+    swap = _expected_swap(
+        _swap_reason(plan),
+        active=16 * GIB,
+        desired=64 * GIB,
+        used=0,
+        held=0,
+        rise=rise,
+    )
+    # The remedy here is to wait for the Spark's swap to reach its setting.
+    assert swap.desired_bytes is not None
+    assert swap.needed_setting_bytes <= swap.desired_bytes
+
+
+def test_n_a_rise_past_the_guard_margin_names_the_setting_to_raise(
+    tmp_path, postgres_engine
+) -> None:
+    """Catches a wait whose needed setting is not carried with the reason."""
+    rise = 63 * GIB
+    _, _, _, _, plan = _switch_world(
+        tmp_path, postgres_engine, rise=rise, total_gib=64, used=0
+    )
+    swap = _expected_swap(
+        _swap_reason(plan),
+        active=64 * GIB,
+        desired=64 * GIB,
+        used=0,
+        held=0,
+        rise=rise,
+    )
+    assert swap.desired_bytes is not None
+    assert swap.needed_setting_bytes > swap.desired_bytes
+
+
+def test_o_a_load_that_never_fits_carries_no_swap_evidence(
+    tmp_path, postgres_engine
+) -> None:
+    """Catches the never-fits reason claiming a shortfall a setting could fix."""
+    beyond = usable_swap_bytes(SWAP_POLICY.maximum_gib * GIB) + 1
+    _, _, _, _, plan = _switch_world(
+        tmp_path,
+        postgres_engine,
+        rise=beyond,
+        total_gib=SWAP_POLICY.maximum_gib,
+        used=0,
+    )
+    ending = [
+        reason
+        for reason in plan.blockers
+        if reason.code == RunSwitchCode.RESOURCE_DEMAND_EXCEEDS_CAPACITY
+    ]
+    assert ending and all(reason.swap is None for reason in ending)
+
+
+def test_p_the_wait_a_profile_load_stores_keeps_the_swap_evidence(
+    tmp_path, postgres_engine
+) -> None:
+    """Catches the evidence dropped when a review reason becomes a stored wait.
+
+    Two copies of the severity mapping rebuilt the blocker from ``code`` and
+    ``detail`` only; the typed numbers were lost on the way to the wait.
+    """
+    from vonk_control.fleet_profile_contract import (
+        FleetProfileAssignmentAssessment,
+        FleetProfilePreview,
+    )
+    from vonk_control.fleet_profiles.assessment_support import _preview_blockers
+    from vonk_control.operation_blockers import dump_blockers, read_blockers
+    from vonk_control.run_switch_contract import RunSwitchAssessment
+
+    _, _, _, _, plan = _switch_world(
+        tmp_path, postgres_engine, rise=35 * GIB, total_gib=16, used=0
+    )
+    reason = _swap_reason(plan)
+    preview = FleetProfilePreview.model_construct(
+        reasons=[],
+        assessments=[
+            FleetProfileAssignmentAssessment.model_construct(
+                assessment=RunSwitchAssessment.model_construct(blockers=[reason])
+            )
+        ],
+    )
+
+    (blocker,) = _preview_blockers(preview)
+    assert blocker.swap == reason.swap
+    stored = dump_blockers([blocker])
+    assert read_blockers(stored)[0].swap == reason.swap
+
+    # A list stored before the evidence existed reads unchanged.
+    legacy = [{k: v for k, v in stored[0].items() if k != "swap"}]
+    (old,) = read_blockers(legacy)
+    assert old.swap is None and old.code == blocker.code
+
+
+def _held(sessions, now):
+    from vonk_control.fleet_projection import FleetProjection
+
+    (spark,) = FleetProjection(sessions, clock=lambda: now).read().nodes
+    return {run.run_id: run.load_swap_held_bytes for run in spark.loaded}
+
+
+def test_q_a_loading_rank_shows_the_swap_it_holds_until_it_runs(
+    tmp_path, postgres_engine
+) -> None:
+    """Catches a rank's held swap being invisible next to the load waiting on it.
+
+    "It starts once the other loads here finish loading" named no number: the
+    fleet showed no run holding anything.
+    """
+    steady, load = 30 * GIB, 50 * GIB
+    sessions, now, node, installation, service = _world(
+        tmp_path, postgres_engine, steady, load_peak_bytes=load
+    )
+    at = now + timedelta(seconds=1)
+    _inventory(sessions, at, node, swap=_swap(64))
+    run_id = _accept(
+        sessions, service, service.plan_run(installation, alias="qwen", now=at), at
+    )
+    assert _stored_load(sessions, run_id) == load
+
+    for state in (RunState.PLANNED, RunState.STARTING):
+        with sessions.begin() as session:
+            session.execute(update(RunNode).values(state=state))
+        assert _held(sessions, at) == {run_id: load - steady}
+
+    with sessions.begin() as session:
+        session.execute(update(RunNode).values(state=RunState.RUNNING))
+    assert _held(sessions, at) == {run_id: None}

@@ -7,7 +7,9 @@ from typing import Annotated, Literal
 
 from pydantic import (
     Field,
+    SerializerFunctionWrapHandler,
     StringConstraints,
+    model_serializer,
     model_validator,
 )
 from vonk_agent_protocol.compiled_execution_plan import MemoryKind
@@ -16,6 +18,7 @@ from vonk_forge_contracts.recipe import Scalar
 
 from ..integer_domains import MAX_DATABASE_INTEGER
 from ..mapping_parameters import MappingParameters
+from ..operation_blockers import SwapShortfallEvidence
 from ..run_switch_identity_contract import NodeId, UuidId
 from ..strict_json import StrictModel
 from .requests import MemoryUsageUncertainty, SparkGroupNode
@@ -41,6 +44,16 @@ class RunSwitchReason(StrictModel):
     scope: RunSwitchReasonScope
     node_ids: list[NodeId] = Field(default_factory=list, max_length=32)
     stale: bool = False
+    swap: SwapShortfallEvidence | None = None
+
+    @model_serializer(mode="wrap")
+    def _serialize(self, handler: SerializerFunctionWrapHandler):
+        # Without a shortfall the key is absent: rows and digests written
+        # before it existed stay equal.
+        data = handler(self)
+        if data.get("swap") is None:
+            data.pop("swap", None)
+        return data
 
 
 class FreshnessEvidence(StrictModel):

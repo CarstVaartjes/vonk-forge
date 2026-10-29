@@ -30,6 +30,36 @@ _LOADING = (RunState.PLANNED, RunState.STARTING)
 _HOLDING = (*_LOADING, RunState.RUNNING)
 
 
+def held_rise(run: RecipeRun, node_id: str, rank_state: str) -> SwapHolder | None:
+    """The load rise this rank still holds, or ``None`` when it holds none.
+
+    The one rule for what a rank holds: used by the swap a Spark can lend and
+    by the fleet projection of a loading rank.
+    """
+
+    if rank_state not in _HOLDING:
+        return None
+    try:
+        plan = parse_stored_run_plan(run.plan)
+    except RecipeExecutionContractError:
+        # Its steady claim still counts; a damaged plan names no rise.
+        return None
+    rank = next((node for node in plan.nodes if node.node_id == node_id), None)
+    if (
+        rank is None
+        or plan.plan_digest != run.plan_digest
+        or rank.load_memory_bytes is None
+        # A running service has loaded; a job run loads per job.
+        or not (rank_state in _LOADING or plan.execution_mode is not None)
+    ):
+        return None
+    return SwapHolder(
+        run.id,
+        max(0, rank.load_memory_bytes - rank.required_memory_bytes),
+        job_run=plan.execution_mode is not None,
+    )
+
+
 def swap_capacity(
     session: Session,
     node_id: str,
@@ -52,26 +82,9 @@ def swap_capacity(
             RecipeRun.id.not_in(excluded_run_ids),
         )
     ):
-        try:
-            plan = parse_stored_run_plan(run.plan)
-        except RecipeExecutionContractError:
-            # Its steady claim still counts; a damaged plan names no rise.
-            continue
-        rank = next((node for node in plan.nodes if node.node_id == node_id), None)
-        if (
-            rank is not None
-            and plan.plan_digest == run.plan_digest
-            and rank.load_memory_bytes is not None
-            # A running service has loaded; a job run loads per job.
-            and (rank_state in _LOADING or plan.execution_mode is not None)
-        ):
-            holders.append(
-                SwapHolder(
-                    run.id,
-                    max(0, rank.load_memory_bytes - rank.required_memory_bytes),
-                    job_run=plan.execution_mode is not None,
-                )
-            )
+        holder = held_rise(run, node_id, rank_state)
+        if holder is not None:
+            holders.append(holder)
     return SwapCapacity(
         total_bytes=observation.total_bytes if observation is not None else 0,
         used_bytes=max(0, observation.total_bytes - observation.free_bytes)

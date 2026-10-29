@@ -450,6 +450,7 @@ class RunPlanningMixin:
                                     reason.detail,
                                     scope="node",
                                     node_ids=(item.node_id,),
+                                    swap=reason.swap,
                                 )
                             )
                         for reason in item.warnings:

@@ -9,6 +9,7 @@ import type {
 import { OutcomeKind, ProfileReasonSeverity } from "../api/vocabulary.generated";
 import { safeErrorText } from "../lib/error-display";
 import {
+  formatBytes,
   nodeCpuClock,
   nodeGpuClock,
   nodeSwap,
@@ -233,6 +234,18 @@ export function SparkDetail({
                     </dd>
                   </div>
                 </dl>
+                {node.loaded.some((item) => item.load_swap_held_bytes != null) && (
+                  <ul className="spark-run-swap" aria-label="Swap held while loading">
+                    {node.loaded
+                      .filter((item) => item.load_swap_held_bytes != null)
+                      .map((item) => (
+                        <li key={`${item.run_id}:${item.rank}`}>
+                          <strong>{item.title}</strong> Swap held while loading:{" "}
+                          {formatBytes(item.load_swap_held_bytes)}
+                        </li>
+                      ))}
+                  </ul>
+                )}
                 {node.loaded.some((item) => Object.keys(item.option_choices ?? {}).length > 0) && (
                   <ul className="spark-run-options" aria-label="Active recipe options">
                     {node.loaded

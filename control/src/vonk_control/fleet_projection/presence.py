@@ -16,6 +16,7 @@ from vonk_agent_protocol import (
 )
 
 from ..cluster_mappings import mapping_option_choices
+from ..load_swap import held_rise
 from ..machine_states import read_state
 from ..models import CatalogDocumentRevision, ClusterMappingNode
 from ..recipe_operations import _run_is_one_shot
@@ -245,6 +246,7 @@ def _loaded_presence(
             )
             for node in visible_nodes:
                 rank_age, rank_fresh = freshness[node.id]
+                holder = held_rise(run, node.node_id, node.state)
                 projected_group.setdefault(node.node_id, []).append(
                     RunPresence(
                         run_id=run.id,
@@ -282,6 +284,10 @@ def _loaded_presence(
                         ),
                         option_choices=mapping_option_choices(mapping.parameters),
                         recipe_update=update,
+                        load_swap_held_bytes=(
+                            holder.held_bytes if holder is not None else 0
+                        )
+                        or None,
                     )
                 )
         except (AttributeError, TypeError, ValueError):

@@ -43,6 +43,7 @@ from .admission_locking import (
 from .categorized_errors import InvalidType, InvalidValue, MissingRecord
 from .gpu_health import gpu_health_reason
 from .install_admission import AdmissionReason
+from .install_admission.contracts import reason_documents
 from .inventory_repository import InventoryRepository
 from .legal_admission import territorial_admission
 from .load_swap import swap_capacity
@@ -898,6 +899,7 @@ class RunAdmissionService:
                 projected = AdmissionReason(
                     _admission_code(reason.code),
                     reason.detail,
+                    reason.swap,
                 )
                 if reason.severity == "blocker":
                     blockers.append(projected)
@@ -1304,6 +1306,8 @@ def _planned_port_demand(demand: RunPortDemand, node: RunNodePlan) -> RunPortDem
 def _node_document(node: RunNodePlan) -> dict[str, object]:
     document = {
         **asdict(node),
+        "blockers": reason_documents(node.blockers),
+        "warnings": reason_documents(node.warnings),
         "inventory_observed_at": (
             node.inventory_observed_at.isoformat()
             if node.inventory_observed_at
