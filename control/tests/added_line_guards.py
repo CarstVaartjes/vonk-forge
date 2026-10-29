@@ -15,6 +15,7 @@ from . import collection_continuation as collections
 from . import content_identity_boundaries as identity
 from . import coordination_boundaries as coordination
 from . import deterministic_retries as retries
+from . import document_read_boundaries as document_reads
 from . import lifecycle_reasons as reasons
 from . import optimistic_boundaries as optimistic
 from . import principle_guards as principles
@@ -35,6 +36,7 @@ MODES = (
     "request-scans",
     "vocabulary",
     "mapping",
+    "document-reads",
     "identity",
     "security",
     "coordination",
@@ -1097,6 +1099,22 @@ def check_source(
             hits.extend(
                 (site.line, "untyped mapping")
                 for site in mappings.scan_source(source, path=path)
+            )
+        if "document-reads" in modes and path.startswith(
+            tuple(
+                root.relative_to(document_reads.REPO_ROOT).as_posix() + "/"
+                for root in document_reads.SOURCE_ROOTS
+            )
+        ):
+            hits.extend(
+                (
+                    site.line,
+                    (
+                        "raw document read; use vonk_forge_contracts "
+                        "read_recipe/read_model/read_*_display"
+                    ),
+                )
+                for site in document_reads.scan_source(source, path=path)
             )
         if "identity" in modes:
             ingress = path.startswith(
