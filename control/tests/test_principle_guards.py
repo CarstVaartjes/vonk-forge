@@ -1178,3 +1178,59 @@ def test_rust_collection_loop_exhausts_pages_instead_of_waiting():
     assert scan_rust(
         source.replace("None => break", "None => continue"), path="agent.rs"
     )
+
+
+#: Only the background collectors may replay 24 hours of jobs, profile
+#: applications and model operations; a request path pays for it on every call.
+_COLLECTOR_SCAN_OWNERS = (
+    "control/src/vonk_control/catalog_revision_collection.py",
+    "control/src/vonk_control/unused_storage_collection/",
+)
+
+
+def _collector_scan_calls(source: str) -> list[int]:
+    """Lines calling ``live_tokens`` or building ``_CollectorEvidence``."""
+    lines: list[int] = []
+    for node in ast.walk(ast.parse(source)):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        name = func.id if isinstance(func, ast.Name) else None
+        attr = func.attr if isinstance(func, ast.Attribute) else None
+        owner = (
+            func.value.id
+            if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name)
+            else None
+        )
+        if (
+            name in {"live_tokens", "_CollectorEvidence"}
+            or attr == "live_tokens"
+            or (attr == "read" and owner == "_CollectorEvidence")
+        ):
+            lines.append(node.lineno)
+    return lines
+
+
+def test_a_request_path_calling_the_24_hour_scan_fails_the_guard():
+    request_path = "def review(session, now):\n    return live_tokens(session, now)\n"
+    reader = "def review(s, now):\n    return _CollectorEvidence.read(s, now)\n"
+    reference = "def review(s, now):\n    return _Evidence.read(s, now)\n"
+    assert _collector_scan_calls(request_path) == [2]
+    assert _collector_scan_calls(reader) == [2]
+    assert _collector_scan_calls(reference) == []
+
+
+def test_the_24_hour_scan_is_never_reachable_from_a_request_path():
+    """Whole Controller: fleet review/accept, inventory POSTs and profile-load
+    reviews read the reference core, never the collector's 24-hour scan."""
+    sources = sorted((ROOT / "control/src/vonk_control").rglob("*.py"))
+    sites = [
+        f"{relative}:{line}"
+        for path in sources
+        if not (relative := path.relative_to(ROOT).as_posix()).startswith(
+            _COLLECTOR_SCAN_OWNERS
+        )
+        for line in _collector_scan_calls(path.read_text())
+    ]
+    assert len(sources) > 100  # the scan sees the Controller
+    assert sites == []
