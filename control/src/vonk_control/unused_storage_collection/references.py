@@ -38,7 +38,7 @@ from ..spark_disk import spark_free_bytes
 from .common import _COLLECTABLE_STATES, _DEAD_RUNS, _FINISHED_JOBS, ACTOR
 
 if TYPE_CHECKING:
-    from .evidence import _Evidence
+    from .evidence import _CollectorEvidence, _Evidence
 
 
 def _installation_kept(
@@ -208,10 +208,13 @@ def _applied_revision_ids(session: Session) -> frozenset[str] | None:
     return frozenset(found)
 
 
-def _model_kept(session: Session, digest: str, evidence: _Evidence) -> str | None:
+def _model_kept(
+    session: Session, digest: str, evidence: _CollectorEvidence
+) -> str | None:
     """Why a model's cached files stay, or ``None`` when no profile needs them."""
 
-    if evidence.pointers is None:
+    reference = evidence.reference
+    if reference.pointers is None:
         return "profiles unreadable"
     sets = session.execute(
         select(
@@ -219,8 +222,8 @@ def _model_kept(session: Session, digest: str, evidence: _Evidence) -> str | Non
             ModelCacheSet.recipe_revision_sha256,
         ).where(ModelCacheSet.model_content_sha256 == digest)
     ).all()
-    if digest in evidence.pointed_models or any(
-        recipe in evidence.pointed_digests for _s, recipe in sets
+    if digest in reference.pointed_models or any(
+        recipe in reference.pointed_digests for _s, recipe in sets
     ):
         return "profile"
     # Model and set digests only, as for an installation: a file shared with a
@@ -229,17 +232,18 @@ def _model_kept(session: Session, digest: str, evidence: _Evidence) -> str | Non
     names = {digest} | {set_digest for set_digest, _r in sets}
     if not evidence.live.isdisjoint(names):
         return "live operation"
-    if not evidence.application_references_readable:
+    if not reference.application_references_readable:
         return "profile application unreadable"
     return None
 
 
 def _image_kept(
-    archive: str, evidence: _Evidence, modified: datetime | None
+    archive: str, evidence: _CollectorEvidence, modified: datetime | None
 ) -> str | None:
     """Why an image receipt stays, or ``None`` when no profile needs the image."""
 
-    if evidence.pointers is None:
+    reference = evidence.reference
+    if reference.pointers is None:
         return "profiles unreadable"
     if archive in evidence.pointed_archives:
         return "profile"
@@ -247,7 +251,7 @@ def _image_kept(
         return "receipt unreadable"
     if archive in evidence.live:
         return "live operation"
-    if not evidence.application_references_readable:
+    if not reference.application_references_readable:
         return "profile application unreadable"
     return None
 
