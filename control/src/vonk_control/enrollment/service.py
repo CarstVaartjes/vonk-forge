@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import logging
 import time
-from collections.abc import Mapping
-from datetime import datetime, timedelta
+from collections.abc import Callable, Mapping
+from datetime import datetime
+from typing import Any
 
 from cryptography import x509
 from sqlalchemy import select, true, update
@@ -46,6 +48,7 @@ from ..enrollment_validation import (
 from ..enrollment_validation import (
     _validate_node_id as _validate_node_id,  # noqa: PLC0414 -- shared helper export
 )
+from ..logging import log_event
 from ..models import (
     AgentCertificate,
     AgentCertificateRotation,
@@ -54,11 +57,13 @@ from ..models import (
     AgentNode,
     AgentOperation,
     AgentOperationAttempt,
+    Base,
     Job,
 )
 from ..owner_liveness import OwnerKind, OwnerRef, owner
-from ..persisted_waits import schedule_wait
+from ..persisted_waits import read_wait, schedule_wait
 from ..pki import IssuedCertificate
+from ..recovery_policy import RECOVERY
 from ..security.enrollment import (
     require_activation_identity,
     require_certificate,
@@ -78,6 +83,18 @@ from .types import (
     RenewalConflictRevocationUncertain,
     RenewalInProgress,
     RenewalIssuanceUncertain,
+)
+
+_LOGGER = logging.getLogger(__name__)
+#: A swept call yields after this much wall time and resumes at the next serial.
+REVOCATION_BUDGET_SECONDS = 1.0
+REVOCATION_BATCH = 32
+_REVOCATION_RETRYABLE = (
+    StepCAUnavailable,
+    EnrollmentIssuanceUncertain,
+    RuntimeError,
+    ValueError,
+    SQLAlchemyError,
 )
 
 
@@ -223,114 +240,162 @@ class EnrollmentService(RotationService):
                         now,
                     )
                     session.delete(accepted_rotation)
-        with self._sessions() as session:
-            certificates = list(
-                session.scalars(
-                    select(AgentCertificate).where(
-                        AgentCertificate.serial == serial
-                        if serial is not None
-                        else true(),
-                        AgentCertificate.revoked_at.is_not(None),
-                        AgentCertificate.ca_revoked_at.is_(None),
-                        (
-                            AgentCertificate.next_action_at.is_(None)
-                            | (AgentCertificate.next_action_at <= now)
-                        ),
+        if serial is not None:
+            return self._confirm_revocation_rows(serial, now, started=None)
+        return self._confirm_revocation_rows(None, now, started=time.monotonic())
+
+    def _confirm_revocation_rows(
+        self, serial: str | None, now: datetime, *, started: float | None
+    ) -> bool:
+        """Confirm due rows in serial order; a swept call stops at its budget.
+
+        An expired certificate or binding can no longer authenticate ingress, so
+        the query never selects it: the sweep neither rescans nor rewrites it.
+        The next call resumes after the last serial examined.
+        """
+        scanned = 0
+        confirmed = 0
+        tables: list[tuple[type[Base], Callable[..., bool]]] = [
+            (AgentIssuedCertificateRevocation, self._confirm_evidence_row),
+            (AgentCertificate, self._confirm_certificate_row),
+        ]
+        for model, confirm in tables:
+            table = model.__tablename__
+            while not self._revocation_budget_spent(started):
+                with self._sessions() as session:
+                    rows = list(
+                        session.scalars(
+                            self._due_revocations(
+                                model,
+                                serial,
+                                now,
+                                self._revocation_cursors.get(table, ""),
+                            )
+                        )
                     )
-                )
+                if not rows:
+                    self._revocation_cursors.pop(table, None)
+                    break
+                for row in rows:
+                    if self._revocation_budget_spent(started):
+                        return self._revocation_pass_done(scanned, confirmed, started)
+                    scanned += 1
+                    confirmed += confirm(row, now)
+                    if serial is None:
+                        self._revocation_cursors[table] = row.serial
+                if serial is not None:
+                    break
+        return self._revocation_pass_done(scanned, confirmed, started)
+
+    @staticmethod
+    def _revocation_budget_spent(started: float | None) -> bool:
+        """Only a swept call (not a targeted one) spends a wall-time budget."""
+        return started is not None and (
+            time.monotonic() - started >= REVOCATION_BUDGET_SECONDS
+        )
+
+    @staticmethod
+    def _revocation_pass_done(
+        scanned: int, confirmed: int, started: float | None
+    ) -> bool:
+        if started is not None:
+            log_event(
+                _LOGGER,
+                "enrollment.revocation_pass",
+                service="control-worker",
+                rows_scanned=scanned,
+                confirmed=confirmed,
+                elapsed_seconds=round(time.monotonic() - started, 3),
             )
-            evidence = list(
-                session.scalars(
-                    select(AgentIssuedCertificateRevocation).where(
-                        AgentIssuedCertificateRevocation.serial == serial
-                        if serial is not None
-                        else true(),
-                        AgentIssuedCertificateRevocation.ca_revoked_at.is_(None),
-                        (
-                            AgentIssuedCertificateRevocation.next_action_at.is_(None)
-                            | (AgentIssuedCertificateRevocation.next_action_at <= now)
-                        ),
-                    )
-                )
+        return confirmed > 0
+
+    @staticmethod
+    def _due_revocations(model: Any, serial: str | None, now: datetime, after: str):
+        """Unconfirmed, unexpired rows whose next check is due, by serial."""
+        due = model.next_action_at.is_(None) | (model.next_action_at <= now)
+        if model is AgentCertificate:
+            live = AgentCertificate.not_after > now
+            denied = AgentCertificate.revoked_at.is_not(None)
+        else:
+            # The binding's fixed-width UTC instant sorts as text.
+            expires = AgentIssuedCertificateRevocation.provider_request[
+                "not_after"
+            ].as_string()
+            live = expires.is_(None) | (expires > now.strftime("%Y-%m-%dT%H:%M:%SZ"))
+            denied = true()
+        statement = (
+            select(model)
+            .where(
+                model.ca_revoked_at.is_(None), model.serial > after, denied, due, live
             )
-        changed = False
-        for row in evidence:
-            binding = _issuance_binding(row.provider_request)
-            if binding is not None and datetime.fromisoformat(binding.not_after) <= now:
-                with self._transaction() as session:
-                    expired = session.get(AgentIssuedCertificateRevocation, row.serial)
-                    if expired is not None:
-                        changed |= schedule_wait(expired, None)
-                continue  # Expired bytes can no longer authenticate ingress.
-            # Persist the next check before HTTP: process death cannot hot-loop.
-            with self._transaction() as session:
-                current = session.get(AgentIssuedCertificateRevocation, row.serial)
-                if current is None or current.ca_revoked_at is not None:
-                    continue
-                schedule_wait(
-                    current,
-                    now + timedelta(seconds=5),
-                    now=now,
-                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
-                    deadline=datetime.fromisoformat(binding.not_after)
-                    if binding is not None
-                    else None,
+            .order_by(model.serial)
+            .limit(REVOCATION_BATCH)
+        )
+        return statement if serial is None else statement.where(model.serial == serial)
+
+    def _next_revocation_check(self, row: Any, now: datetime) -> datetime:
+        """Back off from the first failure the row's wait recorded (stable jitter)."""
+        wait = read_wait(row)
+        attempts = 1
+        if wait is not None:
+            elapsed = max(0, int((now - wait.first_blocked_at).total_seconds()))
+            attempts += (elapsed // RECOVERY.base_delay_seconds + 1).bit_length() - 1
+        scheduled = RECOVERY.next_attempt(
+            row.serial, attempts, now, ongoing_intent=True
+        )
+        assert scheduled is not None  # ongoing intent never exhausts
+        return scheduled
+
+    def _confirm_evidence_row(
+        self, row: AgentIssuedCertificateRevocation, now: datetime
+    ) -> bool:
+        binding = _issuance_binding(row.provider_request)
+        # Persist the next check before HTTP: process death cannot hot-loop.
+        with self._transaction() as session:
+            current = session.get(AgentIssuedCertificateRevocation, row.serial)
+            if current is None or current.ca_revoked_at is not None:
+                return False
+            schedule_wait(
+                current,
+                self._next_revocation_check(current, now),
+                now=now,
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
+                deadline=datetime.fromisoformat(binding.not_after)
+                if binding is not None
+                else None,
+            )
+        try:
+            if binding is not None:
+                if row.csr_pem is None:
+                    return False
+                issued = self._authority.observe_node(
+                    row.csr_pem.encode("ascii"), now, request=binding
                 )
-            try:
-                if binding is not None:
-                    if row.csr_pem is None:
-                        continue
-                    issued = self._authority.observe_node(
-                        row.csr_pem.encode("ascii"), now, request=binding
-                    )
-                    if issued is None:
-                        continue
-                self._authority.revoke_node(row.serial, now)
-                self._confirm_remote_revocation(row.node_id, row.serial, now)
-                changed = True
-            except (
-                StepCAUnavailable,
-                EnrollmentIssuanceUncertain,
-                RuntimeError,
-                ValueError,
-                SQLAlchemyError,
-            ):
-                continue
-        for row in certificates:
-            if _stored_utc(row.not_after) <= now:
-                with self._transaction() as session:
-                    expired_certificate = session.get(AgentCertificate, row.serial)
-                    if expired_certificate is not None:
-                        changed |= schedule_wait(expired_certificate, None)
-                continue
-            with self._transaction() as session:
-                current_certificate = session.get(
-                    AgentCertificate, row.serial, with_for_update=True
-                )
-                if (
-                    current_certificate is None
-                    or current_certificate.ca_revoked_at is not None
-                ):
-                    continue
-                schedule_wait(
-                    current_certificate,
-                    now + timedelta(seconds=5),
-                    now=now,
-                    deadline=current_certificate.not_after,
-                )
-            try:
-                self._authority.revoke_node(row.serial, now)
-                self._confirm_remote_revocation(row.node_id, row.serial, now)
-                changed = True
-            except (
-                StepCAUnavailable,
-                EnrollmentIssuanceUncertain,
-                RuntimeError,
-                ValueError,
-                SQLAlchemyError,
-            ):
-                continue
-        return changed
+                if issued is None:
+                    return False
+            self._authority.revoke_node(row.serial, now)
+            self._confirm_remote_revocation(row.node_id, row.serial, now)
+        except _REVOCATION_RETRYABLE:
+            return False
+        return True
+
+    def _confirm_certificate_row(self, row: AgentCertificate, now: datetime) -> bool:
+        with self._transaction() as session:
+            current = session.get(AgentCertificate, row.serial, with_for_update=True)
+            if current is None or current.ca_revoked_at is not None:
+                return False
+            schedule_wait(
+                current,
+                self._next_revocation_check(current, now),
+                now=now,
+                deadline=current.not_after,
+            )
+        try:
+            self._authority.revoke_node(row.serial, now)
+            self._confirm_remote_revocation(row.node_id, row.serial, now)
+        except _REVOCATION_RETRYABLE:
+            return False
+        return True
 
     def activate(
         self, node_id: str, serial: str, generation: int

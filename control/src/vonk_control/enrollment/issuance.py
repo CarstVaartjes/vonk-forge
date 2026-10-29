@@ -160,6 +160,8 @@ class EnrollmentCore:
         # transactions; PostgreSQL uses its durable row/advisory claims and
         # never holds a process-wide lock across SQL waits or provider HTTP.
         self._sqlite_transaction_lock = threading.RLock()
+        # Where the next budgeted revocation sweep resumes, per table.
+        self._revocation_cursors: dict[str, str] = {}
 
     @contextmanager
     def _transaction(self) -> Iterator[Session]:

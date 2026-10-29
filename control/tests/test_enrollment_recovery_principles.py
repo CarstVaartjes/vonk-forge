@@ -712,3 +712,185 @@ def test_authenticated_renewal_route_recovers_across_controller_replacement(
         ).status_code
         == 200
     )
+
+
+def _revocation_rows(sessions, clock, *, expired: int, live: int, offset: int = 0):
+    """Revoked-but-unconfirmed evidence (late CA effects), expired and live."""
+    from datetime import timedelta
+
+    from vonk_control.models import AgentCertificate
+
+    now = clock.now
+    with sessions.begin() as session:
+        for index in range(expired):
+            number = offset + index
+            session.add(
+                AgentCertificate(
+                    serial=f"7{number:06d}",
+                    node_id=f"expired-{number}",
+                    not_before=now - timedelta(days=30),
+                    not_after=now - timedelta(days=1),
+                    fingerprint=f"expired-{number}",
+                    state=CertificateRecordState.REVOKED,
+                    generation=number + 1,
+                    revoked_at=now - timedelta(days=2),
+                )
+            )
+        for index in range(live):
+            number = offset + index
+            session.add(
+                AgentIssuedCertificateRevocation(
+                    serial=f"8{number:06d}",
+                    node_id=f"live-{number}",
+                    provider_request_id=f"live-{number}",
+                    generation=number + 1,
+                    state=CertificateRotationState.REVOCATION_PENDING,
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+
+
+def test_expired_revocation_rows_are_never_selected_again(service):
+    """Catches an ever-growing rescan: expired rows were re-read and re-opened in
+    a write transaction on every pass, so the sweep grew with history."""
+    from sqlalchemy import event
+
+    enrollment, sessions, clock, authority = service
+    _revocation_rows(sessions, clock, expired=500, live=3)
+    statements = []
+    event.listen(
+        sessions.kw["bind"],
+        "before_cursor_execute",
+        lambda *args: statements.append(args[2]),
+    )
+
+    assert enrollment.reconcile_revocations()
+    first = len(statements)
+    statements.clear()
+    assert not enrollment.reconcile_revocations()
+
+    assert sorted(authority.revocations) == ["8000000", "8000001", "8000002"]
+    assert first < 100
+    assert len(statements) < 10  # nothing left to select; constant, not 500+
+
+
+def test_revocation_sweep_holds_its_budget_at_production_scale(service, monkeypatch):
+    """Catches an unbounded call: 2,000 due rows ran in one call (the step
+    reached 166 s against the 180 s worker watchdog)."""
+    from vonk_control.enrollment.service import REVOCATION_BUDGET_SECONDS
+
+    enrollment, sessions, clock, authority = service
+    _revocation_rows(sessions, clock, expired=0, live=2000)
+    now = [0.0]
+    monkeypatch.setattr(
+        "vonk_control.enrollment.service.time.monotonic", lambda: now[0]
+    )
+    revoke = authority.revoke_node
+
+    def slow_revoke(serial, at):
+        now[0] += 0.01
+        revoke(serial, at)
+
+    monkeypatch.setattr(authority, "revoke_node", slow_revoke)
+
+    assert enrollment.reconcile_revocations()
+    assert now[0] <= REVOCATION_BUDGET_SECONDS + 0.02
+    assert 0 < len(authority.revocations) < 2000
+    for _ in range(100):
+        if not enrollment.reconcile_revocations():
+            break
+    assert authority.revocations == sorted(authority.revocations)  # cursor order
+    assert len(authority.revocations) == len(set(authority.revocations)) == 2000
+    with sessions() as session:
+        pending = session.scalars(
+            select(AgentIssuedCertificateRevocation).where(
+                AgentIssuedCertificateRevocation.ca_revoked_at.is_(None)
+            )
+        ).all()
+        assert pending == []
+
+
+def test_unconfirmable_revocation_backs_off_instead_of_a_flat_five_seconds(service):
+    """Catches the flat +5 s retry: a row the CA cannot confirm came back on
+    every pass; it now backs off to the shared recovery maximum."""
+    from datetime import UTC
+
+    from vonk_control.recovery_policy import RECOVERY
+
+    enrollment, sessions, clock, authority = service
+    _revocation_rows(sessions, clock, expired=0, live=1)
+    authority.revoke_failures.add("8000000")
+    intervals = []
+    for _ in range(12):
+        enrollment.reconcile_revocations()
+        with sessions() as session:
+            due = session.get(
+                AgentIssuedCertificateRevocation, "8000000"
+            ).next_action_at
+        due = due.replace(tzinfo=UTC)
+        intervals.append((due - clock.now).total_seconds())
+        clock.now = due
+    assert intervals[0] <= 2
+    assert max(intervals) <= RECOVERY.max_delay_seconds
+    assert intervals[-1] >= RECOVERY.max_delay_seconds * 3 // 4
+    assert len({round(value) for value in intervals}) > 4  # growing, not flat
+
+
+def test_expired_binding_is_excluded_by_the_query_on_postgres(postgres_engine):
+    """Catches the binding-expiry text comparison working only on SQLite."""
+    from datetime import timedelta
+
+    from sqlalchemy.orm import sessionmaker
+    from vonk_control.enrollment import EnrollmentService
+    from vonk_control.models import Base
+
+    from .test_enrollment import Clock
+
+    Base.metadata.create_all(postgres_engine)
+    clock = Clock()
+    sessions = sessionmaker(postgres_engine, expire_on_commit=False)
+
+    def binding(serial: str, not_after) -> dict:
+        from vonk_agent_protocol.state_machines import CertificateIssuancePurpose
+        from vonk_control.ca_issuance_contract import CertificateIssuanceBinding
+
+        instant = "%Y-%m-%dT%H:%M:%SZ"
+        return CertificateIssuanceBinding(
+            request_id="A" * 43,
+            node_id="spk_" + "0" * 32,
+            csr_sha256="0" * 64,
+            serial=serial,
+            not_before=(clock.now - timedelta(days=2)).strftime(instant),
+            not_after=not_after.strftime(instant),
+            issuer_fingerprint="0" * 64,
+            provisioner_name="vonk",
+            provisioner_kid="kid",
+            policy_sha256="0" * 64,
+            purpose=CertificateIssuancePurpose.ENROLLMENT,
+            source_serial=None,
+            generation=1,
+        ).model_dump(mode="json")
+
+    with sessions.begin() as session:
+        for serial, not_after in (
+            ("1001", clock.now - timedelta(hours=1)),
+            ("1002", clock.now + timedelta(hours=1)),
+        ):
+            session.add(
+                AgentIssuedCertificateRevocation(
+                    serial=serial,
+                    node_id="spk_" + "0" * 32,
+                    provider_request_id=f"request-{serial}",
+                    provider_request=binding(serial, not_after),
+                    generation=1,
+                    state=CertificateRotationState.REVOCATION_PENDING,
+                    created_at=clock.now,
+                    updated_at=clock.now,
+                )
+            )
+    due = EnrollmentService._due_revocations(
+        AgentIssuedCertificateRevocation, None, clock.now, ""
+    )
+    with sessions() as session:
+        assert [row.serial for row in session.scalars(due)] == ["1002"]
