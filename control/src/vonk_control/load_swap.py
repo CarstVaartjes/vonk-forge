@@ -21,6 +21,7 @@ from vonk_agent_protocol.swap import GIB
 from .models import RecipeRun, RunNode
 from .recipe_execution_contract import (
     RecipeExecutionContractError,
+    StoredRunPlan,
     parse_stored_run_plan,
 )
 from .resource_planning import SwapCapacity, SwapHolder
@@ -30,19 +31,26 @@ _LOADING = (RunState.PLANNED, RunState.STARTING)
 _HOLDING = (*_LOADING, RunState.RUNNING)
 
 
-def held_rise(run: RecipeRun, node_id: str, rank_state: str) -> SwapHolder | None:
+def readable_run_plan(run: RecipeRun) -> StoredRunPlan | None:
+    """The run's stored plan, parsed once per run; ``None`` when damaged."""
+
+    try:
+        return parse_stored_run_plan(run.plan)
+    except RecipeExecutionContractError:
+        # Its steady claim still counts; a damaged plan names no rise.
+        return None
+
+
+def held_rise(
+    run: RecipeRun, plan: StoredRunPlan | None, node_id: str, rank_state: str
+) -> SwapHolder | None:
     """The load rise this rank still holds, or ``None`` when it holds none.
 
     The one rule for what a rank holds: used by the swap a Spark can lend and
     by the fleet projection of a loading rank.
     """
 
-    if rank_state not in _HOLDING:
-        return None
-    try:
-        plan = parse_stored_run_plan(run.plan)
-    except RecipeExecutionContractError:
-        # Its steady claim still counts; a damaged plan names no rise.
+    if plan is None or rank_state not in _HOLDING:
         return None
     rank = next((node for node in plan.nodes if node.node_id == node_id), None)
     if (
@@ -82,7 +90,7 @@ def swap_capacity(
             RecipeRun.id.not_in(excluded_run_ids),
         )
     ):
-        holder = held_rise(run, node_id, rank_state)
+        holder = held_rise(run, readable_run_plan(run), node_id, rank_state)
         if holder is not None:
             holders.append(holder)
     return SwapCapacity(

@@ -837,6 +837,14 @@ def test_p_the_wait_a_profile_load_stores_keeps_the_swap_evidence(
     stored = dump_blockers([blocker])
     assert read_blockers(stored)[0].swap == reason.swap
 
+    # Without evidence the key is absent, in a stored wait and in a review reason.
+    from vonk_control.operation_blockers import make_blocker
+
+    assert "swap" not in dump_blockers([make_blocker(blocker.code, "no shortfall")])[0]
+    assert "swap" not in reason.model_copy(update={"swap": None}).model_dump(
+        mode="json"
+    )
+
     # A list stored before the evidence existed reads unchanged.
     legacy = [{k: v for k, v in stored[0].items() if k != "swap"}]
     (old,) = read_blockers(legacy)
@@ -868,6 +876,11 @@ def test_q_a_loading_rank_shows_the_swap_it_holds_until_it_runs(
         sessions, service, service.plan_run(installation, alias="qwen", now=at), at
     )
     assert _stored_load(sessions, run_id) == load
+    with sessions() as session:
+        stored = session.get(RecipeRun, run_id)
+        assert stored is not None
+        # No shortfall: the key is absent, so the plan digest is unchanged.
+        assert "swap" not in json.dumps(stored.plan)
 
     for state in (RunState.PLANNED, RunState.STARTING):
         with sessions.begin() as session:
@@ -877,3 +890,13 @@ def test_q_a_loading_rank_shows_the_swap_it_holds_until_it_runs(
     with sessions.begin() as session:
         session.execute(update(RunNode).values(state=RunState.RUNNING))
     assert _held(sessions, at) == {run_id: None}
+
+
+def test_r_an_admission_reason_without_a_shortfall_stores_no_swap_key() -> None:
+    """Catches ``"swap": null`` entering the stored plan and its json.dumps digest."""
+    from vonk_control.install_admission import AdmissionReason
+    from vonk_control.install_admission.contracts import reason_documents
+
+    assert reason_documents([AdmissionReason("c", "d")]) == [
+        {"code": "c", "detail": "d"}
+    ]

@@ -31,10 +31,10 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol.contracts import DigestText
 
 from .child_phases import FleetProfileChildPhase
+from .integer_domains import MAX_DATABASE_BIGINT
 from .strict_json import StrictJSONModel
 
 MAX_BLOCKERS = 16
-_MAX_BYTES = 2**63 - 1
 _BLOCKER_REASON = TypeAdapter(OperationReason | ProgressAlarmCode)
 
 #: An operation is repeating a phase that failed (it is not merely waiting).
@@ -77,18 +77,18 @@ class SwapShortfallEvidence(StrictJSONModel):
     """The swap numbers behind one load's wait for swap, computed once at admission."""
 
     #: Active swap as the agent reports it (0 when unreported).
-    active_bytes: int = Field(ge=0, le=_MAX_BYTES)
+    active_bytes: int = Field(ge=0, le=MAX_DATABASE_BIGINT)
     #: The Spark's swap setting; ``None`` when unknown.
-    desired_bytes: int | None = Field(default=None, ge=0, le=_MAX_BYTES)
-    used_bytes: int = Field(ge=0, le=_MAX_BYTES)
+    desired_bytes: int | None = Field(default=None, ge=0, le=MAX_DATABASE_BIGINT)
+    used_bytes: int = Field(ge=0, le=MAX_DATABASE_BIGINT)
     #: Rises held by other loads still starting and by active job runs.
-    held_bytes: int = Field(ge=0, le=_MAX_BYTES)
+    held_bytes: int = Field(ge=0, le=MAX_DATABASE_BIGINT)
     #: Swap usable within the host memory guard's margins.
-    usable_bytes: int = Field(ge=0, le=_MAX_BYTES)
+    usable_bytes: int = Field(ge=0, le=MAX_DATABASE_BIGINT)
     #: This load's rise above its steady demand.
-    rise_bytes: int = Field(ge=0, le=_MAX_BYTES)
+    rise_bytes: int = Field(ge=0, le=MAX_DATABASE_BIGINT)
     #: The whole-GiB swap setting that admits this load.
-    needed_setting_bytes: int = Field(ge=0, le=_MAX_BYTES)
+    needed_setting_bytes: int = Field(ge=0, le=MAX_DATABASE_BIGINT)
 
 
 class OperationBlocker(StrictJSONModel):
