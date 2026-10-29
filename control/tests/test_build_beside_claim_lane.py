@@ -331,3 +331,18 @@ def test_off_lane_operations_are_the_agents_shared_vector() -> None:
     assert canonical_message(sorted(OFF_LANE_OPERATIONS)) == canonical_message(
         vector["off_lane_operations"]
     )
+
+
+def test_runtime_preflight_never_becomes_an_off_lane_operation() -> None:
+    """Catches a probe leaving the claim lane under ``record_preflight``'s rule.
+
+    ``record_preflight`` stores the receipt's fingerprint as the node's current
+    fingerprint: a probe runs on the claim lane, so its receipt is the newest
+    host sample and no claim is sampled between the probe and its result.  The
+    claim-side comparisons (``agent_jobs/claim.py``, ``agent_acceptance.py``)
+    read committed node state after the claim handler, so the on-lane ordering
+    is the only thing keeping a claim body equal to the stored value.  If probes
+    move off the lane, a receipt could be older than a claim sample: revisit
+    that rule instead of breaking silently.
+    """
+    assert AgentOperation.RUNTIME_PREFLIGHT.value not in OFF_LANE_OPERATIONS

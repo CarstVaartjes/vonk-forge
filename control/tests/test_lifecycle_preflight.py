@@ -298,7 +298,9 @@ def test_ordinary_stale_preflight_cause_is_preserved_for_retry(tmp_path) -> None
     sessions, _queue, clock, _node_id, service, arguments = _setup(tmp_path)
     pending, error = service.ensure(**arguments, previous=None)
     assert error is None
-    _finish(sessions, pending, clock.now, fingerprint="b" * 64)
+    _finish(sessions, pending, clock.now)
+    # A claim after the receipt reports a host that changed.
+    _claim_reports(sessions, _node_id, "b" * 64)
 
     stale, error = service.ensure(**arguments, previous=pending)
 
@@ -307,7 +309,7 @@ def test_ordinary_stale_preflight_cause_is_preserved_for_retry(tmp_path) -> None
     clock.now = stale.next_check_at
     recovered, error = service.ensure(**arguments, previous=stale)
     assert error is None and _pending(recovered) is not None
-    _finish(sessions, recovered, clock.now)
+    _finish(sessions, recovered, clock.now, fingerprint="b" * 64)
     fresh, error = service.ensure(**arguments, previous=recovered)
     assert error is None
     assert fresh.last_failure_code is None
@@ -470,36 +472,98 @@ def test_changed_earlier_rank_is_reprobed_after_pending_peer_completes(tmp_path)
     assert refreshed.attempts[nodes[0]] == 2
 
 
+def _claim_reports(sessions, node_id, fingerprint):
+    """The agent's next claim reports a host fingerprint, as the claim handler stores it."""
+    with sessions.begin() as session:
+        node = session.get(AgentNode, node_id)
+        assert node is not None
+        set_inventory_fingerprint(node, fingerprint)
+
+
+def _upgrade_during_a_probe_round(tmp_path):
+    """Issue a probe, upgrade the agent under it, then finish it on the new host."""
+    sessions, _queue, clock, node_id, service, arguments = _setup(tmp_path)
+    pending, error = service.ensure(**arguments, previous=None)
+    assert error is None and _pending(pending)
+    # The first post-restart claim samples the host before the daemon-reload.
+    _claim_reports(sessions, node_id, "b" * 64)
+    # The probe then runs on the host after the reload.
+    _finish(sessions, pending, clock.now, fingerprint="c" * 64)
+    return sessions, clock, node_id, service, arguments, pending
+
+
+def test_agent_upgrade_during_a_probe_round_admits_the_new_host_receipt(tmp_path):
+    sessions, _, node_id, service, arguments, pending = _upgrade_during_a_probe_round(
+        tmp_path
+    )
+    completed, error = service.ensure(**arguments, previous=pending)
+    assert error is None
+    assert _pending(completed) is None
+    assert completed.retry_at == {}
+    assert completed.next_check_at is None
+    assert completed.receipts[node_id].result.fingerprint == "c" * 64
+    assert completed.attempts[node_id] == 1
+    with sessions() as session:
+        node = session.get(AgentNode, node_id)
+        assert inventory_items(node).preflight_fingerprint == "c" * 64
+        assert len(list(session.scalars(select(AgentOperation)))) == 1
+
+
+def test_a_real_host_change_after_the_receipt_causes_exactly_one_reprobe(tmp_path):
+    sessions, clock, node_id, service, arguments, pending = (
+        _upgrade_during_a_probe_round(tmp_path)
+    )
+    completed, error = service.ensure(**arguments, previous=pending)
+    assert error is None and node_id in completed.receipts
+    _claim_reports(sessions, node_id, "d" * 64)
+    dropped, error = service.ensure(**arguments, previous=completed)
+    assert error is None
+    assert node_id not in dropped.receipts
+    assert dropped.next_check_at is not None
+    clock.now = dropped.next_check_at
+    reprobing, error = service.ensure(**arguments, previous=dropped)
+    assert error is None and _pending(reprobing)
+    _finish(sessions, reprobing, clock.now, fingerprint="d" * 64)
+    passed, error = service.ensure(**arguments, previous=reprobing)
+    assert error is None and _pending(passed) is None
+    assert passed.next_check_at is None
+    assert passed.receipts[node_id].result.fingerprint == "d" * 64
+    assert passed.attempts[node_id] == 2
+    with sessions() as session:
+        assert len(list(session.scalars(select(AgentOperation)))) == 2
+
+
 def test_repeated_host_changes_recover_after_restart_beyond_previous_attempt_limit(
     tmp_path,
 ):
     sessions, queue, clock, node_id, service, arguments = _setup(tmp_path)
     checkpoint, error = service.ensure(**arguments, previous=None)
     assert error is None and _pending(checkpoint)
-    for _ in range(5):
-        _finish(sessions, checkpoint, clock.now, fingerprint="b" * 64)
-        checkpoint, error = service.ensure(**arguments, previous=checkpoint)
-        assert error is None
-        assert _pending(checkpoint) is None
-        due_at = checkpoint.next_check_at
-        assert due_at is not None
-        assert clock.now < due_at <= clock.now + timedelta(seconds=60)
+    host = "a" * 64
+    for change in range(5):
+        _finish(sessions, checkpoint, clock.now, fingerprint=host)
+        accepted, error = service.ensure(**arguments, previous=checkpoint)
+        assert error is None and node_id in accepted.receipts
+        # A claim after the receipt reports a host that changed again.
+        host = f"{change + 1:x}" * 64
+        _claim_reports(sessions, node_id, host)
+        checkpoint, error = service.ensure(**arguments, previous=accepted)
+        assert error is None and _pending(checkpoint)
+        assert node_id not in checkpoint.receipts
+        pending_id = _pending(checkpoint)
         checkpoint = LifecyclePreflightCheckpoint.model_validate_json(
             checkpoint.model_dump_json()
         )
         service = LifecyclePreflight(sessions, queue, lambda: clock.now, 10)
-        early, error = service.ensure(**arguments, previous=checkpoint)
-        assert error is None and _pending(early) is None
-        assert early.next_check_at == due_at
-        clock.now = due_at
-        checkpoint, error = service.ensure(**arguments, previous=early)
-        assert error is None and _pending(checkpoint)
-    _finish(sessions, checkpoint, clock.now)
+        resumed, error = service.ensure(**arguments, previous=checkpoint)
+        assert error is None and _pending(resumed) == pending_id
+        checkpoint = resumed
+    _finish(sessions, checkpoint, clock.now, fingerprint=host)
     checkpoint, error = service.ensure(**arguments, previous=checkpoint)
     assert error is None and _pending(checkpoint) is None
     assert checkpoint.next_check_at is None
     assert checkpoint.attempts[node_id] == 6
-    assert checkpoint.receipts[node_id].result.fingerprint == "a" * 64
+    assert checkpoint.receipts[node_id].result.fingerprint == host
 
 
 @pytest.mark.parametrize("state", ["queued", "running"])
