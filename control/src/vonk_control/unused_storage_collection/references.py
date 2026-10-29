@@ -12,7 +12,7 @@ from pydantic import TypeAdapter
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import AgentOperation as WireAgentOperation
-from vonk_agent_protocol import WaitReason
+from vonk_agent_protocol import LifecycleState, WaitReason
 
 from .. import model_cache_states
 from ..artifact_reference_scan import saved_profile_selectors
@@ -313,12 +313,22 @@ def _spark_settling(session: Session, node_id: str, received_at: datetime) -> bo
 
 
 def _model_removal_in_flight(session: Session) -> bool:
+    """Whether a model removal is deleting bytes now.
+
+    Only a running removal is settling.  One parked in backoff waits on a
+    dependency and frees nothing; a queued one has not started, and the next
+    pass sees it running if it does.  Counting those would let a removal that
+    waits for ever switch off eviction on space pressure.
+    """
+
     return (
         session.scalar(
             select(ModelCacheOperation.id)
             .where(
                 ModelCacheOperation.kind == "remove",
-                ModelCacheOperation.state.in_(model_cache_states.LIVE),
+                ModelCacheOperation.state.in_(
+                    model_cache_states.words(LifecycleState.RUNNING)
+                ),
             )
             .limit(1)
         )
