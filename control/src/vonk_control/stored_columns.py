@@ -36,7 +36,12 @@ from vonk_agent_protocol.route_activation import ActivationMarker
 from vonk_agent_protocol.runtime_preflight import RuntimePreflightRequest
 from vonk_agent_protocol.source_bundles import SourceBundleManifest
 from vonk_agent_protocol.telemetry import HostResourceSample
-from vonk_forge_contracts import ModelDefinition, RecipeDefinition
+from vonk_forge_contracts import (
+    ModelDefinition,
+    ModelDisplay,
+    RecipeDefinition,
+    RecipeDisplay,
+)
 
 from .agent_upgrade_contract import (
     AgentUpgradeRolloutPayload,
@@ -174,6 +179,13 @@ bind(
     nullable=True,
 )
 
+bind(
+    "catalog_documents",
+    "display",
+    {"model": ModelDisplay, "recipe": RecipeDisplay},
+    nullable=True,
+    discriminator="kind",
+)
 bind(
     "catalog_document_revisions",
     "document",
