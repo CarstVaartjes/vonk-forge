@@ -26,7 +26,7 @@ reference and will fail if only the lock changes.
 | `images.postgres` | `postgres` | `deploy/compose/images.lock.json`, `deploy/compose/compose.yaml`, `.github/workflows/ci.yml` (integration `docker pull`) |
 | `images.prometheus` | `prom/prometheus` | `deploy/compose/images.lock.json`, `deploy/compose/compose.yaml` |
 | `images.registry` | `registry` | `deploy/compose/images.lock.json`, `deploy/compose/compose.yaml` |
-| `images.tailscale` | `tailscale/tailscale` | `deploy/compose/images.lock.json`, `deploy/compose/tailscale/compose.yaml`, `deploy/compose/tests/test_agent_ingress.py`, `deploy/compose/tests/test_networking.py` |
+| `images.tailscale` | `tailscale/tailscale` | `deploy/compose/images.lock.json`, `deploy/compose/tailscale/compose.yaml`, `deploy/compose/tests/test_tailscale.py` |
 | `build_bases.hermes` | `nousresearch/hermes-agent` | `deploy/compose/images.lock.json`, `deploy/compose/hermes-agent/Dockerfile`, `tests/scripts/test_verify_supply_chain.py` |
 | `build_bases.litellm` | `ghcr.io/berriai/litellm` | `deploy/compose/images.lock.json`, `deploy/compose/litellm/Dockerfile` (both `FROM` lines) |
 | `build_bases.node` | `node` | `deploy/compose/images.lock.json`, `control/Dockerfile` (`ARG NODE_IMAGE`) |
