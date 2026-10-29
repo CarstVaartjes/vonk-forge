@@ -83,6 +83,7 @@ PRODUCERS = {
             "scripts/agent-package-versions",
             "scripts/reuse-agent-packages",
             "scripts/seal-agent-deb",
+            "scripts/sign-package-keyless",
             "scripts/dev-publication-sequence",
             "scripts/build-agent-deb",
             "scripts/materialize-agent-tools",
