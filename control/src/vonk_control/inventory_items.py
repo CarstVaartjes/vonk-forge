@@ -121,7 +121,15 @@ def record_preflight(
             requirements_sha256=requirements_sha256, result=result, received_at=now
         )
     )
-    record_items(node, items.model_copy(update={"preflights": entries}), now)
+    # The probe runs on the claim lane, so its receipt is the newest host sample;
+    # a later claim with a different fingerprint still invalidates it.
+    record_items(
+        node,
+        items.model_copy(
+            update={"preflights": entries, "preflight_fingerprint": result.fingerprint}
+        ),
+        now,
+    )
 
 
 def inventory_artifacts(

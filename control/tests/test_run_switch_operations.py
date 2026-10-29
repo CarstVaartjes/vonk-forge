@@ -151,6 +151,7 @@ from .preflight_fixtures import record_passing_preflight
 from .runtime_identity_support import (
     PACKAGED_RUNTIME_IDENTITY,
     inventory_items_fixture,
+    set_inventory_fingerprint,
     set_inventory_identity,
 )
 from .runtime_image_fixtures import place_test_image
@@ -2491,6 +2492,95 @@ def test_slow_cold_compile_refreshes_preflight_instead_of_failing_the_switch(
         if isinstance(result, RunSwitchRuntimePlanResult)
     )
     assert prepared.install_plan_digest == installations[0].plan_digest
+
+
+def test_agent_upgrade_during_runtime_install_preflight_completes_the_switch(
+    tmp_path: Path,
+) -> None:
+    """An agent upgrade between a probe's issue and result is not a host change.
+
+    The first claim of the new agent stores a new build digest and fingerprint
+    before the daemon-reload; the probe then reports the host after the reload.
+    The probe is the newest host sample, so the gate admits it with no extra
+    round and the switch still creates exactly one installation.
+    """
+
+    from vonk_agent_protocol import AgentOperation as AgentOperationKind
+
+    switch = _cold_compile_switch(tmp_path, seconds=1, slow_compiles=0)
+    sessions, clock, service = switch.sessions, switch.clock, switch.service
+    operation_id = switch.operation.operation_id
+
+    def probes() -> int:
+        with sessions() as session:
+            return len(
+                list(
+                    session.scalars(
+                        select(AgentOperation).where(
+                            AgentOperation.kind
+                            == AgentOperationKind.RUNTIME_PREFLIGHT.value
+                        )
+                    )
+                )
+            )
+
+    for _ in range(40):
+        view = service.get(operation_id)
+        if view.progress.subphase == "runtime-install":
+            break
+        switch.drive()
+    # The receipts gathered so far are gone, so the runtime-install gate probes.
+    _clear(sessions)
+
+    upgraded_at: list[int] = []
+    for _ in range(40):
+        before = service.get(operation_id)
+        due = before.next_attempt_at if before.result is not None else None
+        if due is not None and due > clock.now:
+            clock.now = due
+        service.tick()
+        view = service.get(operation_id)
+        assert view.result is not None
+        checkpoint = view.result.preflight
+        pending_id = (
+            None
+            if checkpoint is None
+            else next(iter(checkpoint.pending_jobs.values()), None)
+        )
+        if pending_id is not None:
+            with sessions() as session:
+                pending = session.get(Job, pending_id)
+                answerable = pending is not None and pending.state in {
+                    "queued",
+                    "running",
+                }
+            if answerable and view.progress.subphase == "runtime-install":
+                assert not upgraded_at
+                upgraded_at.append(probes())
+                with sessions.begin() as session:
+                    for node_id in switch.nodes:
+                        node = session.get(AgentNode, node_id)
+                        set_inventory_identity(node, build_digest="sha256:" + "d" * 64)
+                        set_inventory_fingerprint(node, "b" * 64)
+                _finish(sessions, checkpoint, clock.now, fingerprint="c" * 64)
+            elif answerable:
+                _finish(sessions, checkpoint, clock.now)
+        if "runtime-install" in switch.executor.events:
+            break
+    assert upgraded_at, "the runtime-install gate never issued a probe"
+    assert "runtime-install" in switch.executor.events, switch.executor.events
+    assert probes() == upgraded_at[0]
+
+    for _ in range(20):
+        if service.get(operation_id).state != "running":
+            break
+        switch.drive()
+    completed = service.get(operation_id)
+    assert completed.state != "failed", completed.status_reason
+    assert completed.result is not None and completed.result.retry_attempt is None
+    assert completed.progress.operation.phase != "install-preflight-refresh"
+    with sessions() as session:
+        assert len(list(session.scalars(select(RecipeInstallation)))) == 1
 
 
 def test_runtime_install_capacity_busy_parks_and_retries_the_switch(
