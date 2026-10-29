@@ -405,22 +405,25 @@ def _blocker_codes(plan) -> list[str]:
 
 def test_a_shortfall_nothing_vonk_holds_can_clear_never_fits() -> None:
     # Production 2026-10-16: spark-3542 held no Vonk claim, 125_650_657_280
-    # bytes free; the aday777 recipe's measured 122_005_303_296-byte peak left
-    # 3_645_353_984 bytes before the 6 GB floor, and its load backed off 40
-    # times on a capacity wait no claim, stop or run could ever clear.
+    # bytes free; the aday777 recipe's measured peak left less than the platform
+    # floor, and its load backed off 40 times on a capacity wait no claim, stop
+    # or run could ever clear. The peak is derived from the floor constant.
+    free = 125_650_657_280
+    left = PLATFORM_MEMORY_FLOOR_BYTES - 500_000_000
+    peak = free - left
     idle = plan_capacity(
-        {"rank-0": _declared_demand(122_005_303_296)},
-        [_idle_capacity(_SPARK_POOL, 125_650_657_280)],
+        {"rank-0": _declared_demand(peak)},
+        [_idle_capacity(_SPARK_POOL, free)],
         memory_floor_bytes=PLATFORM_MEMORY_FLOOR_BYTES,
     )
     assert not idle.allowed
     assert _blocker_codes(idle) == [ResourceBlockerCode.DEMAND_EXCEEDS_CAPACITY]
     (never_fits,) = (r for r in idle.reasons if r.severity == "blocker")
-    assert "3645353984" in never_fits.detail
+    assert str(left) in never_fits.detail
 
     # The same shortfall while a Vonk claim holds memory there is a wait.
     held = plan_capacity(
-        {"rank-0": _declared_demand(122_005_303_296)},
+        {"rank-0": _declared_demand(peak)},
         [_idle_capacity(_SPARK_POOL, 115_650_657_280, claimed=1_000_000_000)],
         memory_floor_bytes=PLATFORM_MEMORY_FLOOR_BYTES,
     )
@@ -429,8 +432,8 @@ def test_a_shortfall_nothing_vonk_holds_can_clear_never_fits() -> None:
 
     # So is one while a planned stop may free it, even of unknown size.
     stopping = plan_capacity(
-        {"rank-0": _declared_demand(122_005_303_296)},
-        [_idle_capacity(_SPARK_POOL, 125_650_657_280)],
+        {"rank-0": _declared_demand(peak)},
+        [_idle_capacity(_SPARK_POOL, free)],
         [PlannedStopRelease("old", "rank-0", "unified-memory", None, True)],
         memory_floor_bytes=PLATFORM_MEMORY_FLOOR_BYTES,
     )
@@ -440,8 +443,11 @@ def test_a_shortfall_nothing_vonk_holds_can_clear_never_fits() -> None:
 
 def test_a_host_shortfall_inside_its_recent_noise_stays_a_wait() -> None:
     # spark-3542's idle free moved by about 0.5e9 within the hour (125.17e9 to
-    # 125.67e9). The common 119_063_746_765-byte peak fits its best sample; one
-    # low sample must not end that load as never fitting.
+    # 125.67e9). A peak whose floor-inclusive demand sits between the current and
+    # the best sample fits the best one; one low sample must not end that load as
+    # never fitting.
+    peak = 125_000_000_000 - PLATFORM_MEMORY_FLOOR_BYTES + 63_746_765
+
     def plan(best_free: int | None):
         capacity = memory_capacity_snapshot(
             "rank-0",
@@ -454,7 +460,7 @@ def test_a_host_shortfall_inside_its_recent_noise_stays_a_wait() -> None:
             recent_best_free_bytes=best_free,
         )
         return plan_capacity(
-            {"rank-0": _declared_demand(119_063_746_765)},
+            {"rank-0": _declared_demand(peak)},
             [capacity],
             memory_floor_bytes=PLATFORM_MEMORY_FLOOR_BYTES,
         )
@@ -764,8 +770,9 @@ def test_deepseek_deferral_uses_observed_host_not_recipe_reserve() -> None:
 
     from vonk_forge_contracts.memory_admission import evaluate_memory_admission
 
-    peak = 124_000_000_000
     occupied = 4_515_061_760
+    left = PLATFORM_MEMORY_FLOOR_BYTES - 500_000_000
+    peak = _SPARK_POOL - occupied - left
     assert evaluate_memory_admission(peak, _SPARK_POOL).admissible
     assert not evaluate_memory_admission(
         peak, _SPARK_POOL, occupied_bytes=occupied
@@ -782,4 +789,4 @@ def test_deepseek_deferral_uses_observed_host_not_recipe_reserve() -> None:
     )
     assert not plan.allowed
     assert _blocker_codes(plan) == [ResourceBlockerCode.DEMAND_EXCEEDS_CAPACITY]
-    assert "2169772032 bytes" in plan.reasons[-1].detail
+    assert f"{left + 21_598_208} bytes" in plan.reasons[-1].detail
