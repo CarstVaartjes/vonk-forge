@@ -265,3 +265,35 @@ def test_definition_import_round_trips_option_choices(tmp_path, capsys):
     assert _saved(client)["assignments"][0]["option_choices"] == {
         "verification": "adaptive-k"
     }
+
+
+def _library_output(resources, capsys):
+    from cluster_profiles import cli_render
+
+    item = {
+        "selector": SELECTOR,
+        "identity": {"publisher": "vonk-forge", "slug": "glm", "title": "GLM"},
+        "local": {},
+        "resources": resources,
+    }
+    cli_render._library_item(item, "recipe", detail=True)
+    return capsys.readouterr().out
+
+
+def test_recipe_detail_shows_load_peak_and_minimum_swap(capsys):
+    out = _library_output(
+        {
+            "memory_bytes": 100 << 30,
+            "load_peak_bytes": 110 << 30,
+            "minimum_swap_bytes": 16 << 30,
+        },
+        capsys,
+    )
+    assert "Load peak" in out and "110.0 GiB" in out
+    assert "Minimum swap" in out and "16.0 GiB" in out
+
+
+def test_recipe_detail_omits_load_peak_and_swap_when_not_declared(capsys):
+    out = _library_output({"memory_bytes": 100 << 30}, capsys)
+    assert "Memory" in out
+    assert "Load peak" not in out and "Minimum swap" not in out

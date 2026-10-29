@@ -203,9 +203,15 @@ class LibraryLocalState(StrictModel):
 
 
 class LibraryResourceProjection(StrictModel):
-    """Declared resource facts; unknown values remain null."""
+    """Declared resource facts; unknown values remain null.
+
+    ``memory_bytes`` is the steady peak. ``load_peak_bytes`` and
+    ``minimum_swap_bytes`` are the recipe's declared values, never derived.
+    """
 
     memory_bytes: int | None = Field(default=None, ge=0)
+    load_peak_bytes: int | None = Field(default=None, ge=0)
+    minimum_swap_bytes: int | None = Field(default=None, ge=0)
     disk_bytes: int | None = Field(default=None, ge=0)
     runtime_memory_bytes: int | None = Field(default=None, ge=0)
     image_bytes: int | None = Field(default=None, ge=0)

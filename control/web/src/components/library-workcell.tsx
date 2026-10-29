@@ -718,7 +718,10 @@ export function LibraryWorkcell({
             aria-label="Sort Library"
             value={filters.sort}
             onChange={(event) =>
-              onFiltersChange({ ...filters, sort: librarySortFromValue(event.target.value) })
+              onFiltersChange({
+                ...filters,
+                sort: librarySortFromValue(event.target.value),
+              })
             }
           >
             {LIBRARY_SORTS.map((value) => (
@@ -734,7 +737,10 @@ export function LibraryWorkcell({
             aria-label="Filter updated"
             value={filters.updated}
             onChange={(event) =>
-              onFiltersChange({ ...filters, updated: libraryRecencyFromValue(event.target.value) })
+              onFiltersChange({
+                ...filters,
+                updated: libraryRecencyFromValue(event.target.value),
+              })
             }
           >
             {LIBRARY_RECENCY_VALUES.map((value) => (
@@ -852,7 +858,15 @@ export function LibraryWorkcell({
                         {document.topology.roles
                           .map(
                             (role) =>
-                              `${role.name}: ${formatBytes(role.resources.memory.peak_bytes)} peak`,
+                              `${role.name}: ${formatBytes(role.resources.memory.peak_bytes)} peak${
+                                role.resources.memory.load_peak_bytes == null
+                                  ? ""
+                                  : ` · ${formatBytes(role.resources.memory.load_peak_bytes)} load peak`
+                              }${
+                                role.resources.memory.minimum_swap_bytes
+                                  ? ` · ${formatBytes(role.resources.memory.minimum_swap_bytes)} min swap`
+                                  : ""
+                              }`,
                           )
                           .join(" · ")}
                       </small>
