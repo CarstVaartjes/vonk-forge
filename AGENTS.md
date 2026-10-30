@@ -370,9 +370,9 @@ readiness are cache-backed.
 Missing model or recipe-image assets are actionable blockers. Preview and
 authoring must name the missing asset and expose the current prepare-cache
 action; do not silently admit a profile and defer the problem to a Spark.
-The local NAS cache is trusted under its managed-storage contract, so do not
-promise costly repeated full hashing as part of ordinary profile reads or
-admission.
+The local NAS cache is trusted under its managed-storage contract, and so are
+the Spark copies made from it, so do not promise costly repeated full hashing
+as part of ordinary profile reads, admission, Spark installs or profile loads.
 
 Applying a ready profile binds the exact profile and plan digests, fans out
 exact model and recipe-image preparation to the target Sparks in parallel, and

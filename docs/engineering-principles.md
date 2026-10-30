@@ -278,8 +278,13 @@ recipes reproducible rather than to restrict them.
   import, upload into the Controller store). Inside our own environment (NAS
   cache, Controller, Spark over TLS, local caches, build outputs) a digest is a
   name, and admission, serving, transfer, adoption and reuse check identity,
-  existence and length only, trusting the durable receipt. Nothing rehashes
-  model weights on read, serve or after a restart. Signed release, package and
+  existence and length only, trusting the durable receipt. Everything present
+  in the NAS cache was verified at ingress, and every copy made from it (Spark
+  installs, image imports, rehydration, prefetch) is trusted. Loads, installs
+  of already-present content, restarts and reuse check identity, existence and
+  length only; no path re-reads or re-hashes installed bytes. Nothing rehashes
+  model weights on read, serve, load or after a restart (a profile load that
+  ran a verify phase over 665.9 GiB on the Sparks is the precedent). Signed release, package and
   installer verification is a separate trust boundary and stays.
 - Identity is content; provenance is never identity. A runtime image is its
   manifest digest, OCI archive sha256, bytes and architecture, a model file is
