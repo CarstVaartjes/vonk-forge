@@ -86,18 +86,6 @@ def _core_test_input(path: str) -> bool:
     return True
 
 
-def _lane_input(path: str) -> bool:
-    return select([path], "pull_request")["nas_install"]
-
-
-def lane_selected(paths: Iterable[str], event: str) -> bool:
-    """An integration PR accepts its own candidate when it changes what ships."""
-    changed = [path.strip().removeprefix("./") for path in paths if path.strip()]
-    if event not in DIFF_EVENTS:
-        return False
-    return not changed or any(_lane_input(path) for path in changed)
-
-
 # The upgrade carry proves that a workload keeps serving while the Controller
 # is redeployed and the agent is upgraded to the candidate. Main's release
 # carries every merge before anything is published. A pull request carries
@@ -105,9 +93,8 @@ def lane_selected(paths: Iterable[str], event: str) -> bool:
 # the agent, its packaging and installers, the deployment, the protocol
 # between Controller and agent, and the scripts, actions and workflows that
 # assemble and accept a candidate. Controller, web, test, tooling and
-# documentation changes get the clean NAS and Spark exercises on the pull
-# request and the carry on main. An unfamiliar path carries, like any other
-# unknown input.
+# documentation changes leave all acceptance to an integration PR or to main's
+# release. An unfamiliar path carries, like any other unknown input.
 CARRY_INPUTS = (
     "rust/",
     "packaging/",
@@ -147,6 +134,26 @@ def carry_selected(paths: Iterable[str], event: str) -> bool:
         if not (path.startswith(CARRY_EXEMPT) or top_level_prose):
             return True
     return False
+
+
+# Candidate acceptance on a pull request: the `release-acceptance` label (an
+# integration PR; ci.yml folds label and integration/* branches into `lane`) or a change to what the upgrade is made of
+# (CARRY_INPUTS) or to the acceptance programs themselves. Controller, web,
+# tooling, test and documentation PRs fold into an integration PR or merge to
+# main, where Release accepts the merge: its Spark and refresh steps run when
+# the tested PR holds no candidate evidence (release-acceptance-core.yml).
+# The canary fixture feeds the Spark lane and the carry, so it accepts too.
+LANE_INPUTS = ("tests/acceptance/", "tests/fixtures/canonical-synthetic-canary/")
+
+
+def lane_selected(paths: Iterable[str], event: str) -> bool:
+    """Whether this pull request accepts its own candidate by its paths."""
+    changed = [path.strip().removeprefix("./") for path in paths if path.strip()]
+    if event not in DIFF_EVENTS:
+        return False
+    return carry_selected(changed, event) or any(
+        path.startswith(LANE_INPUTS) for path in changed
+    )
 
 
 # Always-on suites retain their output names for the aggregate gate and timing

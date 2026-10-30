@@ -53,7 +53,9 @@ jobs:
       contents: read
     outputs:
       reuse: ${{ steps.match.outputs.reuse }}
-      skip_refresh: ${{ steps.match.outputs.skip_refresh }}
+      # An irrelevant refresh is skipped whether or not the pull request left
+      # candidate evidence (a direct merge of a component PR leaves none).
+      skip_refresh: ${{ steps.match.outputs.skip_refresh || (steps.find.outputs.refresh_required == 'false' && 'true' || '') }}
       generation: ${{ steps.match.outputs.generation }}
       source_sha: ${{ steps.match.outputs.source_sha }}
     steps:
@@ -82,6 +84,12 @@ jobs:
         run: |
           set -euo pipefail
           [[ "$RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          # Apply the PR selector to the merged change before looking for
+          # evidence: the upgrade carry still runs on every release; the
+          # recipe refresh only runs for changes that can alter the upgrade.
+          refresh_required=$(git diff --name-only --no-renames HEAD^ HEAD |
+            scripts/select-ci-areas --event pull_request | jq -er '.upgrade_carry | tostring')
+          echo "refresh_required=$refresh_required" >> "$GITHUB_OUTPUT"
           names=$(gh api --paginate \
             "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID/artifacts?per_page=100" \
             --jq '.artifacts[] | select(.expired | not) | .name' || true)
@@ -128,6 +136,7 @@ jobs:
           PR_GENERATION: ${{ steps.find.outputs.generation }}
           PR_REFRESH: ${{ steps.find.outputs.refresh }}
           RUN_ID: ${{ inputs.reuse_run_id }}
+          REFRESH_REQUIRED: ${{ steps.find.outputs.refresh_required }}
         run: |
           set -euo pipefail
           # The payload needs only the standard library and dpkg-deb.
@@ -140,10 +149,7 @@ jobs:
           }
           current=$(payload "$RUNNER_TEMP/candidate-publication" "$GENERATION")
           reused=$(payload "$RUNNER_TEMP/pr-candidate-publication" "$PR_GENERATION")
-          # Apply the PR selector to the merged change. The upgrade carry still
-          # runs on every release; refresh only runs for relevant changes.
-          refresh_required=$(git diff --name-only --no-renames HEAD^ HEAD |
-            scripts/select-ci-areas --event pull_request | jq -er '.upgrade_carry | tostring')
+          refresh_required=$REFRESH_REQUIRED
           skip_refresh=
           if [[ -n "$PR_REFRESH" ]]; then
             refresh=$(jq -r --arg generation "$PR_GENERATION" \
