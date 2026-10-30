@@ -8,6 +8,7 @@ import sys
 from collections.abc import Sequence
 from difflib import SequenceMatcher
 from functools import cache
+from itertools import pairwise
 from pathlib import Path
 
 from . import claim_registry as claims
@@ -259,7 +260,12 @@ def model_sized_count_caps(source: str) -> list[int]:
             for keyword in call.keywords:
                 capped = (
                     (is_list and keyword.arg == "max_length")
-                    or (is_int and not is_list and counted and keyword.arg == "le")
+                    or (
+                        is_int
+                        and not is_list
+                        and counted
+                        and keyword.arg in {"le", "lt"}
+                    )
                 ) and (
                     # A number or a named constant: both are an item count.
                     (
@@ -273,6 +279,58 @@ def model_sized_count_caps(source: str) -> list[int]:
                 )
                 if capped and ITEM_COUNT_PRAGMA not in lines[keyword.value.lineno - 1]:
                     found.add(keyword.value.lineno)
+    return sorted(found)
+
+
+_MODEL_SIZED_PLURALS = frozenset(
+    {"files", "digests", "artifacts", "objects", "shards", "paths"}
+)
+_MAX_CONSTANT = re.compile(r"^_?MAX_[A-Z0-9_]+$")
+
+
+def runtime_count_caps(source: str) -> list[int]:
+    """Lines comparing ``len(<model-sized>)`` with a ``MAX_*`` name or a big number.
+
+    ``len(artifacts) > _MAX_ARTIFACTS`` is the runtime form of a ``max_length``
+    cap and refuses a model for its file count; a byte bound is the one to use.
+    Small literals (``len(x) < 2``) are shape checks, not caps.
+    """
+
+    found: set[int] = set()
+    for node in ast.walk(ast.parse(source)):
+        if not isinstance(node, ast.Compare):
+            continue
+        sides = [node.left, *node.comparators]
+        for left, right in pairwise(sides):
+            for call, other in ((left, right), (right, left)):
+                if not (
+                    isinstance(call, ast.Call)
+                    and isinstance(call.func, ast.Name)
+                    and call.func.id == "len"
+                    and call.args
+                ):
+                    continue
+                tokens = set(re.split(r"\W+", ast.unparse(call.args[0]).lower()))
+                tokens = {part for token in tokens for part in token.split("_")}
+                # Collections only: ``len(path)`` or ``len(digest)`` measure a string.
+                if not tokens & _MODEL_SIZED_PLURALS:
+                    continue
+                if not any(
+                    isinstance(op, ast.Gt | ast.GtE | ast.Lt | ast.LtE)
+                    for op in node.ops
+                ):
+                    continue
+                if (
+                    isinstance(other, ast.Name)
+                    and _MAX_CONSTANT.match(other.id)
+                    and other.id not in _RANGE_CONSTANTS
+                ) or (
+                    isinstance(other, ast.Constant)
+                    and isinstance(other.value, int)
+                    and not isinstance(other.value, bool)
+                    and other.value >= 64
+                ):
+                    found.add(node.lineno)
     return sorted(found)
 
 
@@ -1470,7 +1528,9 @@ def check_source(
     ):
         hits.extend(
             (line, "item-count cap on a model-sized list; bound by bytes instead")
-            for line in model_sized_count_caps(source)
+            for line in sorted(
+                {*model_sized_count_caps(source), *runtime_count_caps(source)}
+            )
         )
     if (
         python

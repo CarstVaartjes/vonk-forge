@@ -32,7 +32,6 @@ from .constants import (
     _DIGEST_LENGTH,
     _GITHUB_API_HOST,
     _GITHUB_LFS_MEDIA_HOST,
-    _MAX_ARTIFACTS,
     _REVISION_PATTERN,
     ProviderKind,
 )
@@ -365,10 +364,6 @@ def _recipe_model_content_digests(
             )
         if digest not in result:
             result.append(digest)
-    if len(result) > _MAX_ARTIFACTS:
-        raise ModelCacheResolutionInvalid(
-            ModelCacheCode.DEPENDENCY_COUNT, "recipe model set is too large"
-        )
     return result
 
 

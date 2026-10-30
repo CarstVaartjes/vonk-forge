@@ -1681,3 +1681,30 @@ def test_an_event_loop_entered_outside_the_transport_is_flagged(call: str) -> No
     assert not check_source(path, source, {1}, modes=("event-loops",))
     quiet = "def go(runner, work):\n    return runner.run(work)  # asyncio.run(x)\n"
     assert not check_source(path, quiet, {2}, modes=("event-loops",))
+
+
+_RUNTIME_CAP = (
+    "def check(value, artifacts, parts):\n"
+    "    if len(value.artifacts) > _MAX_ARTIFACTS:\n"
+    "        raise ValueError('too many')\n"
+    "    if not 2 <= len(value.files) <= MAX_FILES:\n"
+    "        raise ValueError('parts')\n"
+    "    if len(artifacts) > 4096:\n"
+    "        raise ValueError('big')\n"
+    "    if len(artifacts) < 2 or len(value.nodes) > MAX_NODES:\n"
+    "        raise ValueError('shape')\n"
+    "    "
+)
+
+
+def test_runtime_len_caps_on_model_sized_collections_are_flagged() -> None:
+    """Catches ``len(artifacts) > _MAX_ARTIFACTS``, the runtime form of a cap."""
+    path = "control/src/vonk_control/model_cache/x.py"
+    assert check_source(path, _RUNTIME_CAP, {2}, modes=("item-counts",))
+    assert check_source(path, _RUNTIME_CAP, {4}, modes=("item-counts",))
+    assert check_source(path, _RUNTIME_CAP, {6}, modes=("item-counts",))
+    # A small literal is a shape check, and a non-model-sized collection is free.
+    assert not check_source(path, _RUNTIME_CAP, {8}, modes=("item-counts",))
+    assert not check_source(path, _RUNTIME_CAP, {1, 3}, modes=("item-counts",))
+    lt = "class P(M):\n    artifact_count: int = Field(lt=1024)\n"
+    assert check_source(path, lt, {2}, modes=("item-counts",))

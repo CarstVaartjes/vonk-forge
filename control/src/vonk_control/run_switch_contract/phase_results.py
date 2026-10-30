@@ -181,6 +181,10 @@ class RunSwitchCleanupResult(_RunSwitchPhaseBase):
     scope: Literal["spark-local"]
     reclaimed_bytes: int = Field(ge=0)
     protected_referenced_bytes: int = Field(default=0, ge=0)
+    # Receipts stored before cleanup became bytes; new ones leave these empty and
+    # nothing reads them (delete once in-flight work has turned over).
+    reclaimed_digests: list[Digest] = Field(default_factory=list)
+    protected_digests: list[Digest] = Field(default_factory=list)
     nas_evicted: bool
 
 
