@@ -493,3 +493,141 @@ def active_recipe_revisions(session, selectors: Collection[tuple[str, str]]):
             )
         )
     }
+
+
+@dataclass(frozen=True, slots=True)
+class ProfileRecipeScope:
+    """What the saved profiles' recipes say about a set of cached models."""
+
+    #: Per selector, the (model content, recipe content) rows of the recipe
+    #: revisions bound to those models or built for those recipes. The model is
+    #: ``None`` when only the recipe content matched.
+    matched: dict[tuple[str, str], tuple[tuple[str | None, str], ...]]
+    #: Selectors whose models cannot be proven: no revision resolves, or a
+    #: resolved revision has no binding rows. Nothing may be freed for these.
+    unknown: frozenset[tuple[str, str]]
+
+
+def profile_recipe_scope(
+    session,
+    selectors: Collection[tuple[str, str]],
+    *,
+    models: Collection[str],
+    recipes: Collection[str],
+) -> ProfileRecipeScope:
+    """Resolve saved-profile selectors against cached models, keyed by the target.
+
+    Two reads whatever the number of selectors, and neither returns a selector
+    unrelated to ``models`` or ``recipes``: the first the matching revisions with
+    the model content they are bound to, the second only the selectors that
+    cannot be proven. A selector resolves to its active revision, or to every
+    revision of its own records when its head bookkeeping is missing.
+    """
+    from sqlalchemy import (
+        and_,
+        exists,
+        literal,
+        or_,
+        select,
+        tuple_,
+        union_all,
+    )
+    from sqlalchemy.orm import aliased
+    from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
+
+    from .models import (
+        CatalogDocumentHead,
+        CatalogDocumentRevision,
+        CatalogRecipeModelReference,
+    )
+
+    pairs = sorted(set(selectors))
+    if not pairs:
+        return ProfileRecipeScope({}, frozenset())
+
+    def resolves(rev):
+        usable = aliased(CatalogDocumentRevision)
+        named = and_(
+            CatalogDocumentHead.kind == RunSwitchReasonScopeName.RECIPE,
+            CatalogDocumentHead.publisher == rev.publisher,
+            CatalogDocumentHead.slug == rev.slug,
+        )
+        return and_(
+            rev.kind == RunSwitchReasonScopeName.RECIPE,
+            or_(
+                rev.id.in_(select(CatalogDocumentHead.active_revision_id).where(named)),
+                ~exists().where(
+                    named, usable.id == CatalogDocumentHead.active_revision_id
+                ),
+            ),
+        )
+
+    rev = aliased(CatalogDocumentRevision)
+    lineage = select(CatalogDocumentRevision.id).where(
+        CatalogDocumentRevision.kind == RunSwitchReasonScopeName.MODEL,
+        CatalogDocumentRevision.content_digest.in_(sorted(models)),
+    )
+    bound = and_(
+        CatalogRecipeModelReference.recipe_revision_id == rev.id,
+        CatalogRecipeModelReference.model_revision_id.in_(lineage),
+    )
+    matched: dict[tuple[str, str], list[tuple[str | None, str]]] = {}
+    for publisher, slug, recipe, model in session.execute(
+        select(
+            rev.publisher,
+            rev.slug,
+            rev.content_digest,
+            CatalogRecipeModelReference.model_content_digest,
+        )
+        .select_from(rev)
+        .outerjoin(CatalogRecipeModelReference, bound)
+        .where(
+            resolves(rev),
+            tuple_(rev.publisher, rev.slug).in_(pairs),
+            or_(
+                rev.content_digest.in_(sorted(recipes)),
+                CatalogRecipeModelReference.model_revision_id.is_not(None),
+            ),
+        )
+    ):
+        matched.setdefault((publisher, slug), []).append((model, recipe))
+
+    own = aliased(CatalogDocumentRevision)
+    has_binding = exists().where(
+        CatalogRecipeModelReference.recipe_revision_id == own.id
+    )
+    unknown: set[tuple[str, str]] = set()
+    # A compound select is bounded (SQLite allows 500 terms), so very many
+    # selectors take one more read per 200.
+    for start in range(0, len(pairs), 200):
+        wanted = union_all(
+            *(
+                select(
+                    literal(publisher).label("publisher"), literal(slug).label("slug")
+                )
+                for publisher, slug in pairs[start : start + 200]
+            )
+        ).subquery("wanted")
+        unknown.update(
+            (publisher, slug)
+            for publisher, slug in session.execute(
+                select(wanted.c.publisher, wanted.c.slug).where(
+                    or_(
+                        ~exists().where(
+                            own.publisher == wanted.c.publisher,
+                            own.slug == wanted.c.slug,
+                            resolves(own),
+                        ),
+                        exists().where(
+                            own.publisher == wanted.c.publisher,
+                            own.slug == wanted.c.slug,
+                            resolves(own),
+                            ~has_binding,
+                        ),
+                    )
+                )
+            )
+        )
+    return ProfileRecipeScope(
+        {pair: tuple(rows) for pair, rows in matched.items()}, frozenset(unknown)
+    )

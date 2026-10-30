@@ -556,8 +556,14 @@ def test_removal_cost_does_not_grow_with_unrelated_rows(
         assert len(full.statements) == len(base.statements)
         assert full.parses == base.parses
         # One statement returning every row would keep the count equal.
-        for table in ("Job", "RecipeInstallation"):
-            assert full.loaded[table] == base.loaded[table]
+        tables = ["Job", "RecipeInstallation"]
+        if operation == "review_model_removal":
+            # The reference scan reads the profiles themselves (inherent), then
+            # only the recipes that match these sets. ``_Evidence.read`` (the
+            # other operations) still loads every pointed head and revision.
+            tables += ["CatalogDocumentHead", "CatalogDocumentRevision"]
+        for table in tables:
+            assert full.loaded[table] == base.loaded[table], table
         for statement in full.statements:
             if any(f"FROM {table}" in statement for table in FILTERED_TABLES):
                 assert re.search(r"\bWHERE\b", statement), statement

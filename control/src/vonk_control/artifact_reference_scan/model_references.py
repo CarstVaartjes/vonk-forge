@@ -15,7 +15,7 @@ from .. import model_cache_states
 from ..artifact_lifecycle import (
     ArtifactReferenceUnverified,
 )
-from ..content_identity import installations_for_sets, recipe_model_digests
+from ..content_identity import installations_for_sets, profile_recipe_scope
 from ..machine_states import DISTRIBUTION_HELD, RUN_LIVE
 from ..model_cache_contract import CacheManifest
 from ..models import (
@@ -34,7 +34,7 @@ from .intents import (
     _run_switch_kinds,
     _run_switch_plan,
 )
-from .model_sets import _protect_saved, _selectors_revisions, saved_profile_selectors
+from .model_sets import _protect_saved, _selector_name, saved_profile_selectors
 from .types import (
     _ACTIVE_INSTALLATIONS,
     _ACTIVE_PROFILE_APPLICATIONS,
@@ -88,32 +88,49 @@ def model_set_reference_findings(
         except (TypeError, ValueError):
             served[set_digest] = None
 
+    held_models = {model for found in served.values() for model in found or ()} | {
+        row.model_content_sha256 for row in sets.values() if row.model_content_sha256
+    }
+    held_recipes = {
+        row.recipe_revision_sha256
+        for row in sets.values()
+        if row.recipe_revision_sha256
+    }
+
     # A profile names recipes; each active recipe revision is bound to the exact
-    # model contents it uses by relational rows, so no document is parsed here.
+    # model contents it uses by relational rows. Only the selectors that match
+    # these sets, or cannot be proven, are read.
     profiles = list(session.scalars(select(FleetProfile).order_by(FleetProfile.id)))
     named = {profile.id: saved_profile_selectors(profile) for profile in profiles}
-    resolved = _selectors_revisions(
+    scope = profile_recipe_scope(
         session,
-        {selector for chosen in named.values() for selector in chosen or ()},
-    )
-    bound = recipe_model_digests(
-        session, {record.id for found in resolved.values() for record in found}
+        {
+            _selector_name(selector)
+            for chosen in named.values()
+            for selector in chosen or ()
+        },
+        models=held_models,
+        recipes=held_recipes,
     )
     for profile in profiles:
         selectors = named[profile.id]
         if selectors is None:
             _protect_saved(findings, profile, "model-set", selected)
             continue
+        if selectors:
+            # A manifest that cannot be read has no provable models.
+            _protect_saved(
+                findings,
+                profile,
+                "model-set",
+                {digest for digest, found in served.items() if found is None},
+            )
         for selector in selectors:
-            if not resolved[selector]:
+            pair = _selector_name(selector)
+            if pair in scope.unknown:
                 _protect_saved(findings, profile, "model-set", selected)
-            for record in resolved[selector]:
-                models = bound.get(record.id)
-                if models is None:
-                    # No binding rows: the recipe's models are unknown, so
-                    # every selected set stays.
-                    _protect_saved(findings, profile, "model-set", selected)
-                    continue
+                continue
+            for model, recipe in scope.matched.get(pair, ()):
                 _protect_saved(
                     findings,
                     profile,
@@ -121,8 +138,8 @@ def model_set_reference_findings(
                     {
                         set_digest
                         for set_digest, row in sets.items()
-                        if row.recipe_revision_sha256 == record.content_digest
-                        or (served[set_digest] or models) & models
+                        if row.recipe_revision_sha256 == recipe
+                        or model in (served[set_digest] or ())
                     },
                 )
 
@@ -190,17 +207,8 @@ def model_set_reference_findings(
 
     for use in installations_for_sets(
         session,
-        models={model for found in served.values() for model in found or ()}
-        | {
-            row.model_content_sha256
-            for row in sets.values()
-            if row.model_content_sha256
-        },
-        recipes={
-            row.recipe_revision_sha256
-            for row in sets.values()
-            if row.recipe_revision_sha256
-        },
+        models=held_models,
+        recipes=held_recipes,
         set_digests=selected,
         active=or_(
             RecipeInstallation.state.in_(_ACTIVE_INSTALLATIONS),
