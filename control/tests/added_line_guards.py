@@ -70,6 +70,7 @@ MODES = (
     "model-sets",
     "openers",
     "follow-validators",
+    "event-loops",
 )
 # The agent's messages a Controller test may send only as the stand-in pinned
 # to the agent's shared vector; built by hand they are the Controller's idea of
@@ -1433,6 +1434,23 @@ def check_source(
                 r"\blen\((?:active|operations|queued|running)\w*\)\s*(?:>|>=)"
                 r"|\[[\"']running[\"']\]\s*(?:>|>=)\s*\d",
                 text,
+            )
+        )
+    if (
+        python
+        and not is_test
+        and "event-loops" in modes
+        and path.startswith("src/cluster_profiles/")
+        and path != "src/cluster_profiles/control_transport.py"
+    ):
+        # Every event-loop entry goes through HTTPSResponse._run, which keeps
+        # a Ctrl-C a Ctrl-C (exit 130) however the runner's SIGINT race lands.
+        hits.extend(
+            (line, "event loop entered outside control_transport.py:HTTPSResponse._run")
+            for line, text in enumerate(source.splitlines(), 1)
+            if re.search(
+                r"\b(?:asyncio\.run|asyncio\.Runner|uvloop\.run|anyio\.run)\(|\.run_until_complete\(",
+                text.split("#", 1)[0],
             )
         )
     if python and is_test and "clocks" in modes:

@@ -1620,3 +1620,28 @@ def test_typed_or_unrelated_read_passes_document_reads(source: str) -> None:
     assert not check_source(
         "control/src/vonk_control/example.py", source, {1}, modes=("document-reads",)
     )
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        "asyncio.run(main())",
+        "asyncio.Runner()",
+        "uvloop.run(main())",
+        "anyio.run(main)",
+        "loop.run_until_complete(main())",
+    ],
+)
+def test_an_event_loop_entered_outside_the_transport_is_flagged(call: str) -> None:
+    source = f"def go(main, loop):\n    return {call}\n"
+    path = "src/cluster_profiles/cli.py"
+    assert check_source(path, source, {2}, modes=("event-loops",)), call
+    # The transport owns the entry; other trees and old lines stay quiet.
+    owner = "src/cluster_profiles/control_transport.py"
+    assert not check_source(owner, source, {2}, modes=("event-loops",))
+    assert not check_source(
+        "control/src/vonk_control/x.py", source, {2}, modes=("event-loops",)
+    )
+    assert not check_source(path, source, {1}, modes=("event-loops",))
+    quiet = "def go(runner, work):\n    return runner.run(work)  # asyncio.run(x)\n"
+    assert not check_source(path, quiet, {2}, modes=("event-loops",))
