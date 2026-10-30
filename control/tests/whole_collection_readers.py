@@ -13,11 +13,24 @@ from __future__ import annotations
 
 import ast
 
+_STORAGE = "control/src/vonk_control/unused_storage_collection/"
+# Files that only a collector pass runs. The directory also holds request entry
+# points (``common.spark_eviction_capacity``, ``service.relief_for_spark``), so
+# it is not exempt as a whole.
 COLLECTOR_MODULES = (
     "control/src/vonk_control/catalog_revision_collection.py",
     "control/src/vonk_control/terminal_history_collection.py",
-    "control/src/vonk_control/unused_storage_collection/",
+    f"{_STORAGE}evidence.py",
+    f"{_STORAGE}references.py",
+    f"{_STORAGE}removal.py",
+    f"{_STORAGE}pressure.py",
 )
+# In ``service.py`` only the collector's own passes are exempt.
+COLLECTOR_FUNCTIONS = {
+    f"{_STORAGE}service.py": frozenset(
+        {"tick", "collect", "redrive_installation", "redrive_artifact", "_expire"}
+    )
+}
 # Readers that load or parse the whole collection to answer for any target.
 WHOLE_COLLECTION_READERS = frozenset(
     {
@@ -30,6 +43,9 @@ WHOLE_COLLECTION_READERS = frozenset(
         "runtime_image_reference_reasons",
         "model_set_reference_findings",
         "model_set_reference_reasons",
+        # Wrappers that rebuild the whole evidence for one node.
+        "spark_eviction_capacity",
+        "relief_for_spark",
     }
 )
 # ``read`` is only a whole-collection reader on the evidence classes.
@@ -45,7 +61,8 @@ GROWING_TABLES = frozenset(
         "CatalogDocumentRevision",
     }
 )
-NARROWING = frozenset({"where", "filter", "filter_by", "limit", "join", "outerjoin"})
+# A join relates tables; it does not pick the target rows.
+NARROWING = frozenset({"where", "filter", "filter_by", "limit"})
 
 
 def _tail(node: ast.AST) -> str:
@@ -62,10 +79,20 @@ def is_collector(path: str) -> bool:
     return path.startswith(COLLECTOR_MODULES)
 
 
+def _non_terminal_only(call: ast.Call) -> bool:
+    """``operation_tokens(..., recent=False)`` reads live rows only (P17 exempt)."""
+    return any(
+        keyword.arg == "recent"
+        and isinstance(keyword.value, ast.Constant)
+        and keyword.value.value is False
+        for keyword in call.keywords
+    )
+
+
 def _reader_call(call: ast.Call) -> bool:
     name = _tail(call.func)
     if name in WHOLE_COLLECTION_READERS:
-        return True
+        return not _non_terminal_only(call)
     return (
         name == "read"
         and isinstance(call.func, ast.Attribute)
@@ -77,9 +104,14 @@ def _unfiltered_select(call: ast.Call, parents: dict[ast.AST, ast.AST]) -> bool:
     """``select(Model)`` of a growing table with nothing narrowing it."""
     if not (
         _tail(call.func) == "select"
-        and len(call.args) == 1
+        and call.args
         and not call.keywords
-        and _tail(call.args[0]) in GROWING_TABLES
+        # ``select(Job)`` and column selects such as ``select(Job.payload)``.
+        and all(
+            _tail(argument.value if isinstance(argument, ast.Attribute) else argument)
+            in GROWING_TABLES
+            for argument in call.args
+        )
     ):
         return False
     chain: ast.AST = call
@@ -113,6 +145,12 @@ def scan_source(source: str, *, path: str) -> list[tuple[int, str]]:
     if is_collector(path):
         return []
     tree = ast.parse(source)
+    exempt = [
+        (function.lineno, function.end_lineno or function.lineno)
+        for function in ast.walk(tree)
+        if isinstance(function, ast.FunctionDef | ast.AsyncFunctionDef)
+        and function.name in COLLECTOR_FUNCTIONS.get(path, frozenset())
+    ]
     parents = {
         child: parent
         for parent in ast.walk(tree)
@@ -120,7 +158,9 @@ def scan_source(source: str, *, path: str) -> list[tuple[int, str]]:
     }
     hits: list[tuple[int, str]] = []
     for node in ast.walk(tree):
-        if not isinstance(node, ast.Call):
+        if not isinstance(node, ast.Call) or any(
+            start <= node.lineno <= end for start, end in exempt
+        ):
             continue
         if _reader_call(node):
             hits.append((node.lineno, "whole-collection reader outside a collector"))

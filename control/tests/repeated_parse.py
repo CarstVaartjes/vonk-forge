@@ -54,6 +54,16 @@ def _parser(call: ast.Call) -> str | None:
     return None
 
 
+def _arguments(call: ast.Call) -> tuple[list[str], list[tuple[str | None, str]]]:
+    """Every positional and keyword argument; an empty call matches nothing."""
+    if not call.args and not call.keywords:
+        return ([], [(None, str(id(call)))])
+    return (
+        [ast.dump(argument) for argument in call.args],
+        sorted((key.arg or "", ast.dump(key.value)) for key in call.keywords),
+    )
+
+
 def _calls(function: ast.AST) -> list[ast.Call]:
     """Parser calls of this function, not of the functions defined inside it."""
     found: list[ast.Call] = []
@@ -92,7 +102,12 @@ def _same_execution(
     for left, right in zip(one, other, strict=False):
         if left == right:
             continue
-        return not (left[0] is right[0] and isinstance(left[0], _EXCLUSIVE))
+        # A condition and its body both run; only body and orelse exclude.
+        return not (
+            left[0] is right[0]
+            and isinstance(left[0], _EXCLUSIVE)
+            and {left[1], right[1]} == {"body", "orelse"}
+        )
     return True
 
 
@@ -120,9 +135,7 @@ def scan_source(source: str) -> list[int]:
             for other in calls[index + 1 :]:
                 if (
                     _parser(call) == _parser(other)
-                    and call.args
-                    and list(map(ast.dump, call.args))
-                    == list(map(ast.dump, other.args))
+                    and _arguments(call) == _arguments(other)
                     and _same_execution(call, other, parents)
                 ):
                     lines.update({call.lineno, other.lineno})

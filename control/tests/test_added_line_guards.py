@@ -1628,7 +1628,14 @@ def test_typed_or_unrelated_read_passes_document_reads(source: str) -> None:
         ("def review(s, now):\n    return _Evidence.read(s, now)\n", 2),
         ("def review(s, now):\n    return _CollectorEvidence.read(s, now)\n", 2),
         ("def review(s, now):\n    return live_tokens(s, now)\n", 2),
-        ("def review(s):\n    return operation_tokens(s, recent=False)\n", 2),
+        ("def review(s):\n    return operation_tokens(s, recent=True)\n", 2),
+        ("def review(s, n, now):\n    return spark_eviction_capacity(s, n, now)\n", 2),
+        ("def review(c, s, n):\n    return c.relief_for_spark(s, n)\n", 2),
+        (
+            "def rows(s):\n    return s.execute(select(Job.id, Job.state))\n",
+            2,
+        ),
+        ("def rows(s):\n    return s.scalars(select(Job).join(Other))\n", 2),
         ("def review(s):\n    return pinned_by_heads(s)\n", 2),
         ("def review(s):\n    return _profile_pointers(s)\n", 2),
         ("def review(s, a):\n    return runtime_image_reference_findings(s, a)\n", 2),
@@ -1677,7 +1684,11 @@ def test_a_request_path_may_not_read_the_whole_collection(source, line):
                 "    return s.scalars(q)\n"
             ),
         ),
-        (PATH, "def rows(s):\n    return s.execute(select(Job.id, Job.state))\n"),
+        (PATH, "def review(s):\n    return operation_tokens(s, recent=False)\n"),
+        (
+            PATH,
+            "def rows(s):\n    return s.execute(select(Job.id).where(Job.id == 1))\n",
+        ),
         (PATH, "def rows(s):\n    return s.scalars(select(AgentNode))\n"),
         ("control/tests/test_x.py", "def t(s):\n    return live_tokens(s, 1)\n"),
     ],
@@ -1832,7 +1843,7 @@ def test_an_old_double_parse_does_not_fail_an_unrelated_change():
     [
         ("# keep working for legacy rows\nvalue = 1\n", 1),
         ("# compat shim for the old shape\nvalue = 1\n", 1),
-        ("value = 'compatibility'\n", 1),
+        ("value = 'backwards compatibility'\n", 1),
         ("# backfill the column\nvalue = 1\n", 1),
         ("# an older agent sends this\nvalue = 1\n", 1),
         ("value = adopt_legacy(row)\n", 1),
@@ -1872,8 +1883,7 @@ def test_new_legacy_or_damage_tolerance_is_flagged(source, line):
     "source",
     [
         "value = 'compatible'\n",
-        "value = legacy_other\n",
-        "result = retire_as_unknown('s', row.id, R, 'why')\n",
+        "return_value = 1\n",
         "return retire_as_unknown('s', row.id, R, 'why')\n",
         (
             "try:\n    parse(row)\nexcept ValueError as error:\n"
@@ -1895,9 +1905,149 @@ def test_current_contract_code_passes_the_legacy_guard(source):
         "control/src/vonk_control/lifecycle/evidence.py",
         "control/src/vonk_control/stored_json.py",
         "control/src/vonk_control/strict_json.py",
-        "control/tests/test_x.py",
-        "rust/crates/x/src/lib.rs",
     ],
 )
-def test_the_stored_json_owners_and_tests_may_name_legacy(path):
+def test_the_stored_json_readers_are_not_exempt_from_the_legacy_guard(path):
+    assert check_source(path, "value = 'legacy'\n", {1}, modes=("legacy",))
+
+
+@pytest.mark.parametrize(
+    "path", ["control/tests/test_x.py", "rust/crates/x/src/lib.rs"]
+)
+def test_tests_and_other_languages_are_outside_the_legacy_guard(path):
     assert not check_source(path, "value = 'legacy'\n", {1}, modes=("legacy",))
+
+
+@pytest.mark.parametrize(
+    "path,source",
+    [
+        # A request entry point in the collector directory is a request path.
+        (
+            "control/src/vonk_control/unused_storage_collection/common.py",
+            "def capacity(s, now):\n    return _Evidence.read(s, now)\n",
+        ),
+        (
+            "control/src/vonk_control/unused_storage_collection/service.py",
+            (
+                "class C:\n    def relief_for_spark(self, s, now):\n"
+                "        return _Evidence.read(s, now)\n"
+            ),
+        ),
+        (
+            "control/src/vonk_control/unused_storage_collection/__init__.py",
+            "def review(s, n, now):\n    return spark_eviction_capacity(s, n, now)\n",
+        ),
+    ],
+)
+def test_the_collector_directory_is_not_exempt_as_a_whole(path, source):
+    assert check_source(path, source, {2, 3}, modes=("collection-readers",))
+
+
+@pytest.mark.parametrize(
+    "path,source",
+    [
+        (
+            "control/src/vonk_control/unused_storage_collection/service.py",
+            (
+                "class C:\n    def collect(self, s, now):\n"
+                "        return _CollectorEvidence.read(s, now)\n"
+            ),
+        ),
+        (
+            "control/src/vonk_control/unused_storage_collection/evidence.py",
+            "def read(s, now):\n    return operation_tokens(s, now)\n",
+        ),
+    ],
+)
+def test_the_collector_passes_may_read_the_whole_collection(path, source):
+    assert not check_source(path, source, {2, 3}, modes=("collection-readers",))
+
+
+@pytest.mark.parametrize(
+    "source,expected",
+    [
+        (
+            (
+                "def f(row):\n    fresh = document_sha256(row.document)\n"
+                "    return fresh != row.content_digest\n"
+            ),
+            3,
+        ),
+    ],
+)
+def test_a_two_step_rehash_is_flagged(source, expected):
+    assert f"{PATH}:{expected}: stored row re-hashed" in check_source(
+        PATH, source, {expected}, modes=("identity",)
+    )
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "control/src/vonk_control/catalog_sync_contract.py",
+        "control/src/vonk_control/telemetry_maintenance.py",
+        "control/src/vonk_control/model_cache/download_admission.py",
+    ],
+)
+def test_ingress_prefixes_do_not_over_match(path):
+    source = "bad = row.content_digest != document_sha256(row.document)\n"
+    assert f"{path}:1: stored row re-hashed" in check_source(
+        path, source, {1}, modes=("identity",)
+    )
+
+
+@pytest.mark.parametrize(
+    "source,line",
+    [
+        ("value = legacy_claim(row)\n", 1),
+        ("# backward compat for the old shape\nvalue = 1\n", 1),
+        ("value = _ = retire_as_unknown('s', row.id, R, 'why')\n", 1),
+        ("def f(row):\n    _ = retire_as_unknown('s', row.id, R, 'why')\n", 2),
+        (
+            "def f(row):\n    unused = retire_as_unknown('s', row.id, R, 'why')\n",
+            2,
+        ),
+        ("try:\n    work()\nexcept Exception:\n    return None\n", 3),
+        ("try:\n    work()\nexcept:\n    pass\n", 3),
+        ("try:\n    work()\nexcept BaseException:\n    ...\n", 3),
+        ("try:\n    work()\nexcept ValueError:\n    continue\n", 3),
+        ("with suppress(ValueError):\n    work()\n", 1),
+        ("with contextlib.suppress(Exception):\n    work()\n", 1),
+    ],
+)
+def test_more_tolerance_shapes_are_flagged(source, line):
+    assert check_source(PATH, source, {line}, modes=("legacy",))
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "value = settings.compatibility\n",
+        "value = row.compatibility\n",
+        "def f(row):\n    answer = retire_as_unknown('s', row.id, R, 'why')\n    return answer\n",
+        "try:\n    work()\nexcept OSError:\n    pass\n",
+        "try:\n    work()\nexcept Exception:\n    log(1)\n    raise\n",
+        "with suppress(FileNotFoundError):\n    work()\n",
+    ],
+)
+def test_more_current_code_passes_the_legacy_guard(source):
+    lines = set(range(1, source.count("\n") + 1))
+    assert not check_source(PATH, source, lines, modes=("legacy",))
+
+
+def test_a_condition_and_its_body_both_run():
+    source = (
+        "def f(j):\n"
+        "    if read_recipe(j.document):\n"
+        "        return read_recipe(j.document)\n"
+    )
+    assert check_source(PATH, source, {2, 3}, modes=("repeated-parse",))
+
+
+def test_a_keyword_argument_is_part_of_the_value_parsed():
+    source = (
+        "def f(j):\n"
+        "    a = read_row_column(j, 'plan', strict=True)\n"
+        "    b = read_row_column(j, 'plan', strict=False)\n"
+    )
+    assert not check_source(PATH, source, {2, 3}, modes=("repeated-parse",))

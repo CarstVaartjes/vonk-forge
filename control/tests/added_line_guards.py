@@ -429,15 +429,15 @@ def _enum_member_lines(source: str) -> set[int]:
 REHASH_INGRESS = (
     "control/src/vonk_control/catalog_entities.py",
     "control/src/vonk_control/catalog_service.py",
-    "control/src/vonk_control/catalog_sync",
+    "control/src/vonk_control/catalog_sync.py",
     "control/src/vonk_control/recipe_packages/",
-    "control/src/vonk_control/inventory_repository",
-    "control/src/vonk_control/telemetry",
-    "control/src/vonk_control/cached_file_verification",
-    "control/src/vonk_control/model_cache/download",
-    "control/src/vonk_control/model_cache/transfer",
-    "control/src/vonk_control/model_cache/split_transfer",
-    "control/src/vonk_control/model_cache/http",
+    "control/src/vonk_control/inventory_repository.py",
+    "control/src/vonk_control/telemetry.py",
+    "control/src/vonk_control/cached_file_verification.py",
+    "control/src/vonk_control/model_cache/download.py",
+    "control/src/vonk_control/model_cache/transfer.py",
+    "control/src/vonk_control/model_cache/split_transfer.py",
+    "control/src/vonk_control/model_cache/http.py",
 )
 _STORED_VALUES = ("document", "plan", "payload", "recipe")
 
@@ -453,6 +453,18 @@ def _reaches_stored_value(call: ast.Call) -> bool:
     return any(value in name.lower() for name in names for value in _STORED_VALUES)
 
 
+def _is_digest_column(operand: ast.AST) -> bool:
+    return isinstance(operand, ast.Attribute) and (
+        operand.attr.endswith("digest") or operand.attr.endswith("_sha256")
+    )
+
+
+def _is_fresh_hash(call: ast.Call) -> bool:
+    return ast.unparse(call.func).endswith(("sha256", "_digest")) and (
+        _reaches_stored_value(call)
+    )
+
+
 def _rehashes_stored_row(node: ast.Compare) -> bool:
     """A stored digest column compared with a fresh digest of a stored value.
 
@@ -461,25 +473,50 @@ def _rehashes_stored_row(node: ast.Compare) -> bool:
     row already says. Any column ending in ``digest`` or ``_sha256`` counts.
     """
     operands = (node.left, *node.comparators)
-    if not any(
-        isinstance(operand, ast.Attribute)
-        and (operand.attr.endswith("digest") or operand.attr.endswith("_sha256"))
-        for operand in operands
-    ):
+    if not any(_is_digest_column(operand) for operand in operands):
         return False
     return any(
         isinstance(call, ast.Call)
-        and ast.unparse(call.func).endswith(("sha256", "_digest"))
         and (
-            _reaches_stored_value(call)
-            or any(
-                isinstance(operand, ast.Attribute) and operand.attr == "payload_digest"
-                for operand in operands
+            _is_fresh_hash(call)
+            or (
+                ast.unparse(call.func).endswith("sha256")
+                and any(
+                    isinstance(operand, ast.Attribute)
+                    and operand.attr == "payload_digest"
+                    for operand in operands
+                )
             )
         )
         for operand in operands
         for call in ast.walk(operand)
     )
+
+
+def _two_step_rehashes(tree: ast.Module) -> list[int]:
+    """``fresh = document_sha256(row.document)`` then ``fresh != row.content_digest``."""
+    lines: list[int] = []
+    for function in ast.walk(tree):
+        if not isinstance(function, ast.FunctionDef | ast.AsyncFunctionDef):
+            continue
+        fresh = {
+            target.id
+            for node in ast.walk(function)
+            if isinstance(node, ast.Assign)
+            for call in ast.walk(node.value)
+            if isinstance(call, ast.Call) and _is_fresh_hash(call)
+            for target in node.targets
+            if isinstance(target, ast.Name)
+        }
+        for node in ast.walk(function):
+            if not isinstance(node, ast.Compare):
+                continue
+            operands = (node.left, *node.comparators)
+            if any(_is_digest_column(item) for item in operands) and any(
+                isinstance(item, ast.Name) and item.id in fresh for item in operands
+            ):
+                lines.append(node.lineno)
+    return lines
 
 
 _CLOCK_NAMES = frozenset({"now", "current", "timestamp"})
@@ -1183,7 +1220,7 @@ def check_source(
         if "identity" in modes:
             ingress = path.startswith(
                 (
-                    "control/src/vonk_control/catalog_sync",
+                    "control/src/vonk_control/catalog_sync.py",
                     "control/src/vonk_control/recipe_packages/",
                 )
             ) or path in {
@@ -1219,10 +1256,15 @@ def check_source(
             # written. Re-hashing the Controller's own row to decide what it is
             # refuses it whenever a newer Controller reads it back differently.
             if not path.startswith(REHASH_INGRESS):
+                rehash_tree = ast.parse(source)
                 hits.extend(
                     (node.lineno, "stored row re-hashed")
-                    for node in ast.walk(ast.parse(source))
+                    for node in ast.walk(rehash_tree)
                     if isinstance(node, ast.Compare) and _rehashes_stored_row(node)
+                )
+                hits.extend(
+                    (line, "stored row re-hashed")
+                    for line in _two_step_rehashes(rehash_tree)
                 )
         if "coordination" in modes:
             hits.extend(
