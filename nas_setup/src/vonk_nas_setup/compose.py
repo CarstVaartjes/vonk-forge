@@ -1,7 +1,7 @@
 """Resolve the selected Compose profiles into the Compose file the NAS runs.
 
-The NAS Docker UI runs `docker compose up` without profile flags, so a service
-that carries `profiles:` would never be pulled or recreated there. The written
+Observed: the UGREEN redeploy did not apply the `.env` profile selection, while
+stock Compose does, so profiled services were never deployed there. The written
 file therefore holds exactly the selected services and no `profiles:` key; the
 selection (`COMPOSE_PROFILES` in `.env`) is resolved here once.
 """
@@ -14,7 +14,7 @@ from .environment import SELECTION_ENV, profiles
 from .filesystem import SetupError
 
 CONSUMER = "VONK_SELECTED_PROFILES"
-_SECTIONS = ("networks", "secrets", "volumes")
+_SECTIONS = ("networks", "secrets", "volumes", "configs")
 
 
 def _used(service: dict, section: str) -> set[str]:
@@ -40,17 +40,21 @@ def resolve_compose(compose: str, environment: dict[str, str]) -> bytes:
             kept[name] = service
     for name, service in kept.items():
         dependencies = service.get("depends_on") or []
-        missing = {
+        absent = [dependency for dependency in dependencies if dependency not in kept]
+        # Compose rejects a dependency on an undefined service, even an
+        # optional one: drop `required: false` entries, refuse required ones.
+        required = [
             dependency
-            for dependency in dependencies
-            if dependency not in kept
-            and (
-                not isinstance(dependencies, dict)
-                or dependencies[dependency].get("required") is not False
-            )
-        }
-        if missing:
-            raise SetupError(f"service {name} depends on unselected {sorted(missing)}")
+            for dependency in absent
+            if not isinstance(dependencies, dict)
+            or dependencies[dependency].get("required") is not False
+        ]
+        if required:
+            raise SetupError(f"service {name} depends on unselected {required}")
+        for dependency in absent:
+            del dependencies[dependency]
+        if absent and not dependencies:
+            del service["depends_on"]
         if str(service.get("network_mode", "")).removeprefix("service:") in (
             set(services) - set(kept)
         ):

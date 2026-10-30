@@ -14,7 +14,7 @@ from vonk_agent_protocol.installer_setup import (
     validate_environment_name,
 )
 
-from .filesystem import read_member
+from .filesystem import SetupError, read_member
 
 #: The one owner of the profile-selection name in `.env` and in the Compose file.
 SELECTION_ENV = "COMPOSE_PROFILES"
@@ -89,6 +89,8 @@ def configure_hermes(
     hermes = payload.hermes
     if hermes is None:
         return None
+    if hermes.env != SELECTION_ENV:
+        raise SetupError(f"hermes selection {hermes.env} is not {SELECTION_ENV}")
     members = profiles(environment.get(hermes.env, ""))
     enabled = hermes.enabled_value in members if requested is None else requested
     members = [

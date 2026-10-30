@@ -95,7 +95,8 @@ volumes and retained service data.
 The installer resolves the install mode and the Hermes choice (`COMPOSE_PROFILES`
 in `.env`) into `docker-compose.yaml`: it holds exactly the selected services and
 no `profiles:` key, so the Docker UI and a plain `docker compose` deploy the
-same set. Never pass `--profile`; rerun the installer to change the selection.
+same set (the UGREEN redeploy was observed not to apply the `.env` profile
+selection, while stock Compose does). Never pass `--profile`; rerun the installer to change the selection.
 
 For Secure remote, complete the runbook's
 [post-install verification](../../docs/runbooks/tailscale.md#verification),
