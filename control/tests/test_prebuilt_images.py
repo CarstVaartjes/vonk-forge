@@ -808,14 +808,17 @@ def test_one_archive_that_keeps_failing_does_not_block_the_next_one(
     assert not (tmp_path / IMAGE_CACHE_DIRECTORY / good).exists()
     error = _error_of(sessions, _FAILING_BUILD)
     assert error is not None
-    assert "attempt 1, next attempt" in error and "unsupported archive" in error
+    assert error.startswith(
+        f"conversion failed: {ImageStoreCode.COPY_FAILED}; retried until the upload"
+    )
+    assert "expires at" in error
 
     # It is retried with a growing backoff, never in a tight loop.
     for _ in range(4):
         now[0] += timedelta(hours=3)
         assert importer.run_pending() == 1
     assert registry.attempted.count(bad) == 5
-    assert "attempt 5, next attempt" in (_error_of(sessions, _FAILING_BUILD) or "")
+    assert _error_of(sessions, _FAILING_BUILD) == error  # still true, no attempt count
 
 
 def test_a_restarted_importer_still_lets_the_next_archive_convert(
@@ -880,6 +883,22 @@ def test_a_reopened_build_with_a_new_archive_converts(tmp_path: Path) -> None:
         build.oci_layout_sha256 = fresh
     assert importer.run_pending() == 1
     assert not (tmp_path / IMAGE_CACHE_DIRECTORY / fresh).exists()
+    assert importer._conversion_failures == {}
+
+
+def test_a_removed_archive_prunes_its_retry_entry(tmp_path: Path) -> None:
+    sessions, revision_id = _published_library(tmp_path)
+    bad = _succeeded_upload(
+        sessions, revision_id, tmp_path, 1, NOW - timedelta(hours=2)
+    )
+    importer = PrebuiltImageImporter(
+        sessions, tmp_path, clock=lambda: NOW, store=_FailingArchive(tmp_path, bad)
+    )
+    assert importer.run_pending() == 1
+    assert set(importer._conversion_failures) == {bad}
+
+    (tmp_path / IMAGE_CACHE_DIRECTORY / bad).unlink()  # the collection dropped it
+    assert importer.run_pending() == 0
     assert importer._conversion_failures == {}
 
 
