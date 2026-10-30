@@ -150,3 +150,27 @@ def test_a_copy_starts_from_an_empty_scratch_directory_that_skopeo_uses(
     assert seen["tmpdir"] == tmp_path / "image-cache" / ".skopeo-tmp"
     assert seen["entries"] == []
     assert not any(path.exists() for path in stale)
+
+
+def test_a_temporary_that_cannot_be_removed_is_logged_and_the_rest_still_go(
+    tmp_path: Path, monkeypatch, caplog
+) -> None:
+    store = OciImageStore(tmp_path, runner=_failing_runner)
+    (store.root / "blobs" / "sha256").mkdir(parents=True)
+    stale = _leave_stale_skopeo_files(store)
+    stuck = stale[0]
+    real_unlink = Path.unlink
+
+    def unlink(self: Path, *args, **kwargs) -> None:
+        if self == stuck:
+            raise PermissionError("read-only")
+        real_unlink(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", unlink)
+    with caplog.at_level("INFO"):
+        assert store.collect(lambda: (), grace_seconds=0) == Collection(0, 0)
+
+    assert stuck.exists()
+    assert not any(path.exists() for path in stale if path != stuck)
+    assert ImageStoreCode.COLLECTION_DEFERRED in caplog.text
+    assert "PermissionError" in caplog.text

@@ -46,6 +46,7 @@ from pathlib import Path
 
 from vonk_agent_protocol import ImageStoreCode
 
+from .logging import log_event
 from .stalled_process import run_until_stalled, tree_bytes
 
 IMAGE_CACHE_DIRECTORY = "image-cache"
@@ -353,7 +354,7 @@ class OciImageStore:
         except FileNotFoundError:
             scratch = []
         except OSError as error:
-            _LOGGER.warning("skopeo scratch directory cannot be listed: %s", error)
+            _log_cleanup_deferred(self._scratch, error)
             scratch = []
         leftovers = [*scratch, *self.root.glob(_STAGED_BLOB)]
         for leftover in leftovers:
@@ -365,9 +366,7 @@ class OciImageStore:
             except FileNotFoundError:
                 continue
             except OSError as error:
-                _LOGGER.warning(
-                    "stale skopeo temporary %s was not removed: %s", leftover, error
-                )
+                _log_cleanup_deferred(leftover, error)
 
     def _sweep(
         self,
@@ -441,6 +440,16 @@ class OciImageStore:
             yield True
         finally:
             os.close(descriptor)
+
+
+def _log_cleanup_deferred(path: Path, error: OSError) -> None:
+    log_event(
+        _LOGGER,
+        ImageStoreCode.COLLECTION_DEFERRED,
+        service="control-worker",
+        code=type(error).__name__,
+        detail=f"skopeo temporary {path} was not removed: {error}"[:512],
+    )
 
 
 def _descriptor_size(descriptor: object) -> int:
