@@ -139,4 +139,5 @@ def test_redact_text_masks_database_credentials(text: str) -> None:
     safe = redact_text(text)
 
     assert "s3cretpw" not in safe and "s3cr" not in safe
+    assert "spaces" not in safe
     assert "db" in safe
