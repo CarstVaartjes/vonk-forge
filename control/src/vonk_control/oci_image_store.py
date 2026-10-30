@@ -31,8 +31,10 @@ from __future__ import annotations
 
 import fcntl
 import json
+import logging
 import os
 import re
+import shutil
 import stat
 import subprocess
 import time
@@ -63,6 +65,7 @@ DAMAGED_MANIFEST_CODES = frozenset(
         ImageStoreCode.MANIFEST_UNSUPPORTED,
     }
 )
+_LOGGER = logging.getLogger(__name__)
 _DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 #: A copy that writes no byte for this long has stalled (not a total bound).
 _COPY_STALL_WINDOW = timedelta(minutes=30)
@@ -70,6 +73,10 @@ _COPY_RETRIES = 3
 # The layout's own index only names the newest import; GC follows the
 # Controller's references, not this index.
 _IMPORT_REFERENCE = "import"
+#: skopeo's scratch space (its ``TMPDIR``), beside the layout under image-cache.
+SKOPEO_TEMPORARY_DIRECTORY = ".skopeo-tmp"
+#: What skopeo's ``oci:`` destination stages inside the layout while it copies.
+_STAGED_BLOB = "oci-put-blob*"
 
 
 class OciImageStoreError(RuntimeError):
@@ -134,6 +141,7 @@ class OciImageStore:
     ) -> None:
         self.root = artifact_root / IMAGE_CACHE_DIRECTORY / LAYOUT_DIRECTORY
         self._skopeo = skopeo
+        self._scratch = self.root.parent / SKOPEO_TEMPORARY_DIRECTORY
         self._runner = runner or self._copy_until_stalled
 
     def _copy_until_stalled(
@@ -242,6 +250,8 @@ class OciImageStore:
             if not held:
                 return StoreUnknown(STORE_BUSY, "another image is being stored")
             digest_file.unlink(missing_ok=True)
+            self._clear_scratch()
+            self._scratch.mkdir(mode=0o700, exist_ok=True)
             command = [
                 self._skopeo,
                 "copy",
@@ -258,7 +268,7 @@ class OciImageStore:
                     check=False,
                     capture_output=True,
                     text=True,
-                    env=os.environ | {"TMPDIR": str(self.root.parent)},
+                    env=os.environ | {"TMPDIR": str(self._scratch)},
                 )
             except subprocess.TimeoutExpired as error:
                 return StoreUnknown(
@@ -326,7 +336,38 @@ class OciImageStore:
         with self._lock() as held:
             if not held:
                 return StoreUnknown(STORE_BUSY, "another image is being stored")
+            self._clear_scratch()
             return self._sweep(blobs, referenced, time.time() - grace_seconds)
+
+    def _clear_scratch(self) -> None:
+        """Remove what a killed or stalled skopeo left behind.
+
+        Called only while the writer lock is held: no copy is running, so
+        everything in skopeo's scratch directory and every staged blob in the
+        layout belongs to a copy that is gone. One entry that cannot be
+        removed is logged and the pass goes on; the next pass tries again.
+        """
+
+        try:
+            scratch = list(self._scratch.iterdir())
+        except FileNotFoundError:
+            scratch = []
+        except OSError as error:
+            _LOGGER.warning("skopeo scratch directory cannot be listed: %s", error)
+            scratch = []
+        leftovers = [*scratch, *self.root.glob(_STAGED_BLOB)]
+        for leftover in leftovers:
+            try:
+                if leftover.is_dir() and not leftover.is_symlink():
+                    shutil.rmtree(leftover)
+                else:
+                    leftover.unlink()
+            except FileNotFoundError:
+                continue
+            except OSError as error:
+                _LOGGER.warning(
+                    "stale skopeo temporary %s was not removed: %s", leftover, error
+                )
 
     def _sweep(
         self,

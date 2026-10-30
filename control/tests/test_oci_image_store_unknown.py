@@ -96,3 +96,57 @@ def test_an_unreadable_reference_list_is_passed_through_unremoved(
     assert store.collect(lambda: unknown, grace_seconds=60) == unknown
     assert orphan.exists()
     assert store.collect(lambda: (), grace_seconds=60) == Collection(1, 12)
+
+
+def _leave_stale_skopeo_files(store: OciImageStore) -> list[Path]:
+    """What a killed skopeo leaves: a staged blob and scratch files."""
+
+    scratch = store.root.parent / ".skopeo-tmp"
+    (scratch / "unpack-123").mkdir(parents=True)
+    store.root.mkdir(parents=True, exist_ok=True)
+    leftovers = [
+        store.root / "oci-put-blob1234567",
+        scratch / "docker-tar-9",
+        scratch / "unpack-123" / "layer.tar",
+    ]
+    for leftover in leftovers:
+        leftover.write_bytes(b"half a layer")
+    return [*leftovers, scratch / "unpack-123"]
+
+
+def test_a_killed_copy_s_temporaries_go_at_the_next_collection_unless_the_lock_is_held(
+    tmp_path: Path,
+) -> None:
+    store = OciImageStore(tmp_path, runner=_failing_runner)
+    (store.root / "blobs" / "sha256").mkdir(parents=True)
+    stale = _leave_stale_skopeo_files(store)
+
+    descriptor = _hold_lock(store)  # a live copy owns the scratch space
+    try:
+        assert isinstance(store.collect(lambda: (), grace_seconds=0), StoreUnknown)
+    finally:
+        os.close(descriptor)
+    assert all(path.exists() for path in stale)
+
+    assert store.collect(lambda: (), grace_seconds=0) == Collection(0, 0)  # writer gone
+    assert not any(path.exists() for path in stale)
+
+
+def test_a_copy_starts_from_an_empty_scratch_directory_that_skopeo_uses(
+    tmp_path: Path,
+) -> None:
+    seen: dict[str, object] = {}
+
+    def runner(*_args, env, **_kwargs) -> subprocess.CompletedProcess[str]:
+        scratch = Path(env["TMPDIR"])
+        seen["tmpdir"] = scratch
+        seen["entries"] = sorted(path.name for path in scratch.iterdir())
+        return subprocess.CompletedProcess(["skopeo"], 1, "", "registry unreachable\n")
+
+    store = OciImageStore(tmp_path, runner=runner)
+    stale = _leave_stale_skopeo_files(store)
+
+    assert isinstance(store.import_archive(tmp_path / "image.tar"), StoreUnknown)
+    assert seen["tmpdir"] == tmp_path / "image-cache" / ".skopeo-tmp"
+    assert seen["entries"] == []
+    assert not any(path.exists() for path in stale)
