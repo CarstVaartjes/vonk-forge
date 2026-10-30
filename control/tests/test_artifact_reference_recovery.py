@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import uuid
 from pathlib import Path
 
@@ -17,12 +18,19 @@ from vonk_control.models import (
     CatalogDocument,
     CatalogDocumentHead,
     CatalogDocumentRevision,
+    CatalogRecipeModelReference,
     FleetProfile,
 )
 from vonk_forge_contracts import document_sha256, read_recipe
 
 from .test_catalog_revision_collection import Catalog
-from .test_model_cache import _artifact, _canonical_recipe, _download
+from .test_model_cache import (
+    _artifact,
+    _canonical_model,
+    _canonical_recipe,
+    _download,
+)
+from .test_removal_holds_models import cache_resolved
 from .test_unused_storage_collection import (
     A_MODEL,
     AN_IMAGE,
@@ -79,6 +87,51 @@ def test_scoped_profile_damage_keeps_exact_content_and_collects_unrelated_model(
             created_at=world.now,
         )
         session.add(revision)
+        # The catalog binds an active recipe revision to the exact model
+        # revisions it names; the profile's scope is read from those rows.
+        pin = definition.models[0]
+        model_root = CatalogDocument(
+            kind="model",
+            publisher=pin.model.publisher,
+            slug=pin.model.slug,
+            title=pin.model.slug,
+            created_by="test",
+            created_at=world.now,
+            updated_at=world.now,
+        )
+        session.add(model_root)
+        session.flush()
+        model_revision = CatalogDocumentRevision(
+            document_id=model_root.id,
+            kind="model",
+            publisher=model_root.publisher,
+            slug=model_root.slug,
+            revision_number=1,
+            state=ProfileDocumentState.ACTIVE.value,
+            document=_canonical_model(
+                publisher=model_root.publisher,
+                slug=model_root.slug,
+                file_id="weights",
+                file_digest=hashlib.sha256(b"protected").hexdigest(),
+            ).model_dump(mode="json"),
+            content_digest=A_MODEL,
+            created_by="test",
+            created_at=world.now,
+        )
+        session.add(model_revision)
+        session.flush()
+        session.add(
+            CatalogRecipeModelReference(
+                recipe_revision_id=revision.id,
+                recipe_kind="recipe",
+                selection_id=pin.id,
+                model_revision_id=model_revision.id,
+                model_kind="model",
+                model_publisher=model_root.publisher,
+                model_slug=model_root.slug,
+                model_content_digest=A_MODEL,
+            )
+        )
         session.flush()
         session.add(
             CatalogDocumentHead(
@@ -106,35 +159,31 @@ def test_scoped_profile_damage_keeps_exact_content_and_collects_unrelated_model(
             head = session.scalar(select(CatalogDocumentHead))
             assert head is not None
             head.active_revision_id = None
-    # No model revision exists: the verified recipe's content pin still scopes
-    # the reference, including when its saved draft or active head is damaged.
+    # The recipe's model still scopes the reference, including when its saved
+    # draft or active head is damaged.
     service = ModelCacheService(
-        world.sessions, tmp_path / "cache", reserve_bytes=0, fixture_sources=True
+        world.sessions, tmp_path / "cache", free_fraction=0, fixture_sources=True
     )
     try:
-        protected = _download(
-            service,
-            [_artifact(tmp_path, b"protected", model_content_sha256=A_MODEL)],
-            model_content_sha256=A_MODEL,
-            request_key=str(uuid.uuid4()),
-        )
+        # The set the recipe resolves to, as a download of it would cache it.
+        with world.sessions.begin() as session:
+            protected = cache_resolved(session, revision.id)
         unrelated = _download(
             service,
             [_artifact(tmp_path, b"unrelated", model_content_sha256="b" * 64)],
             model_content_sha256="b" * 64,
             request_key=str(uuid.uuid4()),
         )
-        assert protected.artifact_set_sha256 is not None
         assert unrelated.artifact_set_sha256 is not None
         with world.sessions() as session:
             findings = model_set_reference_findings(
-                session, (protected.artifact_set_sha256, unrelated.artifact_set_sha256)
+                session, (protected, unrelated.artifact_set_sha256)
             )
-        assert findings[protected.artifact_set_sha256]
+        assert findings[protected]
         assert not findings[unrelated.artifact_set_sha256]
         _models(world, service).collect()
         _settle(service)
-        assert _set_exists(world, protected.artifact_set_sha256)
+        assert _set_exists(world, protected)
         assert not _set_exists(world, unrelated.artifact_set_sha256)
         fresh = _download(
             service,

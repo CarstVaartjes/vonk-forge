@@ -106,7 +106,7 @@ def test_finished_recipe_model_eviction_is_exact_durable_and_waits_for_evidence(
     cache = ModelCacheService(
         world.sessions,
         tmp_path / "nas",
-        reserve_bytes=0,
+        free_fraction=0,
         fixture_sources=True,
         clock=lambda: now[0],
     )
@@ -142,7 +142,7 @@ def test_finished_recipe_model_eviction_is_exact_durable_and_waits_for_evidence(
         cache = ModelCacheService(
             world.sessions,
             tmp_path / "nas",
-            reserve_bytes=0,
+            free_fraction=0,
             fixture_sources=True,
             clock=lambda: now[0],
         )
@@ -188,7 +188,7 @@ def test_fleet_removal_confirms_from_a_report_a_slow_agent_clock_stamped_early(
     cache = ModelCacheService(
         world.sessions,
         tmp_path / "nas",
-        reserve_bytes=0,
+        free_fraction=0,
         fixture_sources=True,
         clock=lambda: now[0],
     )
@@ -222,14 +222,18 @@ def test_fleet_removal_confirms_from_a_report_a_slow_agent_clock_stamped_early(
 def test_shared_content_is_retained_on_nas_and_spark(
     postgres_engine, tmp_path: Path, download_active: bool
 ) -> None:
-    """Retain shared bytes and another model's active download ownership."""
+    """Retain bytes a kept set lists and another model's active download ownership.
+
+    Sharing is set membership: the sibling is either cached (its set lists the
+    object) or downloading (an in-progress operation names it).
+    """
     Base.metadata.create_all(postgres_engine)
     world = Catalog(postgres_engine)
     now = datetime.now(UTC)
     cache = ModelCacheService(
         world.sessions,
         tmp_path / "nas",
-        reserve_bytes=0,
+        free_fraction=0,
         fixture_sources=True,
         clock=lambda: now,
     )
@@ -237,16 +241,18 @@ def test_shared_content_is_retained_on_nas_and_spark(
         selector, _, path = _prepare_removal_target(
             cache, world.sessions, tmp_path, slug="shared-model", data=b"abc"
         )
-        other_selector = _register_model(
-            world.sessions, _one_model(tmp_path, "other-model", b"abc")
-        )
-        other_download = (
-            cache.download_model_selector(
+        if download_active:
+            other_selector = _register_model(
+                world.sessions, _one_model(tmp_path, "other-model", b"abc")
+            )
+            other_download = cache.download_model_selector(
                 other_selector, actor="operator", request_key=str(uuid4())
             )
-            if download_active
-            else None
-        )
+        else:
+            _prepare_removal_target(
+                cache, world.sessions, tmp_path, slug="other-model", data=b"abc"
+            )
+            other_download = None
         if other_download is not None:
             assert other_download.state == LifecycleState.QUEUED
         inventory(
@@ -282,7 +288,7 @@ def test_shared_content_is_retained_on_nas_and_spark(
             cache = ModelCacheService(
                 world.sessions,
                 tmp_path / "nas",
-                reserve_bytes=0,
+                free_fraction=0,
                 fixture_sources=True,
                 clock=lambda: now,
             )
@@ -365,7 +371,7 @@ def test_unused_installation_uninstalls_through_existing_job(
     cache = ModelCacheService(
         sessions,
         tmp_path / "nas",
-        reserve_bytes=0,
+        free_fraction=0,
         fixture_sources=True,
         clock=lambda: now[0],
     )
@@ -452,7 +458,7 @@ def test_profile_or_running_workload_retains_model_and_installation(
     cache = ModelCacheService(
         sessions,
         tmp_path / "nas",
-        reserve_bytes=0,
+        free_fraction=0,
         fixture_sources=True,
         clock=lambda: now,
     )
@@ -517,7 +523,7 @@ def test_profile_added_after_review_replans_without_fencing_or_deleting(
     cache = ModelCacheService(
         sessions,
         tmp_path / "nas",
-        reserve_bytes=0,
+        free_fraction=0,
         fixture_sources=True,
         clock=lambda: now,
     )
@@ -576,7 +582,7 @@ def test_lost_owner_authority_expires_before_fresh_reference(
     cache = ModelCacheService(
         world.sessions,
         tmp_path / "nas",
-        reserve_bytes=0,
+        free_fraction=0,
         fixture_sources=True,
         clock=lambda: now[0],
     )
@@ -694,7 +700,7 @@ def test_changed_persisted_scope_never_authorizes_remote_eviction(
     cache = ModelCacheService(
         world.sessions,
         tmp_path / "nas",
-        reserve_bytes=0,
+        free_fraction=0,
         fixture_sources=True,
         clock=lambda: now,
     )

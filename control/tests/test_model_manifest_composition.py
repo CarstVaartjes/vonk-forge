@@ -121,7 +121,7 @@ def test_shared_catalog_files_resume_the_same_parent_after_producer_repair(
 
     def new_cache() -> ModelCacheService:
         return ModelCacheService(
-            sessions, cache_root, reserve_bytes=0, http_client=client, clock=lambda: now
+            sessions, cache_root, free_fraction=0, http_client=client, clock=lambda: now
         )
 
     cache = new_cache()

@@ -48,7 +48,7 @@ def _cache(tmp_path, now):
     service = ModelCacheService(
         sessions,
         tmp_path / "cache",
-        reserve_bytes=0,
+        free_fraction=0,
         fixture_sources=True,
         clock=lambda: now[0],
     )

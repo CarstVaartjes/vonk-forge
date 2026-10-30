@@ -101,7 +101,7 @@ def test_installed_cli_finds_later_page_missing_asset_and_accepts_exact_cache_op
     cache = ModelCacheService(
         sessions,
         tmp_path / "managed-model-cache",
-        reserve_bytes=0,
+        free_fraction=0,
         clock=lambda: _NOW,
     )
     target = revisions["candidate-0001"]

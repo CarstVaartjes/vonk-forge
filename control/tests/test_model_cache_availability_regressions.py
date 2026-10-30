@@ -72,7 +72,7 @@ def _service(tmp_path: Path, sessions, *, maximum: int = 4, handler=None, clock=
     service = ModelCacheService(
         sessions,
         tmp_path / "cache",
-        reserve_bytes=0,
+        free_fraction=0,
         max_parallel_downloads=maximum,
         fixture_sources=True,
         http_client=client,
@@ -724,7 +724,7 @@ def test_hf_access_recheck_resumes_the_exact_retained_transfer(
     service = ModelCacheService(
         sessions,
         tmp_path / "cache",
-        reserve_bytes=0,
+        free_fraction=0,
         max_parallel_downloads=1,
         fixture_sources=True,
         http_client=client,
@@ -914,7 +914,7 @@ def test_hf_access_failure_resumes_automatically_after_token_change(
     service = ModelCacheService(
         sessions,
         tmp_path / "cache",
-        reserve_bytes=0,
+        free_fraction=0,
         max_parallel_downloads=1,
         fixture_sources=True,
         http_client=client,

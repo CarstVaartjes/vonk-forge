@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from collections import namedtuple
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from importlib.resources import files
@@ -138,7 +139,7 @@ def service(tmp_path: Path, sessions, hub: FakeHub):
     cache = ModelCacheService(
         sessions,
         tmp_path / "nas-cache",
-        reserve_bytes=0,
+        free_fraction=0,
         http_client=client,
         fixture_sources=True,
     )
@@ -319,15 +320,20 @@ def test_a_cached_whole_file_skips_every_part_download(service, hub) -> None:
     assert hub.requests == []
 
 
+def _free_disk(monkeypatch: pytest.MonkeyPatch, free: int) -> None:
+    usage = namedtuple("usage", "total used free")
+    monkeypatch.setattr("shutil.disk_usage", lambda _path: usage(10**12, 0, free))
+
+
 def test_preview_counts_the_largest_part_as_transient_disk(
     service, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     whole = _payload()
     artifact = _artifact(whole, _split(whole))
-    monkeypatch.setattr(service, "free_bytes", lambda: len(whole))
+    _free_disk(monkeypatch, len(whole))
     blocked = service.download_preview(model_content_sha256=MODEL, artifacts=[artifact])
     assert blocked["blockers"] == ["insufficient-reserved-storage"]
-    monkeypatch.setattr(service, "free_bytes", lambda: len(whole) + max(PART_SIZES))
+    _free_disk(monkeypatch, len(whole) + max(PART_SIZES))
     admitted = service.download_preview(
         model_content_sha256=MODEL, artifacts=[artifact]
     )

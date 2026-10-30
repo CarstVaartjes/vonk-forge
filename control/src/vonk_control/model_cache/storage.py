@@ -40,6 +40,22 @@ if TYPE_CHECKING:
     from .service import ModelCacheService
 
 
+class StorageShortfall(NamedTuple):
+    """The figures behind a transfer that does not fit, from one disk read."""
+
+    #: Free bytes the transfer needs beside the running ones.
+    required: int
+    #: Free bytes on the volume and the share kept free beyond them.
+    free: int
+    reserve: int
+
+    def detail(self, waiting_for: str) -> str:
+        return (
+            f"{waiting_for}: needs {self.required} bytes free beyond the "
+            f"{self.reserve}-byte reserve, {self.free} free"
+        )
+
+
 class TransferNeed(NamedTuple):
     """What a transfer still adds to the NAS disk."""
 
@@ -81,18 +97,37 @@ class StorageMixin:
 
         cache._storage_demands = demands
 
-    def _request_storage(self, new_bytes: int, reason: str) -> None:
+    def _request_storage(
+        self, new_bytes: int, reason: str, reserve: int | None = None
+    ) -> None:
         """Ask for the free NAS disk a refused download needs, reserve included."""
         cache = cast("ModelCacheService", self)
 
+        if reserve is None:
+            reserve = cache.reserve_of(shutil.disk_usage(cache._root).total)
         if cache._storage_demands is not None:
             cache._storage_demands.request(
                 NAS_MODELS,
-                new_bytes + cache._reserve_bytes,
+                new_bytes + reserve,
                 source="model-download",
                 subject="",
                 reason=reason,
             )
+
+    def _ranges_fit(self, reservation: int) -> bool:
+        """Whether ``reservation`` fits beyond the reserve and the ranges in flight."""
+        cache = cast("ModelCacheService", self)
+
+        return cache.free_bytes() - cache._range_reserved_bytes >= reservation
+
+    def _capacity_detail(self, waiting_for: str, required_bytes: int) -> str:
+        """The figures behind a capacity wait, for the person reading it."""
+        cache = cast("ModelCacheService", self)
+
+        usage = shutil.disk_usage(cache._root)
+        return StorageShortfall(
+            required_bytes, usage.free, cache.reserve_of(usage.total)
+        ).detail(waiting_for)
 
     def free_bytes(self) -> int:
         """Free NAS bytes beyond the reserve: one ``statvfs``, no object scan.
@@ -104,7 +139,8 @@ class StorageMixin:
         """
         cache = cast("ModelCacheService", self)
 
-        return max(0, shutil.disk_usage(cache._root).free - cache._reserve_bytes)
+        usage = shutil.disk_usage(cache._root)
+        return max(0, usage.free - cache.reserve_of(usage.total))
 
     def _transfer_need(
         self,
@@ -201,38 +237,51 @@ class StorageMixin:
             )
         return running
 
-    def _storage_fits(
+    def _committed_bytes(
         self,
         need: TransferNeed,
         running: RunningTransfers,
         *,
         operation_id: str | None = None,
-    ) -> bool:
-        """Whether a transfer fits in the NAS space the running ones leave.
-
-        Its own remaining bytes (objects a running transfer already writes
-        aside) plus its peak must fit in the free disk beyond the reserve once
-        every other running transfer has landed and held its peak. A transfer
-        that adds nothing always fits. When one does not fit, the storage
-        demand asks retention for the whole shortfall.
-        """
-        cache = cast("ModelCacheService", self)
-
+    ) -> int:
+        """Free bytes a transfer needs beside the running ones; 0 when it adds nothing."""
         others, peaks = _in_flight(running, excluding=operation_id)
         own = need.peak + sum(
             remaining
             for digest, remaining in need.objects.items()
             if digest not in others
         )
-        if own == 0:
-            return True
-        committed = own + sum(others.values()) + peaks
-        if committed <= cache.free_bytes():
-            return True
+        return 0 if own == 0 else own + sum(others.values()) + peaks
+
+    def _storage_shortfall(
+        self,
+        need: TransferNeed,
+        running: RunningTransfers,
+        *,
+        operation_id: str | None = None,
+    ) -> StorageShortfall | None:
+        """What a transfer lacks in the NAS space the running ones leave, or None.
+
+        Its own remaining bytes (objects a running transfer already writes
+        aside) plus its peak must fit in the free disk beyond the reserve once
+        every other running transfer has landed and held its peak. A transfer
+        that adds nothing always fits. When one does not fit, the storage
+        demand asks retention for the whole shortfall. One disk read serves the
+        check, the demand and the wait's detail.
+        """
+        cache = cast("ModelCacheService", self)
+
+        committed = cache._committed_bytes(need, running, operation_id=operation_id)
+        if committed == 0:
+            return None
+        usage = shutil.disk_usage(cache._root)
+        reserve = cache.reserve_of(usage.total)
+        if committed <= max(0, usage.free - reserve):
+            return None
         cache._request_storage(
-            committed, ModelCacheBlockerCode.INSUFFICIENT_RESERVED_STORAGE
+            committed, ModelCacheBlockerCode.INSUFFICIENT_RESERVED_STORAGE, reserve
         )
-        return False
+        return StorageShortfall(committed, usage.free, reserve)
 
     def storage_summary(self) -> StorageSummary:
         cache = cast("ModelCacheService", self)
@@ -278,11 +327,12 @@ class StorageMixin:
             in_flight_bytes = sum(
                 _in_flight(cache._running_transfers(session))[0].values()
             )
-        available = max(0, usage.free - cache._reserve_bytes)
+        reserve = cache.reserve_of(usage.total)
+        available = max(0, usage.free - reserve)
         return StorageSummary(
             total_bytes=usage.total,
             free_bytes=usage.free,
-            reserve_bytes=cache._reserve_bytes,
+            reserve_bytes=reserve,
             available_bytes=available,
             unique_used_bytes=unique_used,
             in_flight_bytes=in_flight_bytes,

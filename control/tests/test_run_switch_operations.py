@@ -1656,7 +1656,7 @@ def test_profile_admits_unpublished_cache_observation(tmp_path, monkeypatch, mis
             replace(spec, kind="huggingface.file") for spec in manifest.artifacts
         ),
     )
-    cache = ModelCacheService(sessions, tmp_path / "cache", reserve_bytes=0)
+    cache = ModelCacheService(sessions, tmp_path / "cache", free_fraction=0)
     # Catalog resolution is not under test; storage and its observer are real.
     monkeypatch.setattr(cache, "resolve_artifact_set", lambda **_kwargs: manifest)
     entered, release = Event(), Event()

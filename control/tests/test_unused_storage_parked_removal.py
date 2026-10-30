@@ -80,7 +80,7 @@ def _touch(world: Catalog, set_digest: str, when: datetime) -> None:
 @pytest.fixture
 def cache(tmp_path: Path, world: Catalog):
     service = ModelCacheService(
-        world.sessions, tmp_path / "nas-cache", reserve_bytes=0, fixture_sources=True
+        world.sessions, tmp_path / "nas-cache", free_fraction=0, fixture_sources=True
     )
     yield service
     service.close()
