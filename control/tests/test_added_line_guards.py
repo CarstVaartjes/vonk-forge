@@ -1620,3 +1620,284 @@ def test_typed_or_unrelated_read_passes_document_reads(source: str) -> None:
     assert not check_source(
         "control/src/vonk_control/example.py", source, {1}, modes=("document-reads",)
     )
+
+
+@pytest.mark.parametrize(
+    "source,line",
+    [
+        ("def review(s, now):\n    return _Evidence.read(s, now)\n", 2),
+        ("def review(s, now):\n    return _CollectorEvidence.read(s, now)\n", 2),
+        ("def review(s, now):\n    return live_tokens(s, now)\n", 2),
+        ("def review(s):\n    return operation_tokens(s, recent=False)\n", 2),
+        ("def review(s):\n    return pinned_by_heads(s)\n", 2),
+        ("def review(s):\n    return _profile_pointers(s)\n", 2),
+        ("def review(s, a):\n    return runtime_image_reference_findings(s, a)\n", 2),
+        ("def review(s, a):\n    return model_set_reference_reasons(s, a)\n", 2),
+        ("def rows(s):\n    return s.scalars(select(RecipeInstallation))\n", 2),
+        (
+            "def rows(s):\n    return s.scalars(select(Job).order_by(Job.id))\n",
+            2,
+        ),
+        (
+            "def rows(s):\n    q = select(FleetProfile)\n    return s.scalars(q)\n",
+            2,
+        ),
+    ],
+)
+def test_a_request_path_may_not_read_the_whole_collection(source, line):
+    assert check_source(PATH, source, {line}, modes=("collection-readers",))
+
+
+@pytest.mark.parametrize(
+    "path,source",
+    [
+        # A collector decides over every item; that is its job.
+        (
+            "control/src/vonk_control/unused_storage_collection/removal.py",
+            "def run(s, now):\n    return _CollectorEvidence.read(s, now)\n",
+        ),
+        (
+            "control/src/vonk_control/catalog_revision_collection.py",
+            "def run(s, now):\n    return live_tokens(s, now)\n",
+        ),
+        (
+            "control/src/vonk_control/terminal_history_collection.py",
+            "def run(s):\n    return s.scalars(select(Job))\n",
+        ),
+        # Target-keyed, narrowed or column reads are what a request path does.
+        (PATH, "def review(s, a):\n    return unused_for(s, a)\n"),
+        (PATH, "def rows(s):\n    return s.scalars(select(Job).where(Job.id == 1))\n"),
+        (PATH, "def rows(s):\n    return s.scalars(select(Job).limit(10))\n"),
+        (
+            PATH,
+            (
+                "def rows(s, node):\n"
+                "    q = select(RecipeInstallation)\n"
+                "    q = q.where(RecipeInstallation.node_id == node)\n"
+                "    return s.scalars(q)\n"
+            ),
+        ),
+        (PATH, "def rows(s):\n    return s.execute(select(Job.id, Job.state))\n"),
+        (PATH, "def rows(s):\n    return s.scalars(select(AgentNode))\n"),
+        ("control/tests/test_x.py", "def t(s):\n    return live_tokens(s, 1)\n"),
+    ],
+)
+def test_collectors_and_target_keyed_reads_pass_the_collection_guard(path, source):
+    assert not check_source(path, source, {2, 3, 4}, modes=("collection-readers",))
+
+
+def test_a_whole_collection_read_already_there_does_not_fail_an_unrelated_change():
+    source = "def review(s, now):\n    return _Evidence.read(s, now)\n\nvalue = 1\n"
+    assert not check_source(PATH, source, {4}, modes=("collection-readers",))
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "bad = row.content_digest != document_sha256(row.document)\n",
+        "bad = _digest(row.plan) != row.plan_digest\n",
+        "bad = intended.reviewed_plan_digest != _digest(plan.reviewed)\n",
+        "bad = row.profile_digest != _digest(_profile_document(profile))\n",
+        "bad = sha256(canonical_message(row.payload)).hexdigest() != row.request_sha256\n",
+    ],
+)
+def test_any_stored_digest_column_compared_with_a_fresh_hash_is_a_rehash(source):
+    assert f"{PATH}:1: stored row re-hashed" in check_source(
+        PATH, source, {1}, modes=("identity",)
+    )
+
+
+@pytest.mark.parametrize(
+    "path,source",
+    [
+        # Where bytes arrive, the digest is checked against them.
+        (
+            "control/src/vonk_control/model_cache/download.py",
+            "bad = row.content_digest != document_sha256(row.document)\n",
+        ),
+        (
+            "control/src/vonk_control/inventory_repository.py",
+            "bad = report.payload_digest != _digest(report.payload)\n",
+        ),
+        # Two recorded digests, or a digest of something that is not stored.
+        (PATH, "same = a.content_digest == b.content_digest\n"),
+        (PATH, "bad = row.content_digest != _digest(row.name)\n"),
+        (PATH, "bad = row.size != len(row.document)\n"),
+    ],
+)
+def test_ingress_and_unrelated_comparisons_are_not_rehashes(path, source):
+    assert not [
+        hit
+        for hit in check_source(path, source, {1}, modes=("identity",))
+        if "re-hashed" in hit
+    ]
+
+
+@pytest.mark.parametrize(
+    "source,lines",
+    [
+        (
+            (
+                "def f(job):\n"
+                "    a = read_recipe(job.document)\n"
+                "    b = read_recipe(job.document)\n"
+            ),
+            {2, 3},
+        ),
+        (
+            (
+                "def f(i):\n"
+                "    a = parse_stored_installation_plan(i.plan)\n"
+                "    return parse_stored_installation_plan(i.plan).nodes\n"
+            ),
+            {2, 3},
+        ),
+        (
+            (
+                "def f(j):\n"
+                "    a = read_row_column(j, 'payload')\n"
+                "    b = read_row_column(j, 'payload')\n"
+            ),
+            {2, 3},
+        ),
+        (
+            "def f(j):\n    return parse_stored_job_plan(read_row_column(j, 'plan'))\n",
+            {2},
+        ),
+        (
+            (
+                "def f(rows):\n"
+                "    for r in rows:\n"
+                "        a = read_model(r.document)\n"
+                "        b = read_model(r.document)\n"
+            ),
+            {3, 4},
+        ),
+    ],
+)
+def test_one_stored_value_parsed_twice_in_a_function_is_flagged(source, lines):
+    hits = check_source(PATH, source, lines, modes=("repeated-parse",))
+    assert hits
+    assert all("parsed twice" in hit for hit in hits)
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        # Different values.
+        "def f(a, b):\n    return read_recipe(a.document), read_recipe(b.document)\n",
+        # Different parsers, or different columns.
+        "def f(j):\n    return read_recipe(j.document), read_model(j.document)\n",
+        "def f(j):\n    return read_row_column(j, 'plan'), read_row_column(j, 'payload')\n",
+        # One of two branches runs.
+        (
+            "def f(j, x):\n"
+            "    if x:\n"
+            "        return read_recipe(j.document)\n"
+            "    else:\n"
+            "        return read_recipe(j.document)\n"
+        ),
+        # A new row on every iteration, and a function of its own.
+        (
+            "def f(rows, more):\n"
+            "    for r in rows:\n"
+            "        read_recipe(r.document)\n"
+            "    for r in more:\n"
+            "        read_recipe(r.document)\n"
+        ),
+        (
+            "def f(j):\n"
+            "    def inner():\n"
+            "        return read_recipe(j.document)\n"
+            "    return read_recipe(j.document)\n"
+        ),
+        "def f(j):\n    return parse_stored_job_plan(j.plan)\n",
+    ],
+)
+def test_distinct_or_exclusive_parses_pass_the_repeat_guard(source):
+    lines = set(range(1, source.count("\n") + 1))
+    assert not check_source(PATH, source, lines, modes=("repeated-parse",))
+
+
+def test_an_old_double_parse_does_not_fail_an_unrelated_change():
+    source = (
+        "def f(j):\n    a = read_recipe(j.document)\n    b = read_recipe(j.document)\n\n"
+        "value = 1\n"
+    )
+    assert not check_source(PATH, source, {5}, modes=("repeated-parse",))
+
+
+@pytest.mark.parametrize(
+    "source,line",
+    [
+        ("# keep working for legacy rows\nvalue = 1\n", 1),
+        ("# compat shim for the old shape\nvalue = 1\n", 1),
+        ("value = 'compatibility'\n", 1),
+        ("# backfill the column\nvalue = 1\n", 1),
+        ("# an older agent sends this\nvalue = 1\n", 1),
+        ("value = adopt_legacy(row)\n", 1),
+        ("x: Annotated[str, BeforeValidator(state_adopter(S))]\n", 1),
+        ("x = StateAlias.CANCELLING\n", 1),
+        ("def f(row):\n    retire_as_unknown('s', row.id, R, 'why')\n", 2),
+        (
+            (
+                "def f(rows):\n"
+                "    for row in rows:\n"
+                "        try:\n"
+                "            parse(row)\n"
+                "        except ValueError:\n"
+                "            continue\n"
+            ),
+            5,
+        ),
+        (
+            (
+                "def f(row):\n"
+                "    try:\n"
+                "        parse(row)\n"
+                "    except (ValidationError, TypeError):\n"
+                "        pass\n"
+            ),
+            4,
+        ),
+    ],
+)
+def test_new_legacy_or_damage_tolerance_is_flagged(source, line):
+    assert check_source(PATH, source, {line}, modes=("legacy",))
+    protocol = "agent_protocol/src/vonk_agent_protocol/example.py"
+    assert check_source(protocol, source, {line}, modes=("legacy",))
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "value = 'compatible'\n",
+        "value = legacy_other\n",
+        "result = retire_as_unknown('s', row.id, R, 'why')\n",
+        "return retire_as_unknown('s', row.id, R, 'why')\n",
+        (
+            "try:\n    parse(row)\nexcept ValueError as error:\n"
+            "    raise Refused() from error\n"
+        ),
+        "try:\n    parse(row)\nexcept OSError:\n    pass\n",
+    ],
+)
+def test_current_contract_code_passes_the_legacy_guard(source):
+    if source.startswith("return"):
+        source = f"def f(row):\n    {source}"
+    lines = set(range(1, source.count("\n") + 1))
+    assert not check_source(PATH, source, lines, modes=("legacy",))
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "control/src/vonk_control/lifecycle/evidence.py",
+        "control/src/vonk_control/stored_json.py",
+        "control/src/vonk_control/strict_json.py",
+        "control/tests/test_x.py",
+        "rust/crates/x/src/lib.rs",
+    ],
+)
+def test_the_stored_json_owners_and_tests_may_name_legacy(path):
+    assert not check_source(path, "value = 'legacy'\n", {1}, modes=("legacy",))

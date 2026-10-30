@@ -16,11 +16,16 @@ from . import content_identity_boundaries as identity
 from . import coordination_boundaries as coordination
 from . import deterministic_retries as retries
 from . import document_read_boundaries as document_reads
+from . import (
+    legacy_tolerance,
+    repeated_parse,
+    request_path_scans,
+    whole_collection_readers,
+)
 from . import lifecycle_reasons as reasons
 from . import optimistic_boundaries as optimistic
 from . import principle_guards as principles
 from . import progress_attempt_boundaries as progress_attempts
-from . import request_path_scans
 from . import short_wall_clocks as wall_clocks
 from . import untyped_mapping_boundaries as mappings
 from . import vocabulary_literals as vocabulary
@@ -70,6 +75,9 @@ MODES = (
     "model-sets",
     "openers",
     "follow-validators",
+    "collection-readers",
+    "repeated-parse",
+    "legacy",
 )
 # The agent's messages a Controller test may send only as the stand-in pinned
 # to the agent's shared vector; built by hand they are the Controller's idea of
@@ -416,14 +424,59 @@ def _enum_member_lines(source: str) -> set[int]:
     return lines
 
 
+# Where a document or payload arrives from outside, so its digest is verified
+# against the bytes: comparing it there is ingress, not a re-hash.
+REHASH_INGRESS = (
+    "control/src/vonk_control/catalog_entities.py",
+    "control/src/vonk_control/catalog_service.py",
+    "control/src/vonk_control/catalog_sync",
+    "control/src/vonk_control/recipe_packages/",
+    "control/src/vonk_control/inventory_repository",
+    "control/src/vonk_control/telemetry",
+    "control/src/vonk_control/cached_file_verification",
+    "control/src/vonk_control/model_cache/download",
+    "control/src/vonk_control/model_cache/transfer",
+    "control/src/vonk_control/model_cache/split_transfer",
+    "control/src/vonk_control/model_cache/http",
+)
+_STORED_VALUES = ("document", "plan", "payload", "recipe")
+
+
+def _reaches_stored_value(call: ast.Call) -> bool:
+    """An argument names a stored document, plan, payload or recipe."""
+    names = (
+        part.attr if isinstance(part, ast.Attribute) else getattr(part, "id", "")
+        for argument in (*call.args, *(keyword.value for keyword in call.keywords))
+        for part in ast.walk(argument)
+        if isinstance(part, ast.Attribute | ast.Name)
+    )
+    return any(value in name.lower() for name in names for value in _STORED_VALUES)
+
+
 def _rehashes_stored_row(node: ast.Compare) -> bool:
-    """``row.payload_digest`` compared with a fresh ``sha256`` of a document."""
+    """A stored digest column compared with a fresh digest of a stored value.
+
+    The row recorded its digest when it was written (no internal hashing), so
+    ``row.content_digest != document_sha256(row.document)`` re-derives what the
+    row already says. Any column ending in ``digest`` or ``_sha256`` counts.
+    """
     operands = (node.left, *node.comparators)
-    return any(
-        isinstance(operand, ast.Attribute) and operand.attr == "payload_digest"
+    if not any(
+        isinstance(operand, ast.Attribute)
+        and (operand.attr.endswith("digest") or operand.attr.endswith("_sha256"))
         for operand in operands
-    ) and any(
-        isinstance(call, ast.Call) and ast.unparse(call.func).endswith("sha256")
+    ):
+        return False
+    return any(
+        isinstance(call, ast.Call)
+        and ast.unparse(call.func).endswith(("sha256", "_digest"))
+        and (
+            _reaches_stored_value(call)
+            or any(
+                isinstance(operand, ast.Attribute) and operand.attr == "payload_digest"
+                for operand in operands
+            )
+        )
         for operand in operands
         for call in ast.walk(operand)
     )
@@ -1090,6 +1143,17 @@ def check_source(
                 (line, "unbounded request catalog/history scan")
                 for line in request_path_scans.scan_tree(ast.parse(source), path=path)
             )
+        if "collection-readers" in modes and path.startswith(
+            "control/src/vonk_control/"
+        ):
+            hits.extend(whole_collection_readers.scan_source(source, path=path))
+        if "repeated-parse" in modes and path.startswith("control/src/"):
+            hits.extend(
+                (line, "one stored value parsed twice in one function")
+                for line in repeated_parse.scan_source(source)
+            )
+        if "legacy" in modes and legacy_tolerance.in_scope(path):
+            hits.extend(legacy_tolerance.scan_source(source))
         if "progress" in modes:
             hits.extend(
                 (line, "monotonic progress without attempt key")
@@ -1154,11 +1218,12 @@ def check_source(
             # No internal hashing: a row's digest is recorded once, when it is
             # written. Re-hashing the Controller's own row to decide what it is
             # refuses it whenever a newer Controller reads it back differently.
-            hits.extend(
-                (node.lineno, "stored row re-hashed")
-                for node in ast.walk(ast.parse(source))
-                if isinstance(node, ast.Compare) and _rehashes_stored_row(node)
-            )
+            if not path.startswith(REHASH_INGRESS):
+                hits.extend(
+                    (node.lineno, "stored row re-hashed")
+                    for node in ast.walk(ast.parse(source))
+                    if isinstance(node, ast.Compare) and _rehashes_stored_row(node)
+                )
         if "coordination" in modes:
             hits.extend(
                 (site.line, site.kind)
