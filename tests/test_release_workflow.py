@@ -476,12 +476,14 @@ def test_pull_request_carry_follows_the_selector_and_the_release_always_carries(
     requested but did not run."""
     ci = load(WORKFLOWS / "ci.yml")["jobs"]
     carry = ci["lane-proof"]["with"]["upgrade_carry"]
-    assert "needs.changes.outputs.upgrade_carry == 'true'" in carry
-    assert "'release-acceptance'" in carry
-    assert (
-        ci["changes"]["outputs"]["upgrade_carry"]
-        == "${{ steps.areas.outputs.upgrade_carry }}"
-    )
+    assert carry == "${{ needs.changes.outputs.upgrade_carry == 'true' }}"
+    # The label (or an integration/* head) is folded once, in the job outputs.
+    for name in ("lane", "upgrade_carry"):
+        output = ci["changes"]["outputs"][name]
+        assert f"steps.areas.outputs.{name} == 'true'" in output
+        assert "'release-acceptance'" in output
+        assert "startsWith(github.head_ref, 'integration/')" in output
+    assert ci["lane-proof"]["if"].count("release-acceptance") == 0
     pr = load(WORKFLOWS / "release-acceptance.yml")
     assert pr["on"]["workflow_call"]["inputs"]["upgrade_carry"]["default"] is True
     assert (
@@ -922,14 +924,18 @@ def test_main_reuses_pull_request_spark_evidence_only_for_its_exact_payload() ->
 
 
 @pytest.mark.parametrize(
-    ("changed_path", "refresh", "same_payload", "payload_error"),
+    ("changed_path", "refresh", "same_payload", "payload_error", "no_evidence"),
     [
-        ("control/src/change.py", None, True, False),
-        ("scripts/change", None, True, False),
-        ("scripts/change", "passed", True, False),
-        ("scripts/change", "failed", True, False),
-        ("scripts/change", "passed", False, False),
-        ("control/src/change.py", None, True, True),
+        ("control/src/change.py", None, True, False, False),
+        ("scripts/change", None, True, False, False),
+        ("scripts/change", "passed", True, False, False),
+        ("scripts/change", "failed", True, False, False),
+        ("scripts/change", "passed", False, False, False),
+        ("control/src/change.py", None, True, True, False),
+        # A component PR merged straight to main left no candidate artifacts:
+        # Spark runs here; the refresh runs only when the change is relevant.
+        ("control/src/change.py", None, True, False, True),
+        ("scripts/change", None, True, False, True),
     ],
 )
 def test_main_reuses_each_spark_step_independently(
@@ -938,6 +944,7 @@ def test_main_reuses_each_spark_step_independently(
     refresh: str | None,
     same_payload: bool,
     payload_error: bool,
+    no_evidence: bool,
 ) -> None:
     """Catches missing/failed refresh forcing a proven Spark install to rerun,
     irrelevant refresh running on main, and errors accidentally granting reuse."""
@@ -969,10 +976,14 @@ def test_main_reuses_each_spark_step_independently(
     binaries = tmp_path / "bin"
     binaries.mkdir()
     generation = "a" * 64
-    artifacts = [
-        f"installer-candidate-dev-{generation}",
-        f"installer-spark-acceptance-{generation}-linux-arm64",
-    ]
+    artifacts = (
+        []
+        if no_evidence
+        else [
+            f"installer-candidate-dev-{generation}",
+            f"installer-spark-acceptance-{generation}-linux-arm64",
+        ]
+    )
     if refresh is not None:
         artifacts.append(f"spark-recipe-refresh-{generation}-1")
         report = tmp_path / "pr-refresh/report.json"
@@ -1021,7 +1032,11 @@ def test_main_reuses_each_spark_step_independently(
     }
     context = {"inputs.upgrade_carry": "true"}
     for step_id in ("find", "match"):
+        if step_id == "match" and no_evidence:
+            assert not evaluate(steps["match"]["if"], context)
+            continue
         if step_id == "match":
+            env["REFRESH_REQUIRED"] = context["steps.find.outputs.refresh_required"]
             assert context.get("steps.find.outputs.generation") == generation
             assert bool(evaluate(steps["pull-request-refresh"]["if"], context)) == (
                 refresh is not None
@@ -1056,11 +1071,15 @@ def test_main_reuses_each_spark_step_independently(
         )
         return bool(evaluate(expression, context))
 
-    assert scheduled("spark-acceptance") == (not same_payload or payload_error)
+    assert scheduled("spark-acceptance") == (
+        no_evidence or not same_payload or payload_error
+    )
     refresh_required = changed_path.startswith("scripts/")
+    # An irrelevant refresh never runs, with or without evidence or a match
+    # error; a relevant one runs unless the PR's passed refresh stands.
     assert scheduled("spark-recipe-refresh") == (
-        payload_error
-        or (refresh_required and not (same_payload and refresh == "passed"))
+        refresh_required
+        and (payload_error or no_evidence or not (same_payload and refresh == "passed"))
     )
     # Signing must accept each legitimate skip, while a failed requested
     # refresh still prevents publication.
@@ -1093,6 +1112,10 @@ def test_main_reuses_each_spark_step_independently(
 
     assert can_sign()
     context["needs.spark-recipe-refresh.result"] = "failure"
+    assert not can_sign()
+    context["needs.spark-recipe-refresh.result"] = "success"
+    # Signing requires every scheduled Spark step to succeed.
+    context["needs.spark-acceptance.result"] = "failure"
     assert not can_sign()
 
 

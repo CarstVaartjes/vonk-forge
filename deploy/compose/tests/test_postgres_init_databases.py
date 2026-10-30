@@ -437,7 +437,7 @@ def test_deployed_postgres_writes_a_restore_verified_backup(
                     timeout=10,
                 )
                 raise AssertionError(
-                    f"no verified backup was written:\n{logs.stdout}{logs.stderr}"
+                    f"no backup was written:\n{logs.stdout}{logs.stderr}"
                 )
             time.sleep(0.25)
         assert (state / "last-backup-restore-verification.epoch").is_file()
