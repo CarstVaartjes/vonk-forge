@@ -152,13 +152,20 @@ def test_an_upload_no_build_waits_on_is_reclaimed(system) -> None:
     for upload in (waiting, abandoned):
         upload.write_bytes(b"docker archive")
     _age(waiting, abandoned)
-    _build(sessions, "5" * 64, state="succeeded", updated_at=NOW - timedelta(days=3))
+    expired = storage.root / ("7" * 64)
+    expired.write_bytes(b"docker archive")
+    _age(expired)
+    _build(sessions, "5" * 64, state="succeeded", updated_at=NOW - timedelta(hours=2))
     _build(sessions, "6" * 64, state="failed", updated_at=NOW - timedelta(days=3))
+    # Succeeded more than 24 h ago and still not converted: dropped like any
+    # cache loss; the build runs again on demand.
+    _build(sessions, "7" * 64, state="succeeded", updated_at=NOW - timedelta(days=3))
 
     collector.collect()
 
     assert waiting.exists()
     assert not abandoned.exists()
+    assert not expired.exists()
 
 
 def _damage_manifest(storage, address: str, how: str, monkeypatch) -> None:
