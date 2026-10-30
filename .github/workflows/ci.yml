@@ -31,9 +31,12 @@ env:
 # release workflow call, has its own group: the caller owns its cancellation.
 # Only the `release-acceptance` label starts a new run; any other label runs in
 # its own group so it never cancels the run in progress, and every job below
-# skips it. The four required checks (Ruff, Generated control clients, Compose
-# integration, CI gate) change name on such a run, so its skipped jobs can never
-# satisfy them.
+# skips it. Only ci-gate is renamed ("CI gate (label ignored)"): it always runs,
+# so its name expression is evaluated, and no run of this kind reports "CI gate".
+# A job skipped by its own `if` keeps the raw `${{ ... }}` as its name (run
+# 40906603157, job 123574403196), so every other job keeps its literal name: a
+# renamed job that is skipped would report a raw expression and never satisfy
+# its required check on pull requests that legitimately skip it.
 concurrency:
   group: vonk-forge-ci-${{ (github.event.action == 'labeled' && github.event.label.name != 'release-acceptance') && format('ignored-label-{0}', github.run_id) || github.event.pull_request.number || github.event.merge_group.head_sha || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'merge_group' }}
@@ -115,7 +118,7 @@ jobs:
           done
 
   lint:
-    name: ${{ (github.event.action == 'labeled' && github.event.label.name != 'release-acceptance') && 'Ruff (label ignored)' || 'Ruff' }}
+    name: Ruff
     if: ${{ !(github.event.action == 'labeled' && github.event.label.name != 'release-acceptance') }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -448,7 +451,7 @@ jobs:
           path: artifacts/vonk-forge-systemd-security.json
 
   generated-clients:
-    name: ${{ (github.event.action == 'labeled' && github.event.label.name != 'release-acceptance') && 'Generated control clients (label ignored)' || 'Generated control clients' }}
+    name: Generated control clients
     needs: changes
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -470,7 +473,7 @@ jobs:
         run: scripts/check-generated-determinism
 
   compose-integration:
-    name: ${{ (github.event.action == 'labeled' && github.event.label.name != 'release-acceptance') && 'Compose integration (label ignored)' || 'Compose integration' }}
+    name: Compose integration
     needs: changes
     if: needs.changes.outputs.compose == 'true'
     runs-on: ubuntu-latest

@@ -38,8 +38,11 @@ publishers call the same candidate assembly and acceptance workflows.
 
 Only the `release-acceptance` label starts a new CI run. Any other label runs in
 its own concurrency group, so it never cancels the run in progress, and every job
-skips it; the required checks are renamed on that run (`CI gate (label ignored)`)
-so its skipped jobs cannot satisfy them.
+skips it. Only `CI gate` is renamed on that run (`CI gate (label ignored)`), so
+no such run reports a `CI gate` that could satisfy the requirement while the real
+run is pending. Other jobs keep their names: a job skipped by its own `if` shows
+its name expression unevaluated, which would break a required check such as
+`Compose integration` on pull requests that skip it.
 
 The acceptance's upgrade carry (a workload keeps serving while the Controller
 is redeployed and the agent upgraded to the candidate) runs on main's release

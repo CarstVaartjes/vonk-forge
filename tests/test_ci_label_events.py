@@ -34,9 +34,14 @@ def test_every_root_job_skips_an_ignored_label() -> None:
     assert IGNORED in CI["jobs"]["ci-gate"]["if"]
 
 
-def test_required_checks_are_renamed_on_an_ignored_label() -> None:
-    names = {job.get("name", "") for job in CI["jobs"].values()}
-    for check in REQUIRED_CHECKS:
-        (expression,) = [n for n in names if n.endswith(f"|| '{check}' }}}}")]
-        assert IGNORED in expression
-        assert f"'{check} (label ignored)'" in expression
+def test_only_the_always_running_gate_is_renamed_on_an_ignored_label() -> None:
+    # A job skipped by its own `if` keeps its raw name expression (run
+    # 40906603157, job 123574403196), so renaming a job that can be skipped
+    # would stop a required check from ever being reported. ci-gate always runs.
+    renamed = {key for key, job in CI["jobs"].items() if IGNORED in job.get("name", "")}
+    assert renamed == {"ci-gate"}
+    expression = CI["jobs"]["ci-gate"]["name"]
+    assert IGNORED in expression
+    assert "'CI gate (label ignored)'" in expression
+    for check in REQUIRED_CHECKS - {"CI gate"}:
+        assert check in {job.get("name") for job in CI["jobs"].values()}
