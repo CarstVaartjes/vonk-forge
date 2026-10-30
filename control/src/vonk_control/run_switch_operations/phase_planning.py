@@ -105,7 +105,6 @@ class PhasePlanningMixin:
             inspection.required_bytes is None
             or inspection.required_bytes < 1
             or not _is_hex_digest(inspection.artifact_set_sha256)
-            or (inspection.artifact_set_bytes or 0) < 1
         ):
             inspection = replace(
                 inspection,
