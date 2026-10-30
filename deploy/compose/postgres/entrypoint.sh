@@ -111,18 +111,24 @@ backup_loop() {
   offhost_temporary=/offhost/.postgres-backup.tmp.gz
   margin=268435456
   cleanup() {
-    rm -f "$temporary" "$temporary.gz" "$temporary.status" "$state_temporary" "$verification_temporary" "$offhost_temporary"
+    rm -f "$temporary.gz" "$temporary.status" "$state_temporary" "$verification_temporary" "$offhost_temporary"
   }
   trap 'cleanup; exit 0' TERM INT
   # A SIGKILLed container never ran the trap; drop its leftovers before any attempt.
   cleanup
+  # Free bytes of the filesystem of $1, or "unknown" when it cannot be read
+  # within ten seconds (an unreachable off-host mount must not hang the loop).
   free_bytes() {
-    df -Pk "$1" 2>/dev/null | { read -r _; read -r _ _ _ available _; echo $((${available:-0} * 1024)); }
+    timeout 10 df -Pk "$1" 2>/dev/null | { read -r _ || :; read -r _ _ _ available _ || :; case "${available:-}" in ''|*[!0-9]*) echo unknown ;; *) echo $((available * 1024)) ;; esac; }
   }
-  # Succeeds when the filesystem of $1 has $2 bytes free; otherwise says so.
+  # Succeeds when the filesystem of $1 has $2 bytes free. Short space is
+  # reported; unknown space is reported and not treated as short, because the
+  # step that really needs the space fails on its own.
   has_space() {
     free=$(free_bytes "$1")
-    if [ "$free" -lt "$2" ]; then
+    if [ "$free" = unknown ]; then
+      echo "PostgreSQL backup cannot read the free space of $1; continuing" >&2
+    elif [ "$free" -lt "$2" ]; then
       echo "PostgreSQL backup needs $2 bytes free on $1 but only $free are free" >&2
       return 1
     fi
@@ -148,8 +154,10 @@ backup_loop() {
     gosu postgres pg_ctl -D "$restore_directory/data" -m fast -w stop >/dev/null
     rm -rf -- "${restore_directory:?}"
   )
-  # One attempt. Any failed step ends it; the success markers are written only
-  # after the dump, the off-host copy and the restore verification succeeded.
+  # One attempt. Any failed step ends it. The backup marker means a dump was
+  # published, gzip-tested and copied off-host; the restore-verification marker
+  # is written only when the isolated restore also succeeded (it is skipped,
+  # not failed, while scratch space is short).
   # Call it as a plain command: shells ignore errexit inside a condition.
   backup_once() (
     set -e
@@ -163,13 +171,21 @@ backup_loop() {
     step=space-check
     database_bytes=$(gosu postgres psql --username "$POSTGRES_USER" --dbname postgres -XtAc \
       'SELECT coalesce(sum(pg_database_size(datname)), 0)::bigint FROM pg_database')
-    # The compressed dump stays below the database size; the off-host copy may
+    # A new dump is about as large as the newest published one; before the
+    # first dump, the database size is the upper bound. The off-host copy may
     # share the backup volume, in which case both copies must fit.
-    needed=$((database_bytes + margin))
+    newest=$(ls -1 /backups/postgres-*.sql.gz 2>/dev/null | sort -r | head -n 1)
+    dump_bytes=$database_bytes
+    [ -z "$newest" ] || dump_bytes=$(stat -c %s "$newest")
+    needed=$((dump_bytes + margin))
     offhost_needed=0
     if [ -n "${VONK_BACKUP_OFFHOST_PATH:-}" ]; then
       offhost_needed=$needed
-      [ "$(stat -c %d /backups)" = "$(stat -c %d /offhost 2>/dev/null)" ] && needed=$((needed + offhost_needed))
+      backups_device=$(timeout 10 stat -c %d /backups 2>/dev/null) || backups_device=
+      offhost_device=$(timeout 10 stat -c %d /offhost 2>/dev/null) || offhost_device=
+      if [ -n "$backups_device" ] && [ "$backups_device" = "$offhost_device" ]; then
+        needed=$((needed + offhost_needed))
+      fi
     fi
     has_space /backups "$needed"
     [ "$offhost_needed" -eq 0 ] || has_space /offhost "$offhost_needed"

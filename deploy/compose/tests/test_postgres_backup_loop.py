@@ -28,7 +28,12 @@ STUBS = {
     "install": 'for last; do :; done\nexec mkdir -p "$last"\n',
     # Records what is on disk while the dump streams, then dumps (or fails).
     "pg_dumpall": (
-        'ls -A "$BACKUPS" >"$LISTING"\n'
+        'ls -d "$BACKUPS"/.[!.]* "$OFFHOST"/.[!.]* >"$LISTING" 2>/dev/null\n'
+        'cat "$BACKUPS/.postgres-backup.tmp.gz" >"$LISTING.gz" 2>/dev/null\n'
+        # The dump runs in a brace group that records its status afterwards;
+        # killing that group simulates a dump that never reports a status.
+        '[ "$FAULT" = nostatus ] && kill -9 "$PPID"\n'
+        '[ "$FAULT" = emptystatus ] && : >"$BACKUPS/.postgres-backup.tmp.status" && kill -9 "$PPID"\n'
         "printf '%s\\n' 'CREATE DATABASE litellm;'\n"
         '[ "$FAULT" = dump ] && exit 1\n'
         "exit 0\n"
@@ -39,6 +44,7 @@ STUBS = {
         "  */tmp) kb=${FREE_TMP_KB:-100000000} ;;\n"
         "  *) kb=${FREE_KB:-100000000} ;;\n"
         "esac\n"
+        '[ -n "${DF_UNKNOWN:-}" ] && exit 1\n'
         "echo 'Filesystem 1024-blocks Used Available Capacity Mounted on'\n"
         'echo "stub 1 1 $kb 1% /"\n'
     ),
@@ -65,6 +71,10 @@ STUBS = {
         "    ;;\n"
         "esac\n"
         'exec "$REAL_MV" "$@"\n'
+    ),
+    # Compresses like gzip except that the FAULT=gzip compression fails (ENOSPC).
+    "gzip": (
+        '[ "$FAULT" = gzip ] && [ "$*" = "-c" ] && exit 1\nexec "$REAL_GZIP" "$@"\n'
     ),
     "sleep": 'echo "$1" >>"$SLEEPS"\nexec "$REAL_SLEEP" "${LOOP_TEST_SLEEP:-0.05}"\n',
 }
@@ -116,6 +126,8 @@ def _start(
         **os.environ,
         "FAULT": fault,
         "BACKUPS": str(tmp_path / "backups"),
+        "OFFHOST": str(tmp_path / "offhost"),
+        "REAL_GZIP": str(shutil.which("gzip")),
         "LISTING": str(tmp_path / "listing"),
         **(extra_environment or {}),
         "WORKER_PID": str(tmp_path / "worker.pid"),
@@ -204,7 +216,7 @@ def test_signalling_the_background_pid_runs_the_backup_cleanup(tmp_path: Path) -
     loop, state = _start(tmp_path, "none", sleep_seconds="30")
     try:
         _wait_for((state / "last-successful-backup.epoch").is_file, loop)
-        temporary = tmp_path / "backups/.postgres-backup.tmp"
+        temporary = tmp_path / "backups/.postgres-backup.tmp.gz"
         temporary.write_text("interrupted dump", encoding="ascii")
         worker = int((tmp_path / "worker.pid").read_text())
         os.kill(worker, signal.SIGTERM)
@@ -236,20 +248,26 @@ def test_the_dump_streams_into_gzip_without_an_uncompressed_temporary(
 
 
 def test_temporaries_left_by_a_killed_run_are_removed_at_start(tmp_path: Path) -> None:
-    def leftovers(root: Path) -> None:
-        for name in (
-            "backups/.postgres-backup.tmp",
-            "backups/.postgres-backup.tmp.gz",
-            "backups/.postgres-backup.tmp.status",
-            "offhost/.postgres-backup.tmp.gz",
-        ):
+    leftovers = (
+        "backups/.postgres-backup.tmp.gz",
+        "backups/.postgres-backup.tmp.status",
+        "offhost/.postgres-backup.tmp.gz",
+    )
+
+    def seed(root: Path) -> None:
+        for name in leftovers:
             (root / name).write_text("left by SIGKILL", encoding="ascii")
 
-    loop, state = _start(tmp_path, "none", sleep_seconds="30", seed=leftovers)
+    loop, state = _start(tmp_path, "none", sleep_seconds="30", seed=seed)
     _run_until_marker(loop, state)
 
-    assert not list((tmp_path / "backups").glob(".postgres-backup.tmp*"))
-    assert not list((tmp_path / "offhost").glob(".postgres-backup.tmp*"))
+    # The pg_dumpall stub records what lay on both volumes when the dump started.
+    listing = (tmp_path / "listing").read_text(encoding="ascii")
+    assert ".postgres-backup.tmp.status" not in listing
+    assert "offhost/.postgres-backup.tmp.gz" not in listing
+    assert "left by SIGKILL" not in (tmp_path / "listing.gz").read_text(
+        errors="replace"
+    )
 
 
 def test_insufficient_space_skips_the_attempt_and_keeps_the_old_marker(
@@ -315,3 +333,64 @@ def test_restore_verification_is_skipped_when_the_scratch_space_is_short(
     assert "restore verification skipped" in stderr
     assert list((tmp_path / "backups").glob("postgres-*.sql.gz"))
     assert not (state / "last-backup-restore-verification.epoch").exists()
+
+
+def test_same_device_copies_need_both_dumps_but_not_more(tmp_path: Path) -> None:
+    margin = 268435456
+    newest = 1000
+
+    def previous_dump(root: Path) -> None:
+        (root / "backups/postgres-20200101T000000Z.sql.gz").write_bytes(b"x" * newest)
+
+    # Free space sits between one copy and two copies on the shared volume.
+    single = newest + margin
+    free_kb = (single + single // 2) // 1024
+    loop, _ = _start(
+        tmp_path,
+        "none",
+        seed=previous_dump,
+        extra_environment={"FREE_KB": str(free_kb)},
+    )
+    sleeps = tmp_path / "sleeps"
+    try:
+        _wait_for(
+            lambda: sleeps.is_file() and "300" in sleeps.read_text().split(), loop
+        )
+    finally:
+        stderr = _terminate(loop)
+
+    assert f"needs {2 * single} bytes free" in stderr
+    assert not (tmp_path / "listing").exists(), "the dump started without space"
+
+
+@pytest.mark.parametrize("fault", ["gzip", "nostatus", "emptystatus"])
+def test_a_broken_compression_or_missing_dump_status_fails_the_attempt(
+    tmp_path: Path, fault: str
+) -> None:
+    loop, state = _start(tmp_path, fault)
+    sleeps = tmp_path / "sleeps"
+    try:
+        _wait_for(
+            lambda: (
+                sleeps.is_file()
+                and sleeps.read_text(encoding="ascii").split().count("300") >= 2
+            ),
+            loop,
+        )
+    finally:
+        stderr = _terminate(loop)
+
+    assert "failed at step dump" in stderr
+    assert not list((tmp_path / "backups").glob("postgres-*.sql.gz"))
+    assert not (state / "last-successful-backup.epoch").exists()
+
+
+def test_unreadable_free_space_is_reported_as_unknown_not_zero(tmp_path: Path) -> None:
+    loop, state = _start(
+        tmp_path, "none", sleep_seconds="30", extra_environment={"DF_UNKNOWN": "1"}
+    )
+    stderr = _run_until_marker(loop, state)
+
+    assert "cannot read the free space" in stderr
+    assert "0 are free" not in stderr
+    assert (state / "last-successful-backup.epoch").is_file()
