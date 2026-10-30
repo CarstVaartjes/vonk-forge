@@ -168,3 +168,11 @@ def test_older_active_operation_is_reused_behind_many_newer_unrelated_ones(
         )
         is None
     )
+
+    # A fresh request after the cancel starts a new child instead of joining it.
+    third = availability.start(
+        revision_id, actor="operator-3", request_id=str(uuid.uuid4())
+    )
+    availability.run_pending()
+    fresh_child = availability.get(third.id).model_child
+    assert fresh_child is not None and fresh_child["id"] != child_id
