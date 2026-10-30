@@ -255,41 +255,12 @@ def same_build_units(first: str | None, second: str | None) -> bool:
     return first == second
 
 
-def recipe_model_digests(
-    session, revision_ids: Collection[str]
-) -> dict[str, frozenset[str]]:
-    """The model contents each recipe revision is bound to, by relational rows.
-
-    The binding rows were written with the revision and name the exact model
-    content, so no recipe document is read. A revision without rows is absent.
-    """
-    from sqlalchemy import select
-
-    from .models import CatalogRecipeModelReference
-
-    found: dict[str, set[str]] = {}
-    if revision_ids:
-        for revision_id, model in session.execute(
-            select(
-                CatalogRecipeModelReference.recipe_revision_id,
-                CatalogRecipeModelReference.model_content_digest,
-            ).where(
-                CatalogRecipeModelReference.recipe_revision_id.in_(sorted(revision_ids))
-            )
-        ):
-            found.setdefault(revision_id, set()).add(model)
-    return {revision_id: frozenset(models) for revision_id, models in found.items()}
-
-
-def installations_using_models(
-    session, contents: Collection[str]
-) -> tuple[frozenset[str], frozenset[str]]:
+def installations_using_models(session, contents: Collection[str]) -> frozenset[str]:
     """Installed (not uninstalled) installations that use ``contents``.
 
-    Returns the ids its columns attribute to them (the model column, or a recipe
-    bound to one of their catalog revisions), and the ids that record no model at
-    all, which a caller must read the plan of rather than assume unrelated. The
-    filter is in SQL on indexed columns, so unrelated installations are not read.
+    The ids its columns attribute to them: the model column, or a recipe bound to
+    one of their catalog revisions. The filter is in SQL on indexed columns, so
+    unrelated installations are not read.
     """
     from sqlalchemy import or_, select
     from vonk_agent_protocol import InstallationState
@@ -309,22 +280,17 @@ def installations_using_models(
     bound = select(CatalogRecipeModelReference.recipe_revision_id).where(
         CatalogRecipeModelReference.model_revision_id.in_(lineage)
     )
-    by_model = RecipeInstallation.model_content_sha256.in_(wanted)
-    by_recipe = RecipeInstallation.recipe_revision_id.in_(bound)
-    named: set[str] = set()
-    unknown: set[str] = set()
-    for row in session.execute(
-        select(
-            RecipeInstallation.id,
-            by_model.label("by_model"),
-            by_recipe.label("by_recipe"),
-        ).where(
-            RecipeInstallation.state != InstallationState.UNINSTALLED,
-            or_(by_model, by_recipe, RecipeInstallation.model_content_sha256.is_(None)),
+    return frozenset(
+        session.scalars(
+            select(RecipeInstallation.id).where(
+                RecipeInstallation.state != InstallationState.UNINSTALLED,
+                or_(
+                    RecipeInstallation.model_content_sha256.in_(wanted),
+                    RecipeInstallation.recipe_revision_id.in_(bound),
+                ),
+            )
         )
-    ):
-        (named if row.by_model or row.by_recipe else unknown).add(row.id)
-    return frozenset(named), frozenset(unknown)
+    )
 
 
 def active_recipe_revisions(session, selectors: Collection[tuple[str, str]]):

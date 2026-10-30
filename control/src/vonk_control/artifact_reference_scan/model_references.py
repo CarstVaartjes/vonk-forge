@@ -11,18 +11,16 @@ from vonk_agent_protocol import (
     canonical_message,
 )
 from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
-from vonk_forge_contracts import ModelDefinition
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition
 
 from .. import model_cache_states
 from ..artifact_lifecycle import (
     ArtifactReferenceUnverified,
 )
 from ..catalog_revision_contract import read_catalog_document
-from ..content_identity import catalog_selector_membership, recipe_model_digests
 from ..machine_states import DISTRIBUTION_HELD, RUN_LIVE
 from ..models import (
     ArtifactDistributionAssignment,
-    CatalogDocumentHead,
     CatalogDocumentRevision,
     FleetProfile,
     FleetProfileApplication,
@@ -38,7 +36,7 @@ from .intents import (
     _run_switch_kinds,
     _run_switch_plan,
 )
-from .model_sets import _protect_saved, _selector_name, saved_profile_selectors
+from .model_sets import _protect_saved, _selectors_revisions, saved_profile_selectors
 from .types import (
     _ACTIVE_INSTALLATIONS,
     _ACTIVE_PROFILE_APPLICATIONS,
@@ -49,34 +47,86 @@ from .types import (
 )
 
 
-def _declared_files(session: Session, models: set[str]) -> dict[str, frozenset[str]]:
-    """The file digests each model content declares, read once per model.
+def _model_documents(session: Session, roots: set[str]) -> dict[str, ModelDefinition]:
+    """The models and everything they depend on, read once each, level by level.
 
     A model that is missing or whose document cannot be read is absent, which
     callers treat as unknown, never as declaring nothing.
     """
 
-    found: dict[str, frozenset[str]] = {}
-    damaged: set[str] = set()
-    for revision in session.scalars(
-        select(CatalogDocumentRevision).where(
-            CatalogDocumentRevision.kind == RunSwitchReasonScopeName.MODEL,
-            CatalogDocumentRevision.content_digest.in_(sorted(models)),
+    found: dict[str, ModelDefinition] = {}
+    asked: set[str] = set()
+    pending = set(roots)
+    while pending:
+        asked |= pending
+        level: dict[str, ModelDefinition] = {}
+        for revision in session.scalars(
+            select(CatalogDocumentRevision).where(
+                CatalogDocumentRevision.kind == RunSwitchReasonScopeName.MODEL,
+                CatalogDocumentRevision.content_digest.in_(sorted(pending)),
+            )
+        ):
+            try:
+                model = read_catalog_document(revision)
+            except (TypeError, ValueError):
+                continue
+            if isinstance(model, ModelDefinition):
+                level[revision.content_digest] = model
+        found.update(level)
+        pending = {
+            dependency.content_sha256
+            for model in level.values()
+            for dependency in model.dependencies
+        } - asked
+    return found
+
+
+def _recipe_needs(
+    revision: CatalogDocumentRevision, models: dict[str, ModelDefinition]
+) -> list[frozenset[str]] | None:
+    """The files a set must contain to serve each model a recipe revision uses.
+
+    The recipe uses its models and everything they depend on. A model needs the
+    files its recipe selects (all of them when the recipe does not select it)
+    plus the needs of its dependencies. A model that cannot be read, or whose
+    selection names none of its files, makes the whole revision unknown.
+    """
+
+    try:
+        recipe = read_catalog_document(revision)
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(recipe, RecipeDefinition):
+        return None
+    chosen: dict[str, set[str]] = {}
+    for selection in recipe.models:
+        chosen.setdefault(selection.model.content_sha256, set()).update(
+            file.file_id for file in selection.files
         )
-    ):
-        digest = revision.content_digest
-        try:
-            model = read_catalog_document(revision)
-        except (TypeError, ValueError):
-            damaged.add(digest)
-            continue
-        if not isinstance(model, ModelDefinition):
-            damaged.add(digest)
-            continue
-        found[digest] = found.get(digest, frozenset()) | {
-            file.sha256 for file in model.files
-        }
-    return {digest: files for digest, files in found.items() if digest not in damaged}
+    needs: dict[str, frozenset[str]] = {}
+
+    def need(digest: str, path: frozenset[str]) -> frozenset[str] | None:
+        if digest in needs:
+            return needs[digest]
+        model = models.get(digest)
+        if model is None or digest in path:
+            return None
+        ids = chosen.get(digest)
+        files = {file.sha256 for file in model.files if ids is None or file.id in ids}
+        for dependency in model.dependencies:
+            inner = need(dependency.content_sha256, path | {digest})
+            if inner is None:
+                return None
+            files |= inner
+        if not files:
+            return None
+        needs[digest] = frozenset(files)
+        return needs[digest]
+
+    for root in chosen:
+        if need(root, frozenset()) is None:
+            return None
+    return list(needs.values())
 
 
 def model_set_reference_findings(
@@ -105,9 +155,9 @@ def model_set_reference_findings(
         digest: set() for digest in selected
     }
 
-    # A set is held when it contains a file that a protected model declares.
-    # Files are content: a refreshed model that reuses the bytes of an earlier
-    # one is found by its files, never by who first requested the set.
+    # A set is held when it serves a protected model: it contains every file the
+    # model needs. Shared small files are kept by the object scope, never by
+    # holding unrelated sets.
     members: dict[str, set[str]] = {digest: set() for digest in selected}
     for set_digest, object_digest in session.execute(
         select(
@@ -116,43 +166,23 @@ def model_set_reference_findings(
         ).where(ModelCacheSetArtifact.artifact_set_sha256.in_(sorted(selected)))
     ):
         members[set_digest].add(object_digest)
+    if not all(members.values()):
+        raise ArtifactReferenceUnverified(
+            ArtifactLifecycleCode.REFERENCE_SCAN_FAILED,
+            "model-set membership is unavailable; removal was deferred",
+            retryable=True,
+        )
 
     profiles = list(session.scalars(select(FleetProfile).order_by(FleetProfile.id)))
     named = {profile.id: saved_profile_selectors(profile) for profile in profiles}
-    pairs = sorted(
-        {
-            _selector_name(selector)
-            for chosen in named.values()
-            for selector in chosen or ()
-        }
-    )
-    heads = (
-        {
-            (publisher, slug): revision_id
-            for publisher, slug, revision_id in session.execute(
-                select(
-                    CatalogDocumentHead.publisher,
-                    CatalogDocumentHead.slug,
-                    CatalogDocumentHead.active_revision_id,
-                ).where(
-                    CatalogDocumentHead.kind == RunSwitchReasonScopeName.RECIPE,
-                    catalog_selector_membership(
-                        CatalogDocumentHead.publisher,
-                        CatalogDocumentHead.slug,
-                        pairs,
-                    ),
-                )
-            )
-        }
-        if pairs
-        else {}
+    resolved = _selectors_revisions(
+        session, {selector for chosen in named.values() for selector in chosen or ()}
     )
     running = list(
         session.execute(
             select(
                 RecipeInstallation.id,
                 RecipeInstallation.state,
-                RecipeInstallation.model_content_sha256,
                 RecipeInstallation.recipe_revision_id,
             )
             .where(
@@ -169,26 +199,49 @@ def model_set_reference_findings(
             .order_by(RecipeInstallation.id)
         )
     )
-    # The models a recipe revision uses are its relational binding rows.
-    recipe_ids = {rid for rid in heads.values() if rid} | {
-        row.recipe_revision_id for row in running
+    recipes = {
+        revision.id: revision for found in resolved.values() for revision in found
     }
-    bound = recipe_model_digests(session, recipe_ids)
-    models = {model for chosen in bound.values() for model in chosen} | {
-        row.model_content_sha256 for row in running if row.model_content_sha256
+    installed = {row.recipe_revision_id for row in running} - recipes.keys()
+    if installed:
+        recipes.update(
+            {
+                revision.id: revision
+                for revision in session.scalars(
+                    select(CatalogDocumentRevision).where(
+                        CatalogDocumentRevision.id.in_(sorted(installed))
+                    )
+                )
+            }
+        )
+    roots: set[str] = set()
+    for revision in recipes.values():
+        try:
+            document = read_catalog_document(revision)
+        except (TypeError, ValueError):
+            continue
+        if isinstance(document, RecipeDefinition):
+            roots.update(
+                selection.model.content_sha256 for selection in document.models
+            )
+    documents = _model_documents(session, roots)
+    needs = {
+        revision_id: _recipe_needs(revision, documents)
+        for revision_id, revision in recipes.items()
     }
-    declared = _declared_files(session, models)
 
-    def held_by(used: Iterable[str] | None) -> set[str]:
-        """The selected sets holding a file of ``used``; unknown holds them all."""
-        if used is None:
-            return set(selected)
+    def held_by(revision_ids: Iterable[str]) -> set[str]:
+        """The selected sets serving a recipe revision; unknown holds them all."""
         held: set[str] = set()
-        for model in used:
-            files = declared.get(model)
-            if files is None:
+        for revision_id in revision_ids:
+            wanted = needs.get(revision_id)
+            if wanted is None:
                 return set(selected)
-            held.update(digest for digest, have in members.items() if have & files)
+            held.update(
+                digest
+                for digest, have in members.items()
+                if any(need <= have for need in wanted)
+            )
         return held
 
     for profile in profiles:
@@ -197,12 +250,13 @@ def model_set_reference_findings(
             _protect_saved(findings, profile, "model-set", selected)
             continue
         for selector in selectors:
-            # No active revision, or none bound to a model, is unknown.
+            # A selector with no revision at all is unknown.
+            found = resolved[selector]
             _protect_saved(
                 findings,
                 profile,
                 "model-set",
-                held_by(bound.get(heads.get(_selector_name(selector)) or "")),
+                held_by(revision.id for revision in found) if found else set(selected),
             )
 
     def account(value: object) -> None:
@@ -268,15 +322,8 @@ def model_set_reference_findings(
                 )
 
     for row in running:
-        # A row that records no model is unknown and keeps every selected set.
-        used = (
-            None
-            if row.model_content_sha256 is None
-            else {row.model_content_sha256}
-            | bound.get(row.recipe_revision_id, frozenset())
-        )
         label = f"installation {row.id}"
-        for set_digest in held_by(used):
+        for set_digest in held_by((row.recipe_revision_id,)):
             findings[set_digest].add(
                 _finding(
                     "model-set",

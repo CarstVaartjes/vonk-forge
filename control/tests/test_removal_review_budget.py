@@ -77,9 +77,6 @@ FILES = 40
 CACHED_SETS = 130
 SELECTORS = 55
 SPARK_OBJECTS = 500
-# Models that running installations and saved profiles use: an input of every
-# review, so it is the same at both sizes while their row counts grow.
-PROTECTED = 1
 PUBLISHER = "vonk-forge"
 
 
@@ -234,10 +231,10 @@ def _cached_sets(
 def _noise_recipes(
     session: Session, models: list[tuple[str, str]], now: datetime
 ) -> list[str]:
-    """``SELECTORS`` recipes, each bound as the catalog binds a recipe to a protected model."""
+    """``SELECTORS`` recipes; each selects the first file of its own model."""
     revisions: list[str] = []
     for index in range(SELECTORS):
-        model_revision, model_digest = models[index % PROTECTED]
+        model_revision, model_digest = models[index]
         document = _example("recipe-source-build.json")
         identity = document["identity"]
         assert isinstance(identity, dict)
@@ -245,8 +242,9 @@ def _noise_recipes(
         identity["slug"] = f"noise-recipe-{index:04d}"
         selection = document["models"][0]  # type: ignore[index]
         selection["model"].update(
-            slug=f"noise-model-{index % PROTECTED:04d}", content_sha256=model_digest
+            slug=f"noise-model-{index:04d}", content_sha256=model_digest
         )
+        selection["files"][0]["file_id"] = "w0"
         clean = RecipeDefinition.model_validate(document).model_dump(mode="json")
         document_id, revision_id = str(uuid.uuid4()), str(uuid.uuid4())
         session.add(
@@ -295,7 +293,7 @@ def _noise_recipes(
                     model_revision_id=model_revision,
                     model_kind="model",
                     model_publisher=PUBLISHER,
-                    model_slug=f"noise-model-{index % PROTECTED:04d}",
+                    model_slug=f"noise-model-{index:04d}",
                     model_content_digest=model_digest,
                 ),
             ]
@@ -341,7 +339,7 @@ def _unrelated_load(
         real_model = real.model_content_sha256
         assert real_model is not None
         for index in range(load.installations):
-            digest = models[index % PROTECTED][1]
+            digest = models[index][1]
             session.add(
                 RecipeInstallation(
                     id=str(uuid.uuid4()),
@@ -558,10 +556,20 @@ def test_removal_cost_does_not_grow_with_unrelated_rows(
         tables = ["Job", "RecipeInstallation"]
         if operation == "review_model_removal":
             # The reference scan reads the profiles themselves (inherent) and the
-            # documents of the protected models (the same count at both sizes).
-            # ``_Evidence.read`` (the other operations) still loads every
-            # pointed head and revision.
-            tables += ["CatalogDocumentHead", "CatalogDocumentRevision"]
+            # revisions of the protected recipes and models: it grows with the
+            # DISTINCT protected recipes and models (here one pair per selector,
+            # each document parsed once per call), never with unrelated rows.
+            protected = PRODUCTION.selectors - ONE_OF_EACH.selectors
+            assert (
+                full.loaded["CatalogDocumentRevision"]
+                - base.loaded["CatalogDocumentRevision"]
+                == 2 * protected
+            )
+            assert (
+                full.loaded["CatalogDocumentHead"] - base.loaded["CatalogDocumentHead"]
+                == protected
+            )
+            tables = ["Job", "RecipeInstallation"]
         for table in tables:
             assert full.loaded[table] == base.loaded[table], table
         for statement in full.statements:

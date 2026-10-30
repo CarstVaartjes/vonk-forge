@@ -158,8 +158,8 @@ def test_scoped_profile_damage_keeps_exact_content_and_collects_unrelated_model(
             head = session.scalar(select(CatalogDocumentHead))
             assert head is not None
             head.active_revision_id = None
-    # The recipe's bound model still scopes the reference when its saved draft
-    # is damaged; a missing active head scopes nothing.
+    # The recipe's model still scopes the reference, including when its saved
+    # draft or active head is damaged.
     service = ModelCacheService(
         world.sessions, tmp_path / "cache", reserve_bytes=0, fixture_sources=True
     )
@@ -183,11 +183,6 @@ def test_scoped_profile_damage_keeps_exact_content_and_collects_unrelated_model(
                 session, (protected.artifact_set_sha256, unrelated.artifact_set_sha256)
             )
         assert findings[protected.artifact_set_sha256]
-        if damage == "head":
-            # A selector with no active revision cannot be proven to use any
-            # model, so it keeps every set until the owner repairs it.
-            assert findings[unrelated.artifact_set_sha256]
-            return
         assert not findings[unrelated.artifact_set_sha256]
         _models(world, service).collect()
         _settle(service)
