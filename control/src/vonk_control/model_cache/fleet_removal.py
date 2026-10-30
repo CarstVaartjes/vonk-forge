@@ -230,15 +230,14 @@ class FleetRemovalMixin:
             keep_detail = "Model content references are unavailable; review will recheck owner evidence."
         installations: dict[str, list[FleetRemovalInstallation]] = {}
         lifecycle = cache._fleet_lifecycle
-        # Only installations whose columns name this model are read; damage
-        # elsewhere neither costs a parse nor protects it.
+        # An installation uses the model when its columns name it or its plan
+        # names one of the model's sets (a reused set may never record the model
+        # in the columns). Damage to an installation that does neither is not
+        # this model's.
+        named = installations_using_models(session, contents)
         for installation in session.scalars(
             select(RecipeInstallation)
-            .where(
-                RecipeInstallation.id.in_(
-                    sorted(installations_using_models(session, contents))
-                )
-            )
+            .where(RecipeInstallation.state != InstallationState.UNINSTALLED)
             .order_by(RecipeInstallation.id)
         ):
             plan = read_or_rebuild(
@@ -251,9 +250,16 @@ class FleetRemovalMixin:
                 ),
             )
             if isinstance(plan, Residue):
+                if installation.id not in named:
+                    continue
                 issues.append(_observation_issue(plan))
                 protected = True
                 keep_detail = "Installation model references are unavailable; refresh owner evidence."
+                continue
+            if installation.id not in named and not set(sets) & {
+                compiled.identity.model_artifact_set_sha256
+                for compiled in plan.compiled_execution_plans.values()
+            }:
                 continue
             detail = _installation_kept(session, installation.id, evidence)
             saved = _installation_pointing(

@@ -125,13 +125,14 @@ def model(
     version: str = "1.0.0",
     number: int = 1,
     upstream: str = "0" * 40,
+    repository: str | None = None,
 ) -> str:
     """A catalog model with one file per name; returns its content digest."""
     document = _example("model-definition.json")
     document["identity"].update(publisher=PUBLISHER, slug=slug, version=version)
     document["identity"]["model"].update(publisher=PUBLISHER, slug=slug)
     document["source"] = {
-        "repository": f"https://huggingface.co/{PUBLISHER}/{slug}",
+        "repository": repository or f"https://huggingface.co/{PUBLISHER}/{slug}",
         "revision": upstream,
     }
     document["files"] = [
@@ -323,6 +324,23 @@ def test_a_refresh_keeps_the_old_set_until_the_new_set_is_cached(sessions) -> No
         assert not model_set_reference_findings(s, (old,))[old]
 
 
+def test_duplicate_model_documents_with_identical_files_share_one_set(
+    sessions,
+) -> None:
+    """A profile on model B protects the set first cached under model A."""
+    repo = f"https://huggingface.co/{PUBLISHER}/same"
+    with sessions.begin() as s:
+        a = model(s, "model-a", ["w"], repository=repo)
+        b = model(s, "model-b", ["w"], repository=repo)
+        assert a != b
+        cached = cache_resolved(s, recipe(s, "recipe-a", "model-a", a, ["w"]))
+        other = recipe(s, "recipe-b", "model-b", b, ["w"])
+        assert resolve_recipe_set(s, other).digest == cached
+        profile(s, "recipe-b")
+    with sessions() as s:
+        assert model_set_reference_findings(s, (cached,))[cached]
+
+
 def test_a_retracted_recipe_still_holds_its_set_and_only_its_set(sessions) -> None:
     """Catches a recipe with no active head either holding everything or nothing."""
     with sessions.begin() as s:
@@ -399,27 +417,11 @@ def test_installation_holds_the_set_its_plan_names(tmp_path):
             select(ModelCacheSet).where(ModelCacheSet.model_content_sha256 == w.target)
         ).first()
         first = hashlib.sha256(b"first-requester").hexdigest()
-        target_revision = s.scalars(
-            select(CatalogDocumentRevision).where(
-                CatalogDocumentRevision.content_digest == w.target
-            )
-        ).first()
-        assert target_revision is not None
         assert template is not None
         duplicate = hashlib.sha256(b"duplicate-bytes").hexdigest()
         for digest in used | {duplicate}:
             manifest = copy.deepcopy(template.manifest)
             manifest["model_content_sha256"] = first
-            # The set serves the target through a verified binding, as the
-            # removal's selected sets do; its first requester is another model.
-            manifest["verified_models"] = [
-                {
-                    "kind": "model",
-                    "publisher": target_revision.publisher,
-                    "slug": target_revision.slug,
-                    "content_sha256": w.target,
-                }
-            ]
             s.add(
                 ModelCacheSet(
                     artifact_set_sha256=digest,

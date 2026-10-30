@@ -8,10 +8,10 @@ profiles that name its recipes, live operations), so the cost must not depend on
 the rows of other models.
 
 The world is seeded by inserting rows directly (downloading 300 models takes
-minutes). Each operation runs once with one unrelated row of each kind and once with
-the full unrelated load: the statements it makes must be exactly the same, no
-unrelated job or installation row may be loaded, no installation that does not
-name the target is parsed, and the 24 hour live scan is never replayed.
+minutes). Each operation runs with one unrelated row of each kind, with a long
+history, and with a large protected load. History must not change the statements,
+the plan parses or the rows loaded; protected work may grow linearly. The 24 hour
+live scan is never replayed.
 """
 
 from __future__ import annotations
@@ -66,11 +66,20 @@ class Load:
     selectors: int
     installations: int
     jobs: int
+    #: Uninstalled installations, and catalog models with a cached set each:
+    #: history that nothing protects.
+    uninstalled: int = 0
+    models: int = 0
 
 
 # One row of each kind, so every read that exists once such rows exist runs.
 ONE_OF_EACH = Load(profiles=1, selectors=1, installations=1, jobs=1)
-PRODUCTION = Load(profiles=6, selectors=55, installations=29, jobs=1_000)
+# History grows with age: it must cost nothing.
+HISTORY = Load(
+    profiles=1, selectors=1, installations=1, jobs=1_000, uninstalled=29, models=150
+)
+# Protected work (saved selectors, active installations) may grow linearly.
+PROTECTED = Load(profiles=6, selectors=55, installations=29, jobs=1)
 
 MODELS = 300
 FILES = 40
@@ -90,10 +99,12 @@ def _example(name: str) -> dict[str, object]:
     )
 
 
-def _noise_models(session: Session, now: datetime) -> list[tuple[str, str]]:
+def _noise_models(
+    session: Session, now: datetime, count: int = MODELS, start: int = 0
+) -> list[tuple[str, str]]:
     """``MODELS`` catalog models of ``FILES`` files each; returns (revision id, digest)."""
     found: list[tuple[str, str]] = []
-    for index in range(MODELS):
+    for index in range(start, start + count):
         document = _example("model-definition.json")
         identity = document["identity"]
         assert isinstance(identity, dict)
@@ -161,14 +172,20 @@ def _noise_models(session: Session, now: datetime) -> list[tuple[str, str]]:
 
 
 def _cached_sets(
-    session: Session, models: list[tuple[str, str]], target: str, now: datetime
+    session: Session,
+    models: list[tuple[str, str]],
+    target: str | None,
+    now: datetime,
+    *,
+    count: int = CACHED_SETS,
+    prefix: str = "",
 ) -> None:
     named = [
         *(
-            (str(index), digest)
-            for index, (_id, digest) in enumerate(models[:CACHED_SETS])
+            (f"{prefix}{index}", digest)
+            for index, (_id, digest) in enumerate(models[:count])
         ),
-        ("target", target),
+        *(() if target is None else (("target", target),)),
     ]
     for key, digest in named:
         set_digest = _hex(f"set/{key}")
@@ -357,6 +374,27 @@ def _unrelated_load(
                     updated_at=now,
                 )
             )
+        for index in range(load.uninstalled):
+            digest = models[index][1]
+            session.add(
+                RecipeInstallation(
+                    id=str(uuid.uuid4()),
+                    recipe_revision_id=recipes[index],
+                    model_content_sha256=digest,
+                    mapping_id=real.mapping_id,
+                    mapping_generation=real.mapping_generation,
+                    recipe_build_id=real.recipe_build_id,
+                    image_digest=real.image_digest,
+                    plan_digest=_hex(f"old-plan/{index}"),
+                    plan=json.loads(json.dumps(real.plan).replace(real_model, digest)),
+                    state="uninstalled",
+                    actor="test",
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+        extra = _noise_models(session, NOW, load.models, start=MODELS)
+        _cached_sets(session, extra, None, NOW, count=load.models, prefix="h")
         payload = _availability_payload(recipes[0]).model_dump(mode="json")
         recent = now - timedelta(hours=1)
         for index in range(load.jobs):
@@ -507,6 +545,16 @@ def _operations(world: World) -> dict[str, Callable[[], object]]:
     }
 
 
+# Owner scans (model_set_reference_findings) per operation: the protected work
+# is repeated once per scan.
+SCANS = {
+    "review_model_removal": 1,
+    "review_fleet_model_removal": 1,
+    "remove_fleet_model_selector": 2,
+    "store_retention_request": 0,
+}
+
+
 @pytest.mark.slow(30)
 @pytest.mark.parametrize(
     "operation",
@@ -522,11 +570,18 @@ def test_removal_cost_does_not_grow_with_unrelated_rows(
 ) -> None:
     """Catches parsing every installation and walking every profile and job per request.
 
-    Slow by design: it seeds 300 models of 40 files, 130 cached sets and the
-    production load, twice per operation.
+    Two axes. HISTORY (finished jobs, uninstalled installations, catalog models
+    and cached sets nothing protects) must leave statements, plan parses and
+    loaded rows exactly equal. PROTECTED work (saved selectors, active
+    installations) is resolved or parsed once per owner scan, so it may grow
+    linearly and no faster.
+
+    Slow by design: it seeds 300 models of 40 files and 130 cached sets, three
+    times per operation.
     """
     alone = _world(tmp_path, "alone", unrelated=ONE_OF_EACH)
-    loaded = _world(tmp_path, "loaded", unrelated=PRODUCTION)
+    history = _world(tmp_path, "history", unrelated=HISTORY)
+    protected = _world(tmp_path, "protected", unrelated=PROTECTED)
     # The uninstall plan the fleet review asks of a named installation lists every
     # other installation and parses each recipe to find dependents of the model
     # (recipe_operations/action_plans.py::_model_dependents_on_nodes). That is the
@@ -538,27 +593,40 @@ def test_removal_cost_does_not_grow_with_unrelated_rows(
         lambda _self, _session, _model, node_ids, **_kw: {n: () for n in node_ids},
     )
     try:
-        if operation != "remove_fleet_model_selector":
-            # Warm the process the way a running Controller is, then measure.
-            _operations(alone)[operation]()
-            _operations(loaded)[operation]()
-        base = _measure(alone, monkeypatch, _operations(alone)[operation])
-        full = _measure(loaded, monkeypatch, _operations(loaded)[operation])
+        costs = {}
+        for name, world in (
+            ("one-of-each", alone),
+            ("history", history),
+            ("protected", protected),
+        ):
+            if operation != "remove_fleet_model_selector":
+                # Warm the process the way a running Controller is, then measure.
+                _operations(world)[operation]()
+            costs[name] = _measure(world, monkeypatch, _operations(world)[operation])
+        base, aged, full = costs["one-of-each"], costs["history"], costs["protected"]
         print(  # the budget numbers are the report
             f"{operation}: one-of-each statements={len(base.statements)} "
-            f"parses={base.parses}; production statements={len(full.statements)} "
-            f"parses={full.parses} job_rows={full.loaded['Job']} "
-            f"installation_rows={full.loaded['RecipeInstallation']}"
+            f"parses={base.parses}; history statements={len(aged.statements)} "
+            f"parses={aged.parses}; protected statements={len(full.statements)} "
+            f"parses={full.parses} installation_rows={full.loaded['RecipeInstallation']}"
         )
-        # Unrelated models, sets, recipes, profiles, installations and jobs add
-        # nothing: a request reads only what can name the target's sets.
-        assert len(full.statements) == len(base.statements)
-        assert full.parses == base.parses
+        assert len(aged.statements) == len(base.statements)
+        assert aged.parses == base.parses
+        assert aged.loaded["Job"] == base.loaded["Job"]
+        assert aged.loaded["RecipeInstallation"] == base.loaded["RecipeInstallation"]
+        scans = SCANS[operation]
+        recipes = (PROTECTED.selectors - ONE_OF_EACH.selectors) * scans
+        running = (PROTECTED.installations - ONE_OF_EACH.installations) * scans
+        assert len(full.statements) - len(base.statements) <= 6 * recipes
+        # One parse per active installation per owner scan, and one more where
+        # the fleet effects read the installation's own plan.
+        assert full.parses - base.parses <= 3 * running
         assert full.loaded["Job"] == base.loaded["Job"]
-        assert full.loaded["RecipeInstallation"] == base.loaded["RecipeInstallation"]
-        for statement in full.statements:
-            if any(f"FROM {table}" in statement for table in FILTERED_TABLES):
-                assert re.search(r"\bWHERE\b", statement), statement
+        for world_cost in (aged, full):
+            for statement in world_cost.statements:
+                if any(f"FROM {table}" in statement for table in FILTERED_TABLES):
+                    assert re.search(r"\bWHERE\b", statement), statement
     finally:
         alone.cache.close()
-        loaded.cache.close()
+        history.cache.close()
+        protected.cache.close()

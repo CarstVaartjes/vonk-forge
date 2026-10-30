@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from itertools import chain
 
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
@@ -15,13 +16,8 @@ from .. import model_cache_states
 from ..artifact_lifecycle import (
     ArtifactReferenceUnverified,
 )
-from ..content_identity import (
-    installation_uses_models,
-    recipe_model_digests,
-    recipe_revisions_using_models,
-)
+from ..content_identity import recipe_model_digests
 from ..machine_states import DISTRIBUTION_HELD, RUN_LIVE
-from ..model_cache_contract import CacheManifest
 from ..models import (
     ArtifactDistributionAssignment,
     FleetProfile,
@@ -32,7 +28,6 @@ from ..models import (
     RecipeInstallation,
     RecipeRun,
 )
-from ..stored_json import read_row_column
 from .intents import (
     _installation_plan,
     _profile_plan,
@@ -56,7 +51,7 @@ def model_set_reference_findings(
     """Find typed saved-profile and active owners of exact model sets."""
 
     from ..model_cache.errors import ModelCacheError
-    from ..model_cache.lineage import lineage_contents, set_bindings
+    from ..model_cache.lineage import lineage_contents, model_sets
     from ..model_cache.resolution import resolve_recipe_set
 
     selected = set(set_digests)
@@ -81,31 +76,14 @@ def model_set_reference_findings(
     }
 
     # A set is held when it is the set a protected recipe revision resolves to,
-    # as a download resolves it (identical files resolve to the same set). Only
-    # revisions and installations bound to the target's model lineage can name
-    # these sets, so only those are read. A revision that cannot be resolved, or
-    # whose resolved set is not cached yet (a refresh in flight), holds the
-    # selected sets of its models' lineage until the new set is cached.
-    serves: dict[str, frozenset[str]] = {}
-    for digest, row in sets.items():
-        manifest = read_row_column(row, "manifest")
-        serves[digest] = set_bindings(
-            row.model_content_sha256,
-            manifest.verified_models if isinstance(manifest, CacheManifest) else (),
-        )
-    lineage = {
-        content
-        for model in set().union(*serves.values())
-        for content in lineage_contents(session, model)
-    }
+    # as a download resolves it (identical files resolve to the same set,
+    # whichever model document the recipe names). A revision that cannot be
+    # resolved, or whose resolved set is not cached yet (a refresh in flight),
+    # holds the selected sets of its models' lineage until the new set is cached.
     profiles = list(session.scalars(select(FleetProfile).order_by(FleetProfile.id)))
     named = {profile.id: saved_profile_selectors(profile) for profile in profiles}
     resolved = _selectors_revisions(
         session, {selector for chosen in named.values() for selector in chosen or ()}
-    )
-    revision_ids = {revision.id for found in resolved.values() for revision in found}
-    related = set(
-        session.scalars(recipe_revisions_using_models(lineage, among=revision_ids))
     )
     running = list(
         session.scalars(
@@ -119,27 +97,23 @@ def model_set_reference_findings(
                         RecipeRun.state.in_(RUN_LIVE),
                     )
                     .exists(),
-                ),
-                installation_uses_models(lineage),
+                )
             )
             .order_by(RecipeInstallation.id)
         )
     )
     bound = recipe_model_digests(
-        session, related | {row.recipe_revision_id for row in running}
+        session,
+        {revision.id for found in resolved.values() for revision in found}
+        | {row.recipe_revision_id for row in running},
     )
-    by_lineage: dict[str, set[str]] = {}
 
     def lineage_sets(models: Iterable[str]) -> set[str]:
         """The selected sets cached for these models' lineage (no parsing)."""
-        wanted = {
-            content
-            for model in models
-            for content in by_lineage.setdefault(
-                model, set(lineage_contents(session, model))
-            )
+        contents = {
+            content for model in models for content in lineage_contents(session, model)
         }
-        return {digest for digest, models in serves.items() if models & wanted}
+        return selected & set(chain(*model_sets(session, contents)))
 
     resolves: dict[str, str | None] = {}
 
@@ -167,8 +141,6 @@ def model_set_reference_findings(
             found = resolved[selector]
             held = set() if found else set(selected)
             for revision in found:
-                if revision.id not in related:
-                    continue
                 digest = resolved_set(revision.id)
                 held |= (
                     {digest} & selected

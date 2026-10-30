@@ -281,66 +281,38 @@ def recipe_model_digests(
     return {revision_id: frozenset(models) for revision_id, models in found.items()}
 
 
-def recipe_revisions_using_models(
-    contents: Collection[str], among: Collection[str] | None = None
-):
-    """A select of the recipe revisions bound to any of ``contents``.
+def installations_using_models(session, contents: Collection[str]) -> frozenset[str]:
+    """Installed (not uninstalled) installations whose columns name ``contents``.
 
-    ``among`` limits it to these revision ids.
-
-    The filter is on the indexed ``model_revision_id`` column, so unrelated
-    recipes are not read.
+    The model column, or a recipe bound to one of their catalog revisions. The
+    filter is in SQL on indexed columns. An installation running on a reused
+    set may name it only in its plan, so callers also read plans.
     """
-    from sqlalchemy import select
+    from sqlalchemy import or_, select
+    from vonk_agent_protocol import InstallationState
     from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
 
-    from .models import CatalogDocumentRevision, CatalogRecipeModelReference
+    from .models import (
+        CatalogDocumentRevision,
+        CatalogRecipeModelReference,
+        RecipeInstallation,
+    )
 
     lineage = select(CatalogDocumentRevision.id).where(
         CatalogDocumentRevision.kind == RunSwitchReasonScopeName.MODEL,
         CatalogDocumentRevision.content_digest.in_(sorted(contents)),
     )
-    query = select(CatalogRecipeModelReference.recipe_revision_id).where(
+    bound = select(CatalogRecipeModelReference.recipe_revision_id).where(
         CatalogRecipeModelReference.model_revision_id.in_(lineage)
     )
-    if among is not None:
-        query = query.where(
-            CatalogRecipeModelReference.recipe_revision_id.in_(sorted(among))
-        )
-    return query
-
-
-def installation_uses_models(contents: Collection[str]):
-    """The SQL condition: the installation's model column or recipe names ``contents``."""
-    from sqlalchemy import or_
-
-    from .models import RecipeInstallation
-
-    return or_(
-        RecipeInstallation.model_content_sha256.in_(sorted(contents)),
-        RecipeInstallation.recipe_revision_id.in_(
-            recipe_revisions_using_models(contents)
-        ),
-    )
-
-
-def installations_using_models(session, contents: Collection[str]) -> frozenset[str]:
-    """Installed (not uninstalled) installations that use ``contents``.
-
-    The ids its columns attribute to them: the model column, or a recipe bound to
-    one of their catalog revisions. The filter is in SQL on indexed columns, so
-    unrelated installations are not read.
-    """
-    from sqlalchemy import select
-    from vonk_agent_protocol import InstallationState
-
-    from .models import RecipeInstallation
-
     return frozenset(
         session.scalars(
             select(RecipeInstallation.id).where(
                 RecipeInstallation.state != InstallationState.UNINSTALLED,
-                installation_uses_models(contents),
+                or_(
+                    RecipeInstallation.model_content_sha256.in_(sorted(contents)),
+                    RecipeInstallation.recipe_revision_id.in_(bound),
+                ),
             )
         )
     )
