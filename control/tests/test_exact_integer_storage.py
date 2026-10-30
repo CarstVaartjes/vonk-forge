@@ -39,7 +39,10 @@ from vonk_control.exact_integer_adoption import (
     adopt_exact_integer_columns,
     reconcile_exact_integer_schema,
 )
-from vonk_control.exact_integer_storage import DecimalIntegerOrderKey
+from vonk_control.exact_integer_storage import (
+    DecimalIntegerOrderKey,
+    ExactNonnegativeInteger,
+)
 from vonk_control.model_cache import ArtifactSetManifest, ModelCacheService
 from vonk_control.model_cache_contract import (
     CacheEntryResponse,
@@ -113,67 +116,39 @@ class NoRemoval:
 
 
 @contextmanager
-def _historical_mapper(engine: Engine) -> Iterator[None]:
-    """Use old BIGINT mappings only for sequential historical producer fixtures.
+def _historical_mapper(engine: Engine) -> Iterator[Engine]:
+    """Yield a private engine whose dialect stores owning integers as BIGINT.
 
-    Sessions/cache services close before exit; no concurrent mapped users are
-    allowed. Restore four types and both caches before current adoption/reads.
+    Sequential historical producer fixtures run the real services against the
+    BIGINT schema. The mapping is a property of this engine's own dialect copy
+    (``colspecs``), so the shared ``Base.metadata`` columns and the ORM
+    attributes' memoized bind types are never touched and cannot leak into
+    later tests. Both mapper flush caches are cleared around it.
     """
-    saved = {
-        (table, name): Base.metadata.tables[table].c[name].type
-        for table, names in OWNING_COLUMNS.items()
-        for name in names
-    }
-    with engine.connect() as connection:
-        assert all(
-            isinstance(column["type"], BigInteger)
-            for table, names in OWNING_COLUMNS.items()
-            for column in inspect(connection).get_columns(table)
-            if column["name"] in names
-        )
-        settings = (
-            tuple(
-                connection.exec_driver_sql(f"PRAGMA {key}").scalar_one()
-                for key in ("foreign_keys", "legacy_alter_table", "busy_timeout")
-            )
-            if engine.dialect.name == "sqlite"
-            else ()
-        )
 
     def clear_caches() -> None:
-        engine.clear_compiled_cache()
-        # Native ORM flushes use Mapper._compiled_cache rather than the engine
-        # cache (pinned persistence.py); restore that cache boundary too.
         CatalogDocumentRevision.__mapper__._compiled_cache.clear()
         ModelCacheSet.__mapper__._compiled_cache.clear()
 
+    historical = create_engine(engine.url)
+    historical.dialect.colspecs = {
+        **historical.dialect.colspecs,
+        ExactNonnegativeInteger: BigInteger,
+    }
+    clear_caches()
     try:
-        for table, name in saved:
-            Base.metadata.tables[table].c[name].type = BigInteger()
-        clear_caches()
-        yield
+        yield historical
     finally:
-        for (table, name), original in saved.items():
-            Base.metadata.tables[table].c[name].type = original
         clear_caches()
-        engine.dispose()
-        if engine.dialect.name == "sqlite":
-            with engine.connect() as connection:
-                for key, value in zip(
-                    ("foreign_keys", "legacy_alter_table", "busy_timeout"),
-                    settings,
-                    strict=True,
-                ):
-                    connection.exec_driver_sql(f"PRAGMA {key}={int(value)}")
-                connection.commit()
+        historical.dispose()
 
 
 def _historical_draft(
     engine: Engine, document: dict[str, object]
 ) -> CatalogDocumentRevision:
-    with _historical_mapper(engine):
+    with _historical_mapper(engine) as historical:
         return CatalogEntityService(
-            sessionmaker(engine, expire_on_commit=False), clock=lambda: NOW
+            sessionmaker(historical, expire_on_commit=False), clock=lambda: NOW
         ).create_draft(document, actor="operator")
 
 
@@ -337,7 +312,7 @@ def test_actual_bigint_counterexample_then_native_adoption_and_same_ids(
     existing = _historical_draft(engine, _document(9, "legacy-nine"))
     # The baseline attempt runs through the real producer, inside an isolated
     # outer transaction. Restore even if SQLite accepted a lossy REAL value.
-    with _historical_mapper(engine), engine.connect() as connection:
+    with _historical_mapper(engine) as historical, historical.connect() as connection:
         transaction = connection.begin()
         try:
             if engine.dialect.name == "sqlite":
@@ -487,11 +462,11 @@ def test_legacy_adoption_preserves_keys_extensions_and_checked_restart(
     """Catches table replacement losing foreign keys, CHECKs or unknown DDL."""
     engine = legacy_engine
     sessions = sessionmaker(engine, expire_on_commit=False)
-    with _historical_mapper(engine):
-        revision = CatalogEntityService(sessions, clock=lambda: NOW).create_draft(
-            _document(9, "preserved-nine"), actor="operator"
-        )
-        digest = _seed_cache(engine, tmp_path / "cache", 9)
+    with _historical_mapper(engine) as historical:
+        revision = CatalogEntityService(
+            sessionmaker(historical, expire_on_commit=False), clock=lambda: NOW
+        ).create_draft(_document(9, "preserved-nine"), actor="operator")
+        digest = _seed_cache(historical, tmp_path / "cache", 9)
     with engine.begin() as connection:
         connection.exec_driver_sql(
             "CREATE TABLE proof_child (identity VARCHAR(64) PRIMARY KEY, revision_id VARCHAR(64) NOT NULL REFERENCES catalog_document_revisions(id), CONSTRAINT ck_proof_child_name CHECK (length(identity)>0), CHECK (length(revision_id)>0))"
@@ -1098,11 +1073,11 @@ def test_adoption_execution_deadline_rolls_back_partial_ddl_then_same_identity_r
     """Catches partial adoption escaping a real execution timeout, or poisoned retry."""
     engine = legacy_engine
     sessions = sessionmaker(engine, expire_on_commit=False)
-    with _historical_mapper(engine):
-        revision = CatalogEntityService(sessions, clock=lambda: NOW).create_draft(
-            _document(9, "deadline-retained"), actor="operator"
-        )
-        digest = _seed_cache(engine, tmp_path / "deadline-cache", 9)
+    with _historical_mapper(engine) as historical:
+        revision = CatalogEntityService(
+            sessionmaker(historical, expire_on_commit=False), clock=lambda: NOW
+        ).create_draft(_document(9, "deadline-retained"), actor="operator")
+        digest = _seed_cache(historical, tmp_path / "deadline-cache", 9)
     monkeypatch.setattr(
         adoption_module,
         "DATABASE_WAIT_BUDGETS",

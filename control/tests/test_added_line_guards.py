@@ -1620,3 +1620,28 @@ def test_typed_or_unrelated_read_passes_document_reads(source: str) -> None:
     assert not check_source(
         "control/src/vonk_control/example.py", source, {1}, modes=("document-reads",)
     )
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "Base.metadata.tables['t'].c['n'].type = BigInteger()\n",
+        "Model.__table__.c.size_bytes.type = BigInteger()\n",
+        "for t, n in saved:\n    Base.metadata.tables[t].c[n].type = original\n",
+        "setattr(Model.__table__.c.size_bytes, 'type', BigInteger())\n",
+    ],
+)
+def test_a_test_retyping_shared_metadata_columns_fails(source):
+    lines = set(range(1, len(source.splitlines()) + 1))
+    path = "control/tests/test_example.py"
+    modes = ("shared-metadata",)
+    assert check_source(path, source, lines, modes=modes)
+    unchanged = source + "x = 1\n"
+    assert not check_source(path, unchanged, {len(lines) + 1}, modes=modes)
+
+
+def test_a_private_metadata_copy_may_retype_its_columns():
+    source = "metadata = MetaData()\ntable = metadata.tables['t']\ntable.c['n'].type = BigInteger()\n"
+    assert not check_source(
+        "control/tests/test_example.py", source, {1, 2, 3}, modes=("shared-metadata",)
+    )
