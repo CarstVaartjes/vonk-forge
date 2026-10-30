@@ -33,6 +33,7 @@ from ..profile_capacity import (
 )
 from ..recipe_execution_contract import (
     installation_matches_runtime_image,
+    parse_stored_installation_plan,
 )
 from ..recipe_operations import (
     RecipeOperationConflict,
@@ -43,6 +44,7 @@ from ..recipe_runtime_specs import (
 from ..resource_planning import (
     resolve_effective_settings,
 )
+from ..revision_images import revision_source_bundle
 from ..run_admission import (
     PORT_ADMISSION_CODES,
 )
@@ -205,29 +207,61 @@ class RunPlanningMixin:
                 mapping,
                 group,
             )
-            # An installed installation that already runs the needed image
-            # starts as it is: a build row or a NAS archive is provenance, not
-            # identity, so neither is consulted.  Model bytes still missing on
-            # a Spark need the transfer phases and their image identity, so
-            # that load keeps the full resolution.
+            # An installed installation that already runs the needed image on
+            # every target Spark starts as it is: a build row or a NAS archive
+            # is provenance, not identity, so neither is consulted.  Model or
+            # image bytes missing on a Spark need the transfer phases and the
+            # image's NAS copy, so that load keeps the full resolution.
+            current_builds = tuple(service._current_builds(session, revision.id))
+            installed_plan = (
+                parse_stored_installation_plan(installation.plan)
+                if installation is not None
+                else None
+            )
             installed_image = (
                 service._installed_image(
-                    session,
                     installation,
-                    revision.id,
+                    installed_plan,
+                    current_builds,
+                    revision_source=revision_source_bundle(revision),
+                    recorded_build=session.get(
+                        RecipeBuild, installation.recipe_build_id
+                    )
+                    if installation.recipe_build_id
+                    else None,
                     expected_image=expected_image,
                 )
                 if installation is not None
+                and installed_plan is not None
                 and inspection.missing_spark_bytes in (None, 0)
                 else None
             )
-            reuse_installed = installed_image is not None
             build_selection = None
             build = None
             build_candidate = None
+            if installed_image is not None:
+                build_evidence, runtime_storage, build_blockers, build_warnings = (
+                    service._build_evidence(
+                        session,
+                        revision,
+                        None,
+                        None,
+                        group,
+                        expected_image=installed_image,
+                        require_available=False,
+                        image_installed=True,
+                    )
+                )
+                if runtime_storage.missing_image_distribution_bytes not in (None, 0):
+                    # A Spark lacks the image: heal through the full path.
+                    installed_image = None
+            reuse_installed = installed_image is not None
             if not reuse_installed:
                 build = service._matching_build(
-                    session, revision.id, expected_image=expected_image
+                    session,
+                    revision.id,
+                    expected_image=expected_image,
+                    current_builds=current_builds,
                 )
                 build_candidate = build or (
                     session.get(RecipeBuild, expected_image.build_id)
@@ -254,25 +288,24 @@ class RunPlanningMixin:
                         image_digest=build.image_digest,
                         oci_layout_sha256=build.oci_layout_sha256,
                         image_bytes=build.image_bytes,
+                        plan=installed_plan,
                     )
                 ):
                     # A replacement image needs a fresh compiled plan and
                     # install receipt.
                     installation = None
                 blockers.extend(build_selection.blockers)
-            build_evidence, runtime_storage, build_blockers, build_warnings = (
-                service._build_evidence(
-                    session,
-                    revision,
-                    build,
-                    build_candidate,
-                    group,
-                    defer_source_build=defer_source_build,
-                    expected_image=installed_image or expected_image,
-                    require_available=not reuse_installed,
-                    image_installed=reuse_installed,
+                build_evidence, runtime_storage, build_blockers, build_warnings = (
+                    service._build_evidence(
+                        session,
+                        revision,
+                        build,
+                        build_candidate,
+                        group,
+                        defer_source_build=defer_source_build,
+                        expected_image=expected_image,
+                    )
                 )
-            )
             blockers.extend(build_blockers)
             warnings.extend(build_warnings)
             resource_fits = service._resource_fits(

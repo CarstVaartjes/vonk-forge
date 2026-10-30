@@ -49,6 +49,7 @@ from vonk_control.run_switch_operations import RunSwitchOperationConflict
 from vonk_control.source_bundles import SourceBundleStore, generate_source_bundle
 
 from .preflight_fixtures import record_passing_preflight
+from .runtime_image_fixtures import install_another_image
 from .test_profile_capacity_admission import _capacity_profile
 from .test_profile_installed_execution import _profile_service
 from .test_profile_port_claims import _load, _ready_profile
@@ -153,6 +154,12 @@ def _accepted_build_profile(
             assert mapping_id is not None
         preview = lifecycle.preview_install(mapping_id, selected.build_id)
         assert preview.allowed
+    if installation_is_other_image:
+        # An installation that runs the needed image starts without any build,
+        # so a build only follows when the installation is another image.
+        with sessions.begin() as session:
+            for installation in session.scalars(select(RecipeInstallation)):
+                install_another_image(installation)
     application_id = _load(profile, api, headers)[0] if accept_profile else None
     # Cache loss occurs after acceptance. The already selected, typed build
     # receipt is still the same identity; only its executable work is pending.
@@ -162,11 +169,6 @@ def _accepted_build_profile(
         build.state = "planned"
         build.image_digest = build.oci_layout_sha256 = None
         build.image_bytes = None
-        # An installation that still runs the needed image starts without any
-        # build, so a build only follows when the installation is another image.
-        for installation in session.scalars(select(RecipeInstallation)):
-            if installation_is_other_image:
-                installation.image_digest = "sha256:" + "e" * 64
     return sessions, profiles, planner, nodes[0], application_id, selected
 
 

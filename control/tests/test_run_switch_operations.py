@@ -42,6 +42,7 @@ from vonk_control.install_admission import (
     InstallAdmissionBusy,
     installation_plan_digest_from_stored_document,
 )
+from vonk_control.inventory_items import inventory_items, record_items
 from vonk_control.inventory_repository import (
     InventoryRepository,
     NodeInventoryReport,
@@ -87,6 +88,7 @@ from vonk_control.recipe_operations import (
     RecipeOperationView,
 )
 from vonk_control.recipe_runtime_specs import (
+    RUNTIME_INTERFACE,
     compile_runtime_spec,
     resolve_recipe_entities,
     split_option_choices,
@@ -155,7 +157,7 @@ from .runtime_identity_support import (
     set_inventory_fingerprint,
     set_inventory_identity,
 )
-from .runtime_image_fixtures import place_test_image
+from .runtime_image_fixtures import install_another_image, place_test_image
 
 _FIXTURE_ADAPTER = resolve_runtime_adapter("vllm", {"node_count": 1})
 from .test_lifecycle_preflight import _clear, _finish
@@ -3412,6 +3414,106 @@ def test_a_newer_unfinished_build_row_keeps_the_installation_once_its_image_expi
     assert _phase_kinds(plan) == ["start", "final_verify"]
     with sessions.begin() as session:
         assert session.scalar(select(func.count()).select_from(RecipeBuild)) == 2
+
+
+def _drop_installed_image_from_spark(sessions, node_id: str) -> None:
+    with sessions.begin() as session:
+        node = session.get(AgentNode, node_id)
+        assert node is not None
+        items = inventory_items(node)
+        record_items(node, items.model_copy(update={"artifacts": []}), NOW)
+
+
+@pytest.mark.parametrize("archive_present", [True, False])
+def test_installed_recipe_whose_image_is_missing_on_a_spark_is_healed_not_started(
+    tmp_path: Path, archive_present: bool
+) -> None:
+    """Reuse needs the image on every target Spark; a lost copy takes the full path."""
+
+    sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
+    installed_recipe(
+        lifecycle, mapping_id, build_id, nodes, request_id=str(uuid.uuid4())
+    )
+    _drop_installed_image_from_spark(sessions, nodes[0])
+
+    plan = _installed_service(
+        sessions, lifecycle, archive_present=archive_present
+    ).preview(_request(sessions, nodes[0]), actor="admin")
+
+    assert _phase_kinds(plan) != ["start", "final_verify"]
+    if archive_present:
+        assert plan.allowed, [reason.code for reason in plan.blockers]
+        assert "transfer" in _phase_kinds(plan)
+    else:
+        # The expired image needs a build; this fixture has no builder, so the
+        # plan says so instead of starting a Spark without its image.
+        assert RunSwitchCode.CONTAINER_BUILD_UNAVAILABLE in {
+            reason.code for reason in plan.blockers
+        }
+
+
+def test_installed_reuse_is_decided_without_asking_the_nas_archive(
+    tmp_path: Path,
+) -> None:
+    """Which wrong implementation: reuse that still consults archive presence."""
+
+    sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
+    installed_recipe(
+        lifecycle, mapping_id, build_id, nodes, request_id=str(uuid.uuid4())
+    )
+
+    def never_asked(_digest, _size):
+        raise AssertionError("installation reuse must not read NAS archive presence")
+
+    service = RunSwitchOperationService(
+        sessions,
+        lifecycle=lifecycle,
+        clock=lambda: NOW,
+        artifacts=CompleteArtifactInspector(),
+        artifact_phase_executor=RecordingArtifactExecutor(),
+        build_archive_available=never_asked,
+        memory_floor_bytes=50,
+    )
+    plan = service.preview(_request(sessions, nodes[0]), actor="admin")
+
+    assert _phase_kinds(plan) == ["start", "final_verify"]
+
+
+def test_accepted_image_reuse_reaches_start_and_final_verify(tmp_path: Path) -> None:
+    """A profile load bound to the accepted image reuses the installation too."""
+
+    sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
+    installed_recipe(
+        lifecycle, mapping_id, build_id, nodes, request_id=str(uuid.uuid4())
+    )
+    with sessions() as session:
+        build = session.get(RecipeBuild, build_id)
+        assert build is not None
+        assert build.image_digest and build.oci_layout_sha256 and build.image_bytes
+        accepted = RuntimeImageIdentity(
+            image_digest=build.image_digest,
+            oci_layout_sha256=build.oci_layout_sha256,
+            image_bytes=build.image_bytes,
+            architecture="linux-arm64",
+            runtime_interface=RUNTIME_INTERFACE,
+            build_id=build.id,
+        )
+
+    service = _installed_service(sessions, lifecycle, archive_present=False)
+    plan = service.inspect_request(
+        _request(sessions, nodes[0]), actor="admin", expected_runtime_image=accepted
+    )
+    assert plan.allowed, [reason.code for reason in plan.blockers]
+    assert _phase_kinds(plan) == ["start", "final_verify"]
+    assert plan.preparation is not None
+    assert plan.preparation.runtime_image.image_digest == accepted.image_digest
+
+    other = accepted.model_copy(update={"image_digest": "sha256:" + "d" * 64})
+    assert _phase_kinds(
+        service.inspect_request(
+            _request(sessions, nodes[0]), actor="admin", expected_runtime_image=other
+        )
+    ) != ["start", "final_verify"]
 
 
 @pytest.mark.parametrize("stale_state", ["succeeded", "planned"])
@@ -7870,7 +7972,7 @@ def test_plan_reuses_inventory_when_a_new_sample_lands_between_read_points(
             # builder's inventory is read only when the image is another one.
             installation = session.get(RecipeInstallation, installed.owner_id)
             assert installation is not None
-            installation.image_digest = "sha256:" + "e" * 64
+            install_another_image(installation)
 
     service = _service(
         sessions,

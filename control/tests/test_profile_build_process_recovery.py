@@ -405,15 +405,26 @@ def _worker_process(config: dict, crash: str) -> None:
 # PostgreSQL. That process boundary is the behaviour under test.
 @pytest.mark.slow(30)
 @pytest.mark.parametrize(
-    ("boundary", "complete_while_down", "replacement"),
+    ("boundary", "complete_while_down", "initially_installed", "replacement"),
     [
-        ("build-before", False, None),
-        ("build-after", False, None),
-        ("build-after", True, None),
-        ("start-before", False, None),
-        ("start-after", False, None),
-        ("start-after", True, None),
-        pytest.param("build-after", True, "image", id="first-install-changed-image"),
+        ("build-before", False, False, None),
+        ("build-after", False, False, None),
+        ("build-after", True, False, None),
+        ("start-before", False, False, None),
+        ("start-after", False, False, None),
+        ("start-after", True, False, None),
+        # An installed recipe whose image is intact starts without any build,
+        # even though the NAS copy is gone (the short start path).
+        pytest.param("start-before", False, True, None, id="installed-start-before"),
+        pytest.param("start-after", False, True, None, id="installed-start-after"),
+        pytest.param("start-after", True, True, None, id="installed-start-complete"),
+        pytest.param(
+            "build-after", True, False, "image", id="first-install-changed-image"
+        ),
+        pytest.param("build-after", True, True, "image", id="installed-changed-image"),
+        pytest.param(
+            "build-after", True, True, "archive", id="installed-changed-archive"
+        ),
     ],
 )
 def test_profile_recovers_after_worker_process_death(
@@ -421,10 +432,17 @@ def test_profile_recovers_after_worker_process_death(
     postgres_engine,
     boundary,
     complete_while_down,
+    initially_installed,
     replacement,
 ):
     sessions, profiles, _planner, _node, application_id, selected = (
-        _accepted_build_profile(tmp_path, postgres_engine)
+        _accepted_build_profile(
+            tmp_path,
+            postgres_engine,
+            initially_installed=initially_installed,
+            # A replaced image is a different image from the installed one.
+            installation_is_other_image=replacement is not None,
+        )
     )
     assert application_id is not None
     storage = FilesystemRuntimeImageStorage(tmp_path / "runtime-images")
@@ -443,12 +461,28 @@ def test_profile_recovers_after_worker_process_death(
             }
         )
         (tmp_path / "expected-build.receipt.json").write_text(changed.model_dump_json())
+    elif replacement == "archive":
+        changed = original.model_copy(
+            update={
+                "image_digest": "sha256:" + "c" * 64,
+                "oci_archive_sha256": "c" * 64,
+                "image_bytes": original.image_bytes + len(b"replacement"),
+            }
+        )
+        (tmp_path / "expected-build.receipt.json").write_text(changed.model_dump_json())
     remove_test_image(storage, original.oci_archive_sha256)
     original_archive.unlink()
     with sessions() as session:
         original_installations = {
             row.id: row.plan for row in session.scalars(select(RecipeInstallation))
         }
+        original_work = set(
+            session.scalars(
+                select(Job.id).where(
+                    Job.kind.in_(("recipe.build.v1", "recipe.install"))
+                )
+            )
+        )
         claim_ids = {
             claim.id
             for claim in session.scalars(
@@ -659,11 +693,35 @@ def test_profile_recovers_after_worker_process_death(
         "state": "succeeded",
     }
     with sessions() as session:
-        for child_kind in ("recipe.build.v1", "recipe.install", "recipe.start"):
+        # An intact installation starts as it is: no build, no install.
+        children = (
+            ("recipe.start",)
+            if initially_installed
+            else (
+                "recipe.build.v1",
+                "recipe.install",
+                "recipe.start",
+            )
+        )
+        for child_kind in children:
             jobs = tuple(session.scalars(select(Job).where(Job.kind == child_kind)))
             assert len(jobs) == 1 and jobs[0].state == "succeeded"
             if child_kind == kind and child_id is not None:
                 assert jobs[0].id == child_id
+        if initially_installed:
+            assert (
+                set(
+                    session.scalars(
+                        select(Job.id).where(
+                            Job.kind.in_(("recipe.build.v1", "recipe.install"))
+                        )
+                    )
+                )
+                == original_work
+            )
+            assert {
+                row.id: row.plan for row in session.scalars(select(RecipeInstallation))
+            } == original_installations
         runs = tuple(session.scalars(select(RecipeRun)))
         assert len(runs) == 1 and runs[0].state == "running"
         assert runs[0].route_state == "published"
