@@ -29,13 +29,19 @@ env:
 
 # A new commit supersedes an older PR check. Every other run, including a
 # release workflow call, has its own group: the caller owns its cancellation.
+# Only the `release-acceptance` label starts a new run; any other label runs in
+# its own group so it never cancels the run in progress, and every job below
+# skips it. The four required checks (Ruff, Generated control clients, Compose
+# integration, CI gate) change name on such a run, so its skipped jobs can never
+# satisfy them.
 concurrency:
-  group: vonk-forge-ci-${{ github.event.pull_request.number || github.event.merge_group.head_sha || github.run_id }}
+  group: vonk-forge-ci-${{ (github.event.action == 'labeled' && github.event.label.name != 'release-acceptance') && format('ignored-label-{0}', github.run_id) || github.event.pull_request.number || github.event.merge_group.head_sha || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'merge_group' }}
 
 jobs:
   changes:
     name: Select CI integration dependencies
+    if: ${{ !(github.event.action == 'labeled' && github.event.label.name != 'release-acceptance') }}
     permissions:
       contents: read
       actions: read
@@ -109,7 +115,8 @@ jobs:
           done
 
   lint:
-    name: Ruff
+    name: ${{ (github.event.action == 'labeled' && github.event.label.name != 'release-acceptance') && 'Ruff (label ignored)' || 'Ruff' }}
+    if: ${{ !(github.event.action == 'labeled' && github.event.label.name != 'release-acceptance') }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -145,6 +152,7 @@ jobs:
 
   supply-chain:
     name: Supply-chain evidence
+    if: ${{ !(github.event.action == 'labeled' && github.event.label.name != 'release-acceptance') }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -440,7 +448,7 @@ jobs:
           path: artifacts/vonk-forge-systemd-security.json
 
   generated-clients:
-    name: Generated control clients
+    name: ${{ (github.event.action == 'labeled' && github.event.label.name != 'release-acceptance') && 'Generated control clients (label ignored)' || 'Generated control clients' }}
     needs: changes
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -462,7 +470,7 @@ jobs:
         run: scripts/check-generated-determinism
 
   compose-integration:
-    name: Compose integration
+    name: ${{ (github.event.action == 'labeled' && github.event.label.name != 'release-acceptance') && 'Compose integration (label ignored)' || 'Compose integration' }}
     needs: changes
     if: needs.changes.outputs.compose == 'true'
     runs-on: ubuntu-latest
@@ -758,6 +766,7 @@ jobs:
 
   repository-guards:
     name: Repository guards
+    if: ${{ !(github.event.action == 'labeled' && github.event.label.name != 'release-acceptance') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -1211,9 +1220,9 @@ jobs:
       upgrade_carry: ${{ needs.changes.outputs.upgrade_carry == 'true' || contains(github.event.pull_request.labels.*.name, 'release-acceptance') }}
 
   ci-gate:
-    name: CI gate
+    name: ${{ (github.event.action == 'labeled' && github.event.label.name != 'release-acceptance') && 'CI gate (label ignored)' || 'CI gate' }}
     needs: [changes, lint, supply-chain, rust-quality, rust-tests, rust-platform, controller-spark-wire, generated-clients, compose-integration, repository-guards, repository-suite, control-suite, control-image-build, web-suite, nas-install, agent-package, lane-proof]
-    if: always()
+    if: ${{ always() && !(github.event.action == 'labeled' && github.event.label.name != 'release-acceptance') }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
