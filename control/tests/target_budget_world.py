@@ -20,8 +20,9 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from importlib.resources import files
 from pathlib import Path
+from typing import Any
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event, select
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol.inventory import ModelStoreObject
@@ -54,13 +55,14 @@ FILES = 4
 # shape, so the unit only has to be large enough that a per-row read shows.
 JOBS_PER_UNIT = 100
 SELECTORS_PER_UNIT = 5
-# Saved profiles are a small, user-authored set that a reference check may read
-# whole; it is the selectors they name, and the catalog behind them, that grow.
-PROFILES = 3
+PROFILES_PER_UNIT = 1
+# Installations on the target's own Spark, whatever the unrelated history.
+NODE_LOCAL = 3
 MODELS_PER_UNIT = 30
 INSTALLATIONS_PER_UNIT = 3
 CACHED_SETS_PER_UNIT = 13
-SPARK_OBJECTS_PER_UNIT = 20
+# The Spark's own store is node-local input and does not grow with history.
+SPARK_OBJECTS = 20
 
 
 def _hex(value: str) -> str:
@@ -88,6 +90,13 @@ class World:
     node: str
     other_node: str
     now: datetime
+    # Rows the database driver has handed to the Controller, over every
+    # statement and every table, so a column select that the code filters in
+    # Python counts as much as an entity load.
+    fetched: list[int]
+    root: Path
+    target_recipe_slug: str
+    target_build: str
 
     def close(self) -> None:
         self.cache.close()
@@ -263,6 +272,15 @@ def _noise_recipes(
     return revisions
 
 
+def _own(value: object, swaps: dict[str, str]) -> object:
+    """``value`` with the target's identities replaced by another item's."""
+    text = json.dumps(value)
+    for old, new in swaps.items():
+        if old:
+            text = text.replace(old, new)
+    return json.loads(text)
+
+
 def _unrelated_history(
     sessions: sessionmaker[Session],
     scale: int,
@@ -275,9 +293,10 @@ def _unrelated_history(
 ) -> None:
     """Saved profiles, installations and finished jobs that do not name the target."""
     with sessions.begin() as session:
-        selectors = scale * SELECTORS_PER_UNIT
-        for number in range(PROFILES):
-            chosen = range(number, selectors, PROFILES)
+        for number in range(scale * PROFILES_PER_UNIT):
+            chosen = range(
+                number * SELECTORS_PER_UNIT, (number + 1) * SELECTORS_PER_UNIT
+            )
             session.add(
                 FleetProfile(
                     number=number + 1,
@@ -298,10 +317,59 @@ def _unrelated_history(
                 )
             )
         real = session.get(RecipeInstallation, target_installation)
+        real_build = session.get(RecipeBuild, real.recipe_build_id) if real else None
         assert real is not None and real.model_content_sha256 is not None
-        for index in range(scale * INSTALLATIONS_PER_UNIT):
+        assert real_build is not None
+        build_columns = {
+            column.name: getattr(real_build, column.name)
+            for column in RecipeBuild.__table__.columns
+        }
+        revision_digests = {
+            revision.id: revision.content_digest
+            for revision in session.scalars(
+                select(CatalogDocumentRevision).where(
+                    CatalogDocumentRevision.id.in_(recipes)
+                )
+            )
+        }
+        target_revision = session.get(CatalogDocumentRevision, real.recipe_revision_id)
+        assert target_revision is not None and target_revision.content_digest
+        for index in range(scale * INSTALLATIONS_PER_UNIT + NODE_LOCAL):
+            # The first NODE_LOCAL installations sit on the target's own Spark:
+            # what a node holds is the input of a question about that node, so
+            # it does not grow with unrelated history. The rest sit on the other.
+            local = index < NODE_LOCAL
+            node = spark if local else other_node
             digest = models[index][1]
-            installation_id = str(uuid.uuid4())
+            installation_id, build_id = str(uuid.uuid4()), str(uuid.uuid4())
+            archive = _hex(f"archive/{index}")
+            image_digest = f"sha256:{_hex(f'image/{index}')}"
+            swaps = {
+                spark: node,
+                real.model_content_sha256: digest,
+                real.recipe_build_id: build_id,
+                real.recipe_revision_id: recipes[index],
+                target_revision.content_digest: revision_digests[recipes[index]] or "",
+                real_build.oci_layout_sha256 or "": archive,
+                real.image_digest or "": image_digest,
+                real_build.build_input_sha256: _hex(f"input/{index}"),
+            }
+
+            session.add(
+                RecipeBuild(
+                    **{
+                        **build_columns,
+                        "id": build_id,
+                        "recipe_revision_id": recipes[index],
+                        "build_input_sha256": _hex(f"input/{index}"),
+                        "oci_layout_sha256": archive,
+                        "image_digest": image_digest,
+                        "plan": _own(real_build.plan, swaps),
+                    }
+                )
+            )
+            session.flush()
+            plan = _own(real.plan, swaps)
             session.add(
                 RecipeInstallation(
                     id=installation_id,
@@ -309,12 +377,10 @@ def _unrelated_history(
                     model_content_sha256=digest,
                     mapping_id=real.mapping_id,
                     mapping_generation=real.mapping_generation,
-                    recipe_build_id=real.recipe_build_id,
-                    image_digest=real.image_digest,
+                    recipe_build_id=build_id,
+                    image_digest=image_digest,
                     plan_digest=_hex(f"plan/{index}"),
-                    plan=json.loads(
-                        json.dumps(real.plan).replace(real.model_content_sha256, digest)
-                    ),
+                    plan=plan,
                     state=real.state,
                     actor="test",
                     created_at=now,
@@ -325,9 +391,9 @@ def _unrelated_history(
             session.add(
                 InstallationNode(
                     installation_id=installation_id,
-                    node_id=other_node,
+                    node_id=node,
                     rank=0,
-                    role="primary",
+                    role="entrypoint",
                     state="installed",
                     required_bytes=120,
                     installed_bytes=120,
@@ -361,6 +427,16 @@ def build_world(tmp_path: Path, name: str, *, scale: int) -> World:
         f"sqlite:///{tmp_path / f'{name}.sqlite'}",
         connect_args={"check_same_thread": False},
     )
+    fetched = [0]
+
+    def count_fetched(_cursor: object, row: tuple[object, ...]) -> tuple[object, ...]:
+        fetched[0] += 1
+        return row
+
+    @event.listens_for(engine, "connect")
+    def _count_rows(dbapi_connection: Any, _record: object) -> None:
+        dbapi_connection.row_factory = count_fetched
+
     sessions, operations, _, mapping_id, build_id, nodes = setup_services(
         tmp_path, engine=engine, nodes=2, mapping_node_count=1
     )
@@ -373,6 +449,44 @@ def build_world(tmp_path: Path, name: str, *, scale: int) -> World:
         assert row is not None and row.model_content_sha256 is not None
         assert build is not None and build.oci_layout_sha256 is not None
         target, archive = row.model_content_sha256, build.oci_layout_sha256
+        revision = session.get(CatalogDocumentRevision, row.recipe_revision_id)
+        assert revision is not None
+        slug = revision.slug
+        # The target recipe is a published one: a document with an active head,
+        # which is what a selector resolves.
+        if session.get(CatalogDocument, revision.document_id) is None:
+            session.add(
+                CatalogDocument(
+                    id=revision.document_id,
+                    kind=revision.kind,
+                    publisher=revision.publisher,
+                    slug=revision.slug,
+                    title="target",
+                    created_by="test",
+                    created_at=NOW,
+                    updated_at=NOW,
+                )
+            )
+            session.flush()
+        if (
+            session.scalar(
+                select(CatalogDocumentHead).where(
+                    CatalogDocumentHead.kind == revision.kind,
+                    CatalogDocumentHead.publisher == revision.publisher,
+                    CatalogDocumentHead.slug == revision.slug,
+                )
+            )
+            is None
+        ):
+            session.add(
+                CatalogDocumentHead(
+                    kind=revision.kind,
+                    publisher=revision.publisher,
+                    slug=revision.slug,
+                    active_revision_id=revision.id,
+                )
+            )
+        session.commit()
     count = scale * MODELS_PER_UNIT
     with sessions.begin() as session:
         models = _noise_models(session, count, NOW)
@@ -382,7 +496,9 @@ def build_world(tmp_path: Path, name: str, *, scale: int) -> World:
             target,
             NOW,
         )
-        recipes = _noise_recipes(session, models, scale * SELECTORS_PER_UNIT, NOW)
+        recipes = _noise_recipes(
+            session, models, scale * SELECTORS_PER_UNIT + NODE_LOCAL, NOW
+        )
     now = NOW + timedelta(minutes=1)
     if scale:
         _unrelated_history(
@@ -397,7 +513,7 @@ def build_world(tmp_path: Path, name: str, *, scale: int) -> World:
         )
     objects = [
         ModelStoreObject(sha256=_hex(f"spark/{n}"), bytes=3)
-        for n in range(scale * SPARK_OBJECTS_PER_UNIT)
+        for n in range(SPARK_OBJECTS)
     ]
     for node in nodes:
         inventory(sessions, node, now, objects)
@@ -417,4 +533,8 @@ def build_world(tmp_path: Path, name: str, *, scale: int) -> World:
         nodes[0],
         nodes[1],
         now,
+        fetched,
+        tmp_path,
+        slug,
+        build_id,
     )
