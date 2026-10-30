@@ -13,6 +13,7 @@ from typing import TypedDict, Unpack
 
 import pytest
 import yaml
+from vonk_nas_setup.compose import resolve_compose
 
 from tests.acceptance.runtime import AcceptanceError, reclaim_gateway_journal
 
@@ -1398,14 +1399,13 @@ def test_reference_acceptance_accepts_the_installer_service_topology(
     payload = _script_module(PAYLOAD_BUILDER, "acceptance_topology_builder")._payload(
         document, "dev"
     )
-    (tmp_path / "docker-compose.yaml").write_text(payload["docker_compose_yaml"])
+    selection = "secure-remote,hermes" if hermes else "secure-remote"
+    (tmp_path / "docker-compose.yaml").write_bytes(
+        resolve_compose(payload["docker_compose_yaml"], {"COMPOSE_PROFILES": selection})
+    )
     (tmp_path / ".env").write_text(
         "NAS_LAN_IP=192.0.2.10\nVONK_CONTROL_HOSTNAME=control.acceptance.test\n"
-        + (
-            "COMPOSE_PROFILES=secure-remote,hermes\n"
-            if hermes
-            else "COMPOSE_PROFILES=secure-remote\n"
-        )
+        f"COMPOSE_PROFILES={selection}\n"
     )
     monkeypatch.setattr(acceptance, "reference_compose", lambda: ["docker", "compose"])
     expected = acceptance.HERMES_SERVICES if hermes else acceptance.DEFAULT_SERVICES

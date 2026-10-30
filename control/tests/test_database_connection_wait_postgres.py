@@ -186,6 +186,6 @@ def test_initialize_database_silent_handshake_timeout_releases_attempt_then_same
             event.remove(Engine, "engine_disposed", engine_disposed)
             event.remove(Engine, "engine_connect", engine_connected)
     diagnostics = capsys.readouterr().err
-    assert "connection establishment cause unknown" in diagnostics
+    assert "timeout expired" in diagnostics
     assert "deadline expired" not in diagnostics
     assert_retained_and_current(database)

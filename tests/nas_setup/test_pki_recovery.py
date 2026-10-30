@@ -158,4 +158,6 @@ def test_well_formed_foreign_controller_key_remains_explicit_blocker(
     with pytest.raises(ValueError, match="PKI"):
         prepare(template, tmp_path, PromptIo(io.StringIO("")), upgrade=True)
     assert target.read_bytes() == foreign
-    assert (bundle / "docker-compose.yaml").read_text() == template.docker_compose_yaml
+    assert (bundle / "docker-compose.yaml").read_text() == (
+        "services:\n  upgraded: {}\n"
+    )
