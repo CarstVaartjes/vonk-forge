@@ -92,6 +92,10 @@ SCOPED: tuple[tuple[str, str], ...] = (
         "Portable NAS setup behavior and recovery; no whole-tree product scan.",
     ),
     (
+        "tests/nas_setup/test_compose.py",
+        "Portable NAS setup behavior and recovery; no whole-tree product scan.",
+    ),
+    (
         "tests/nas_setup/test_pki.py",
         "Portable NAS setup behavior and recovery; no whole-tree product scan.",
     ),
