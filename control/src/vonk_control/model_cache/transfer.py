@@ -41,7 +41,6 @@ from .constants import (
     SCHEMA_VERSION,
 )
 from .errors import ModelCacheError, _ArtifactWriterBusy
-from .partial_owner_lock import partial_owner_lock
 from .persistence import _manifest_of, _operation_cancellation, _store_operation_payload
 
 if TYPE_CHECKING:
@@ -495,12 +494,9 @@ class TransferMixin:
             # slot. The durable operation is rescheduled after releasing it.
             # Every writer of the owner's partials directory holds the shared
             # owner lock, so the partials collector never removes bytes under it.
+            owner = cache._partial_owner(operation_id, set_digest)
             with (
-                partial_owner_lock(
-                    cache._root,
-                    cache._partial_owner(operation_id, set_digest),
-                    exclusive=False,
-                ),
+                cache._model_storage_lock(owner, model_set=True, shared=True),
                 (cache._root / "locks" / spec.sha256).open("a+b") as lock_file,
             ):
                 try:
@@ -522,6 +518,7 @@ class TransferMixin:
                 cache._download_locked(
                     spec,
                     set_digest,
+                    owner=owner,
                     operation_id=operation_id,
                     force=force,
                     interrupt_after_bytes=interrupt_after_bytes,
@@ -539,6 +536,7 @@ class TransferMixin:
         spec: ArtifactSpec,
         set_digest: str,
         *,
+        owner: str,
         operation_id: str,
         force: bool,
         interrupt_after_bytes: int | None,
@@ -572,6 +570,7 @@ class TransferMixin:
             cache._download_split(
                 spec,
                 set_digest,
+                owner=owner,
                 operation_id=operation_id,
                 force=force,
                 interrupt_after_bytes=interrupt_after_bytes,
@@ -580,6 +579,7 @@ class TransferMixin:
             cache._download_artifact(
                 spec,
                 set_digest,
+                owner=owner,
                 operation_id=operation_id,
                 completed_artifacts=0,
                 force=force,

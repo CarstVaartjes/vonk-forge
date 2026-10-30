@@ -12,7 +12,7 @@ modification time alone, because the filesystem is listed, not the database.
 The pass filters by modification time without the database. Only a stale
 directory costs one ownership query, read in a short read-only session under the
 exclusive owner lock that every transfer writer holds shared
-(``partial_owner_lock``); a busy lock means a writer is alive, so the directory
+(``_model_storage_lock``); a busy lock means a writer is alive, so the directory
 is skipped and the next pass asks again. A pass is bounded in time and resumes
 from a name cursor, so directories kept at the head of the list cannot starve
 the rest.
@@ -36,20 +36,20 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
 from ..catalog_revision_collection import GRACE, INTERVAL
+from ..categorized_errors import InvalidValue
 from ..logging import log_event
 from ..model_cache_contract import CacheOperationKind
 from ..model_cache_states import LIVE
 from ..models import ModelCacheOperation
 from ..terminal_history_collection import BACKLOG_PAUSE, PASS_BUDGET_SECONDS
 from .errors import ModelCacheStorageRefused, _ArtifactWriterBusy
-from .partial_owner_lock import partial_owner_lock
+from .split_transfer import REPAIR_PARTIALS_PREFIX
 
 if TYPE_CHECKING:
     from .service import ModelCacheService
 
 _LOGGER = logging.getLogger(__name__)
 _DIGEST = re.compile(r"^[0-9a-f]{64}$")
-_REPAIR = "repair-"
 
 
 @dataclass(frozen=True)
@@ -126,8 +126,14 @@ class ModelPartialsCollector:
             self._cursor = name
             try:
                 removed += self._collect_one(name)
-            except (OSError, ModelCacheStorageRefused) as error:
-                # One unreadable directory never stops the others; next pass.
+            except (
+                OSError,
+                SQLAlchemyError,
+                InvalidValue,
+                ModelCacheStorageRefused,
+            ) as error:
+                # One unreadable directory or failed query never stops the
+                # others; the next pass judges it again.
                 log_event(
                     _LOGGER,
                     "model_partials.item_deferred",
@@ -142,18 +148,16 @@ class ModelPartialsCollector:
         return self._cache._root / "partials"
 
     def _collect_one(self, name: str) -> int:
+        newest = self._newest_change(name)
         # No database for a directory that changed within the grace period.
-        if not self._older_than_grace(self._newest_change(name)):
+        if newest is None or not self._older_than_grace(newest):
             return 0
         try:
-            with partial_owner_lock(self._cache._root, name, exclusive=True):
-                # Judged again under the lock: a writer that held it shared
-                # has finished, and a later one is refused until we release.
+            with self._cache._model_storage_lock(name, model_set=True):
+                # Judged under the lock: a writer that held it shared has
+                # finished, and a later one is refused until we release.
                 owner = self._ownership(name)
-                if owner.live:
-                    return 0
-                newest = self._newest_change(name)
-                if newest is None or not self._older_than_grace(
+                if owner.live or not self._older_than_grace(
                     max(newest, owner.last_update or newest)
                 ):
                     return 0
@@ -190,11 +194,11 @@ class ModelPartialsCollector:
         query = select(live, func.max(ModelCacheOperation.updated_at))
         if _DIGEST.match(name):
             query = query.where(ModelCacheOperation.artifact_set_sha256 == name)
-        elif name.startswith(_REPAIR):
+        elif name.startswith(REPAIR_PARTIALS_PREFIX):
             transfer = ModelCacheOperation.payload["repair_checkpoint"]["transfer_id"]
             query = query.where(
                 ModelCacheOperation.kind == CacheOperationKind.REPAIR,
-                transfer.as_string() == name.removeprefix(_REPAIR),
+                transfer.as_string() == name.removeprefix(REPAIR_PARTIALS_PREFIX),
             )
         else:
             return _Ownership(live=False, last_update=None)
