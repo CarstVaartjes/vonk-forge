@@ -10,26 +10,30 @@ from vonk_agent_protocol import (
     ArtifactLifecycleCode,
     canonical_message,
 )
+from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
+from vonk_forge_contracts import ModelDefinition
 
 from .. import model_cache_states
 from ..artifact_lifecycle import (
     ArtifactReferenceUnverified,
 )
-from ..content_identity import installations_for_sets, profile_recipe_scope
+from ..catalog_revision_contract import read_catalog_document
+from ..content_identity import catalog_selector_membership, recipe_model_digests
 from ..machine_states import DISTRIBUTION_HELD, RUN_LIVE
-from ..model_cache_contract import CacheManifest
 from ..models import (
     ArtifactDistributionAssignment,
+    CatalogDocumentHead,
+    CatalogDocumentRevision,
     FleetProfile,
     FleetProfileApplication,
     Job,
     ModelCacheOperation,
     ModelCacheSet,
+    ModelCacheSetArtifact,
     RecipeInstallation,
     RecipeRun,
 )
 from .intents import (
-    _installation_plan,
     _profile_plan,
     _run_switch_kinds,
     _run_switch_plan,
@@ -45,12 +49,40 @@ from .types import (
 )
 
 
+def _declared_files(session: Session, models: set[str]) -> dict[str, frozenset[str]]:
+    """The file digests each model content declares, read once per model.
+
+    A model that is missing or whose document cannot be read is absent, which
+    callers treat as unknown, never as declaring nothing.
+    """
+
+    found: dict[str, frozenset[str]] = {}
+    damaged: set[str] = set()
+    for revision in session.scalars(
+        select(CatalogDocumentRevision).where(
+            CatalogDocumentRevision.kind == RunSwitchReasonScopeName.MODEL,
+            CatalogDocumentRevision.content_digest.in_(sorted(models)),
+        )
+    ):
+        digest = revision.content_digest
+        try:
+            model = read_catalog_document(revision)
+        except (TypeError, ValueError):
+            damaged.add(digest)
+            continue
+        if not isinstance(model, ModelDefinition):
+            damaged.add(digest)
+            continue
+        found[digest] = found.get(digest, frozenset()) | {
+            file.sha256 for file in model.files
+        }
+    return {digest: files for digest, files in found.items() if digest not in damaged}
+
+
 def model_set_reference_findings(
     session: Session, set_digests: Iterable[str]
 ) -> dict[str, tuple[ArtifactReferenceFinding, ...]]:
     """Find typed saved-profile and active owners of exact model sets."""
-
-    from ..model_cache.lineage import set_bindings
 
     selected = set(set_digests)
     if not selected:
@@ -73,75 +105,105 @@ def model_set_reference_findings(
         digest: set() for digest in selected
     }
 
-    # A set serves every model content it was first requested for or later
-    # verified (a refreshed model reuses the set of its first requester), so a
-    # reference matches on that, never on the first requester alone.
-    served: dict[str, frozenset[str] | None] = {}
-    for set_digest, row in sets.items():
-        try:
-            manifest = CacheManifest.model_validate_json(
-                canonical_message(row.manifest), strict=True
-            )
-            served[set_digest] = set_bindings(
-                row.model_content_sha256, manifest.verified_models
-            )
-        except (TypeError, ValueError):
-            served[set_digest] = None
+    # A set is held when it contains a file that a protected model declares.
+    # Files are content: a refreshed model that reuses the bytes of an earlier
+    # one is found by its files, never by who first requested the set.
+    members: dict[str, set[str]] = {digest: set() for digest in selected}
+    for set_digest, object_digest in session.execute(
+        select(
+            ModelCacheSetArtifact.artifact_set_sha256,
+            ModelCacheSetArtifact.artifact_sha256,
+        ).where(ModelCacheSetArtifact.artifact_set_sha256.in_(sorted(selected)))
+    ):
+        members[set_digest].add(object_digest)
 
-    held_models = {model for found in served.values() for model in found or ()} | {
-        row.model_content_sha256 for row in sets.values() if row.model_content_sha256
-    }
-    held_recipes = {
-        row.recipe_revision_sha256
-        for row in sets.values()
-        if row.recipe_revision_sha256
-    }
-
-    # A profile names recipes; each active recipe revision is bound to the exact
-    # model contents it uses by relational rows. Only the selectors that match
-    # these sets, or cannot be proven, are read.
     profiles = list(session.scalars(select(FleetProfile).order_by(FleetProfile.id)))
     named = {profile.id: saved_profile_selectors(profile) for profile in profiles}
-    scope = profile_recipe_scope(
-        session,
+    pairs = sorted(
         {
             _selector_name(selector)
             for chosen in named.values()
             for selector in chosen or ()
-        },
-        models=held_models,
-        recipes=held_recipes,
+        }
     )
+    heads = (
+        {
+            (publisher, slug): revision_id
+            for publisher, slug, revision_id in session.execute(
+                select(
+                    CatalogDocumentHead.publisher,
+                    CatalogDocumentHead.slug,
+                    CatalogDocumentHead.active_revision_id,
+                ).where(
+                    CatalogDocumentHead.kind == RunSwitchReasonScopeName.RECIPE,
+                    catalog_selector_membership(
+                        CatalogDocumentHead.publisher,
+                        CatalogDocumentHead.slug,
+                        pairs,
+                    ),
+                )
+            )
+        }
+        if pairs
+        else {}
+    )
+    running = list(
+        session.execute(
+            select(
+                RecipeInstallation.id,
+                RecipeInstallation.state,
+                RecipeInstallation.model_content_sha256,
+                RecipeInstallation.recipe_revision_id,
+            )
+            .where(
+                or_(
+                    RecipeInstallation.state.in_(_ACTIVE_INSTALLATIONS),
+                    select(RecipeRun.id)
+                    .where(
+                        RecipeRun.installation_id == RecipeInstallation.id,
+                        RecipeRun.state.in_(RUN_LIVE),
+                    )
+                    .exists(),
+                )
+            )
+            .order_by(RecipeInstallation.id)
+        )
+    )
+    # The models a recipe revision uses are its relational binding rows.
+    recipe_ids = {rid for rid in heads.values() if rid} | {
+        row.recipe_revision_id for row in running
+    }
+    bound = recipe_model_digests(session, recipe_ids)
+    models = {model for chosen in bound.values() for model in chosen} | {
+        row.model_content_sha256 for row in running if row.model_content_sha256
+    }
+    declared = _declared_files(session, models)
+
+    def held_by(used: Iterable[str] | None) -> set[str]:
+        """The selected sets holding a file of ``used``; unknown holds them all."""
+        if used is None:
+            return set(selected)
+        held: set[str] = set()
+        for model in used:
+            files = declared.get(model)
+            if files is None:
+                return set(selected)
+            held.update(digest for digest, have in members.items() if have & files)
+        return held
+
     for profile in profiles:
         selectors = named[profile.id]
         if selectors is None:
             _protect_saved(findings, profile, "model-set", selected)
             continue
-        if selectors:
-            # A manifest that cannot be read has no provable models.
+        for selector in selectors:
+            # No active revision, or none bound to a model, is unknown.
             _protect_saved(
                 findings,
                 profile,
                 "model-set",
-                {digest for digest, found in served.items() if found is None},
+                held_by(bound.get(heads.get(_selector_name(selector)) or "")),
             )
-        for selector in selectors:
-            pair = _selector_name(selector)
-            if pair in scope.unknown:
-                _protect_saved(findings, profile, "model-set", selected)
-                continue
-            for model, recipe in scope.matched.get(pair, ()):
-                _protect_saved(
-                    findings,
-                    profile,
-                    "model-set",
-                    {
-                        set_digest
-                        for set_digest, row in sets.items()
-                        if row.recipe_revision_sha256 == recipe
-                        or model in (served[set_digest] or ())
-                    },
-                )
 
     def account(value: object) -> None:
         try:
@@ -205,70 +267,25 @@ def model_set_reference_findings(
                     )
                 )
 
-    for use in installations_for_sets(
-        session,
-        models=held_models,
-        recipes=held_recipes,
-        set_digests=selected,
-        active=or_(
-            RecipeInstallation.state.in_(_ACTIVE_INSTALLATIONS),
-            select(RecipeRun.id)
-            .where(
-                RecipeRun.installation_id == RecipeInstallation.id,
-                RecipeRun.state.in_(RUN_LIVE),
-            )
-            .exists(),
-        ),
-    ):
-        if use.attributable:
-            # The installation's model, its recipe's bound models and the sets
-            # its plan names say which sets it uses, without reading its plan.
-            held = {
-                set_digest
-                for set_digest, cached in sets.items()
-                if cached.recipe_revision_sha256 == use.recipe
-                or use.used
-                & (served[set_digest] or frozenset({cached.model_content_sha256}))
-            } | (use.named_sets & selected)
-            detail = "accepted installation uses this model set"
-            label = f"installation {use.id}"
-        else:
-            # Its columns attribute nothing: read its own plan. Unreadable, it
-            # keeps the sets of the model and recipe its row names, or every
-            # selected set when it names none.
-            installation = session.get(RecipeInstallation, use.id)
-            assert installation is not None
-            plan = _installation_plan(installation)
-            if plan is not None:
-                held = selected & {
-                    compiled.identity.model_artifact_set_sha256
-                    for compiled in plan.compiled_execution_plans.values()
-                }
-                detail = "accepted installation uses this model set"
-                label = f"installation {use.id}"
-            else:
-                held = (
-                    {
-                        set_digest
-                        for set_digest, cached in sets.items()
-                        if cached.model_content_sha256 in {None, use.model}
-                        or cached.recipe_revision_sha256 == use.recipe
-                    }
-                    if use.model is not None or use.recipe is not None
-                    else selected
-                )
-                detail = "installation plan is unreadable; it keeps the sets it names"
-                label = f"installation {use.id} (plan unreadable)"
-        for set_digest in held:
+    for row in running:
+        # A row that records no model is unknown and keeps every selected set.
+        used = (
+            None
+            if row.model_content_sha256 is None
+            else {row.model_content_sha256}
+            | bound.get(row.recipe_revision_id, frozenset())
+        )
+        label = f"installation {row.id}"
+        for set_digest in held_by(used):
             findings[set_digest].add(
                 _finding(
                     "model-set",
                     set_digest,
                     owner_kind="recipe-installation",
-                    owner_id=use.id,
-                    state=use.state,
+                    owner_id=row.id,
+                    state=row.state,
                     classification="active-work",
-                    detail=detail,
+                    detail="accepted installation uses this model set",
                     reason=label,
                 )
             )

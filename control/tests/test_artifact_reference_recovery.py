@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import uuid
 from pathlib import Path
 
@@ -23,7 +24,12 @@ from vonk_control.models import (
 from vonk_forge_contracts import document_sha256, read_recipe
 
 from .test_catalog_revision_collection import Catalog
-from .test_model_cache import _artifact, _canonical_recipe, _download
+from .test_model_cache import (
+    _artifact,
+    _canonical_model,
+    _canonical_recipe,
+    _download,
+)
 from .test_unused_storage_collection import (
     A_MODEL,
     AN_IMAGE,
@@ -101,7 +107,12 @@ def test_scoped_profile_damage_keeps_exact_content_and_collects_unrelated_model(
             slug=model_root.slug,
             revision_number=1,
             state=ProfileDocumentState.ACTIVE.value,
-            document={},
+            document=_canonical_model(
+                publisher=model_root.publisher,
+                slug=model_root.slug,
+                file_id="weights",
+                file_digest=hashlib.sha256(b"protected").hexdigest(),
+            ).model_dump(mode="json"),
             content_digest=A_MODEL,
             created_by="test",
             created_at=world.now,
@@ -147,8 +158,8 @@ def test_scoped_profile_damage_keeps_exact_content_and_collects_unrelated_model(
             head = session.scalar(select(CatalogDocumentHead))
             assert head is not None
             head.active_revision_id = None
-    # The recipe's bound model still scopes the reference, including when its
-    # saved draft or active head is damaged.
+    # The recipe's bound model still scopes the reference when its saved draft
+    # is damaged; a missing active head scopes nothing.
     service = ModelCacheService(
         world.sessions, tmp_path / "cache", reserve_bytes=0, fixture_sources=True
     )
@@ -172,6 +183,11 @@ def test_scoped_profile_damage_keeps_exact_content_and_collects_unrelated_model(
                 session, (protected.artifact_set_sha256, unrelated.artifact_set_sha256)
             )
         assert findings[protected.artifact_set_sha256]
+        if damage == "head":
+            # A selector with no active revision cannot be proven to use any
+            # model, so it keeps every set until the owner repairs it.
+            assert findings[unrelated.artifact_set_sha256]
+            return
         assert not findings[unrelated.artifact_set_sha256]
         _models(world, service).collect()
         _settle(service)

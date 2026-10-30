@@ -14,6 +14,7 @@ import uuid
 from datetime import UTC, datetime
 from importlib.resources import files
 
+import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -97,7 +98,13 @@ def _doc(session, kind, publisher, slug, number, document, *, head=True):
     return rev
 
 
-def test_refreshed_model_profile_keeps_first_requested_set():
+@pytest.mark.parametrize("later_refreshes", [0, 1])
+def test_refreshed_model_profile_keeps_first_requested_set(later_refreshes):
+    """The profile's model M2 is refreshed ``later_refreshes`` more times.
+
+    The set then records only the newest binding (M3), none of M2, yet it still
+    holds M2's files.
+    """
     engine = create_engine(
         "sqlite+pysqlite:///:memory:",
         connect_args={"check_same_thread": False},
@@ -114,6 +121,18 @@ def test_refreshed_model_profile_keeps_first_requested_set():
         pub, slug = m["identity"]["publisher"], m["identity"]["slug"]
         r1 = _doc(s, "model", pub, slug, 1, m1)
         r2 = _doc(s, "model", pub, slug, 2, m2)
+        newest = r2
+        for number in range(3, 3 + later_refreshes):
+            later = copy.deepcopy(m)
+            later["identity"]["version"] = f"1.0.{number}"
+            newest = _doc(
+                s,
+                "model",
+                pub,
+                slug,
+                number,
+                ModelDefinition.model_validate(later).model_dump(mode="json"),
+            )
         assert r1.content_digest != r2.content_digest
         recipe = _example("recipe-source-build.json")
         sel = recipe["models"][0]
@@ -183,7 +202,7 @@ def test_refreshed_model_profile_keeps_first_requested_set():
                         "kind": "model",
                         "publisher": pub,
                         "slug": slug,
-                        "content_sha256": r2.content_digest,
+                        "content_sha256": newest.content_digest,
                     }
                 ],
             }
@@ -224,7 +243,11 @@ def test_refreshed_model_profile_keeps_first_requested_set():
 
 
 def test_installation_on_refreshed_model_holds_its_set(tmp_path):
-    """Catches ownership by first requester: the plan names these sets."""
+    """Catches ownership by first requester or by plan text.
+
+    A second set holds the same bytes and no plan names it; a running
+    installation of the model still keeps it, because the files are the model's.
+    """
     w = _world(tmp_path, "alone", unrelated=None)
     with w.sessions.begin() as s:
         inst = s.scalars(select(RecipeInstallation)).one()
@@ -238,6 +261,8 @@ def test_installation_on_refreshed_model_holds_its_set(tmp_path):
         ).first()
         first = hashlib.sha256(b"first-requester").hexdigest()
         assert template is not None
+        duplicate = hashlib.sha256(b"duplicate-bytes").hexdigest()
+        used = used | {duplicate}
         for digest in used:
             manifest = copy.deepcopy(template.manifest)
             manifest["model_content_sha256"] = first
@@ -257,6 +282,28 @@ def test_installation_on_refreshed_model_holds_its_set(tmp_path):
                     updated_at=w.now,
                     last_accessed_at=w.now,
                 )
+            )
+            s.flush()
+            # The set holds the bytes the installation's model declares.
+            declared = {
+                file.sha256
+                for file in ModelDefinition.model_validate(
+                    s.scalars(
+                        select(CatalogDocumentRevision.document).where(
+                            CatalogDocumentRevision.kind == "model",
+                            CatalogDocumentRevision.content_digest == w.target,
+                        )
+                    ).one()
+                ).files
+            }
+            s.add_all(
+                ModelCacheSetArtifact(
+                    artifact_set_sha256=digest,
+                    artifact_key=f"f{n}",
+                    artifact_sha256=sha,
+                    path=f"model-{n}.safetensors",
+                )
+                for n, sha in enumerate(sorted(declared))
             )
     with w.sessions() as s:
         findings = model_set_reference_findings(s, tuple(used))
