@@ -20,16 +20,25 @@ _STORAGE = "control/src/vonk_control/unused_storage_collection/"
 COLLECTOR_MODULES = (
     "control/src/vonk_control/catalog_revision_collection.py",
     "control/src/vonk_control/terminal_history_collection.py",
-    f"{_STORAGE}evidence.py",
-    f"{_STORAGE}references.py",
     f"{_STORAGE}removal.py",
     f"{_STORAGE}pressure.py",
 )
 # In ``service.py`` only the collector's own passes are exempt.
 COLLECTOR_FUNCTIONS = {
+    # The evidence readers and the reference scans the collector passes use;
+    # the per-installation helpers beside them serve a node-keyed review too.
+    f"{_STORAGE}evidence.py": frozenset({"read"}),
+    f"{_STORAGE}references.py": frozenset(
+        {
+            "_profile_pointers",
+            "_applied_revision_ids",
+            "_model_removal_in_flight",
+            "_latest_snapshots",
+        }
+    ),
     f"{_STORAGE}service.py": frozenset(
         {"tick", "collect", "redrive_installation", "redrive_artifact", "_expire"}
-    )
+    ),
 }
 # Readers that load or parse the whole collection to answer for any target.
 WHOLE_COLLECTION_READERS = frozenset(
@@ -59,6 +68,15 @@ GROWING_TABLES = frozenset(
         "Job",
         "ModelCacheSet",
         "CatalogDocumentRevision",
+        "RecipeRun",
+        "JobAttempt",
+        "AgentOperation",
+        "InstallationNode",
+        "RunNode",
+        "RecipeBuild",
+        "NodeTelemetrySample",
+        "NodeInventorySnapshot",
+        "ModelCacheSetArtifact",
     }
 )
 # A join relates tables; it does not pick the target rows.
@@ -107,7 +125,7 @@ def _unfiltered_select(call: ast.Call, parents: dict[ast.AST, ast.AST]) -> bool:
         and call.args
         and not call.keywords
         # ``select(Job)`` and column selects such as ``select(Job.payload)``.
-        and all(
+        and any(
             _tail(argument.value if isinstance(argument, ast.Attribute) else argument)
             in GROWING_TABLES
             for argument in call.args

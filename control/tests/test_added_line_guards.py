@@ -1841,11 +1841,11 @@ def test_an_old_double_parse_does_not_fail_an_unrelated_change():
 @pytest.mark.parametrize(
     "source,line",
     [
-        ("# keep working for legacy rows\nvalue = 1\n", 1),
-        ("# compat shim for the old shape\nvalue = 1\n", 1),
+        ("value = accepts_legacy(row)\n", 1),
+        ("value = shim(row)\n", 1),
         ("value = 'backwards compatibility'\n", 1),
-        ("# backfill the column\nvalue = 1\n", 1),
-        ("# an older agent sends this\nvalue = 1\n", 1),
+        ("backfill(column)\n", 1),
+        ("value = 'an older agent sends this'\n", 1),
         ("value = adopt_legacy(row)\n", 1),
         ("x: Annotated[str, BeforeValidator(state_adopter(S))]\n", 1),
         ("x = StateAlias.CANCELLING\n", 1),
@@ -2000,7 +2000,7 @@ def test_ingress_prefixes_do_not_over_match(path):
     "source,line",
     [
         ("value = legacy_claim(row)\n", 1),
-        ("# backward compat for the old shape\nvalue = 1\n", 1),
+        ("value = 'backward compat'\n", 1),
         ("value = _ = retire_as_unknown('s', row.id, R, 'why')\n", 1),
         ("def f(row):\n    _ = retire_as_unknown('s', row.id, R, 'why')\n", 2),
         (
@@ -2051,3 +2051,72 @@ def test_a_keyword_argument_is_part_of_the_value_parsed():
         "    b = read_row_column(j, 'plan', strict=False)\n"
     )
     assert not check_source(PATH, source, {2, 3}, modes=("repeated-parse",))
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "# keep working for legacy rows\nvalue = 1\n",
+        "value = 1  # backfill the column\n",
+        'def f():\n    """Reads legacy rows, a compat shim."""\n    return 1\n',
+        'class C:\n    """An older agent."""\n',
+        '"""Module about legacy data."""\nvalue = 1\n',
+        "cursor.execute('PRAGMA legacy_alter_table = ON')\n",
+    ],
+)
+def test_comments_docstrings_and_pragmas_are_quiet(source):
+    lines = set(range(1, source.count("\n") + 1))
+    assert not check_source(PATH, source, lines, modes=("legacy",))
+
+
+@pytest.mark.parametrize(
+    "tail",
+    [
+        "log(error)\n        return None",
+        "log(error)\n        return []",
+        "log(error)\n        return {}",
+        "log(error)\n        return ()",
+        "log(error)\n        return ''",
+        "log(error)\n        return set()",
+        "log(error)\n        value = None",
+        "log(error)\n        value = []",
+        "log(error)\n        continue",
+        "log(error)\n        pass",
+    ],
+)
+def test_a_handler_ending_in_nothing_is_flagged_whatever_precedes_it(tail):
+    source = f"def f(row):\n    try:\n        parse(row)\n    except ValueError as error:\n        {tail}\n"
+    assert check_source(PATH, source, {4}, modes=("legacy",))
+
+
+def test_json_decode_errors_and_raising_handlers():
+    flagged = "try:\n    work()\nexcept json.JSONDecodeError:\n    pass\n"
+    assert check_source(PATH, flagged, {3}, modes=("legacy",))
+    kept = "try:\n    work()\nexcept ValueError as e:\n    log(e)\n    raise\n"
+    assert not check_source(PATH, kept, {3}, modes=("legacy",))
+
+
+@pytest.mark.parametrize(
+    "path,source",
+    [
+        (
+            "control/src/vonk_control/unused_storage_collection/references.py",
+            "def _installation_kept(s):\n    return _Evidence.read(s, 1)\n",
+        ),
+        (
+            "control/src/vonk_control/unused_storage_collection/evidence.py",
+            "def helper(s):\n    return operation_tokens(s, 1)\n",
+        ),
+        (PATH, "def rows(s):\n    return s.scalars(select(RecipeRun))\n"),
+        (PATH, "def rows(s):\n    return s.scalars(select(NodeTelemetrySample))\n"),
+        (PATH, "def rows(s):\n    return s.execute(select(Job.id, Other.x))\n"),
+    ],
+)
+def test_collector_modules_are_exempt_per_function_and_more_tables_grow(path, source):
+    assert check_source(path, source, {2}, modes=("collection-readers",))
+
+
+def test_the_collector_functions_of_the_evidence_modules_stay_exempt():
+    source = "def read(s, now):\n    return operation_tokens(s, now)\n"
+    path = "control/src/vonk_control/unused_storage_collection/evidence.py"
+    assert not check_source(path, source, {2}, modes=("collection-readers",))
