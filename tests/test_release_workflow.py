@@ -18,6 +18,11 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOWS = ROOT / ".github/workflows"
+# ci.yml skips a labeled event for any label but release-acceptance.
+IGNORED_LABEL_IF = (
+    "${{ !(github.event.action == 'labeled' && "
+    "github.event.label.name != 'release-acceptance') }}"
+)
 RELEASE = WORKFLOWS / "installer-publication.yml"
 ACCEPTANCE = WORKFLOWS / "release-acceptance-core.yml"
 CANDIDATE = WORKFLOWS / "installer-candidate.yml"
@@ -279,7 +284,8 @@ def test_fast_jobs_have_no_path_predicate_and_gate_observes_acceptance() -> None
         "repository-guards",
         "lint",
     ):
-        assert "if" not in jobs[name], name
+        # The only predicate is the one that skips a label other than release-acceptance.
+        assert jobs[name].get("if", IGNORED_LABEL_IF) == IGNORED_LABEL_IF, name
     assert "lane-proof" in jobs["ci-gate"]["needs"]
     # Integration PRs prove their own complete candidate with no release secrets.
     assert jobs["lane-proof"]["uses"] == "./.github/workflows/release-acceptance.yml"

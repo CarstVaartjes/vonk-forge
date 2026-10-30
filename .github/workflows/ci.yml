@@ -28,13 +28,22 @@ env:
 
 # A new commit supersedes an older PR check. Every other run, including a
 # release workflow call, has its own group: the caller owns its cancellation.
+# Only the `release-acceptance` label starts a new run; any other label runs in
+# its own group so it never cancels the run in progress, and every job below
+# skips it. Only ci-gate is renamed ("CI gate (label ignored)"): it always runs,
+# so its name expression is evaluated, and no run of this kind reports "CI gate".
+# A job skipped by its own `if` keeps the raw `${{ ... }}` as its name (run
+# 40906603157, job 123574403196), so every other job keeps its literal name: a
+# renamed job that is skipped would report a raw expression and never satisfy
+# its required check on pull requests that legitimately skip it.
 concurrency:
-  group: vonk-forge-ci-${{ github.event.pull_request.number || github.event.merge_group.head_sha || github.run_id }}
+  group: vonk-forge-ci-${{ (github.event.action == 'labeled' && github.event.label.name != 'release-acceptance') && format('ignored-label-{0}', github.run_id) || github.event.pull_request.number || github.event.merge_group.head_sha || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'merge_group' }}
 
 jobs:
   changes:
     name: Select CI integration dependencies
+    if: ${{ !(github.event.action == 'labeled' && github.event.label.name != 'release-acceptance') }}
     permissions:
       contents: read
       actions: read
@@ -128,6 +137,7 @@ jobs:
 
   lint:
     name: Ruff
+    if: ${{ !(github.event.action == 'labeled' && github.event.label.name != 'release-acceptance') }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -163,6 +173,7 @@ jobs:
 
   supply-chain:
     name: Supply-chain evidence
+    if: ${{ !(github.event.action == 'labeled' && github.event.label.name != 'release-acceptance') }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -776,6 +787,7 @@ jobs:
 
   repository-guards:
     name: Repository guards
+    if: ${{ !(github.event.action == 'labeled' && github.event.label.name != 'release-acceptance') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -1229,9 +1241,9 @@ jobs:
       upgrade_carry: ${{ needs.changes.outputs.upgrade_carry == 'true' }}
 
   ci-gate:
-    name: CI gate
+    name: ${{ (github.event.action == 'labeled' && github.event.label.name != 'release-acceptance') && 'CI gate (label ignored)' || 'CI gate' }}
     needs: [changes, lint, supply-chain, rust-quality, rust-tests, rust-platform, controller-spark-wire, generated-clients, compose-integration, repository-guards, repository-suite, control-suite, control-image-build, web-suite, nas-install, agent-package, lane-proof]
-    if: always()
+    if: ${{ always() && !(github.event.action == 'labeled' && github.event.label.name != 'release-acceptance') }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
