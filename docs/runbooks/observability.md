@@ -105,9 +105,10 @@ to clear the alert. A declining count clears the pending or firing alert.
 ## Stale backup
 
 Check `vonk_control_backup_successful`, the backup age, and the isolated restore
-verification age. The backup loop writes its success marker only after the
-PostgreSQL dump is restored successfully and the paired CA archive is copied to
-the configured destination. A missing first backup fires
+verification age. The backup loop writes its success marker once the PostgreSQL
+dump is published, gzip-tested and copied to the configured destination; the
+restore-verification marker advances only after an isolated restore succeeded
+(it is skipped, with a log line, when scratch space is short). A missing first backup fires
 `ControlBackupNeverSucceeded`; follow [backup and recovery](../postgres-backups.md)
 to inspect logs, storage capacity, and recovery files.
 

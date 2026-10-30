@@ -515,7 +515,7 @@ class MetricsRegistry:
             )
         lines.extend(
             (
-                "# HELP vonk_control_backup_successful Whether a verified control-plane backup has ever completed.",
+                "# HELP vonk_control_backup_successful Whether a published, gzip-tested control-plane backup (copied off-host when configured) has ever completed.",
                 "# TYPE vonk_control_backup_successful gauge",
                 f"vonk_control_backup_successful {int(backup_successful)}",
                 "# HELP vonk_control_backup_restore_verified Whether an isolated restore has ever succeeded.",
