@@ -228,6 +228,8 @@ def model_set_reference_findings(
                 compiled.identity.model_artifact_set_sha256
                 for compiled in plan.compiled_execution_plans.values()
             }
+            detail = "accepted installation uses this model set"
+            label = f"installation {row.id}"
         else:
             # Its plan cannot be read: it keeps the sets of the models its rows
             # name, and every selected set when they name none.
@@ -235,7 +237,8 @@ def model_set_reference_findings(
                 {row.model_content_sha256} if row.model_content_sha256 else set()
             )
             held = lineage_sets(models) if models else selected
-        label = f"installation {row.id}"
+            detail = "installation plan is unreadable; it keeps the sets it names"
+            label = f"installation {row.id} (plan unreadable)"
         for set_digest in held:
             findings[set_digest].add(
                 _finding(
@@ -245,7 +248,7 @@ def model_set_reference_findings(
                     owner_id=row.id,
                     state=row.state,
                     classification="active-work",
-                    detail="accepted installation uses this model set",
+                    detail=detail,
                     reason=label,
                 )
             )

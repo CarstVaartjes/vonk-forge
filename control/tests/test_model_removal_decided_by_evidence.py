@@ -285,7 +285,7 @@ def test_an_unreadable_installation_plan_keeps_only_its_own_model(
         _wait_out(service, world, removal)
         waiting = _operation(world.sessions, removal)
         assert waiting.state in model_cache_states.LIVE
-        assert f"installation {damaged}" in str(waiting.last_error)
+        assert f"installation {damaged} (plan unreadable)" in str(waiting.last_error)
         assert kept_path.exists()
         # The unknown never held the other model: it can be fetched afresh.
         assert _request_download(service, tmp_path, "other", other_model) == "succeeded"
