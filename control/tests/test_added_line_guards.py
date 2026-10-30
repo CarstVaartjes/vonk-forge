@@ -1460,6 +1460,43 @@ def test_the_storage_owner_and_other_packages_may_read_nas_space() -> None:
         assert not check_source(path, _SPACE_CHECK, {2}, modes=("nas-space",))
 
 
+@pytest.mark.parametrize(
+    "source",
+    [
+        "MODEL_CACHE_RESERVE_BYTES = 10 * 1024**3\n",
+        "reserve_bytes: int = 10 * 1024**3\n",
+        "_MODEL_CACHE_RESERVE_BYTES = 10 * 1024**3\n",
+        "NAS_RESERVE_BYTES = (4 << 30)\n",
+        "X_RESERVE_BYTES = OTHER_CONSTANT\n",
+        "def f(self, reserve_bytes: int = 5 * 1024**3): ...\n",
+    ],
+)
+def test_a_fixed_byte_reserve_is_flagged(source: str) -> None:
+    path = "control/src/vonk_control/settings.py"
+    assert check_source(path, source, {1}, modes=("fixed-reserves",))
+
+
+@pytest.mark.parametrize(
+    ("path", "source"),
+    [
+        (
+            "control/src/vonk_control/recipe_builds/common.py",
+            "MINIMUM_BUILD_DISK_RESERVE_BYTES = 4 * 1024**3\n",
+        ),
+        ("control/src/vonk_control/other.py", "RESERVE_FRACTION = 0.1\n"),
+        (
+            "control/src/vonk_control/other.py",
+            "reserve_bytes=cache.reserve_of(total)\n",
+        ),
+        ("control/src/vonk_control/other.py", "reserve_bytes: int = Field(ge=0)\n"),
+        ("control/src/vonk_control/other.py", "reserved_bytes = 4096\n"),
+        ("control/tests/test_x.py", "RESERVE_BYTES = 10 * 1024**3\n"),
+    ],
+)
+def test_other_reserve_lines_are_not_flagged(path: str, source: str) -> None:
+    assert not check_source(path, source, {1}, modes=("fixed-reserves",))
+
+
 _SET_SELECTION = (
     "def sets(session, digest):\n"
     "    return session.scalars(\n"

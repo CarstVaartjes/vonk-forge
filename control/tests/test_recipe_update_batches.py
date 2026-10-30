@@ -888,7 +888,7 @@ def test_postgres_update_cancel_preserves_shared_model_child_for_unrelated_consu
     cache = ModelCacheService(
         sessions,
         tmp_path / "models",
-        reserve_bytes=0,
+        free_fraction=0,
         clock=lambda: now[0],
         fixture_sources=True,
     )

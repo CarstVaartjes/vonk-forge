@@ -56,7 +56,7 @@ def _hold_at_verification(
         engine = create_engine(dsn, pool_pre_ping=True)
         sessions = sessionmaker(engine, expire_on_commit=False)
         service = ModelCacheService(
-            sessions, Path(cache_root), reserve_bytes=0, fixture_sources=True
+            sessions, Path(cache_root), free_fraction=0, fixture_sources=True
         )
         verify = service._verify_file
 
@@ -96,7 +96,7 @@ def test_cancel_fences_process_publication_and_keeps_shared_work_resumable(
     artifact = _artifact(tmp_path / "weights.source", content)
 
     service = ModelCacheService(
-        sessions, cache_root, reserve_bytes=0, fixture_sources=True
+        sessions, cache_root, free_fraction=0, fixture_sources=True
     )
     preview = service.download_preview(
         model_content_sha256="a" * 64, artifacts=[artifact]
@@ -128,10 +128,10 @@ def test_cancel_fences_process_publication_and_keeps_shared_work_resumable(
         ),
     )
     shared = ModelCacheService(
-        sessions, cache_root, reserve_bytes=0, fixture_sources=True
+        sessions, cache_root, free_fraction=0, fixture_sources=True
     )
     restarted = ModelCacheService(
-        sessions, cache_root, reserve_bytes=0, fixture_sources=True
+        sessions, cache_root, free_fraction=0, fixture_sources=True
     )
     try:
         worker.start()

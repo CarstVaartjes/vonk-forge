@@ -219,7 +219,7 @@ def test_pending_recipe_child_cancellation_fences_model_removal_and_preserves_pe
     cache = ModelCacheService(
         sessions,
         cache_root,
-        reserve_bytes=0,
+        free_fraction=0,
         fixture_sources=True,
     )
     peer_source_root = tmp_path / "peer-source"
@@ -374,7 +374,7 @@ def test_pending_recipe_child_cancellation_fences_model_removal_and_preserves_pe
         restarted = ModelCacheService(
             sessions,
             cache_root,
-            reserve_bytes=0,
+            free_fraction=0,
             fixture_sources=True,
             # Past the waiting removal's backoff.
             clock=lambda: datetime.now(UTC) + timedelta(minutes=1),

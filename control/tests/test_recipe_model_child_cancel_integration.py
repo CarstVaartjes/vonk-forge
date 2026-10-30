@@ -42,7 +42,7 @@ def _hold_model_worker(
     engine = create_engine(dsn, pool_pre_ping=True)
     sessions = sessionmaker(engine, expire_on_commit=False)
     cache = ModelCacheService(
-        sessions, Path(cache_root), reserve_bytes=0, fixture_sources=True
+        sessions, Path(cache_root), free_fraction=0, fixture_sources=True
     )
     verify = cache._verify_file
 
@@ -84,7 +84,7 @@ recipe = RecipeDefinition.model_validate_json(json.dumps(config["recipe"]))
 artifact = config["artifact"]
 model_digest = config["model_digest"]
 cache = ModelCacheService(
-    sessions, Path(config["cache_root"]), reserve_bytes=0, fixture_sources=True,
+    sessions, Path(config["cache_root"]), free_fraction=0, fixture_sources=True,
     clock=lambda: now,
 )
 
@@ -284,7 +284,7 @@ def test_recipe_parent_waits_for_model_child_effect_after_controller_restart(
     cache_root = tmp_path / "model-cache"
     image_root = tmp_path / "image-cache"
     cache = ModelCacheService(
-        sessions, cache_root, reserve_bytes=0, fixture_sources=True
+        sessions, cache_root, free_fraction=0, fixture_sources=True
     )
 
     class CacheAdapter:

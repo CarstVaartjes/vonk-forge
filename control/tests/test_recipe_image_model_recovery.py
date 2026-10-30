@@ -120,7 +120,7 @@ def test_missing_managed_model_object_is_redownloaded_without_rebuilding_image(
     cache = ModelCacheService(
         sessions,
         cache_root,
-        reserve_bytes=0,
+        free_fraction=0,
         max_parallel_downloads=2,
         fixture_sources=True,
         http_client=client,

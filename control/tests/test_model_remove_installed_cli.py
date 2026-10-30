@@ -61,7 +61,7 @@ def test_installed_model_remove_recovers_exact_digest_after_head_change(
     cache = ModelCacheService(
         sessions,
         cache_root,
-        reserve_bytes=0,
+        free_fraction=0,
         clock=lambda: _NOW,
         fixture_sources=True,
     )

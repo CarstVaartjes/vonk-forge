@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import uuid
+from collections import namedtuple
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -146,7 +147,10 @@ def test_a_refused_download_is_admitted_after_the_collector_made_room(
     try:
         size = 3  # the canonical model's one file
         free = [size - 2]  # two bytes short; the superseded revision frees three
-        monkeypatch.setattr(service, "free_bytes", lambda: free[0])
+        usage = namedtuple("usage", "total used free")
+        monkeypatch.setattr(
+            "shutil.disk_usage", lambda _path: usage(1000, 1000 - free[0], free[0])
+        )
         demands = StorageDemands(lambda: world.now)
         service.bind_storage_demands(demands)
         # The collector's clock decides when a demand expires.

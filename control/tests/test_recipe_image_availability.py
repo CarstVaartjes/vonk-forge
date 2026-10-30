@@ -3709,7 +3709,7 @@ def test_cancelling_one_parent_preserves_a_shared_partial_model_transfer(
     cache = ModelCacheService(
         sessions,
         tmp_path / "model-cache",
-        reserve_bytes=0,
+        free_fraction=0,
         fixture_sources=True,
     )
     source = tmp_path / "weights.source"
@@ -4315,7 +4315,7 @@ def test_preparation_expiry_preserves_download_but_explicit_cancel_still_owns_it
     Base.metadata.create_all(postgres_engine)
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)
     cache = ModelCacheService(
-        sessions, tmp_path / "models", reserve_bytes=0, fixture_sources=True
+        sessions, tmp_path / "models", free_fraction=0, fixture_sources=True
     )
     try:
         selector, _, _ = _prepare_removal_target(

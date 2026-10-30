@@ -151,7 +151,7 @@ def test_metadata_only_revision_lists_one_copy_with_real_bytes(
         root = service.root
         service.close()
         service = ModelCacheService(
-            sessions, root, reserve_bytes=0, fixture_sources=True
+            sessions, root, free_fraction=0, fixture_sources=True
         )
         library = LibraryProjection(
             sessions,
@@ -220,7 +220,7 @@ def test_completed_download_repairs_lost_revision_binding_after_restart(
         root = service.root
         service.close()
         service = ModelCacheService(
-            sessions, root, reserve_bytes=0, fixture_sources=True
+            sessions, root, free_fraction=0, fixture_sources=True
         )
         _next_pass(service)
         library = LibraryProjection(

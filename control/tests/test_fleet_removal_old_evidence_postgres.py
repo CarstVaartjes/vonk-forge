@@ -47,7 +47,7 @@ def test_review_of_shared_content_survives_partial_evidence_and_heals(
     cache = ModelCacheService(
         world.sessions,
         tmp_path / "nas",
-        reserve_bytes=0,
+        free_fraction=0,
         fixture_sources=True,
         clock=lambda: now[0],
     )
@@ -197,7 +197,7 @@ def test_accepted_removal_waits_for_repaired_evidence_under_original_request(
     cache = ModelCacheService(
         world.sessions,
         tmp_path / "nas",
-        reserve_bytes=0,
+        free_fraction=0,
         fixture_sources=True,
         clock=lambda: now[0],
     )

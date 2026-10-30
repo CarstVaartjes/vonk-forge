@@ -162,7 +162,7 @@ def test_scoped_profile_damage_keeps_exact_content_and_collects_unrelated_model(
     # The recipe's model still scopes the reference, including when its saved
     # draft or active head is damaged.
     service = ModelCacheService(
-        world.sessions, tmp_path / "cache", reserve_bytes=0, fixture_sources=True
+        world.sessions, tmp_path / "cache", free_fraction=0, fixture_sources=True
     )
     try:
         # The set the recipe resolves to, as a download of it would cache it.
