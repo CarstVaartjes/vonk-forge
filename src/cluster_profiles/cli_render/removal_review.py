@@ -28,7 +28,7 @@ from ..generated_control.models.fleet_model_removal_effects import (
     FleetModelRemovalEffects,
 )
 from ..generated_control.types import UNSET
-from .common import _actions, _bytes, _field, _object, _time
+from .common import _bytes, _field, _object, _time
 
 _NAMED_OWNERS = 3
 
@@ -131,34 +131,56 @@ def _summary(
         users = {f.owner_id for f in sharing}
         print(
             f"Keeps {len(kept)} shared files ({_size(kept)}) also used by "
-            f"{len(users)} other cached models"
+            f"{len(users)} other cached model sets"
         )
         for (owner_kind, state), group in _group(sharing).items():
             print(
                 f"  {owner_kind} ({state}): {len({f.asset_sha256 for f in group})} "
                 f"files kept for {len({f.owner_id for f in group})} owners"
             )
-    referenced = [a for a in review.assets if a.disposition == ASSET_RETAIN_REFERENCED]
+    referenced = {
+        (a.kind, a.sha256)
+        for a in review.assets
+        if a.disposition == ASSET_RETAIN_REFERENCED
+    }
     if referenced:
-        print(f"Keeps {len(referenced)} assets that a saved reference still uses")
+        # The finding's own classification says why, not a guess here.
+        why = sorted(
+            {
+                f.classification
+                for f in (*review.references, *review.active_work)
+                if (f.asset_kind, f.asset_sha256) in referenced
+            }
+        )
+        print(f"Keeps {len(referenced)} assets still in use ({', '.join(why)})")
 
 
-def _blockers(
-    review: CacheRemovalReview,
-    blocking: Sequence[CacheRemovalFinding],
-    active: Sequence[CacheRemovalFinding],
-) -> bool:
-    explained = {f.reason for f in (*blocking, *active)}
-    for heading, findings in (("saved reference", blocking), ("active work", active)):
-        for (owner_kind, state), group in _group(findings).items():
-            print(f"Blocked by {heading} {owner_kind} ({state}): {_owners(group)}")
+def _findings(heading: str, findings: Sequence[CacheRemovalFinding]) -> None:
+    if not findings:
+        print(f"{heading}: none")
+    for (owner_kind, state), group in _group(findings).items():
+        print(f"{heading}: {owner_kind} ({state}): {_owners(group)}")
+
+
+def _blockers(review: CacheRemovalReview, *, verbose: bool) -> None:
+    """Only the Controller's own blockers; this client decides nothing."""
+    if not review.blockers:
+        print("Blockers: none")
+        return
+    groups: dict[tuple[str, bool, tuple[str, ...]], list[str]] = defaultdict(list)
     for blocker in review.blockers:
-        if blocker.detail not in explained:
-            print(f"Blocked: {blocker.code}: {blocker.detail}")
-            _actions(
-                None if blocker.recovery_actions is UNSET else blocker.recovery_actions
-            )
-    return bool(review.blockers or blocking or active)
+        given = blocker.recovery_actions
+        actions = tuple(given) if isinstance(given, list) else ()
+        groups[(blocker.code, blocker.retryable, tuple(actions))].append(blocker.detail)
+    for (code, retryable, actions), details in sorted(groups.items()):
+        retry = "retryable" if retryable else "not retryable"
+        count = f" x{len(details)}" if len(details) > 1 and not verbose else ""
+        print(f"Blocked: {code}{count} ({retry}): {details[0]}")
+        if verbose:
+            for detail in details[1:]:
+                print(f"  and: {detail}")
+        for action in actions:
+            print(f"  Next: {action}")
 
 
 def _detail(
@@ -229,18 +251,11 @@ def _cache_removal_review(payload: object, *, verbose: bool = False) -> None:
     if not review.assets:
         print("Assets: none")
     _summary(review, sharing)
-    blocked = _blockers(review, blocking, review.active_work)
-    if review.active_work:
-        print(f"Active work: {len(review.active_work)} ({_owners(review.active_work)})")
-    else:
-        print("Active work: none")
-    command = _confirm_command(review)
-    if blocked:
-        print("Blockers: resolve the owners above, then review again:")
-        print(f"  Next: {command} --review")
-    else:
-        print("Blockers: none")
-        print(f"Confirm: {command} --yes --detach")
+    _findings("Saved references", blocking)
+    _findings("Active work", review.active_work)
+    _blockers(review, verbose=verbose)
+    # The Controller decides on submit whether this waits or refuses.
+    print(f"Confirm: {_confirm_command(review)} --yes --detach")
     if verbose:
         print("Detail:")
         _detail(review, sharing, blocking)

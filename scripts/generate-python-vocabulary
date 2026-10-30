@@ -50,13 +50,6 @@ def cli_words() -> str:
     from vonk_agent_protocol.reason_codes.profiles import PROFILE_REFUSAL_CODES
     from vonk_control.cache_removal_review import ArtifactKind, CacheAssetDisposition
 
-    # Only the kind words that exist in the contract may be spelled here.
-    assert set(get_args(ArtifactKind)) == {
-        "model-object",
-        "model-set",
-        "runtime-image",
-    }
-
     words = {
         "STOP_UNCONFIRMED": StopOutcome.UNCONFIRMED,
         "PROFILE_NOT_ISSUED": ProfileEffectState.NOT_ISSUED,
@@ -90,10 +83,11 @@ def cli_words() -> str:
         "ASSET_REMOVE": CacheAssetDisposition.REMOVE,
         "ASSET_RETAIN_SHARED": CacheAssetDisposition.RETAIN_SHARED,
         "ASSET_RETAIN_REFERENCED": CacheAssetDisposition.RETAIN_REFERENCED,
-        "ASSET_MODEL_OBJECT": "model-object",
-        "ASSET_MODEL_SET": "model-set",
-        "ASSET_RUNTIME_IMAGE": "runtime-image",
         "ASSET_VERIFIED": AssetAvailability.VERIFIED,
+        **{
+            f"ASSET_{kind.upper().replace('-', '_')}": kind
+            for kind in get_args(ArtifactKind)
+        },
     }
     lines = [
         '"""The contract words the CLI compares, generated. Do not edit.',

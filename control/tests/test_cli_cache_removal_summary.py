@@ -6,7 +6,11 @@ import hashlib
 import json
 
 import pytest
-from vonk_agent_protocol import AssetAvailability
+from vonk_agent_protocol import (
+    ArtifactLifecycleCode,
+    AssetAvailability,
+    ModelCacheCode,
+)
 from vonk_control.cache_removal_review import (
     CacheAssetDisposition,
     CacheRemovalAsset,
@@ -93,32 +97,26 @@ def _review(*, blocked: bool = False) -> dict[str, object]:
             classification="active-work",
             asset_kind="model-set",
             asset_sha256=_digest("set-1"),
-            owner_kind="recipe-run",
-            owner_id="run-7",
+            owner_kind="model-cache-operation",
+            owner_id="operation-7",
             state="running",
-            detail="A workload uses this set.",
-            reason="run-7 is serving this set",
+            detail="accepted model removal retains this deletion fence",
+            reason="removal operation operation-7 is running and owns model-set x",
         )
         references.append(profile)
         active.append(work)
         blockers = [
             CacheRemovalBlocker(
-                code="cache.removal.referenced",
+                code=ModelCacheCode.REMOVAL_REFERENCED,
                 detail=profile.reason,
                 retryable=False,
                 recovery_actions=["resolve_reference"],
             ),
             CacheRemovalBlocker(
-                code="artifact.deletion_in_progress",
+                code=ArtifactLifecycleCode.DELETION_IN_PROGRESS,
                 detail=work.reason,
                 retryable=True,
                 recovery_actions=["observe_removal_operation"],
-            ),
-            CacheRemovalBlocker(
-                code="cache.storage.unreadable",
-                detail="the cache index is unreadable",
-                retryable=True,
-                recovery_actions=["retry"],
             ),
         ]
     content = CacheRemovalReviewContent(
@@ -146,7 +144,7 @@ def test_default_review_is_a_summary(capsys: pytest.CaptureFixture[str]) -> None
 
     assert "Removes 41.0 GiB (44023414784 bytes) in 41 files (2 model sets)" in text
     assert (
-        "Keeps 9 shared files (9.0 GiB (9663676416 bytes)) also used by 13 other"
+        "Keeps 9 shared files (9.0 GiB (9663676416 bytes)) also used by 13 other cached model sets"
         in text
     )
     assert "Blockers: none" in text
@@ -154,9 +152,9 @@ def test_default_review_is_a_summary(capsys: pytest.CaptureFixture[str]) -> None
     assert f"Confirm: vonkctl model remove {_SELECTOR} --yes --detach" in text
     assert "Review digest: " + str(review["review_digest"]) in text
     # Short by content: no per-asset or per-pair blocks, whatever the model size.
-    assert "Asset:" not in text and "Saved references:" not in text
+    assert "Asset:" not in text and "Saved references:\n" not in text
+    assert "Saved references: none" in text
     assert text.count("another cached model set") == 0
-    assert len(text.splitlines()) < 25
     for asset in review["assets"]:  # type: ignore[attr-defined]
         assert asset["sha256"] not in text
 
@@ -176,25 +174,73 @@ def test_verbose_lists_each_shared_object_once(
         )
         assert all(_digest(f"other-{j}") in line for j in range(13))
     assert text.count("Asset:") == 52
-    assert "Saved references:" not in text
+    assert "Saved references:\n" not in text
 
 
-def test_blocked_review_names_owners_and_the_next_step(
+def test_blocked_review_prints_only_the_controllers_blockers(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    text = _human(capsys, _review(blocked=True))
+    review = _review(blocked=True)
+    text = _human(capsys, review)
+
+    assert "Saved references: fleet-profile (current): fleet-profile profile-4" in text
+    assert (
+        "Active work: model-cache-operation (running): "
+        "model-cache-operation operation-7" in text
+    )
+    assert (
+        f"Blocked: {ModelCacheCode.REMOVAL_REFERENCED} (not retryable): "
+        "profile-4 still selects this model" in text
+    )
+    assert f"Blocked: {ArtifactLifecycleCode.DELETION_IN_PROGRESS} (retryable)" in text
+    assert "  Next: resolve_reference" in text
+    assert "  Next: observe_removal_operation" in text
+    # The Controller decides on submit; the confirm command is always shown.
+    assert f"Confirm: vonkctl model remove {_SELECTOR} --yes --detach" in text
+
+
+def test_recipe_aggregated_blocker_is_shown_as_the_controller_sent_it(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    review = _review()
+    review["resource_kind"] = "recipe"
+    review["with_model"] = False
+    review["target_identity"] = "revision-1"
+    review["blockers"] = [
+        CacheRemovalBlocker(
+            code=ModelCacheCode.REMOVAL_REFERENCED,
+            detail="runtime image references prevent removal (2 owner(s)): a; b",
+            retryable=True,
+            recovery_actions=["inspect"],
+        ).model_dump(mode="json")
+    ]
+    text = _human(capsys, review)
 
     assert (
-        "Blocked by saved reference fleet-profile (current): fleet-profile profile-4"
-        in text
+        f"Blocked: {ModelCacheCode.REMOVAL_REFERENCED} (retryable): "
+        "runtime image references prevent removal (2 owner(s)): a; b" in text
     )
-    assert "Blocked by active work recipe-run (running): recipe-run run-7" in text
-    assert "Blocked: cache.storage.unreadable: the cache index is unreadable" in text
-    assert "Active work: 1 (recipe-run run-7)" in text
-    assert "Confirm:" not in text and "--yes" not in text
-    assert f"Next: vonkctl model remove {_SELECTOR} --review" in text
-    # The profile and workload appear once each: the blocker rows are not repeated.
-    assert text.count("profile-4") == 1
+    assert "  Next: inspect" in text
+    assert f"Confirm: vonkctl recipe remove {_SELECTOR} --keep-model --yes" in text
+
+
+def test_verbose_lists_every_blocker_in_full(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    review = _review()
+    review["blockers"] = [
+        CacheRemovalBlocker(
+            code=ModelCacheCode.REMOVAL_REFERENCED,
+            detail=f"owner {i} prevents removal",
+            retryable=True,
+        ).model_dump(mode="json")
+        for i in range(3)
+    ]
+    short = _human(capsys, review)
+    full = _human(capsys, review, wide=True)
+
+    assert "x3" in short
+    assert all(f"owner {i} prevents removal" in full for i in range(3))
 
 
 def test_json_review_is_unchanged_by_verbose(
@@ -232,4 +278,26 @@ def test_fleet_review_confirm_command_keeps_the_fleet_scope(
     text = _human(capsys, review)
 
     assert "NAS removal: yes" in text
+    assert f"Confirm: vonkctl model remove {_SELECTOR} --fleet --yes --detach" in text
+
+
+def test_protected_nas_copy_without_blockers_is_not_blocked(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from vonk_control.fleet_model_removal_contract import (
+        FleetModelRemovalEffects,
+        FleetRemovalReason,
+    )
+
+    review = _review()
+    review["fleet"] = FleetModelRemovalEffects(
+        nas_remove=False,
+        nas_reason=FleetRemovalReason.REFERENCED,
+        nas_detail="A saved profile keeps the NAS copy",
+        targets=[],
+    ).model_dump(mode="json")
+    text = _human(capsys, review)
+
+    assert "NAS removal: no" in text
+    assert "Blocked" not in text
     assert f"Confirm: vonkctl model remove {_SELECTOR} --fleet --yes --detach" in text
