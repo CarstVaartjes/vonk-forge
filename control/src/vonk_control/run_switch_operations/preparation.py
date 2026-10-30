@@ -159,7 +159,7 @@ class PreparationMixin:
             )
         model_completeness = (
             "unknown"
-            if not inspection.artifact_set_sha256
+            if not inspection.artifact_count
             else "complete"
             if model_controller_ready
             and all(target.state == "ready" for target in model_targets)
@@ -169,6 +169,7 @@ class PreparationMixin:
             artifact_set_sha256=artifact_set_digest,
             model_content_sha256=primary_model_digest,
             recipe_revision_sha256=revision.content_digest,
+            artifact_count=max(1, inspection.artifact_count),
             artifact_set_bytes=artifact_set_bytes,
             dependency_model_content_sha256=sorted(
                 set(inspection.dependency_model_content_sha256)

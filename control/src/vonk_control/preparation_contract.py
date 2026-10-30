@@ -106,6 +106,7 @@ class ModelArtifactIdentity(StrictModel):
     artifact_set_sha256: Digest
     model_content_sha256: Digest
     recipe_revision_sha256: Digest | None = None
+    artifact_count: int = Field(ge=1)
     artifact_set_bytes: int = Field(ge=1)
     dependency_model_content_sha256: list[Digest] = Field(
         default_factory=list, max_length=128

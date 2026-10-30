@@ -27,6 +27,10 @@ FILES = 300  # one production model had 286 files and failed planning at 256
 SET_DIGEST = "a" * 64
 
 
+def _digests() -> list[str]:
+    return [f"{index + 1:064x}" for index in range(FILES)]
+
+
 def _inspection() -> ArtifactInspection:
     return ArtifactInspection(
         required_bytes=FILES,
@@ -39,6 +43,7 @@ def _inspection() -> ArtifactInspection:
         spark_coverage="complete",
         artifact_set_sha256=SET_DIGEST,
         artifact_set_bytes=FILES,
+        artifact_count=FILES,
     )
 
 
@@ -49,10 +54,16 @@ def test_a_model_of_hundreds_of_files_plans_as_one_set() -> None:
     assert ArtifactStorageImpact.model_validate(impact.model_dump(mode="json"))
 
 
-def test_the_plan_contract_lists_no_files() -> None:
-    assert "artifact_digests" not in ArtifactStorageImpact.model_fields
-    assert "verified_digests" not in RunSwitchCachedTransferResult.model_fields
-    assert "artifact_digests" not in ArtifactInspection.__dataclass_fields__
+def test_a_new_plan_carries_the_set_not_its_files() -> None:
+    """The retired lists stay readable for stored jobs; a new plan leaves them empty."""
+    impact = PhasePlanningMixin._storage(_inspection(), retention="retain-cached")
+    assert impact.artifact_digests == []
+    # An old stored plan with hundreds of file digests still validates (no cap).
+    old = {**impact.model_dump(mode="json"), "artifact_digests": _digests()}
+    assert len(ArtifactStorageImpact.model_validate(old).artifact_digests) == FILES
+    assert RunSwitchCachedTransferResult.model_fields[
+        "verified_digests"
+    ].default_factory
 
 
 class _ManyFileModel(ModelCacheManifestProvider):

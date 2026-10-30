@@ -6,7 +6,10 @@ import uuid
 from typing import Any
 
 from sqlalchemy import select, text
+from vonk_agent_protocol import canonical_message
+from vonk_control.job_documents import RunSwitchJobPayload
 from vonk_control.models import Job, RecipeRun
+from vonk_control.preparation_contract import ModelArtifactIdentity
 from vonk_control.run_switch_contract import (
     RunSwitchApplyRequest,
     RunSwitchOperationResult,
@@ -121,6 +124,19 @@ def test_old_shape_job_with_a_starting_run_continues_to_success(tmp_path) -> Non
             },
         )
 
+    # The profile Stop authority strictly re-reads the parent payload as stored;
+    # the old shape (a long file list, an old receipt) must validate there too.
+    with sessions() as session:
+        stored = session.execute(
+            text("select payload from jobs where id = :id"),
+            {"id": operation.operation_id},
+        ).scalar_one()
+    document = json.loads(stored) if isinstance(stored, str) else stored
+    parent_payload = RunSwitchJobPayload.model_validate_json(
+        canonical_message(document), strict=True
+    )
+    assert len(parent_payload.plan.storage.artifact_digests) == len(FILE_DIGESTS)
+
     for _ in range(8):
         if service.get(operation.operation_id).state not in {"queued", "running"}:
             break
@@ -137,3 +153,21 @@ def test_old_shape_job_with_a_starting_run_continues_to_success(tmp_path) -> Non
         run = session.scalars(select(RecipeRun)).one()
         assert run.id == started.owner_id
         assert run.state not in {"stopping", "stopped"}
+
+
+def test_profile_plan_identity_keeps_its_count_field_beyond_the_old_cap() -> None:
+    """The profile plan digest hashes ``ModelArtifactIdentity``; its fields stay.
+
+    Removing ``artifact_count`` changed the hashed plan and made stored profile
+    applications unreadable. The field stays; only the 1024 cap is gone.
+    """
+    assert "artifact_count" in ModelArtifactIdentity.model_fields
+    document = {
+        "artifact_set_sha256": "a" * 64,
+        "model_content_sha256": "b" * 64,
+        "recipe_revision_sha256": None,
+        "artifact_count": 2000,
+        "artifact_set_bytes": 1,
+        "dependency_model_content_sha256": [],
+    }
+    assert ModelArtifactIdentity.model_validate(document).artifact_count == 2000

@@ -342,6 +342,7 @@ class CompleteArtifactInspector:
             missing_nas_bytes=0,
             missing_spark_bytes=missing_spark_bytes,
             reclaimable_bytes=self.reclaimable_bytes,
+            artifact_count=1,
             nas_coverage="complete",
             spark_coverage="complete" if missing_spark_bytes == 0 else "partial",
             reclaimable_digests=("1" * 64,) if self.reclaimable_bytes else (),

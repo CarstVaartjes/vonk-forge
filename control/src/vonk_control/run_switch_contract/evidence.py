@@ -156,6 +156,9 @@ class ArtifactStorageImpact(StrictModel):
     spark_coverage: RunSwitchCoverage
     retention: RunSwitchRetention
     running_coverage: RunSwitchCoverage = "unknown"
+    # Kept for jobs stored before the plan became set + bytes; new plans leave it
+    # empty and nothing reads it (delete once in-flight work has turned over).
+    artifact_digests: list[Digest] = Field(default_factory=list)
     reclaimable_digests: list[Digest] = Field(default_factory=list, max_length=256)
 
 

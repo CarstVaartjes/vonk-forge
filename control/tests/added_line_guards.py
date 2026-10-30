@@ -206,8 +206,25 @@ def security_refusals() -> frozenset[str]:
 # Sizes the model or recipe sets (files, digests, artifacts, objects, shards)
 # are bounded by bytes (the document or wire budget), never by an item count:
 # a 286-file model failed planning on a 256-digest cap.
-_MODEL_SIZED_FIELD = re.compile(
-    r"count|digest|artifact|file|object|shard|path", re.IGNORECASE
+_MODEL_SIZED_TOKENS = frozenset(
+    {
+        "file",
+        "files",
+        "digest",
+        "digests",
+        "artifact",
+        "artifacts",
+        "object",
+        "objects",
+        "shard",
+        "shards",
+        "path",
+        "paths",
+    }
+)
+# Database-range and fleet-size constants are not item counts.
+_RANGE_CONSTANTS = frozenset(
+    {"MAX_DATABASE_INTEGER", "_MAX_SIGNED_BIGINT", "_MAX_FLEET_NODES"}
 )
 # A real protocol limit states why on the line: ``# item-count-limit: <why>``.
 ITEM_COUNT_PRAGMA = "# item-count-limit:"
@@ -220,9 +237,17 @@ def model_sized_count_caps(source: str) -> list[int]:
     for node in ast.walk(ast.parse(source)):
         if not isinstance(node, ast.AnnAssign) or not isinstance(node.target, ast.Name):
             continue
-        name = node.target.id
+        tokens = node.target.id.split("_")
         # A byte size is the bound the owner wants; only counts are refused.
-        if not _MODEL_SIZED_FIELD.search(name) or "bytes" in name:
+        if "bytes" in tokens:
+            continue
+        sized = any(token in _MODEL_SIZED_TOKENS for token in tokens)
+        counted = (
+            len(tokens) > 1
+            and tokens[-1] == "count"
+            and tokens[-2] in _MODEL_SIZED_TOKENS
+        )
+        if not (sized or counted):
             continue
         annotation = ast.unparse(node.annotation)
         is_list = bool(re.search(r"\b(?:list|tuple|Sequence)\[", annotation))
@@ -233,10 +258,13 @@ def model_sized_count_caps(source: str) -> list[int]:
             for keyword in call.keywords:
                 capped = (
                     (is_list and keyword.arg == "max_length")
-                    or (is_int and not is_list and keyword.arg == "le")
+                    or (is_int and not is_list and counted and keyword.arg == "le")
                 ) and (
                     # A number or a named constant: both are an item count.
-                    isinstance(keyword.value, ast.Name)
+                    (
+                        isinstance(keyword.value, ast.Name)
+                        and keyword.value.id not in _RANGE_CONSTANTS
+                    )
                     or (
                         isinstance(keyword.value, ast.Constant)
                         and isinstance(keyword.value.value, int)

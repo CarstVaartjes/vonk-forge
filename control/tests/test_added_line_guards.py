@@ -1635,6 +1635,9 @@ _ITEM_COUNT = (
     "    input_files: list[In] = Field(max_length=MAX_INPUT_FILES)\n"
     "    artifact_count: int = Field(ge=1, le=1024)\n"
     "    artifact_bytes: int = Field(ge=1, le=1024)\n"
+    "    object_ids: list[str] = Field(max_length=MAX_FLEET)\n"
+    "    profile_count: int = Field(ge=0, le=MAX_DATABASE_INTEGER)\n"
+    "    rooms: list[str] = Field(max_length=MAX_DATABASE_INTEGER)\n"
 )
 
 
@@ -1649,3 +1652,6 @@ def test_item_count_cap_on_a_model_sized_list_is_flagged() -> None:
     assert check_source(path, _ITEM_COUNT, {10}, modes=("item-counts",))
     assert check_source(path, _ITEM_COUNT, {11}, modes=("item-counts",))
     assert not check_source(path, _ITEM_COUNT, {12}, modes=("item-counts",))
+    # Whole name tokens only: ``object_ids`` has the token ``object``; a database
+    # range constant and names without a model-sized token are not counts.
+    assert not check_source(path, _ITEM_COUNT, {14, 15}, modes=("item-counts",))

@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import Annotated, Literal
 
 from pydantic import (
-    ConfigDict,
     Field,
     StringConstraints,
     model_validator,
@@ -39,13 +38,11 @@ from .vocabulary import (
 class ArtifactVerificationResult(StrictModel):
     """Canonical evidence returned by a completed artifact verify phase."""
 
-    # Stored receipts written before ``verified_digests`` was retired still read:
-    # the union they sit in cannot drop a retired field of one member (the other
-    # members' errors are not retired-field errors), so the receipt ignores it.
-    model_config = ConfigDict(extra="ignore")
-
     skipped: bool = False
     verified: Literal[True]
+    # Receipts stored before the set identity carried the plan list this; new ones
+    # leave it empty and nothing reads it (delete once in-flight work has turned over).
+    verified_digests: list[Digest] = Field(default_factory=list)
     verified_build_id: UuidId | None
     verified_image_digest: Annotated[
         str, StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$")
@@ -157,13 +154,13 @@ class RunSwitchTargetTransferEvidenceResult(ArtifactVerificationEvidence):
 
 
 class RunSwitchCachedTransferResult(_RunSwitchPhaseBase):
-    # Same history rule as ``ArtifactVerificationResult``.
-    model_config = ConfigDict(extra="ignore")
-
     phase: Literal["transfer"]
     subphase: Literal["target-copy"]
     skipped: Literal[True]
     verified: Literal[False]
+    # Receipts stored before the set identity carried the plan list this; new ones
+    # leave it empty and nothing reads it (delete once in-flight work has turned over).
+    verified_digests: list[Digest] = Field(default_factory=list)
     verified_build_id: UuidId | None
     verified_image_digest: Annotated[
         str, StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$")
