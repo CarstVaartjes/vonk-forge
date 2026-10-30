@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import stat
+from collections.abc import Iterable
 from typing import TYPE_CHECKING, cast
 
 from sqlalchemy import select
@@ -18,6 +19,7 @@ from ..bounded_retry import bounded_attempts
 from ..catalog_queries import active_head_revision
 from ..categorized_errors import InvalidValue
 from ..fleet_profile_contract import FleetProfileAssignmentInput
+from ..inventory_items import inventory_artifacts
 from ..lifecycle.evidence import Residue
 from ..machine_states import INSTALLATION_ACTIVE
 from ..model_cache_contract import CacheManifest
@@ -25,6 +27,7 @@ from ..models import (
     CatalogDocumentRevision,
     FleetProfile,
     ModelCacheSet,
+    ModelCacheSetArtifact,
     RecipeInstallation,
     RecipeRun,
 )
@@ -45,6 +48,36 @@ if TYPE_CHECKING:
 
 class InventoryMixin:
     """Inventory behavior of the cache service."""
+
+    def reclaimable_bytes_for_sets(
+        self, session: Session, node_id: str, set_digests: Iterable[str]
+    ) -> int:
+        """Bytes a Spark would free by dropping these model sets.
+
+        The one answer callers get about unused model files: they see models
+        (set digest + bytes), the cache keeps its per-object logic. A file also
+        used elsewhere on the node is not freed, and a file is counted once
+        however many of the sets name it. A set this cache does not hold frees
+        nothing.
+        """
+
+        requested = tuple(set(set_digests))
+        if not requested:
+            return 0
+        names = set(
+            session.scalars(
+                select(ModelCacheSetArtifact.artifact_sha256).where(
+                    ModelCacheSetArtifact.artifact_set_sha256.in_(requested)
+                )
+            )
+        )
+        return sum(
+            artifact.size_bytes
+            for artifact in inventory_artifacts(session, node_id)
+            if artifact.digest in names
+            and artifact.state == ModelFileState.VERIFIED
+            and artifact.ref_count == 0
+        )
 
     def get_entry(self, artifact_set_sha256: str) -> dict[str, object]:
         cache = cast("ModelCacheService", self)

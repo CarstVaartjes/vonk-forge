@@ -159,7 +159,6 @@ class ArtifactStorageImpact(StrictModel):
     # Kept for jobs stored before the plan became set + bytes; new plans leave it
     # empty and nothing reads it (delete once in-flight work has turned over).
     artifact_digests: list[Digest] = Field(default_factory=list)
-    reclaimable_digests: list[Digest] = Field(default_factory=list, max_length=256)
 
 
 class BuildSourceEvidence(StrictModel):
@@ -202,7 +201,6 @@ class RuntimeImageStorageImpact(StrictModel):
     spark_coverage: RunSwitchCoverage
     running_coverage: RunSwitchCoverage = "unknown"
     reclaimable_bytes: int = Field(default=0, ge=0)
-    reclaimable_digests: list[Digest] = Field(default_factory=list, max_length=256)
 
 
 class RunSwitchBuildEvidence(StrictModel):

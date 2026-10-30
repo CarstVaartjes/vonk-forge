@@ -162,31 +162,6 @@ def _validate_artifact_execution(
                 RunSwitchCode.CLEANUP_REFERENCE_PROTECTION_EVIDENCE_INVALID,
                 reason=WaitReason.OBSERVATION_UNAVAILABLE,
             )
-        raw_reclaimed = evidence.reclaimed_digests
-        raw_protected = evidence.protected_digests
-        if (
-            not isinstance(raw_reclaimed, list)
-            or not isinstance(raw_protected, list)
-            or len(set(raw_reclaimed)) != len(raw_reclaimed)
-            or len(set(raw_protected)) != len(raw_protected)
-        ):
-            raise RunSwitchRetryLater(
-                RunSwitchCode.CLEANUP_REFERENCE_PROTECTION_EVIDENCE_INVALID,
-                reason=WaitReason.OBSERVATION_UNAVAILABLE,
-            )
-        reclaimed_digests = set(raw_reclaimed)
-        protected_digests = set(raw_protected)
-        if reclaimed_digests & protected_digests:
-            raise RunSwitchRetryLater(
-                RunSwitchCode.CLEANUP_REFERENCE_PROTECTION_OVERLAP
-            )
-        allowed_reclaimable = set(plan.storage.reclaimable_digests)
-        allowed_reclaimable.update(plan.runtime_storage.reclaimable_digests)
-        if not reclaimed_digests <= allowed_reclaimable:
-            raise RunSwitchRetryLater(
-                RunSwitchCode.CLEANUP_REFERENCE_PROTECTION_EVIDENCE_INVALID,
-                reason=WaitReason.OBSERVATION_UNAVAILABLE,
-            )
         maximum_reclaimable = (
             plan.storage.reclaimable_bytes + plan.runtime_storage.reclaimable_bytes
         )

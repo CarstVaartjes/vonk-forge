@@ -181,8 +181,6 @@ class RunSwitchCleanupResult(_RunSwitchPhaseBase):
     scope: Literal["spark-local"]
     reclaimed_bytes: int = Field(ge=0)
     protected_referenced_bytes: int = Field(default=0, ge=0)
-    reclaimed_digests: list[Digest] = Field(default_factory=list, max_length=256)
-    protected_digests: list[Digest] = Field(default_factory=list, max_length=256)
     nas_evicted: bool
 
 
