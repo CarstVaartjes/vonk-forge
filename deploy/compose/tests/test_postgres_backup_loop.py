@@ -54,6 +54,7 @@ STUBS = {
         "    kb=${FREE_KB:-100000000}; device=pool\n"
         '    dumps=$(ls "$BACKUPS"/postgres-*.sql.gz 2>/dev/null | wc -l)\n'
         "    kb=$((kb - ${KB_PER_DUMP:-0} * dumps))\n"
+        '    [ -e "$BACKUPS/.postgres-backup.tmp" ] && kb=$((kb - ${KB_STALE:-0}))\n'
         "    ;;\n"
         "esac\n"
         'case "$*" in *offhost) device=${OFFHOST_DEVICE:-$device} ;; esac\n'
@@ -73,12 +74,24 @@ STUBS = {
         '  *) exec "$REAL_DATE" "$@" ;;\n'
         "esac\n"
     ),
+    # An unreachable off-host mount: removing there never returns.
+    "rm": (
+        'case "$*" in *offhost*) [ -n "${RM_HANG:-}" ] && exec "$REAL_SLEEP" 30 ;; esac\n'
+        'exec "$REAL_RM" "$@"\n'
+    ),
     # Off-host copies fail CP_FAILURES times (or hang); the first copy after that
     # works. Every off-host copy records how many dumps /backups holds.
     "cp": (
         'case "$*" in *offhost*) ;; *) exec "$REAL_CP" "$@" ;; esac\n'
         'ls "$BACKUPS"/postgres-*.sql.gz | wc -l >>"$COUNTS"\n'
         '[ "$FAULT" = hangcp ] && exec "$REAL_SLEEP" 30\n'
+        # A truncated copy, and a slow copy that keeps growing before it completes.
+        '[ "$FAULT" = shortcp ] && head -c 1 "$1" >"$2" && exit 0\n'
+        'if [ "$FAULT" = slowcp ]; then\n'
+        "  for chunk in $(seq 1 60); do\n"
+        '    printf x >>"$2"; "$REAL_SLEEP" 0.02\n'
+        "  done\n"
+        "fi\n"
         "attempt=0\n"
         'while [ "$attempt" -lt "${CP_FAILURES:-0}" ]; do\n'
         '  mkdir "$FAULTS/cp$attempt" 2>/dev/null && exit 1\n'
@@ -114,7 +127,14 @@ STUBS = {
     "gzip": (
         '[ "$FAULT" = gzip ] && [ "$*" = "-c" ] && exit 1\nexec "$REAL_GZIP" "$@"\n'
     ),
-    "sleep": 'echo "$1" >>"$SLEEPS"\nexec "$REAL_SLEEP" "${LOOP_TEST_SLEEP:-0.05}"\n',
+    # Retry and interval sleeps last LOOP_TEST_SLEEP; the copy's poll stays short.
+    "sleep": (
+        'echo "$1" >>"$SLEEPS"\n'
+        'case "$1" in\n'
+        '  86400|300) exec "$REAL_SLEEP" "${LOOP_TEST_SLEEP:-0.05}" ;;\n'
+        '  *) exec "$REAL_SLEEP" 0.05 ;;\n'
+        "esac\n"
+    ),
 }
 
 
@@ -125,7 +145,7 @@ def _backup_loop(root: Path) -> str:
     )
     assert match, "backup_loop is not defined in the entrypoint"
     return re.sub(
-        r"(?<![\w.])/(backups|state|offhost)\b",
+        r"(?<![\w.])/(backups|state|offhost|tmp)\b",
         lambda path: f"{root}/{path.group(1)}",
         match.group(0),
     )
@@ -144,7 +164,7 @@ def _start(
         if os.environ.get("CI") == "true":
             pytest.fail("dash is required in CI")
         pytest.skip("dash is not installed")
-    for directory in ("backups", "state", "offhost", "faults", "bin"):
+    for directory in ("backups", "state", "offhost", "faults", "bin", "tmp"):
         (tmp_path / directory).mkdir()
     for name, body in STUBS.items():
         stub = tmp_path / "bin" / name
@@ -168,6 +188,7 @@ def _start(
         "REAL_GZIP": str(shutil.which("gzip")),
         "REAL_TIMEOUT": str(shutil.which("timeout")),
         "REAL_CP": str(shutil.which("cp")),
+        "REAL_RM": str(shutil.which("rm")),
         "REAL_DATE": str(shutil.which("date")),
         "COUNTS": str(tmp_path / "counts"),
         "LISTING": str(tmp_path / "listing"),
@@ -558,3 +579,61 @@ def test_a_hung_offhost_copy_fails_the_step_instead_of_hanging(tmp_path: Path) -
         stderr = _terminate(loop)
 
     assert "failed at step off-host-copy" in stderr
+
+
+def test_an_old_uncompressed_dump_from_a_killed_container_is_removed(
+    tmp_path: Path,
+) -> None:
+    # The 2026-10-30 incident: the older version was killed mid-dump and left
+    # this file, which then took the space the next attempt needs.
+    def leftovers(root: Path) -> None:
+        (root / "backups/.postgres-backup.tmp").write_text("8 GB of SQL")
+        (root / "tmp/vonk-backup-restore.stale").mkdir()
+
+    loop, state = _start(
+        tmp_path,
+        "none",
+        sleep_seconds="30",
+        seed=leftovers,
+        extra_environment={"FREE_KB": "700000", "KB_STALE": "300000"},
+    )
+    _run_until_marker(loop, state)
+
+    listing = (tmp_path / "listing").read_text().split()
+    assert not [path for path in listing if path.endswith("/.postgres-backup.tmp")]
+    assert not (tmp_path / "tmp/vonk-backup-restore.stale").exists()
+    assert list((tmp_path / "backups").glob("postgres-*.sql.gz"))
+
+
+def test_a_hung_mount_cannot_stall_cleanup_or_pruning(
+    tmp_path: Path,
+) -> None:
+    loop, _ = _start(tmp_path, "hangcp", extra_environment={"RM_HANG": "1"})
+    try:
+        _wait_for(_retries(tmp_path, 2), loop)
+    finally:
+        stderr = _terminate(loop)
+
+    # The failure is logged before the (bounded) cleanup, and the local dump
+    # was published before the off-host step.
+    assert "failed at step off-host-copy" in stderr
+    assert list((tmp_path / "backups").glob("postgres-*.sql.gz"))
+
+
+def test_a_slow_copy_that_keeps_growing_completes(tmp_path: Path) -> None:
+    loop, state = _start(tmp_path, "slowcp", sleep_seconds="30")
+    stderr = _run_until_marker(loop, state)
+
+    assert "made no progress" not in stderr
+    assert list((tmp_path / "offhost").glob("postgres-*.sql.gz"))
+
+
+def test_a_truncated_offhost_copy_fails_the_size_check(tmp_path: Path) -> None:
+    loop, _ = _start(tmp_path, "shortcp")
+    try:
+        _wait_for(_retries(tmp_path, 2), loop)
+    finally:
+        stderr = _terminate(loop)
+
+    assert "failed at step off-host-copy" in stderr
+    assert not list((tmp_path / "offhost").glob("postgres-*.sql.gz"))

@@ -110,12 +110,17 @@ backup_loop() {
   verification_temporary=/state/.last-backup-restore-verification.epoch.tmp
   offhost_temporary=/offhost/.postgres-backup.tmp.gz
   margin=268435456
+  # The old uncompressed "$temporary" is removed too: a container recreated
+  # during an older version's dump leaves exactly that file behind.
   cleanup() {
-    rm -f "$temporary.gz" "$temporary.status" "$state_temporary" "$verification_temporary" "$offhost_temporary"
+    rm -f "$temporary" "$temporary.gz" "$temporary.status" "$state_temporary" "$verification_temporary"
+    # An unreachable off-host mount must not hang the local cleanup.
+    timeout 10 rm -f "$offhost_temporary"
   }
   trap 'cleanup; exit 0' TERM INT
   # A SIGKILLed container never ran the trap; drop its leftovers before any attempt.
   cleanup
+  rm -rf /tmp/vonk-backup-restore.*
   # Free bytes of the filesystem of $1 and its device name, or "unknown" when
   # df cannot answer within ten seconds (an unreachable mount must not hang us).
   free_bytes() {
@@ -164,9 +169,32 @@ backup_loop() {
     for backup in $(timeout 10 ls -1 "$1"/postgres-*.sql.gz 2>/dev/null | sort -r); do
       count=$((count + 1))
       if [ "$count" -gt "$keep" ] && [ "$(basename "$backup")" != "$protected" ]; then
-        rm -f "$backup"
+        timeout 10 rm -f "$backup"
       fi
     done
+  }
+  # Copy $1 to $2, killing the copy only when $2 has not grown for a minute.
+  copy_offhost() {
+    cp "$1" "$2" &
+    copy_pid=$!
+    last_size=-1
+    stalled=0
+    while kill -0 "$copy_pid" 2>/dev/null; do
+      size=$(timeout 10 stat -c %s "$2" 2>/dev/null) || size=unknown
+      if [ "$size" != unknown ] && [ "$size" != "$last_size" ]; then
+        last_size=$size
+        stalled=0
+      else
+        stalled=$((stalled + 5))
+      fi
+      if [ "$stalled" -ge 60 ]; then
+        kill -KILL "$copy_pid" 2>/dev/null
+        echo "PostgreSQL off-host copy made no progress for $stalled seconds" >&2
+        return 1
+      fi
+      sleep 5
+    done
+    wait "$copy_pid"
   }
   restore_verify() (
     set -e
@@ -198,8 +226,8 @@ backup_loop() {
     set -e
     report_failure() {
       if [ "$1" -ne 0 ]; then
-        cleanup
         echo "PostgreSQL backup failed at step $step (status $1); keeping previous success marker; retrying in five minutes" >&2
+        cleanup
       fi
     }
     trap 'report_failure "$?"' EXIT
@@ -242,12 +270,12 @@ backup_loop() {
     chmod 0600 "$destination"
     if [ -n "${VONK_BACKUP_OFFHOST_PATH:-}" ]; then
       step=off-host-copy
-      # An unreachable mount must fail the step, never hang the loop: allow
-      # one MiB/s plus a minute for the copy.
-      copy_seconds=$(($(stat -c %s "$destination") / 1048576 + 60))
+      # An unreachable mount fails the step instead of hanging the loop. The
+      # copy may take as long as it keeps growing; our own copy is trusted, so
+      # only its size is compared.
       timeout 10 test -d /offhost
-      timeout "$copy_seconds" cp "$destination" "$offhost_temporary"
-      timeout "$copy_seconds" gzip -t "$offhost_temporary"
+      copy_offhost "$destination" "$offhost_temporary"
+      [ "$(timeout 10 stat -c %s "$offhost_temporary")" = "$(stat -c %s "$destination")" ]
       timeout 60 mv "$offhost_temporary" "/offhost/$(basename "$destination")"
     fi
     step=restore-verification
