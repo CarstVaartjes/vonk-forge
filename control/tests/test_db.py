@@ -1,3 +1,4 @@
+import socket
 import subprocess
 import sys
 import zipfile
@@ -256,3 +257,85 @@ def test_build_engine_sets_every_finite_budget_on_the_server(postgres_engine) ->
         "transaction_timeout": "300000",
         "idle_in_transaction_session_timeout": "60000",
     }
+
+
+def _startup_log(error: Exception, capsys: pytest.CaptureFixture[str]) -> str:
+    from vonk_control import db
+
+    now = 0.0
+
+    def sleep(seconds: float) -> None:
+        nonlocal now
+        now += seconds
+
+    with pytest.raises(OperationalError):
+        db.run_with_database_startup_retry(
+            lambda: (_ for _ in ()).throw(error),
+            timeout_seconds=0.5,
+            sleep=sleep,
+            monotonic=lambda: now,
+            label="PostgreSQL",
+        )
+    return capsys.readouterr().err
+
+
+class _Sqlstate(Exception):
+    def __init__(self, message: str, sqlstate: str | None) -> None:
+        super().__init__(message)
+        self.sqlstate = sqlstate
+
+
+@pytest.mark.parametrize(
+    ("driver", "cause"),
+    [
+        (
+            socket.gaierror(-3, "Temporary failure in name resolution"),
+            "name_resolution_failed",
+        ),
+        (
+            _Sqlstate(
+                'could not translate host name "postgres" to address: nodename nor servname',
+                None,
+            ),
+            "name_resolution_failed",
+        ),
+        (
+            _Sqlstate("connection failed: Connection refused", None),
+            "connection_refused",
+        ),
+        (ConnectionRefusedError(111, "refused"), "connection_refused"),
+        (_Sqlstate("connection timeout expired", None), "timeout"),
+        (TimeoutError("x"), "timeout"),
+        (
+            _Sqlstate("server closed the connection unexpectedly", None),
+            "server_closed_connection",
+        ),
+        (_Sqlstate("auth", "28P01"), "authentication_failed"),
+        (_Sqlstate("x", "28000"), "authentication_failed"),
+        (_Sqlstate('database "vonk" does not exist', "3D000"), "database_missing"),
+        (_Sqlstate("weird", None), "other"),
+    ],
+)
+def test_startup_log_names_the_connection_cause(
+    driver: Exception, cause: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    log = _startup_log(OperationalError("connect", {}, driver), capsys)
+
+    assert f"cause {cause}" in log
+    assert "cause unknown" not in log
+
+
+def test_startup_log_never_shows_a_dsn_password(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    driver = _Sqlstate(
+        'connection to server at "postgres" (10.0.0.2), port 5432 failed: '
+        "postgresql://vonk:s3cretpw@postgres:5432/vonk password=s3cretpw",
+        None,
+    )
+
+    log = _startup_log(OperationalError("connect", {}, driver), capsys)
+
+    assert "s3cretpw" not in log
+    assert "postgres" in log
+    assert "5432" in log

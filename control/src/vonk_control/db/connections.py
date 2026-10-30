@@ -18,6 +18,7 @@ from sqlalchemy.exc import (
 from sqlalchemy.orm import Session, sessionmaker
 
 from ..settings import DATABASE_WAIT_BUDGETS
+from .connection_cause import classify_connection_failure
 from .constants import (
     _ALEMBIC_CONFIG,
     _DATABASE_RETRYABLE_ERRORS,
@@ -150,6 +151,13 @@ def run_with_database_startup_retry[T](
             return operation()
         except (*_DATABASE_RETRYABLE_ERRORS, _DatabaseStartupContention) as error:
             if not _startup_retryable(error):
+                if isinstance(error, (InterfaceError, OperationalError)):
+                    cause, detail = classify_connection_failure(error)
+                    print(
+                        f"{label} startup failed; not retrying; cause {cause}: {detail}",
+                        file=sys.stderr,
+                        flush=True,
+                    )
                 raise
             remaining = deadline - monotonic()
             if remaining <= 0:
@@ -157,9 +165,10 @@ def run_with_database_startup_retry[T](
                     isinstance(error, (InterfaceError, OperationalError))
                     and _database_sqlstate(error) is None
                 ):
+                    cause, detail = classify_connection_failure(error)
                     print(
-                        f"{label} startup deadline expired; connection establishment "
-                        "cause unknown (driver SQLSTATE unavailable); credentials unchanged",
+                        f"{label} startup deadline expired; connection "
+                        f"establishment cause {cause}: {detail}; credentials unchanged",
                         file=sys.stderr,
                         flush=True,
                     )
@@ -170,10 +179,11 @@ def run_with_database_startup_retry[T](
                 reason = str(error)
             elif isinstance(error, (InterfaceError, OperationalError)):
                 code = _database_sqlstate(error)
+                cause, detail = classify_connection_failure(error)
                 reason = (
-                    f"{type(error).__name__}; SQLSTATE {code}"
+                    f"{type(error).__name__}; SQLSTATE {code}; cause {cause}: {detail}"
                     if code is not None
-                    else "connection establishment cause unknown; driver SQLSTATE unavailable"
+                    else f"connection establishment cause {cause}: {detail}"
                 )
             else:
                 reason = type(error).__name__
