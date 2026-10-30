@@ -16,10 +16,11 @@ from typing import Literal, cast
 import httpx2
 import pytest
 from pydantic import TypeAdapter, ValidationError
-from sqlalchemy import create_engine, select, update
+from sqlalchemy import create_engine, func, select, update
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
     FailureCode,
+    InstallationState,
     LifecycleState,
     ReservationState,
     RunState,
@@ -3331,6 +3332,86 @@ def test_present_rebuilt_image_replaces_installation_bound_to_missing_build(
     assert ("prepare", "runtime-plan") in {
         (phase.kind, phase.subphase) for phase in plan.phases
     }
+
+
+def _installed_service(sessions, lifecycle, *, archive_present: bool):
+    return RunSwitchOperationService(
+        sessions,
+        lifecycle=lifecycle,
+        clock=lambda: NOW,
+        artifacts=CompleteArtifactInspector(),
+        artifact_phase_executor=RecordingArtifactExecutor(),
+        build_archive_available=lambda _digest, _size: archive_present,
+        memory_floor_bytes=50,
+    )
+
+
+def _phase_kinds(plan) -> list[str]:
+    return [phase.kind for phase in plan.phases]
+
+
+def test_installed_recipe_starts_after_its_nas_image_expired(tmp_path: Path) -> None:
+    """The installed image decides; the NAS archive and build row are provenance."""
+
+    sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
+    installed_recipe(
+        lifecycle, mapping_id, build_id, nodes, request_id=str(uuid.uuid4())
+    )
+
+    plan = _installed_service(sessions, lifecycle, archive_present=False).preview(
+        _request(sessions, nodes[0]), actor="admin"
+    )
+
+    assert plan.allowed, [reason.code for reason in plan.blockers]
+    assert plan.installation_id is not None
+    assert plan.installation_state == InstallationState.INSTALLED
+    assert _phase_kinds(plan) == ["start", "final_verify"]
+    assert plan.build.state != "planned"
+    with sessions.begin() as session:
+        assert session.scalar(select(func.count()).select_from(RecipeBuild)) == 1
+
+
+@pytest.mark.parametrize("newer_state", ["failed", "planned"])
+def test_a_newer_unfinished_build_row_keeps_the_installation_once_its_image_expired(
+    tmp_path: Path, newer_state: str
+) -> None:
+    sessions, lifecycle, _queue, mapping_id, old_build_id, nodes = setup_services(
+        tmp_path
+    )
+    installed_recipe(
+        lifecycle, mapping_id, old_build_id, nodes, request_id=str(uuid.uuid4())
+    )
+    with sessions.begin() as session:
+        old_build = session.get(RecipeBuild, old_build_id)
+        assert old_build is not None
+        new_build_id = str(uuid.uuid4())
+        new_plan = dict(old_build.plan)
+        new_plan["build_id"] = new_build_id
+        new_plan["build_input_sha256"] = "6" * 64
+        session.add(
+            RecipeBuild(
+                id=new_build_id,
+                recipe_revision_id=old_build.recipe_revision_id,
+                builder_node_id=old_build.builder_node_id,
+                source_bundle_sha256=old_build.source_bundle_sha256,
+                build_input_sha256="6" * 64,
+                state=newer_state,
+                policy_report=dict(old_build.policy_report),
+                plan=new_plan,
+                created_at=NOW + timedelta(seconds=1),
+                updated_at=NOW + timedelta(seconds=1),
+            )
+        )
+
+    plan = _installed_service(sessions, lifecycle, archive_present=False).preview(
+        _request(sessions, nodes[0]), actor="admin"
+    )
+
+    assert plan.allowed, [reason.code for reason in plan.blockers]
+    assert plan.installation_id is not None
+    assert _phase_kinds(plan) == ["start", "final_verify"]
+    with sessions.begin() as session:
+        assert session.scalar(select(func.count()).select_from(RecipeBuild)) == 2
 
 
 @pytest.mark.parametrize("stale_state", ["succeeded", "planned"])

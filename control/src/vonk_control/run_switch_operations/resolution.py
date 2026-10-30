@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from typing import (
     TYPE_CHECKING,
 )
@@ -39,6 +39,7 @@ from ..preparation_contract import (
 )
 from ..recipe_execution_contract import (
     installation_serves_authorised_ports,
+    parse_stored_installation_plan,
 )
 from ..recipe_runtime_specs import (
     OPTION_CHOICES_KEY,
@@ -325,6 +326,104 @@ class ResolutionMixin:
             )
         )
 
+    def _reusable_build(self, session: Session, revision_id: str) -> RecipeBuild | None:
+        """The build the current recipe inputs reproduce, present or not."""
+        service = typing_cast("RunSwitchOperationService", self)
+        reusable_build_id = getattr(service._lifecycle, "reusable_build_id", None)
+        try:
+            found_id = (
+                reusable_build_id(revision_id) if callable(reusable_build_id) else None
+            )
+        except BookkeepingUnknown:
+            # A pending read is not evidence for selecting another receipt.
+            raise
+        except UnknownOutcomeError:
+            found_id = None
+        return session.get(RecipeBuild, found_id) if found_id else None
+
+    def _current_builds(
+        self, session: Session, revision_id: str
+    ) -> Iterator[RecipeBuild]:
+        """The builds that may be this recipe's current image, best first.
+
+        A fresh review binds the build whose executable inputs the current
+        recipe and source bundle reproduce, whichever revision built it: the
+        one build resolution that image preparation also reuses. A newer row
+        of this revision that the current inputs no longer reproduce is
+        another image, and preparation would refuse the load bound to it.
+        Without a reusable build (or while resolution is unobservable),
+        preparation names no build to compare, so the current completed image
+        of this revision stays the binding. A republished package keeps the
+        revision but replaces its source bundle: a build of the earlier
+        bundle is another image.
+        """
+        found = self._reusable_build(session, revision_id)
+        if found is not None:
+            yield found
+        revision = session.get(CatalogDocumentRevision, revision_id)
+        source = revision_source_bundle(revision) if revision is not None else None
+        query = select(RecipeBuild).where(
+            RecipeBuild.recipe_revision_id == revision_id,
+            RecipeBuild.state == LifecycleState.SUCCEEDED.value,
+            RecipeBuild.image_digest.is_not(None),
+            RecipeBuild.image_bytes.is_not(None),
+        )
+        if source is not None:
+            query = query.where(RecipeBuild.source_bundle_sha256 == source)
+        yield from session.scalars(
+            query.order_by(RecipeBuild.updated_at.desc(), RecipeBuild.id.desc())
+        )
+
+    def _installed_image_is_needed(
+        self,
+        session: Session,
+        installation: RecipeInstallation,
+        revision_id: str,
+        *,
+        expected_image: RuntimeImageIdentity | None,
+    ) -> bool:
+        """Whether an installed installation already runs the image this load needs.
+
+        The image is its content: the installed digest decides.  A build row or
+        a NAS archive only records where the image came from and may be gone
+        or replaced without changing what is installed on the Sparks.
+        """
+        if installation.state != InstallationState.INSTALLED:
+            return False
+        digest = installation.image_digest
+        plan = parse_stored_installation_plan(installation.plan)
+        if not plan.compiled_execution_plans or any(
+            compiled.runtime_image.image_digest != digest
+            for compiled in plan.compiled_execution_plans.values()
+        ):
+            return False
+        if expected_image is not None:
+            return expected_image.image_digest == digest
+        revision = session.get(CatalogDocumentRevision, revision_id)
+        source = revision_source_bundle(revision) if revision is not None else None
+        recorded = (
+            session.get(RecipeBuild, installation.recipe_build_id)
+            if installation.recipe_build_id
+            else None
+        )
+        if (
+            source is not None
+            and recorded is not None
+            and recorded.source_bundle_sha256 != source
+        ):
+            # A republished source bundle builds another image.
+            return False
+        needed = next(
+            (
+                build.image_digest
+                for build in self._current_builds(session, revision_id)
+                if build.state == LifecycleState.SUCCEEDED.value
+                and build.image_digest is not None
+            ),
+            None,
+        )
+        return needed is None or needed == digest
+
     def _matching_build(
         self,
         session: Session,
@@ -357,38 +456,7 @@ class ResolutionMixin:
         # one build resolution that image preparation also reuses. A newer row
         # of this revision that the current inputs no longer reproduce is
         # another image, and preparation would refuse the load bound to it.
-        reusable_build_id = getattr(service._lifecycle, "reusable_build_id", None)
-        try:
-            found_id = (
-                reusable_build_id(revision_id) if callable(reusable_build_id) else None
-            )
-        except BookkeepingUnknown:
-            # A pending read is not evidence for selecting another receipt.
-            raise
-        except UnknownOutcomeError:
-            found_id = None
-        found = session.get(RecipeBuild, found_id) if found_id else None
-        if found is not None and service._build_is_available(found):
-            return found
-        # Without a reusable build (or while resolution is unobservable),
-        # preparation names no build to compare, so the current completed image
-        # of this revision stays the binding.  A republished package keeps the
-        # revision but replaces its source bundle: a build of the earlier
-        # bundle is another image.
-        revision = session.get(CatalogDocumentRevision, revision_id)
-        source = revision_source_bundle(revision) if revision is not None else None
-        query = select(RecipeBuild).where(
-            RecipeBuild.recipe_revision_id == revision_id,
-            RecipeBuild.state == LifecycleState.SUCCEEDED.value,
-            RecipeBuild.image_digest.is_not(None),
-            RecipeBuild.image_bytes.is_not(None),
-        )
-        if source is not None:
-            query = query.where(RecipeBuild.source_bundle_sha256 == source)
-        candidates = session.scalars(
-            query.order_by(RecipeBuild.updated_at.desc(), RecipeBuild.id.desc())
-        )
-        for candidate in candidates:
+        for candidate in self._current_builds(session, revision_id):
             if service._build_is_available(candidate):
                 return candidate
         return None

@@ -33,7 +33,6 @@ from ..profile_capacity import (
 )
 from ..recipe_execution_contract import (
     installation_matches_runtime_image,
-    parse_stored_installation_plan,
 )
 from ..recipe_operations import (
     RecipeOperationConflict,
@@ -206,58 +205,47 @@ class RunPlanningMixin:
                 mapping,
                 group,
             )
-            build = service._matching_build(
-                session, revision.id, expected_image=expected_image
-            )
-            build_candidate = build or (
-                session.get(RecipeBuild, expected_image.build_id)
-                if expected_image is not None and expected_image.build_id is not None
-                else service._latest_build(session, revision.id)
-            )
-            build_selection = service._select_build(
-                session,
-                revision,
-                build,
-                build_candidate,
-                group,
-                now=now,
-                inventory=inventory,
-                create_build=create_build,
-            )
-            build = build_selection.build
-            build_candidate = build_selection.candidate
-            restoring_installation = (
-                expected_image is not None
-                and installation is not None
-                and installation.state == InstallationState.INSTALLED
-                and build is None
-                and build_candidate is not None
-                and build_candidate.state in {"planned", "building"}
-                and installation.recipe_build_id
-                == build_candidate.id
-                == expected_image.build_id
-                and installation.image_digest == expected_image.image_digest
-            )
-            if restoring_installation:
-                assert installation is not None and expected_image is not None
-                installed_plan = parse_stored_installation_plan(installation.plan)
-                for compiled in installed_plan.compiled_execution_plans.values():
-                    changes = differing_image_fields(
-                        expected_image, compiled.runtime_image
-                    )
-                    if changes:
-                        blockers.append(
-                            _as_reason(
-                                RunSwitchCode.RUNTIME_IMAGE_PREPARATION_RECEIPT_INVALID,
-                                "Accepted runtime image observation differs: "
-                                + ", ".join(changes),
-                                scope="artifact",
-                                node_ids=node_ids,
-                            )
-                        )
-            if (
+            # An installed installation that already runs the needed image
+            # starts as it is: a build row or a NAS archive is provenance, not
+            # identity, so neither is consulted.  Model bytes still missing on
+            # a Spark need the transfer phases and their image identity, so
+            # that load keeps the full resolution.
+            reuse_installed = (
                 installation is not None
-                and (
+                and inspection.missing_spark_bytes in (None, 0)
+                and service._installed_image_is_needed(
+                    session,
+                    installation,
+                    revision.id,
+                    expected_image=expected_image,
+                )
+            )
+            build_selection = None
+            build = None
+            build_candidate = None
+            if not reuse_installed:
+                build = service._matching_build(
+                    session, revision.id, expected_image=expected_image
+                )
+                build_candidate = build or (
+                    session.get(RecipeBuild, expected_image.build_id)
+                    if expected_image is not None
+                    and expected_image.build_id is not None
+                    else service._latest_build(session, revision.id)
+                )
+                build_selection = service._select_build(
+                    session,
+                    revision,
+                    build,
+                    build_candidate,
+                    group,
+                    now=now,
+                    inventory=inventory,
+                    create_build=create_build,
+                )
+                build = build_selection.build
+                build_candidate = build_selection.candidate
+                if installation is not None and (
                     build is None
                     or not installation_matches_runtime_image(
                         installation,
@@ -265,15 +253,11 @@ class RunPlanningMixin:
                         oci_layout_sha256=build.oci_layout_sha256,
                         image_bytes=build.image_bytes,
                     )
-                )
-                and not restoring_installation
-            ):
-                # An installed source build is reusable only while its exact
-                # Controller build remains selected, or its recreation is
-                # bound to the accepted image in every installed rank. Other
-                # replacements need a fresh compiled plan and install receipt.
-                installation = None
-            blockers.extend(build_selection.blockers)
+                ):
+                    # A replacement image needs a fresh compiled plan and
+                    # install receipt.
+                    installation = None
+                blockers.extend(build_selection.blockers)
             build_evidence, runtime_storage, build_blockers, build_warnings = (
                 service._build_evidence(
                     session,
@@ -283,6 +267,7 @@ class RunPlanningMixin:
                     group,
                     defer_source_build=defer_source_build,
                     expected_image=expected_image,
+                    require_available=not reuse_installed,
                 )
             )
             blockers.extend(build_blockers)
@@ -298,7 +283,9 @@ class RunPlanningMixin:
                 effective_settings=effective_settings,
                 model_documents=model_documents,
                 image_bytes=(
-                    runtime_storage.image_bytes
+                    None
+                    if reuse_installed
+                    else runtime_storage.image_bytes
                     if runtime_storage.image_bytes is not None
                     else expected_image.image_bytes
                     if expected_image is not None
@@ -322,7 +309,11 @@ class RunPlanningMixin:
             fit_after_stop = resource_fits.after_stop
             blockers.extend(resource_fits.blockers)
             warnings.extend(resource_fits.warnings)
-            builder_freshness = build_selection.builder_freshness
+            builder_freshness = (
+                build_selection.builder_freshness
+                if build_selection is not None
+                else None
+            )
             if builder_freshness is not None and not any(
                 item.source == builder_freshness.source for item in freshness
             ):
@@ -342,6 +333,8 @@ class RunPlanningMixin:
             image_digest = (
                 build.image_digest
                 if build is not None
+                else installation.image_digest
+                if reuse_installed and installation is not None
                 else expected_image.image_digest
                 if expected_image is not None
                 else runtime_storage.image_digest
