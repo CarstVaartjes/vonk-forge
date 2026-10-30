@@ -168,7 +168,7 @@ class OperationsMixin:
 
         The question is asked of the target: the set digest and the state are
         predicates of the query, so an operation is found however old it is and
-        no unrelated row is read.  A succeeded operation is preferred, then a
+        no unrelated row is read; only this set's rows are looked at, best first.  A succeeded operation is preferred, then a
         live one, then the lowest id.
         """
         cache = cast("ModelCacheService", self)
@@ -182,14 +182,24 @@ class OperationsMixin:
         )
         if excluding is not None:
             query = query.where(ModelCacheOperation.id != excluding)
+        usable = {
+            LifecycleState.QUEUED.value,
+            LifecycleState.RUNNING.value,
+            LifecycleState.BACKOFF.value,
+            *((LifecycleState.SUCCEEDED.value,) if include_succeeded else ()),
+        }
         with cache._session() as session:
-            row = session.scalars(
-                query.order_by(
-                    case((ModelCacheOperation.state.in_(succeeded), 0), else_=1),
-                    ModelCacheOperation.id,
-                ).limit(1)
-            ).first()
-            return None if row is None else cache._operation_view(row)
+            ordered = query.order_by(
+                case((ModelCacheOperation.state.in_(succeeded), 0), else_=1),
+                ModelCacheOperation.id,
+            )
+            for row in session.scalars(ordered):
+                # A cancellation lives in the payload: the view of an operation
+                # being cancelled says so, and such an operation is not joined.
+                view = cache._operation_view(row)
+                if view.state in usable:
+                    return view
+        return None
 
     def operations_page(
         self,

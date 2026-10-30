@@ -3245,7 +3245,7 @@ def test_automatic_reconciliation_repairs_model_child_and_reuses_image(
             )
 
         def reusable_operation(self, **_: object) -> object:
-            return repaired if self.repair_calls else failed
+            return repaired if self.repair_calls else None if self.failed else failed
 
         def start_download(self, **_: object) -> SimpleNamespace:
             raise AssertionError("the existing ModelCache child should be reused")
