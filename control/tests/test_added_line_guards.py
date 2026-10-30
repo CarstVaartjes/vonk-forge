@@ -283,6 +283,24 @@ def test_provenance_assignment_identity_is_rejected():
     )
 
 
+def test_a_primary_key_row_lookup_is_not_a_provenance_comparison():
+    assert not check_source(
+        PATH,
+        "stmt = update(RecipeBuild).where(RecipeBuild.id == build_id)\n",
+        {1},
+        modes=("identity",),
+    )
+    assert check_source(
+        PATH,
+        "same = a.recipe_build_id == b.recipe_build_id\n",
+        {1},
+        modes=("identity",),
+    )
+    assert check_source(
+        PATH, "same = a.assignment_id == b.assignment_id\n", {1}, modes=("identity",)
+    )
+
+
 def test_contract_definition_can_spell_its_member_but_consumer_cannot():
     path = "agent_protocol/src/vonk_agent_protocol/agent_words.py"
     source = "class Phase(WireEnum):\n    RUNNING = 'running'\n\nvalue = 'running'\n"

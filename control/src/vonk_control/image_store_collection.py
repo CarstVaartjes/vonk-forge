@@ -240,19 +240,18 @@ class ImageStoreCollector:
         }
 
     def _collect_uploads(self) -> Collection:
-        """Remove uploaded archives no unconverted build waits on."""
+        """Remove uploaded archives no unconverted build waits on.
+
+        A succeeded build waits for its conversion only for the grace period,
+        like the blob reference check: an archive that still is not converted
+        after that is dropped and the build runs again on demand.
+        """
 
         if not self._image_cache.is_dir():
             return Collection(0, 0)
+        now = self._clock()
         with self._sessions() as session:
-            waiting = set(
-                session.scalars(
-                    select(RecipeBuild.oci_layout_sha256).where(
-                        builds_in_flight(self._clock())
-                        | (RecipeBuild.state == LifecycleState.SUCCEEDED)
-                    )
-                )
-            )
+            waiting = self._waiting_builds(session, now)
         cutoff = time.time() - GRACE.total_seconds()
         removed = reclaimed = 0
         try:

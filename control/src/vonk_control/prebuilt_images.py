@@ -33,7 +33,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from sqlalchemy import select, true
+from sqlalchemy import select, true, update
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
     AgentFailureKind,
@@ -51,6 +51,7 @@ from .catalog_revision_contract import (
     BuildSecurityProjection,
     PrebuiltImage,
 )
+from .image_store_collection import GRACE
 from .lifecycle.image_availability import PrebuiltImageAdapter
 from .models import Job, RecipeBuild
 from .oci_image_store import (
@@ -74,6 +75,12 @@ PREBUILT_KEY_SCHEMA_VERSION = 1
 PREBUILT_BUILD_KIND = "recipe.build.v1"
 # A Controller pull of one image; renewed while the pull runs.
 _CLAIM_LEASE = timedelta(minutes=5)
+# One uploaded archive that fails to convert is retried with a growing backoff
+# so it never holds back the archives behind it. The bound is the image-store
+# collection, which drops the upload 24 h after its build succeeded; a healed
+# fault converts on the next due attempt.
+_CONVERSION_BACKOFF = timedelta(minutes=10)
+_CONVERSION_BACKOFF_CAP = timedelta(hours=2)
 _REFERENCE = re.compile(PREBUILT_REFERENCE_PATTERN)
 
 # Why a plan did or did not use the catalog's prebuilt image.  The codes are
@@ -512,6 +519,9 @@ class PrebuiltImageImporter:
             max_workers=1, thread_name_prefix="prebuilt-image"
         )
         self._active: Future[None] | None = None
+        # archive sha256 -> (failed attempts, earliest next attempt); in memory, so a
+        # restart simply starts the backoff again.
+        self._conversion_failures: dict[str, tuple[int, datetime]] = {}
         self._lock = threading.Lock()
 
     def close(self) -> None:
@@ -557,18 +567,64 @@ class PrebuiltImageImporter:
         agent's terminal evidence is compared against the uploaded identity
         first, and only then is the row rewritten to the stored image.
         """
+        now = self._clock()
+        for archive_sha256 in list(self._conversion_failures):
+            if not (self._image_cache / archive_sha256).is_file():
+                del self._conversion_failures[archive_sha256]
         with self._sessions() as session:
             for build_id, layout in session.execute(
                 select(RecipeBuild.id, RecipeBuild.oci_layout_sha256)
                 .where(
-                    RecipeBuild.state == "succeeded",
+                    RecipeBuild.state == LifecycleState.SUCCEEDED,
                     RecipeBuild.oci_layout_sha256.is_not(None),
                 )
                 .order_by(RecipeBuild.updated_at, RecipeBuild.id)
             ):
-                if isinstance(layout, str) and (self._image_cache / layout).is_file():
+                if (
+                    isinstance(layout, str)
+                    and (self._image_cache / layout).is_file()
+                    and self._conversion_due(layout, now)
+                ):
                     return str(build_id)
         return None
+
+    def _conversion_due(self, archive_sha256: str, now: datetime) -> bool:
+        _attempts, retry_at = self._conversion_failures.get(archive_sha256, (0, now))
+        return retry_at <= now
+
+    def _record_conversion_failure(
+        self,
+        build_id: str,
+        archive_sha256: str,
+        failure: StoreUnknown,
+        expires_at: datetime,
+    ) -> None:
+        now = self._clock()
+        attempts = self._conversion_failures.get(archive_sha256, (0, now))[0] + 1
+        retry_at = now + min(_CONVERSION_BACKOFF * attempts, _CONVERSION_BACKOFF_CAP)
+        self._conversion_failures[archive_sha256] = (attempts, retry_at)
+        _LOGGER.warning(
+            "uploaded build %s: %s: %s (attempt %d, next attempt %s)",
+            build_id,
+            failure.code,
+            failure.detail,
+            attempts,
+            retry_at.isoformat(),
+        )
+        # Stays true across a restart and until the collection drops the upload.
+        detail = (
+            f"conversion failed: {failure.code}; retried until the upload "
+            f"expires at {(expires_at + GRACE).isoformat()}"
+        )
+        with self._sessions.begin() as session:
+            session.execute(
+                update(RecipeBuild)
+                .where(
+                    RecipeBuild.id == build_id,
+                    RecipeBuild.oci_layout_sha256 == archive_sha256,
+                )
+                .values(error=detail[:512])
+            )
 
     def convert_upload(self, build_id: str) -> None:
         """Move a Spark build's uploaded archive into the layered store."""
@@ -576,25 +632,37 @@ class PrebuiltImageImporter:
         with self._sessions() as session:
             build = session.get(RecipeBuild, build_id)
             archive_sha256 = None if build is None else build.oci_layout_sha256
-        if archive_sha256 is None:
+            succeeded_at = None if build is None else build.updated_at
+        if archive_sha256 is None or succeeded_at is None:
             return
         archive = self._image_cache / archive_sha256
         image = self._store.import_archive(archive)
         if isinstance(image, StoreUnknown):
-            _LOGGER.warning(
-                "uploaded build %s could not be stored (%s); retrying",
-                build_id,
-                image.detail,
-            )
+            if image.code != STORE_BUSY:
+                # A busy store is not this archive's fault: it simply goes again.
+                self._record_conversion_failure(
+                    build_id, archive_sha256, image, succeeded_at
+                )
             return
+        self._conversion_failures.pop(archive_sha256, None)
         with self._sessions.begin() as session:
-            build = session.get(RecipeBuild, build_id, with_for_update=True)
-            if build is None or build.oci_layout_sha256 != archive_sha256:
+            converted = session.execute(
+                update(RecipeBuild)
+                .where(
+                    RecipeBuild.id == build_id,
+                    RecipeBuild.oci_layout_sha256 == archive_sha256,
+                )
+                .values(
+                    image_digest=image.manifest_digest,
+                    oci_layout_sha256=image.manifest_digest.removeprefix("sha256:"),
+                    image_bytes=image.stored_bytes,
+                    error=None,
+                    updated_at=self._clock(),
+                )
+                .returning(RecipeBuild.id)
+            )
+            if converted.first() is None:
                 return
-            build.image_digest = image.manifest_digest
-            build.oci_layout_sha256 = image.manifest_digest.removeprefix("sha256:")
-            build.image_bytes = image.stored_bytes
-            build.updated_at = self._clock()
         archive.unlink(missing_ok=True)
         _LOGGER.info(
             "stored Spark build %s as runtime image %s",
