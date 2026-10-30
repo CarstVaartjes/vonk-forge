@@ -31,11 +31,14 @@ inputs remain conservative. The PostgreSQL fault-recovery test runs once in
 the complete Controller suite, without a second standalone job.
 
 Integration PRs must accept their own candidate before merge. CI applies the
-`release-acceptance` label to same-repository PRs; `CI gate` requires their exact
+`release-acceptance` label to same-repository `integration/*` PRs (the branch
+alone selects acceptance); `CI gate` requires their exact
 candidate's acceptance. A PR without the label runs that acceptance only when it
 changes upgrade-sensitive paths (`CARRY_INPUTS`) or the acceptance programs;
 Controller, web, tooling, test and documentation PRs fold into an integration
-PR or are accepted by main's Release, and their `CI gate` does not wait for it.
+PR or are accepted by main's Release, and their `CI gate` does not wait for it. A component PR merged straight to
+main leaves no candidate evidence, so Release runs the Spark acceptance (and the
+recipe refresh only if the change can alter the upgrade) itself.
 See [the contributor guide](../contributor.md#ci-and-pre-merge-release-acceptance)
 for dispatch by ref and protected-environment configuration. The PR and main
 publishers call the same candidate assembly and acceptance workflows.

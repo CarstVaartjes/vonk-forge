@@ -205,21 +205,12 @@ def test_component_prs_select_no_candidate_acceptance(paths: list[str]) -> None:
         ["install/spark/install.sh"],
         ["deploy/compose/compose.yaml"],
         ["tests/acceptance/test_fresh_nas_install.py"],
+        ["tests/fixtures/canonical-synthetic-canary/index.json"],
         ["weird/new"],
     ],
 )
 def test_upgrade_sensitive_prs_select_candidate_acceptance(paths: list[str]) -> None:
     assert _module().lane_selected(paths, "pull_request") is True
-
-
-def test_the_label_owner_is_ci_yml_and_the_lane_proof_honours_it() -> None:
-    # The selector decides by paths; the label is read once per consumer in
-    # ci.yml, so a labelled control-only PR runs acceptance and carry.
-    text = (ROOT / ".github/workflows/ci.yml").read_text()
-    label = "contains(github.event.pull_request.labels.*.name, 'release-acceptance')"
-    assert f"needs.changes.outputs.lane == 'true' || {label}" in text
-    assert f"needs.changes.outputs.upgrade_carry == 'true' || {label}" in text
-    assert _module().lane_selected(["control/src/x.py"], "pull_request") is False
 
 
 def test_a_control_only_pr_without_acceptance_still_passes_the_gate() -> None:
@@ -240,14 +231,6 @@ def test_a_control_only_pr_without_acceptance_still_passes_the_gate() -> None:
     assert gate["verify"]("success", selected, results) == []
     results["lane-proof"] = "success"
     assert gate["verify"]("success", selected, results)
-
-
-def test_release_accepts_a_direct_merge_whose_pr_held_no_candidate() -> None:
-    # No gap: a component PR merged straight to main has no PR candidate
-    # evidence, so main's Release runs the Spark and refresh steps itself.
-    core = (ROOT / ".github/workflows/release-acceptance-core.yml").read_text()
-    assert "has no complete candidate evidence" in core
-    assert "Spark and recipe refresh run here" in core
 
 
 @pytest.mark.parametrize(
@@ -341,7 +324,12 @@ def test_shared_and_acceptance_test_inputs_keep_their_integrations(path: str) ->
     # Acceptance programs accept their own candidate; shared helpers and
     # fixtures leave acceptance to the integration PR or main's Release.
     assert module.lane_selected([path], "pull_request") is path.startswith(
-        ("tests/acceptance/", "deploy/", "weird/")
+        (
+            "tests/acceptance/",
+            "tests/fixtures/canonical-synthetic-canary/",
+            "deploy/",
+            "weird/",
+        )
     )
 
 

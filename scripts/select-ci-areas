@@ -137,12 +137,13 @@ def carry_selected(paths: Iterable[str], event: str) -> bool:
 
 
 # Candidate acceptance on a pull request: the `release-acceptance` label (an
-# integration PR, applied in ci.yml) or a change to what the upgrade is made of
+# integration PR; ci.yml folds label and integration/* branches into `lane`) or a change to what the upgrade is made of
 # (CARRY_INPUTS) or to the acceptance programs themselves. Controller, web,
 # tooling, test and documentation PRs fold into an integration PR or merge to
 # main, where Release accepts the merge: its Spark and refresh steps run when
 # the tested PR holds no candidate evidence (release-acceptance-core.yml).
-LANE_INPUTS = ("tests/acceptance/",)
+# The canary fixture feeds the Spark lane and the carry, so it accepts too.
+LANE_INPUTS = ("tests/acceptance/", "tests/fixtures/canonical-synthetic-canary/")
 
 
 def lane_selected(paths: Iterable[str], event: str) -> bool:

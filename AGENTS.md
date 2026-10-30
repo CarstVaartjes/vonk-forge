@@ -218,7 +218,7 @@ guards, web tests, Rust tests/lint, generated clients and Python lint/types.
 Integration selection follows transitive dependencies in `scripts/select-ci-areas`;
 unknown inputs run the integrations. Controller PostgreSQL checks always run.
 Integration PRs require the `release-acceptance` label and exact-commit candidate
-acceptance before `CI gate` passes. CI labels same-repository integration PRs.
+acceptance before `CI gate` passes. CI labels same-repository `integration/*` PRs.
 Candidate acceptance runs on a PR only with the `release-acceptance` label or
 when the change can alter the upgrade (agent, packaging, installers, deployment,
 protocol, candidate scripts and workflows; the selector owns that boundary);
