@@ -1,9 +1,11 @@
 """Terminal presentation of a cache-removal review.
 
 The default is the answer an operator needs before consenting: what is removed,
-what is kept and why, what blocks, and the exact next command. ``--verbose``
-(``--wide``) lists every asset and every owner finding, one line per shared
-object. The Controller owns every value shown; nothing is classified here.
+what is kept (by the Controller's own disposition word, with owner lines only
+from findings that exist), the Controller's blockers, and the exact next
+command. ``--verbose`` (``--wide``) lists every asset, every owner finding (one
+line per shared object) and every blocker. The Controller owns every value
+shown; nothing is classified or explained here.
 """
 
 from __future__ import annotations
@@ -111,10 +113,14 @@ def _summary(
     # A set's bytes total its member objects, so bytes and files count objects.
     files = [a for a in removed if a.kind == ASSET_MODEL_OBJECT]
     images = [a for a in removed if a.kind == ASSET_RUNTIME_IMAGE]
-    line = f"Removes {_size(files + images)} in {len(files)} files ({len(sets)} model sets)"
-    if images:
-        line += f" and {len(images)} runtime images"
-    print(line)
+    if removed:
+        line = (
+            f"Removes {_size(files + images)} in {len(files)} files "
+            f"({len(sets)} model sets)"
+        )
+        if images:
+            line += f" and {len(images)} runtime images"
+        print(line)
     states: dict[str, int] = defaultdict(int)
     for asset in removed:
         states[asset.availability] += 1
@@ -126,33 +132,29 @@ def _summary(
                 k if len(states) == 1 else f"{n} {k}" for k, n in sorted(states.items())
             )
         )
-    kept = [a for a in review.assets if a.disposition == ASSET_RETAIN_SHARED]
-    if kept:
-        users = {f.owner_id for f in sharing}
-        print(
-            f"Keeps {len(kept)} shared files ({_size(kept)}) also used by "
-            f"{len(users)} other cached model sets"
-        )
-        for (owner_kind, state), group in _group(sharing).items():
-            print(
-                f"  {owner_kind} ({state}): {len({f.asset_sha256 for f in group})} "
-                f"files kept for {len({f.owner_id for f in group})} owners"
+    for disposition in (ASSET_RETAIN_SHARED, ASSET_RETAIN_REFERENCED):
+        kept = [a for a in review.assets if a.disposition == disposition]
+        if not kept:
+            continue
+        objects = [a for a in kept if a.kind == ASSET_MODEL_OBJECT]
+        extra = [
+            f"{len([a for a in kept if a.kind == kind])} {label}"
+            for kind, label in (
+                (ASSET_MODEL_SET, "model sets"),
+                (ASSET_RUNTIME_IMAGE, "runtime images"),
             )
-    referenced = {
-        (a.kind, a.sha256)
-        for a in review.assets
-        if a.disposition == ASSET_RETAIN_REFERENCED
-    }
-    if referenced:
-        # The finding's own classification says why, not a guess here.
-        why = sorted(
-            {
-                f.classification
-                for f in (*review.references, *review.active_work)
-                if (f.asset_kind, f.asset_sha256) in referenced
-            }
+            if any(a.kind == kind for a in kept)
+        ]
+        print(
+            f"Keeps ({disposition}): {len(objects)} files ({_size(objects)})"
+            + "".join(f", {item}" for item in extra)
         )
-        print(f"Keeps {len(referenced)} assets still in use ({', '.join(why)})")
+    # Owner lines only from findings that exist for the shared files.
+    for (owner_kind, state), group in _group(sharing).items():
+        print(
+            f"  {owner_kind} ({state}): {len({f.asset_sha256 for f in group})} "
+            f"files kept for {len({f.owner_id for f in group})} owners"
+        )
 
 
 def _findings(heading: str, findings: Sequence[CacheRemovalFinding]) -> None:
@@ -167,20 +169,19 @@ def _blockers(review: CacheRemovalReview, *, verbose: bool) -> None:
     if not review.blockers:
         print("Blockers: none")
         return
-    groups: dict[tuple[str, bool, tuple[str, ...]], list[str]] = defaultdict(list)
+    groups: dict[tuple[str, bool, tuple[str, ...], str], int] = defaultdict(int)
     for blocker in review.blockers:
         given = blocker.recovery_actions
         actions = tuple(given) if isinstance(given, list) else ()
-        groups[(blocker.code, blocker.retryable, tuple(actions))].append(blocker.detail)
-    for (code, retryable, actions), details in sorted(groups.items()):
+        groups[(blocker.code, blocker.retryable, actions, blocker.detail)] += 1
+    for (code, retryable, actions, detail), count in sorted(groups.items()):
         retry = "retryable" if retryable else "not retryable"
-        count = f" x{len(details)}" if len(details) > 1 and not verbose else ""
-        print(f"Blocked: {code}{count} ({retry}): {details[0]}")
-        if verbose:
-            for detail in details[1:]:
-                print(f"  and: {detail}")
-        for action in actions:
-            print(f"  Next: {action}")
+        # Only exact duplicates collapse by default; --verbose repeats them.
+        for _ in range(count if verbose else 1):
+            suffix = f" x{count}" if count > 1 and not verbose else ""
+            print(f"Blocked: {code}{suffix} ({retry}): {detail}")
+            for action in actions:
+                print(f"  Next: {action}")
 
 
 def _detail(

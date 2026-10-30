@@ -10,6 +10,7 @@ from vonk_agent_protocol import (
     ArtifactLifecycleCode,
     AssetAvailability,
     ModelCacheCode,
+    RuntimeImageCode,
 )
 from vonk_control.cache_removal_review import (
     CacheAssetDisposition,
@@ -143,10 +144,8 @@ def test_default_review_is_a_summary(capsys: pytest.CaptureFixture[str]) -> None
     text = _human(capsys, review)
 
     assert "Removes 41.0 GiB (44023414784 bytes) in 41 files (2 model sets)" in text
-    assert (
-        "Keeps 9 shared files (9.0 GiB (9663676416 bytes)) also used by 13 other cached model sets"
-        in text
-    )
+    assert "Keeps (retain-shared): 9 files (9.0 GiB (9663676416 bytes))" in text
+    assert "model-cache-set-membership (complete): 9 files kept for 13 owners" in text
     assert "Blockers: none" in text
     assert "Active work: none" in text
     assert f"Confirm: vonkctl model remove {_SELECTOR} --yes --detach" in text
@@ -224,23 +223,27 @@ def test_recipe_aggregated_blocker_is_shown_as_the_controller_sent_it(
     assert f"Confirm: vonkctl recipe remove {_SELECTOR} --keep-model --yes" in text
 
 
-def test_verbose_lists_every_blocker_in_full(
+def test_only_exact_duplicate_blockers_collapse(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     review = _review()
-    review["blockers"] = [
+    mismatch = [
         CacheRemovalBlocker(
-            code=ModelCacheCode.REMOVAL_REFERENCED,
-            detail=f"owner {i} prevents removal",
-            retryable=True,
+            code=RuntimeImageCode.ARCHIVE_SIZE_MISMATCH,
+            detail=f"archive {name} has the wrong size",
+            retryable=False,
+            recovery_actions=["inspect"],
         ).model_dump(mode="json")
-        for i in range(3)
+        for name in ("alpha", "beta", "beta")
     ]
+    review["blockers"] = mismatch
     short = _human(capsys, review)
     full = _human(capsys, review, wide=True)
 
-    assert "x3" in short
-    assert all(f"owner {i} prevents removal" in full for i in range(3))
+    assert "archive alpha has the wrong size" in short
+    assert "archive beta has the wrong size" in short
+    assert f"{RuntimeImageCode.ARCHIVE_SIZE_MISMATCH} x2" in short
+    assert full.count("archive beta has the wrong size") == 2
 
 
 def test_json_review_is_unchanged_by_verbose(
@@ -281,23 +284,73 @@ def test_fleet_review_confirm_command_keeps_the_fleet_scope(
     assert f"Confirm: vonkctl model remove {_SELECTOR} --fleet --yes --detach" in text
 
 
-def test_protected_nas_copy_without_blockers_is_not_blocked(
+def _fleet_review(
+    assets: list[CacheRemovalAsset], *, nas_remove: bool, reason: object
+) -> dict[str, object]:
+    from vonk_control.fleet_model_removal_contract import FleetModelRemovalEffects
+
+    return seal_cache_removal_review(
+        CacheRemovalReviewContent(
+            resource_kind="model",
+            selector=_SELECTOR,
+            target_identity=_digest("model"),
+            with_model=None,
+            fleet=FleetModelRemovalEffects(
+                nas_remove=nas_remove,
+                nas_reason=reason,  # type: ignore[arg-type]
+                nas_detail="detail from the Controller",
+                targets=[],
+            ),
+            assets=assets,
+            references=[],
+            active_work=[],
+            blockers=[],
+            observed_at="2026-10-30T10:00:00Z",
+        )
+    ).model_dump(mode="json")
+
+
+def test_protected_nas_copy_keeps_every_asset_without_inventing_a_reason(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    from vonk_control.fleet_model_removal_contract import (
-        FleetModelRemovalEffects,
-        FleetRemovalReason,
-    )
+    from vonk_control.fleet_model_removal_contract import FleetRemovalReason
 
-    review = _review()
-    review["fleet"] = FleetModelRemovalEffects(
+    kept = CacheAssetDisposition.RETAIN_REFERENCED
+    review = _fleet_review(
+        [
+            _asset("model-set", "set-0", kept, 5 * _GIB),
+            *(_asset("model-object", f"obj-{i}", kept) for i in range(3)),
+        ],
         nas_remove=False,
-        nas_reason=FleetRemovalReason.REFERENCED,
-        nas_detail="A saved profile keeps the NAS copy",
-        targets=[],
-    ).model_dump(mode="json")
+        reason=FleetRemovalReason.REFERENCED,
+    )
     text = _human(capsys, review)
 
     assert "NAS removal: no" in text
+    assert "Keeps (retain-referenced): 3 files" in text
+    assert "()" not in text
+    assert "Removes" not in text
     assert "Blocked" not in text
+    assert "other cached model" not in text
     assert f"Confirm: vonkctl model remove {_SELECTOR} --fleet --yes --detach" in text
+
+
+def test_shared_fleet_object_without_membership_finding_names_no_sets(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from vonk_control.fleet_model_removal_contract import FleetRemovalReason
+
+    review = _fleet_review(
+        [
+            _asset("model-object", "gone", CacheAssetDisposition.REMOVE),
+            _asset("model-object", "kept", CacheAssetDisposition.RETAIN_SHARED),
+        ],
+        nas_remove=True,
+        reason=FleetRemovalReason.UNUSED,
+    )
+    text = _human(capsys, review)
+
+    assert "Removes" in text and "in 1 files" in text
+    assert "Keeps (retain-shared): 1 files" in text
+    assert "other" not in text.lower().replace("another", "")
+    assert " 0 " not in text.replace("0 model sets", "")
