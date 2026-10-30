@@ -96,6 +96,12 @@ class HTTPSResponse(io.BufferedIOBase):
                 return await work
 
         attempt = bounded()
+        # Runner.run arms its SIGINT handler only here, so only here can its
+        # Ctrl-C bookkeeping be missed.
+        armed = (
+            threading.current_thread() is threading.main_thread()
+            and signal.getsignal(signal.SIGINT) is signal.default_int_handler
+        )
         try:
             return self._runner.run(attempt)
         except KeyboardInterrupt:
@@ -107,8 +113,12 @@ class HTTPSResponse(io.BufferedIOBase):
             # Only the runner's SIGINT handler cancels this task (the deadline
             # becomes TimeoutError). Runner.run reports that cancel as Ctrl-C
             # only when its own interrupt counter saw it, and a signal landing
-            # between handler install and counter reset is missed. Whichever
-            # await it lands in, a cancelled task is the operator's interrupt.
+            # between handler install and counter reset is missed. When this
+            # run armed that handler, a cancelled task is the operator's
+            # interrupt, whichever await it landed in. Elsewhere (worker
+            # threads) it stays a cancel.
+            if not armed:
+                raise
             self._interrupted = True
             raise KeyboardInterrupt from None
         except (httpx2.HTTPError, OSError) as error:

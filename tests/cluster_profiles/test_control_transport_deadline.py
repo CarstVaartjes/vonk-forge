@@ -818,3 +818,30 @@ def test_sigint_landing_as_the_runner_arms_is_still_a_ctrl_c(monkeypatch):
             monkeypatch.undo()
     assert delivered
     assert response._interrupted
+
+
+def test_a_cancel_in_a_worker_thread_is_not_relabelled_a_ctrl_c():
+    """Only a run that armed Runner's SIGINT handler may report Ctrl-C."""
+    from cluster_profiles.control_transport import HTTPSResponse
+
+    outcome = []
+
+    def worker():
+        response = object.__new__(HTTPSResponse)
+        response._interrupted = False
+        with asyncio.Runner() as runner:
+            response._runner = runner
+            response._deadline = runner.get_loop().time() + 30
+
+            async def cancelled():
+                raise asyncio.CancelledError
+
+            try:
+                response._run(cancelled())
+            except BaseException as error:  # noqa: BLE001 - the outcome is the assertion
+                outcome.append((type(error), response._interrupted))
+
+    thread = threading.Thread(target=worker)
+    thread.start()
+    thread.join(10)
+    assert outcome == [(asyncio.CancelledError, False)]
