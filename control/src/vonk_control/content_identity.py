@@ -255,6 +255,32 @@ def same_build_units(first: str | None, second: str | None) -> bool:
     return first == second
 
 
+def recipe_model_digests(
+    session, revision_ids: Collection[str]
+) -> dict[str, frozenset[str]]:
+    """The model contents each recipe revision is bound to, by relational rows.
+
+    The binding rows were written with the revision and name the exact model
+    content. A revision without rows is absent.
+    """
+    from sqlalchemy import select
+
+    from .models import CatalogRecipeModelReference
+
+    found: dict[str, set[str]] = {}
+    if revision_ids:
+        for revision_id, model in session.execute(
+            select(
+                CatalogRecipeModelReference.recipe_revision_id,
+                CatalogRecipeModelReference.model_content_digest,
+            ).where(
+                CatalogRecipeModelReference.recipe_revision_id.in_(sorted(revision_ids))
+            )
+        ):
+            found.setdefault(revision_id, set()).add(model)
+    return {revision_id: frozenset(models) for revision_id, models in found.items()}
+
+
 def installations_using_models(session, contents: Collection[str]) -> frozenset[str]:
     """Installed (not uninstalled) installations that use ``contents``.
 

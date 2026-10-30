@@ -37,7 +37,6 @@ from .test_catalog_revision_collection import Catalog
 from .test_model_cache import (
     _artifact,
     _canonical_model,
-    _canonical_recipe,
     _download,
 )
 from .test_unused_storage_collection import (
@@ -127,7 +126,7 @@ def _parked_world(world: Catalog, service: ModelCacheService, root: Path):
         revision_row.content_digest = PARKED
 
     # An installation that never settled holds the third model.
-    revision = world.revision("held", 1, document=_canonical_recipe(PARKED))
+    revision = world.revision("held", 1)
     world.revision("held", 2, head="active")
     holder, _ = world.workload(revision, installation="installing", run="stopped")
     with world.sessions.begin() as session:

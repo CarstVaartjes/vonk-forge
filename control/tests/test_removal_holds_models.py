@@ -22,6 +22,8 @@ from vonk_control.model_cache_contract import CacheManifest
 from vonk_control.models import (
     Base,
     CatalogDocumentHead,
+    CatalogDocumentRevision,
+    CatalogRecipeModelReference,
     FleetProfile,
     ModelCacheSet,
     ModelCacheSetArtifact,
@@ -94,7 +96,25 @@ def _recipe(session: Session, slug: str, model: tuple[str, str], file_id: str) -
     )
     selection["files"][0]["file_id"] = file_id
     clean = RecipeDefinition.model_validate(document).model_dump(mode="json")
-    _doc(session, "recipe", PUBLISHER, slug, 1, clean)
+    revision = _doc(session, "recipe", PUBLISHER, slug, 1, clean)
+    model_revision = session.scalars(
+        select(CatalogDocumentRevision).where(
+            CatalogDocumentRevision.kind == "model",
+            CatalogDocumentRevision.content_digest == model[1],
+        )
+    ).one()
+    session.add(
+        CatalogRecipeModelReference(
+            recipe_revision_id=revision.id,
+            recipe_kind="recipe",
+            selection_id=str(selection["id"]),
+            model_revision_id=model_revision.id,
+            model_kind="model",
+            model_publisher=PUBLISHER,
+            model_slug=model[0],
+            model_content_digest=model[1],
+        )
+    )
 
 
 def _profile(session: Session, recipe: str) -> None:
