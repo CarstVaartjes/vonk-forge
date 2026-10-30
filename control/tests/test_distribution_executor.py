@@ -190,7 +190,7 @@ def test_complete_two_node_distribution_is_a_verified_skip() -> None:
     )
     plan = _plan(
         preparation=preparation,
-        storage=SimpleNamespace(artifact_digests=["c" * 64]),
+        storage=SimpleNamespace(artifact_set_sha256="c" * 64, artifact_set_bytes=1),
         image_digest="sha256:" + "d" * 64,
         build=SimpleNamespace(oci_layout_sha256="e" * 64, image_bytes=11),
         recipe_build_id=None,
@@ -214,7 +214,8 @@ def test_complete_two_node_distribution_is_a_verified_skip() -> None:
         "subphase": "target-copy",
         "skipped": True,
         "verified": False,
-        "verified_digests": ["c" * 64],
+        "verified_artifact_set_sha256": "c" * 64,
+        "verified_artifact_set_bytes": 1,
         "verified_build_id": None,
         "verified_image_digest": "sha256:" + "d" * 64,
         "verified_oci_layout_sha256": "e" * 64,
@@ -306,7 +307,7 @@ def test_partial_child_replays_and_aggregates_cached_target(agent_system) -> Non
     )
     plan = _plan(
         preparation=preparation,
-        storage=SimpleNamespace(artifact_digests=["a" * 64, "b" * 64]),
+        storage=SimpleNamespace(artifact_set_sha256="c" * 64, artifact_set_bytes=1),
         image_digest=None,
         build=SimpleNamespace(oci_layout_sha256=None, image_bytes=None),
         recipe_build_id=None,
@@ -639,7 +640,7 @@ def test_build_verify_handoff_reuses_content_from_another_producer() -> None:
                 ],
             ),
         ),
-        storage=SimpleNamespace(artifact_digests=[artifact_digest]),
+        storage=SimpleNamespace(artifact_set_sha256="c" * 64, artifact_set_bytes=1),
         image_digest=None,
         build=SimpleNamespace(oci_layout_sha256=layout_digest, image_bytes=11),
         recipe_build_id=build_id,
@@ -1109,7 +1110,6 @@ def test_model_download_is_a_durable_cache_child_with_exact_pins(
         plan.storage = ArtifactStorageImpact.model_construct(
             artifact_set_sha256=model.artifact_set_sha256,
             artifact_set_bytes=model.artifact_set_bytes,
-            artifact_digests=["1" * 64, "2" * 64],
         )
         plan.preparation = None
     phase = _phase(kind="transfer", subphase="model-download", index=2)
@@ -1504,7 +1504,8 @@ def test_production_composite_uncached_cache_then_two_target_distribution(
     plan = _plan(
         preparation=preparation,
         storage=SimpleNamespace(
-            artifact_digests=[item["sha256"] for item in artifacts],
+            artifact_set_sha256="c" * 64,
+            artifact_set_bytes=1,
             missing_nas_bytes=0,
         ),
         image_digest=image_digest,

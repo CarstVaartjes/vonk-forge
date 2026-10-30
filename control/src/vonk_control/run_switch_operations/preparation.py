@@ -81,7 +81,6 @@ class PreparationMixin:
         primary_model_digest = _primary_model_digest(revision.document)
         if primary_model_digest is None:
             return None
-        model_digests = tuple(inspection.artifact_digests)
         model_expected = inspection.artifact_set_bytes
         if model_expected is None or model_expected < 1:
             # The shared preparation contract requires the exact model set
@@ -160,7 +159,7 @@ class PreparationMixin:
             )
         model_completeness = (
             "unknown"
-            if not model_digests
+            if not inspection.artifact_count
             else "complete"
             if model_controller_ready
             and all(target.state == "ready" for target in model_targets)
@@ -170,7 +169,7 @@ class PreparationMixin:
             artifact_set_sha256=artifact_set_digest,
             model_content_sha256=primary_model_digest,
             recipe_revision_sha256=revision.content_digest,
-            artifact_count=max(1, len(model_digests)),
+            artifact_count=max(1, inspection.artifact_count),
             artifact_set_bytes=artifact_set_bytes,
             dependency_model_content_sha256=sorted(
                 set(inspection.dependency_model_content_sha256)

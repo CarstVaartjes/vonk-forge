@@ -344,7 +344,7 @@ class CompleteArtifactInspector:
             reclaimable_bytes=self.reclaimable_bytes,
             nas_coverage="complete",
             spark_coverage="complete" if missing_spark_bytes == 0 else "partial",
-            artifact_digests=(MODEL_ARTIFACT,),
+            artifact_count=1,
             reclaimable_digests=("1" * 64,) if self.reclaimable_bytes else (),
             artifact_set_sha256=MODEL_ARTIFACT_SET,
             artifact_set_bytes=1024,
@@ -503,7 +503,6 @@ class RecordingArtifactExecutor:
                 result=None,
             )
         if phase.kind == "verify":
-            digests = [MODEL_ARTIFACT]
             runtime_image = getattr(
                 getattr(plan, "preparation", None), "runtime_image", None
             )
@@ -514,7 +513,8 @@ class RecordingArtifactExecutor:
                 phase,
                 result={
                     "verified": True,
-                    "verified_digests": digests,
+                    "verified_artifact_set_sha256": MODEL_ARTIFACT_SET,
+                    "verified_artifact_set_bytes": 1024,
                     "verified_build_id": getattr(plan, "recipe_build_id", None),
                     "verified_image_digest": image_digest,
                     "verified_oci_layout_sha256": archive_sha256,
@@ -781,7 +781,8 @@ class ColdStartPhaseExecutor:
                 phase,
                 result={
                     "verified": True,
-                    "verified_digests": list(plan.storage.artifact_digests),
+                    "verified_artifact_set_sha256": plan.storage.artifact_set_sha256,
+                    "verified_artifact_set_bytes": plan.storage.artifact_set_bytes,
                     "verified_build_id": getattr(plan, "recipe_build_id", None),
                     "verified_image_digest": plan.image_digest,
                     "verified_oci_layout_sha256": plan.build.oci_layout_sha256,
@@ -2046,7 +2047,8 @@ def test_cold_production_phases_prepare_receipts_before_real_install_compile(
                     phase,
                     result={
                         "verified": True,
-                        "verified_digests": list(plan.storage.artifact_digests),
+                        "verified_artifact_set_sha256": plan.storage.artifact_set_sha256,
+                        "verified_artifact_set_bytes": plan.storage.artifact_set_bytes,
                         "verified_build_id": getattr(plan, "recipe_build_id", None),
                         "verified_image_digest": plan.image_digest,
                         "verified_oci_layout_sha256": plan.build.oci_layout_sha256,
@@ -2267,7 +2269,8 @@ class _ColdCompileExecutor:
                 phase,
                 result={
                     "verified": True,
-                    "verified_digests": list(plan.storage.artifact_digests),
+                    "verified_artifact_set_sha256": plan.storage.artifact_set_sha256,
+                    "verified_artifact_set_bytes": plan.storage.artifact_set_bytes,
                     "verified_build_id": getattr(plan, "recipe_build_id", None),
                     "verified_image_digest": plan.image_digest,
                     "verified_oci_layout_sha256": plan.build.oci_layout_sha256,

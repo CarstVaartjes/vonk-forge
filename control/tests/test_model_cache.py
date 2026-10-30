@@ -1315,10 +1315,9 @@ def test_canonical_dependency_closure_reaches_run_switch(
     assert inspection.artifact_set_bytes == (3 if shared_object else 6)
     assert inspection.required_bytes == inspection.artifact_set_bytes
     assert inspection.missing_nas_bytes == inspection.artifact_set_bytes
-    assert set(inspection.artifact_digests) == {
-        item.sha256 for item in manifest.artifacts
-    }
-    assert hashlib.sha256(b"").hexdigest() in inspection.artifact_digests
+    assert inspection.artifact_count == len(
+        {item.sha256 for item in manifest.artifacts}
+    )
 
 
 def test_download_persists_real_primary_and_auxiliary_bytes_and_deduplicates(

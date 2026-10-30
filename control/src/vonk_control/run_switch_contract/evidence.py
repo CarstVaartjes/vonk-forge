@@ -156,7 +156,6 @@ class ArtifactStorageImpact(StrictModel):
     spark_coverage: RunSwitchCoverage
     retention: RunSwitchRetention
     running_coverage: RunSwitchCoverage = "unknown"
-    artifact_digests: list[Digest] = Field(default_factory=list, max_length=256)
     reclaimable_digests: list[Digest] = Field(default_factory=list, max_length=256)
 
 

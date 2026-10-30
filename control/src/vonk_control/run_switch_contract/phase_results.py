@@ -40,7 +40,8 @@ class ArtifactVerificationResult(StrictModel):
 
     skipped: bool = False
     verified: Literal[True]
-    verified_digests: list[Digest] = Field(max_length=256)
+    verified_artifact_set_sha256: Digest | None
+    verified_artifact_set_bytes: int | None = Field(ge=1)
     verified_build_id: UuidId | None
     verified_image_digest: Annotated[
         str, StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$")
@@ -156,7 +157,8 @@ class RunSwitchCachedTransferResult(_RunSwitchPhaseBase):
     subphase: Literal["target-copy"]
     skipped: Literal[True]
     verified: Literal[False]
-    verified_digests: list[Digest] = Field(max_length=256)
+    verified_artifact_set_sha256: Digest | None
+    verified_artifact_set_bytes: int | None = Field(ge=1)
     verified_build_id: UuidId | None
     verified_image_digest: Annotated[
         str, StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$")

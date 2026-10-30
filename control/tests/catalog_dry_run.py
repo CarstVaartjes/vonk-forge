@@ -182,14 +182,15 @@ class CatalogDryRun:
             artifact_set_sha256=manifest.digest,
             artifact_set_bytes=manifest.expected_bytes,
         )
-        digests = list({item.sha256: None for item in manifest.artifacts})
         return cast(
             "RunSwitchPlan",
             SimpleNamespace(
                 plan_digest="c" * 64,
                 mapping=None,
                 preparation=SimpleNamespace(model=model),
-                storage=SimpleNamespace(artifact_digests=digests),
+                storage=SimpleNamespace(
+                    artifact_set_sha256="c" * 64, artifact_set_bytes=1
+                ),
             ),
         )
 

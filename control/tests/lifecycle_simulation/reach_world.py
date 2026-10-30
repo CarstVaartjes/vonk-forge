@@ -128,7 +128,8 @@ class CacheArtifactExecutor:
                 phase,
                 result={
                     "verified": True,
-                    "verified_digests": list(plan.storage.artifact_digests),
+                    "verified_artifact_set_sha256": plan.storage.artifact_set_sha256,
+                    "verified_artifact_set_bytes": plan.storage.artifact_set_bytes,
                     "verified_build_id": getattr(plan, "recipe_build_id", None),
                     "verified_image_digest": plan.image_digest,
                     "verified_oci_layout_sha256": plan.build.oci_layout_sha256,

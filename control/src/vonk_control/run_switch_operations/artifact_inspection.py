@@ -217,7 +217,7 @@ class DatabaseRunSwitchArtifactInspector:
                 else PlacementInstallState.PARTIAL.value
             ),
             spark_coverage="complete" if missing_spark == 0 else "partial",
-            artifact_digests=tuple(model_digests),
+            artifact_count=len(model_digests),
             reclaimable_digests=tuple(sorted(reclaimable_digests)),
             freshness=(),
             blockers=tuple(blockers),

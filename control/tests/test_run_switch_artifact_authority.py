@@ -25,7 +25,7 @@ def test_missing_artifact_authority_does_not_poison_repaired_inspection(
     assert inspection.required_bytes is None
     assert inspection.missing_nas_bytes is None
     assert inspection.missing_spark_bytes is None
-    assert not inspection.artifact_digests
+    assert not inspection.artifact_count
     sessions, _lifecycle, _queue, _mapping, _build, nodes = setup_services(tmp_path)
     provider = ModelCacheManifestProvider(missing_nas_bytes=0)
     inspector.bind_model_cache(provider)
