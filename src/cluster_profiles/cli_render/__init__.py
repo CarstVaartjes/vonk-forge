@@ -66,5 +66,5 @@ from .profile import _profile as _profile
 from .profile import _profile_endpoints as _profile_endpoints
 from .progress import _measured_progress as _measured_progress
 from .progress import progress_line as progress_line
-from .review import _cache_removal_review as _cache_removal_review
+from .removal_review import _cache_removal_review as _cache_removal_review
 from .review import _preview as _preview
