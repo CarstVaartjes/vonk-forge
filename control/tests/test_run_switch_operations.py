@@ -512,8 +512,6 @@ class RecordingArtifactExecutor:
                 phase,
                 result={
                     "verified": True,
-                    "verified_artifact_set_sha256": MODEL_ARTIFACT_SET,
-                    "verified_artifact_set_bytes": 1024,
                     "verified_build_id": getattr(plan, "recipe_build_id", None),
                     "verified_image_digest": image_digest,
                     "verified_oci_layout_sha256": archive_sha256,
@@ -780,8 +778,6 @@ class ColdStartPhaseExecutor:
                 phase,
                 result={
                     "verified": True,
-                    "verified_artifact_set_sha256": plan.storage.artifact_set_sha256,
-                    "verified_artifact_set_bytes": plan.storage.artifact_set_bytes,
                     "verified_build_id": getattr(plan, "recipe_build_id", None),
                     "verified_image_digest": plan.image_digest,
                     "verified_oci_layout_sha256": plan.build.oci_layout_sha256,
@@ -1364,8 +1360,6 @@ def test_malformed_operation_is_reconciled_without_aborting_the_batch(
         payload = copy.deepcopy(accepted.payload)
         if damage == "plan":
             payload["plan"] = {"not": "a plan"}
-            # With a readable intent the job re-plans instead; none, it ends.
-            payload["intent"] = {"not": "an intent"}
         session.add(
             Job(
                 id=malformed_id,
@@ -2048,8 +2042,6 @@ def test_cold_production_phases_prepare_receipts_before_real_install_compile(
                     phase,
                     result={
                         "verified": True,
-                        "verified_artifact_set_sha256": plan.storage.artifact_set_sha256,
-                        "verified_artifact_set_bytes": plan.storage.artifact_set_bytes,
                         "verified_build_id": getattr(plan, "recipe_build_id", None),
                         "verified_image_digest": plan.image_digest,
                         "verified_oci_layout_sha256": plan.build.oci_layout_sha256,
@@ -2270,8 +2262,6 @@ class _ColdCompileExecutor:
                 phase,
                 result={
                     "verified": True,
-                    "verified_artifact_set_sha256": plan.storage.artifact_set_sha256,
-                    "verified_artifact_set_bytes": plan.storage.artifact_set_bytes,
                     "verified_build_id": getattr(plan, "recipe_build_id", None),
                     "verified_image_digest": plan.image_digest,
                     "verified_oci_layout_sha256": plan.build.oci_layout_sha256,

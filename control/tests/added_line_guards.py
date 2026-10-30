@@ -203,36 +203,46 @@ def security_refusals() -> frozenset[str]:
     return frozenset(names)
 
 
-# Lists whose length the model or recipe sets (files, digests, artifacts,
-# objects) are bounded by bytes (the document or wire budget), never by an
-# item count: a 286-file model failed planning on a 256-digest cap.
-_MODEL_SIZED_FIELD = re.compile(r"digest|artifact|file|object", re.IGNORECASE)
+# Sizes the model or recipe sets (files, digests, artifacts, objects, shards)
+# are bounded by bytes (the document or wire budget), never by an item count:
+# a 286-file model failed planning on a 256-digest cap.
+_MODEL_SIZED_FIELD = re.compile(
+    r"count|digest|artifact|file|object|shard|path", re.IGNORECASE
+)
 # A real protocol limit states why on the line: ``# item-count-limit: <why>``.
 ITEM_COUNT_PRAGMA = "# item-count-limit:"
 
 
 def model_sized_count_caps(source: str) -> list[int]:
-    """Lines giving a digest/artifact/file/object list a ``max_length=<int>``."""
+    """Lines capping a model-sized list (``max_length``) or count (``le``)."""
     lines = source.splitlines()
     found: set[int] = set()
     for node in ast.walk(ast.parse(source)):
         if not isinstance(node, ast.AnnAssign) or not isinstance(node.target, ast.Name):
             continue
-        if not _MODEL_SIZED_FIELD.search(node.target.id):
+        name = node.target.id
+        # A byte size is the bound the owner wants; only counts are refused.
+        if not _MODEL_SIZED_FIELD.search(name) or "bytes" in name:
             continue
         annotation = ast.unparse(node.annotation)
-        if not re.search(r"\b(?:list|tuple|Sequence)\[", annotation):
-            continue
+        is_list = bool(re.search(r"\b(?:list|tuple|Sequence)\[", annotation))
+        is_int = bool(re.search(r"\bint\b", annotation))
         for call in ast.walk(node):
             if not isinstance(call, ast.Call):
                 continue
             for keyword in call.keywords:
-                if (
-                    keyword.arg == "max_length"
-                    and isinstance(keyword.value, ast.Constant)
-                    and isinstance(keyword.value.value, int)
-                    and ITEM_COUNT_PRAGMA not in lines[keyword.value.lineno - 1]
-                ):
+                capped = (
+                    (is_list and keyword.arg == "max_length")
+                    or (is_int and not is_list and keyword.arg == "le")
+                ) and (
+                    # A number or a named constant: both are an item count.
+                    isinstance(keyword.value, ast.Name)
+                    or (
+                        isinstance(keyword.value, ast.Constant)
+                        and isinstance(keyword.value.value, int)
+                    )
+                )
+                if capped and ITEM_COUNT_PRAGMA not in lines[keyword.value.lineno - 1]:
                     found.add(keyword.value.lineno)
     return sorted(found)
 

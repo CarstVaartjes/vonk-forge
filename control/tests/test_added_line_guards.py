@@ -1632,6 +1632,9 @@ _ITEM_COUNT = (
     "    files: list[F] = Field(max_length=8)  # item-count-limit: wire frame\n"
     "    node_ids: list[str] = Field(max_length=32)\n"
     "    digest: str = Field(max_length=64)\n"
+    "    input_files: list[In] = Field(max_length=MAX_INPUT_FILES)\n"
+    "    artifact_count: int = Field(ge=1, le=1024)\n"
+    "    artifact_bytes: int = Field(ge=1, le=1024)\n"
 )
 
 
@@ -1640,5 +1643,9 @@ def test_item_count_cap_on_a_model_sized_list_is_flagged() -> None:
     path = "control/src/vonk_control/plan_contract.py"
     assert check_source(path, _ITEM_COUNT, {2}, modes=("item-counts",))
     assert check_source(path, _ITEM_COUNT, {5}, modes=("item-counts",))
-    assert not check_source(path, _ITEM_COUNT, {6, 7, 8}, modes=("item-counts",))
+    assert not check_source(path, _ITEM_COUNT, {7, 8, 9}, modes=("item-counts",))
     assert not check_source(path, _ITEM_COUNT, {1}, modes=("item-counts",))
+    # A named constant is a count too; so is ``le`` on a count field.
+    assert check_source(path, _ITEM_COUNT, {10}, modes=("item-counts",))
+    assert check_source(path, _ITEM_COUNT, {11}, modes=("item-counts",))
+    assert not check_source(path, _ITEM_COUNT, {12}, modes=("item-counts",))

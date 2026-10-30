@@ -46,7 +46,6 @@ from ..recipe_build_cancellation import (
 )
 from ..run_switch_contract import (
     RunSwitchOperation,
-    RunSwitchOperationResult,
     RunSwitchPlan,
 )
 from ..stored_json import read_row_column
@@ -69,16 +68,10 @@ from .planning_helpers import (
     _digest,
     _now,
     _run_switch_payload,
-    _stored_intent,
     _stored_job_plan,
 )
 from .provider import _ADAPTER
-from .result_helpers import (
-    _persisted_result,
-    _progress_damaged,
-    _progress_without_receipts,
-    _read_progress,
-)
+from .result_helpers import _persisted_result, _progress_damaged, _read_progress
 
 if TYPE_CHECKING:
     from .service import RunSwitchOperationService
@@ -290,21 +283,11 @@ class ReservationMixin:
             if row is None or row.kind not in _OPERATION_KINDS:
                 return False
             plan = _stored_job_plan(row)
-            parent = _run_switch_payload(row)
-            stored = _stored_intent(row) if parent is None else None
-            if stored is not None:
-                # Stored before the plan contract changed: the receipts of the
-                # old shape are dropped and the intent re-plans (a Start it
-                # issued is adopted by request key, never cancelled).
-                healed = _progress_without_receipts(row.result)
-                persisted_progress = healed or RunSwitchOperationResult()
-            else:
-                stored_result = read_row_column(row, "result")
-                if _progress_damaged(stored_result):
-                    # Unreadable evidence of what was issued is never re-planned
-                    # from the accepted payload: a Start may already exist.
-                    return False
-                persisted_progress = _read_progress(stored_result)
+            if _progress_damaged(read_row_column(row, "result")):
+                # Unreadable evidence of what was issued is never re-planned
+                # from the accepted payload: a Start may already exist.
+                return False
+            persisted_progress = _read_progress(read_row_column(row, "result"))
             if (
                 plan is not None
                 and plan.allowed
@@ -318,15 +301,9 @@ class ReservationMixin:
                 return False
             due = row.next_action_at
             if due is not None and now < _aware(due):
-                # An old-shape job has nothing else to do until its re-plan is due.
-                return stored is not None
-            intent = (
-                parent.intent
-                if parent is not None
-                else stored.intent
-                if stored is not None
-                else None
-            )
+                return False
+            parent = _run_switch_payload(row)
+            intent = parent.intent if parent is not None else None
             if intent is None:
                 return False
             actor = row.actor
@@ -381,21 +358,9 @@ class ReservationMixin:
             ):
                 return True
             current_plan = _stored_job_plan(current)
-            current_stored = (
-                _stored_intent(current)
-                if _run_switch_payload(current) is None
-                else None
-            )
-            if current_stored is not None:
-                progress = (
-                    _progress_without_receipts(current.result)
-                    or RunSwitchOperationResult()
-                )
-            else:
-                current_result = read_row_column(current, "result")
-                if _progress_damaged(current_result):
-                    return False
-                progress = _read_progress(current_result)
+            if _progress_damaged(read_row_column(current, "result")):
+                return False
+            progress = _read_progress(read_row_column(current, "result"))
             if (
                 current_plan is not None
                 and current_plan.allowed
@@ -427,19 +392,7 @@ class ReservationMixin:
             if refreshed is not None and refreshed.allowed and not targets_changed:
                 current_parent = _run_switch_payload(current)
                 if current_parent is None:
-                    if current_stored is None:
-                        return False
-                    current_parent = RunSwitchJobPayload(
-                        schema_version=2,
-                        operation_kind=current_stored.operation_kind,
-                        action=refreshed.action,
-                        plan_digest=refreshed.plan_digest,
-                        plan=refreshed,
-                        intent=current_stored.intent,
-                        progress=progress,
-                        workload_intent_ordinal=current_stored.workload_intent_ordinal,
-                        retry_of=current_stored.retry_of,
-                    )
+                    return False
                 current.payload = serialize_json_value(
                     current_parent.model_copy(
                         update={"plan": refreshed, "plan_digest": refreshed.plan_digest}
@@ -514,8 +467,7 @@ class ReservationMixin:
             current.result = _persisted_result(progress)
             current_parent = _run_switch_payload(current)
             if current_parent is None:
-                # Still an old-shape job waiting for its next re-plan.
-                return current_stored is not None
+                return False
             current.payload = serialize_json_value(
                 current_parent.model_copy(update={"progress": progress})
             )

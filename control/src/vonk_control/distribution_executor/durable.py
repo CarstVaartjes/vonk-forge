@@ -135,8 +135,6 @@ class DurableDistributionPhaseExecutor(DistributionChildren):
                         subphase=ProfileChildPhase.TARGET_COPY.value,
                         skipped=True,
                         verified=False,
-                        verified_artifact_set_sha256=plan.storage.artifact_set_sha256,
-                        verified_artifact_set_bytes=plan.storage.artifact_set_bytes,
                         verified_build_id=build_id,
                         verified_image_digest=image_digest,
                         verified_oci_layout_sha256=archive_digest,

@@ -214,8 +214,6 @@ def test_complete_two_node_distribution_is_a_verified_skip() -> None:
         "subphase": "target-copy",
         "skipped": True,
         "verified": False,
-        "verified_artifact_set_sha256": "c" * 64,
-        "verified_artifact_set_bytes": 1,
         "verified_build_id": None,
         "verified_image_digest": "sha256:" + "d" * 64,
         "verified_oci_layout_sha256": "e" * 64,

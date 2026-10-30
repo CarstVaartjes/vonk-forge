@@ -127,36 +127,6 @@ def _progress_damaged(value: object) -> bool:
     return isinstance(_stored_result(value), Residue)
 
 
-def _progress_without_receipts(value: object) -> RunSwitchOperationResult | None:
-    """Progress of a job stored before its receipts changed shape.
-
-    Receipts of the retired shape are dropped, as are measurements: the job
-    re-plans, and the new plan starts with no results and adopts what the old
-    one issued (its start, by deterministic request key).
-    """
-
-    if not isinstance(value, Mapping):
-        return None
-    try:
-        return RunSwitchOperationResult.model_validate_json(
-            canonical_message(
-                {
-                    **value,
-                    "phase_results": [],
-                    "completed_phases": [],
-                    "completed_bytes": 0,
-                    "total_bytes": None,
-                    "total_bytes_known": False,
-                    "operation": None,
-                    "members": [],
-                }
-            ),
-            strict=True,
-        )
-    except (TypeError, ValueError):
-        return None
-
-
 def _read_progress(value: object) -> RunSwitchOperationResult:
     result = _parse_persisted_result(value)
     return result if result is not None else RunSwitchOperationResult()

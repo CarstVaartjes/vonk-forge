@@ -44,12 +44,7 @@ from .constants import (
 )
 from .errors import RunSwitchIssuedWorkloadPending
 from .ownership import _checkpoint_matches, _complete_cancellation
-from .planning_helpers import (
-    _aware,
-    _now,
-    _start_parent,
-    _workload_intent_ordinal,
-)
+from .planning_helpers import _aware, _now, _run_switch_payload, _start_parent
 from .provider import _ADAPTER
 from .result_helpers import _observe_progress, _persisted_result, _read_progress
 
@@ -74,7 +69,8 @@ class RetryHoldsMixin:
     def _scope_intent_status(session: Session, job: Job) -> str:
         """Distinguish malformed authority from a later authorized node head."""
 
-        ordinal = _workload_intent_ordinal(job)
+        parent = _run_switch_payload(job)
+        ordinal = parent.workload_intent_ordinal if parent is not None else None
         if type(ordinal) is not int or ordinal < 1:
             return "invalid"
         nodes = session.scalars(

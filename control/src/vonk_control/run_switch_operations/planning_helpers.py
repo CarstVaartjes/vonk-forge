@@ -4,16 +4,12 @@ from __future__ import annotations
 
 import hashlib
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import (
     Literal,
     TypeGuard,
-    cast,
-    get_args,
 )
 
-from pydantic import TypeAdapter, ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
@@ -27,7 +23,6 @@ from ..categorized_errors import (
 )
 from ..job_documents import (
     RecipeStartParent,
-    RunSwitchIntent,
     RunSwitchJobPayload,
 )
 from ..memory_reservations import (
@@ -160,59 +155,6 @@ def _as_reason(
 def _run_switch_payload(job: Job) -> RunSwitchJobPayload | None:
     payload = read_row_column(job, "payload")
     return payload if isinstance(payload, RunSwitchJobPayload) else None
-
-
-_OperationKind = Literal["recipe.run-switch.v2", "recipe.stop.v2", "recipe.cleanup.v2"]
-
-
-@dataclass(frozen=True)
-class StoredIntent:
-    """What a job's payload still says when its plan no longer reads whole."""
-
-    operation_kind: _OperationKind
-    intent: RunSwitchIntent
-    workload_intent_ordinal: int | None
-    retry_of: str | None
-
-
-_INTENT = TypeAdapter(RunSwitchIntent)
-
-
-def _stored_intent(job: Job) -> StoredIntent | None:
-    """The accepted intent of a job stored in a shape the plan contract retired.
-
-    A plan or receipt written before a contract change fails strict parsing as a
-    whole, but the intent is the owner's request and reads on its own: the job
-    re-plans from it and adopts the effects it already issued, instead of being
-    rejected (which would cancel a start in progress).
-    """
-
-    payload = job.payload
-    if not isinstance(payload, Mapping):
-        return None
-    kind = payload.get("operation_kind")
-    ordinal = payload.get("workload_intent_ordinal")
-    retry_of = payload.get("retry_of")
-    try:
-        intent = _INTENT.validate_python(payload.get("intent"), strict=True)
-    except ValidationError:
-        return None
-    if kind not in get_args(_OperationKind):
-        return None
-    return StoredIntent(
-        operation_kind=cast(_OperationKind, kind),
-        intent=intent,
-        workload_intent_ordinal=ordinal if type(ordinal) is int else None,
-        retry_of=retry_of if isinstance(retry_of, str) else None,
-    )
-
-
-def _workload_intent_ordinal(job: Job) -> int | None:
-    parent = _run_switch_payload(job)
-    if parent is not None:
-        return parent.workload_intent_ordinal
-    stored = _stored_intent(job)
-    return stored.workload_intent_ordinal if stored is not None else None
 
 
 def _stored_job_plan(job: Job) -> RunSwitchPlan | None:
