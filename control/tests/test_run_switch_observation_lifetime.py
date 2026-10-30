@@ -169,12 +169,9 @@ def test_artifact_observation_repairs_or_ends_and_admits_fresh(tmp_path, fault, 
                     receipt = RunSwitchCleanupResult(
                         phase=ProfileChildPhase.CLEANUP.value,
                         scope="spark-local",
-                        reclaimed_bytes=0,
+                        # More than the plan allowed to reclaim.
+                        reclaimed_bytes=10**9 if fault == "unplanned-cleanup" else 0,
                         protected_referenced_bytes=0,
-                        reclaimed_digests=["f" * 64]
-                        if fault == "unplanned-cleanup"
-                        else [],
-                        protected_digests=[],
                         nas_evicted=fault == "nas-eviction",
                     )
                 return PhaseExecution(result=receipt)

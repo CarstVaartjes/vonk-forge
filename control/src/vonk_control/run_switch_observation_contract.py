@@ -103,9 +103,6 @@ class RunSwitchStoredIdentity(BaseModel):
 
 DigestValue = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
 ObservedBytes = Annotated[int, Field(ge=0)] | None
-ObservedDigests = Annotated[
-    list[DigestValue] | None, readable_or_none(TypeAdapter(list[DigestValue]))
-]
 
 
 class RunSwitchArtifactGuardEvidence(BaseModel):
@@ -131,8 +128,6 @@ class RunSwitchArtifactGuardEvidence(BaseModel):
     nas_evicted: bool | None = None
     reclaimed_bytes: ObservedBytes = None
     protected_referenced_bytes: ObservedBytes = None
-    reclaimed_digests: ObservedDigests = None
-    protected_digests: ObservedDigests = None
 
 
 class RunSwitchObservedImageIdentity(BaseModel):
