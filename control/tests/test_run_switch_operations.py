@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import errno
 import hashlib
+import io
 import json
 import re
 import uuid
@@ -31,6 +32,7 @@ from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_control.auth import CursorCodec
 from vonk_control.catalog_revision_contract import (
     read_catalog_projection,
+    read_recipe_projection,
     write_catalog_projection,
 )
 from vonk_control.cluster_mappings import ClusterMappingService
@@ -144,7 +146,7 @@ from vonk_control.runtime_image_preparation import (
     prepare_runtime_image,
 )
 from vonk_control.runtime_preflight import latest_result
-from vonk_control.source_bundles import SourceBundleStore
+from vonk_control.source_bundles import SourceBundleStore, generate_source_bundle
 from vonk_forge_contracts import RecipeDefinition, document_sha256
 
 from .inventory_artifact_support import (
@@ -3453,13 +3455,62 @@ def test_installed_recipe_whose_image_is_missing_on_a_spark_is_healed_not_starte
         }
 
 
+def _build_service_that_reaches_the_archive_check(
+    tmp_path: Path, sessions, build_id: str, archive_present
+) -> RecipeBuildService:
+    """A real build service whose resolve() gets as far as the archive check.
+
+    The fixture's source bundle is stored and its build row carries the input
+    identity the current recipe reproduces, so resolve() only stops at the
+    archive callable.
+    """
+
+    bundles = SourceBundleStore(tmp_path / "sources")
+    bundle = generate_source_bundle({"Dockerfile": b"FROM scratch\nUSER 10001:10001\n"})
+    bundles.put(bundle.sha256, io.BytesIO(bundle.archive))
+    builder_digest = "a" * 64
+    with sessions.begin() as session:
+        build = session.get(RecipeBuild, build_id)
+        assert build is not None
+        revision = session.get(CatalogDocumentRevision, build.recipe_revision_id)
+        assert revision is not None
+        projected = read_recipe_projection(revision).model_copy(
+            update={"source_bundle_sha256": bundle.sha256}
+        )
+        session.execute(
+            update(CatalogDocumentRevision)
+            .where(CatalogDocumentRevision.id == revision.id)
+            .values(projected=write_catalog_projection(projected))
+        )
+        build.source_bundle_sha256 = bundle.sha256
+        build.policy_report = {
+            **build.policy_report,
+            "source_bundle_sha256": bundle.sha256,
+            "builder_binary_digest": builder_digest,
+        }
+        revision_id = revision.id
+    probe = RecipeBuildService(
+        sessions, bundles=bundles, build_archive_available=lambda *_: True
+    )
+    resolution = probe._resolve_once(revision_id)
+    with sessions.begin() as session:
+        build = session.get(RecipeBuild, build_id)
+        assert build is not None
+        build.build_input_sha256 = resolution.build_input_for_builder(builder_digest)
+    assert probe.reusable_build_id(revision_id) == build_id
+    return RecipeBuildService(
+        sessions, bundles=bundles, build_archive_available=archive_present
+    )
+
+
 def test_installed_reuse_is_decided_without_asking_the_nas_archive(
     tmp_path: Path,
 ) -> None:
     """Which wrong implementation: reuse that still consults archive presence.
 
-    The production wiring: the real build service and the planner get the same
-    archive check; both raise if the reuse decision reads archive presence.
+    Production wiring: the real build service and the planner share the same
+    archive check, and resolve() reaches it for this recipe (proved below), so
+    any reuse decision that resolves a build raises.
     """
 
     sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
@@ -3470,11 +3521,16 @@ def test_installed_reuse_is_decided_without_asking_the_nas_archive(
     def never_asked(_digest, _size):
         raise AssertionError("installation reuse must not read NAS archive presence")
 
-    lifecycle._builds = RecipeBuildService(
-        sessions,
-        bundles=SourceBundleStore(tmp_path / "sources"),
-        build_archive_available=never_asked,
+    lifecycle._builds = _build_service_that_reaches_the_archive_check(
+        tmp_path, sessions, build_id, never_asked
     )
+    with sessions() as session:
+        build = session.get(RecipeBuild, build_id)
+        assert build is not None
+        revision_id = build.recipe_revision_id
+    with pytest.raises(AssertionError, match="archive presence"):
+        lifecycle.reusable_build_id(revision_id)
+
     service = RunSwitchOperationService(
         sessions,
         lifecycle=lifecycle,
