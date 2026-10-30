@@ -31,10 +31,25 @@ inputs remain conservative. The PostgreSQL fault-recovery test runs once in
 the complete Controller suite, without a second standalone job.
 
 Integration PRs must accept their own candidate before merge. CI applies the
-`release-acceptance` label to same-repository PRs; `CI gate` requires their exact
-candidate's acceptance. See [the contributor guide](../contributor.md#ci-and-pre-merge-release-acceptance)
+`release-acceptance` label to same-repository `integration/*` PRs (the branch
+alone selects acceptance); `CI gate` requires their exact
+candidate's acceptance. A PR without the label runs that acceptance only when it
+changes upgrade-sensitive paths (`CARRY_INPUTS`) or the acceptance programs;
+Controller, web, tooling, test and documentation PRs fold into an integration
+PR or are accepted by main's Release, and their `CI gate` does not wait for it. A component PR merged straight to
+main leaves no candidate evidence, so Release runs the Spark acceptance (and the
+recipe refresh only if the change can alter the upgrade) itself.
+See [the contributor guide](../contributor.md#ci-and-pre-merge-release-acceptance)
 for dispatch by ref and protected-environment configuration. The PR and main
 publishers call the same candidate assembly and acceptance workflows.
+
+Only the `release-acceptance` label starts a new CI run. Any other label runs in
+its own concurrency group, so it never cancels the run in progress, and every job
+skips it. Only `CI gate` is renamed on that run (`CI gate (label ignored)`), so
+no such run reports a `CI gate` that could satisfy the requirement while the real
+run is pending. Other jobs keep their names: a job skipped by its own `if` shows
+its name expression unevaluated, which would break a required check such as
+`Compose integration` on pull requests that skip it.
 
 The acceptance's upgrade carry (a workload keeps serving while the Controller
 is redeployed and the agent upgraded to the candidate) runs on main's release
@@ -42,9 +57,8 @@ for every merge. A pull request carries its own candidate only when it changes
 what the upgrade is made of: the agent, its packaging and installers, the
 deployment, the Controller-to-agent protocol, and the scripts, actions and
 workflows that assemble and accept a candidate (`CARRY_INPUTS` in
-`scripts/select-ci-areas`). Controller, web, test, tooling and documentation
-changes get the clean NAS and Spark exercises on the pull request and the
-carry on main; the `release-acceptance` label asks for the carry on any PR.
+`scripts/select-ci-areas`). Other changes get no acceptance on the pull request
+and the carry on main; the `release-acceptance` label asks for both on any PR.
 The pull request's acceptance summary says when the carry was left to main.
 
 The carry waits on behaviour, never on a fixed timer. After the baseline

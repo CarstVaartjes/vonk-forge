@@ -37,7 +37,7 @@ Integration selection uses the conservative dependency closure documented in
 Controller suites include their real PostgreSQL tests on every PR.
 
 Integration PRs carry the `release-acceptance` label. CI adds it to
-same-repository integration PRs and requires acceptance of that exact PR merge
+same-repository `integration/*` PRs (the branch alone selects acceptance) and requires acceptance of that exact PR merge
 commit in `CI gate`. Create that repository label before enabling this workflow.
 The standalone `labeled` and `synchronize` events rerun acceptance; a green result on an
 older commit does not cover a new one. Fork PRs need reviewed source in a

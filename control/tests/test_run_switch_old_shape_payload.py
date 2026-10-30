@@ -1,4 +1,4 @@
-"""An upgrade never stops a load in progress: retired plan fields are dropped on read."""
+"""An upgrade never stops a load in progress: the retired plan fields still read."""
 
 import copy
 import json
