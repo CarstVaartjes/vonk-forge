@@ -164,6 +164,7 @@ def _pressure(
         max(shortfall, line_shortfall) + reserve,
         why,
         demanded,
+        line_shortfall,
     )
 
 
@@ -218,11 +219,15 @@ def _relieve(
     if paused is not None and now < paused:
         outcome.outcome = "paused"
         return outcome
-    if pressure.demanded and outcome.freeable < pressure.shortfall:
+    unmet = pressure.demanded and outcome.freeable < pressure.shortfall
+    if unmet and not pressure.line_shortfall:
         # Removing part of it would cost cached items and still not admit
-        # the work that asked.
+        # the work that asked, and nothing else is short.
         outcome.outcome = "insufficient_after_eviction"
         return outcome
+    # Below the low-space line, eviction goes on toward the line (and as far
+    # as the demand, as far as the unused items reach) even when the refused
+    # work cannot be met: the co-located services need the line either way.
     ordered = _eviction_order(items)
     queued = 0
     measured_removal = 0
@@ -253,6 +258,8 @@ def _relieve(
         self._reclaim_blobs()
     if measured_removal:
         self._rounds[pressure.scope] = _Round(measured_removal, pressure.free)
+        if unmet:
+            outcome.outcome = "insufficient_after_eviction"  # for the remainder
     elif pressure.demanded and not outcome.stopping:
         outcome.outcome = "insufficient_after_eviction"
     elif not outcome.stopping:  # else evicting: removal follows the Stop

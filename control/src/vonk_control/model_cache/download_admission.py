@@ -126,7 +126,9 @@ class DownloadAdmissionMixin:
             if isinstance(planned, ModelCacheTransfer)
             else cache._transfer_state_for_manifest(manifest, force=force)
         )
-        capacity = cache._capacity_wait(waiting_for, transfer.total_bytes)
+        capacity = cache._capacity_wait(
+            waiting_for, int(str(preview["_required_bytes"]))
+        )
         wait_until = None if capacity is None else capacity[1]
         payload = _write_operation_payload(
             "download",
@@ -400,6 +402,7 @@ class DownloadAdmissionMixin:
             # appended: the disk peaks at the file plus its largest part.
             needed = transfer.total_bytes + _split_transient_bytes(manifest, cached)
             fits = needed <= available_bytes
+            required = needed
             if not fits:
                 cache._request_storage(
                     needed, ModelCacheBlockerCode.INSUFFICIENT_RESERVED_STORAGE
@@ -410,12 +413,11 @@ class DownloadAdmissionMixin:
             )
             # A preview compares with the free disk alone: the claim gate is
             # where a transfer also makes room for the running ones.
-            fits = cache._storage_fits(
-                cache._transfer_need(
-                    manifest, transfer, replaces=False, measured=True, cached=cached
-                ),
-                {},
+            need = cache._transfer_need(
+                manifest, transfer, replaces=False, measured=True, cached=cached
             )
+            fits = cache._storage_shortfall(need, {}) is None
+            required = cache._committed_bytes(need, {})
         new_bytes = transfer.total_bytes
         blockers = []
         if not fits:
@@ -443,4 +445,5 @@ class DownloadAdmissionMixin:
             "warnings": [],
             "_manifest": manifest,
             "_transfer": transfer,
+            "_required_bytes": required,
         }

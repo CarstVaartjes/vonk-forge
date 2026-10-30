@@ -3521,3 +3521,27 @@ def test_unused_models_go_when_free_space_falls_below_the_reserve_with_no_downlo
     _settle(service)
     assert not _set_exists(world, set_digest)
     assert volume.free > service.reserve_of(volume.total)
+
+
+def test_eviction_goes_toward_the_line_when_a_waiting_download_cannot_be_met(
+    squeezed, tmp_path: Path
+) -> None:
+    """Catches all-or-nothing eviction: the 10 % line sits far above what unused
+    models can free, so while any download waited nothing was evicted and the
+    co-located database stayed at about 1 % free."""
+
+    world, service = squeezed.world, squeezed.service
+    squeezed.volume.fill_until_free(300)  # line and reserve 1000; model frees 1000
+    waiting = _wait_for_download(service, tmp_path)  # 500 + 1000 > 300 + 1000
+    assert squeezed.demands.active()
+
+    swept = squeezed.collector.collect()
+
+    assert swept.models == 1
+    # Evicted what it could; only the remainder of the demand is insufficient.
+    assert _scope(swept, "nas")["outcome"] == "insufficient_after_eviction"
+    _settle(service)
+    assert not _set_exists(world, squeezed.set_digest)
+    assert squeezed.volume.free >= 1300
+    # Still short of the whole demand (500 + 1000): the download keeps waiting.
+    assert service.get_operation(waiting.id).failure is not None

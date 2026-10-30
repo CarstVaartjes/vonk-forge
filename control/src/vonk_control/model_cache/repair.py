@@ -117,7 +117,7 @@ class RepairMixin:
         need = cache._transfer_need(manifest, transfer, replaces=True)
         waiting_for = (
             ""
-            if cache._storage_fits(need, {})
+            if cache._storage_shortfall(need, {}) is None
             else ModelCacheBlockerCode.INSUFFICIENT_RESERVED_STORAGE
         )
         capacity = cache._capacity_wait(waiting_for, cache._committed_bytes(need, {}))
@@ -194,10 +194,12 @@ class RepairMixin:
 
         if not waiting_for:
             return None
-        return cache._capacity_failure(waiting_for, required_bytes)
+        return cache._capacity_failure(
+            cache._capacity_detail(waiting_for, required_bytes)
+        )
 
     def _capacity_failure(
-        self, waiting_for: str, required_bytes: int
+        self, detail: str
     ) -> tuple[AvailabilityOperationFailure, datetime]:
         """The retryable ``download_blocked`` wait and its due time.
 
@@ -209,7 +211,7 @@ class RepairMixin:
         due = cache._clock() + timedelta(seconds=_RETRY_BASE_SECONDS)
         failure = _cache_failure(
             ModelCacheCode.DOWNLOAD_BLOCKED,
-            cache._capacity_detail(waiting_for, required_bytes),
+            detail,
             retryable=True,
             recovery="capacity",
             retry_time=_iso(due),
@@ -236,11 +238,11 @@ class RepairMixin:
         """
         cache = cast("ModelCacheService", self)
 
-        if cache._storage_fits(need, running, operation_id=operation.id):
+        shortfall = cache._storage_shortfall(need, running, operation_id=operation.id)
+        if shortfall is None:
             return False
         failure, due = cache._capacity_failure(
-            ModelCacheBlockerCode.INSUFFICIENT_RESERVED_STORAGE,
-            cache._committed_bytes(need, running, operation_id=operation.id),
+            shortfall.detail(ModelCacheBlockerCode.INSUFFICIENT_RESERVED_STORAGE)
         )
         if any(owner != operation.id for owner in running):
             operation.progress_advanced_at = _aware(now)

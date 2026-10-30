@@ -1442,6 +1442,32 @@ def test_the_storage_owner_and_other_packages_may_read_nas_space() -> None:
         assert not check_source(path, _SPACE_CHECK, {2}, modes=("nas-space",))
 
 
+def test_a_fixed_byte_reserve_is_flagged_outside_its_allowlist() -> None:
+    modes = ("fixed-reserves",)
+    source = "MODEL_CACHE_RESERVE_BYTES = 10 * 1024**3\n"
+    assert check_source(
+        "control/src/vonk_control/settings.py", source, {1}, modes=modes
+    )
+    assert check_source(
+        "control/src/vonk_control/other.py",
+        "NAS_RESERVE_BYTES = (4 << 30)\n",
+        {1},
+        modes=modes,
+    )
+    assert not check_source(
+        "control/src/vonk_control/recipe_builds/common.py",
+        "MINIMUM_BUILD_DISK_RESERVE_BYTES = 4 * 1024**3\n",
+        {1},
+        modes=modes,
+    )
+    assert not check_source(
+        "control/src/vonk_control/other.py",
+        "RESERVE_FRACTION = 0.1\n",
+        {1},
+        modes=modes,
+    )
+
+
 _SET_SELECTION = (
     "def sets(session, digest):\n"
     "    return session.scalars(\n"

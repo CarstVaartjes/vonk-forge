@@ -261,6 +261,9 @@ class _Pressure:
     why: str
     #: Work was refused for this space, so removing too little would not help it.
     demanded: bool
+    #: Bytes missing for the low-space line, whether or not work was refused.
+    #: Eviction goes toward the line even when the refused work cannot be met.
+    line_shortfall: int = 0
 
 
 class StorageItemKind(StrEnum):
