@@ -24,8 +24,6 @@ from ..strict_json import serialize_json_value
 from .constants import (
     _DIGEST_LENGTH,
     _EMPTY_SHA256,
-    _MAX_ARTIFACT_PARTS,
-    _MAX_ARTIFACTS,
     _MAX_MANIFEST_BYTES,
     _WEIGHT_ROLES,
     SCHEMA_VERSION,
@@ -392,7 +390,7 @@ def _validate_parts(value: ArtifactSpec) -> None:
     if (
         provider is None
         or not provider.parts
-        or not 2 <= len(parts) <= _MAX_ARTIFACT_PARTS
+        or len(parts) < 2
         or len({part.path for part in parts}) != len(parts)
         or value.path in {part.path for part in parts}
         or sum(part.expected_bytes for part in parts) != value.expected_bytes
@@ -417,7 +415,8 @@ def _validate_parts(value: ArtifactSpec) -> None:
 
 
 def _validate_manifest(value: ArtifactSetManifest) -> None:
-    if len(value.artifacts) < 1 or len(value.artifacts) > _MAX_ARTIFACTS:
+    # The manifest byte limit below bounds the set; a count never does.
+    if len(value.artifacts) < 1:
         raise ModelCacheResolutionInvalid(
             ModelCacheCode.ARTIFACT_COUNT, "cache artifact set count is invalid"
         )

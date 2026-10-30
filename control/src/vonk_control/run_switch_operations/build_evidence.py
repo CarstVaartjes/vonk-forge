@@ -201,7 +201,6 @@ class BuildEvidenceMixin:
         runtime_missing = 0
         runtime_missing_by_node: dict[str, int] = {}
         runtime_reclaimable = 0
-        runtime_reclaimable_digests: set[str] = set()
         runtime_raw_digest = (
             image_digest.removeprefix("sha256:")
             if isinstance(image_digest, str)
@@ -234,7 +233,6 @@ class BuildEvidenceMixin:
                     and artifact.ref_count == 0
                 ):
                     runtime_reclaimable += artifact.size_bytes
-                    runtime_reclaimable_digests.add(artifact.digest)
         runtime_coverage = (
             "complete"
             if image_bytes is not None and runtime_missing == 0
@@ -279,7 +277,6 @@ class BuildEvidenceMixin:
             ),
             spark_coverage=runtime_coverage,
             reclaimable_bytes=runtime_reclaimable,
-            reclaimable_digests=sorted(runtime_reclaimable_digests),
         )
         state = "missing" if candidate is None else str(candidate.state)
         detail: str | None = None

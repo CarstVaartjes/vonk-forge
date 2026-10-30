@@ -351,7 +351,6 @@ class CompleteArtifactInspector:
             artifact_count=1,
             nas_coverage="complete",
             spark_coverage="complete" if missing_spark_bytes == 0 else "partial",
-            reclaimable_digests=("1" * 64,) if self.reclaimable_bytes else (),
             artifact_set_sha256=MODEL_ARTIFACT_SET,
             artifact_set_bytes=1024,
         )
@@ -532,8 +531,6 @@ class RecordingArtifactExecutor:
                     "scope": "spark-local",
                     "reclaimed_bytes": 0,
                     "protected_referenced_bytes": 0,
-                    "reclaimed_digests": [],
-                    "protected_digests": [],
                 },
             )
         return _fixture_execution(
@@ -4994,8 +4991,6 @@ def test_cleanup_adapter_retries_when_executor_reports_nas_eviction(
                         scope="nas",
                         reclaimed_bytes=30,
                         protected_referenced_bytes=0,
-                        reclaimed_digests=[],
-                        protected_digests=[],
                         nas_evicted=True,
                     )
                 )

@@ -81,7 +81,6 @@ class PhasePlanningMixin:
                 reclaimable_bytes=0,
                 nas_coverage="unknown",
                 spark_coverage="unknown",
-                reclaimable_digests=(),
                 blockers=(
                     _as_reason(
                         RunSwitchCode.ARTIFACT_IDENTITY_UNKNOWN,
@@ -145,7 +144,6 @@ class PhasePlanningMixin:
             nas_coverage=inspection.nas_coverage,
             spark_coverage=inspection.spark_coverage,
             retention=retention,
-            reclaimable_digests=list(inspection.reclaimable_digests),
         )
 
     def _phases(

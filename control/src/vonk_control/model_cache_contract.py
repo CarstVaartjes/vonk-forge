@@ -716,7 +716,7 @@ class CacheEntryResponse(StrippedStrictModel):
     expected_bytes: int = Field(ge=0)
     verified_bytes: int = Field(ge=0)
     unique_bytes: int = Field(ge=0)
-    artifacts: list[CacheArtifactResponse] = Field(max_length=1024)
+    artifacts: list[CacheArtifactResponse]
     protected: bool
     protected_reasons: list[str] = Field(max_length=32)
     update_available: bool
