@@ -59,7 +59,7 @@ def test_older_active_operation_is_reused_behind_many_newer_unrelated_ones(
         _add_revision(session, revision_id, recipe)
         session.add(User(subject="operator", role="operator"))
     cache = ModelCacheService(
-        sessions, tmp_path / "model-cache", reserve_bytes=0, fixture_sources=True
+        sessions, tmp_path / "model-cache", free_fraction=0, fixture_sources=True
     )
     artifacts = [
         _source_artifact(
