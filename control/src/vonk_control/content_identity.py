@@ -24,7 +24,7 @@ identifying field are never the same image.
 from __future__ import annotations
 
 from collections.abc import Collection, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
@@ -289,19 +289,21 @@ class InstallationModels:
     state: str
     #: The primary model content its row records; ``None`` when it records none.
     model: str | None
-    #: Every model content its recipe revision is bound to; ``None`` when unbound.
-    models: frozenset[str] | None
+    #: Every model content its recipe revision is bound to.
+    models: frozenset[str]
     #: The content digest of its recipe revision.
     recipe: str | None
+    #: The queried set digests its plan text names (only ``installations_for_sets``).
+    named_sets: frozenset[str] = frozenset()
 
     @property
     def attributable(self) -> bool:
         """Whether its columns, not its plan, say which models it uses."""
-        return self.model is not None and self.models is not None
+        return self.model is not None
 
     @property
     def used(self) -> frozenset[str]:
-        return (self.models or frozenset()) | (
+        return self.models | (
             frozenset() if self.model is None else frozenset({self.model})
         )
 
@@ -344,7 +346,7 @@ def installation_models(session, *conditions) -> list[InstallationModels]:
             id=row.id,
             state=row.state,
             model=row.model_content_sha256,
-            models=bound.get(row.recipe_revision_id),
+            models=bound.get(row.recipe_revision_id, frozenset()),
             recipe=contents.get(row.recipe_revision_id),
         )
         for row in rows
@@ -356,25 +358,110 @@ def installations_using_models(
 ) -> tuple[frozenset[str], frozenset[str]]:
     """Installed (not uninstalled) installations that use ``contents``.
 
-    Returns the ids its columns attribute to them, and the ids whose columns
-    attribute nothing (no recorded model or an unbound recipe), which a caller
-    must read the plan of rather than assume unrelated.
+    Returns the ids its columns attribute to them (the model column, or a recipe
+    bound to one of their catalog revisions), and the ids that record no model at
+    all, which a caller must read the plan of rather than assume unrelated. The
+    filter is in SQL on indexed columns, so unrelated installations are not read.
     """
+    from sqlalchemy import or_, select
     from vonk_agent_protocol import InstallationState
+    from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
 
-    from .models import RecipeInstallation
+    from .models import (
+        CatalogDocumentRevision,
+        CatalogRecipeModelReference,
+        RecipeInstallation,
+    )
 
-    wanted = frozenset(contents)
+    wanted = sorted(contents)
+    lineage = select(CatalogDocumentRevision.id).where(
+        CatalogDocumentRevision.kind == RunSwitchReasonScopeName.MODEL,
+        CatalogDocumentRevision.content_digest.in_(wanted),
+    )
+    bound = select(CatalogRecipeModelReference.recipe_revision_id).where(
+        CatalogRecipeModelReference.model_revision_id.in_(lineage)
+    )
+    by_model = RecipeInstallation.model_content_sha256.in_(wanted)
+    by_recipe = RecipeInstallation.recipe_revision_id.in_(bound)
     named: set[str] = set()
     unknown: set[str] = set()
-    for row in installation_models(
-        session, RecipeInstallation.state != InstallationState.UNINSTALLED
+    for row in session.execute(
+        select(
+            RecipeInstallation.id,
+            by_model.label("by_model"),
+            by_recipe.label("by_recipe"),
+        ).where(
+            RecipeInstallation.state != InstallationState.UNINSTALLED,
+            or_(by_model, by_recipe, RecipeInstallation.model_content_sha256.is_(None)),
+        )
     ):
-        if not row.attributable:
-            unknown.add(row.id)
-        elif row.used & wanted:
-            named.add(row.id)
+        (named if row.by_model or row.by_recipe else unknown).add(row.id)
     return frozenset(named), frozenset(unknown)
+
+
+def installations_for_sets(
+    session,
+    *,
+    models: Collection[str],
+    recipes: Collection[str],
+    set_digests: Collection[str],
+    active,
+) -> list[InstallationModels]:
+    """The ``active`` installations that can use cached sets, filtered in SQL.
+
+    A set serves the model contents it was first requested for or verified, and
+    the recipe content it was cached for. An installation can use it through its
+    model column or recipe bindings, through the recipe content, or because its
+    plan names the set digest; one that records no model is kept for the caller
+    to read. Everything else is not selected.
+    """
+    from sqlalchemy import Text, cast, or_, select
+    from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
+
+    from .models import (
+        CatalogDocumentRevision,
+        CatalogRecipeModelReference,
+        RecipeInstallation,
+    )
+
+    lineage = select(CatalogDocumentRevision.id).where(
+        CatalogDocumentRevision.kind == RunSwitchReasonScopeName.MODEL,
+        CatalogDocumentRevision.content_digest.in_(sorted(models)),
+    )
+    recipe_revisions = select(CatalogDocumentRevision.id).where(
+        CatalogDocumentRevision.kind == RunSwitchReasonScopeName.RECIPE,
+        CatalogDocumentRevision.content_digest.in_(sorted(recipes)),
+    )
+    plan = cast(RecipeInstallation.plan, Text)
+    uses = installation_models(
+        session,
+        active,
+        or_(
+            RecipeInstallation.model_content_sha256.in_(sorted(models)),
+            RecipeInstallation.model_content_sha256.is_(None),
+            RecipeInstallation.recipe_revision_id.in_(
+                select(CatalogRecipeModelReference.recipe_revision_id).where(
+                    CatalogRecipeModelReference.model_revision_id.in_(lineage)
+                )
+            ),
+            RecipeInstallation.recipe_revision_id.in_(recipe_revisions),
+            *(plan.contains(digest, autoescape=True) for digest in sorted(set_digests)),
+        ),
+    )
+    digests = sorted(set_digests)
+    if not uses or not digests:
+        return uses
+    named: dict[str, frozenset[str]] = {}
+    for row in session.execute(
+        select(
+            RecipeInstallation.id,
+            *(plan.contains(digest, autoescape=True) for digest in digests),
+        ).where(RecipeInstallation.id.in_([use.id for use in uses]))
+    ):
+        named[row[0]] = frozenset(
+            digest for digest, hit in zip(digests, row[1:], strict=True) if hit
+        )
+    return [replace(use, named_sets=named.get(use.id, frozenset())) for use in uses]
 
 
 def active_recipe_revisions(session, selectors: Collection[tuple[str, str]]):

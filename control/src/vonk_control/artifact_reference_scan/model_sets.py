@@ -226,12 +226,6 @@ def saved_profile_selectors(profile: FleetProfile) -> tuple[str, ...] | None:
     return tuple(selectors)
 
 
-def _selector_revisions(
-    session: Session, selector: str
-) -> tuple[CatalogDocumentRevision, ...]:
-    return _selectors_revisions(session, (selector,))[selector]
-
-
 def _selectors_revisions(
     session: Session, selectors: Collection[str]
 ) -> dict[str, tuple[CatalogDocumentRevision, ...]]:

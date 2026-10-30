@@ -180,7 +180,7 @@ from .model_references import (
 )
 from .model_references import model_set_reference_reasons as model_set_reference_reasons
 from .model_sets import _protect_saved as _protect_saved
-from .model_sets import _selector_revisions as _selector_revisions
+from .model_sets import _selectors_revisions as _selectors_revisions
 from .model_sets import model_set_objects as model_set_objects
 from .model_sets import require_model_sets_open as require_model_sets_open
 from .model_sets import saved_profile_selectors as saved_profile_selectors

@@ -4,25 +4,22 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
-from pydantic import TypeAdapter
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
     ArtifactLifecycleCode,
     canonical_message,
 )
-from vonk_forge_contracts import RecipeDefinition
 
 from .. import model_cache_states
 from ..artifact_lifecycle import (
     ArtifactReferenceUnverified,
 )
-from ..catalog_revision_contract import read_catalog_document
-from ..content_identity import installation_models, recipe_model_digests
+from ..content_identity import installations_for_sets, recipe_model_digests
 from ..machine_states import DISTRIBUTION_HELD, RUN_LIVE
+from ..model_cache_contract import CacheManifest
 from ..models import (
     ArtifactDistributionAssignment,
-    CatalogDocumentRevision,
     FleetProfile,
     FleetProfileApplication,
     Job,
@@ -48,24 +45,12 @@ from .types import (
 )
 
 
-def _pinned_models(record: CatalogDocumentRevision) -> frozenset[str] | None:
-    """The model contents a recipe document pins; ``None`` when it cannot be read."""
-
-    from ..model_cache.catalog_helpers import _recipe_model_content_digests
-
-    try:
-        recipe = TypeAdapter(RecipeDefinition).validate_json(
-            read_catalog_document(record).model_dump_json(), strict=True
-        )
-        return frozenset(_recipe_model_content_digests(recipe))
-    except (TypeError, ValueError, RuntimeError):
-        return None
-
-
 def model_set_reference_findings(
     session: Session, set_digests: Iterable[str]
 ) -> dict[str, tuple[ArtifactReferenceFinding, ...]]:
     """Find typed saved-profile and active owners of exact model sets."""
+
+    from ..model_cache.lineage import set_bindings
 
     selected = set(set_digests)
     if not selected:
@@ -88,8 +73,23 @@ def model_set_reference_findings(
         digest: set() for digest in selected
     }
 
-    # A profile names recipes; each recipe revision is bound to the exact model
-    # contents it uses by relational rows, so no document is parsed here.
+    # A set serves every model content it was first requested for or later
+    # verified (a refreshed model reuses the set of its first requester), so a
+    # reference matches on that, never on the first requester alone.
+    served: dict[str, frozenset[str] | None] = {}
+    for set_digest, row in sets.items():
+        try:
+            manifest = CacheManifest.model_validate_json(
+                canonical_message(row.manifest), strict=True
+            )
+            served[set_digest] = set_bindings(
+                row.model_content_sha256, manifest.verified_models
+            )
+        except (TypeError, ValueError):
+            served[set_digest] = None
+
+    # A profile names recipes; each active recipe revision is bound to the exact
+    # model contents it uses by relational rows, so no document is parsed here.
     profiles = list(session.scalars(select(FleetProfile).order_by(FleetProfile.id)))
     named = {profile.id: saved_profile_selectors(profile) for profile in profiles}
     resolved = _selectors_revisions(
@@ -110,10 +110,8 @@ def model_set_reference_findings(
             for record in resolved[selector]:
                 models = bound.get(record.id)
                 if models is None:
-                    # No binding rows: the document's own pins say which models
-                    # the recipe uses; unreadable, every selected set stays.
-                    models = _pinned_models(record)
-                if models is None:
+                    # No binding rows: the recipe's models are unknown, so
+                    # every selected set stays.
                     _protect_saved(findings, profile, "model-set", selected)
                     continue
                 _protect_saved(
@@ -124,7 +122,7 @@ def model_set_reference_findings(
                         set_digest
                         for set_digest, row in sets.items()
                         if row.recipe_revision_sha256 == record.content_digest
-                        or row.model_content_sha256 in models
+                        or (served[set_digest] or models) & models
                     },
                 )
 
@@ -190,9 +188,21 @@ def model_set_reference_findings(
                     )
                 )
 
-    for use in installation_models(
+    for use in installations_for_sets(
         session,
-        or_(
+        models={model for found in served.values() for model in found or ()}
+        | {
+            row.model_content_sha256
+            for row in sets.values()
+            if row.model_content_sha256
+        },
+        recipes={
+            row.recipe_revision_sha256
+            for row in sets.values()
+            if row.recipe_revision_sha256
+        },
+        set_digests=selected,
+        active=or_(
             RecipeInstallation.state.in_(_ACTIVE_INSTALLATIONS),
             select(RecipeRun.id)
             .where(
@@ -203,14 +213,15 @@ def model_set_reference_findings(
         ),
     ):
         if use.attributable:
-            # The installation's model and its recipe's bound models say which
-            # sets it uses, without reading its plan.
+            # The installation's model, its recipe's bound models and the sets
+            # its plan names say which sets it uses, without reading its plan.
             held = {
                 set_digest
                 for set_digest, cached in sets.items()
-                if cached.model_content_sha256 in use.used
-                or cached.recipe_revision_sha256 == use.recipe
-            }
+                if cached.recipe_revision_sha256 == use.recipe
+                or use.used
+                & (served[set_digest] or frozenset({cached.model_content_sha256}))
+            } | (use.named_sets & selected)
             detail = "accepted installation uses this model set"
             label = f"installation {use.id}"
         else:

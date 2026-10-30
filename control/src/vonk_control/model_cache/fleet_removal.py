@@ -86,9 +86,8 @@ from ..unused_storage_collection.references import (
 from .errors import ModelCacheConflictInvalid
 from .lineage import first_requested_sets, lineage_contents, model_sets
 from .persistence import _operation_removal, _store_operation_payload
-from .removal_timing import RemovalPhase, removal_phase, removal_timing
 from .source_helpers import _model_selector, _request_key
-from .views import CacheOperationView
+from .views import CacheOperationView, ModelCacheRemovalScope
 
 if TYPE_CHECKING:
     from .service import ModelCacheService
@@ -203,16 +202,14 @@ class FleetRemovalMixin:
         self, session: Session, digest: str, *, shared_objects: set[str] | None = None
     ) -> FleetModelRemovalEffects:
         cache = cast("ModelCacheService", self)
-        with removal_phase(RemovalPhase.EVIDENCE):
-            evidence = _Evidence.read(session, cache._clock())
+        evidence = _Evidence.read(session, cache._clock())
         readable = (
             evidence.pointers is not None and evidence.application_references_readable
         )
         issues: list[FleetRemovalObservationIssue] = []
-        with removal_phase(RemovalPhase.MODEL_OBJECTS):
-            target_objects, shared = _model_objects(
-                session, digest, observation_issues=issues
-            )
+        target_objects, shared = _model_objects(
+            session, digest, observation_issues=issues
+        )
         if shared_objects is not None:
             shared_objects.update(shared)
         # Provenance is not identity. Include every cached set the Library
@@ -233,180 +230,174 @@ class FleetRemovalMixin:
             keep_detail = "Model content references are unavailable; review will recheck owner evidence."
         installations: dict[str, list[FleetRemovalInstallation]] = {}
         lifecycle = cache._fleet_lifecycle
-        # An installation names this model through its model column or its
-        # recipe's bound models. Only those, and any whose columns attribute
-        # nothing, are read; damage elsewhere neither costs a parse nor
-        # protects this model.
+        # Only installations whose columns name this model, or attribute nothing,
+        # are read; damage elsewhere neither costs a parse nor protects it.
         named_installations, unknown_installations = installations_using_models(
             session, contents
         )
-        with removal_phase(RemovalPhase.INSTALLATIONS):
-            for installation in session.scalars(
-                select(RecipeInstallation)
-                .where(
-                    RecipeInstallation.id.in_(
-                        sorted(named_installations | unknown_installations)
-                    )
+        for installation in session.scalars(
+            select(RecipeInstallation)
+            .where(
+                RecipeInstallation.id.in_(
+                    sorted(named_installations | unknown_installations)
                 )
-                .order_by(RecipeInstallation.id)
+            )
+            .order_by(RecipeInstallation.id)
+        ):
+            plan = read_or_rebuild(
+                kind=RecipeInstallation.__tablename__,
+                subject=installation.id,
+                read=partial(
+                    parse_stored_installation_plan,
+                    installation.plan,
+                    for_uninstall=True,
+                ),
+            )
+            if isinstance(plan, Residue):
+                issues.append(_observation_issue(plan))
+                protected = True
+                keep_detail = "Installation model references are unavailable; refresh owner evidence."
+                continue
+            models = {installation.model_content_sha256}
+            models.update(
+                artifact.model.content_sha256
+                for compiled in plan.compiled_execution_plans.values()
+                for artifact in compiled.artifacts
+            )
+            if installation.id not in named_installations and models.isdisjoint(
+                contents
             ):
-                plan = read_or_rebuild(
+                continue
+            detail = _installation_kept(session, installation.id, evidence)
+            saved = _installation_pointing(
+                session, installation.id, evidence, evidence.pointers
+            )
+            if saved:
+                detail = "saved profiles: " + ", ".join(saved)
+            uninstall = (
+                None
+                if lifecycle is None
+                else read_or_rebuild(
                     kind=RecipeInstallation.__tablename__,
                     subject=installation.id,
                     read=partial(
-                        parse_stored_installation_plan,
-                        installation.plan,
-                        for_uninstall=True,
+                        lifecycle._uninstall_plan_in_session,
+                        session,
+                        installation.id,
+                        lock=False,
+                        preserve_model_files=True,
                     ),
                 )
-                if isinstance(plan, Residue):
-                    issues.append(_observation_issue(plan))
-                    protected = True
-                    keep_detail = "Installation model references are unavailable; refresh owner evidence."
-                    continue
-                models = {installation.model_content_sha256}
-                models.update(
-                    artifact.model.content_sha256
-                    for compiled in plan.compiled_execution_plans.values()
-                    for artifact in compiled.artifacts
-                )
-                if installation.id not in named_installations and models.isdisjoint(
-                    contents
-                ):
-                    continue
-                detail = _installation_kept(session, installation.id, evidence)
-                saved = _installation_pointing(
-                    session, installation.id, evidence, evidence.pointers
-                )
-                if saved:
-                    detail = "saved profiles: " + ", ".join(saved)
-                uninstall = (
-                    None
-                    if lifecycle is None
-                    else read_or_rebuild(
-                        kind=RecipeInstallation.__tablename__,
-                        subject=installation.id,
-                        read=partial(
-                            lifecycle._uninstall_plan_in_session,
-                            session,
-                            installation.id,
-                            lock=False,
-                            preserve_model_files=True,
-                        ),
-                    )
-                )
-                if isinstance(uninstall, Residue):
-                    issues.append(_observation_issue(uninstall))
-                    uninstall = None
-                if uninstall is None:
-                    detail = "Installation removal owner unavailable."
-                elif not uninstall.allowed:
-                    detail = "; ".join(item.detail for item in uninstall.blockers)
-                if detail is not None:
-                    protected = True
-                effect = FleetRemovalInstallation(
-                    installation_id=installation.id,
-                    plan_digest=None if uninstall is None else uninstall.plan_digest,
-                    disposition=D.REMOVE if detail is None else D.RETAIN,
-                    reason=R.UNUSED if detail is None else R.REFERENCED,
-                    detail="Unused installation; remove through uninstall."
-                    if detail is None
-                    else detail,
-                )
-                for node_id in session.scalars(
-                    select(InstallationNode.node_id)
-                    .where(InstallationNode.installation_id == installation.id)
-                    .order_by(InstallationNode.node_id)
-                ):
-                    installations.setdefault(node_id, []).append(effect)
-        targets: list[FleetRemovalTarget] = []
-        with removal_phase(RemovalPhase.NODES):
+            )
+            if isinstance(uninstall, Residue):
+                issues.append(_observation_issue(uninstall))
+                uninstall = None
+            if uninstall is None:
+                detail = "Installation removal owner unavailable."
+            elif not uninstall.allowed:
+                detail = "; ".join(item.detail for item in uninstall.blockers)
+            if detail is not None:
+                protected = True
+            effect = FleetRemovalInstallation(
+                installation_id=installation.id,
+                plan_digest=None if uninstall is None else uninstall.plan_digest,
+                disposition=D.REMOVE if detail is None else D.RETAIN,
+                reason=R.UNUSED if detail is None else R.REFERENCED,
+                detail="Unused installation; remove through uninstall."
+                if detail is None
+                else detail,
+            )
             for node_id in session.scalars(
-                select(AgentNode.node_id)
-                .where(AgentNode.revoked_at.is_(None))
-                .order_by(AgentNode.node_id)
+                select(InstallationNode.node_id)
+                .where(InstallationNode.installation_id == installation.id)
+                .order_by(InstallationNode.node_id)
             ):
-                snapshot = session.scalar(
-                    select(NodeInventorySnapshot)
-                    .where(NodeInventorySnapshot.node_id == node_id)
-                    .order_by(NodeInventorySnapshot.observed_at.desc())
-                    .limit(1)
+                installations.setdefault(node_id, []).append(effect)
+        targets: list[FleetRemovalTarget] = []
+        for node_id in session.scalars(
+            select(AgentNode.node_id)
+            .where(AgentNode.revoked_at.is_(None))
+            .order_by(AgentNode.node_id)
+        ):
+            snapshot = session.scalar(
+                select(NodeInventorySnapshot)
+                .where(NodeInventorySnapshot.node_id == node_id)
+                .order_by(NodeInventorySnapshot.observed_at.desc())
+                .limit(1)
+            )
+            available = (
+                snapshot is not None
+                and snapshot.model_objects is not None
+                and aware(snapshot.received_at) >= cache._clock() - INVENTORY_MAX_AGE
+            )
+            snapshot_objects = None if snapshot is None else snapshot.model_objects
+            objects = (
+                []
+                if not available or snapshot is None
+                else read_or_rebuild(
+                    kind=NodeInventorySnapshot.__tablename__,
+                    subject=node_id,
+                    read=partial(
+                        TypeAdapter(list[ModelStoreObject]).validate_json,
+                        canonical_message(snapshot_objects),
+                        strict=True,
+                    ),
                 )
-                available = (
-                    snapshot is not None
-                    and snapshot.model_objects is not None
-                    and aware(snapshot.received_at)
-                    >= cache._clock() - INVENTORY_MAX_AGE
-                )
-                snapshot_objects = None if snapshot is None else snapshot.model_objects
-                objects = (
-                    []
-                    if not available or snapshot is None
-                    else read_or_rebuild(
-                        kind=NodeInventorySnapshot.__tablename__,
-                        subject=node_id,
-                        read=partial(
-                            TypeAdapter(list[ModelStoreObject]).validate_json,
-                            canonical_message(snapshot_objects),
-                            strict=True,
-                        ),
-                    )
-                )
-                if isinstance(objects, Residue):
-                    issues.append(_observation_issue(objects))
-                    available, objects = False, []
-                elif not available:
-                    issues.append(
-                        _observation_issue(
-                            retire_as_unknown(
-                                NodeInventorySnapshot.__tablename__,
-                                node_id,
-                                BookkeepingReason.EVIDENCE_UNAVAILABLE,
-                                "A fresh model-object inventory is required.",
-                            )
+            )
+            if isinstance(objects, Residue):
+                issues.append(_observation_issue(objects))
+                available, objects = False, []
+            elif not available:
+                issues.append(
+                    _observation_issue(
+                        retire_as_unknown(
+                            NodeInventorySnapshot.__tablename__,
+                            node_id,
+                            BookkeepingReason.EVIDENCE_UNAVAILABLE,
+                            "A fresh model-object inventory is required.",
                         )
                     )
-                references_unknown = any(
-                    issue.kind != NodeInventorySnapshot.__tablename__
-                    for issue in issues
                 )
-                effects = [
-                    FleetRemovalObject(
-                        object=obj,
-                        disposition=D.RETAIN
-                        if protected or obj.sha256 in shared
-                        else D.REMOVE,
-                        reason=R.OBSERVATION_UNAVAILABLE
-                        if references_unknown
-                        else R.REFERENCED
-                        if protected
-                        else R.SHARED
-                        if obj.sha256 in shared
-                        else R.UNUSED,
-                        detail=keep_detail
-                        if protected
-                        else "Another model names this content."
-                        if obj.sha256 in shared
-                        else "Exclusively owned model object; evict through store retention.",
-                    )
-                    for obj in objects
-                    if obj.sha256 in target_objects
-                ]
-                targets.append(
-                    FleetRemovalTarget(
-                        node_id=node_id,
-                        objects=effects,
-                        installations=installations.get(node_id, []),
-                        observation_available=available,
-                        reclaimable_bytes=sum(
-                            item.object.bytes
-                            for item in effects
-                            if item.disposition == D.REMOVE
-                        )
-                        if available
-                        else None,
-                    )
+            references_unknown = any(
+                issue.kind != NodeInventorySnapshot.__tablename__ for issue in issues
+            )
+            effects = [
+                FleetRemovalObject(
+                    object=obj,
+                    disposition=D.RETAIN
+                    if protected or obj.sha256 in shared
+                    else D.REMOVE,
+                    reason=R.OBSERVATION_UNAVAILABLE
+                    if references_unknown
+                    else R.REFERENCED
+                    if protected
+                    else R.SHARED
+                    if obj.sha256 in shared
+                    else R.UNUSED,
+                    detail=keep_detail
+                    if protected
+                    else "Another model names this content."
+                    if obj.sha256 in shared
+                    else "Exclusively owned model object; evict through store retention.",
                 )
+                for obj in objects
+                if obj.sha256 in target_objects
+            ]
+            targets.append(
+                FleetRemovalTarget(
+                    node_id=node_id,
+                    objects=effects,
+                    installations=installations.get(node_id, []),
+                    observation_available=available,
+                    reclaimable_bytes=sum(
+                        item.object.bytes
+                        for item in effects
+                        if item.disposition == D.REMOVE
+                    )
+                    if available
+                    else None,
+                )
+            )
         nas_reason = R.UNUSED
         nas_detail = "Remove unshared NAS objects through model cache removal."
         if any(issue.kind != NodeInventorySnapshot.__tablename__ for issue in issues):
@@ -454,15 +445,14 @@ class FleetRemovalMixin:
         return set(scope.delete_objects) - shared
 
     def review_fleet_model_removal(self, selector: str) -> CacheRemovalReview:
-        with removal_timing(_model_selector(selector).casefold(), fleet=True):
-            return self._review_fleet_model_removal(selector)[0]
+        return self._review_fleet_model_removal(selector)[0]
 
     def _review_fleet_model_removal(
         self, selector: str
-    ) -> tuple[CacheRemovalReview, set[str]]:
-        """The sealed review and the objects a kept set also lists."""
+    ) -> tuple[CacheRemovalReview, ModelCacheRemovalScope]:
+        """The sealed review and the scope it read."""
         cache = cast("ModelCacheService", self)
-        review = cache.review_model_removal(selector)
+        review, scope = cache._review_model_removal(selector)
         shared: set[str] = set()
         with cache._session() as session:
             effects = cache._fleet_effects(
@@ -521,133 +511,119 @@ class FleetRemovalMixin:
                 }
             )
         )
-        return sealed, shared
+        return sealed, scope
 
     def remove_fleet_model_selector(
         self, selector: str, *, actor: str, request_key: str, review_digest: str
     ) -> CacheOperationView:
         cache = cast("ModelCacheService", self)
+        key = _request_key(request_key)
         selector = _model_selector(selector).casefold()
-        with removal_timing(selector, fleet=True):
-            key = _request_key(request_key)
-            with cache._session() as session:
-                existing = session.scalar(
-                    select(ModelCacheOperation).where(
-                        ModelCacheOperation.request_key == key
-                    )
-                )
-                if existing is not None:
-                    payload = _operation_removal(existing)
-                    if (
-                        isinstance(payload, Residue)
-                        or payload.fleet is None
-                        or payload.review_digest != review_digest
-                    ):
-                        raise ModelCacheConflictInvalid(
-                            ModelCacheCode.REQUEST_KEY_REUSED,
-                            "Request key belongs to another removal scope or review.",
-                        )
-                    return cache._replay_model_removal(
-                        existing,
-                        actor=actor,
-                        selector=selector,
-                        fleet=True,
-                        review_digest=review_digest,
-                    )
-            review, shared = cache._review_fleet_model_removal(selector)
-            if review.review_digest != review_digest:
-                raise ModelCacheConflictInvalid(
-                    ArtifactLifecycleCode.REFERENCE_IDENTITY_MISMATCH,
-                    "Fleet removal effects changed; a fresh review is available.",
-                )
-            effects = review.fleet
-            assert effects is not None
-            # Missing evidence is retained in the review, not permission to infer
-            # an empty remote cache. Acceptance requires an exact complete scope.
-            if effects.observation_issues or any(
-                not target.observation_available for target in effects.targets
-            ):
-                raise ModelCacheConflictInvalid(
-                    ArtifactLifecycleCode.REFERENCE_SCAN_FAILED,
-                    "Fleet evidence is unavailable; refresh owner evidence and review again.",
-                )
-            selected = tuple(
-                sorted(
-                    asset.sha256
-                    for asset in review.assets
-                    if asset.kind == "model-set" and effects.nas_remove
+        with cache._session() as session:
+            existing = session.scalar(
+                select(ModelCacheOperation).where(
+                    ModelCacheOperation.request_key == key
                 )
             )
-            with cache._session() as session:
-                expected_scope = cache._model_removal_scope_for_sets(session, selected)
-                reviewed_objects = {
-                    asset.sha256
-                    for asset in review.assets
-                    if asset.kind == "model-object" and effects.nas_remove
-                }
-                reviewed_deletes = {
-                    asset.sha256
-                    for asset in review.assets
-                    if asset.kind == "model-object"
-                    and asset.disposition == CacheAssetDisposition.REMOVE
-                }
+            if existing is not None:
+                payload = _operation_removal(existing)
                 if (
-                    set(expected_scope.selected_objects) != reviewed_objects
-                    or set(expected_scope.delete_objects) - shared != reviewed_deletes
+                    isinstance(payload, Residue)
+                    or payload.fleet is None
+                    or payload.review_digest != review_digest
                 ):
                     raise ModelCacheConflictInvalid(
-                        ArtifactLifecycleCode.REFERENCE_IDENTITY_MISMATCH,
-                        "NAS removal membership changed; a fresh review is available.",
+                        ModelCacheCode.REQUEST_KEY_REUSED,
+                        "Request key belongs to another removal scope or review.",
                     )
-            try:
-                with admitting(), cache._lock, cache._session(write=True) as session:
-
-                    def verify(session: Session, selected: tuple[str, ...]) -> None:
-                        current_shared: set[str] = set()
-                        with removal_phase(RemovalPhase.ACCEPT_VERIFY):
-                            current = cache._fleet_effects(
-                                session,
-                                review.target_identity,
-                                shared_objects=current_shared,
-                            )
-                        if (
-                            current != effects
-                            or set(expected_scope.delete_objects) - current_shared
-                            != reviewed_deletes
-                        ):
-                            raise ModelCacheConflictInvalid(
-                                ArtifactLifecycleCode.REFERENCE_IDENTITY_MISMATCH,
-                                "Fleet removal references changed; a fresh review is available.",
-                            )
-
-                    operation = cache._accept_model_removal(
-                        session,
-                        actor=actor,
-                        request_key=key,
-                        selector=selector,
-                        model_content_sha256=review.target_identity,
-                        selected_sets=selected,
-                        expected_scope=expected_scope,
-                        review_digest=review_digest,
-                        verify=verify,
-                        defer_scope=False,
-                        fleet=FleetModelRemovalCheckpoint(
-                            effects=effects,
-                            deadline_at=cache._clock() + FLEET_REMOVAL_DEADLINE,
-                        ),
-                    )
-                    operation_id = operation.id
-            except ConstraintReplay as duplicate:
-                return duplicate.replay(
-                    lambda: cache._model_removal_by_request(
-                        key,
-                        actor=actor,
-                        selector=selector,
-                        fleet=True,
-                        review_digest=review_digest,
-                    )
+                return cache._replay_model_removal(
+                    existing,
+                    actor=actor,
+                    selector=selector,
+                    fleet=True,
+                    review_digest=review_digest,
                 )
-            return cache.get_operation(operation_id)
+        review, reviewed_scope = cache._review_fleet_model_removal(selector)
+        if review.review_digest != review_digest:
+            raise ModelCacheConflictInvalid(
+                ArtifactLifecycleCode.REFERENCE_IDENTITY_MISMATCH,
+                "Fleet removal effects changed; a fresh review is available.",
+            )
+        effects = review.fleet
+        assert effects is not None
+        # Missing evidence is retained in the review, not permission to infer
+        # an empty remote cache. Acceptance requires an exact complete scope.
+        if effects.observation_issues or any(
+            not target.observation_available for target in effects.targets
+        ):
+            raise ModelCacheConflictInvalid(
+                ArtifactLifecycleCode.REFERENCE_SCAN_FAILED,
+                "Fleet evidence is unavailable; refresh owner evidence and review again.",
+            )
+        selected = tuple(
+            sorted(
+                asset.sha256
+                for asset in review.assets
+                if asset.kind == "model-set" and effects.nas_remove
+            )
+        )
+        # The scope is the one the review read; accept re-reads it under the
+        # fences and refuses a difference.
+        expected_scope = reviewed_scope if effects.nas_remove else None
+        planned_deletes = set(
+            () if expected_scope is None else expected_scope.delete_objects
+        )
+        reviewed_deletes = {
+            asset.sha256
+            for asset in review.assets
+            if asset.kind == "model-object"
+            and asset.disposition == CacheAssetDisposition.REMOVE
+        }
+        try:
+            with admitting(), cache._lock, cache._session(write=True) as session:
+
+                def verify(session: Session, selected: tuple[str, ...]) -> None:
+                    current_shared: set[str] = set()
+                    current = cache._fleet_effects(
+                        session, review.target_identity, shared_objects=current_shared
+                    )
+                    if (
+                        current != effects
+                        or planned_deletes - current_shared != reviewed_deletes
+                    ):
+                        raise ModelCacheConflictInvalid(
+                            ArtifactLifecycleCode.REFERENCE_IDENTITY_MISMATCH,
+                            "Fleet removal references changed; a fresh review is available.",
+                        )
+
+                operation = cache._accept_model_removal(
+                    session,
+                    actor=actor,
+                    request_key=key,
+                    selector=selector,
+                    model_content_sha256=review.target_identity,
+                    selected_sets=selected,
+                    expected_scope=expected_scope,
+                    review_digest=review_digest,
+                    verify=verify,
+                    defer_scope=False,
+                    fleet=FleetModelRemovalCheckpoint(
+                        effects=effects,
+                        deadline_at=cache._clock() + FLEET_REMOVAL_DEADLINE,
+                    ),
+                )
+                operation_id = operation.id
+        except ConstraintReplay as duplicate:
+            return duplicate.replay(
+                lambda: cache._model_removal_by_request(
+                    key,
+                    actor=actor,
+                    selector=selector,
+                    fleet=True,
+                    review_digest=review_digest,
+                )
+            )
+        return cache.get_operation(operation_id)
 
     def _advance_fleet_removal(self, operation_id: str, *, now: datetime) -> bool:
         cache = cast("ModelCacheService", self)

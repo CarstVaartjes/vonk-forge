@@ -17,6 +17,7 @@ from vonk_control.models import (
     CatalogDocument,
     CatalogDocumentHead,
     CatalogDocumentRevision,
+    CatalogRecipeModelReference,
     FleetProfile,
 )
 from vonk_forge_contracts import document_sha256, read_recipe
@@ -79,6 +80,46 @@ def test_scoped_profile_damage_keeps_exact_content_and_collects_unrelated_model(
             created_at=world.now,
         )
         session.add(revision)
+        # The catalog binds an active recipe revision to the exact model
+        # revisions it names; the profile's scope is read from those rows.
+        pin = definition.models[0]
+        model_root = CatalogDocument(
+            kind="model",
+            publisher=pin.model.publisher,
+            slug=pin.model.slug,
+            title=pin.model.slug,
+            created_by="test",
+            created_at=world.now,
+            updated_at=world.now,
+        )
+        session.add(model_root)
+        session.flush()
+        model_revision = CatalogDocumentRevision(
+            document_id=model_root.id,
+            kind="model",
+            publisher=model_root.publisher,
+            slug=model_root.slug,
+            revision_number=1,
+            state=ProfileDocumentState.ACTIVE.value,
+            document={},
+            content_digest=A_MODEL,
+            created_by="test",
+            created_at=world.now,
+        )
+        session.add(model_revision)
+        session.flush()
+        session.add(
+            CatalogRecipeModelReference(
+                recipe_revision_id=revision.id,
+                recipe_kind="recipe",
+                selection_id=pin.id,
+                model_revision_id=model_revision.id,
+                model_kind="model",
+                model_publisher=model_root.publisher,
+                model_slug=model_root.slug,
+                model_content_digest=A_MODEL,
+            )
+        )
         session.flush()
         session.add(
             CatalogDocumentHead(
@@ -106,8 +147,8 @@ def test_scoped_profile_damage_keeps_exact_content_and_collects_unrelated_model(
             head = session.scalar(select(CatalogDocumentHead))
             assert head is not None
             head.active_revision_id = None
-    # No model revision exists: the verified recipe's content pin still scopes
-    # the reference, including when its saved draft or active head is damaged.
+    # The recipe's bound model still scopes the reference, including when its
+    # saved draft or active head is damaged.
     service = ModelCacheService(
         world.sessions, tmp_path / "cache", reserve_bytes=0, fixture_sources=True
     )
