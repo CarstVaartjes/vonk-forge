@@ -21,7 +21,6 @@ from vonk_forge_contracts import RecipeDefinition
 
 from .test_catalog_revision_collection import NODE, Catalog
 from .test_fleet_model_removal_postgres import inventory, submit_model_download
-from .test_model_removal_reference_lifecycle import _one_model, _register_model
 from .test_model_removal_worker_postgres import _prepare_removal_target
 from .test_operator_acceptance_postgres import _api
 from .test_recipe_operations import canonical_example
@@ -64,8 +63,10 @@ def test_review_of_shared_content_survives_partial_evidence_and_heals(
             )
             recipe = RecipeDefinition.model_validate(document)
             world.revision(slug, 1, document=recipe.model_dump(mode="json"))
-        _register_model(
-            world.sessions, _one_model(tmp_path, "sibling", b"shared weights")
+        # The sibling is cached too: its set lists the shared object, which is
+        # what keeps the bytes. A catalog declaration alone does not.
+        _prepare_removal_target(
+            cache, world.sessions, tmp_path, slug="sibling", data=b"shared weights"
         )
         obj = ModelStoreObject(sha256=path.name, bytes=path.stat().st_size)
         for node in (NODE, second):
@@ -80,7 +81,11 @@ def test_review_of_shared_content_survives_partial_evidence_and_heals(
                     .values(model_objects=[{"sha256": obj.sha256}])
                 )
             elif fault == "manifest":
-                row = session.scalar(select(ModelCacheSet))
+                row = session.scalar(
+                    select(ModelCacheSet).where(
+                        ModelCacheSet.model_content_sha256 == model_digest
+                    )
+                )
                 assert row is not None
                 manifest = row.manifest
                 row.manifest = {}
@@ -110,7 +115,11 @@ def test_review_of_shared_content_survives_partial_evidence_and_heals(
         # A read never repairs SQL or submits a removal. Fresh owner evidence heals.
         if manifest is not None:
             with world.sessions.begin() as session:
-                row = session.scalar(select(ModelCacheSet))
+                row = session.scalar(
+                    select(ModelCacheSet).where(
+                        ModelCacheSet.model_content_sha256 == model_digest
+                    )
+                )
                 assert row is not None and row.manifest == {}
                 row.manifest = manifest
         now[0] += timedelta(seconds=1)

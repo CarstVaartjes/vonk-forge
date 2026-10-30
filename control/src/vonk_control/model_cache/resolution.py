@@ -36,6 +36,7 @@ from .artifacts import (
     _unique_artifacts,
     _validate_manifest,
 )
+from .catalog import CatalogMixin
 from .catalog_helpers import (
     _canonical_model_artifacts,
     _recipe_model_content_digests,
@@ -132,76 +133,88 @@ class ResolutionMixin:
                 "an exact model definition or recipe revision is required",
             )
         with cache._session() as session:
-            recipe_document: RecipeDefinition | None = None
-            recipe_model_digests: list[str] = []
-            if recipe_digest is not None or recipe_revision_id is not None:
-                recipe_document, _resolved_recipe_id, resolved_recipe_digest = (
-                    cache._recipe_document(session, recipe_digest, recipe_revision_id)
+            return cache._manifest_in_session(
+                session,
+                model_digest=model_digest,
+                recipe_digest=recipe_digest,
+                recipe_revision_id=recipe_revision_id,
+            )
+
+    def _manifest_in_session(
+        self,
+        session: Session,
+        *,
+        model_digest: str | None,
+        recipe_digest: str | None,
+        recipe_revision_id: str | None,
+    ) -> ArtifactSetManifest:
+        """The set a model or recipe revision resolves to, from the catalog alone."""
+        cache = cast("ModelCacheService", self)
+        recipe_document: RecipeDefinition | None = None
+        recipe_model_digests: list[str] = []
+        if recipe_digest is not None or recipe_revision_id is not None:
+            recipe_document, _resolved_recipe_id, resolved_recipe_digest = (
+                cache._recipe_document(session, recipe_digest, recipe_revision_id)
+            )
+            if recipe_digest is not None and resolved_recipe_digest != recipe_digest:
+                raise ModelCacheStorageUnknown(
+                    ModelCacheCode.RECIPE_REVISION_MISSING,
+                    "exact recipe revision is not resolved",
                 )
-                if (
-                    recipe_digest is not None
-                    and resolved_recipe_digest != recipe_digest
-                ):
-                    raise ModelCacheStorageUnknown(
-                        ModelCacheCode.RECIPE_REVISION_MISSING,
-                        "exact recipe revision is not resolved",
-                    )
-                recipe_digest = resolved_recipe_digest
-                recipe_model_digests = _recipe_model_content_digests(recipe_document)
-                if not recipe_model_digests:
-                    raise ModelCacheResolutionInvalid(
-                        ModelCacheCode.RECIPE_MODEL_MISSING,
-                        "recipe does not bind an exact model definition",
-                    )
-                if (
-                    model_digest is not None
-                    and model_digest not in recipe_model_digests
-                ):
-                    raise ModelCacheConflictInvalid(
-                        ModelCacheCode.PIN_MISMATCH,
-                        "recipe and requested model definitions do not match",
-                    )
-                model_digest = model_digest or recipe_model_digests[0]
-            if model_digest is None:
+            recipe_digest = resolved_recipe_digest
+            recipe_model_digests = _recipe_model_content_digests(recipe_document)
+            if not recipe_model_digests:
                 raise ModelCacheResolutionInvalid(
-                    ModelCacheCode.PIN_REQUIRED,
-                    "an exact model definition is required after recipe resolution",
+                    ModelCacheCode.RECIPE_MODEL_MISSING,
+                    "recipe does not bind an exact model definition",
                 )
-            model_rows: dict[str, CatalogDocumentRevision] = {}
-            requested_model_digests = (
-                recipe_model_digests if recipe_document is not None else [model_digest]
+            if model_digest is not None and model_digest not in recipe_model_digests:
+                raise ModelCacheConflictInvalid(
+                    ModelCacheCode.PIN_MISMATCH,
+                    "recipe and requested model definitions do not match",
+                )
+            model_digest = model_digest or recipe_model_digests[0]
+        if model_digest is None:
+            raise ModelCacheResolutionInvalid(
+                ModelCacheCode.PIN_REQUIRED,
+                "an exact model definition is required after recipe resolution",
             )
-            for digest in requested_model_digests:
-                cache._collect_model_definitions(session, digest, model_rows)
-            specs: list[ArtifactSpec] = []
-            model_ref: ModelReference | None = None
-            for digest, row in sorted(model_rows.items()):
-                if digest == model_digest:
-                    model_ref = ModelReference(
-                        publisher=row.publisher,
-                        slug=row.slug,
-                        content_sha256=digest,
+        model_rows: dict[str, CatalogDocumentRevision] = {}
+        requested_model_digests = (
+            recipe_model_digests if recipe_document is not None else [model_digest]
+        )
+        for digest in requested_model_digests:
+            cache._collect_model_definitions(session, digest, model_rows)
+        specs: list[ArtifactSpec] = []
+        model_ref: ModelReference | None = None
+        for digest, row in sorted(model_rows.items()):
+            if digest == model_digest:
+                model_ref = ModelReference(
+                    publisher=row.publisher,
+                    slug=row.slug,
+                    content_sha256=digest,
+                )
+            raw_artifacts = _canonical_model_artifacts(row)
+            selected_ids = _recipe_model_file_ids(recipe_document, digest)
+            for raw in raw_artifacts:
+                if selected_ids is not None and raw.id not in selected_ids:
+                    continue
+                specs.append(
+                    cache._artifact_from_catalog(
+                        raw,
+                        model_content_sha256=digest,
                     )
-                raw_artifacts = _canonical_model_artifacts(row)
-                selected_ids = _recipe_model_file_ids(recipe_document, digest)
-                for raw in raw_artifacts:
-                    if selected_ids is not None and raw.id not in selected_ids:
-                        continue
-                    specs.append(
-                        cache._artifact_from_catalog(
-                            raw,
-                            model_content_sha256=digest,
-                        )
-                    )
-            manifest = ArtifactSetManifest(
-                model_content_sha256=model_digest,
-                recipe_revision_sha256=recipe_digest,
-                model_content_digests=tuple(sorted(model_rows)),
-                artifacts=tuple(
-                    sorted(_composed_artifacts(specs), key=lambda item: item.key)
-                ),
-                model_definition_ref=model_ref,
-            )
+                )
+        manifest = ArtifactSetManifest(
+            model_content_sha256=model_digest,
+            recipe_revision_sha256=recipe_digest,
+            model_content_digests=tuple(sorted(model_rows)),
+            artifacts=tuple(
+                sorted(_composed_artifacts(specs), key=lambda item: item.key)
+            ),
+            model_definition_ref=model_ref,
+        )
+
         _validate_manifest(manifest)
         return manifest
 
@@ -677,3 +690,22 @@ class ResolutionMixin:
                 ),
                 blockers=blockers,
             )
+
+
+class _CatalogResolver(ResolutionMixin, CatalogMixin):
+    """The cache's own resolution for readers that hold only a session."""
+
+    _fixture_sources = False
+
+
+def resolve_recipe_set(
+    session: Session, recipe_revision_id: str
+) -> ArtifactSetManifest:
+    """The artifact set a recipe revision resolves to, as a download resolves it."""
+
+    return _CatalogResolver()._manifest_in_session(
+        session,
+        model_digest=None,
+        recipe_digest=None,
+        recipe_revision_id=recipe_revision_id,
+    )
