@@ -11,8 +11,16 @@ from __future__ import annotations
 import shlex
 from collections import defaultdict
 from collections.abc import Iterable, Sequence
-from enum import StrEnum
 
+from ..cli_states_generated import (
+    ASSET_MODEL_OBJECT,
+    ASSET_MODEL_SET,
+    ASSET_REMOVE,
+    ASSET_RETAIN_REFERENCED,
+    ASSET_RETAIN_SHARED,
+    ASSET_RUNTIME_IMAGE,
+    ASSET_VERIFIED,
+)
 from ..generated_control.models.cache_removal_asset import CacheRemovalAsset
 from ..generated_control.models.cache_removal_finding import CacheRemovalFinding
 from ..generated_control.models.cache_removal_review import CacheRemovalReview
@@ -23,22 +31,6 @@ from ..generated_control.types import UNSET
 from .common import _actions, _bytes, _field, _object, _time
 
 _NAMED_OWNERS = 3
-
-
-class _Disposition(StrEnum):
-    """CacheRemovalAssetDisposition; a test pins these to the generated contract."""
-
-    REMOVE = "remove"
-    RETAIN_SHARED = "retain-shared"
-    RETAIN_REFERENCED = "retain-referenced"
-
-
-class _Kind(StrEnum):
-    """CacheRemovalAssetKind; a test pins these to the generated contract."""
-
-    OBJECT = "model-object"
-    SET = "model-set"
-    IMAGE = "runtime-image"
 
 
 def _size(assets: Sequence[CacheRemovalAsset]) -> str:
@@ -114,11 +106,11 @@ def _fleet(
 def _summary(
     review: CacheRemovalReview, sharing: Sequence[CacheRemovalFinding]
 ) -> None:
-    removed = [a for a in review.assets if a.disposition == _Disposition.REMOVE]
-    sets = [a for a in removed if a.kind == _Kind.SET]
+    removed = [a for a in review.assets if a.disposition == ASSET_REMOVE]
+    sets = [a for a in removed if a.kind == ASSET_MODEL_SET]
     # A set's bytes total its member objects, so bytes and files count objects.
-    files = [a for a in removed if a.kind == _Kind.OBJECT]
-    images = [a for a in removed if a.kind == _Kind.IMAGE]
+    files = [a for a in removed if a.kind == ASSET_MODEL_OBJECT]
+    images = [a for a in removed if a.kind == ASSET_RUNTIME_IMAGE]
     line = f"Removes {_size(files + images)} in {len(files)} files ({len(sets)} model sets)"
     if images:
         line += f" and {len(images)} runtime images"
@@ -126,7 +118,7 @@ def _summary(
     states: dict[str, int] = defaultdict(int)
     for asset in removed:
         states[asset.availability] += 1
-    if set(states) - {"verified"}:
+    if set(states) - {ASSET_VERIFIED}:
         # Incomplete bytes are part of consent: say how much is not ready.
         print(
             "Readiness: "
@@ -134,7 +126,7 @@ def _summary(
                 k if len(states) == 1 else f"{n} {k}" for k, n in sorted(states.items())
             )
         )
-    kept = [a for a in review.assets if a.disposition == _Disposition.RETAIN_SHARED]
+    kept = [a for a in review.assets if a.disposition == ASSET_RETAIN_SHARED]
     if kept:
         users = {f.owner_id for f in sharing}
         print(
@@ -146,9 +138,7 @@ def _summary(
                 f"  {owner_kind} ({state}): {len({f.asset_sha256 for f in group})} "
                 f"files kept for {len({f.owner_id for f in group})} owners"
             )
-    referenced = [
-        a for a in review.assets if a.disposition == _Disposition.RETAIN_REFERENCED
-    ]
+    referenced = [a for a in review.assets if a.disposition == ASSET_RETAIN_REFERENCED]
     if referenced:
         print(f"Keeps {len(referenced)} assets that a saved reference still uses")
 
@@ -230,7 +220,7 @@ def _cache_removal_review(payload: object, *, verbose: bool = False) -> None:
     shared = {
         (a.kind, a.sha256)
         for a in review.assets
-        if a.disposition == _Disposition.RETAIN_SHARED
+        if a.disposition == ASSET_RETAIN_SHARED
     }
     sharing = [r for r in review.references if (r.asset_kind, r.asset_sha256) in shared]
     blocking = [

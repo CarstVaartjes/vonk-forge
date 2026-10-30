@@ -214,25 +214,6 @@ def test_json_review_is_unchanged_by_verbose(
     assert json.loads(outputs[0]) == review
 
 
-def test_renderer_words_are_the_generated_contract_words() -> None:
-    from typing import get_args
-
-    from cluster_profiles.cli_render import removal_review
-    from cluster_profiles.generated_control.models.cache_removal_asset_disposition import (
-        CacheRemovalAssetDisposition,
-    )
-    from cluster_profiles.generated_control.models.cache_removal_asset_kind import (
-        CacheRemovalAssetKind,
-    )
-
-    assert {m.value for m in removal_review._Disposition} == set(
-        get_args(CacheRemovalAssetDisposition)
-    )
-    assert {m.value for m in removal_review._Kind} == set(
-        get_args(CacheRemovalAssetKind)
-    )
-
-
 def test_fleet_review_confirm_command_keeps_the_fleet_scope(
     capsys: pytest.CaptureFixture[str],
 ) -> None:

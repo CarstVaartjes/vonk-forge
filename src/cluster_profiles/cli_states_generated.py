@@ -46,6 +46,13 @@ DISPOSITION_FAIL = "fail"
 DISPOSITION_WAIT = "wait"
 DISPOSITION_OBSERVE = "observe"
 DISPOSITION_SECURITY = "security"
+ASSET_REMOVE = "remove"
+ASSET_RETAIN_SHARED = "retain-shared"
+ASSET_RETAIN_REFERENCED = "retain-referenced"
+ASSET_MODEL_OBJECT = "model-object"
+ASSET_MODEL_SET = "model-set"
+ASSET_RUNTIME_IMAGE = "runtime-image"
+ASSET_VERIFIED = "verified"
 
 # The shared HTTP status disposition table, first match wins:
 # (first status, last status, disposition); anything else is observed.
