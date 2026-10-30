@@ -30,6 +30,7 @@ from vonk_control.models import (
     Job,
     NodeInventorySnapshot,
     RecipeBuild,
+    RecipeInstallation,
     RecipeRun,
     RecipeSourceBundle,
     ResourceReservation,
@@ -60,7 +61,8 @@ def _accepted_build_profile(
     *,
     build_memory_bytes=200,
     accept_profile=True,
-    initially_installed=True,
+    initially_installed=False,
+    installation_is_other_image=True,
 ):
     if initially_installed:
         sessions, profiles, planner, profile, api, headers, nodes, _ = _ready_profile(
@@ -160,6 +162,11 @@ def _accepted_build_profile(
         build.state = "planned"
         build.image_digest = build.oci_layout_sha256 = None
         build.image_bytes = None
+        # An installation that still runs the needed image starts without any
+        # build, so a build only follows when the installation is another image.
+        for installation in session.scalars(select(RecipeInstallation)):
+            if installation_is_other_image:
+                installation.image_digest = "sha256:" + "e" * 64
     return sessions, profiles, planner, nodes[0], application_id, selected
 
 

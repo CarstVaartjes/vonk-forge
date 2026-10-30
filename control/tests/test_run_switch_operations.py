@@ -7866,6 +7866,11 @@ def test_plan_reuses_inventory_when_a_new_sample_lands_between_read_points(
         snapshot.capabilities = [*snapshot.capabilities, "recipe.build.v1"]
         if during_builder:
             _reopen_build_attempt(build, now=NOW)
+            # An installation of the needed image starts without any build; the
+            # builder's inventory is read only when the image is another one.
+            installation = session.get(RecipeInstallation, installed.owner_id)
+            assert installation is not None
+            installation.image_digest = "sha256:" + "e" * 64
 
     service = _service(
         sessions,

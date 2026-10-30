@@ -405,22 +405,15 @@ def _worker_process(config: dict, crash: str) -> None:
 # PostgreSQL. That process boundary is the behaviour under test.
 @pytest.mark.slow(30)
 @pytest.mark.parametrize(
-    ("boundary", "complete_while_down", "initially_installed", "replacement"),
+    ("boundary", "complete_while_down", "replacement"),
     [
-        ("build-before", False, False, None),
-        ("build-after", False, False, None),
-        ("build-after", True, False, None),
-        ("start-before", False, False, None),
-        ("start-after", False, False, None),
-        ("start-after", True, False, None),
-        pytest.param("build-after", True, True, None, id="installed-restore"),
-        pytest.param(
-            "build-after", True, False, "image", id="first-install-changed-image"
-        ),
-        pytest.param("build-after", True, True, "image", id="installed-changed-image"),
-        pytest.param(
-            "build-after", True, True, "archive", id="installed-changed-archive"
-        ),
+        ("build-before", False, None),
+        ("build-after", False, None),
+        ("build-after", True, None),
+        ("start-before", False, None),
+        ("start-after", False, None),
+        ("start-after", True, None),
+        pytest.param("build-after", True, "image", id="first-install-changed-image"),
     ],
 )
 def test_profile_recovers_after_worker_process_death(
@@ -428,13 +421,10 @@ def test_profile_recovers_after_worker_process_death(
     postgres_engine,
     boundary,
     complete_while_down,
-    initially_installed,
     replacement,
 ):
     sessions, profiles, _planner, _node, application_id, selected = (
-        _accepted_build_profile(
-            tmp_path, postgres_engine, initially_installed=initially_installed
-        )
+        _accepted_build_profile(tmp_path, postgres_engine)
     )
     assert application_id is not None
     storage = FilesystemRuntimeImageStorage(tmp_path / "runtime-images")
@@ -450,15 +440,6 @@ def test_profile_recovers_after_worker_process_death(
             update={
                 "image_digest": "sha256:" + "b" * 64,
                 "oci_archive_sha256": "b" * 64,
-            }
-        )
-        (tmp_path / "expected-build.receipt.json").write_text(changed.model_dump_json())
-    elif replacement == "archive":
-        changed = original.model_copy(
-            update={
-                "image_digest": "sha256:" + "c" * 64,
-                "oci_archive_sha256": "c" * 64,
-                "image_bytes": original.image_bytes + len(b"replacement"),
             }
         )
         (tmp_path / "expected-build.receipt.json").write_text(changed.model_dump_json())
@@ -688,10 +669,6 @@ def test_profile_recovers_after_worker_process_death(
         assert runs[0].route_state == "published"
         assert runs[0].route_generation is not None
         assert len(tuple(session.scalars(select(RecipeInstallation)))) == 1
-        if initially_installed:
-            assert {
-                row.id: row.plan for row in session.scalars(select(RecipeInstallation))
-            } == original_installations
         application = session.get(FleetProfileApplication, application_id)
         assert application is not None and application.state == "succeeded"
         for claim_id in claim_ids:

@@ -210,16 +210,18 @@ class RunPlanningMixin:
             # identity, so neither is consulted.  Model bytes still missing on
             # a Spark need the transfer phases and their image identity, so
             # that load keeps the full resolution.
-            reuse_installed = (
-                installation is not None
-                and inspection.missing_spark_bytes in (None, 0)
-                and service._installed_image_is_needed(
+            installed_image = (
+                service._installed_image(
                     session,
                     installation,
                     revision.id,
                     expected_image=expected_image,
                 )
+                if installation is not None
+                and inspection.missing_spark_bytes in (None, 0)
+                else None
             )
+            reuse_installed = installed_image is not None
             build_selection = None
             build = None
             build_candidate = None
@@ -266,8 +268,9 @@ class RunPlanningMixin:
                     build_candidate,
                     group,
                     defer_source_build=defer_source_build,
-                    expected_image=expected_image,
+                    expected_image=installed_image or expected_image,
                     require_available=not reuse_installed,
+                    image_installed=reuse_installed,
                 )
             )
             blockers.extend(build_blockers)
@@ -283,9 +286,7 @@ class RunPlanningMixin:
                 effective_settings=effective_settings,
                 model_documents=model_documents,
                 image_bytes=(
-                    None
-                    if reuse_installed
-                    else runtime_storage.image_bytes
+                    runtime_storage.image_bytes
                     if runtime_storage.image_bytes is not None
                     else expected_image.image_bytes
                     if expected_image is not None
@@ -320,7 +321,9 @@ class RunPlanningMixin:
                 freshness.append(builder_freshness)
             start_plan_digest: str | None = None
             recipe_build_id = (
-                build.id
+                installed_image.build_id
+                if installed_image is not None
+                else build.id
                 if build is not None
                 else build_candidate.id
                 if build_candidate is not None

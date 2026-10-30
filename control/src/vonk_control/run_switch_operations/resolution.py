@@ -43,6 +43,7 @@ from ..recipe_execution_contract import (
 )
 from ..recipe_runtime_specs import (
     OPTION_CHOICES_KEY,
+    RUNTIME_INTERFACE,
     RecipeRuntimeSpecError,
     resolve_recipe_entities,
 )
@@ -374,31 +375,44 @@ class ResolutionMixin:
             query.order_by(RecipeBuild.updated_at.desc(), RecipeBuild.id.desc())
         )
 
-    def _installed_image_is_needed(
+    def _installed_image(
         self,
         session: Session,
         installation: RecipeInstallation,
         revision_id: str,
         *,
         expected_image: RuntimeImageIdentity | None,
-    ) -> bool:
-        """Whether an installed installation already runs the image this load needs.
+    ) -> RuntimeImageIdentity | None:
+        """The image an installed installation runs, when this load needs it.
 
         The image is its content: the installed digest decides.  A build row or
         a NAS archive only records where the image came from and may be gone
         or replaced without changing what is installed on the Sparks.
         """
         if installation.state != InstallationState.INSTALLED:
-            return False
-        digest = installation.image_digest
-        plan = parse_stored_installation_plan(installation.plan)
-        if not plan.compiled_execution_plans or any(
-            compiled.runtime_image.image_digest != digest
-            for compiled in plan.compiled_execution_plans.values()
+            return None
+        images = [
+            compiled.runtime_image
+            for compiled in parse_stored_installation_plan(
+                installation.plan
+            ).compiled_execution_plans.values()
+        ]
+        if not images or not all(
+            same_image(item, images[0])
+            and item.image_digest == installation.image_digest
+            for item in images
         ):
-            return False
+            return None
+        installed = RuntimeImageIdentity(
+            image_digest=images[0].image_digest,
+            oci_layout_sha256=images[0].oci_layout_sha256,
+            image_bytes=images[0].image_bytes,
+            architecture="linux-arm64",
+            runtime_interface=RUNTIME_INTERFACE,
+            build_id=images[0].build_id,
+        )
         if expected_image is not None:
-            return expected_image.image_digest == digest
+            return installed if same_image(expected_image, installed) else None
         revision = session.get(CatalogDocumentRevision, revision_id)
         source = revision_source_bundle(revision) if revision is not None else None
         recorded = (
@@ -412,17 +426,19 @@ class ResolutionMixin:
             and recorded.source_bundle_sha256 != source
         ):
             # A republished source bundle builds another image.
-            return False
+            return None
+        # A build of another image replaces the installation, present on the
+        # NAS or not; without any build the installed image stands.
         needed = next(
             (
-                build.image_digest
+                build
                 for build in self._current_builds(session, revision_id)
                 if build.state == LifecycleState.SUCCEEDED.value
                 and build.image_digest is not None
             ),
             None,
         )
-        return needed is None or needed == digest
+        return installed if needed is None or same_image(needed, installed) else None
 
     def _matching_build(
         self,
