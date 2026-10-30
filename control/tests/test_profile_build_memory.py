@@ -21,6 +21,7 @@ from vonk_control.catalog_revision_contract import (
     read_recipe_projection,
     write_catalog_projection,
 )
+from vonk_control.inventory_items import inventory_items, record_items
 from vonk_control.inventory_repository import InventoryRepository
 from vonk_control.memory_reservations import memory_reservations
 from vonk_control.models import (
@@ -64,6 +65,7 @@ def _accepted_build_profile(
     accept_profile=True,
     initially_installed=False,
     installation_is_other_image=True,
+    image_lost_on_sparks=False,
 ):
     if initially_installed:
         sessions, profiles, planner, profile, api, headers, nodes, _ = _ready_profile(
@@ -160,6 +162,15 @@ def _accepted_build_profile(
         with sessions.begin() as session:
             for installation in session.scalars(select(RecipeInstallation)):
                 install_another_image(installation)
+    if image_lost_on_sparks:
+        with sessions.begin() as session:
+            for node in session.scalars(select(AgentNode)):
+                items = inventory_items(node)
+                record_items(
+                    node,
+                    items.model_copy(update={"artifacts": []}),
+                    profiles._clock(),
+                )
     application_id = _load(profile, api, headers)[0] if accept_profile else None
     # Cache loss occurs after acceptance. The already selected, typed build
     # receipt is still the same identity; only its executable work is pending.

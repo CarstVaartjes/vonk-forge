@@ -44,7 +44,6 @@ from ..recipe_runtime_specs import (
 from ..resource_planning import (
     resolve_effective_settings,
 )
-from ..revision_images import revision_source_bundle
 from ..run_admission import (
     PORT_ADMISSION_CODES,
 )
@@ -212,7 +211,6 @@ class RunPlanningMixin:
             # is provenance, not identity, so neither is consulted.  Model or
             # image bytes missing on a Spark need the transfer phases and the
             # image's NAS copy, so that load keeps the full resolution.
-            current_builds = tuple(service._current_builds(session, revision.id))
             installed_plan = (
                 parse_stored_installation_plan(installation.plan)
                 if installation is not None
@@ -220,15 +218,10 @@ class RunPlanningMixin:
             )
             installed_image = (
                 service._installed_image(
+                    session,
                     installation,
                     installed_plan,
-                    current_builds,
-                    revision_source=revision_source_bundle(revision),
-                    recorded_build=session.get(
-                        RecipeBuild, installation.recipe_build_id
-                    )
-                    if installation.recipe_build_id
-                    else None,
+                    revision,
                     expected_image=expected_image,
                 )
                 if installation is not None
@@ -261,7 +254,6 @@ class RunPlanningMixin:
                     session,
                     revision.id,
                     expected_image=expected_image,
-                    current_builds=current_builds,
                 )
                 build_candidate = build or (
                     session.get(RecipeBuild, expected_image.build_id)

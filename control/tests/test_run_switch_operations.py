@@ -16,7 +16,7 @@ from typing import Literal, cast
 import httpx2
 import pytest
 from pydantic import TypeAdapter, ValidationError
-from sqlalchemy import create_engine, func, select, update
+from sqlalchemy import create_engine, event, func, select, update
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
     FailureCode,
@@ -144,6 +144,7 @@ from vonk_control.runtime_image_preparation import (
     prepare_runtime_image,
 )
 from vonk_control.runtime_preflight import latest_result
+from vonk_control.source_bundles import SourceBundleStore
 from vonk_forge_contracts import RecipeDefinition, document_sha256
 
 from .inventory_artifact_support import (
@@ -3455,7 +3456,11 @@ def test_installed_recipe_whose_image_is_missing_on_a_spark_is_healed_not_starte
 def test_installed_reuse_is_decided_without_asking_the_nas_archive(
     tmp_path: Path,
 ) -> None:
-    """Which wrong implementation: reuse that still consults archive presence."""
+    """Which wrong implementation: reuse that still consults archive presence.
+
+    The production wiring: the real build service and the planner get the same
+    archive check; both raise if the reuse decision reads archive presence.
+    """
 
     sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
     installed_recipe(
@@ -3465,6 +3470,11 @@ def test_installed_reuse_is_decided_without_asking_the_nas_archive(
     def never_asked(_digest, _size):
         raise AssertionError("installation reuse must not read NAS archive presence")
 
+    lifecycle._builds = RecipeBuildService(
+        sessions,
+        bundles=SourceBundleStore(tmp_path / "sources"),
+        build_archive_available=never_asked,
+    )
     service = RunSwitchOperationService(
         sessions,
         lifecycle=lifecycle,
@@ -3479,18 +3489,12 @@ def test_installed_reuse_is_decided_without_asking_the_nas_archive(
     assert _phase_kinds(plan) == ["start", "final_verify"]
 
 
-def test_accepted_image_reuse_reaches_start_and_final_verify(tmp_path: Path) -> None:
-    """A profile load bound to the accepted image reuses the installation too."""
-
-    sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
-    installed_recipe(
-        lifecycle, mapping_id, build_id, nodes, request_id=str(uuid.uuid4())
-    )
+def _accepted_identity(sessions, build_id: str) -> RuntimeImageIdentity:
     with sessions() as session:
         build = session.get(RecipeBuild, build_id)
         assert build is not None
         assert build.image_digest and build.oci_layout_sha256 and build.image_bytes
-        accepted = RuntimeImageIdentity(
+        return RuntimeImageIdentity(
             image_digest=build.image_digest,
             oci_layout_sha256=build.oci_layout_sha256,
             image_bytes=build.image_bytes,
@@ -3498,6 +3502,103 @@ def test_accepted_image_reuse_reaches_start_and_final_verify(tmp_path: Path) -> 
             runtime_interface=RUNTIME_INTERFACE,
             build_id=build.id,
         )
+
+
+@pytest.mark.parametrize("accepted", [True, False])
+def test_installed_reuse_never_enters_build_resolution(
+    tmp_path: Path, monkeypatch, accepted: bool
+) -> None:
+    """Which wrong implementation: resolve() (source bundle, row scan) per pass."""
+
+    sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
+    installed_recipe(
+        lifecycle, mapping_id, build_id, nodes, request_id=str(uuid.uuid4())
+    )
+    resolutions: list[str] = []
+    original = lifecycle.reusable_build_id
+    monkeypatch.setattr(
+        lifecycle,
+        "reusable_build_id",
+        lambda revision_id: resolutions.append(revision_id) or original(revision_id),
+    )
+    service = _installed_service(sessions, lifecycle, archive_present=False)
+    request = _request(sessions, nodes[0])
+    plan = (
+        service.inspect_request(
+            request,
+            actor="admin",
+            expected_runtime_image=_accepted_identity(sessions, build_id),
+        )
+        if accepted
+        else service.preview(request, actor="admin")
+    )
+
+    assert _phase_kinds(plan) == ["start", "final_verify"]
+    assert resolutions == []
+
+
+def test_installed_reuse_cost_does_not_grow_with_build_rows(tmp_path: Path) -> None:
+    """Which wrong implementation: a scan of every build row per planning pass."""
+
+    sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
+    installed_recipe(
+        lifecycle, mapping_id, build_id, nodes, request_id=str(uuid.uuid4())
+    )
+    service = _installed_service(sessions, lifecycle, archive_present=False)
+    request = _request(sessions, nodes[0])
+    statements: list[str] = []
+    engine = sessions.kw["bind"]
+
+    def count(_conn, _cursor, statement, *_rest):
+        # Primary-key reads are one row; every other read must be bounded.
+        if "recipe_builds" in statement and "recipe_builds.id = " not in statement:
+            statements.append(statement)
+
+    def measure() -> int:
+        statements.clear()
+        event.listen(engine, "before_cursor_execute", count)
+        try:
+            plan = service.preview(request, actor="admin")
+        finally:
+            event.remove(engine, "before_cursor_execute", count)
+        assert _phase_kinds(plan) == ["start", "final_verify"]
+        assert all("LIMIT" in statement for statement in statements), statements
+        return len(statements)
+
+    few = measure()
+    with sessions.begin() as session:
+        base = session.get(RecipeBuild, build_id)
+        assert base is not None
+        for index in range(80):
+            row_id = str(uuid.uuid4())
+            session.add(
+                RecipeBuild(
+                    id=row_id,
+                    recipe_revision_id=base.recipe_revision_id,
+                    builder_node_id=base.builder_node_id,
+                    source_bundle_sha256=base.source_bundle_sha256,
+                    build_input_sha256=f"{index + 16:064x}",
+                    state="succeeded",
+                    policy_report=dict(base.policy_report),
+                    plan={**base.plan, "build_id": row_id},
+                    image_digest=base.image_digest,
+                    oci_layout_sha256=base.oci_layout_sha256,
+                    image_bytes=base.image_bytes,
+                    created_at=NOW - timedelta(seconds=index + 1),
+                    updated_at=NOW - timedelta(seconds=index + 1),
+                )
+            )
+    assert measure() == few
+
+
+def test_accepted_image_reuse_reaches_start_and_final_verify(tmp_path: Path) -> None:
+    """A profile load bound to the accepted image reuses the installation too."""
+
+    sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
+    installed_recipe(
+        lifecycle, mapping_id, build_id, nodes, request_id=str(uuid.uuid4())
+    )
+    accepted = _accepted_identity(sessions, build_id)
 
     service = _installed_service(sessions, lifecycle, archive_present=False)
     plan = service.inspect_request(

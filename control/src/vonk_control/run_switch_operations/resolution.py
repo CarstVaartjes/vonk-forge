@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Iterator, Mapping
 from typing import (
     TYPE_CHECKING,
 )
@@ -366,7 +366,16 @@ class ResolutionMixin:
         if found is not None:
             yield found
         revision = session.get(CatalogDocumentRevision, revision_id)
-        source = revision_source_bundle(revision) if revision is not None else None
+        yield from session.scalars(
+            self._succeeded_builds(
+                revision_id,
+                revision_source_bundle(revision) if revision is not None else None,
+            )
+        )
+
+    @staticmethod
+    def _succeeded_builds(revision_id: str, source: str | None):
+        """Newest first: the SUCCEEDED builds of this revision and source bundle."""
         query = select(RecipeBuild).where(
             RecipeBuild.recipe_revision_id == revision_id,
             RecipeBuild.state == LifecycleState.SUCCEEDED.value,
@@ -375,18 +384,15 @@ class ResolutionMixin:
         )
         if source is not None:
             query = query.where(RecipeBuild.source_bundle_sha256 == source)
-        yield from session.scalars(
-            query.order_by(RecipeBuild.updated_at.desc(), RecipeBuild.id.desc())
-        )
+        return query.order_by(RecipeBuild.updated_at.desc(), RecipeBuild.id.desc())
 
     def _installed_image(
         self,
+        session: Session,
         installation: RecipeInstallation,
         plan: StoredInstallationPlan,
-        current_builds: Sequence[RecipeBuild],
+        revision: CatalogDocumentRevision,
         *,
-        revision_source: str | None,
-        recorded_build: RecipeBuild | None,
         expected_image: RuntimeImageIdentity | None,
     ) -> RuntimeImageIdentity | None:
         """The image an installed installation runs, when this load needs it.
@@ -395,7 +401,8 @@ class ResolutionMixin:
         a NAS archive only records where the image came from and may be gone
         or replaced without changing what is installed on the Sparks.  What the
         load needs is the accepted image, else the newest SUCCEEDED build row
-        of this revision and source bundle, present on the NAS or not.
+        of this revision and source bundle (one indexed row; resolve() and the
+        NAS archive are never asked).
         """
         if installation.state != InstallationState.INSTALLED:
             return None
@@ -416,22 +423,22 @@ class ResolutionMixin:
         )
         if expected_image is not None:
             return installed if same_image(expected_image, installed) else None
+        source = revision_source_bundle(revision)
+        recorded = (
+            session.get(RecipeBuild, installation.recipe_build_id)
+            if installation.recipe_build_id
+            else None
+        )
         if (
-            revision_source is not None
-            and recorded_build is not None
-            and recorded_build.source_bundle_sha256 != revision_source
+            source is not None
+            and recorded is not None
+            and recorded.source_bundle_sha256 != source
         ):
             # A republished source bundle builds another image.
             return None
-        needed = next(
-            (
-                build
-                for build in current_builds
-                if build.state == LifecycleState.SUCCEEDED.value
-                and build.image_digest is not None
-            ),
-            None,
-        )
+        needed = session.scalars(
+            self._succeeded_builds(revision.id, source).limit(1)
+        ).first()
         return installed if needed is None or same_image(needed, installed) else None
 
     def _matching_build(
@@ -440,7 +447,6 @@ class ResolutionMixin:
         revision_id: str,
         *,
         expected_image: RuntimeImageIdentity | None,
-        current_builds: Sequence[RecipeBuild],
     ) -> RecipeBuild | None:
         service = typing_cast("RunSwitchOperationService", self)
         if expected_image is not None:
@@ -467,7 +473,7 @@ class ResolutionMixin:
         # one build resolution that image preparation also reuses. A newer row
         # of this revision that the current inputs no longer reproduce is
         # another image, and preparation would refuse the load bound to it.
-        for candidate in current_builds:
+        for candidate in self._current_builds(session, revision_id):
             if service._build_is_available(candidate):
                 return candidate
         return None
