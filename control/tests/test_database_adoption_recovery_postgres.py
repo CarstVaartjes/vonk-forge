@@ -486,7 +486,8 @@ def test_initialize_database_bad_handshake_is_bounded_unknown_with_unchanged_cre
         event.remove(Engine, "engine_connect", connected_attempt)
         event.remove(Engine, "engine_disposed", disposed_attempt)
     diagnostics = capsys.readouterr().err
-    assert "cause unknown" in diagnostics and "deadline expired" in diagnostics
+    assert "password authentication failed" in diagnostics
+    assert "deadline expired" in diagnostics
     assert "credentials unchanged" in diagnostics and bad_password not in diagnostics
     assert _schema(database.engine) == before
     with database.engine.connect() as connection:

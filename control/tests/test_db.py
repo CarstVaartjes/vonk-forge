@@ -279,63 +279,73 @@ def _startup_log(error: Exception, capsys: pytest.CaptureFixture[str]) -> str:
     return capsys.readouterr().err
 
 
-class _Sqlstate(Exception):
-    def __init__(self, message: str, sqlstate: str | None) -> None:
-        super().__init__(message)
-        self.sqlstate = sqlstate
+def _real_connect_failure(url: str) -> OperationalError:
+    engine = create_engine(url, connect_args={"connect_timeout": 3})
+    try:
+        with pytest.raises(OperationalError) as caught:
+            engine.connect()
+    finally:
+        engine.dispose()
+    return caught.value
 
 
-@pytest.mark.parametrize(
-    ("driver", "cause"),
-    [
-        (
-            socket.gaierror(-3, "Temporary failure in name resolution"),
-            "name_resolution_failed",
-        ),
-        (
-            _Sqlstate(
-                'could not translate host name "postgres" to address: nodename nor servname',
-                None,
-            ),
-            "name_resolution_failed",
-        ),
-        (
-            _Sqlstate("connection failed: Connection refused", None),
-            "connection_refused",
-        ),
-        (ConnectionRefusedError(111, "refused"), "connection_refused"),
-        (_Sqlstate("connection timeout expired", None), "timeout"),
-        (TimeoutError("x"), "timeout"),
-        (
-            _Sqlstate("server closed the connection unexpectedly", None),
-            "server_closed_connection",
-        ),
-        (_Sqlstate("auth", "28P01"), "authentication_failed"),
-        (_Sqlstate("x", "28000"), "authentication_failed"),
-        (_Sqlstate('database "vonk" does not exist', "3D000"), "database_missing"),
-        (_Sqlstate("weird", None), "other"),
-    ],
-)
-def test_startup_log_names_the_connection_cause(
-    driver: Exception, cause: str, capsys: pytest.CaptureFixture[str]
+def test_startup_log_carries_the_incident_dns_message(
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
-    log = _startup_log(OperationalError("connect", {}, driver), capsys)
+    """Catches an implementation that prints a fixed "cause unknown" text."""
+    message = (
+        "failed to resolve host 'postgres': "
+        "[Errno -3] Temporary failure in name resolution"
+    )
 
-    assert f"cause {cause}" in log
+    log = _startup_log(OperationalError("connect", {}, Exception(message)), capsys)
+
+    assert message in log
     assert "cause unknown" not in log
 
 
-def test_startup_log_never_shows_a_dsn_password(
+def test_startup_log_names_a_real_refused_connection(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    driver = _Sqlstate(
-        'connection to server at "postgres" (10.0.0.2), port 5432 failed: '
-        "postgresql://vonk:s3cretpw@postgres:5432/vonk password=s3cretpw",
-        None,
+    """Catches classification that assumes psycopg chains an OSError or SQLSTATE."""
+    with socket.socket() as closed:
+        closed.bind(("127.0.0.1", 0))
+        port = closed.getsockname()[1]
+
+    log = _startup_log(
+        _real_connect_failure(f"postgresql+psycopg://u:s3cretpw@127.0.0.1:{port}/d"),
+        capsys,
+    )
+
+    assert "127.0.0.1" in log and str(port) in log
+    assert "refused" in log.lower()
+    assert "s3cretpw" not in log
+
+
+def test_startup_log_names_a_real_dns_failure(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Catches classification that mislabels or drops a real resolution failure."""
+    log = _startup_log(
+        _real_connect_failure("postgresql+psycopg://u:s3cretpw@nohost.invalid:5432/d"),
+        capsys,
+    )
+
+    assert "failed to resolve host" in log
+    assert "nohost.invalid" in log
+    assert "s3cretpw" not in log
+
+
+def test_startup_log_redacts_a_password_inside_the_driver_message(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Catches logging the raw driver text without the central redaction."""
+    driver = Exception(
+        "connection to postgresql://vonk:p@ss@postgres:5432/vonk failed "
+        "password='s3cret pw'"
     )
 
     log = _startup_log(OperationalError("connect", {}, driver), capsys)
 
-    assert "s3cretpw" not in log
-    assert "postgres" in log
-    assert "5432" in log
+    assert "s3cret" not in log and "p@ss" not in log
+    assert "postgres:5432" in log

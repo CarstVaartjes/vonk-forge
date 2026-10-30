@@ -21,11 +21,15 @@ _SENSITIVE_KEY = re.compile(
 )
 _AUTHORIZATION = re.compile(r"(?i)authorization\s*:\s*(?:bearer|basic)\s+[^\s,;]+")
 _BEARER = re.compile(r"(?i)\b(?:bearer|basic)\s+[^\s,;]+")
-_ASSIGNMENT = re.compile(r"(?i)\b(password|secret|token|api[_-]?key)\s*[:=]\s*[^\s,;]+")
+_ASSIGNMENT = re.compile(
+    r"(?i)\b(password|secret|token|api[_-]?key)\s*[:=]\s*(?:'(?:[^'\\]|\\.)*'|\"[^\"]*\"|[^\s,;]+)"
+)
 _PRIVATE_BLOCK = re.compile(
     r"-----BEGIN [^-]*PRIVATE KEY-----.*?-----END [^-]*PRIVATE KEY-----", re.DOTALL
 )
-_HTTP_URL = re.compile(r"https?://[^\s<>\"']+", re.IGNORECASE)
+_HTTP_URL = re.compile(
+    r"(?<![a-z0-9+.-])[a-z][a-z0-9+.-]*://[^\s<>\"']+", re.IGNORECASE
+)
 _MAX_FIELD = 4096
 
 
