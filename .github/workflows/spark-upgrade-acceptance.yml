@@ -146,6 +146,7 @@ jobs:
           version-file: .tool-versions
           python-version: "3.14"
           enable-cache: true
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Build recipe library index and packages
         run: scripts/build-recipe-library "$VONK_RECIPE_LIBRARY_ROOT"

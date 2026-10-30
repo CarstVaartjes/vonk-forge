@@ -1635,6 +1635,7 @@ jobs:
           version-file: .tool-versions
           python-version: "3.14"
           enable-cache: true
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
       - name: Authenticate CI image mirror reads
         # The mirror is an optional fast path; pulls fall back to upstream.
         continue-on-error: true

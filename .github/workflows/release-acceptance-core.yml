@@ -71,6 +71,7 @@ jobs:
           version-file: .tool-versions
           python-version: "3.14"
           enable-cache: true
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
       - name: Find the pull request candidate and its Spark evidence
         id: find
         shell: bash
@@ -223,6 +224,7 @@ jobs:
           version-file: .tool-versions
           python-version: "3.14"
           enable-cache: true
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Authenticate candidate image reads
         if: inputs.premerge
@@ -629,6 +631,7 @@ jobs:
           version-file: .tool-versions
           python-version: "3.14"
           enable-cache: true
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
       - name: Build recipe library index and packages
         run: scripts/build-recipe-library "$VONK_RECIPE_LIBRARY_ROOT"
 
@@ -681,6 +684,7 @@ jobs:
           shared-key: linux-arm64-candidate
           add-job-id-key: "false"
           cache-workspace-crates: "false"
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Build exact-source native renewal scheduling peer
         shell: bash
@@ -930,6 +934,7 @@ jobs:
           version-file: .tool-versions
           python-version: "3.14"
           enable-cache: true
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Download exact candidate publication graph
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
