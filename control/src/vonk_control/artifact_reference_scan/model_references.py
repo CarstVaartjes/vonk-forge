@@ -10,19 +10,15 @@ from vonk_agent_protocol import (
     ArtifactLifecycleCode,
     canonical_message,
 )
-from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
-from vonk_forge_contracts import ModelDefinition, RecipeDefinition
 
 from .. import model_cache_states
 from ..artifact_lifecycle import (
     ArtifactReferenceUnverified,
 )
-from ..catalog_revision_contract import read_catalog_document
 from ..content_identity import recipe_model_digests
 from ..machine_states import DISTRIBUTION_HELD, RUN_LIVE
 from ..models import (
     ArtifactDistributionAssignment,
-    CatalogDocumentRevision,
     FleetProfile,
     FleetProfileApplication,
     Job,
@@ -33,6 +29,7 @@ from ..models import (
     RecipeRun,
 )
 from .intents import (
+    _installation_plan,
     _profile_plan,
     _run_switch_kinds,
     _run_switch_plan,
@@ -48,93 +45,13 @@ from .types import (
 )
 
 
-def _model_documents(session: Session, roots: set[str]) -> dict[str, ModelDefinition]:
-    """The models and everything they depend on, read once each, level by level.
-
-    A model that is missing or whose document cannot be read is absent, which
-    callers treat as unknown, never as declaring nothing.
-    """
-
-    found: dict[str, ModelDefinition] = {}
-    asked: set[str] = set()
-    pending = set(roots)
-    while pending:
-        asked |= pending
-        level: dict[str, ModelDefinition] = {}
-        for revision in session.scalars(
-            select(CatalogDocumentRevision).where(
-                CatalogDocumentRevision.kind == RunSwitchReasonScopeName.MODEL,
-                CatalogDocumentRevision.content_digest.in_(sorted(pending)),
-            )
-        ):
-            try:
-                model = read_catalog_document(revision)
-            except (TypeError, ValueError):
-                continue
-            if isinstance(model, ModelDefinition):
-                level[revision.content_digest] = model
-        found.update(level)
-        pending = {
-            dependency.content_sha256
-            for model in level.values()
-            for dependency in model.dependencies
-        } - asked
-    return found
-
-
-def _needs(
-    revision: CatalogDocumentRevision,
-    used: frozenset[str],
-    models: dict[str, ModelDefinition],
-) -> list[frozenset[str]] | None:
-    """The files a set must contain to serve each model a recipe revision uses.
-
-    A model needs the files its recipe selects (all of them when the recipe does
-    not select it) plus the needs of its dependencies. A recipe or model that
-    cannot be read, or a selection naming none of the model's files, is unknown.
-    """
-
-    try:
-        recipe = read_catalog_document(revision)
-    except (TypeError, ValueError):
-        return None
-    if not isinstance(recipe, RecipeDefinition):
-        return None
-    chosen: dict[str, set[str]] = {}
-    for selection in recipe.models:
-        chosen.setdefault(selection.model.content_sha256, set()).update(
-            file.file_id for file in selection.files
-        )
-    needs: dict[str, frozenset[str]] = {}
-
-    def need(digest: str, path: frozenset[str]) -> frozenset[str] | None:
-        if digest in needs:
-            return needs[digest]
-        model = models.get(digest)
-        if model is None or digest in path:
-            return None
-        ids = chosen.get(digest)
-        files = {file.sha256 for file in model.files if ids is None or file.id in ids}
-        for dependency in model.dependencies:
-            inner = need(dependency.content_sha256, path | {digest})
-            if inner is None:
-                return None
-            files |= inner
-        if not files:
-            return None
-        needs[digest] = frozenset(files)
-        return needs[digest]
-
-    for root in sorted(used):
-        if need(root, frozenset()) is None:
-            return None
-    return list(needs.values())
-
-
 def model_set_reference_findings(
     session: Session, set_digests: Iterable[str]
 ) -> dict[str, tuple[ArtifactReferenceFinding, ...]]:
     """Find typed saved-profile and active owners of exact model sets."""
+
+    from ..model_cache.errors import ModelCacheError
+    from ..model_cache.resolution import resolve_recipe_set
 
     selected = set(set_digests)
     if not selected:
@@ -157,22 +74,29 @@ def model_set_reference_findings(
         digest: set() for digest in selected
     }
 
-    # A set is held when it serves a protected model: it contains every file the
-    # model needs. Shared small files are kept by the object scope, never by
-    # holding unrelated sets.
-    members: dict[str, set[str]] = {digest: set() for digest in selected}
-    for set_digest, object_digest in session.execute(
-        select(
-            ModelCacheSetArtifact.artifact_set_sha256,
-            ModelCacheSetArtifact.artifact_sha256,
-        ).where(ModelCacheSetArtifact.artifact_set_sha256.in_(sorted(selected)))
-    ):
-        members[set_digest].add(object_digest)
-    if not all(members.values()):
-        raise ArtifactReferenceUnverified(
-            ArtifactLifecycleCode.REFERENCE_SCAN_FAILED,
-            "model-set membership is unavailable; removal was deferred",
-            retryable=True,
+    # A set is held when it is the set a protected recipe revision resolves to,
+    # as a download resolves it (identical files resolve to the same set). A
+    # revision that cannot be resolved holds the sets bound to its models.
+    present = set(
+        session.scalars(
+            select(ModelCacheSetArtifact.artifact_set_sha256)
+            .where(ModelCacheSetArtifact.artifact_set_sha256.in_(sorted(selected)))
+            .distinct()
+        )
+    )
+    for set_digest in selected - present:
+        label = f"model set {set_digest} has no membership"
+        findings[set_digest].add(
+            _finding(
+                "model-set",
+                set_digest,
+                owner_kind="model-cache-set",
+                owner_id=set_digest,
+                state="unverified",
+                classification="active-work",
+                detail="the set's membership is unavailable, so it is kept",
+                reason=label,
+            )
         )
 
     profiles = list(session.scalars(select(FleetProfile).order_by(FleetProfile.id)))
@@ -181,13 +105,8 @@ def model_set_reference_findings(
         session, {selector for chosen in named.values() for selector in chosen or ()}
     )
     running = list(
-        session.execute(
-            select(
-                RecipeInstallation.id,
-                RecipeInstallation.state,
-                RecipeInstallation.model_content_sha256,
-                RecipeInstallation.recipe_revision_id,
-            )
+        session.scalars(
+            select(RecipeInstallation)
             .where(
                 or_(
                     RecipeInstallation.state.in_(_ACTIVE_INSTALLATIONS),
@@ -202,50 +121,27 @@ def model_set_reference_findings(
             .order_by(RecipeInstallation.id)
         )
     )
-    recipes = {
-        revision.id: revision for found in resolved.values() for revision in found
-    }
-    installed = {row.recipe_revision_id for row in running} - recipes.keys()
-    if installed:
-        recipes.update(
-            {
-                revision.id: revision
-                for revision in session.scalars(
-                    select(CatalogDocumentRevision).where(
-                        CatalogDocumentRevision.id.in_(sorted(installed))
-                    )
-                )
-            }
-        )
-    # A recipe uses the models its binding rows name; an installation also the
-    # model its row records.
-    bound = recipe_model_digests(session, recipes.keys())
-    uses = {
-        row.id: bound.get(row.recipe_revision_id, frozenset())
-        | ({row.model_content_sha256} if row.model_content_sha256 else frozenset())
-        for row in running
-    }
-    documents = _model_documents(
-        session,
-        {model for chosen in bound.values() for model in chosen}
-        | {model for chosen in uses.values() for model in chosen},
+    revision_ids = {revision.id for found in resolved.values() for revision in found}
+    bound = recipe_model_digests(
+        session, revision_ids | {row.recipe_revision_id for row in running}
     )
-    needs: dict[tuple[str, frozenset[str]], list[frozenset[str]] | None] = {}
 
-    def held_by(revision_id: str, used: frozenset[str]) -> set[str]:
-        """The selected sets serving the models used; unknown holds them all."""
-        revision = recipes.get(revision_id)
-        key = (revision_id, used)
-        if key not in needs:
-            needs[key] = None if revision is None else _needs(revision, used, documents)
-        wanted = needs[key]
-        if wanted is None:
-            return set(selected)
+    def bound_sets(models: Iterable[str]) -> set[str]:
+        """The selected sets first cached for these models (no parsing)."""
+        wanted = set(models)
         return {
-            digest
-            for digest, have in members.items()
-            if any(need <= have for need in wanted)
+            digest for digest, row in sets.items() if row.model_content_sha256 in wanted
         }
+
+    resolves: dict[str, str | None] = {}
+
+    def resolved_set(ident: str) -> str | None:
+        if ident not in resolves:
+            try:
+                resolves[ident] = resolve_recipe_set(session, ident).digest
+            except (ModelCacheError, TypeError, ValueError):
+                resolves[ident] = None
+        return resolves[ident]
 
     for profile in profiles:
         selectors = named[profile.id]
@@ -254,11 +150,14 @@ def model_set_reference_findings(
             continue
         for selector in selectors:
             found = resolved[selector]
-            # No revision, or a revision bound to no model, is unknown.
             held = set() if found else set(selected)
             for revision in found:
-                used = bound.get(revision.id, frozenset())
-                held |= held_by(revision.id, used) if used else set(selected)
+                digest = resolved_set(revision.id)
+                held |= (
+                    {digest} & selected
+                    if digest is not None
+                    else bound_sets(bound.get(revision.id, ()))
+                )
             _protect_saved(findings, profile, "model-set", held)
 
     def account(value: object) -> None:
@@ -324,8 +223,20 @@ def model_set_reference_findings(
                 )
 
     for row in running:
+        plan = _installation_plan(row)
+        if plan is not None:
+            held = selected & {
+                compiled.identity.model_artifact_set_sha256
+                for compiled in plan.compiled_execution_plans.values()
+            }
+        else:
+            # Its plan cannot be read: it keeps the sets of the models its rows name.
+            held = bound_sets(
+                bound.get(row.recipe_revision_id, frozenset())
+                | ({row.model_content_sha256} if row.model_content_sha256 else set())
+            )
         label = f"installation {row.id}"
-        for set_digest in held_by(row.recipe_revision_id, uses[row.id]):
+        for set_digest in held:
             findings[set_digest].add(
                 _finding(
                     "model-set",

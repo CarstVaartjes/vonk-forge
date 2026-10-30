@@ -30,6 +30,7 @@ from .test_model_cache import (
     _canonical_recipe,
     _download,
 )
+from .test_removal_holds_models import cache_resolved
 from .test_unused_storage_collection import (
     A_MODEL,
     AN_IMAGE,
@@ -164,29 +165,25 @@ def test_scoped_profile_damage_keeps_exact_content_and_collects_unrelated_model(
         world.sessions, tmp_path / "cache", reserve_bytes=0, fixture_sources=True
     )
     try:
-        protected = _download(
-            service,
-            [_artifact(tmp_path, b"protected", model_content_sha256=A_MODEL)],
-            model_content_sha256=A_MODEL,
-            request_key=str(uuid.uuid4()),
-        )
+        # The set the recipe resolves to, as a download of it would cache it.
+        with world.sessions.begin() as session:
+            protected = cache_resolved(session, revision.id)
         unrelated = _download(
             service,
             [_artifact(tmp_path, b"unrelated", model_content_sha256="b" * 64)],
             model_content_sha256="b" * 64,
             request_key=str(uuid.uuid4()),
         )
-        assert protected.artifact_set_sha256 is not None
         assert unrelated.artifact_set_sha256 is not None
         with world.sessions() as session:
             findings = model_set_reference_findings(
-                session, (protected.artifact_set_sha256, unrelated.artifact_set_sha256)
+                session, (protected, unrelated.artifact_set_sha256)
             )
-        assert findings[protected.artifact_set_sha256]
+        assert findings[protected]
         assert not findings[unrelated.artifact_set_sha256]
         _models(world, service).collect()
         _settle(service)
-        assert _set_exists(world, protected.artifact_set_sha256)
+        assert _set_exists(world, protected)
         assert not _set_exists(world, unrelated.artifact_set_sha256)
         fresh = _download(
             service,
