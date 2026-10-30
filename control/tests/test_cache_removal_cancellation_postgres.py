@@ -58,8 +58,8 @@ def _cache_adapter(
                 artifacts=artifacts,
             )
 
-        def list_operations(self, *, limit: int = 100):
-            return cache.list_operations(limit=limit)
+        def reusable_operation(self, **kwargs: Any):
+            return cache.reusable_operation(**kwargs)
 
         def start_download(self, **kwargs: Any):
             kwargs.pop("recipe_revision_id", None)
