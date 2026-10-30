@@ -219,10 +219,11 @@ Integration selection follows transitive dependencies in `scripts/select-ci-area
 unknown inputs run the integrations. Controller PostgreSQL checks always run.
 Integration PRs require the `release-acceptance` label and exact-commit candidate
 acceptance before `CI gate` passes. CI labels same-repository integration PRs.
-The acceptance's upgrade carry runs on main for every merge and on a PR only
-when the change can alter the upgrade (agent, packaging, installers,
-deployment, protocol, candidate scripts and workflows); the selector owns that
-boundary.
+Candidate acceptance runs on a PR only with the `release-acceptance` label or
+when the change can alter the upgrade (agent, packaging, installers, deployment,
+protocol, candidate scripts and workflows; the selector owns that boundary);
+other component PRs fold into an integration PR or are accepted by main's
+Release, which runs the upgrade carry for every merge.
 See [the contributor CI guide](contributor.md#ci-and-pre-merge-release-acceptance)
 for protected environment setup and dispatch by ref. PR acceptance and main's
 Release reuse the same candidate/acceptance jobs; only main promotes channels.

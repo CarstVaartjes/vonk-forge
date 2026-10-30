@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.machinery
 import importlib.util
+import runpy
 import subprocess
 import sys
 from pathlib import Path
@@ -180,15 +181,73 @@ def test_lane_code_needs_a_proof_run_on_the_pull_request(path: str) -> None:
     assert module.lane_selected([path], "merge_group") is True
 
 
-def test_product_code_and_workflows_need_candidate_acceptance() -> None:
-    assert _module().lane_selected(
-        [
-            "control/src/vonk_control/api.py",
-            "docs/operator.md",
-            ".github/workflows/ci.yml",
-        ],
-        "pull_request",
-    )
+@pytest.mark.parametrize(
+    "paths",
+    [
+        ["control/src/vonk_control/api.py"],
+        ["control/src/vonk_control/api.py", "docs/operator.md"],
+        ["control/web/src/app.tsx", "tools/pytest_budget.py"],
+        [".github/workflows/ci.yml"],
+    ],
+)
+def test_component_prs_select_no_candidate_acceptance(paths: list[str]) -> None:
+    # Catches acceptance on every Controller/tooling PR again: those fold into
+    # an integration PR (label) or are accepted by main's Release.
+    assert _module().lane_selected(paths, "pull_request") is False
+
+
+@pytest.mark.parametrize(
+    "paths",
+    [
+        ["rust/crates/vonk-agent/src/main.rs"],
+        ["control/src/vonk_control/api.py", "agent_protocol/src/x.py"],
+        ["packaging/debian/control"],
+        ["install/spark/install.sh"],
+        ["deploy/compose/compose.yaml"],
+        ["tests/acceptance/test_fresh_nas_install.py"],
+        ["weird/new"],
+    ],
+)
+def test_upgrade_sensitive_prs_select_candidate_acceptance(paths: list[str]) -> None:
+    assert _module().lane_selected(paths, "pull_request") is True
+
+
+def test_the_label_owner_is_ci_yml_and_the_lane_proof_honours_it() -> None:
+    # The selector decides by paths; the label is read once per consumer in
+    # ci.yml, so a labelled control-only PR runs acceptance and carry.
+    text = (ROOT / ".github/workflows/ci.yml").read_text()
+    label = "contains(github.event.pull_request.labels.*.name, 'release-acceptance')"
+    assert f"needs.changes.outputs.lane == 'true' || {label}" in text
+    assert f"needs.changes.outputs.upgrade_carry == 'true' || {label}" in text
+    assert _module().lane_selected(["control/src/x.py"], "pull_request") is False
+
+
+def test_a_control_only_pr_without_acceptance_still_passes_the_gate() -> None:
+    gate = runpy.run_path(str(ROOT / "scripts/verify-ci-gate"))
+    selected = {
+        "rust": "true", "repository": "true", "control": "true", "web": "true",
+        "generated": "true", "compose": "true", "nas-install": "true",
+        "agent-package": "true", "lane": "false",
+    }  # fmt: skip
+    results = {
+        "lint": "success", "supply-chain": "success", "repository-guards": "success",
+        "rust-quality": "success", "rust-tests": "success", "rust-platform": "success",
+        "repository": "success", "control": "success", "web": "success",
+        "generated": "success", "compose": "success", "nas-install": "success",
+        "agent-package": "success", "control-image-build": "success",
+        "controller-spark-wire": "success", "lane-proof": "skipped",
+    }  # fmt: skip
+    assert gate["verify"]("success", selected, results) == []
+    results["lane-proof"] = "success"
+    assert gate["verify"]("success", selected, results)
+
+
+def test_release_accepts_a_direct_merge_whose_pr_held_no_candidate() -> None:
+    # No gap: a component PR merged straight to main has no PR candidate
+    # evidence, so main's Release runs the Spark and refresh steps itself.
+    core = (ROOT / ".github/workflows/release-acceptance-core.yml").read_text()
+    assert "has no complete candidate evidence" in core
+    assert "Spark and recipe refresh run here" in core
 
 
 @pytest.mark.parametrize(
@@ -225,7 +284,7 @@ def test_test_only_changes_skip_candidate_acceptance(paths: list[str]) -> None:
 
 @pytest.mark.parametrize(
     "path",
-    ["tests/acceptance/test_spark_lifecycle.py", "tests/fixtures/x.json", "weird/new"],
+    ["tests/acceptance/test_spark_lifecycle.py", "weird/new"],
 )
 def test_acceptance_inputs_and_unknown_paths_keep_candidate_acceptance(
     path: str,
@@ -279,17 +338,21 @@ def test_shared_and_acceptance_test_inputs_keep_their_integrations(path: str) ->
     # and programs invoked by installer, Compose and native package consumers.
     module = _module()
     assert all(module.select([path], "pull_request").values())
-    assert module.lane_selected([path], "pull_request") is True
+    # Acceptance programs accept their own candidate; shared helpers and
+    # fixtures leave acceptance to the integration PR or main's Release.
+    assert module.lane_selected([path], "pull_request") is path.startswith(
+        ("tests/acceptance/", "deploy/", "weird/")
+    )
 
 
-def test_product_change_alongside_ordinary_tests_still_accepts_candidate() -> None:
+def test_product_change_alongside_ordinary_tests_leaves_acceptance_to_release() -> None:
     paths = [
         "control/tests/test_catalog_dry_run.py",
         "control/src/vonk_control/catalog.py",
     ]
     module = _module()
     assert all(module.select(paths, "pull_request").values())
-    assert module.lane_selected(paths, "pull_request") is True
+    assert module.lane_selected(paths, "pull_request") is False
 
 
 @pytest.mark.parametrize(
@@ -417,5 +480,5 @@ def test_selector_names_the_carry_for_the_lane_proof() -> None:
     )
     assert result.returncode == 0, result.stderr
     lines = result.stdout.splitlines()
-    assert "lane=true" in lines
+    assert "lane=false" in lines
     assert "upgrade_carry=false" in lines
