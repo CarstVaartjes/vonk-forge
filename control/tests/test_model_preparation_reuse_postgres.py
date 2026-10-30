@@ -133,3 +133,38 @@ def test_older_active_operation_is_reused_behind_many_newer_unrelated_ones(
             )
             == 1
         )
+
+    # A removal of the same set is never reused.
+    with sessions.begin() as session:
+        row = session.get(ModelCacheOperation, child_id)
+        assert row is not None
+        row.kind = "remove"
+    assert (
+        cache.reusable_operation(
+            artifact_set_sha256=str(child.artifact_set_sha256),
+            include_succeeded=True,
+        )
+        is None
+    )
+    with sessions.begin() as session:
+        row = session.get(ModelCacheOperation, child_id)
+        assert row is not None
+        row.kind = "download"
+
+    # An operation whose cancellation is being driven is not rejoined.
+    with sessions.begin() as session:
+        assert cache.cancel_operation_in_session(
+            session,
+            child_id,
+            actor="operator",
+            request_key=str(uuid.uuid4()),
+            reason="no longer wanted",
+        )
+    assert cache.get_operation(child_id).state == LifecycleState.OBSERVING
+    assert (
+        cache.reusable_operation(
+            artifact_set_sha256=str(child.artifact_set_sha256),
+            include_succeeded=True,
+        )
+        is None
+    )

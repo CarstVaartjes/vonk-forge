@@ -168,16 +168,21 @@ class OperationsMixin:
 
         The question is asked of the target: the set digest and the state are
         predicates of the query, so an operation is found however old it is and
-        no unrelated row is read; only this set's rows are looked at, best first.  A succeeded operation is preferred, then a
-        live one, then the lowest id.
+        no unrelated row is read.  Only download and repair operations qualify,
+        never a removal.  Ids are selected first and rows are loaded best first
+        until one is usable.  A succeeded operation is preferred, then a live
+        one, then the lowest id.
         """
         cache = cast("ModelCacheService", self)
         succeeded = model_cache_states.stored_words(
             model_cache_states.SUBJECT, (LifecycleState.SUCCEEDED,)
         )
         states = (*model_cache_states.ACTIVE, *(succeeded if include_succeeded else ()))
-        query = select(ModelCacheOperation).where(
+        query = select(ModelCacheOperation.id).where(
             ModelCacheOperation.artifact_set_sha256 == artifact_set_sha256,
+            ModelCacheOperation.kind.in_(
+                (CacheOperationKind.DOWNLOAD.value, CacheOperationKind.REPAIR.value)
+            ),
             ModelCacheOperation.state.in_(states),
         )
         if excluding is not None:
@@ -189,11 +194,16 @@ class OperationsMixin:
             *((LifecycleState.SUCCEEDED.value,) if include_succeeded else ()),
         }
         with cache._session() as session:
-            ordered = query.order_by(
-                case((ModelCacheOperation.state.in_(succeeded), 0), else_=1),
-                ModelCacheOperation.id,
-            )
-            for row in session.scalars(ordered):
+            candidates = session.scalars(
+                query.order_by(
+                    case((ModelCacheOperation.state.in_(succeeded), 0), else_=1),
+                    ModelCacheOperation.id,
+                )
+            ).all()
+            for operation_id in candidates:
+                row = session.get(ModelCacheOperation, operation_id)
+                if row is None:
+                    continue
                 # A cancellation lives in the payload: the view of an operation
                 # being cancelled says so, and such an operation is not joined.
                 view = cache._operation_view(row)
