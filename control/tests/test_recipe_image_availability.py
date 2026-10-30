@@ -2437,9 +2437,8 @@ def test_postgres_model_child_lock_contention_resumes_same_preparation(
                 ),
             )
 
-        def list_operations(self, *, limit: int) -> tuple[object, ...]:
-            assert limit > 0
-            return (child,)
+        def reusable_operation(self, **_: object) -> object:
+            return child
 
         def start_download(self, **_: object) -> SimpleNamespace:
             self.start_calls += 1
@@ -2901,8 +2900,8 @@ def test_model_child_and_image_complete_through_one_sql_operation(
                 document=lambda: _manifest(model_content_digests=["d" * 64]),
             )
 
-        def list_operations(self, *, limit: int) -> tuple[object, ...]:
-            return (child,) if self.start_calls else ()
+        def reusable_operation(self, **_: object) -> object:
+            return child if self.start_calls else None
 
         def start_download(self, **_: object) -> SimpleNamespace:
             self.start_calls += 1
@@ -3011,8 +3010,8 @@ def test_model_and_image_children_advance_independently_and_reuse_image(
                 document=lambda: _manifest(model_content_digests=["d" * 64]),
             )
 
-        def list_operations(self, **_: object) -> tuple[object, ...]:
-            return ()
+        def reusable_operation(self, **_: object) -> None:
+            return None
 
         def start_download(self, **_: object) -> SimpleNamespace:
             return child
@@ -3137,8 +3136,8 @@ def test_recipe_retry_uses_model_access_recheck_for_terminal_auth(
             self.called = {"operation_id": operation_id, **kwargs}
             return failed
 
-        def list_operations(self, **_: object) -> tuple[object, ...]:
-            return ()
+        def reusable_operation(self, **_: object) -> None:
+            return None
 
     cache = ModelCache()
     service = _service(
@@ -3245,8 +3244,8 @@ def test_automatic_reconciliation_repairs_model_child_and_reuses_image(
                 document=lambda: _manifest(model_content_digests=["d" * 64]),
             )
 
-        def list_operations(self, **_: object) -> tuple[object, ...]:
-            return (repaired,) if self.repair_calls else (failed,)
+        def reusable_operation(self, **_: object) -> object:
+            return repaired if self.repair_calls else failed
 
         def start_download(self, **_: object) -> SimpleNamespace:
             raise AssertionError("the existing ModelCache child should be reused")

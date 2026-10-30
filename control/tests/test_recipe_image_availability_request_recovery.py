@@ -435,8 +435,8 @@ def test_lost_model_projection_is_reconciled_by_same_request_and_reuses_image(tm
                 document=lambda: _manifest(model_content_digests=[model_digest]),
             )
 
-        def list_operations(self, **kwargs):
-            return ()
+        def reusable_operation(self, **kwargs):
+            return None
 
         def start_download(self, *, request_key, **kwargs):
             requests.append(request_key)

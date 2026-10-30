@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, cast
 
-from sqlalchemy import select
+from sqlalchemy import case, select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import LifecycleState, ModelCacheCode
 
@@ -157,19 +157,39 @@ class OperationsMixin:
             )
         return operation, action, selector
 
-    def list_operations(self, *, limit: int = 100) -> tuple[CacheOperationView, ...]:
+    def reusable_operation(
+        self,
+        *,
+        artifact_set_sha256: str,
+        include_succeeded: bool,
+        excluding: str | None = None,
+    ) -> CacheOperationView | None:
+        """Return the operation a consumer of this artifact set may attach to.
+
+        The question is asked of the target: the set digest and the state are
+        predicates of the query, so an operation is found however old it is and
+        no unrelated row is read.  A succeeded operation is preferred, then a
+        live one, then the lowest id.
+        """
         cache = cast("ModelCacheService", self)
-        if not 1 <= limit <= 100:
-            raise InvalidValue("cache operation limit is invalid")
+        succeeded = model_cache_states.stored_words(
+            model_cache_states.SUBJECT, (LifecycleState.SUCCEEDED,)
+        )
+        states = (*model_cache_states.ACTIVE, *(succeeded if include_succeeded else ()))
+        query = select(ModelCacheOperation).where(
+            ModelCacheOperation.artifact_set_sha256 == artifact_set_sha256,
+            ModelCacheOperation.state.in_(states),
+        )
+        if excluding is not None:
+            query = query.where(ModelCacheOperation.id != excluding)
         with cache._session() as session:
-            rows = session.scalars(
-                select(ModelCacheOperation)
-                .order_by(
-                    ModelCacheOperation.created_at.desc(), ModelCacheOperation.id.desc()
-                )
-                .limit(limit)
-            )
-            return tuple(cache._operation_view(row) for row in rows)
+            row = session.scalars(
+                query.order_by(
+                    case((ModelCacheOperation.state.in_(succeeded), 0), else_=1),
+                    ModelCacheOperation.id,
+                ).limit(1)
+            ).first()
+            return None if row is None else cache._operation_view(row)
 
     def operations_page(
         self,
