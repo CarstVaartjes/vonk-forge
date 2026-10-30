@@ -437,7 +437,7 @@ def test_initialize_database_native_schema_permission_denial_is_fatal_without_ba
             connection.exec_driver_sql(f"DROP ROLE {role}")
 
 
-def test_initialize_database_bad_handshake_is_bounded_unknown_with_unchanged_credentials(
+def test_initialize_database_bad_handshake_is_bounded_and_names_the_refusal_with_unchanged_credentials(
     startup_database: StartupDatabase,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
@@ -461,13 +461,13 @@ def test_initialize_database_bad_handshake_is_bounded_unknown_with_unchanged_cre
             assert isinstance(engine.pool, QueuePool)
             assert engine.pool.checkedout() == 0
 
-    def bounded_unknown(wait: float) -> None:
+    def bounded_refusal(wait: float) -> None:
         assert failed and not connected
         assert all(engine.url == bad_url for engine in failed)
         waits.append(wait)
         time.sleep(wait)
 
-    observe_retry(monkeypatch, timeout=0.3, sleep=bounded_unknown)
+    observe_retry(monkeypatch, timeout=0.3, sleep=bounded_refusal)
     event.listen(Engine, "engine_connect", connected_attempt)
     event.listen(Engine, "engine_disposed", disposed_attempt)
     started = time.monotonic()
@@ -486,7 +486,8 @@ def test_initialize_database_bad_handshake_is_bounded_unknown_with_unchanged_cre
         event.remove(Engine, "engine_connect", connected_attempt)
         event.remove(Engine, "engine_disposed", disposed_attempt)
     diagnostics = capsys.readouterr().err
-    assert "cause unknown" in diagnostics and "deadline expired" in diagnostics
+    assert "password authentication failed" in diagnostics
+    assert "deadline expired" in diagnostics
     assert "credentials unchanged" in diagnostics and bad_password not in diagnostics
     assert _schema(database.engine) == before
     with database.engine.connect() as connection:
