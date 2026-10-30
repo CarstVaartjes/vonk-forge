@@ -233,6 +233,13 @@ def legacy_engine(storage_engine: Engine, request: pytest.FixtureRequest) -> Eng
             )
         )
     metadata.create_all(storage_engine)
+    with storage_engine.connect() as connection:
+        assert all(
+            isinstance(column["type"], BigInteger)
+            for table, names in OWNING_COLUMNS.items()
+            for column in inspect(connection).get_columns(table)
+            if column["name"] in names
+        )
     if storage_engine.dialect.name == "sqlite":
         with storage_engine.connect() as connection:
             connection.exec_driver_sql("PRAGMA foreign_keys=ON")

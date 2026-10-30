@@ -21,7 +21,6 @@ from . import optimistic_boundaries as optimistic
 from . import principle_guards as principles
 from . import progress_attempt_boundaries as progress_attempts
 from . import request_path_scans
-from . import shared_metadata_mutation as shared_metadata
 from . import short_wall_clocks as wall_clocks
 from . import untyped_mapping_boundaries as mappings
 from . import vocabulary_literals as vocabulary
@@ -57,7 +56,6 @@ MODES = (
     "locks",
     "optimistic",
     "clocks",
-    "shared-metadata",
     "excerpts",
     "collections",
     "progress",
@@ -1440,10 +1438,6 @@ def check_source(
     if python and is_test and "clocks" in modes:
         hits.extend(
             (line, wall_clocks.KIND) for line in wall_clocks.scan_source(source)
-        )
-    if python and is_test and "shared-metadata" in modes:
-        hits.extend(
-            (line, shared_metadata.KIND) for line in shared_metadata.scan_source(source)
         )
     if python and not is_test and "retention" in modes:
         hits.extend(
