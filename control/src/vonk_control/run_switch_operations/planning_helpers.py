@@ -385,7 +385,6 @@ def _inspection_unavailable(detail: str) -> ArtifactInspection:
         reclaimable_bytes=0,
         nas_coverage="unknown",
         spark_coverage="unknown",
-        artifact_digests=(),
         reclaimable_digests=(),
         blockers=(
             _as_reason(

@@ -144,7 +144,6 @@ class _Nas:
                 None,
                 artifact_set_sha256=manifest.digest,
                 artifact_set_bytes=manifest.expected_bytes,
-                artifact_digests=[item.sha256 for item in manifest.artifacts],
                 missing_nas_bytes=manifest.expected_bytes,
             ),
         )
