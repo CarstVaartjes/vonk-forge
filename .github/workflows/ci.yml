@@ -17,11 +17,10 @@ permissions:
 
 # Dependency fetches retry transient network failures inside the tool; the
 # pre-sync steps below additionally run under scripts/retry-dependency-fetch.
+# Cargo's own settings live in .cargo/config.toml: rust-cache hashes CARGO* env.
 env:
   UV_HTTP_TIMEOUT: "60"
   UV_HTTP_RETRIES: "5"
-  CARGO_NET_RETRY: "5"
-  CARGO_HTTP_TIMEOUT: "60"
   npm_config_fetch_retries: "5"
   # Exhaustive sweeps run a fixed share on pull-request and merge-queue runs;
   # main's release run and every other caller sweep the full corpus.

@@ -23,6 +23,8 @@ on:
       - control/uv.lock
       - agent_protocol/pyproject.toml
       - .github/actions/python-env/action.yml
+      - .cargo/config.toml
+      - .github/workflows/ci.yml
       - .github/workflows/ci-cache-warm.yml
   schedule:
     - cron: "17 4 * * 1"
