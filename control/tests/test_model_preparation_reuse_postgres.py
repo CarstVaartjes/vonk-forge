@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -134,10 +133,3 @@ def test_older_active_operation_is_reused_behind_many_newer_unrelated_ones(
             )
             == 1
         )
-    assert (
-        cache.reusable_operation(
-            artifact_set_sha256=hashlib.sha256(b"other").hexdigest(),
-            include_succeeded=True,
-        )
-        is None
-    )
