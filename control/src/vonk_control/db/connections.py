@@ -44,7 +44,8 @@ def _driver_detail(error: BaseException) -> str:
     connection, authentication) in the message; no structured code exists.
     """
     driver = getattr(error, "orig", None) or error
-    return redact_text(" ".join(str(driver).split()))[:400]
+    message = " ".join(str(driver).split())
+    return redact_text(message or type(driver).__name__)[:400]
 
 
 def _startup_retryable(error: BaseException) -> bool:
@@ -144,7 +145,7 @@ def run_with_database_startup_retry[T](
 
     Container DNS and PostgreSQL can become available in either order after a
     host or Docker restart.  Keep startup deterministic by retrying only
-    typed connection faults, unknown connection establishment and exact startup
+    typed connection faults, connection establishment failures and exact startup
     contention. Diagnostics carry the driver's own redacted message and the
     fixed deadline never resets. Known schema and permission refusals remain
     fatal immediately; a handshake failure without SQLSTATE stays retryable

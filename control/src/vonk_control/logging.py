@@ -27,9 +27,7 @@ _ASSIGNMENT = re.compile(
 _PRIVATE_BLOCK = re.compile(
     r"-----BEGIN [^-]*PRIVATE KEY-----.*?-----END [^-]*PRIVATE KEY-----", re.DOTALL
 )
-_HTTP_URL = re.compile(
-    r"(?<![a-z0-9+.-])[a-z][a-z0-9+.-]*://[^\s<>\"']+", re.IGNORECASE
-)
+_HTTP_URL = re.compile(r"[a-z][a-z0-9+.-]{0,31}://[^\s<>\"']+", re.IGNORECASE)
 _MAX_FIELD = 4096
 
 

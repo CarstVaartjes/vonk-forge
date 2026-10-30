@@ -132,10 +132,13 @@ def test_retired_bookkeeping_names_subject_and_reason_in_production_output(
         "password='s3cretpw with spaces' host=db",
         'password="s3cretpw with spaces" host=db',
         "password='it\\'s s3cretpw' host=db",
+        "\x1b[32mhttps://u:s3cretpw@db/x",
+        "-https://u:s3cretpw@db/x",
+        "1https://u:s3cretpw@db/x",
     ],
 )
 def test_redact_text_masks_database_credentials(text: str) -> None:
-    """Catches a redactor limited to http(s) URLs and unquoted assignments."""
+    """Catches a redactor limited to http(s) URLs, unquoted assignments or a URL not preceded by a space."""
     safe = redact_text(text)
 
     assert "s3cretpw" not in safe and "s3cr" not in safe

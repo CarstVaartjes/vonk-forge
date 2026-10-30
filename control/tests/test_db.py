@@ -349,3 +349,12 @@ def test_startup_log_redacts_a_password_inside_the_driver_message(
 
     assert "s3cret" not in log and "p@ss" not in log
     assert "postgres:5432" in log
+
+
+def test_startup_log_names_the_exception_when_the_driver_message_is_empty(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Catches a log line that ends in an empty piece for a silent driver error."""
+    log = _startup_log(OperationalError("connect", {}, ConnectionResetError()), capsys)
+
+    assert "ConnectionResetError" in log
