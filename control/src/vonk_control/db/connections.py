@@ -176,20 +176,20 @@ def run_with_database_startup_retry[T](
             wait = min(delay, remaining)
             attempts += 1
             if isinstance(error, _DatabaseStartupContention):
-                reason = str(error)
+                failure = str(error)
             elif isinstance(error, (InterfaceError, OperationalError)):
                 code = _database_sqlstate(error)
                 cause, detail = classify_connection_failure(error)
-                reason = (
+                failure = (
                     f"{type(error).__name__}; SQLSTATE {code}; cause {cause}: {detail}"
                     if code is not None
                     else f"connection establishment cause {cause}: {detail}"
                 )
             else:
-                reason = type(error).__name__
+                failure = type(error).__name__
             print(
                 f"{label} unavailable during startup (attempt {attempts}; "
-                f"{reason}); retrying in {wait:.1f}s",
+                f"{failure}); retrying in {wait:.1f}s",
                 file=sys.stderr,
                 flush=True,
             )
