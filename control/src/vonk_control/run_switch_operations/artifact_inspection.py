@@ -141,7 +141,6 @@ class DatabaseRunSwitchArtifactInspector:
         expected_by_digest = {
             artifact.sha256: artifact.expected_bytes for artifact in manifest.artifacts
         }
-        model_digests = tuple(expected_by_digest)
         artifact_bytes = manifest.expected_bytes
         # Transfer checkpoints reduce the bytes left to download, but do not
         # make an object verified or available for profile admission.
@@ -217,7 +216,6 @@ class DatabaseRunSwitchArtifactInspector:
                 else PlacementInstallState.PARTIAL.value
             ),
             spark_coverage="complete" if missing_spark == 0 else "partial",
-            artifact_count=len(model_digests),
             reclaimable_digests=tuple(sorted(reclaimable_digests)),
             freshness=(),
             blockers=tuple(blockers),

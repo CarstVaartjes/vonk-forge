@@ -344,7 +344,6 @@ class CompleteArtifactInspector:
             reclaimable_bytes=self.reclaimable_bytes,
             nas_coverage="complete",
             spark_coverage="complete" if missing_spark_bytes == 0 else "partial",
-            artifact_count=1,
             reclaimable_digests=("1" * 64,) if self.reclaimable_bytes else (),
             artifact_set_sha256=MODEL_ARTIFACT_SET,
             artifact_set_bytes=1024,
@@ -1365,6 +1364,8 @@ def test_malformed_operation_is_reconciled_without_aborting_the_batch(
         payload = copy.deepcopy(accepted.payload)
         if damage == "plan":
             payload["plan"] = {"not": "a plan"}
+            # With a readable intent the job re-plans instead; none, it ends.
+            payload["intent"] = {"not": "an intent"}
         session.add(
             Job(
                 id=malformed_id,

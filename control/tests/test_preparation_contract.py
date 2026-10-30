@@ -46,7 +46,6 @@ def _ready_document() -> dict[str, object]:
         "model": {
             "artifact_set_sha256": "a" * 64,
             "model_content_sha256": "b" * 64,
-            "artifact_count": 3,
             "artifact_set_bytes": 100,
             "dependency_model_content_sha256": ["c" * 64],
             "completeness": "complete",
@@ -80,7 +79,6 @@ def test_ready_preparation_binds_model_image_and_complete_target_scope() -> None
     value = RolloutPreparation.model_validate(_ready_document())
 
     assert RolloutPreparation.model_validate_json(value.model_dump_json()) == value
-    assert value.model.artifact_count == 3
     assert value.runtime_image.targets[1].imported_image_digest == "sha256:" + "d" * 64
     assert value.ready is True
 

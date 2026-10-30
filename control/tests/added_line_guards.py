@@ -70,6 +70,7 @@ MODES = (
     "model-sets",
     "openers",
     "follow-validators",
+    "item-counts",
 )
 # The agent's messages a Controller test may send only as the stand-in pinned
 # to the agent's shared vector; built by hand they are the Controller's idea of
@@ -200,6 +201,40 @@ def security_refusals() -> frozenset[str]:
         if names == previous:
             break
     return frozenset(names)
+
+
+# Lists whose length the model or recipe sets (files, digests, artifacts,
+# objects) are bounded by bytes (the document or wire budget), never by an
+# item count: a 286-file model failed planning on a 256-digest cap.
+_MODEL_SIZED_FIELD = re.compile(r"digest|artifact|file|object", re.IGNORECASE)
+# A real protocol limit states why on the line: ``# item-count-limit: <why>``.
+ITEM_COUNT_PRAGMA = "# item-count-limit:"
+
+
+def model_sized_count_caps(source: str) -> list[int]:
+    """Lines giving a digest/artifact/file/object list a ``max_length=<int>``."""
+    lines = source.splitlines()
+    found: set[int] = set()
+    for node in ast.walk(ast.parse(source)):
+        if not isinstance(node, ast.AnnAssign) or not isinstance(node.target, ast.Name):
+            continue
+        if not _MODEL_SIZED_FIELD.search(node.target.id):
+            continue
+        annotation = ast.unparse(node.annotation)
+        if not re.search(r"\b(?:list|tuple|Sequence)\[", annotation):
+            continue
+        for call in ast.walk(node):
+            if not isinstance(call, ast.Call):
+                continue
+            for keyword in call.keywords:
+                if (
+                    keyword.arg == "max_length"
+                    and isinstance(keyword.value, ast.Constant)
+                    and isinstance(keyword.value.value, int)
+                    and ITEM_COUNT_PRAGMA not in lines[keyword.value.lineno - 1]
+                ):
+                    found.add(keyword.value.lineno)
+    return sorted(found)
 
 
 def added_lines(patch: str) -> dict[str, set[int]]:
@@ -1387,6 +1422,16 @@ def check_source(
             (line, "model sets chosen by first-requester digest; use lineage.py")
             for line, text in enumerate(source.splitlines(), 1)
             if "ModelCacheSet.model_content_sha256" in text
+        )
+    if (
+        python
+        and not is_test
+        and "item-counts" in modes
+        and path.startswith(("control/src/", "agent_protocol/src/"))
+    ):
+        hits.extend(
+            (line, "item-count cap on a model-sized list; bound by bytes instead")
+            for line in model_sized_count_caps(source)
         )
     if (
         python

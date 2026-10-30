@@ -422,7 +422,6 @@ def _exact_preparation(
                 "artifact_set_sha256": model_digest,
                 "model_content_sha256": "b" * 64,
                 "recipe_revision_sha256": "c" * 64,
-                "artifact_count": 1,
                 "artifact_set_bytes": 100,
                 "dependency_model_content_sha256": [],
                 "completeness": "complete",
@@ -1533,7 +1532,6 @@ def test_preview_treats_a_preparation_blocker_as_not_allowed() -> None:
                 artifact_set_sha256=digest,
                 model_content_sha256="b" * 64,
                 recipe_revision_sha256="c" * 64,
-                artifact_count=1,
                 artifact_set_bytes=asset_bytes,
                 completeness="complete",
                 controller=ControllerAssetState(

@@ -1095,7 +1095,6 @@ def test_model_download_is_a_durable_cache_child_with_exact_pins(
                 artifact_set_sha256="d" * 64,
                 model_content_sha256="a" * 64,
                 recipe_revision_sha256="b" * 64,
-                artifact_count=2,
                 artifact_set_bytes=15,
             )
         ),
@@ -1239,7 +1238,6 @@ def test_model_download_uses_real_cache_manifest_and_reports_complete_coverage(
                 artifact_set_sha256=artifact_set,
                 model_content_sha256=model_content_sha256,
                 recipe_revision_sha256=recipe_digest,
-                artifact_count=1,
                 artifact_set_bytes=len(payload),
             )
         ),
@@ -1473,7 +1471,6 @@ def test_production_composite_uncached_cache_then_two_target_distribution(
             artifact_set_sha256=artifact_set,
             model_content_sha256=model_content_sha256,
             recipe_revision_sha256=recipe_digest,
-            artifact_count=2,
             artifact_set_bytes=len(model_payload) + len(auxiliary_payload),
             targets=[
                 SimpleNamespace(
@@ -2012,7 +2009,6 @@ def test_zero_byte_model_download_uses_the_cache_admission() -> None:
             model=SimpleNamespace(
                 artifact_set_sha256="d" * 64,
                 model_content_sha256="a" * 64,
-                artifact_count=2,
                 artifact_set_bytes=15,
             )
         ),

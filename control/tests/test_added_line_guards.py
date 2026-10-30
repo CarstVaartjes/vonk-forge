@@ -1620,3 +1620,25 @@ def test_typed_or_unrelated_read_passes_document_reads(source: str) -> None:
     assert not check_source(
         "control/src/vonk_control/example.py", source, {1}, modes=("document-reads",)
     )
+
+
+_ITEM_COUNT = (
+    "class Plan(Model):\n"
+    "    artifact_digests: list[Digest] = Field(default_factory=list, max_length=256)\n"
+    "    objects: tuple[Obj, ...] = Field(\n"
+    "        min_length=1,\n"
+    "        max_length=4096,\n"
+    "    )\n"
+    "    files: list[F] = Field(max_length=8)  # item-count-limit: wire frame\n"
+    "    node_ids: list[str] = Field(max_length=32)\n"
+    "    digest: str = Field(max_length=64)\n"
+)
+
+
+def test_item_count_cap_on_a_model_sized_list_is_flagged() -> None:
+    """Catches a digest/object cap like the 256-digest one that failed a plan."""
+    path = "control/src/vonk_control/plan_contract.py"
+    assert check_source(path, _ITEM_COUNT, {2}, modes=("item-counts",))
+    assert check_source(path, _ITEM_COUNT, {5}, modes=("item-counts",))
+    assert not check_source(path, _ITEM_COUNT, {6, 7, 8}, modes=("item-counts",))
+    assert not check_source(path, _ITEM_COUNT, {1}, modes=("item-counts",))
