@@ -16,6 +16,9 @@ from vonk_agent_protocol.installer_setup import (
 
 from .filesystem import read_member
 
+#: The one owner of the profile-selection name in `.env` and in the Compose file.
+SELECTION_ENV = "COMPOSE_PROFILES"
+
 
 def parse_environment(path: Path) -> dict[str, str]:
     document = read_member(path.parent, path.name)
@@ -108,7 +111,7 @@ def retain_known(
     if payload.hermes:
         known.add(payload.hermes.env)
     if payload.install_modes:
-        known.add("COMPOSE_PROFILES")
+        known.add(SELECTION_ENV)
         known.update(item.env for item in payload.install_modes.lab_values)
     dropped = tuple(name for name in environment if name not in known)
     for name in dropped:

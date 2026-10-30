@@ -23,8 +23,10 @@ The interactive command creates `vonk-forge/docker-compose.yaml`,
 sudo, SSH, a NAS mount, or direct NAS access. Drag the entire directory into the
 NAS Docker application and start it as one Compose project.
 
-The wizard asks whether to enable Hermes. If it is not selected, Hermes remains
-the only disabled optional profile; no unused helper containers are created.
+The wizard asks whether to enable Hermes. The written `docker-compose.yaml`
+holds exactly the selected services (no `profiles:` key), so a Docker UI or a
+plain `docker compose up -d` deploys the same set; unselected services are
+absent and no unused helper containers are created.
 
 To update a prepared project, rerun the same command from its parent directory.
 Normal upgrades preserve the existing Hermes selection without prompting. To

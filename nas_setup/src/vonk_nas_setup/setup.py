@@ -15,6 +15,7 @@ from vonk_agent_protocol.lifecycle_vocabulary import SecurityRefusalReason, Wait
 from . import publication
 from .compose import resolve_compose
 from .environment import (
+    SELECTION_ENV,
     configure_hermes,
     profiles,
     recover_environment,
@@ -84,7 +85,7 @@ def fresh(
         environment = {item.env: item.value for item in payload.internal_values}
         if payload.install_modes:
             modes = payload.install_modes
-            environment["COMPOSE_PROFILES"] = "" if lab else modes.secure_remote_value
+            environment[SELECTION_ENV] = "" if lab else modes.secure_remote_value
             if lab:
                 environment.update((item.env, item.value) for item in modes.lab_values)
         for required in payload.required_values:
@@ -154,12 +155,12 @@ def upgrade_credentials(
     else:
         real_directory(gateway)
     environment = recover_environment(payload, bundle)
-    if payload.install_modes and "COMPOSE_PROFILES" not in environment:
+    if payload.install_modes and SELECTION_ENV not in environment:
         raise ObservationUnavailable()
     lab = (
         payload.install_modes is not None
         and payload.install_modes.secure_remote_value
-        not in profiles(environment.get("COMPOSE_PROFILES", ""))
+        not in profiles(environment.get(SELECTION_ENV, ""))
     )
     if payload.install_modes and lab:
         for item in payload.install_modes.lab_values:

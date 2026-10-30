@@ -10,10 +10,10 @@ from __future__ import annotations
 
 import yaml
 
-from .environment import profiles
+from .environment import SELECTION_ENV, profiles
 from .filesystem import SetupError
 
-SELECTION = "COMPOSE_PROFILES"
+CONSUMER = "VONK_SELECTED_PROFILES"
 _SECTIONS = ("networks", "secrets", "volumes")
 
 
@@ -28,19 +28,9 @@ def _used(service: dict, section: str) -> set[str]:
     return names
 
 
-def _literal(value: object, selection: str) -> object:
-    if isinstance(value, str):
-        return value.replace("${COMPOSE_PROFILES:-}", selection)
-    if isinstance(value, list):
-        return [_literal(item, selection) for item in value]
-    if isinstance(value, dict):
-        return {key: _literal(item, selection) for key, item in value.items()}
-    return value
-
-
 def resolve_compose(compose: str, environment: dict[str, str]) -> bytes:
     """Return the Compose file for the profiles selected in `environment`."""
-    selected = profiles(environment.get(SELECTION, ""))
+    selected = profiles(environment.get(SELECTION_ENV, ""))
     document = yaml.safe_load(compose)
     services = document.get("services") or {}
     kept = {}
@@ -49,7 +39,16 @@ def resolve_compose(compose: str, environment: dict[str, str]) -> bytes:
         if not members or set(members) & set(selected):
             kept[name] = service
     for name, service in kept.items():
-        missing = set(service.get("depends_on") or []) - set(kept)
+        dependencies = service.get("depends_on") or []
+        missing = {
+            dependency
+            for dependency in dependencies
+            if dependency not in kept
+            and (
+                not isinstance(dependencies, dict)
+                or dependencies[dependency].get("required") is not False
+            )
+        }
         if missing:
             raise SetupError(f"service {name} depends on unselected {sorted(missing)}")
         if str(service.get("network_mode", "")).removeprefix("service:") in (
@@ -67,5 +66,16 @@ def resolve_compose(compose: str, environment: dict[str, str]) -> bytes:
             for name, value in document[section].items()
             if name not in used_before or name in used_now
         }
-    resolved = _literal(document, ",".join(selected))
-    return yaml.safe_dump(resolved, sort_keys=False, default_flow_style=False).encode()
+    # Compose does not pass its own selection into containers; the consumer
+    # gets the same literal that .env holds. A renamed variable fails here.
+    found = False
+    for service in services.values():
+        container = service.get("environment")
+        if isinstance(container, dict) and CONSUMER in container:
+            if container[CONSUMER] != f"${{{SELECTION_ENV}:-}}":
+                raise SetupError(f"{CONSUMER} must be ${{{SELECTION_ENV}:-}}")
+            container[CONSUMER] = ",".join(selected)
+            found = True
+    if CONSUMER in compose and not found:
+        raise SetupError(f"{CONSUMER} is not a mapping entry")
+    return yaml.safe_dump(document, sort_keys=False, default_flow_style=False).encode()

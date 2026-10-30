@@ -1525,6 +1525,7 @@ dependencies = [
     { name = "cryptography" },
     { name = "jsonschema" },
     { name = "pydantic" },
+    { name = "pyyaml" },
 ]
 
 [package.metadata]
@@ -1533,4 +1534,5 @@ requires-dist = [
     { name = "cryptography", specifier = ">=50.0.1" },
     { name = "jsonschema", specifier = ">=4.26.0" },
     { name = "pydantic", specifier = ">=2.13.5" },
+    { name = "pyyaml", specifier = ">=6.0.3" },
 ]
