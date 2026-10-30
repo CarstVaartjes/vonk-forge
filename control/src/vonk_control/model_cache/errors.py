@@ -290,7 +290,12 @@ class _ArtifactWriterBusy(_CacheUnknown):
     disposition = Disposition.WAIT  # type: ignore[assignment]
 
     def __init__(
-        self, digest: str, *, holder: str | None = None, recorded: bool = False
+        self,
+        digest: str,
+        *,
+        holder: str | None = None,
+        recorded: bool = False,
+        subject: str = "object",
     ) -> None:
         # An in-process holder is the live writer. The lock file only names the
         # last download that wrote it: removal and cancellation probes take
@@ -304,7 +309,7 @@ class _ArtifactWriterBusy(_CacheUnknown):
         )
         super().__init__(
             ModelCacheCode.OBJECT_BUSY,
-            f"waiting for the managed-cache writer{writer} of object {digest}; resumes after that writer releases its lock",
+            f"waiting for the managed-cache writer{writer} of {subject} {digest}; resumes after that writer releases its lock",
             retry_after_seconds=_RETRY_BASE_SECONDS,
             recovery="resume",
         )
