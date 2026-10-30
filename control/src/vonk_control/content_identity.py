@@ -253,3 +253,156 @@ def same_build_units(first: str | None, second: str | None) -> bool:
     """
 
     return first == second
+
+
+def recipe_model_digests(
+    session, revision_ids: Collection[str]
+) -> dict[str, frozenset[str]]:
+    """The model contents each recipe revision is bound to, by relational rows.
+
+    The binding rows were written with the revision and name the exact model
+    content, so no recipe document is read. A revision without rows is absent.
+    """
+    from sqlalchemy import select
+
+    from .models import CatalogRecipeModelReference
+
+    found: dict[str, set[str]] = {}
+    if revision_ids:
+        for revision_id, model in session.execute(
+            select(
+                CatalogRecipeModelReference.recipe_revision_id,
+                CatalogRecipeModelReference.model_content_digest,
+            ).where(
+                CatalogRecipeModelReference.recipe_revision_id.in_(sorted(revision_ids))
+            )
+        ):
+            found.setdefault(revision_id, set()).add(model)
+    return {revision_id: frozenset(models) for revision_id, models in found.items()}
+
+
+@dataclass(frozen=True, slots=True)
+class InstallationModels:
+    """What an installation row says about the models it uses, without its plan."""
+
+    id: str
+    state: str
+    #: The primary model content its row records; ``None`` when it records none.
+    model: str | None
+    #: Every model content its recipe revision is bound to; ``None`` when unbound.
+    models: frozenset[str] | None
+    #: The content digest of its recipe revision.
+    recipe: str | None
+
+    @property
+    def attributable(self) -> bool:
+        """Whether its columns, not its plan, say which models it uses."""
+        return self.model is not None and self.models is not None
+
+    @property
+    def used(self) -> frozenset[str]:
+        return (self.models or frozenset()) | (
+            frozenset() if self.model is None else frozenset({self.model})
+        )
+
+
+def installation_models(session, *conditions) -> list[InstallationModels]:
+    """The installations matching ``conditions``, as their columns describe them.
+
+    Three reads whatever the count, none of which loads a plan.
+    """
+    from sqlalchemy import select
+
+    from .models import CatalogDocumentRevision, RecipeInstallation
+
+    rows = session.execute(
+        select(
+            RecipeInstallation.id,
+            RecipeInstallation.state,
+            RecipeInstallation.model_content_sha256,
+            RecipeInstallation.recipe_revision_id,
+        )
+        .where(*conditions)
+        .order_by(RecipeInstallation.id)
+    ).all()
+    revisions = {row.recipe_revision_id for row in rows}
+    bound = recipe_model_digests(session, revisions)
+    contents = (
+        {
+            revision_id: digest
+            for revision_id, digest in session.execute(
+                select(
+                    CatalogDocumentRevision.id, CatalogDocumentRevision.content_digest
+                ).where(CatalogDocumentRevision.id.in_(sorted(revisions)))
+            )
+        }
+        if revisions
+        else {}
+    )
+    return [
+        InstallationModels(
+            id=row.id,
+            state=row.state,
+            model=row.model_content_sha256,
+            models=bound.get(row.recipe_revision_id),
+            recipe=contents.get(row.recipe_revision_id),
+        )
+        for row in rows
+    ]
+
+
+def installations_using_models(
+    session, contents: Collection[str]
+) -> tuple[frozenset[str], frozenset[str]]:
+    """Installed (not uninstalled) installations that use ``contents``.
+
+    Returns the ids its columns attribute to them, and the ids whose columns
+    attribute nothing (no recorded model or an unbound recipe), which a caller
+    must read the plan of rather than assume unrelated.
+    """
+    from vonk_agent_protocol import InstallationState
+
+    from .models import RecipeInstallation
+
+    wanted = frozenset(contents)
+    named: set[str] = set()
+    unknown: set[str] = set()
+    for row in installation_models(
+        session, RecipeInstallation.state != InstallationState.UNINSTALLED
+    ):
+        if not row.attributable:
+            unknown.add(row.id)
+        elif row.used & wanted:
+            named.add(row.id)
+    return frozenset(named), frozenset(unknown)
+
+
+def active_recipe_revisions(session, selectors: Collection[tuple[str, str]]):
+    """Each recipe selector's active revision, in one read.
+
+    Heads without an active revision, or whose revision is gone, are absent:
+    the caller recovers those from the selector's own records.
+    """
+    from sqlalchemy import select
+    from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
+
+    from .models import CatalogDocumentHead, CatalogDocumentRevision
+
+    return {
+        (head.publisher, head.slug): revision
+        for head, revision in session.execute(
+            select(CatalogDocumentHead, CatalogDocumentRevision)
+            .join(
+                CatalogDocumentRevision,
+                CatalogDocumentRevision.id == CatalogDocumentHead.active_revision_id,
+            )
+            .where(
+                CatalogDocumentHead.kind == RunSwitchReasonScopeName.RECIPE,
+                catalog_selector_membership(
+                    CatalogDocumentHead.publisher,
+                    CatalogDocumentHead.slug,
+                    tuple(selectors),
+                ),
+            )
+        )
+    }

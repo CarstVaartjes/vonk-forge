@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Collection, Iterable, Mapping
 from datetime import datetime
 from typing import Literal
 
@@ -15,6 +15,7 @@ from vonk_agent_protocol import (
     WaitReason,
     canonical_message,
 )
+from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
 
 from ..artifact_lifecycle import (
     ArtifactIdentity,
@@ -22,6 +23,10 @@ from ..artifact_lifecycle import (
     lock_reference_gates,
 )
 from ..categorized_errors import InvalidValue
+from ..content_identity import (
+    active_recipe_revisions,
+    catalog_selector_membership,
+)
 from ..fleet_profile_contract import (
     FleetProfileAssignmentInput,
     RecipeSelector,
@@ -29,7 +34,6 @@ from ..fleet_profile_contract import (
 from ..lifecycle.evidence import BookkeepingReason, retire_as_unknown
 from ..model_cache_contract import CacheManifest
 from ..models import (
-    CatalogDocumentHead,
     CatalogDocumentRevision,
     FleetProfile,
     ModelCacheSet,
@@ -225,32 +229,56 @@ def saved_profile_selectors(profile: FleetProfile) -> tuple[str, ...] | None:
 def _selector_revisions(
     session: Session, selector: str
 ) -> tuple[CatalogDocumentRevision, ...]:
+    return _selectors_revisions(session, (selector,))[selector]
+
+
+def _selectors_revisions(
+    session: Session, selectors: Collection[str]
+) -> dict[str, tuple[CatalogDocumentRevision, ...]]:
+    """The active revision of each recipe selector, in two reads whatever the count.
+
+    Missing head bookkeeping is recovered conservatively from this exact
+    selector's records, never by substituting a different selector. This is
+    retention evidence only; it neither changes intent nor admits execution.
+    """
+
+    names = {selector: _selector_name(selector) for selector in selectors}
+    pairs = sorted(set(names.values()))
+    found: dict[tuple[str, str], tuple[CatalogDocumentRevision, ...]] = {}
+    if pairs:
+        found.update(
+            {
+                pair: (row,)
+                for pair, row in active_recipe_revisions(session, pairs).items()
+            }
+        )
+        missing = [pair for pair in pairs if pair not in found]
+        history: dict[tuple[str, str], list[CatalogDocumentRevision]] = {}
+        if missing:
+            for revision in session.scalars(
+                select(CatalogDocumentRevision)
+                .where(
+                    CatalogDocumentRevision.kind == RunSwitchReasonScopeName.RECIPE,
+                    catalog_selector_membership(
+                        CatalogDocumentRevision.publisher,
+                        CatalogDocumentRevision.slug,
+                        missing,
+                    ),
+                )
+                .order_by(
+                    CatalogDocumentRevision.created_at, CatalogDocumentRevision.id
+                )
+            ):
+                history.setdefault((revision.publisher, revision.slug), []).append(
+                    revision
+                )
+        found.update({pair: tuple(history.get(pair, ())) for pair in missing})
+    return {selector: found[pair] for selector, pair in names.items()}
+
+
+def _selector_name(selector: str) -> tuple[str, str]:
     publisher, _, slug = selector.partition("/")
-    head = session.scalar(
-        select(CatalogDocumentHead).where(
-            CatalogDocumentHead.kind == "recipe",
-            CatalogDocumentHead.publisher == publisher,
-            CatalogDocumentHead.slug == slug,
-        )
-    )
-    if head is not None and head.active_revision_id is not None:
-        current = session.get(CatalogDocumentRevision, head.active_revision_id)
-        if current is not None:
-            return (current,)
-    # Missing head bookkeeping is recovered conservatively from this exact
-    # selector's records, never by substituting a different selector. This is
-    # retention evidence only; it neither changes intent nor admits execution.
-    return tuple(
-        session.scalars(
-            select(CatalogDocumentRevision)
-            .where(
-                CatalogDocumentRevision.kind == "recipe",
-                CatalogDocumentRevision.publisher == publisher,
-                CatalogDocumentRevision.slug == slug,
-            )
-            .order_by(CatalogDocumentRevision.created_at, CatalogDocumentRevision.id)
-        )
-    )
+    return publisher, slug
 
 
 def _protect_saved(

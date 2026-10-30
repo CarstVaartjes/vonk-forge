@@ -18,12 +18,11 @@ from ..artifact_lifecycle import (
     ArtifactReferenceUnverified,
 )
 from ..catalog_revision_contract import read_catalog_document
+from ..content_identity import installation_models, recipe_model_digests
 from ..machine_states import DISTRIBUTION_HELD, RUN_LIVE
-from ..model_cache_contract import CacheManifest
 from ..models import (
     ArtifactDistributionAssignment,
     CatalogDocumentRevision,
-    CatalogRecipeModelReference,
     FleetProfile,
     FleetProfileApplication,
     Job,
@@ -38,7 +37,7 @@ from .intents import (
     _run_switch_kinds,
     _run_switch_plan,
 )
-from .model_sets import _protect_saved, _selector_revisions, saved_profile_selectors
+from .model_sets import _protect_saved, _selectors_revisions, saved_profile_selectors
 from .types import (
     _ACTIVE_INSTALLATIONS,
     _ACTIVE_PROFILE_APPLICATIONS,
@@ -49,16 +48,24 @@ from .types import (
 )
 
 
+def _pinned_models(record: CatalogDocumentRevision) -> frozenset[str] | None:
+    """The model contents a recipe document pins; ``None`` when it cannot be read."""
+
+    from ..model_cache.catalog_helpers import _recipe_model_content_digests
+
+    try:
+        recipe = TypeAdapter(RecipeDefinition).validate_json(
+            read_catalog_document(record).model_dump_json(), strict=True
+        )
+        return frozenset(_recipe_model_content_digests(recipe))
+    except (TypeError, ValueError, RuntimeError):
+        return None
+
+
 def model_set_reference_findings(
     session: Session, set_digests: Iterable[str]
 ) -> dict[str, tuple[ArtifactReferenceFinding, ...]]:
     """Find typed saved-profile and active owners of exact model sets."""
-
-    from ..model_cache.catalog_helpers import (
-        _canonical_model_artifacts,
-        _recipe_model_content_digests,
-        _recipe_model_file_ids,
-    )
 
     selected = set(set_digests)
     if not selected:
@@ -81,92 +88,45 @@ def model_set_reference_findings(
         digest: set() for digest in selected
     }
 
-    # Resolve relational owner pointers first; only content digests decide which
-    # bytes a binding protects. Identical recipe content shares these bindings.
-    recipe_content = {
-        owner_id: digest
-        for owner_id, digest in session.execute(
-            select(
-                CatalogDocumentRevision.id, CatalogDocumentRevision.content_digest
-            ).where(CatalogDocumentRevision.kind == "recipe")
-        )
-    }
-    bound_models: dict[str, set[str]] = {}
-    for owner_id, model_digest in session.execute(
-        select(
-            CatalogRecipeModelReference.recipe_revision_id,
-            CatalogRecipeModelReference.model_content_digest,
-        )
-    ):
-        digest = recipe_content.get(owner_id)
-        if digest is not None:
-            bound_models.setdefault(digest, set()).add(model_digest)
-
-    for profile in session.scalars(select(FleetProfile).order_by(FleetProfile.id)):
-        selectors = saved_profile_selectors(profile)
+    # A profile names recipes; each recipe revision is bound to the exact model
+    # contents it uses by relational rows, so no document is parsed here.
+    profiles = list(session.scalars(select(FleetProfile).order_by(FleetProfile.id)))
+    named = {profile.id: saved_profile_selectors(profile) for profile in profiles}
+    resolved = _selectors_revisions(
+        session,
+        {selector for chosen in named.values() for selector in chosen or ()},
+    )
+    bound = recipe_model_digests(
+        session, {record.id for found in resolved.values() for record in found}
+    )
+    for profile in profiles:
+        selectors = named[profile.id]
         if selectors is None:
             _protect_saved(findings, profile, "model-set", selected)
             continue
         for selector in selectors:
-            revisions = _selector_revisions(session, selector)
-            if not revisions:
+            if not resolved[selector]:
                 _protect_saved(findings, profile, "model-set", selected)
-                continue
-            for record in revisions:
-                model_digests = set(bound_models.get(record.content_digest, ()))
-                required: set[str] = set()
-                readable = True
-                try:
-                    recipe = TypeAdapter(RecipeDefinition).validate_json(
-                        read_catalog_document(record).model_dump_json(), strict=True
-                    )
-                    model_digests.update(_recipe_model_content_digests(recipe))
-                    for model_digest in model_digests:
-                        model = session.scalar(
-                            select(CatalogDocumentRevision)
-                            .where(
-                                CatalogDocumentRevision.kind == "model",
-                                CatalogDocumentRevision.content_digest == model_digest,
-                            )
-                            .order_by(CatalogDocumentRevision.created_at.desc())
-                            .limit(1)
-                        )
-                        if model is None:
-                            readable = False
-                            continue
-                        file_ids = _recipe_model_file_ids(recipe, model_digest)
-                        required.update(
-                            artifact.sha256
-                            for artifact in _canonical_model_artifacts(model)
-                            if file_ids is None or artifact.id in file_ids
-                        )
-                except (TypeError, ValueError, RuntimeError):
-                    readable = False
-                protected: set[str] = set()
-                for set_digest, row in sets.items():
-                    if (
-                        row.recipe_revision_sha256 == record.content_digest
-                        or row.model_content_sha256 in model_digests
-                    ):
-                        protected.add(set_digest)
-                        continue
-                    try:
-                        manifest = CacheManifest.model_validate_json(
-                            canonical_message(row.manifest), strict=True
-                        )
-                    except (TypeError, ValueError):
-                        protected.add(set_digest)
-                        continue
-                    if required and required <= {
-                        artifact.sha256 for artifact in manifest.artifacts
-                    }:
-                        protected.add(set_digest)
-                    elif not readable and (
-                        not model_digests or row.model_content_sha256 is None
-                    ):
-                        # There is no exact independent scope for these bytes.
-                        protected.add(set_digest)
-                _protect_saved(findings, profile, "model-set", protected)
+            for record in resolved[selector]:
+                models = bound.get(record.id)
+                if models is None:
+                    # No binding rows: the document's own pins say which models
+                    # the recipe uses; unreadable, every selected set stays.
+                    models = _pinned_models(record)
+                if models is None:
+                    _protect_saved(findings, profile, "model-set", selected)
+                    continue
+                _protect_saved(
+                    findings,
+                    profile,
+                    "model-set",
+                    {
+                        set_digest
+                        for set_digest, row in sets.items()
+                        if row.recipe_revision_sha256 == record.content_digest
+                        or row.model_content_sha256 in models
+                    },
+                )
 
     def account(value: object) -> None:
         try:
@@ -230,58 +190,67 @@ def model_set_reference_findings(
                     )
                 )
 
-    for installation in session.scalars(
-        select(RecipeInstallation)
-        .where(
-            or_(
-                RecipeInstallation.state.in_(_ACTIVE_INSTALLATIONS),
-                select(RecipeRun.id)
-                .where(
-                    RecipeRun.installation_id == RecipeInstallation.id,
-                    RecipeRun.state.in_(RUN_LIVE),
-                )
-                .exists(),
+    for use in installation_models(
+        session,
+        or_(
+            RecipeInstallation.state.in_(_ACTIVE_INSTALLATIONS),
+            select(RecipeRun.id)
+            .where(
+                RecipeRun.installation_id == RecipeInstallation.id,
+                RecipeRun.state.in_(RUN_LIVE),
             )
-        )
-        .order_by(RecipeInstallation.id)
-        .execution_options(yield_per=64)
+            .exists(),
+        ),
     ):
-        installed = _installation_plan(installation)
-        if installed is not None:
-            held = selected & {
-                compiled.identity.model_artifact_set_sha256
-                for compiled in installed.compiled_execution_plans.values()
+        if use.attributable:
+            # The installation's model and its recipe's bound models say which
+            # sets it uses, without reading its plan.
+            held = {
+                set_digest
+                for set_digest, cached in sets.items()
+                if cached.model_content_sha256 in use.used
+                or cached.recipe_revision_sha256 == use.recipe
             }
             detail = "accepted installation uses this model set"
-            reason = f"installation {installation.id}"
+            label = f"installation {use.id}"
         else:
-            # Residue scoped to this installation: the sets of the model and
-            # recipe its own row names, or every selected set when it names none.
-            recipe = recipe_content.get(installation.recipe_revision_id)
-            model = installation.model_content_sha256
-            held = (
-                {
-                    set_digest
-                    for set_digest, row in sets.items()
-                    if row.model_content_sha256 in {None, model}
-                    or row.recipe_revision_sha256 == recipe
+            # Its columns attribute nothing: read its own plan. Unreadable, it
+            # keeps the sets of the model and recipe its row names, or every
+            # selected set when it names none.
+            installation = session.get(RecipeInstallation, use.id)
+            assert installation is not None
+            plan = _installation_plan(installation)
+            if plan is not None:
+                held = selected & {
+                    compiled.identity.model_artifact_set_sha256
+                    for compiled in plan.compiled_execution_plans.values()
                 }
-                if model is not None or recipe is not None
-                else selected
-            )
-            detail = "installation plan is unreadable; it keeps the sets it names"
-            reason = f"installation {installation.id} (plan unreadable)"
+                detail = "accepted installation uses this model set"
+                label = f"installation {use.id}"
+            else:
+                held = (
+                    {
+                        set_digest
+                        for set_digest, cached in sets.items()
+                        if cached.model_content_sha256 in {None, use.model}
+                        or cached.recipe_revision_sha256 == use.recipe
+                    }
+                    if use.model is not None or use.recipe is not None
+                    else selected
+                )
+                detail = "installation plan is unreadable; it keeps the sets it names"
+                label = f"installation {use.id} (plan unreadable)"
         for set_digest in held:
             findings[set_digest].add(
                 _finding(
                     "model-set",
                     set_digest,
                     owner_kind="recipe-installation",
-                    owner_id=installation.id,
-                    state=installation.state,
+                    owner_id=use.id,
+                    state=use.state,
                     classification="active-work",
                     detail=detail,
-                    reason=reason,
+                    reason=label,
                 )
             )
 

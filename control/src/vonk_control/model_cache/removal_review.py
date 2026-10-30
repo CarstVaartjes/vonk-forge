@@ -38,6 +38,7 @@ from .errors import (
 )
 from .lineage import first_requested_sets, lineage_contents, model_sets
 from .persistence import _operation_removal
+from .removal_timing import RemovalPhase, removal_phase, removal_timing
 from .source_helpers import _model_selector, _request_key
 from .views import CacheOperationView, ModelCacheRemovalScope
 
@@ -280,20 +281,26 @@ class RemovalReviewMixin:
 
     def review_model_removal(self, selector: str) -> CacheRemovalReview:
         """Return the current owner-derived model removal impact without writes."""
-        cache = cast("ModelCacheService", self)
-
         normalized_selector = _model_selector(selector).casefold()
+        with removal_timing(normalized_selector, fleet=False):
+            return self._review_model_removal(normalized_selector)
+
+    def _review_model_removal(self, normalized_selector: str) -> CacheRemovalReview:
+        cache = cast("ModelCacheService", self)
         with cache._session() as session:
-            digest = cache._resolve_model_selector_in_session(
-                session, normalized_selector
-            )
-            # The sets the Library shows for this model, not only those first
-            # downloaded under its current content digest.
-            selected_sets = model_sets(session, lineage_contents(session, digest)).owned
+            with removal_phase(RemovalPhase.RESOLVE):
+                digest = cache._resolve_model_selector_in_session(
+                    session, normalized_selector
+                )
+                # The sets the Library shows for this model, not only those first
+                # downloaded under its current content digest.
+                selected_sets = model_sets(
+                    session, lineage_contents(session, digest)
+                ).owned
             findings: list[CacheRemovalFinding] = []
             blockers: list[CacheRemovalBlocker] = []
             try:
-                with session.begin_nested():
+                with session.begin_nested(), removal_phase(RemovalPhase.SCOPE):
                     scope = cache._model_removal_scope_for_sets(session, selected_sets)
             except ArtifactLifecycleError as error:
                 scope = ModelCacheRemovalScope(
@@ -312,7 +319,7 @@ class RemovalReviewMixin:
                     )
                 )
             try:
-                with session.begin_nested():
+                with session.begin_nested(), removal_phase(RemovalPhase.REFERENCES):
                     by_set = model_set_reference_findings(session, scope.selected_sets)
             except ArtifactLifecycleError as error:
                 by_set = {}
@@ -325,7 +332,7 @@ class RemovalReviewMixin:
                     )
                 )
             try:
-                with session.begin_nested():
+                with session.begin_nested(), removal_phase(RemovalPhase.OWNERS):
                     active_removals = cache.removal_owner_findings_in_session(
                         session, scope
                     )
@@ -372,7 +379,8 @@ class RemovalReviewMixin:
                 for finding in active_removals
             )
 
-        assets = cache.removal_asset_status(scope)
+        with removal_phase(RemovalPhase.ASSETS):
+            assets = cache.removal_asset_status(scope)
         content = CacheRemovalReviewContent(
             resource_kind="model",
             selector=normalized_selector,
